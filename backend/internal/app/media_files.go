@@ -22,8 +22,8 @@ import (
 
 // storeMediaResults downloads each result file into AWWO_MEDIA_DIR/<tenant>/<run>/<sha256>.<ext>
 // and records it as an artifact of the run's canvas node. A file whose bytes are not an image (for
-// an image node), a video (for a video node) or a binary glTF model (first, for a 3D node, beside its
-// rendered preview image) is refused, whatever the provider called it.
+// an image node), a video (for a video node), MP3 or WAV audio (for an audio node) or a binary glTF model (first, for a
+// 3D node, beside its rendered preview image) is refused, whatever the provider called it.
 func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult, textureMax int) (string, error) {
 	results = mediaFileResults(results)
 	if len(results) == 0 {
@@ -204,7 +204,7 @@ func (h *headBuffer) Write(p []byte) (int, error) {
 }
 func (h *headBuffer) Bytes() []byte { return h.buf.Bytes() }
 
-// sniffMedia identifies the closed set of image, video and 3D model formats a media node stores.
+// sniffMedia identifies the closed set of image, video, audio and 3D model formats a media node stores.
 func sniffMedia(head []byte) (contentType, ext, kind string) {
 	switch {
 	case len(head) >= 12 && bytes.Equal(head[0:4], []byte("glTF")) && binary.LittleEndian.Uint32(head[4:8]) == 2:
@@ -225,6 +225,11 @@ func sniffMedia(head []byte) (contentType, ext, kind string) {
 		return "video/mp4", "mp4", mediaKindVideo
 	case bytes.HasPrefix(head, []byte{0x1A, 0x45, 0xDF, 0xA3}):
 		return "video/webm", "webm", mediaKindVideo
+	case bytes.HasPrefix(head, []byte("ID3")) || (len(head) >= 2 && head[0] == 0xFF && (head[1]&0xE6) == 0xE2):
+		// MPEG audio layer III: an ID3 tag, or a frame sync (as sniffUpload reads it, never the AAC ADTS pattern).
+		return "audio/mpeg", "mp3", mediaKindAudio
+	case len(head) >= 12 && bytes.Equal(head[0:4], []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WAVE")):
+		return "audio/wav", "wav", mediaKindAudio
 	}
 	return "", "", ""
 }

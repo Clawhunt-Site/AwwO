@@ -64,6 +64,60 @@ var runningHubLabels = map[string][2]string{
 	"rh.wan-2-7":            {"视频 · 全高清标准", "Video · Full HD Standard"},
 	"rh.grok-imagine-video": {"视频 · 快速出片", "Video · Quick clip"},
 	"rh.pixverse-v6":        {"视频 · 灵活时长", "Video · Flexible length"},
+
+	// Sound, by what it is for in a film: a character's or a narrator's voice, and the score under it.
+	"rh.minimax-speech-2-8-hd":          {"配音 · 旁白", "Voice-over"},
+	"rh.minimax-music-2-6-instrumental": {"配乐 · 纯音乐", "Score · Instrumental"},
+}
+
+// runningHubWireParams maps a RunningHub model's catalog parameter names (letters and digits, like every media
+// parameter) onto its request fields where the two differ; every other parameter is sent under its own name. The
+// catalog check refuses a parameter whose field is the prompt's, a fixed one or another parameter's, and an entry for
+// a parameter the model does not have.
+var runningHubWireParams = map[string]map[string]string{
+	"rh.minimax-speech-2-8-hd": {"voice": "voice_id", "englishNormalization": "english_normalization"},
+}
+
+// runningHubPromptField names the field a model reads its words from where it is not "prompt": the speech model
+// reads aloud its text.
+var runningHubPromptField = map[string]string{"rh.minimax-speech-2-8-hd": "text"}
+
+// runningHubFixed are the fields a model always sends with one value: the speech model returns a file to download,
+// never the audio inline as base64; the music model makes MP3, the one format a node keeps, and music without a voice
+// (isInstrumental: the same route makes songs from lyrics otherwise). The instrumental route the docs also list,
+// .../music-2.6/text-to-instrumental, answered 1001 "Invalid URL" to the operator's key on 2026-10-17.
+var runningHubFixed = map[string]map[string]any{
+	"rh.minimax-speech-2-8-hd":          {"enable_base64_output": false},
+	"rh.minimax-music-2-6-instrumental": {"format": "mp3", "isInstrumental": true},
+}
+
+// runningHubPromptFieldOf is the field model id reads its words from.
+func runningHubPromptFieldOf(id string) string {
+	if field := runningHubPromptField[id]; field != "" {
+		return field
+	}
+	return "prompt"
+}
+
+// runningHubWireName is the request field of a model's parameter.
+func runningHubWireName(id, name string) string {
+	if wire := runningHubWireParams[id][name]; wire != "" {
+		return wire
+	}
+	return name
+}
+
+// runningHubRequest is the body of one RunningHub task: the words under the model's prompt field, its fixed fields
+// and the resolved parameters under their request names.
+func runningHubRequest(m *mediaModel, prompt string, params map[string]any) map[string]any {
+	body := map[string]any{runningHubPromptFieldOf(m.ID): prompt}
+	for field, value := range runningHubFixed[m.ID] {
+		body[field] = value
+	}
+	for name, value := range params {
+		body[runningHubWireName(m.ID, name)] = value
+	}
+	return body
 }
 
 // rhError is a provider failure reduced to a closed code; RunningHub's message text is never

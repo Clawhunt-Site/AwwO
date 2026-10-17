@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-// The curated RunningHub catalog: image and video models an image or video node can run, each
+// The curated RunningHub catalog: image, video and audio models an image, video or audio node can run, each
 // with the closed parameter choices checked against that model's OpenAPI request schema. It is
 // embedded so the API and its catalog can never disagree, and parsed strictly at startup: a
 // malformed entry stops the process instead of offering a model the API cannot drive.
@@ -26,6 +26,7 @@ const (
 	mediaKindImage   = "image"
 	mediaKindVideo   = "video"
 	mediaKindModel3D = "model3d"
+	mediaKindAudio   = "audio"
 	maxMediaParams   = 16
 
 	mediaProviderRunningHub = "runninghub"
@@ -144,7 +145,7 @@ func validMediaModel(m *mediaModel) error {
 	if m.Label != ([2]string{}) && !validMediaLabel(m) {
 		return errors.New("label")
 	}
-	if (m.Kind != mediaKindImage && m.Kind != mediaKindVideo) || m.Mode != "text-to-"+m.Kind {
+	if !validMediaKindMode(m.Kind, m.Mode) {
 		return errors.New("kind")
 	}
 	if m.References != 0 {
@@ -160,17 +161,45 @@ func validMediaModel(m *mediaModel) error {
 		return errors.New("too many parameters")
 	}
 	names := map[string]bool{}
+	// Every field the request carries is sent once: a parameter's field (its own name, or its wire name) is never the
+	// prompt's field, a fixed field or another parameter's field.
+	fields := map[string]bool{runningHubPromptFieldOf(m.ID): true}
+	for field := range runningHubFixed[m.ID] {
+		fields[field] = true
+	}
 	for i := range m.Params {
 		p := &m.Params[i]
-		if !mediaParamName.MatchString(p.Name) || reservedMediaParams[p.Name] || names[p.Name] || !cleanCatalogText(p.Label[0], 40) || !cleanCatalogText(p.Label[1], 40) {
+		field := runningHubWireName(m.ID, p.Name)
+		if !mediaParamName.MatchString(p.Name) || reservedMediaParams[p.Name] || names[p.Name] || fields[field] || !cleanCatalogText(p.Label[0], 40) || !cleanCatalogText(p.Label[1], 40) {
 			return fmt.Errorf("parameter %q", p.Name)
 		}
-		names[p.Name] = true
+		names[p.Name], fields[field] = true, true
 		if err := validMediaParamSpec(p); err != nil {
 			return fmt.Errorf("parameter %q: %w", p.Name, err)
 		}
 	}
+	// A wire name for a parameter the model does not have would never be used: the mapping is stale.
+	for name := range runningHubWireParams[m.ID] {
+		if !names[name] {
+			return fmt.Errorf("wire name for unknown parameter %q", name)
+		}
+	}
 	return validMediaParamRequires(m.Params)
+}
+
+// mediaAudioModes are what an audio node generates from its text: speech read from it, or music it describes.
+var mediaAudioModes = map[string]bool{"text-to-speech": true, "text-to-music": true}
+
+// validMediaKindMode: an image or video model makes its kind from words (text-to-image, text-to-video); an audio model
+// reads its words aloud or makes music from them.
+func validMediaKindMode(kind, mode string) bool {
+	switch kind {
+	case mediaKindImage, mediaKindVideo:
+		return mode == "text-to-"+kind
+	case mediaKindAudio:
+		return mediaAudioModes[mode]
+	}
+	return false
 }
 
 // validMediaParamRequires checks every dependency between a model's parameters: it names an enum parameter declared

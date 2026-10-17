@@ -3,12 +3,12 @@ import { api, tenantPath } from '../saas/api';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
 import type { MediaParams, MediaParamValue } from './canvasDoc';
 
-// The image and video models this workspace can run, as the server publishes them. The server is
+// The image, video, 3D and audio models this workspace can run, as the server publishes them. The server is
 // the only source: no model, parameter or choice is named here, a malformed entry is dropped rather
 // than repaired, and a parameter's default is only ever displayed — an untouched parameter stays
 // absent from the node, and the server applies the model's default when the run is admitted.
 
-export type MediaKind = 'image' | 'video' | 'model3d';
+export type MediaKind = 'image' | 'video' | 'model3d' | 'audio';
 export type MediaParamType = 'enum' | 'integer' | 'number' | 'boolean' | 'text';
 
 export interface MediaParam {
@@ -52,7 +52,7 @@ const PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
 // The most pictures a model may start from: the server's own ceiling (X-tasy's video models take up to 10).
 const MAX_MEDIA_REFERENCES = 10;
 const MODEL_ID = /^(?:rh|tripo|xt)\.[a-z0-9][a-z0-9-]{0,62}$/;
-const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d']);
+const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d', 'audio']);
 const PARAM_TYPES: ReadonlySet<string> = new Set(['enum', 'integer', 'number', 'boolean', 'text']);
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -153,7 +153,7 @@ export async function readMediaCatalogue(signal?: AbortSignal): Promise<MediaCat
 }
 
 export const mediaKindOf = (agentKind: string): MediaKind | null =>
-  agentKind === 'image' || agentKind === 'video' || agentKind === 'model3d' ? agentKind : null;
+  agentKind === 'image' || agentKind === 'video' || agentKind === 'model3d' || agentKind === 'audio' ? agentKind : null;
 
 export function mediaModelsOf(catalogue: MediaCatalogue | null | undefined, kind: MediaKind): MediaModel[] {
   return catalogue?.available ? catalogue.models.filter(model => model.kind === kind) : [];

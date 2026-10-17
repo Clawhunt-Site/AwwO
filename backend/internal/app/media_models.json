@@ -3,7 +3,7 @@
   "provider": "runninghub",
   "source": "RunningHub Standard Model API OpenAPI docs, read 2026-10-03",
   "notes": [
-    "Only text-to-image and text-to-video models: models that need an input image wait for an upload flow.",
+    "Only text-to-image, text-to-video and text-to-audio models: models that need an input image wait for an upload flow.",
     "Parameters are closed choices checked against each model's OpenAPI request schema; example prompts and URLs are not copied.",
     "verified is the date of a successful real call with this deployment's key; empty means not yet called."
   ],
@@ -1113,6 +1113,185 @@
       ],
       "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184444.md",
       "verified": "2026-10-05"
+    },
+    {
+      "id": "rh.minimax-speech-2-8-hd",
+      "name": "MiniMax Speech 2.8 HD",
+      "vendor": "minimax",
+      "kind": "audio",
+      "mode": "text-to-speech",
+      "endpoint": "/openapi/v2/rhart-audio/text-to-audio/speech-2.8-hd",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "params": [
+        {
+          "name": "voice",
+          "type": "enum",
+          "values": [
+            "Wise_Woman",
+            "Friendly_Person",
+            "Inspirational_girl",
+            "Deep_Voice_Man",
+            "Calm_Woman",
+            "Casual_Guy",
+            "Lively_Girl",
+            "Patient_Man",
+            "Young_Knight",
+            "Determined_Man",
+            "Lovely_Girl",
+            "Decent_Boy",
+            "Imposing_Manner",
+            "Elegant_Man",
+            "Abbess",
+            "Sweet_Girl_2",
+            "Exuberant_Girl"
+          ],
+          "default": "Calm_Woman",
+          "label": [
+            "音色",
+            "Voice"
+          ],
+          "valueLabels": [
+            ["睿智女声", "Wise woman"],
+            ["亲切嗓音", "Friendly person"],
+            ["励志少女", "Inspirational girl"],
+            ["低沉男声", "Deep-voiced man"],
+            ["沉静女声", "Calm woman"],
+            ["随性男声", "Casual guy"],
+            ["活泼少女", "Lively girl"],
+            ["耐心男声", "Patient man"],
+            ["少年骑士", "Young knight"],
+            ["坚毅男声", "Determined man"],
+            ["可爱少女", "Lovely girl"],
+            ["正直少年", "Decent boy"],
+            ["威严嗓音", "Imposing manner"],
+            ["儒雅男声", "Elegant man"],
+            ["女修道院长", "Abbess"],
+            ["甜美少女", "Sweet girl"],
+            ["热情少女", "Exuberant girl"]
+          ]
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "min": 0.5,
+          "max": 2,
+          "default": 1,
+          "label": [
+            "语速",
+            "Speed"
+          ]
+        },
+        {
+          "name": "pitch",
+          "type": "integer",
+          "min": -12,
+          "max": 12,
+          "default": 0,
+          "label": [
+            "音调",
+            "Pitch"
+          ]
+        },
+        {
+          "name": "emotion",
+          "type": "enum",
+          "values": [
+            "neutral",
+            "happy",
+            "sad",
+            "angry",
+            "fearful",
+            "disgusted",
+            "surprised"
+          ],
+          "default": "neutral",
+          "label": [
+            "情绪",
+            "Emotion"
+          ],
+          "valueLabels": [
+            ["平静", "Neutral"],
+            ["开心", "Happy"],
+            ["悲伤", "Sad"],
+            ["愤怒", "Angry"],
+            ["恐惧", "Fearful"],
+            ["厌恶", "Disgusted"],
+            ["惊讶", "Surprised"]
+          ]
+        },
+        {
+          "name": "englishNormalization",
+          "type": "boolean",
+          "default": false,
+          "label": [
+            "英文数字规范朗读",
+            "English normalization"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-448184545.md",
+      "verified": "2026-10-17"
+    },
+    {
+      "id": "rh.minimax-music-2-6-instrumental",
+      "name": "MiniMax Music 2.6 Instrumental",
+      "vendor": "minimax",
+      "kind": "audio",
+      "mode": "text-to-music",
+      "endpoint": "/openapi/v2/minimax/music-2.6",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "params": [
+        {
+          "name": "sampleRate",
+          "type": "enum",
+          "values": [
+            "16000",
+            "24000",
+            "32000",
+            "44100"
+          ],
+          "default": "44100",
+          "label": [
+            "采样率",
+            "Sample rate"
+          ],
+          "valueLabels": [
+            ["16 kHz", "16 kHz"],
+            ["24 kHz", "24 kHz"],
+            ["32 kHz", "32 kHz"],
+            ["44.1 kHz", "44.1 kHz"]
+          ]
+        },
+        {
+          "name": "bitrate",
+          "type": "enum",
+          "values": [
+            "32000",
+            "64000",
+            "128000",
+            "256000"
+          ],
+          "default": "256000",
+          "label": [
+            "码率",
+            "Bitrate"
+          ],
+          "valueLabels": [
+            ["32 kbps", "32 kbps"],
+            ["64 kbps", "64 kbps"],
+            ["128 kbps", "128 kbps"],
+            ["256 kbps", "256 kbps"]
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859301.md",
+      "verified": "2026-10-17"
     }
   ]
 }

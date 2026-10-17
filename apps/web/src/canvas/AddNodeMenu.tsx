@@ -24,8 +24,8 @@ export interface AddNodeMenuProps {
   onOpenAgentLibrary?: () => void;
   /** Cloud hosts replace role-node shortcuts with the separate model/persona shelf. */
   onOpenModelShelf?: () => void;
-  /** Image, video and 3D model nodes the host can run (its media catalogue offers a model of that kind). */
-  mediaKinds?: ReadonlyArray<'image' | 'video' | 'model3d'>;
+  /** Image, video, 3D model and audio nodes the host can run (its media catalogue offers a model of that kind). */
+  mediaKinds?: ReadonlyArray<'image' | 'video' | 'model3d' | 'audio'>;
   /** Offer a 预览展示 window (displayNodes.ts), picked as kind 'display'. */
   withDisplay?: boolean;
 }
@@ -81,7 +81,7 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
       {onOpenAgentLibrary && <button type="button" role="menuitem" className="canvas-add-menu-item" onClick={onOpenAgentLibrary}>{locale === 'zh' ? '选择工作区 Agent…' : 'Choose workspace Agent…'}</button>}
       {mediaKinds.map(kind => <button key={kind} type="button" role="menuitem" className="canvas-add-menu-item" onClick={event => {
         event.stopPropagation(); onPick(kind);
-      }}>{t(kind === 'video' ? 'node.addVideo' : kind === 'model3d' ? 'node.addModel3d' : 'node.addImage')}</button>)}
+      }}>{t(kind === 'video' ? 'node.addVideo' : kind === 'model3d' ? 'node.addModel3d' : kind === 'audio' ? 'node.addAudio' : 'node.addImage')}</button>)}
       {items.map((item) => (
         <button
           key={item.id}

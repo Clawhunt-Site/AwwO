@@ -1,4 +1,4 @@
-// The images, videos or 3D models a media node generated, shown in place inside its transcript and in the 成果 view.
+// The images, videos, sounds or 3D models a media node generated, shown in place inside its transcript and in the 成果 view.
 // Files are served by the workspace API under the signed-in session; without an active workspace (a local canvas
 // showing a cloud result) only the summary is shown, never a guessed URL.
 
@@ -13,7 +13,8 @@ import { PREVIEW_LIMITS, type PreviewFile } from './previewData';
 import './media.css';
 
 export function mediaOutputSummaryKey(output: MediaOutput) {
-  return output.kind === 'video' ? 'media.generatedVideos' as const : output.kind === 'model3d' ? 'media.generatedModels' as const : 'media.generatedImages' as const;
+  return output.kind === 'video' ? 'media.generatedVideos' as const : output.kind === 'model3d' ? 'media.generatedModels' as const
+    : output.kind === 'audio' ? 'media.generatedAudio' as const : 'media.generatedImages' as const;
 }
 
 /** How many results a summary counts: a 3D result's rendered preview picture, and a file of more clips for its skeleton,
@@ -44,7 +45,10 @@ function MediaItem({ item, kind }: { item: MediaOutputItem; kind: MediaOutput['k
   const download = storedArtifactUrl(`awwo-file:${item.artifactId}`);
   if (!inline || broken) return <div className="canvas-media-missing" role="status">{broken ? t('media.unavailableFile') : item.name}</div>;
   return <figure className="canvas-media-item">
-    {kind === 'video'
+    {kind === 'audio'
+      // A voice-over or a score: the browser's own player, which only plays when someone presses play.
+      ? <audio className="canvas-media-audio" src={inline} controls preload="metadata" onError={() => setBroken(true)} aria-label={t('media.audioLabel', { name: item.name })} />
+      : kind === 'video'
       // A media fragment makes the browser fetch and paint the first frame instead of a blank box.
       ? <video className="canvas-media-video" src={`${inline}#t=0.1`} controls preload="metadata" playsInline onError={() => setBroken(true)} aria-label={item.name} />
       : <a href={inline} target="_blank" rel="noopener noreferrer" title={t('media.open')}>

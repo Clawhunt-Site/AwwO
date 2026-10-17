@@ -208,7 +208,7 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
 }
 
 const TYPE_LABEL: Record<DataType, CanvasTextKey> = {
-  text: 'contract.text', image: 'contract.image', video: 'contract.video', number: 'contract.number', boolean: 'contract.boolean', file: 'contract.file',
+  text: 'contract.text', image: 'contract.image', video: 'contract.video', audio: 'contract.audio', number: 'contract.number', boolean: 'contract.boolean', file: 'contract.file',
 };
 
 export interface TilePortsProps {
@@ -245,7 +245,7 @@ export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, p
       : t('media.guideReferenceNone');
   }
   if (port.side === 'output' && port.id === 'result') {
-    return t(kind === 'video' ? 'media.guideResultVideo' : kind === 'model3d' ? 'media.guideResultModel3d' : 'media.guideResultImage');
+    return t(kind === 'video' ? 'media.guideResultVideo' : kind === 'model3d' ? 'media.guideResultModel3d' : kind === 'audio' ? 'media.guideResultAudio' : 'media.guideResultImage');
   }
   return null;
 }

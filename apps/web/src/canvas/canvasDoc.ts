@@ -27,7 +27,7 @@ import type { AgentTemplateId } from './agentTemplates';
 import { sanitizeNodeTeam, type NodeTeam } from './nodeTeam';
 import { sanitizeDisplays, type DisplayNode } from './displayNodes';
 
-export type AgentKind = 'llm' | 'coding' | 'image' | 'video' | 'model3d';
+export type AgentKind = 'llm' | 'coding' | 'image' | 'video' | 'model3d' | 'audio';
 
 /** An image or video node's parameter choices. An absent key takes the model's default on the server. */
 export type MediaParamValue = string | number | boolean;
@@ -240,6 +240,7 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
   image: { label: '图像', glyph: 'I' },
   video: { label: '视频', glyph: 'V' },
   model3d: { label: '3D 模型', glyph: '3D' },
+  audio: { label: '音频', glyph: 'A' },
 };
 
 /** Default tile sizes. Sessions are taller because they render a live transcript. */
@@ -247,7 +248,7 @@ export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
 export const ASSEMBLE_NODE_SIZE = { w: 320, h: 220 } as const;
 
-const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d'];
+const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d', 'audio'];
 const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'];
 /** Waypoint slots are the number-row keys; anything outside is clamped into range. */
 export const WAYPOINT_MIN_SLOT = 1;
@@ -540,7 +541,7 @@ function sanitizeMediaParams(raw: unknown): MediaParams | undefined {
 function sanitizeEdge(raw: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const dataType: DataType = r.dataType === 'image' || r.dataType === 'video' || r.dataType === 'number' || r.dataType === 'boolean' || r.dataType === 'file'
+  const dataType: DataType = r.dataType === 'image' || r.dataType === 'video' || r.dataType === 'audio' || r.dataType === 'number' || r.dataType === 'boolean' || r.dataType === 'file'
     ? r.dataType : 'text';
   const edge: CanvasEdge = {
     id: str(r.id),

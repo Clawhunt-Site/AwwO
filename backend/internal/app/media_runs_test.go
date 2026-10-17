@@ -19,6 +19,7 @@ import (
 var (
 	testPNG = append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), bytes.Repeat([]byte{7}, 4096)...)
 	testMP4 = append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00"), bytes.Repeat([]byte{9}, 4096)...)
+	testMP3 = append([]byte("ID3\x04\x00\x00\x00\x00\x00\x00"), bytes.Repeat([]byte{5}, 4096)...)
 )
 
 type fakeSubmit struct {
@@ -327,6 +328,80 @@ func TestPostgresMediaRunGeneratesStoresAndServesAnImage(t *testing.T) {
 	canvas = h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/initialize", map[string]any{"documentVersion": canvas["version"]}, 200)
 	if next := setupNodeAt(canvas, 0); next["issueId"] == sid || next["binding"].(map[string]any)["agentId"] == agentID {
 		t.Fatal("a changed media model must start a new conversation and Agent")
+	}
+}
+
+// An audio node (2026-10-17) generates a voice-over from its text and a score from its description: the speech model
+// reads the words as text with the node's voice under RunningHub's names and never asks for base64, the music model
+// always asks for instrumental MP3, and the run keeps the MP3 as audio-1.mp3 (audio/mpeg), served inline for <audio>.
+func TestPostgresMediaRunGeneratesAndStoresAudio(t *testing.T) {
+	h, rh := newMediaHarness(t)
+	c, tid, _ := h.register(t, "media-audio@example.test")
+	_, canvas := mediaCanvas(t, h, c, tid,
+		mediaNode("vo", mediaKindAudio, "rh.minimax-speech-2-8-hd", map[string]any{"voice": "Young_Knight", "emotion": "sad"}),
+		mediaNode("score", mediaKindAudio, "rh.minimax-music-2-6-instrumental", map[string]any{"sampleRate": "32000"}))
+	rh.mu.Lock()
+	rh.content["/out.mp3"] = testMP3
+	rh.mu.Unlock()
+	rh.set(nil, func(task string, n int) (int, any) {
+		return 200, map[string]any{"taskId": task, "status": "SUCCESS", "results": []any{map[string]any{"url": "https://files.runninghub.ai/out.mp3", "outputType": "mp3"}}}
+	})
+
+	run := h.mediaRun(t, c, tid, setupNodeAt(canvas, 0)["issueId"].(string), "  (sighs) The rain will not stop tonight.  ", 202)
+	done := h.awaitRun(t, c, tid, run["id"].(string), "completed")
+	sent := rh.submission(0)
+	want := map[string]any{"text": "(sighs) The rain will not stop tonight.", "voice_id": "Young_Knight", "emotion": "sad", "speed": float64(1),
+		"pitch": float64(0), "english_normalization": false, "enable_base64_output": false}
+	if sent.path != "/openapi/v2/rhart-audio/text-to-audio/speech-2.8-hd" || len(sent.body) != len(want) {
+		t.Fatalf("speech submission %+v", sent)
+	}
+	for k, v := range want {
+		if sent.body[k] != v {
+			t.Fatalf("speech submission %s = %v, want %v (%+v)", k, sent.body[k], v, sent.body)
+		}
+	}
+	var out mediaOutput
+	if e := json.Unmarshal([]byte(done["output"].(string)), &out); e != nil || out.Kind != mediaKindAudio || out.Model != "rh.minimax-speech-2-8-hd" || len(out.Items) != 1 {
+		t.Fatal("output", done["output"], e)
+	}
+	item := out.Items[0]
+	if item.Name != "audio-1.mp3" || item.ContentType != "audio/mpeg" || item.Size != int64(len(testMP3)) {
+		t.Fatal("item", item)
+	}
+	var rel, contentType string
+	if e := h.db.QueryRow(t.Context(), "SELECT storage_path,content_type FROM artifacts WHERE tenant_id=$1 AND id=$2", tid, item.ArtifactID).Scan(&rel, &contentType); e != nil ||
+		contentType != "audio/mpeg" || !strings.HasSuffix(rel, ".mp3") {
+		t.Fatal("artifact row", rel, contentType, e)
+	}
+	if data, e := os.ReadFile(filepath.Join(rh.dir, filepath.FromSlash(rel))); e != nil || !bytes.Equal(data, testMP3) {
+		t.Fatal("stored file", rel, e)
+	}
+	header, body := h.readRaw(t, c, "/tenants/"+tid+"/artifacts/"+item.ArtifactID+"/media", 200)
+	if !bytes.Equal(body, testMP3) || header.Get("Content-Type") != "audio/mpeg" || !strings.HasPrefix(header.Get("Content-Disposition"), "inline") {
+		t.Fatal("inline audio", header)
+	}
+
+	run = h.mediaRun(t, c, tid, setupNodeAt(canvas, 1)["issueId"].(string), "warm strings under a rainy night, slow and sad", 202)
+	done = h.awaitRun(t, c, tid, run["id"].(string), "completed")
+	sent = rh.submission(1)
+	if sent.path != "/openapi/v2/minimax/music-2.6" || len(sent.body) != 5 || sent.body["prompt"] != "warm strings under a rainy night, slow and sad" ||
+		sent.body["sampleRate"] != "32000" || sent.body["bitrate"] != "256000" || sent.body["format"] != "mp3" || sent.body["isInstrumental"] != true {
+		t.Fatalf("music submission %+v", sent)
+	}
+	if e := json.Unmarshal([]byte(done["output"].(string)), &out); e != nil || out.Kind != mediaKindAudio || len(out.Items) != 1 || out.Items[0].Name != "audio-1.mp3" {
+		t.Fatal("music output", done["output"], e)
+	}
+
+	// A picture is not a sound: an audio node refuses an image result, and the run settles with a closed code.
+	rh.set(nil, func(task string, n int) (int, any) {
+		return 200, mediaSuccess(task, "https://files.runninghub.ai/out.png")
+	})
+	run = h.mediaRun(t, c, tid, setupNodeAt(canvas, 0)["issueId"].(string), "Again, softly.", 202)
+	if _, code := awaitRunRow(t, h, tid, run["id"].(string), "failed"); code != "media_result_invalid" {
+		t.Fatal("an image kept by an audio node", code)
+	}
+	if submits, _ := rh.counts(); submits != 3 {
+		t.Fatal("submissions", submits)
 	}
 }
 

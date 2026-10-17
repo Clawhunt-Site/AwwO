@@ -63,7 +63,7 @@ type mediaItem struct {
 var mediaPathPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 // Uploaded files of any type are stored as <sha256>.bin (uploads.go); their type lives in the artifact row.
-var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb|bin)$`)
+var mediaFileName = regexp.MustCompile(`^[0-9a-f]{64}\.(png|jpg|webp|gif|mp4|webm|mov|glb|mp3|wav|bin)$`)
 
 // mediaHub is the configured RunningHub client, or nil when image and video generation is off.
 func (a *App) mediaHub() *runningHub {
@@ -584,10 +584,7 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	case mediaProviderJimeng:
 		body = jimengRequest(m, text, plan.Params, id, references)
 	default:
-		body = map[string]any{"prompt": text}
-		for name, value := range plan.Params {
-			body[name] = value
-		}
+		body = runningHubRequest(m, text, plan.Params)
 	}
 	// One admitted run is one provider task: a submission that may or may not have reached the
 	// provider is never retried, because a retry could pay for the same generation twice. Nor is it

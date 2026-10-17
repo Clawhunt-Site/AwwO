@@ -117,6 +117,65 @@ func TestGraphPromptNamesMediaFilesInsteadOfTheirRecord(t *testing.T) {
 	}
 }
 
+// An audio node's delivery reads downstream as its files, by path, with the rule that tells a page how to play them; a
+// delivery without audio has no such rule, so every existing case reads as before.
+func TestGraphPromptNamesAudioFilesAndHowToPlayThem(t *testing.T) {
+	record := `{"type":"awwo.media","version":1,"kind":"audio","model":"rh.minimax-speech-2-8-hd","items":[{"artifactId":"aAAAAAAAAAAA","name":"audio-1.mp3","contentType":"audio/mpeg","size":4106}]}`
+	d := graphDocument{Nodes: []graphNode{{ID: "vo_lark_1", Kind: "session", AgentKind: mediaKindAudio, Title: "Lark"}, {ID: "page", Kind: "session", AgentKind: "coding", Title: "Page"}},
+		Edges: []graphEdge{{ID: "e", FromNode: "vo_lark_1", FromPort: "result", ToNode: "page", ToPort: "context", DataType: "audio"}}}
+	prompt, err := graphPrompt(d.Nodes[1], d, map[string]string{"vo_lark_1": record})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"「Lark」生成的音频文件", "- vo_lark_1/audio-1.mp3（audio/mpeg，4106 字节）", "<audio>", "new Audio("} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in %s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "aAAAAAAAAAAA") {
+		t.Fatal("the record's artifact id reached the page", prompt)
+	}
+	// Nothing made: the page is told so, by the audio node's kind.
+	if got := mediaMissingText(d.Nodes[0]); !strings.Contains(got, "这次没有生成出音频文件") {
+		t.Fatal(got)
+	}
+	picture := `{"type":"awwo.media","version":1,"kind":"image","model":"rh.seedream-v5-pro","items":[{"artifactId":"aAAAAAAAAAAA","name":"image-1.png","contentType":"image/png","size":10}]}`
+	if got := mediaDeliveryText(graphNode{ID: "hero", Kind: "session", AgentKind: mediaKindImage, Title: "Hero"}, picture); strings.Contains(got, "<audio>") || strings.Contains(got, mediaAudioPageRule) {
+		t.Fatal("a picture's delivery carries the audio rule", got)
+	}
+	// The audio result is typed audio: it feeds a page's text context (the soft media edge) and nothing that is not text.
+	bound := func(n map[string]any) map[string]any {
+		n["binding"], n["runtime"] = map[string]any{"agentId": "agent-" + n["id"].(string)}, "pi"
+		return n
+	}
+	doc := func(edge map[string]any) []byte {
+		raw, _ := json.Marshal(map[string]any{"nodes": []any{
+			bound(map[string]any{"id": "vo", "kind": "session", "agentKind": "audio", "title": "VO"}),
+			bound(map[string]any{"id": "hero", "kind": "session", "agentKind": "image", "title": "Hero"}),
+			bound(map[string]any{"id": "page", "kind": "session", "agentKind": "coding", "title": "Page"})}, "edges": []any{edge}})
+		return raw
+	}
+	edge := func(from, to, toPort, dataType string) map[string]any {
+		return map[string]any{"id": "e", "fromNode": from, "fromPort": "result", "toNode": to, "toPort": toPort, "dataType": dataType}
+	}
+	if _, _, err := parseGraph(doc(edge("vo", "page", "context", "audio")), nil); err != nil {
+		t.Fatal("an audio result feeds a page", err)
+	}
+	for name, bad := range map[string]map[string]any{
+		"audio typed as text":          edge("vo", "page", "context", "text"),
+		"audio into a picture input":   edge("vo", "hero", "reference", "audio"),
+		"a picture into an audio node": edge("hero", "vo", "reference", "image"),
+	} {
+		if _, _, err := parseGraph(doc(bad), nil); err == nil {
+			t.Error("accepted", name)
+		}
+	}
+	soft := graphDocument{Nodes: d.Nodes, Edges: d.Edges}
+	if !softMediaEdge(soft, d.Edges[0]) {
+		t.Fatal("an audio result into a page's context is a soft media edge")
+	}
+}
+
 // A canvas run hands its pictures, clips and 3D models to the page that uses them: a media node's result may feed a
 // text input (a page's context, or a text field of a contract node) and reads there as the files it made. Every other
 // mismatch is still refused, and the edge keeps its source's type.

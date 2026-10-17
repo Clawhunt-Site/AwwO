@@ -116,7 +116,7 @@ set_model 是唯一能改模型的操作，只能改用 models 中的模型：mo
 
 const LIMITS = { raw: 120000, operations: 100, id: 128, title: 200, persona: 8000, value: 16000, help: 2000, fields: 64 } as const;
 
-const MEDIA_KIND_WORDS: Record<MediaKind, string> = { image: '图片', video: '视频', model3d: '3D 模型' };
+const MEDIA_KIND_WORDS: Record<MediaKind, string> = { image: '图片', video: '视频', model3d: '3D 模型', audio: '音频' };
 
 /**
  * The protocol with media nodes offered: add_node may also name the given kinds, and one line says what a media node
@@ -417,8 +417,8 @@ function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adju
 function inputTypeFor(from: CanvasNode, output: PortSpec): ContractFieldType | null {
   if (from.kind === 'session' && from.contract) return from.contract.outputs.find(field => `out:${field.id}` === output.id)?.type ?? null;
   if (output.dataType === 'text') return 'markdown';
-  // A picture or a clip from a media node is read through a text input (canFeed): the page gets the files' paths.
-  if (isMediaSessionNode(from) && output.id === 'result' && (output.dataType === 'image' || output.dataType === 'video')) return 'markdown';
+  // A picture, a clip or a sound from a media node is read through a text input (canFeed): the page gets the files' paths.
+  if (isMediaSessionNode(from) && output.id === 'result' && (output.dataType === 'image' || output.dataType === 'video' || output.dataType === 'audio')) return 'markdown';
   return output.dataType === 'number' || output.dataType === 'boolean' || output.dataType === 'file' ? output.dataType : null;
 }
 
@@ -456,7 +456,7 @@ function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode,
   // input, still empty and unwired, becomes a text input under the plan's own name, instead of a second input beside
   // it that nothing would ever fill.
   const retyped = wanted && to.kind === 'session' && isMediaSessionNode(from) && output.id === 'result'
-    && (output.dataType === 'image' || output.dataType === 'video')
+    && (output.dataType === 'image' || output.dataType === 'video' || output.dataType === 'audio')
     ? to.contract?.inputs.find(field => `in:${field.id}` === wanted.id && field.type === 'file' && !String(field.value ?? '').trim())
     : undefined;
   if (wanted && retyped && !draft.edges.some(edge => edge.toNode === to.id && edge.toPort === wanted.id)) {

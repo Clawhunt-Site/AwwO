@@ -15,7 +15,7 @@ const (
 )
 
 func mediaAgentKind(kind string) bool {
-	return kind == mediaKindImage || kind == mediaKindVideo || kind == mediaKindModel3D
+	return kind == mediaKindImage || kind == mediaKindVideo || kind == mediaKindModel3D || kind == mediaKindAudio
 }
 
 func (c setupConfiguration) engine() string {

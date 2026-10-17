@@ -3,7 +3,7 @@
 // nothing here runs, publishes or edits on its own. A host opts in (the hosted app); the canvas stays as
 // it is elsewhere.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Box, Download, FileCode2, FileDown, FileText, Film, Image as ImageIcon, Loader2, Play, SquareArrowOutUpRight, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Box, Download, FileCode2, FileDown, FileText, Film, Image as ImageIcon, Loader2, Music, Play, SquareArrowOutUpRight, X } from 'lucide-react';
 import { caseRunLabel, type CanvasEdge, type CanvasNode, type ReviewGraphPolicy } from './canvasDoc';
 import { canvasResult, deliveredItems, type DeliveredItem, type StepDelivery } from './canvasResultModel';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
@@ -223,9 +223,9 @@ function ReviewNote({ step, onOpen }: { step: StepDelivery; onOpen: () => void }
 }
 
 
-const ITEM_ICON = { page: FileCode2, file: FileDown, image: ImageIcon, video: Film, model: Box, document: FileText, missing: AlertTriangle } as const;
+const ITEM_ICON = { page: FileCode2, file: FileDown, image: ImageIcon, video: Film, audio: Music, model: Box, document: FileText, missing: AlertTriangle } as const;
 const ITEM_KIND: Record<DeliveredItem['kind'], CanvasTextKey> = {
-  page: 'results.itemPage', file: 'results.itemFile', image: 'results.itemImage', video: 'results.itemVideo', model: 'results.itemModel',
+  page: 'results.itemPage', file: 'results.itemFile', image: 'results.itemImage', video: 'results.itemVideo', audio: 'results.itemAudio', model: 'results.itemModel',
   document: 'results.itemDocument', missing: 'results.itemMissing',
 };
 

@@ -24,7 +24,7 @@ export interface ModelNamed {
 }
 
 const KIND_NAMES: Readonly<Record<MediaKind, readonly [zh: string, en: string]>> = {
-  image: ['图片', 'Image'], video: ['视频', 'Video'], model3d: ['3D 模型', '3D model'],
+  image: ['图片', 'Image'], video: ['视频', 'Video'], model3d: ['3D 模型', '3D model'], audio: ['音频', 'Audio'],
 };
 
 const modelOf = (node: ModelNamed): string => typeof node.model === 'string' ? node.model : '';

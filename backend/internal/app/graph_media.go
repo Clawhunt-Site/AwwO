@@ -24,7 +24,7 @@ import (
 // can still be bound to an ordinary text Agent, so what decides how a node runs is its frozen snapshot
 // (frozenMediaNode) and, once it ran, whether its child run was a generation.
 func graphMediaNode(n graphNode) bool {
-	return n.Kind == "session" && (n.AgentKind == mediaKindImage || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D)
+	return n.Kind == "session" && (n.AgentKind == mediaKindImage || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D || n.AgentKind == mediaKindAudio)
 }
 
 // frozenMediaNode reports whether the graph admitted node nid as a generation (its snapshot holds a media plan).
@@ -178,12 +178,15 @@ func mediaDeliveryText(n graphNode, output string) string {
 	if title == "" {
 		title = n.ID
 	}
-	lines := []string{fmt.Sprintf("「%s」生成的%s文件（存放在这张画布的成果里，这里只列文件，不含内容）：", title, map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型"}[record.Kind])}
+	lines := []string{fmt.Sprintf("「%s」生成的%s文件（存放在这张画布的成果里，这里只列文件，不含内容）：", title, mediaKindShown[record.Kind])}
 	// A rigged model's GLBs name their clips; one with clips only is for the skeleton of the first model.
-	model, animated, clipsOnly := "", false, false
+	model, animated, clipsOnly, audio := "", false, false, false
 	for _, item := range record.Items {
 		if item.ContentType == "model/gltf-binary" && !item.ClipsOnly && model == "" {
 			model = n.ID + "/" + item.Name
+		}
+		if strings.HasPrefix(item.ContentType, "audio/") {
+			audio = true
 		}
 	}
 	for _, item := range record.Items {
@@ -209,8 +212,18 @@ func mediaDeliveryText(n graphNode, output string) string {
 		}
 		lines = append(lines, line)
 	}
+	if audio {
+		lines = append(lines, mediaAudioPageRule)
+	}
 	return strings.Join(lines, "\n")
 }
+
+// mediaKindShown names a media node's kind in a downstream prompt.
+var mediaKindShown = map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型", mediaKindAudio: "音频"}
+
+// mediaAudioPageRule tells a page how to play the audio files listed above it (written only when there are some, so
+// every delivery without audio reads exactly as before).
+const mediaAudioPageRule = "音频文件用 <audio> 元素播放（src 写上面的相对路径），或在脚本里用 new Audio(路径) 播放；浏览器只在用户点击等操作之后才允许出声，所以播放要由用户的操作触发。"
 
 // shownClipNames lists a GLB's clip names as a downstream prompt may name them: plain short names only (the API wrote
 // them from the file, media_glb.go, but a record is read back from the database), space separated.
@@ -231,7 +244,7 @@ func mediaMissingText(n graphNode) string {
 	if title == "" {
 		title = n.ID
 	}
-	kind := map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型"}[n.AgentKind]
+	kind := mediaKindShown[n.AgentKind]
 	if kind == "" {
 		kind = "媒体"
 	}

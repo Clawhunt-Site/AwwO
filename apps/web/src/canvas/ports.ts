@@ -24,7 +24,7 @@ import { boundsOfBoxes } from './viewport';
 export type PortSide = 'input' | 'output';
 
 /** Closed set of channels a wire can carry. */
-export type DataType = 'text' | 'image' | 'video' | 'number' | 'boolean' | 'file';
+export type DataType = 'text' | 'image' | 'video' | 'audio' | 'number' | 'boolean' | 'file';
 
 export interface PortSpec {
   id: string;
@@ -59,6 +59,7 @@ export interface PortRef {
  * - session llm/coding: input 'context' (text, MULTI)                       → output 'result' (text)
  * - session image:      input 'context' (text, MULTI) + 'reference' (image) → output 'result' (image)
  * - session model3d:    input 'context' (text, MULTI) + 'reference' (image) → output 'result' (file)
+ * - session audio:      input 'context' (text, MULTI)                       → output 'result' (audio)
  */
 export function portsFor(node: CanvasNode): PortSpec[] {
   if (node.kind === 'form') {
@@ -80,9 +81,10 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   }
   if (node.kind === 'assemble') return [];
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
-  // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D).
+  // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D). An
+  // audio node generates from its words alone.
   if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
-  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' ? node.agentKind
+  ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'audio' ? node.agentKind
     : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;
 }
@@ -122,20 +124,20 @@ export function arePortTypesCompatible(outType: DataType, inType: DataType): boo
   return outType === inType;
 }
 
-/** Is `node` an image, video or 3D node (its `result` is the generated files)? */
+/** Is `node` an image, video, 3D or audio node (its `result` is the generated files)? */
 export function isMediaSessionNode(node: CanvasNode): boolean {
-  return node.kind === 'session' && !node.contract && (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d');
+  return node.kind === 'session' && !node.contract && (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' || node.agentKind === 'audio');
 }
 
 /**
- * May this output feed this input? The same type, or a media node's result (a picture, a clip, a 3D model) into a text
- * input: that input then reads the files the generation stored, by the paths a page names them with, so a canvas run
- * hands its media to the page that uses them. The API applies the same rule to a run's graph (edgeTypesFit).
+ * May this output feed this input? The same type, or a media node's result (a picture, a clip, a 3D model, a sound) into
+ * a text input: that input then reads the files the generation stored, by the paths a page names them with, so a canvas
+ * run hands its media to the page that uses them. The API applies the same rule to a run's graph (edgeTypesFit).
  */
 export function canFeed(fromNode: CanvasNode, out: PortSpec, inp: PortSpec): boolean {
   if (arePortTypesCompatible(out.dataType, inp.dataType)) return true;
   return inp.dataType === 'text' && out.id === 'result' && isMediaSessionNode(fromNode)
-    && (out.dataType === 'image' || out.dataType === 'video' || out.dataType === 'file');
+    && (out.dataType === 'image' || out.dataType === 'video' || out.dataType === 'audio' || out.dataType === 'file');
 }
 
 /**

@@ -461,7 +461,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     return () => controller.abort();
   }, [canInitialize, cloudScope, readOnly, mediaRefresh]);
-  const mediaKinds = useMemo(() => (['image', 'video', 'model3d'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
+  const mediaKinds = useMemo(() => (['image', 'video', 'model3d', 'audio'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -2144,9 +2144,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // team. The first catalog model is shown, and runs only once the operator saves it.
       const node = kind === 'form' ? createFormNode(world)
         : kind === 'assemble' ? createAssembleNode(world, locale)
-        : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : media === 'model3d' ? 'node.model3d' : 'node.image'),
+        : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : media === 'model3d' ? 'node.model3d' : media === 'audio' ? 'node.audio' : 'node.image'),
           model: mediaModelsOf(mediaCatalogueOf(mediaState), media)[0]?.id ?? '' }
-        : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video' || kind === 'model3d'
+        : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video' || kind === 'model3d' || kind === 'audio'
           ? { ...createAgentTemplate('general', world, locale), agentKind: kind }
           : createAgentTemplate(kind, world, locale);
       patchDoc((prev) => ({ ...prev, nodes: [...prev.nodes, node] }), { label: `add:${node.id}` });
@@ -3769,7 +3769,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
     const catalogue = mediaCatalogueOf(mediaState);
     const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: mediaModelLabel(model, locale), group: mediaGroupLabel(locale), available: true, references: model.references }));
-    return { image: of('image'), video: of('video'), model3d: of('model3d') };
+    return { image: of('image'), video: of('video'), model3d: of('model3d'), audio: of('audio') };
   }, [mediaState, locale]);
   const modelChoicesRef = useRef({ chat: chatModelChoices, media: mediaModelChoices });
   modelChoicesRef.current = { chat: chatModelChoices, media: mediaModelChoices };

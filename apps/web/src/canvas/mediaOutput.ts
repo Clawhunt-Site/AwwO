@@ -2,7 +2,7 @@
 // answers the run with a small record naming them; this reads that record strictly, so any other
 // text, however similar, stays ordinary text.
 
-export type MediaOutputKind = 'image' | 'video' | 'model3d';
+export type MediaOutputKind = 'image' | 'video' | 'model3d' | 'audio';
 
 export interface MediaOutputItem {
   artifactId: string;
@@ -33,7 +33,10 @@ const TYPES: Record<MediaOutputKind, ReadonlySet<string>> = {
   video: new Set(['video/mp4', 'video/webm', 'video/quicktime']),
   // A 3D node stores its model and the provider's rendered preview picture.
   model3d: new Set(['model/gltf-binary', ...IMAGE_TYPES]),
+  // An audio node stores MP3 or WAV.
+  audio: new Set(['audio/mpeg', 'audio/wav']),
 };
+const OUTPUT_KINDS: ReadonlySet<unknown> = new Set<MediaOutputKind>(['image', 'video', 'model3d', 'audio']);
 
 export function parseMediaOutput(text: unknown): MediaOutput | null {
   const trimmed = typeof text === 'string' ? text.trim() : '';
@@ -42,9 +45,9 @@ export function parseMediaOutput(text: unknown): MediaOutput | null {
   try { value = JSON.parse(trimmed); } catch { return null; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (record.type !== MEDIA_OUTPUT_TYPE || record.version !== 1 || (record.kind !== 'image' && record.kind !== 'video' && record.kind !== 'model3d')
+  if (record.type !== MEDIA_OUTPUT_TYPE || record.version !== 1 || !OUTPUT_KINDS.has(record.kind)
     || typeof record.model !== 'string' || !Array.isArray(record.items) || !record.items.length || record.items.length > 8) return null;
-  const kind = record.kind;
+  const kind = record.kind as MediaOutputKind;
   const items: MediaOutputItem[] = [];
   for (const raw of record.items) {
     if (!raw || typeof raw !== 'object') return null;
@@ -70,7 +73,10 @@ export function parseMediaOutput(text: unknown): MediaOutput | null {
 }
 
 
-const KIND_WORDS: Record<MediaOutputKind, string> = { image: '图片', video: '视频', model3d: '3D 模型' };
+const KIND_WORDS: Record<MediaOutputKind, string> = { image: '图片', video: '视频', model3d: '3D 模型', audio: '音频' };
+
+/** How a page plays the audio files listed above it; the same line the API writes (mediaAudioPageRule in graph_media.go). */
+export const MEDIA_AUDIO_PAGE_RULE = '音频文件用 <audio> 元素播放（src 写上面的相对路径），或在脚本里用 new Audio(路径) 播放；浏览器只在用户点击等操作之后才允许出声，所以播放要由用户的操作触发。';
 
 /**
  * How a media node's delivery reads in a downstream node's input: the files it stored, by the path a page can name them
@@ -97,6 +103,7 @@ export function mediaDeliveryText(node: { id: string; title?: string }, text: st
     lines.push(`带动画的 GLB 用 THREE.AnimationMixer 按上面的动画名播放它的动画（gltf.animations）。${clipsOnly && model
       ? `只有动画的文件和 ${model} 是同一副骨骼：加载它只取动画，按骨骼名用到 ${model} 的场景上。` : ''}`);
   }
+  if (media.items.some(item => item.contentType.startsWith('audio/'))) lines.push(MEDIA_AUDIO_PAGE_RULE);
   return lines.join('\n');
 }
 
@@ -108,7 +115,7 @@ export function mediaDeliveryText(node: { id: string; title?: string }, text: st
  */
 export function mediaMissingText(node: { id: string; title?: string; agentKind?: string }): string {
   const title = node.title?.trim() || node.id;
-  const kind = node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' ? KIND_WORDS[node.agentKind] : '媒体';
+  const kind = node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' || node.agentKind === 'audio' ? KIND_WORDS[node.agentKind] : '媒体';
   return `「${title}」这次没有生成出${kind}文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。`;
 }
 

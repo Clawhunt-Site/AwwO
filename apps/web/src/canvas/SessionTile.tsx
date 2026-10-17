@@ -30,7 +30,7 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
@@ -87,7 +87,7 @@ const DRAWER_WIDTH: Record<OpenContent, string> = { page: '62%', media: '48%', d
 
 /** What an image, video or 3D node that has not generated yet asks for (its empty state's title). */
 const MEDIA_EMPTY_TITLE: Record<MediaKind, CanvasTextKey> = {
-  image: 'media.emptyImage', video: 'media.emptyVideo', model3d: 'media.emptyModel3d',
+  image: 'media.emptyImage', video: 'media.emptyVideo', model3d: 'media.emptyModel3d', audio: 'media.emptyAudio',
 };
 
 /** How a press on a tile changes the selection — see SessionTileProps.onSelect. */
@@ -271,7 +271,8 @@ function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   if (node.kind === 'assemble') return { glyph: '⧉', kindClass: 'assemble', label: canvasText(locale, 'tile.assemble') };
   const meta = AGENT_KIND_META[node.agentKind];
-  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : node.agentKind === 'model3d' ? 'node.model3d' : 'node.llm');
+  const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : node.agentKind === 'model3d' ? 'node.model3d'
+    : node.agentKind === 'audio' ? 'node.audio' : 'node.llm');
   return { glyph: meta.glyph, kindClass: node.agentKind, label };
 }
 
@@ -754,7 +755,7 @@ export const SessionTile = memo(function SessionTile({
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
   const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
-    : node.agentKind === 'model3d' ? Box : Bot;
+    : node.agentKind === 'model3d' ? Box : node.agentKind === 'audio' ? Music : Bot;
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
     onUpdateNode?.({ ...node, contract: { ...contract, inputs: fields } });

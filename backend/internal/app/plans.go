@@ -395,7 +395,19 @@ var mediaBaseCredits = map[string]int{
 	"xt.seedream-5-pro": 40, "xt.gemini-3-1-flash-image": 40, "xt.omni-image-5-pro": 40, "xt.xtasy-3-pro": 40,
 	"xt.xtasy-3": 30, "xt.gpt-image-2-5": 30,
 	"xt.omni-video": 280, "xt.omni-video-2-5": 420,
+	// Audio, per call whatever its settings (mediaCreditsFor).
+	"rh.minimax-speech-2-8-hd": speechCreditsPerCall, "rh.minimax-music-2-6-instrumental": instrumentalCreditsPerCall,
 }
+
+// An audio generation's price per call, three times what RunningHub charged with the operator's key on 2026-10-17,
+// rounded up to ten. A voice-over is billed by the character ($0.0095 for 107, $0.0505 for 561: about $0.00009 each),
+// and a canvas composes a node's text only when its turn comes, after the price is set: so its text is held to 1,000
+// characters (media_models.json), at most $0.09, and priced at that. A piece of instrumental music was $0.12 at the
+// default 44.1 kHz and 256 kbps (about 110 seconds of it).
+const (
+	speechCreditsPerCall       = 30
+	instrumentalCreditsPerCall = 40
+)
 
 // model3DCredits prices a Tripo text-to-3D task at three times Tripo's own credits (one Tripo credit and one AwwO
 // credit are both $0.01): with texture, without, and what detailed texture and detailed geometry add. Tripo's
@@ -429,6 +441,10 @@ func mediaCreditsFor(model, kind string, params map[string]any) int {
 	if !ok {
 		base = 200
 		kind = mediaKindVideo
+	}
+	if kind == mediaKindAudio {
+		// An audio generation costs one price per call: none of its settings changes what it costs.
+		return base
 	}
 	text := func(name string) string {
 		switch v := params[name].(type) {

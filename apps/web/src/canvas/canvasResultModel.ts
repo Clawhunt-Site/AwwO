@@ -144,7 +144,7 @@ export function canvasResult(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Part
 
 /** One thing a canvas made, as the 成果 view lists it: a page that runs, a stored file, a generated image, video
  *  or 3D model, a document, or a file field that came back as a name with no file behind it. */
-export type DeliveredItemKind = 'page' | 'file' | 'image' | 'video' | 'model' | 'document' | 'missing';
+export type DeliveredItemKind = 'page' | 'file' | 'image' | 'video' | 'audio' | 'model' | 'document' | 'missing';
 export interface DeliveredItem {
   key: string;
   nodeId: string;
@@ -177,7 +177,8 @@ export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Pa
     if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind)) {
       const media = parseMediaOutput(step.output.text);
       for (const item of media?.items ?? []) {
-        const kind: DeliveredItemKind = item.contentType.startsWith('video/') ? 'video' : item.contentType.startsWith('model/') ? 'model' : 'image';
+        const kind: DeliveredItemKind = item.contentType.startsWith('video/') ? 'video' : item.contentType.startsWith('model/') ? 'model'
+          : item.contentType.startsWith('audio/') ? 'audio' : 'image';
         items.push({ key: `${node.id}:${item.artifactId}`, nodeId: node.id, nodeTitle, label: item.name, kind, artifactId: item.artifactId, name: item.name });
       }
       continue;

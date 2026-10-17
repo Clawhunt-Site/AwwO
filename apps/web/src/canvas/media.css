@@ -32,6 +32,9 @@
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 .canvas-root .canvas-media-grid--video { grid-template-columns: 1fr; }
+/* A voice-over or a score: one player per row, as wide as the node. */
+:is(.canvas-root, .awwo-results) .canvas-media-grid--audio { grid-template-columns: 1fr; }
+:is(.canvas-root, .awwo-results) .canvas-media-audio { display: block; width: 100%; min-height: 40px; }
 .canvas-root .canvas-media-item {
   display: flex;
   flex-direction: column;

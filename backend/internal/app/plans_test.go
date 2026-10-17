@@ -75,6 +75,11 @@ func TestMediaCreditsFollowTheSettingsThatRaiseTheirPrice(t *testing.T) {
 		{"rh.wan-2-7-pro", mediaKindImage, map[string]any{"width": float64(4096), "height": float64(1024)}, 60},
 		{"rh.midjourney-v7", mediaKindImage, map[string]any{"quality": "2"}, 120},
 		{"rh.seedance-2", mediaKindVideo, map[string]any{"duration": "5", "generateAudio": true}, 200},
+		// Audio costs one measured price per call, whatever its settings.
+		{"rh.minimax-speech-2-8-hd", mediaKindAudio, map[string]any{"voice": "Calm_Woman", "speed": 2.0, "pitch": int64(12)}, 30},
+		{"rh.minimax-speech-2-8-hd", mediaKindAudio, nil, speechCreditsPerCall},
+		{"rh.minimax-music-2-6-instrumental", mediaKindAudio, map[string]any{"sampleRate": "44100", "bitrate": "256000"}, 40},
+		{"rh.minimax-music-2-6-instrumental", mediaKindAudio, map[string]any{"sampleRate": "16000", "bitrate": "32000"}, instrumentalCreditsPerCall},
 	} {
 		if got := mediaCreditsFor(c.model, c.kind, c.params); got != c.want {
 			t.Fatal(c.model, c.params, "=", got, "want", c.want)

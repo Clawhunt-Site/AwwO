@@ -19,7 +19,7 @@ export function MediaWiringGuide({ kind, simple }: MediaWiringGuideProps) {
   return (
     <section className="awwo-media-wiring" aria-label={title}>
       <p><span className="awwo-media-wiring-title">{title}{locale === 'en' ? ': ' : '：'}</span>
-        {t(simple ? 'media.wireSimple' : kind === 'video' ? 'media.wireDeveloperVideo' : 'media.wireDeveloper')}</p>
+        {t(simple ? 'media.wireSimple' : kind === 'video' || kind === 'audio' ? 'media.wireDeveloperVideo' : 'media.wireDeveloper')}</p>
     </section>
   );
 }

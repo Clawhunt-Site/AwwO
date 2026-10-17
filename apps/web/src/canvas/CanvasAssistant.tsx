@@ -273,7 +273,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     </div>;
   } else if (busy) {
     // A media node is named by what it makes (图像生成, 视频生成, 3D 模型生成), like the add menu.
-    const mediaTitles: Record<string, string> = { image: t('node.addImage'), video: t('node.addVideo'), model3d: t('node.addModel3d') };
+    const mediaTitles: Record<string, string> = { image: t('node.addImage'), video: t('node.addVideo'), model3d: t('node.addModel3d'), audio: t('node.addAudio') };
     const titleOf = (id: string | undefined) => id ? mediaTitles[id] ?? getAgentTemplates(locale).find(item => item.id === id)?.title : undefined;
     const template = titleOf(progress?.template);
     const target = titleOf(progress?.target);

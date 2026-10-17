@@ -109,14 +109,14 @@ func fieldType(t string) string {
 }
 
 // edgeTypesFit reports whether an edge from src's port (of type st) may feed an input of type dt: the same type, or an
-// image, video or 3D node's result into a text input (a page's context or a text field). That input then reads the
+// image, video, audio or 3D node's result into a text input (a page's context or a text field). That input then reads the
 // files the generation stored, by the paths a page names them with (mediaDeliveryText), so a canvas run hands its
 // pictures and clips to the page that uses them. The edge keeps its source's type.
 func edgeTypesFit(src graphNode, fromPort, st, dt string) bool {
 	if st == dt {
 		return true
 	}
-	return dt == "text" && fromPort == "result" && graphMediaNode(src) && (st == mediaKindImage || st == mediaKindVideo || st == "file")
+	return dt == "text" && fromPort == "result" && graphMediaNode(src) && (st == mediaKindImage || st == mediaKindVideo || st == mediaKindAudio || st == "file")
 }
 
 // softMediaEdge reports whether e is edgeTypesFit's one cross-type case: an image, video or 3D node's result feeding a
@@ -163,7 +163,7 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 		return "image", true
 	}
 	if !input && id == "result" {
-		if n.AgentKind == "image" || n.AgentKind == "video" {
+		if n.AgentKind == "image" || n.AgentKind == "video" || n.AgentKind == mediaKindAudio {
 			return n.AgentKind, true
 		}
 		if n.AgentKind == mediaKindModel3D {

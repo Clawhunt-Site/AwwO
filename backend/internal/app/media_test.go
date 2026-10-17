@@ -18,7 +18,7 @@ import (
 
 func TestBuiltinMediaCatalogIsCompleteAndClosed(t *testing.T) {
 	c := builtinMediaCatalog
-	images, videos := 0, 0
+	images, videos, audio := 0, 0, 0
 	for i := range c.Models {
 		m := &c.Models[i]
 		switch m.Kind {
@@ -26,6 +26,8 @@ func TestBuiltinMediaCatalogIsCompleteAndClosed(t *testing.T) {
 			images++
 		case mediaKindVideo:
 			videos++
+		case mediaKindAudio:
+			audio++
 		}
 		// Every model must resolve to a complete request from its defaults alone.
 		values, err := m.resolveMediaParams(nil)
@@ -41,9 +43,151 @@ func TestBuiltinMediaCatalogIsCompleteAndClosed(t *testing.T) {
 			t.Fatal("catalog index lost", m.ID)
 		}
 	}
-	if images < 5 || videos < 5 || len(c.Models) != images+videos {
-		t.Fatal("catalog lacks the expected image and video choices", images, videos)
+	if images < 5 || videos < 5 || audio != 2 || len(c.Models) != images+videos+audio {
+		t.Fatal("catalog lacks the expected image, video and audio choices", images, videos, audio)
 	}
+}
+
+// The two audio models (2026-10-17): a voice-over read from the node's text and instrumental music it describes, each
+// with its closed choices, its request names where RunningHub's differ from the catalog's, and its fixed fields.
+func TestAudioModelsAreInTheCatalogAndClosed(t *testing.T) {
+	speech, ok := builtinMediaCatalog.model("rh.minimax-speech-2-8-hd")
+	if !ok || speech.Kind != mediaKindAudio || speech.Mode != "text-to-speech" || speech.Provider != mediaProviderRunningHub || speech.References != 0 ||
+		speech.Endpoint != "/openapi/v2/rhart-audio/text-to-audio/speech-2.8-hd" || speech.Prompt != (mediaPrompt{MinLength: 1, MaxLength: 1000}) ||
+		speech.Verified != "2026-10-17" || speech.Label != [2]string{"配音 · 旁白", "Voice-over"} || speech.Vendor != mediaVendorShown {
+		t.Fatalf("speech model %+v", speech)
+	}
+	music, ok := builtinMediaCatalog.model("rh.minimax-music-2-6-instrumental")
+	if !ok || music.Kind != mediaKindAudio || music.Mode != "text-to-music" || music.Provider != mediaProviderRunningHub || music.References != 0 ||
+		music.Endpoint != "/openapi/v2/minimax/music-2.6" || music.Prompt != (mediaPrompt{MinLength: 1, MaxLength: 2000}) ||
+		music.Verified != "2026-10-17" || music.Label != [2]string{"配乐 · 纯音乐", "Score · Instrumental"} || music.Vendor != mediaVendorShown {
+		t.Fatalf("music model %+v", music)
+	}
+	// The voices are exactly the system voices the model's documentation lists, Calm_Woman first chosen.
+	voices := []string{"Wise_Woman", "Friendly_Person", "Inspirational_girl", "Deep_Voice_Man", "Calm_Woman", "Casual_Guy", "Lively_Girl",
+		"Patient_Man", "Young_Knight", "Determined_Man", "Lovely_Girl", "Decent_Boy", "Imposing_Manner", "Elegant_Man", "Abbess", "Sweet_Girl_2", "Exuberant_Girl"}
+	params := map[string]mediaParam{}
+	for _, p := range speech.Params {
+		params[p.Name] = p
+	}
+	if v := params["voice"]; v.Type != "enum" || strings.Join(v.Values, ",") != strings.Join(voices, ",") || v.Default != "Calm_Woman" || len(v.ValueLabels) != len(voices) {
+		t.Fatalf("voice %+v", v)
+	}
+	if e := params["emotion"]; e.Type != "enum" || e.Default != "neutral" || len(e.Values) != 7 || len(e.ValueLabels) != 7 {
+		t.Fatalf("emotion %+v", e)
+	}
+	if s := params["speed"]; s.Type != "number" || *s.Min != 0.5 || *s.Max != 2 || s.Default != float64(1) {
+		t.Fatalf("speed %+v", s)
+	}
+	if p := params["pitch"]; p.Type != "integer" || *p.Min != -12 || *p.Max != 12 || p.Default != float64(0) {
+		t.Fatalf("pitch %+v", p)
+	}
+	if n := params["englishNormalization"]; n.Type != "boolean" || n.Default != false || len(speech.Params) != 5 {
+		t.Fatalf("english normalization %+v, %d parameters", n, len(speech.Params))
+	}
+	names := []string{}
+	for _, p := range music.Params {
+		names = append(names, p.Name+"="+p.Default.(string))
+	}
+	if strings.Join(names, ",") != "sampleRate=44100,bitrate=256000" {
+		t.Fatal("music parameters", names)
+	}
+
+	// The request: the words as text (speech) or prompt (music), the request names, and the fixed fields.
+	values, err := speech.resolveMediaParams(json.RawMessage(`{"voice":"Young_Knight","emotion":"sad","speed":1.25,"pitch":-3,"englishNormalization":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := runningHubRequest(speech, "(sighs) The rain will not stop.", values)
+	want := map[string]any{"text": "(sighs) The rain will not stop.", "voice_id": "Young_Knight", "emotion": "sad", "speed": 1.25, "pitch": int64(-3),
+		"english_normalization": true, "enable_base64_output": false}
+	if len(body) != len(want) {
+		t.Fatalf("speech body %v", body)
+	}
+	for k, v := range want {
+		if body[k] != v {
+			t.Fatalf("speech body %s = %v, want %v (%v)", k, body[k], v, body)
+		}
+	}
+	values, _ = music.resolveMediaParams(nil)
+	body = runningHubRequest(music, "warm strings at dusk", values)
+	if len(body) != 5 || body["prompt"] != "warm strings at dusk" || body["sampleRate"] != "44100" || body["bitrate"] != "256000" || body["format"] != "mp3" ||
+		body["isInstrumental"] != true {
+		t.Fatalf("music body %v", body)
+	}
+	// An image model's request is as before: the prompt and its parameters under their own names.
+	image, _ := builtinMediaCatalog.model("rh.seedream-v5-pro")
+	values, _ = image.resolveMediaParams(nil)
+	if body = runningHubRequest(image, "a cat", values); len(body) != 3 || body["prompt"] != "a cat" || body["resolution"] != "2k" || body["outputFormat"] != "jpeg" {
+		t.Fatalf("image body %v", body)
+	}
+	// A choice outside the closed lists is refused, never sent.
+	for _, raw := range []string{`{"voice":"Someone_Else"}`, `{"speed":3}`, `{"pitch":0.5}`, `{"emotion":"bored"}`, `{"enableBase64Output":true}`} {
+		if _, err := speech.resolveMediaParams(json.RawMessage(raw)); err == nil {
+			t.Fatal("accepted", raw)
+		}
+	}
+	for _, raw := range []string{`{"format":"wav"}`, `{"isInstrumental":false}`} {
+		if _, err := music.resolveMediaParams(json.RawMessage(raw)); err == nil {
+			t.Fatal("a node chose a fixed music field", raw)
+		}
+	}
+}
+
+// An audio model is checked like any catalog entry: its mode is speech or music, and no parameter's request field is
+// the prompt's, a fixed one or another's.
+func TestParseMediaCatalogChecksAudioEntries(t *testing.T) {
+	audio := func(id, mode string, params ...any) func(map[string]any) {
+		return func(m map[string]any) {
+			m["id"], m["kind"], m["mode"], m["endpoint"] = id, "audio", mode, "/openapi/v2/test/"+mode
+			if params != nil {
+				m["params"] = params
+			}
+		}
+	}
+	enum := func(name string) map[string]any {
+		return map[string]any{"name": name, "type": "enum", "values": []any{"a", "b"}, "default": "a", "label": []any{"甲", "A"}}
+	}
+	for _, mode := range []string{"text-to-speech", "text-to-music"} {
+		if _, err := parseMediaCatalog(mediaCatalogFixture(audio("rh.test-audio", mode))); err != nil {
+			t.Fatal("an audio entry", mode, err)
+		}
+	}
+	// The speech model's own shape passes: its two renamed parameters are there.
+	if _, err := parseMediaCatalog(mediaCatalogFixture(audio("rh.minimax-speech-2-8-hd", "text-to-speech", enum("voice"), enum("englishNormalization")))); err != nil {
+		t.Fatal("the speech model's parameters", err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"audio of another mode": audio("rh.test-audio", "text-to-audio"),
+		"audio as an image":     audio("rh.test-audio", "text-to-image"),
+		"unknown kind":          func(m map[string]any) { m["kind"], m["mode"] = "sound", "text-to-sound" },
+		// The speech model reads its words from "text", and the music model always sends its format: no parameter may
+		// be sent as either.
+		"parameter on the prompt's field": audio("rh.minimax-speech-2-8-hd", "text-to-speech", enum("voice"), enum("englishNormalization"), enum("text")),
+		"parameter on a fixed field":      audio("rh.minimax-music-2-6-instrumental", "text-to-music", enum("format")),
+		"parameter on the vocal switch":   audio("rh.minimax-music-2-6-instrumental", "text-to-music", enum("isInstrumental")),
+		"wire name for a missing param":   audio("rh.minimax-speech-2-8-hd", "text-to-speech", enum("voice")),
+	} {
+		if _, err := parseMediaCatalog(mediaCatalogFixture(mutate)); err == nil {
+			t.Error("accepted catalog with", name)
+		}
+	}
+	// Every request mapping names a catalog model.
+	for _, table := range []map[string]bool{keysOf(runningHubWireParams), keysOf(runningHubPromptField), keysOf(runningHubFixed)} {
+		for id := range table {
+			if m, ok := builtinMediaCatalog.model(id); !ok || m.Provider != mediaProviderRunningHub {
+				t.Error("request mapping for a model RunningHub does not run", id)
+			}
+		}
+	}
+}
+
+func keysOf[V any](m map[string]V) map[string]bool {
+	keys := map[string]bool{}
+	for k := range m {
+		keys[k] = true
+	}
+	return keys
 }
 
 func mediaCatalogFixture(mutate func(map[string]any)) []byte {
@@ -322,6 +466,10 @@ func TestSniffMediaAndStoredPaths(t *testing.T) {
 		"\x00\x00\x00\x18ftypisom":            {"video/mp4", "mp4", "video"},
 		"\x00\x00\x00\x14ftypqt  ":            {"video/quicktime", "mov", "video"},
 		"\x1a\x45\xdf\xa3":                    {"video/webm", "webm", "video"},
+		"ID3\x04\x00\x00\x00\x00\x00\x00":     {"audio/mpeg", "mp3", "audio"},
+		"\xff\xfb\x90\x64":                    {"audio/mpeg", "mp3", "audio"},
+		"RIFF0000WAVEfmt ":                    {"audio/wav", "wav", "audio"},
+		"\xff\xf1\x50\x80":                    {"", "", ""},
 		"<svg xmlns='http://www.w3.org/2000/": {"", "", ""},
 		"<html><script>alert(1)</script>":     {"", "", ""},
 	}
@@ -336,6 +484,11 @@ func TestSniffMediaAndStoredPaths(t *testing.T) {
 	sum := strings.Repeat("a", 64)
 	if _, ok := a.mediaFile("t1", "t1/r1/"+sum+".png"); !ok {
 		t.Fatal("refused a stored path")
+	}
+	for _, ext := range []string{"mp3", "wav"} {
+		if _, ok := a.mediaFile("t1", "t1/r1/"+sum+"."+ext); !ok {
+			t.Fatal("refused a stored audio path", ext)
+		}
 	}
 	for _, rel := range []string{"t2/r1/" + sum + ".png", "t1/../t2/" + sum + ".png", "t1/r1/" + sum + ".svg", "t1/r1/x.png", "t1/r1/sub/" + sum + ".png", "/t1/r1/" + sum + ".png"} {
 		if _, ok := a.mediaFile("t1", rel); ok {
