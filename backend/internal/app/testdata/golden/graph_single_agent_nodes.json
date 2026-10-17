@@ -72,8 +72,11 @@
       "documentVersion": 1,
       "error": "",
       "id": "<graph:graph-characterization>",
+      "nodeRetries": 0,
       "nodes": [
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "research",
           "output": "",
@@ -83,6 +86,8 @@
           "state": "waiting"
         },
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "report",
           "output": "",
@@ -175,8 +180,11 @@
       "documentVersion": 1,
       "error": "",
       "id": "<graph:graph-characterization>",
+      "nodeRetries": 0,
       "nodes": [
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "research",
           "output": "pi reply 1 from test-model",
@@ -186,6 +194,8 @@
           "state": "done"
         },
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "report",
           "output": "{\"artifact\":\"awwo-file:<artifact:report:artifact>\",\"summary\":\"Summary 2 from openai-agents.\"}",

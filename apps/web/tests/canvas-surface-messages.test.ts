@@ -36,6 +36,11 @@ describe('canvas surface messages', () => {
     expect(preflightIssueMessage(translate('en'), issue, 'en')).toBe('Choose a round limit from 1 to 5.');
   });
 
+  it('names a node waiting for its automatic retry in both languages', () => {
+    expect(recoveryDetailMessage(translate('en'), 'retrying')).toBe('Retrying automatically');
+    expect(recoveryDetailMessage(translate('zh'), 'retrying')).toBe('自动重试中');
+  });
+
   it.each(['review_invalid_verdict', 'review_exhausted'])('translates persisted review status %s in both languages', detail => {
     expect(recoveryDetailMessage(translate('en'), detail)).not.toMatch(/[\u3400-\u9fff]/);
     expect(recoveryDetailMessage(translate('en'), detail)).not.toBe(detail);

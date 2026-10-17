@@ -57,6 +57,9 @@ type App struct {
 	routeLimiter assistantRouteLimiter
 	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
 	signupClock func() time.Time
+	// graphRetryUnit is the first wait before a canvas node runs again after a transient failure, which later retries
+	// double (graph_retry.go); zero is the 15 s every deployment uses. Tests shorten it.
+	graphRetryUnit time.Duration
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map

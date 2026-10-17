@@ -23,6 +23,9 @@ export interface CanvasRunJournalNode {
   partial?: boolean;
   phase?: GraphCollaborationPhase;
   round?: number;
+  /** A cloud graph's automatic retries of this node and their limit (RunNodeStatus). */
+  attempts?: number;
+  retryLimit?: number;
 }
 
 export interface CanvasRunJournal {
@@ -54,6 +57,7 @@ export interface CanvasRunJournal {
 
 const states = new Set<RunNodeState>(['waiting', 'running', 'done', 'failed', 'blocked', 'cancelled', 'cached']);
 const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value : null;
+const retryCount = (value: unknown): number | undefined => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5 ? Number(value) : undefined;
 
 /** Invalid/torn storage never becomes an active lock. */
 export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage()): CanvasRunJournal | null {
@@ -81,6 +85,8 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
       ...(typeof item.partial === 'boolean' ? { partial: item.partial } : {}),
       ...(['proposal', 'review', 'synthesis'].includes(String(item.phase)) ? { phase: item.phase as GraphCollaborationPhase } : {}),
       ...(Number.isInteger(item.round) && Number(item.round) >= 0 && Number(item.round) <= 3 ? { round: Number(item.round) } : {}),
+      ...(retryCount(item.attempts) ? { attempts: retryCount(item.attempts) } : {}),
+      ...(retryCount(item.attempts) && retryCount(item.retryLimit) ? { retryLimit: retryCount(item.retryLimit) } : {}),
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;

@@ -14,7 +14,7 @@ import { resolve } from 'node:path';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { SessionTile } from '../src/canvas/SessionTile';
+import { runBadgeText, SessionTile } from '../src/canvas/SessionTile';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { resetAllSessions } from '../src/canvas/sessions';
 
@@ -164,6 +164,16 @@ describe('SessionTile compact header actions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('says which automatic retry a cloud node is waiting for', () => {
+    render(<SessionTile node={node()} scale={1} run={{ state: 'waiting', detail: 'retrying', attempts: 1, retryLimit: 2 }} />);
+    expect(screen.getByTestId('canvas-tile-run-s1')).toHaveTextContent('自动重试中（第 1 次，共 2 次）');
+    expect(runBadgeText({ state: 'waiting', detail: 'retrying', attempts: 2, retryLimit: 2 }, 'en')).toBe('Retrying automatically (2 of 2)');
+    // Without the counts it still says it is retrying, and a node merely queued says so.
+    expect(runBadgeText({ state: 'waiting', detail: 'retrying' }, 'en')).toBe('Retrying automatically');
+    expect(runBadgeText({ state: 'waiting', attempts: 1, retryLimit: 2 }, 'en')).toBe('Queued');
+    expect(runBadgeText({ state: 'running', attempts: 1, retryLimit: 2 }, 'zh')).toBe('运行中');
   });
 
   it('closes the overflow menu on a press outside the card and keeps it for presses on the card', () => {

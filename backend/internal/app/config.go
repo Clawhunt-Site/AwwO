@@ -99,6 +99,9 @@ type Config struct {
 	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
 	// bought; subscriptions already taken still count.
 	BillingCheckoutEnabled bool
+	// GraphNodeRetries is how many times a canvas node may run again by itself after its run failed for a transient
+	// reason (graph_retry.go, AWWO_GRAPH_NODE_RETRIES: 0-5, unset 2); 0 retries nothing.
+	GraphNodeRetries int
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -155,6 +158,9 @@ func ConfigFromEnv() (Config, error) {
 		c.BillingCheckoutEnabled = true
 	default:
 		return c, errors.New("AWWO_BILLING_CHECKOUT_ENABLED must be true or false")
+	}
+	if c.GraphNodeRetries, err = parseGraphNodeRetries(os.Getenv("AWWO_GRAPH_NODE_RETRIES")); err != nil {
+		return c, err
 	}
 	providers, err := parsePlatformProviders(os.Getenv("AWWO_PLATFORM_PROVIDERS"))
 	if err != nil {
@@ -279,6 +285,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateMediaExposure(c); err != nil {
 		return err
+	}
+	if c.GraphNodeRetries < 0 || c.GraphNodeRetries > maxGraphNodeRetries {
+		return errors.New("AWWO_GRAPH_NODE_RETRIES must be a whole number from 0 (no automatic retries) to 5")
 	}
 	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {
 		return errors.New("AWWO_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes")

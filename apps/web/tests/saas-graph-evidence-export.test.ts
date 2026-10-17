@@ -53,6 +53,17 @@ it('exports a freshly fetched frozen graph, full invocation pagination and exact
   expect(fetcher.mock.calls.some(([url]) => url.endsWith('/archive'))).toBe(false);
 });
 
+it("collects a retried node's earlier attempts as runs of the same node and session", async () => {
+  const attemptLog = [{ runId: 'run-a-first', code: 'runtime_rejected', endedAt: '2026-10-17T01:00:00Z', attempt: 1 }, { code: 'no run named' }, null];
+  const snapshot = graph(['a'], { nodes: [{ nodeId: 'a', state: 'done', runId: 'run-a', sessionId: 'session-a', attempts: 1, attemptLog }] });
+  server(snapshot, url => url.pathname.endsWith('/runs/run-a-first') ? json(record('run-a-first', { sessionId: 'session-a', status: 'failed', output: '' }))
+    : url.pathname.endsWith('/runs/run-a-first/evidence') ? json(evidence('run-a-first', { status: 'failed', outputPresent: false, outputBytes: 0, preview: '' })) : undefined);
+  const result = await collect();
+  expect(result.runs.map(run => [run.runId, run.nodeIds, run.sessionIds])).toEqual([['run-a', ['a'], ['session-a']], ['run-a-first', ['a'], ['session-a']]]);
+  expect(result.runs[1].record).toMatchObject({ id: 'run-a-first', status: 'failed' });
+  expect(result.completeness.complete).toBe(true);
+});
+
 it('limits all endpoint reads to two concurrent requests without dropping either run', async () => {
   let active = 0, peak = 0;
   server(graph(['a', 'b', 'c']), async () => {

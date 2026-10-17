@@ -17,7 +17,13 @@ export interface GraphNodeResult {
   partial?: boolean;
   phase?: GraphCollaborationPhase;
   round?: number;
+  /** Automatic retries after transient failures (the server's graph_retry.go); a waiting node whose detail is
+   * `retrying` waits for the next one. */
+  attempts?: number;
+  /** Each failed attempt the node was retried after, oldest first. */
+  attemptLog?: GraphNodeAttempt[];
 }
+export interface GraphNodeAttempt { runId: string; code: string; endedAt: string; attempt: number }
 export type GraphCollaborationPhase = 'proposal' | 'review' | 'synthesis';
 export interface GraphCollaborationPolicy { goal: string; rounds: number; synthesizerNodeId: string }
 export interface GraphCollaborationTurn {
@@ -51,7 +57,12 @@ export interface GraphRunSnapshot {
   updatedAt?: string;
   error?: string;
   collaboration?: GraphCollaborationSnapshot | null;
+  /** How many times a node of this graph may run again by itself after a transient failure. */
+  nodeRetries?: number;
 }
+
+/** A retry count the server sent, or nothing: retries run from 1 to 5. */
+const retryCount = (value: unknown): number | undefined => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5 ? Number(value) : undefined;
 
 const collaborationPhases = new Set(['proposal', 'review', 'synthesis']);
 const collaborationStatuses = new Set(['waiting', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']);
@@ -249,10 +260,14 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
     if (collaboration && previous.issueId && result.sessionId && previous.issueId !== result.sessionId) throw new Error('Collaboration node Session changed');
     // A fresh authoritative node snapshot replaces its previous diagnostic too. In particular,
     // a local observer's input-mismatch warning must not survive a later matching server result.
-    const { detail: _previousDetail, ...previousState } = previous;
+    const { detail: _previousDetail, attempts: _previousAttempts, retryLimit: _previousLimit, ...previousState } = previous;
+    // A node's retries show only while the server reports them, with the limit they count towards.
+    const attempts = retryCount(result.attempts);
+    const retryLimit = retryCount(snapshot.nodeRetries);
     nodes[result.nodeId] = { ...previousState, state: result.state,
       ...(typeof result.output === 'string' ? { output: result.output } : {}),
       ...(result.detail ? { detail: result.detail } : {}),
+      ...(attempts ? { attempts, ...(retryLimit ? { retryLimit } : {}) } : {}),
       ...(result.runId ? { runId: result.runId } : {}),
       ...(result.sessionId ? { issueId: result.sessionId } : {}),
       ...(collaboration ? { partial: snapshot.status !== 'completed' || result.partial !== false || result.nodeId !== collaboration.synthesizerNodeId }

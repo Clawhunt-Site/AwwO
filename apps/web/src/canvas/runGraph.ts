@@ -32,6 +32,10 @@ export interface RunNodeStatus {
   detail?: string;
   /** The node's captured output (form serialization / the agent turn's streamed text). */
   output?: string;
+  /** A cloud run's automatic retries of this node so far, and how many it may make (a waiting node whose detail is
+   * `retrying` waits for the next one). The local engine never retries. */
+  attempts?: number;
+  retryLimit?: number;
 }
 
 export interface ExecAgentResult {

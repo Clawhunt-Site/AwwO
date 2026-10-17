@@ -155,6 +155,10 @@ export function runBadgeText(
   if ((run.state as string) === 'cancelled') return detail || canvasText(locale, 'tile.cancelled');
   switch (run.state) {
     case 'waiting':
+      // A cloud node waiting for its next automatic attempt after a transient failure says which one it is.
+      if (run.detail === 'retrying') {
+        return run.attempts && run.retryLimit ? translate('tile.retrying', { attempt: run.attempts, limit: run.retryLimit }) : detail || canvasText(locale, 'tile.queued');
+      }
       return canvasText(locale, 'tile.queued');
     case 'running':
       return canvasText(locale, 'tile.running');

@@ -62,6 +62,10 @@ function references(graph: GraphRunSnapshot): RunReference[] {
     refs.set(runId, ref);
   };
   graph.nodes.forEach(node => add(node.runId, node.nodeId, node.sessionId));
+  // A node retried after transient failures made a run for each attempt; the earlier ones are named in its attempt log.
+  for (const node of graph.nodes) for (const attempt of Array.isArray(node.attemptLog) ? node.attemptLog : []) {
+    if (object(attempt) && identity(attempt.runId)) add(attempt.runId, node.nodeId, node.sessionId);
+  }
   graph.collaboration?.turns.forEach(turn => add(turn.runId, turn.nodeId, turn.sessionId, turn.ordinal));
   return [...refs.values()];
 }

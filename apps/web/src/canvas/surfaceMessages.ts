@@ -77,6 +77,7 @@ const RECOVERY_DETAIL_KEYS = {
   'Missing cached upstream output': 'surface.cachedOutputMissing',
   'Cached upstream output holds no deliverable': 'surface.cachedOutputEmpty',
   timed_out: 'session.timedOut',
+  retrying: 'surface.retrying',
 } as const satisfies Record<string, CanvasTextKey>;
 
 /** Known persisted/native status codes are localized; unknown evidence remains verbatim. */

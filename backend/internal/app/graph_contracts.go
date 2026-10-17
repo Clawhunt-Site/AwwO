@@ -57,6 +57,9 @@ type graphNode struct {
 	// a shape this host does not expect leaves the draft empty instead of failing the whole graph.
 	ActiveThreadID json.RawMessage `json:"activeThreadId,omitempty"`
 	Threads        json.RawMessage `json:"threads,omitempty"`
+
+	// TemplateID is the node's role in the canvas's template library (planTemplateIDs); a node made without one has none.
+	TemplateID string `json:"templateId,omitempty"`
 }
 type graphEdge struct {
 	ID       string          `json:"id"`

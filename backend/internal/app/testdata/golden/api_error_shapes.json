@@ -183,8 +183,11 @@
       "documentVersion": 1,
       "error": "",
       "id": "<graph:image-graph-run>",
+      "nodeRetries": 0,
       "nodes": [
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "image-graph",
           "output": "",
@@ -226,8 +229,11 @@
       "documentVersion": 1,
       "error": "",
       "id": "<graph:image-graph-run>",
+      "nodeRetries": 0,
       "nodes": [
         {
+          "attemptLog": [],
+          "attempts": 0,
           "detail": "",
           "nodeId": "image-graph",
           "output": "pi reply 2 from test-model",

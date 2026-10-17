@@ -213,6 +213,18 @@ func (a *App) downloadRunArchive(w http.ResponseWriter, r *http.Request) {
 		fail(w, 413, "archive_too_large", "Run records exceed the configured download limit")
 		return
 	}
+	// A run a canvas node made, as its latest attempt or one its automatic retries replaced (graph_retry.go), takes the
+	// node's attempts with it: how often it ran and why each earlier attempt failed. The graph is the one its
+	// operation names (graphChildOperationID).
+	var graphNode json.RawMessage
+	err = tx.QueryRow(r.Context(), `SELECT jsonb_build_object('graphId',n.graph_id,'nodeId',n.node_id,'attempts',n.attempts,'attemptLog',n.attempt_log)
+		FROM runs r JOIN graph_run_nodes n ON n.tenant_id=r.tenant_id AND n.graph_id=split_part(r.operation_id,':',2)
+		WHERE r.tenant_id=$1 AND r.id=$2 AND r.operation_id LIKE 'graph:%' AND (n.run_id=r.id OR n.attempt_log @> jsonb_build_array(jsonb_build_object('runId',r.id)))
+		ORDER BY n.node_id LIMIT 1`, tid, id).Scan(&graphNode)
+	if err != nil && !noRows(err) {
+		a.dbError(w, err)
+		return
+	}
 	rows, err := tx.Query(r.Context(), `SELECT id,created_at,data FROM run_events
 		WHERE tenant_id=$1 AND run_id=$2 AND id<=$3 ORDER BY id`, tid, id, through)
 	if err != nil {
@@ -253,6 +265,9 @@ func (a *App) downloadRunArchive(w http.ResponseWriter, r *http.Request) {
 		"status": status, "scope": "retained_run_events", "throughEventId": through, "eventCount": count,
 		"completeThroughCursor": true, "terminal": status != "queued" && status != "running", "redacted": true,
 		"output": redactRunText(output, secrets)}
+	if len(graphNode) > 0 {
+		manifest["graphNode"] = graphNode
+	}
 	if err = encoder.Encode(manifest); err != nil {
 		a.dbError(w, err)
 		return

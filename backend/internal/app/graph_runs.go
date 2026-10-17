@@ -6,19 +6,25 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
 )
 
-const graphJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId')) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb)) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
+// graphJSON is a graph run as the web and API clients read it. Each node carries its automatic retries (attempts, and
+// attemptLog naming each failed attempt's run, code and end), and nodeRetries is the retry limit in force for the
+// graph's plain nodes (graph_retry.go); a collaboration's turns are never retried. The limit is a validated integer.
+func (a *App) graphJSON() string {
+	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
+}
 
 func (a *App) listGraphRuns(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+graphJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
+	v, e := rowsJSON(r.Context(), a.db, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
 	a.replyList(w, v, e)
 }
 func (a *App) getGraphRun(w http.ResponseWriter, r *http.Request) {
-	v, e := oneJSON(r.Context(), a.db, "SELECT "+graphJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.id=$3", r.PathValue("tenantId"), r.PathValue("canvasId"), r.PathValue("id"))
+	v, e := oneJSON(r.Context(), a.db, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.id=$3", r.PathValue("tenantId"), r.PathValue("canvasId"), r.PathValue("id"))
 	a.replyOne(w, v, e, 200)
 }
 func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +75,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			fail(w, 409, "idempotency_conflict", "operationId was used with different parameters")
 			return
 		}
-		v, e := oneJSON(r.Context(), tx, "SELECT "+graphJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.operation_id=$3", tid, cid, b.OperationID)
+		v, e := oneJSON(r.Context(), tx, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.operation_id=$3", tid, cid, b.OperationID)
 		a.replyOne(w, v, e, 200)
 		return
 	}
@@ -362,7 +368,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	v, e := oneJSON(r.Context(), tx, "SELECT "+graphJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.id=$2", tid, id)
+	v, e := oneJSON(r.Context(), tx, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.id=$2", tid, id)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -430,6 +436,8 @@ type graphState struct {
 	Detail    string `json:"detail"`
 	RunID     string `json:"runId"`
 	SessionID string `json:"sessionId"`
+	// RetryPending: a waiting node whose next attempt is not due yet (graph_retry.go).
+	RetryPending bool `json:"retryPending"`
 }
 
 func (a *App) executeGraph(ctx context.Context, tid, id string) {
@@ -460,7 +468,7 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 		if e = a.db.QueryRow(ctx, "SELECT status FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&status); e != nil || status != "running" {
 			return
 		}
-		rows, e := rowsJSON(ctx, a.db, "SELECT jsonb_build_object('nodeId',node_id,'state',state,'output',output,'detail',detail,'runId',COALESCE(run_id,''),'sessionId',COALESCE(session_id,'')) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 ORDER BY ordinal", tid, id)
+		rows, e := rowsJSON(ctx, a.db, "SELECT jsonb_build_object('nodeId',node_id,'state',state,'output',output,'detail',detail,'runId',COALESCE(run_id,''),'sessionId',COALESCE(session_id,''),'retryPending',retry_at IS NOT NULL AND retry_at>now()) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 ORDER BY ordinal", tid, id)
 		if e != nil {
 			return
 		}
@@ -548,10 +556,23 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				} else if rs == "interrupted" {
 					detail = "interrupted"
 				}
+				// A run that failed for a transient reason sends its node back to waiting for another attempt, while
+				// it has retries left (graph_retry.go). Only the run's own failure counts: a delivery that completed
+				// but could not be accepted, a cancellation and an interruption are settled as before.
+				if rs == "failed" && a.graphNodeRetries() > 0 && graphRetryable(code, func() bool { return generation && a.mediaRunUnbilled(ctx, tid, s.RunID) }) {
+					if retried, err := a.retryGraphNode(ctx, tid, id, n, s.RunID, code); err != nil || retried {
+						continue
+					}
+				}
 				a.setGraphNode(ctx, tid, id, n.ID, state, recorded, detail)
 				continue
 			}
 			if s.State != "waiting" {
+				continue
+			}
+			// A node waiting for its next attempt is not admitted again before its retry_at; its downstream nodes keep
+			// waiting for it like for any node not done yet.
+			if s.RetryPending {
 				continue
 			}
 			ready, blocked := true, false
@@ -622,7 +643,11 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 }
 func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, detail string) {
 	var runID *string
-	err := a.db.QueryRow(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND state<>$4 AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running') RETURNING run_id", tid, gid, nid, state, output, detail).Scan(&runID)
+	// A node that was retried settles its pending experiences in the same statement: done as succeeded, any other end as
+	// failed (graph_retry.go). A node never retried has none, and the second statement then reads nothing.
+	err := a.db.QueryRow(ctx, `WITH settled AS (UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6,retry_at=NULL WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND state<>$4 AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running') RETURNING run_id,attempts),
+		experiences AS (UPDATE canvas_experiences SET outcome=CASE WHEN $4='done' THEN 'succeeded' ELSE 'failed' END,detail=detail||jsonb_build_object('nodeState',$4::text),updated_at=now() WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND outcome='pending' AND EXISTS(SELECT 1 FROM settled WHERE attempts>0))
+		SELECT run_id FROM settled`, tid, gid, nid, state, output, detail).Scan(&runID)
 	if err == nil {
 		a.observeGraphNodeState(state)
 		if runID != nil {
@@ -709,11 +734,14 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	var sid, state string
 	var raw []byte
-	e = tx.QueryRow(ctx, "SELECT session_id,state,execution_snapshot FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 FOR UPDATE", tid, gid, nid).Scan(&sid, &state, &raw)
+	var attempts int
+	var retryPending bool
+	e = tx.QueryRow(ctx, "SELECT session_id,state,execution_snapshot,attempts,retry_at IS NOT NULL AND retry_at>now() FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 FOR UPDATE", tid, gid, nid).Scan(&sid, &state, &raw, &attempts, &retryPending)
 	if e != nil {
 		return e
 	}
-	if turn == nil && state != "waiting" {
+	// A node waiting for its next attempt is admitted only once its retry_at has passed (graph_retry.go).
+	if turn == nil && (state != "waiting" || retryPending) {
 		return nil
 	}
 	if turn != nil {
@@ -738,7 +766,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		if err != nil {
 			return err
 		}
-		return a.admitGraphMedia(ctx, tx, tid, gid, nid, sid, actor, prompt, snap, entitlement, owner != nil, readRouteLimits(routes), workspaceLimits{active, concurrent, today, daily, needsPlan})
+		return a.admitGraphMedia(ctx, tx, tid, gid, nid, sid, actor, graphChildOperationID(gid, nid, attempts), prompt, snap, entitlement, owner != nil, readRouteLimits(routes), workspaceLimits{active, concurrent, today, daily, needsPlan})
 	}
 	// This node's catalog was frozen when the graph was admitted, which can be long
 	// before this child is created — and a graph still queued has no child to
@@ -842,7 +870,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		return errGraphCapacity
 	}
 	rid := randomID()
-	op := "graph:" + gid + ":" + tokenHash(nid)[:20]
+	op := graphChildOperationID(gid, nid, attempts)
 	if turn != nil {
 		op = collaborationOperationID(gid, *turn)
 	}
@@ -859,7 +887,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, rid, `{"type":"queued"}`); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state='running',run_id=$4 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, nid, rid); e != nil {
+	if _, e = tx.Exec(ctx, graphNodeAdmittedSQL, tid, gid, nid, rid); e != nil {
 		return e
 	}
 	if turn != nil {
@@ -1131,15 +1159,18 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 	for _, n := range doc.Nodes {
 		nodes[n.ID] = n
 	}
-	rows, e := tx.Query(ctx, "SELECT n.node_id,n.state,n.output,n.detail,COALESCE(r.status,''),COALESCE(r.output,''),COALESCE(r.error,'') FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id WHERE n.tenant_id=$1 AND n.graph_id=$2 FOR UPDATE OF n", tid, gid)
+	rows, e := tx.Query(ctx, "SELECT n.node_id,n.state,n.output,n.detail,COALESCE(r.status,''),COALESCE(r.output,''),COALESCE(r.error,''),n.state='waiting' AND n.retry_at IS NOT NULL FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id WHERE n.tenant_id=$1 AND n.graph_id=$2 FOR UPDATE OF n", tid, gid)
 	if e != nil {
 		return "", e
 	}
-	type row struct{ id, state, output, detail, runStatus, runOutput, runError string }
+	type row struct {
+		id, state, output, detail, runStatus, runOutput, runError string
+		retrying                                                  bool
+	}
 	all := []row{}
 	for rows.Next() {
 		var r row
-		if e = rows.Scan(&r.id, &r.state, &r.output, &r.detail, &r.runStatus, &r.runOutput, &r.runError); e != nil {
+		if e = rows.Scan(&r.id, &r.state, &r.output, &r.detail, &r.runStatus, &r.runOutput, &r.runError, &r.retrying); e != nil {
 			rows.Close()
 			return "", e
 		}
@@ -1153,7 +1184,9 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 	for _, r := range all {
 		if r.state == "waiting" || r.state == "running" {
 			r.state, r.detail = "cancelled", "Graph cancelled"
-			if r.runStatus != "" {
+			// A node waiting for its next attempt (graph_retry.go) still names the attempt that failed, which is in
+			// its attempt log: the cancellation stops the retry, so the node ends cancelled, not failed.
+			if r.runStatus != "" && !r.retrying {
 				// graphOutput below validates a normalized copy, so project the same
 				// normalization: recording the raw text would let a child stored before
 				// stripping existed pass validation and still publish its scratchpad.
@@ -1170,7 +1203,7 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 					r.state, r.detail = "failed", "interrupted"
 				}
 			}
-			if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, r.id, r.state, r.output, r.detail); e != nil {
+			if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6,retry_at=NULL WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, r.id, r.state, r.output, r.detail); e != nil {
 				return "", e
 			}
 		}
@@ -1183,6 +1216,10 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 		if r.detail == "interrupted" {
 			interrupted = true
 		}
+	}
+	// Every node is settled now, and so are the experiences of the ones that were retried.
+	if _, e = tx.Exec(ctx, settleGraphExperiencesSQL, tid, gid); e != nil {
+		return "", e
 	}
 	if cancelled {
 		return "cancelled", nil

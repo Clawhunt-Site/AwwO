@@ -98,6 +98,36 @@ describe('durable cloud graph identity and recovery', () => {
     expect(rejected.nodes.b.detail).toBe('recovery_input_changed'); // An omitted node was not refreshed.
   });
 
+  it('shows a node waiting for its automatic retry with its attempts and limit, through a reload and its next attempt', () => {
+    const failed = { runId: 'run-a-1', code: 'runtime_rejected', endedAt: '2026-09-08T03:05:00Z', attempt: 1 };
+    const retrying = snapshot({ nodeRetries: 2, nodes: [
+      { nodeId: 'a', state: 'waiting', detail: 'retrying', runId: 'run-a-1', sessionId: 'session-a', output: '', attempts: 1, attemptLog: [failed] },
+      { nodeId: 'b', state: 'waiting', detail: '', attempts: 0, attemptLog: [] },
+    ] });
+    const journal = graphRecoveryJournal(retrying, tenant.id, document());
+    // The failed attempt is named, never shown as running.
+    expect(journal.nodes.a).toMatchObject({ state: 'waiting', detail: 'retrying', runId: 'run-a-1', attempts: 1, retryLimit: 2 });
+    expect(journal.nodes.b).not.toHaveProperty('attempts');
+    expect(journal.nodes.b).not.toHaveProperty('retryLimit');
+    const storage = memoryStorage();
+    expect(saveRunJournal(journal, storage)).toBe(true);
+    expect(loadRunJournal(storage)!.nodes.a).toMatchObject({ detail: 'retrying', attempts: 1, retryLimit: 2 });
+    const next = mergeGraphSnapshot(journal, { ...retrying, nodes: [{ nodeId: 'a', state: 'running', detail: '', runId: 'run-a-2', sessionId: 'session-a', attempts: 1, attemptLog: [failed] }] });
+    expect(next.nodes.a).toMatchObject({ state: 'running', runId: 'run-a-2', attempts: 1, retryLimit: 2 });
+    expect(next.nodes.a.detail).toBeUndefined();
+    // Retries show only while the server reports them, and only within its range.
+    const unreported = mergeGraphSnapshot(journal, { ...retrying, nodeRetries: undefined, nodes: [{ nodeId: 'a', state: 'running', runId: 'run-a-2' }] });
+    expect(unreported.nodes.a).not.toHaveProperty('attempts');
+    expect(unreported.nodes.a).not.toHaveProperty('retryLimit');
+    const odd = mergeGraphSnapshot(journal, { ...retrying, nodeRetries: 9, nodes: [{ nodeId: 'a', state: 'waiting', detail: 'retrying', attempts: 1.5 }] });
+    expect(odd.nodes.a).not.toHaveProperty('attempts');
+    const unlimited = mergeGraphSnapshot(journal, { ...retrying, nodeRetries: 0, nodes: [{ nodeId: 'a', state: 'waiting', detail: 'retrying', attempts: 1 }] });
+    expect(unlimited.nodes.a).toMatchObject({ attempts: 1 });
+    expect(unlimited.nodes.a).not.toHaveProperty('retryLimit');
+    storage.setItem('awwo.canvas.active-run.v1', JSON.stringify({ ...journal, nodes: { ...journal.nodes, a: { ...journal.nodes.a, attempts: 7, retryLimit: 'two' } } }));
+    expect(loadRunJournal(storage)!.nodes.a).not.toHaveProperty('attempts');
+  });
+
   it('never re-POSTs an absent pending operation, including after a reload', async () => {
     const fetcher = vi.fn(async (_url: string, _init: RequestInit = {}) => json({ items: [] }));
     vi.stubGlobal('fetch', fetcher);

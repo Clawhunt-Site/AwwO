@@ -202,8 +202,9 @@ func mediaMissingText(n graphNode) string {
 
 // admitGraphMedia admits a media node's generation inside admitGraphChild's transaction, after the workspace's runs
 // at once (and an entitled plan's slot) were counted there. Any refusal settles the node failed with its code; only
-// a session still busy with another run waits.
-func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid, actor, prompt string, snap executionSnapshot, entitlement modelEntitlement, paid bool, routes routeLimits, own workspaceLimits) error {
+// a session still busy with another run waits. op is the run's operation (graphChildOperationID): a retried node's
+// next generation is admitted here like its first, on the same allowances.
+func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid, actor, op, prompt string, snap executionSnapshot, entitlement modelEntitlement, paid bool, routes routeLimits, own workspaceLimits) error {
 	plan := snap.Media
 	m, ok := builtinMediaCatalog.model(plan.Model)
 	if !ok || m.Kind != plan.Kind || m.Provider != plan.Provider {
@@ -257,7 +258,7 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 	}
 	rid := randomID()
 	task, _ := json.Marshal(map[string]string{"provider": plan.Provider, "model": plan.Model})
-	if _, e = tx.Exec(ctx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,media_task) VALUES($1,$2,$3,$4,$5,$6,'queued',$7)", rid, tid, sid, "graph:"+gid+":"+tokenHash(nid)[:20], tokenHash(prompt), prompt, task); e != nil {
+	if _, e = tx.Exec(ctx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,media_task) VALUES($1,$2,$3,$4,$5,$6,'queued',$7)", rid, tid, sid, op, tokenHash(prompt), prompt, task); e != nil {
 		return e
 	}
 	if e = saveRunSnapshot(ctx, tx, tid, rid, actor, snap); e != nil {
@@ -272,7 +273,7 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 	if _, e = tx.Exec(ctx, "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, rid, `{"type":"queued"}`); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state='running',run_id=$4 WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, nid, rid); e != nil {
+	if _, e = tx.Exec(ctx, graphNodeAdmittedSQL, tid, gid, nid, rid); e != nil {
 		return e
 	}
 	if e = audit(ctx, tx, actor, tid, "graph.node.accepted", rid); e != nil {
