@@ -255,7 +255,10 @@ const RETIRED_MEDIA_MODELS: Readonly<Record<string, string>> = {
  * generator keeps it), for any model that is not a retired one, or when nothing of the kind is offered.
  */
 export function replacementMediaModel(catalogue: MediaCatalogue | null | undefined, kind: MediaKind, model: string): string | null {
-  if (!model.startsWith('rh.') && !Object.hasOwn(RETIRED_MEDIA_MODELS, model)) return null;
+  // RunningHub's image and video models left the offer on 2026-10-11; its audio models (2026-10-17) did not, so an audio
+  // node keeps its model where a workspace is offered only the other one.
+  const retiredFamily = model.startsWith('rh.') && (kind === 'image' || kind === 'video');
+  if (!retiredFamily && !Object.hasOwn(RETIRED_MEDIA_MODELS, model)) return null;
   const offered = mediaModelsOf(catalogue, kind);
   if (!offered.length || offered.some(item => item.id === model)) return null;
   const preferred = RETIRED_MEDIA_MODELS[model];

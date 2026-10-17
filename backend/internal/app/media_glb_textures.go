@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"sync"
 
 	"golang.org/x/image/draw"
 )
@@ -27,11 +28,15 @@ import (
 const (
 	// A GLB larger than this is not rebuilt in memory.
 	maxGLBRebuildBytes = 160 << 20
-	// A texture with more pixels than this is not decoded (a decompression bomb would be).
-	maxTexturePixels   = 8192 * 8192
+	// A texture with more pixels than this is not decoded (a decompression bomb would be). Decoding one this large holds
+	// up to 128 MiB (16-bit PNG) and resampling it to 1,024 pixels another 128 MiB of float rows.
+	maxTexturePixels   = 4096 * 4096
 	glbChunkBIN        = 0x004E4942 // "BIN\0", little-endian
 	textureJPEGQuality = 88
 )
+
+// glbRebuild lets one GLB be rebuilt at a time: a rebuild holds the file, its copy and a decoded texture in memory.
+var glbRebuild sync.Mutex
 
 var tripoTextureSizes = []string{"original", "2048", "1024", "512"}
 
@@ -61,11 +66,13 @@ func (a *App) webTexturesGLB(f *fetchedMedia, tmp string, maxSide int) {
 	if maxSide <= 0 || f.size <= 0 || f.size > maxGLBRebuildBytes {
 		return
 	}
+	glbRebuild.Lock()
+	defer glbRebuild.Unlock()
 	raw, err := os.ReadFile(f.path)
 	if err != nil || int64(len(raw)) != f.size {
 		return
 	}
-	rebuilt, ok := resizeGLBTextures(raw, maxSide)
+	rebuilt, ok := a.resizeGLBTexturesSafely(raw, maxSide)
 	if !ok || len(rebuilt) >= len(raw) {
 		return
 	}
@@ -92,9 +99,24 @@ func (a *App) webTexturesGLB(f *fetchedMedia, tmp string, maxSide int) {
 	f.path, f.size, f.sum = out.Name(), int64(len(rebuilt)), hex.EncodeToString(sum[:])
 }
 
+// resizeGLBTexturesSafely is resizeGLBTextures that keeps the file as it came, instead of stopping the API, if a file
+// of a shape it does not foresee makes it panic.
+func (a *App) resizeGLBTexturesSafely(raw []byte, maxSide int) (out []byte, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, ok = nil, false
+			if a.log != nil {
+				a.log.Error("GLB texture resize panicked; the file is kept as it came")
+			}
+		}
+	}()
+	return resizeGLBTextures(raw, maxSide)
+}
+
 // resizeGLBTextures returns a binary glTF 2.0 file with each JPEG or PNG image larger than maxSide resized to fit it,
 // and ok, or ok false when nothing was resized or the file is not one this can rebuild safely: exactly a JSON and a BIN
-// chunk, one buffer (the BIN chunk's), buffer views that lie inside it without overlapping. Every buffer view keeps its
+// chunk, one buffer (the BIN chunk's), buffer views that lie inside it without overlapping, and no extension on the
+// buffer or a buffer view (one there may hold offsets into the buffer: EXT_meshopt_compression). Every buffer view keeps its
 // bytes (an image's are replaced) and is placed in its old order at a 4-byte boundary; the JSON is written again with
 // only the views' offsets and lengths and the buffer's length changed.
 func resizeGLBTextures(raw []byte, maxSide int) ([]byte, bool) {
@@ -120,7 +142,7 @@ func resizeGLBTextures(raw []byte, maxSide int) ([]byte, bool) {
 	}
 	buffers, _ := doc["buffers"].([]any)
 	buffer, _ := firstObject(buffers)
-	if len(buffers) != 1 || buffer == nil || buffer["uri"] != nil {
+	if len(buffers) != 1 || buffer == nil || buffer["uri"] != nil || buffer["extensions"] != nil {
 		return nil, false
 	}
 	views, _ := doc["bufferViews"].([]any)
@@ -131,13 +153,15 @@ func resizeGLBTextures(raw []byte, maxSide int) ([]byte, bool) {
 	regions := make([]region, len(views))
 	for i, v := range views {
 		view, _ := v.(map[string]any)
-		if view == nil {
+		if view == nil || view["extensions"] != nil {
 			return nil, false
 		}
 		buf, okBuf := jsonInt(view["buffer"], 0)
 		offset, okOffset := jsonInt(view["byteOffset"], 0)
 		length, okLength := jsonInt(view["byteLength"], -1)
-		if !okBuf || !okOffset || !okLength || buf != 0 || offset < 0 || length <= 0 || offset+length > int64(len(bin)) {
+		// Compared without adding, so an offset near the int64 limit cannot wrap around.
+		if !okBuf || !okOffset || !okLength || buf != 0 || offset < 0 || length <= 0 || offset > int64(len(bin)) ||
+			length > int64(len(bin))-offset {
 			return nil, false
 		}
 		regions[i] = region{offset, length, view}

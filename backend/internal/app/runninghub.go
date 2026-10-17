@@ -107,16 +107,20 @@ func runningHubWireName(id, name string) string {
 	return name
 }
 
-// runningHubRequest is the body of one RunningHub task: the words under the model's prompt field, its fixed fields
-// and the resolved parameters under their request names.
+// runningHubRequest is the body of one RunningHub task: the resolved values of the model's own parameters under their
+// request names, then its fixed fields and the words under its prompt field, which nothing frozen can replace (a
+// snapshot from another catalog version included).
 func runningHubRequest(m *mediaModel, prompt string, params map[string]any) map[string]any {
-	body := map[string]any{runningHubPromptFieldOf(m.ID): prompt}
+	body := map[string]any{}
+	for i := range m.Params {
+		if value, ok := params[m.Params[i].Name]; ok {
+			body[runningHubWireName(m.ID, m.Params[i].Name)] = value
+		}
+	}
 	for field, value := range runningHubFixed[m.ID] {
 		body[field] = value
 	}
-	for name, value := range params {
-		body[runningHubWireName(m.ID, name)] = value
-	}
+	body[runningHubPromptFieldOf(m.ID)] = prompt
 	return body
 }
 

@@ -115,6 +115,12 @@ func TestAudioModelsAreInTheCatalogAndClosed(t *testing.T) {
 		body["isInstrumental"] != true {
 		t.Fatalf("music body %v", body)
 	}
+	// Nothing frozen replaces the words or a fixed field, and a key the model does not have is not sent.
+	body = runningHubRequest(speech, "Hold the line.", map[string]any{"voice": "Abbess", "text": "something else",
+		"enable_base64_output": true, "voice_id": "Elegant_Man", "unknown": 1})
+	if body["text"] != "Hold the line." || body["enable_base64_output"] != false || body["voice_id"] != "Abbess" || body["unknown"] != nil || len(body) != 3 {
+		t.Fatalf("speech body from a tampered plan %v", body)
+	}
 	// An image model's request is as before: the prompt and its parameters under their own names.
 	image, _ := builtinMediaCatalog.model("rh.seedream-v5-pro")
 	values, _ = image.resolveMediaParams(nil)

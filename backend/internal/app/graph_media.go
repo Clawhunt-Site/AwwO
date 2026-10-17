@@ -120,6 +120,11 @@ func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode
 	}
 	for _, e := range deps {
 		src := nodes[e.FromNode]
+		// A media node's delivery is its files' record: it means nothing among another generation's words (a voice-over
+		// would read it aloud); its pictures reach a generation through the reference input only.
+		if graphMediaNode(src) {
+			continue
+		}
 		out := stripReasoningPreamble(outputs[e.FromNode])
 		if src.Contract != nil {
 			v, err := graphOutput(src, out)

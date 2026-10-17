@@ -174,6 +174,21 @@ func TestResizeGLBTexturesRefusesWhatItCannotRebuildSafely(t *testing.T) {
 		"two bufs": func(doc map[string]any) {
 			doc["buffers"] = append(doc["buffers"].([]any), map[string]any{"byteLength": 4})
 		},
+		// An offset near the int64 limit wraps around when added to the length: refused, never sliced.
+		"offset overflow": func(doc map[string]any) {
+			doc["bufferViews"].([]any)[2].(map[string]any)["byteOffset"] = json.Number("9223372036854775000")
+		},
+		"length overflow": func(doc map[string]any) {
+			doc["bufferViews"].([]any)[2].(map[string]any)["byteLength"] = json.Number("9223372036854775000")
+		},
+		// A buffer view's extension may hold offsets into the buffer that a rebuild would not move.
+		"view extension": func(doc map[string]any) {
+			doc["bufferViews"].([]any)[0].(map[string]any)["extensions"] = map[string]any{
+				"EXT_meshopt_compression": map[string]any{"buffer": 0, "byteOffset": 0, "byteLength": 12}}
+		},
+		"buffer extension": func(doc map[string]any) {
+			doc["buffers"].([]any)[0].(map[string]any)["extensions"] = map[string]any{"EXT_meshopt_compression": map[string]any{"fallback": true}}
+		},
 	} {
 		if _, ok := resizeGLBTextures(edit(change), 256); ok {
 			t.Fatal("rebuilt a GLB with", name)

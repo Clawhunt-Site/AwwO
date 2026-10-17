@@ -4,7 +4,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { createSessionNode, sanitizeDocument, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
-import { mediaKindOf, mediaModelsOf, parseMediaCatalogue } from '../src/canvas/mediaCatalog';
+import { mediaKindOf, mediaModelsOf, parseMediaCatalogue, replacementMediaModel } from '../src/canvas/mediaCatalog';
+import { replaceRetiredMediaModels } from '../src/canvas/retiredMediaModels';
 import { MEDIA_AUDIO_PAGE_RULE, mediaDeliveryText, mediaMissingText, parseMediaOutput } from '../src/canvas/mediaOutput';
 import { MediaResult } from '../src/canvas/MediaResult';
 import { canConnect, isSoftMediaFeed, portsFor } from '../src/canvas/ports';
@@ -17,7 +18,7 @@ const rawCatalogue = {
   configured: true, available: true, limits: { runsPerDay: 30, timeoutSeconds: 1200 },
   models: [
     { id: 'rh.minimax-speech-2-8-hd', name: '配音 · 旁白', label: ['配音 · 旁白', 'Voice-over'], vendor: 'media', kind: 'audio', mode: 'text-to-speech',
-      prompt: { minLength: 1, maxLength: 5000 }, references: 0,
+      prompt: { minLength: 1, maxLength: 1000 }, references: 0,
       params: [
         { name: 'voice', type: 'enum', values: ['Calm_Woman', 'Young_Knight'], default: 'Calm_Woman', label: ['音色', 'Voice'],
           valueLabels: [['沉静女声', 'Calm woman'], ['少年骑士', 'Young knight']] },
@@ -53,11 +54,21 @@ describe('audio models in the catalogue', () => {
     expect(catalogue.models.map(model => model.id)).toEqual(['rh.minimax-speech-2-8-hd', 'rh.minimax-music-2-6-instrumental', 'rh.seedream-v5-pro']);
     const audio = mediaModelsOf(catalogue, 'audio');
     expect(audio.map(model => model.label)).toEqual([['配音 · 旁白', 'Voice-over'], ['配乐 · 纯音乐', 'Score · Instrumental']]);
-    expect(audio[0]).toMatchObject({ kind: 'audio', references: 0, prompt: { minLength: 1, maxLength: 5000 } });
+    expect(audio[0]).toMatchObject({ kind: 'audio', references: 0, prompt: { minLength: 1, maxLength: 1000 } });
     expect(audio[0].params.map(param => param.name)).toEqual(['voice', 'speed', 'englishNormalization']);
     expect(audio[0].params[0].valueLabels).toEqual([['沉静女声', 'Calm woman'], ['少年骑士', 'Young knight']]);
     expect(mediaModelsOf(catalogue, 'image').map(model => model.id)).toEqual(['rh.seedream-v5-pro']);
     expect(mediaKindOf('audio')).toBe('audio');
+  });
+
+  it('keeps an audio node on its model where the workspace is offered only the other audio model', () => {
+    const onlyMusic = parseMediaCatalogue({ ...rawCatalogue, models: rawCatalogue.models.filter(model => model.id !== 'rh.minimax-speech-2-8-hd') });
+    expect(replacementMediaModel(onlyMusic, 'audio', 'rh.minimax-speech-2-8-hd')).toBeNull();
+    expect(replaceRetiredMediaModels(sanitizeDocument({ nodes: [voice('vo')], edges: [] }), onlyMusic)).toBeNull();
+    // RunningHub's image models are still moved to an offered one, as before.
+    const otherImage = parseMediaCatalogue({ ...rawCatalogue, models: [...rawCatalogue.models.filter(model => model.kind !== 'image'),
+      { id: 'xt.seedream-5-pro', name: '图片', vendor: 'media', kind: 'image', mode: 'text-to-image', prompt: { minLength: 1, maxLength: 5000 }, params: [] }] });
+    expect(replacementMediaModel(otherImage, 'image', 'rh.seedream-v5-pro')).toBe('xt.seedream-5-pro');
   });
 });
 

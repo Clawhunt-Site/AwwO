@@ -174,6 +174,18 @@ func TestGraphPromptNamesAudioFilesAndHowToPlayThem(t *testing.T) {
 	if !softMediaEdge(soft, d.Edges[0]) {
 		t.Fatal("an audio result into a page's context is a soft media edge")
 	}
+
+	// A picture wired into a voice-over's context adds nothing to the words it reads; a text node's delivery does.
+	threads, _ := json.Marshal([]map[string]any{{"id": "default", "draft": "(breath) Hold the line."}})
+	vo := graphNode{ID: "vo", Kind: "session", AgentKind: mediaKindAudio, Title: "VO", Threads: threads}
+	media := graphDocument{Nodes: []graphNode{vo, {ID: "hero", Kind: "session", AgentKind: mediaKindImage, Title: "Hero"},
+		{ID: "notes", Kind: "session", AgentKind: "llm", Title: "Notes"}},
+		Edges: []graphEdge{{ID: "e1", FromNode: "hero", FromPort: "result", ToNode: "vo", ToPort: "context", DataType: "image"},
+			{ID: "e2", FromNode: "notes", FromPort: "result", ToNode: "vo", ToPort: "context", DataType: "text"}}}
+	words, err := (&App{}).graphMediaPrompt(t.Context(), "t1", "", vo, media, map[string]string{"hero": picture, "notes": "Until dawn."})
+	if err != nil || words != "(breath) Hold the line.\n\nUntil dawn." {
+		t.Fatalf("voice-over words %q %v", words, err)
+	}
 }
 
 // A canvas run hands its pictures, clips and 3D models to the page that uses them: a media node's result may feed a
