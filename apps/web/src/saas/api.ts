@@ -59,6 +59,10 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
+/** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
+ * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
+ * view sends the document. Never a canvas to edit or save: read the canvas itself for that. */
+export type CanvasListItem = Omit<CanvasRecord, 'document'> & { outline?: unknown; document?: unknown };
 /** API Agent runtime is persisted independently of a canvas draft. Legacy records default to Pi. */
 export type SaaSAgent = { id: string; tenantId: string; name: string; runtime?: 'pi' | 'openai-agents'; model: string; instructions?: string; status?: string;
   effort?: string; role?: string; title?: string; adapterType?: 'pi' | 'openai-agents'; adapterConfig?: { model?: string; effort?: string } };

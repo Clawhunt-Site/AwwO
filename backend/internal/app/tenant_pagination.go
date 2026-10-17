@@ -31,6 +31,15 @@ func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 		fail(w, 400, "invalid_pagination", "Invalid list query")
 		return
 	}
+	// The same canvases, each with its outline instead of its document (canvas_outline.go). Only the projection
+	// changes, so a cursor stays valid across views.
+	if views, present := query["view"]; present && kind == "canvases" {
+		if len(views) != 1 || views[0] != "summary" {
+			fail(w, 400, "invalid_pagination", "View must be summary")
+			return
+		}
+		s.projection = canvasSummaryJSON
+	}
 	limit := 200
 	if values, present := query["limit"]; present {
 		var err error

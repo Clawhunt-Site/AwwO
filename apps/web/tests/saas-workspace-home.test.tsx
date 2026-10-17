@@ -221,7 +221,7 @@ it('gives readers the canvas list without a prompt box or examples, and reads no
   expect(screen.queryByRole('button', { name: '空白画布' })).toBeNull();
   expect(screen.queryByRole('button', { name: '需要灵感？看看案例' })).toBeNull();
   expect(screen.queryByRole('region', { name: '从案例开始' })).toBeNull();
-  expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(['/api/v1/tenants/tenant-a/canvases?limit=50']);
+  expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(['/api/v1/tenants/tenant-a/canvases?view=summary&limit=50']);
 });
 
 it('reads in English', async () => {

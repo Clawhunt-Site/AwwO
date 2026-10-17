@@ -31,6 +31,8 @@
 
 记录按不可变创建时间与 ID 降序，成员使用 membership.createdAt/userId；改名不改变分页位置。sessions 可同时使用 `canvasId`、精确 `sessionId`；runs 可使用 `sessionId`、`operationId` 与 `active=true`（queued/running），`active=false` 不限制运行状态。活动 run 若在翻页期间结束，将不再满足后续页的活动过滤。`snapshot` 是创建时间边界，不会冻结更新，也不隔离晚提交的旧事务，因此不是数据库一致性快照。画布、成员与邀请 UI 每页 50 条；历史恢复优先查询确切 session，不依赖首 200 条。
 
+画布列表另接受 `view=summary`（2026-10-17）：每项的其余字段与完整视图相同，但以 `outline` 代替 `document`。`outline` 正是列表卡片缩略图所画的内容：前 60 个有字符串 id 的节点的 `{id,x,y,w,h}`（缺省字段省略）、两端都在其中的边的 `{fromNode,toNode}`，以及全部这类节点的 `nodeCount`。工作区首页的画布列表用它，避免一次下载每张画布的完整文档（含每个节点的输出）。两种视图翻页同一集合、顺序相同，同一 cursor 可用于任一视图；`view` 的其他取值或重复出现返回 400 / invalid_pagination；其他列表忽略该参数。列表项从不是可编辑的画布：改名等写操作先读取完整画布。
+
 ## 当前账号配色
 
 | 方法与路径（省略 /api/v1） | 输入 | 结果与权限 |
@@ -79,7 +81,7 @@
 
 | 方法与后缀 | 请求 | 说明 |
 | --- | --- | --- |
-| GET /canvases | limit?, cursor? | 当前租户画布，`{items,nextCursor,snapshot}` |
+| GET /canvases | limit?, cursor?, view? | 当前租户画布，`{items,nextCursor,snapshot}`；`view=summary` 时每项以 `outline` 代替 `document` |
 | POST /canvases | name, document | 创建画布，201 |
 | GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt |
 | PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409 |

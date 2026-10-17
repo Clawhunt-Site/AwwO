@@ -2,20 +2,27 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, RefreshCw, Search } from 'lucide-react';
 import { CanvasThumbnail, canvasShape, relativeTime } from './CanvasThumbnail';
 import { ActionMenu } from './ActionMenu';
-import { api, tenantPath, saasErrorMessage, type CanvasRecord, type Tenant } from './api';
+import { api, tenantPath, saasErrorMessage, type CanvasListItem, type CanvasRecord, type Tenant } from './api';
 import { ListPager, usePagedList } from './ListPager';
 import { useSaaSPreferences } from './preferences';
 import { CANVAS_SEARCH_MAX_LENGTH, readCanvasListView, saveCanvasListView } from './canvasListView';
 
-const updatedAt = (canvas: CanvasRecord) => Date.parse(canvas.updatedAt) || 0;
+const updatedAt = (canvas: CanvasListItem) => Date.parse(canvas.updatedAt) || 0;
 /** Most recently touched first; canvases touched at the same time keep the server's order. */
-const byRecentUpdate = (items: ReadonlyArray<CanvasRecord>) => [...items].sort((a, b) => updatedAt(b) - updatedAt(a));
+const byRecentUpdate = (items: ReadonlyArray<CanvasListItem>) => [...items].sort((a, b) => updatedAt(b) - updatedAt(a));
+/** What a card draws and counts: the summary view's outline, or the document an API without that view sends. */
+const outlineOf = (canvas: CanvasListItem) => canvas.outline ?? canvas.document;
+const nodeCountOf = (canvas: CanvasListItem, drawn: number) => {
+  const count = (canvas.outline as { nodeCount?: unknown } | undefined)?.nodeCount;
+  return typeof count === 'number' && Number.isInteger(count) && count >= 0 ? count : drawn;
+};
 
 /** The workspace's canvases, most recently updated first. With `recentLimit`, only that many are
  * shown until the operator expands the full list in place (its pages, rename and delete). Search
  * matches only the loaded page; paging stays explicit, and clearing a search returns recent mode. */
 type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string;
-  /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果). */
+  /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果).
+   * Such a view reads the canvases' outputs, so the list then reads whole documents, not the summary view. */
   onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void;
   /** Changing it reloads the list: a view built from it (最近的成果) deleted canvases. */
   reloadSignal?: number };
@@ -26,10 +33,12 @@ export function CanvasList(props: CanvasListProps) {
 
 function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, reloadSignal }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
-  const path = tenantPath(tenant.id, '/canvases');
-  const listing = usePagedList<CanvasRecord>(path);
+  // The summary view: a card draws only an outline, and a document carries every node's output (megabytes for a
+  // workspace of large canvases, 2026-10-17).
+  const path = tenantPath(tenant.id, onFirstPage ? '/canvases' : '/canvases?view=summary');
+  const listing = usePagedList<CanvasListItem>(path);
   const readOnly = tenant.role === 'reader' || tenant.status !== 'active';
-  const [editing, setEditing] = useState<{ canvas: CanvasRecord; action: 'rename' | 'delete' } | null>(null);
+  const [editing, setEditing] = useState<{ canvas: CanvasListItem; action: 'rename' | 'delete' } | null>(null);
   const [view, setView] = useState(() => readCanvasListView(userId, tenant.id));
   const { query, expanded } = view;
   const setQuery = (query: string) => {
@@ -64,7 +73,8 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
   const items = listing.page ? byRecentUpdate(listing.page.items) : [];
   const firstPage = useRef(onFirstPage);
   firstPage.current = onFirstPage;
-  useEffect(() => { if (listing.page && listing.pageNumber === 1) firstPage.current?.(listing.page.items); }, [listing.page, listing.pageNumber]);
+  // With onFirstPage the list reads the full view, so its items carry their documents.
+  useEffect(() => { if (listing.page && listing.pageNumber === 1) firstPage.current?.(listing.page.items as CanvasRecord[]); }, [listing.page, listing.pageNumber]);
   const needle = query.trim().toLocaleLowerCase();
   const matches = needle ? items.filter(canvas => canvas.name.toLocaleLowerCase().includes(needle)) : items;
   const limit = recentLimit ?? Infinity;
@@ -84,10 +94,12 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
     : `${matches.length ? t(`找到 ${matches.length} 张画布`, `${matches.length} ${matches.length === 1 ? 'canvas' : 'canvases'} found`)
       : t(`没有名称包含“${query.trim()}”的画布`, `No canvas name contains “${query.trim()}”`)}${morePages ? t('（只搜索当前页）', ' (this page only)') : ''}`;
 
-  const card = (canvas: CanvasRecord) => {
-    const shape = canvasShape(canvas.document);
+  const card = (canvas: CanvasListItem) => {
+    const drawn = outlineOf(canvas);
+    const shape = canvasShape(drawn);
+    const nodes = nodeCountOf(canvas, shape.boxes.length);
     return <article key={canvas.id} className="saas-canvas-card">
-      <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><CanvasThumbnail document={canvas.document} /><span className="saas-canvas-card-body"><h3>{canvas.name}</h3><span className="saas-canvas-card-meta"><time dateTime={canvas.updatedAt} title={new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}>{t('更新于', 'Updated')} {relativeTime(canvas.updatedAt, locale)}</time><span>{shape.boxes.length ? t(`${shape.boxes.length} 个节点`, `${shape.boxes.length} ${shape.boxes.length === 1 ? 'node' : 'nodes'}`) : t('空白画布', 'Blank')}</span></span></span></button>
+      <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><CanvasThumbnail document={drawn} /><span className="saas-canvas-card-body"><h3>{canvas.name}</h3><span className="saas-canvas-card-meta"><time dateTime={canvas.updatedAt} title={new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}>{t('更新于', 'Updated')} {relativeTime(canvas.updatedAt, locale)}</time><span>{nodes ? t(`${nodes} 个节点`, `${nodes} ${nodes === 1 ? 'node' : 'nodes'}`) : t('空白画布', 'Blank')}</span></span></span></button>
       {!readOnly && <div className="saas-canvas-actions"><ActionMenu label={t(`画布选项：${canvas.name}`, `Canvas options: ${canvas.name}`)}>{close => <>
         <button onClick={() => { close(); setEditing({ canvas, action: 'rename' }); }}>{t('改名', 'Rename')}</button>
         <button className="saas-danger-action" onClick={() => { close(); setEditing({ canvas, action: 'delete' }); }}>{t('删除', 'Delete')}</button>
@@ -126,7 +138,7 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
   </section>;
 }
 
-function CanvasAction({ tenantId, canvas, action, onClose, onSaved }: { tenantId: string; canvas: CanvasRecord; action: 'rename' | 'delete'; onClose: () => void; onSaved: () => void }) {
+function CanvasAction({ tenantId, canvas, action, onClose, onSaved }: { tenantId: string; canvas: CanvasListItem; action: 'rename' | 'delete'; onClose: () => void; onSaved: () => void }) {
   const { locale, t } = useSaaSPreferences();
   const [name, setName] = useState(canvas.name);
   const [current, setCurrent] = useState<CanvasRecord | null>(null);

@@ -56,7 +56,7 @@ it('ignores a late canvas list response from a previous tenant and starts the ne
   expect(screen.queryByText('Private A')).toBeNull();
   expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
   expect(screen.getByRole('button', { name: '刷新列表' })).toBeEnabled();
-  expect(fetcher.mock.calls[1][0]).toBe('/api/v1/tenants/tenant-b/canvases?limit=50');
+  expect(fetcher.mock.calls[1][0]).toBe('/api/v1/tenants/tenant-b/canvases?view=summary&limit=50');
 });
 
 it('recovers from an invalid page cursor by refreshing from the first page', async () => {
@@ -69,7 +69,7 @@ it('recovers from an invalid page cursor by refreshing from the first page', asy
   fireEvent.click(screen.getByRole('button', { name: '刷新列表' }));
   await screen.findByRole('heading', { name: 'Canvas 0' });
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(urls.at(-1)).toBe('/api/v1/tenants/tenant-a/canvases?limit=50');
+  expect(urls.at(-1)).toBe('/api/v1/tenants/tenant-a/canvases?view=summary&limit=50');
 });
 
 it('does not write when renaming is cancelled, including before the initial read completes', async () => {
