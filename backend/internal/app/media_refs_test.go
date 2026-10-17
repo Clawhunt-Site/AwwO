@@ -21,7 +21,7 @@ func testReference(data []byte, contentType string) mediaReference {
 
 func TestMediaReferenceCatalog(t *testing.T) {
 	want := map[string]int{"xt.xtasy-3": 1, "xt.xtasy-3-pro": 1, "xt.seedream-5-pro": 1, "tripo.v3-1": 1, "tripo.p1": 1,
-		"jm.image-cinema": 1, "jm.image-express": 1, "xt.omni-video": 9, "xt.omni-video-2-5": 10}
+		"jm.image-cinema": 1, "jm.image-express": 1, "xt.omni-video": 9, "xt.omni-video-2-5": 10, "rh.seedance-2-multimodal": 9}
 	for _, m := range builtinMediaCatalog.List() {
 		if m.References != want[m.ID] {
 			t.Errorf("%s takes %d references, want %d", m.ID, m.References, want[m.ID])

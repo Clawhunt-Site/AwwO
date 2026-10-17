@@ -48,6 +48,20 @@ var mediaReferenceTypes = map[string]map[string]bool{
 	mediaProviderXtasy: {"image/png": true, "image/jpeg": true, "image/webp": true},
 	// Jimeng's canvas registers an uploaded picture by its extension; these are the picture types it reads.
 	mediaProviderJimeng: {"image/png": true, "image/jpeg": true, "image/webp": true},
+	// RunningHub's multimodal video reads JPEG, PNG and WebP pictures (runningHubReferenceField).
+	mediaProviderRunningHub: {"image/png": true, "image/jpeg": true, "image/webp": true},
+}
+
+// mediaReferenceLimits are the providers whose uploads take less than maxMediaReferenceBytes: a larger picture is left
+// out when the run is admitted, as one of another type is, instead of failing the run at its upload.
+var mediaReferenceLimits = map[string]int64{mediaProviderRunningHub: rhMaxReferenceBytes}
+
+// mediaReferenceLimit is the largest picture provider takes as a reference.
+func mediaReferenceLimit(provider string) int64 {
+	if limit := mediaReferenceLimits[provider]; limit > 0 {
+		return limit
+	}
+	return maxMediaReferenceBytes
 }
 
 // referenceUploader is a provider that takes reference pictures: it returns the id its generation request names.
@@ -63,6 +77,7 @@ func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasI
 		return nil, nil
 	}
 	types := mediaReferenceTypes[m.Provider]
+	limit := mediaReferenceLimit(m.Provider)
 	refs := []mediaReference{}
 	for _, id := range uploadReferences(text) {
 		if len(refs) >= m.References {
@@ -78,7 +93,7 @@ func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasI
 		if e != nil {
 			return nil, e
 		}
-		if rel == nil || contentType == nil || !types[*contentType] || ref.Size <= 0 || ref.Size > maxMediaReferenceBytes || len(ref.SHA256) != 64 {
+		if rel == nil || contentType == nil || !types[*contentType] || ref.Size <= 0 || ref.Size > limit || len(ref.SHA256) != 64 {
 			continue
 		}
 		if _, ok := a.mediaFile(tid, *rel); !ok {

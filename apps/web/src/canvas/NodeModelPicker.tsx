@@ -32,6 +32,8 @@ export interface NodeModelChoice {
   reason?: string;
   /** A media model: how many reference pictures it takes (0 or absent: words only). */
   references?: number;
+  /** A media model whose every reference picture is a subject reference, a single one included. */
+  subjectReferences?: boolean;
   /** A chat model: its id, whatever runtime the choice runs it on. */
   model?: string;
 }

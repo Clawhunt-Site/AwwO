@@ -385,6 +385,9 @@ var mediaBaseCredits = map[string]int{
 	"rh.qwen-image-3-pro": 30, "rh.nano-banana-pro": 60, "rh.gpt-image-2": 60, "rh.midjourney-v7": 60,
 	"rh.vidu-q3-pro": 100, "rh.wan-2-7": 100, "rh.grok-imagine-video": 100, "rh.pixverse-v6": 100,
 	"rh.kling-v3-pro": 200, "rh.seedance-2": 200, "rh.veo-3-1-fast": 200, "rh.sora-2": 200, "rh.hailuo-2-3-pro": 200,
+	// Provisional until a generation of it has been measured: priced exactly as the same family's text-to-video, per
+	// five seconds and its settings; its reference pictures add nothing (their upload costs nothing).
+	"rh.seedance-2-multimodal": 200,
 	// Tripo 3D models at their default (textured) settings; model3DCredits holds the rest of each price.
 	"tripo.v3-1": 60, "tripo.p1": 120,
 	// X-tasy, three times what it charged at each model's defaults in the verification of 2026-10-10 (one X-tasy credit

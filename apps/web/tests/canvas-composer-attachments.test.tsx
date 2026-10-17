@@ -5,6 +5,7 @@ import { ATTACHMENT_DATA_MARKER, attachmentKind, attachmentLine, attachmentSeenB
 import { MessageWithAttachments } from '../src/canvas/ComposerAttachments';
 import { mediaComposerInfo, TileComposer, type MediaComposerInfo } from '../src/canvas/TileComposer';
 import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
+import { canvasText } from '../src/canvas/i18n';
 import { portsFor } from '../src/canvas/ports';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { ContractFields } from '../src/canvas/ContractFields';
@@ -102,6 +103,23 @@ describe('a media node composer', () => {
     expect(screen.getByText(/它是视频的第一帧.*主体参考，最多 9 张/)).toBeInTheDocument();
     rerender(composer({ kind: 'video', references: 0, referenceModels: ['视频 · 标准'] }));
     expect(screen.getByText('这个模型只按文字生成，附带的文件不会使用。要用参考图，请换成：视频 · 标准。')).toBeInTheDocument();
+    rerender(composer({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true }));
+    expect(screen.getByText(canvasText('zh', 'attach.mediaRefSubjects', { count: 9 }))).toBeInTheDocument();
+    expect(screen.getByText(/主体参考，最多 9 张，只附一张也一样.*@Image 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/第一帧/)).toBeNull();
+  });
+
+  it('marks a model whose every picture is a subject reference, from its choice and from the catalogue', () => {
+    const choices = [{ key: 'rh.seedance-2-multimodal', label: '视频 · 多图参考', available: true, references: 9, subjectReferences: true },
+      { key: 'xt.omni-video', label: '视频 · 全能', available: true, references: 9 }];
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'rh.seedance-2-multimodal' }, choices))
+      .toEqual({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考', '视频 · 全能'], subjects: true });
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'xt.omni-video' }, choices)?.subjects).toBeUndefined();
+    const model = (id: string, references: unknown, referenceMode?: unknown) => ({ id, name: 'x', label: ['视频', 'Video'], vendor: 'media', kind: 'video',
+      prompt: { minLength: 1, maxLength: 10 }, params: [], references, referenceMode });
+    const catalogue = parseMediaCatalogue({ configured: true, available: true, models: [model('rh.a', 9, 'subjects'), model('rh.b', 9),
+      model('rh.c', 0, 'subjects'), model('rh.d', 9, 'frames')] });
+    expect(catalogue.models.map(m => m.subjectReferences === true)).toEqual([true, false, false, false]);
   });
 
   it('reads what the node model does from its choices, and only for media nodes', () => {

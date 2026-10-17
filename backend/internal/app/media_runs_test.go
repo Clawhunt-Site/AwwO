@@ -25,7 +25,18 @@ var (
 type fakeSubmit struct {
 	path, auth string
 	body       map[string]any
+	// uploads is how many reference pictures had been uploaded when the submission arrived.
+	uploads int
 }
+
+// fakeUpload is one reference picture sent to the fake's upload route.
+type fakeUpload struct {
+	auth, name, contentType string
+	data                    []byte
+}
+
+// fakeRunningHubKey is the key configure gives the API; the fake's upload route refuses any other.
+const fakeRunningHubKey = "rh-test-key-0123456789"
 
 // fakeRunningHub stands in for RunningHub's task API and its result storage. Result URLs name the
 // real allowlisted host; the configured file client delivers them to this server.
@@ -38,6 +49,9 @@ type fakeRunningHub struct {
 	submit     func(n int) (int, any)
 	query      func(task string, n int) (int, any)
 	content    map[string][]byte
+	// uploads are the reference pictures the upload route took, in order; upload answers the n-th of them.
+	uploads []fakeUpload
+	upload  func(n int) (int, any)
 	// When set, a submission signals entered and waits for gate before it is answered.
 	entered, gate chan struct{}
 }
@@ -48,6 +62,17 @@ func mediaSuccess(task string, urls ...string) map[string]any {
 		results = append(results, map[string]any{"url": u, "outputType": "png"})
 	}
 	return map[string]any{"taskId": task, "status": "SUCCESS", "results": results}
+}
+
+// rhUploadAnswer is RunningHub's answer to an upload, as it answered a 69-byte PNG on 2026-10-17.
+func rhUploadAnswer(downloadURL string) map[string]any {
+	return map[string]any{"code": 0, "msg": "success", "errorMessages": nil, "data": map[string]any{"type": "image", "download_url": downloadURL,
+		"fileName": "openapi/0123456789abcdef.png", "size": "69"}}
+}
+
+// fakeReferenceURL is the URL the fake's default upload answer names the n-th uploaded picture by.
+func fakeReferenceURL(n int) string {
+	return fmt.Sprintf("https://files.runninghub.ai/openapi/ref-%d.png", n)
 }
 
 func newFakeRunningHub(t *testing.T) *fakeRunningHub {
@@ -61,7 +86,12 @@ func newFakeRunningHub(t *testing.T) *fakeRunningHub {
 		}
 		return 200, mediaSuccess(task, "https://files.runninghub.ai/out.png")
 	}
+	f.upload = func(n int) (int, any) { return 200, rhUploadAnswer(fakeReferenceURL(n)) }
 	f.api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == rhUploadPath {
+			f.serveUpload(w, r)
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if r.URL.Path != "/openapi/v2/query" {
@@ -83,7 +113,7 @@ func newFakeRunningHub(t *testing.T) *fakeRunningHub {
 			f.polls[task]++
 			status, reply = f.query(task, f.polls[task])
 		} else {
-			f.submits = append(f.submits, fakeSubmit{r.URL.Path, r.Header.Get("Authorization"), body})
+			f.submits = append(f.submits, fakeSubmit{r.URL.Path, r.Header.Get("Authorization"), body, len(f.uploads)})
 			status, reply = f.submit(len(f.submits))
 		}
 		f.mu.Unlock()
@@ -133,8 +163,64 @@ func (f *fakeRunningHub) submission(i int) fakeSubmit {
 	return f.submits[i]
 }
 
+// serveUpload stands in for RunningHub's upload route: the bearer key, exactly one file, in field "file", of a picture
+// type, answered by f.upload (by default like the real one: code 0 and the file's download_url).
+func (f *fakeRunningHub) serveUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+fakeRunningHubKey {
+		w.WriteHeader(401)
+		return
+	}
+	if r.ParseMultipartForm(16<<20) != nil {
+		w.WriteHeader(400)
+		return
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+	if len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["file"]) != 1 || len(r.MultipartForm.Value) != 0 {
+		w.WriteHeader(400)
+		return
+	}
+	header := r.MultipartForm.File["file"][0]
+	contentType := header.Header.Get("Content-Type")
+	if contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
+		w.WriteHeader(415)
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+	data, err := io.ReadAll(file)
+	_ = file.Close()
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+	f.mu.Lock()
+	f.uploads = append(f.uploads, fakeUpload{auth: r.Header.Get("Authorization"), name: header.Filename, contentType: contentType, data: data})
+	status, reply := f.upload(len(f.uploads))
+	f.mu.Unlock()
+	if reply == nil {
+		w.WriteHeader(status)
+		return
+	}
+	writeJSON(w, status, reply)
+}
+
+func (f *fakeRunningHub) setUpload(upload func(n int) (int, any)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upload = upload
+}
+
+func (f *fakeRunningHub) uploaded() []fakeUpload {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeUpload(nil), f.uploads...)
+}
+
 func (f *fakeRunningHub) configure(a *App) {
-	a.cfg.RunningHubAPIKey = "rh-test-key-0123456789"
+	a.cfg.RunningHubAPIKey = fakeRunningHubKey
 	a.cfg.RunningHubBaseURL = f.api.URL
 	a.cfg.MediaDir = f.dir
 	a.cfg.MediaTimeout = time.Minute

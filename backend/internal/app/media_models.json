@@ -4,6 +4,7 @@
   "source": "RunningHub Standard Model API OpenAPI docs, read 2026-10-03",
   "notes": [
     "Only text-to-image, text-to-video and text-to-audio models: models that need an input image wait for an upload flow.",
+    "A model that also takes reference pictures (references) is driven from words as well; its pictures are uploaded first and sent in the field runningHubReferenceField names for it.",
     "Parameters are closed choices checked against each model's OpenAPI request schema; example prompts and URLs are not copied.",
     "verified is the date of a successful real call with this deployment's key; empty means not yet called."
   ],
@@ -664,6 +665,98 @@
       ],
       "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859271.md",
       "verified": "2026-10-05"
+    },
+    {
+      "id": "rh.seedance-2-multimodal",
+      "name": "Seedance 2.0 Multimodal",
+      "vendor": "bytedance",
+      "kind": "video",
+      "mode": "text-to-video",
+      "endpoint": "/openapi/v2/rhart-video/sparkvideo-2.0/multimodal-video",
+      "prompt": {
+        "minLength": 1,
+        "maxLength": 20480
+      },
+      "references": 9,
+      "params": [
+        {
+          "name": "resolution",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p",
+          "label": [
+            "分辨率",
+            "Resolution"
+          ]
+        },
+        {
+          "name": "duration",
+          "type": "enum",
+          "values": [
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15"
+          ],
+          "default": "5",
+          "label": [
+            "时长（秒）",
+            "Duration (s)"
+          ]
+        },
+        {
+          "name": "ratio",
+          "type": "enum",
+          "values": [
+            "adaptive",
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9"
+          ],
+          "default": "adaptive",
+          "label": [
+            "画面比例",
+            "Aspect ratio"
+          ]
+        },
+        {
+          "name": "generateAudio",
+          "type": "boolean",
+          "default": true,
+          "label": [
+            "生成音频",
+            "Generate audio"
+          ]
+        },
+        {
+          "name": "seed",
+          "type": "integer",
+          "min": -1,
+          "max": 2147483647,
+          "default": -1,
+          "label": [
+            "随机种子",
+            "Seed"
+          ]
+        }
+      ],
+      "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859282.md",
+      "verified": ""
     },
     {
       "id": "rh.veo-3-1-fast",

@@ -239,7 +239,10 @@ export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, p
   if (port.side === 'input' && port.id === 'context') return t('media.guideContext');
   if (port.side === 'input' && port.id === 'reference') {
     if (!media) return t('media.guideReference');
-    if (media.references > 0) return t(kind === 'model3d' ? 'media.guideReference3d' : kind === 'video' ? 'media.guideReferenceVideo' : 'media.guideReferenceImage');
+    if (media.references > 0) {
+      const key = kind === 'model3d' ? 'media.guideReference3d' : kind === 'video' ? (media.subjects ? 'media.guideReferenceSubjects' : 'media.guideReferenceVideo') : 'media.guideReferenceImage';
+      return t(key, { count: media.references });
+    }
     return media.referenceModels.length
       ? t('media.guideReferenceUnused', { models: media.referenceModels.join(locale === 'en' ? ', ' : '、') })
       : t('media.guideReferenceNone');

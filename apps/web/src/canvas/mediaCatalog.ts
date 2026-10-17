@@ -38,6 +38,8 @@ export interface MediaModel {
   params: MediaParam[];
   /** How many pictures a generation can start from (0: words only): the first image attached, or wired in. */
   references: number;
+  /** Every picture the model starts from is a subject reference, a single one included (never its first frame). */
+  subjectReferences?: boolean;
 }
 
 export interface MediaCatalogue {
@@ -124,7 +126,8 @@ function parseModel(raw: unknown): MediaModel | null {
   }
   const shown: [string, string] = label(r.label) ? [r.label[0], r.label[1]] : [r.name, r.name];
   const references = Number.isInteger(r.references) && (r.references as number) > 0 && (r.references as number) <= MAX_MEDIA_REFERENCES ? r.references as number : 0;
-  return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params, references };
+  return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params, references,
+    ...(references > 0 && r.referenceMode === 'subjects' ? { subjectReferences: true } : {}) };
 }
 
 export function parseMediaCatalogue(raw: unknown): MediaCatalogue {

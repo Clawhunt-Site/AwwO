@@ -50,6 +50,15 @@ API 在启动时把下表的名字写进每个模型的 `name`/`label`，厂商�
 | `rh.wan-2-7` | 视频 · 全高清标准 | Video · Full HD Standard |
 | `rh.grok-imagine-video` | 视频 · 快速出片 | Video · Quick clip |
 | `rh.pixverse-v6` | 视频 · 灵活时长 | Video · Flexible length |
+| `rh.seedance-2-multimodal` | 视频 · 多图参考 | Video · From references |
+
+## 参考图生成视频（2026-10-17 起，`rh.seedance-2-multimodal`）
+
+`rh.seedance-2-multimodal`（`/openapi/v2/rhart-video/sparkvideo-2.0/multimodal-video`）按最多 9 张参考图生成视频，让同一角色、物品和场景在各镜头里保持一致；尚未做过真实生成，`verified` 为空，价格暂按 `rh.seedance-2` 计（每 5 秒、按设置，`plans.go`），实测后再定。
+
+- 参考图来自节点消息里附的图片或接入「参考图」的上游图片节点结果（与其他提供方相同的冻结规则，`media_refs.go`）；只收 PNG、JPEG、WebP，单张不超过 10 MB，超出的在受理时就不选用。
+- 提交任务前，每张图经 `POST /openapi/v2/media/upload/binary`（multipart，字段 `file`，免费，不建任务）上传，回答必须是 `code: 0` 和不含凭据的 https `data.download_url`（不超过 2048 字节）；RunningHub 自己去取这个地址，AwwO 从不下载它。上传失败时运行以固定错误码结束（如 `media_reference_unavailable`），不提交、不计费；网络错误、限流和 5xx 会重试。
+- 这些地址按冻结顺序放进请求的 `imageUrls`（`runningHubReferenceField`）；提示词里可用 `@Image 1`、`@Image 2` 指代。只提供分辨率（480p/720p/1080p）、时长（4–15 秒）、画面比例、生成音频和随机种子；参考视频/音频、真人素材转换和尾帧都不提供也不发送。其他 RunningHub 模型的请求不变。
 
 RunningHub 拒绝提交时回 HTTP 200 和错误码（坏 key `806`、缺参数 `1007`、余额 `812`/`416`）。只有明确不含任务的平铺回答（`taskId` 和 `status` 都是空字符串、带错误码、没有 `data`、没有结果，每个键只出现一次且是 ASCII，任务解析读到的也是没有任务）里的运营方原因（key、余额）才算拒绝、退回免费次数（`rhAnswerNamesNoTask`）；带任务或可能带任务的回答（QUEUED/RUNNING 等状态、重复键或大小写不同的键）、包装过的回答、请求本身的问题和轮询的回答都照常计数。
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -65,6 +66,9 @@ var runningHubLabels = map[string][2]string{
 	"rh.grok-imagine-video": {"视频 · 快速出片", "Video · Quick clip"},
 	"rh.pixverse-v6":        {"视频 · 灵活时长", "Video · Flexible length"},
 
+	// A video made from reference pictures: the characters, things and places in them stay the same from shot to shot.
+	"rh.seedance-2-multimodal": {"视频 · 多图参考", "Video · From references"},
+
 	// Sound, by what it is for in a film: a character's or a narrator's voice, and the score under it.
 	"rh.minimax-speech-2-8-hd":          {"配音 · 旁白", "Voice-over"},
 	"rh.minimax-music-2-6-instrumental": {"配乐 · 纯音乐", "Score · Instrumental"},
@@ -107,10 +111,16 @@ func runningHubWireName(id, name string) string {
 	return name
 }
 
+// runningHubReferenceField names the request field a RunningHub model's reference pictures go in: the URLs its upload
+// answered (uploadReference), in the order the run froze them. A model without an entry takes no pictures; the catalog
+// check refuses references on it, and refuses a parameter or a fixed field on this one.
+var runningHubReferenceField = map[string]string{"rh.seedance-2-multimodal": "imageUrls"}
+
 // runningHubRequest is the body of one RunningHub task: the resolved values of the model's own parameters under their
-// request names, then its fixed fields and the words under its prompt field, which nothing frozen can replace (a
+// request names, then its fixed fields, its reference pictures' URLs (in order, up to the model's count, only for a
+// model that names a field for them) and the words under its prompt field, which nothing frozen can replace (a
 // snapshot from another catalog version included).
-func runningHubRequest(m *mediaModel, prompt string, params map[string]any) map[string]any {
+func runningHubRequest(m *mediaModel, prompt string, params map[string]any, references []string) map[string]any {
 	body := map[string]any{}
 	for i := range m.Params {
 		if value, ok := params[m.Params[i].Name]; ok {
@@ -120,8 +130,104 @@ func runningHubRequest(m *mediaModel, prompt string, params map[string]any) map[
 	for field, value := range runningHubFixed[m.ID] {
 		body[field] = value
 	}
+	if field := runningHubReferenceField[m.ID]; field != "" && len(references) > 0 && m.References > 0 {
+		body[field] = slices.Clone(references[:min(len(references), m.References)])
+	}
 	body[runningHubPromptFieldOf(m.ID)] = prompt
 	return body
+}
+
+const (
+	// rhUploadPath takes one file (multipart, field "file") and answers the URL a model's request names it by. An upload
+	// creates no task and costs nothing; RunningHub fetches the file from that URL itself, so AwwO never reads it.
+	rhUploadPath = "/openapi/v2/media/upload/binary"
+	// rhMaxReferenceBytes is the largest file the upload takes (809 APIKEY_FILE_SIZE_EXCEEDED past it).
+	rhMaxReferenceBytes = 10 << 20
+	// rhMaxReferenceURL bounds the URL an upload answers, which every request of the run then carries.
+	rhMaxReferenceURL = 2048
+	// maxRunningHubReferences is the most pictures a RunningHub model takes (the multimodal video's imageUrls: 9).
+	maxRunningHubReferences = 9
+)
+
+// uploadReference stores one reference picture with RunningHub (JPEG, PNG or WebP, up to 10 MB) under a neutral name
+// and returns the https URL its answer names. The answer is read strictly: code 0 and a URL without credentials,
+// anything else a closed code (never RunningHub's message). A request that never got an answer, a busy answer and a
+// server error are transient, so the caller tries again (nothing was created); every other refusal is final.
+func (h *runningHub) uploadReference(ctx context.Context, ref mediaReference, data []byte, _ string) (string, error) {
+	if !mediaReferenceTypes[mediaProviderRunningHub][ref.ContentType] || len(data) == 0 || len(data) > rhMaxReferenceBytes {
+		return "", &rhError{Code: "media_reference_unavailable"}
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	body, contentType, err := multipartFile("file", referenceFileName(ref.ContentType), ref.ContentType, data)
+	if err != nil {
+		return "", &rhError{Code: "media_request_invalid"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.base+rhUploadPath, bytes.NewReader(body))
+	if err != nil {
+		return "", &rhError{Code: "media_request_invalid"}
+	}
+	req.Header.Set("Authorization", "Bearer "+h.key)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := h.api.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+	}
+	defer resp.Body.Close()
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, rhResponseLimit+1))
+	if err != nil || len(answer) > rhResponseLimit {
+		return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+	}
+	switch {
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		return "", &rhError{Code: "media_provider_unauthorized"}
+	case resp.StatusCode == 429:
+		return "", &rhError{Code: "media_provider_busy", Transient: true}
+	case resp.StatusCode >= 500:
+		return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+	case resp.StatusCode != 200:
+		return "", &rhError{Code: "media_reference_unavailable"}
+	}
+	var v struct {
+		Code json.RawMessage `json:"code"`
+		Data *struct {
+			DownloadURL string `json:"download_url"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(answer, &v) != nil {
+		return "", &rhError{Code: "media_provider_unavailable", Transient: true}
+	}
+	switch code := numericCode(v.Code); code {
+	case "0":
+	case "":
+		return "", &rhError{Code: "media_provider_unavailable"}
+	case "809":
+		return "", &rhError{Code: "media_reference_unavailable"}
+	default:
+		// A task code ("running", "queued") means nothing for an upload: it is not taken.
+		if e, _ := asRHError(rhCodeError(code)); !e.is("media_pending") {
+			return "", e
+		}
+		return "", &rhError{Code: "media_provider_unavailable"}
+	}
+	if v.Data == nil || !rhReferenceURL(v.Data.DownloadURL) {
+		return "", &rhError{Code: "media_provider_unavailable"}
+	}
+	return v.Data.DownloadURL, nil
+}
+
+// rhReferenceURL accepts the URL an upload answered: https with a host, without credentials, spaces or a backslash,
+// at most rhMaxReferenceURL bytes.
+func rhReferenceURL(raw string) bool {
+	if raw == "" || len(raw) > rhMaxReferenceURL || strings.ContainsAny(raw, " \t\r\n\\") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.User == nil && u.Opaque == "" && u.Hostname() != ""
 }
 
 // rhError is a provider failure reduced to a closed code; RunningHub's message text is never

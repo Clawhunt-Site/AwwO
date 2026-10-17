@@ -90,6 +90,15 @@ describe('media port guides', () => {
     expect(videoReference).toBeDefined();
     expect(mediaPortGuide((key, values) => canvasText('zh', key, values), 'zh', media('video'), videoReference!,
       { kind: 'video', references: 9, referenceModels: ['视频 · 全能'] })).toContain('视频从这张图开始（第一帧）');
+    // A model whose every picture is a subject reference never calls one its first frame, and says how words name them.
+    for (const locale of ['zh', 'en'] as const) {
+      const subjects = mediaPortGuide((key, values) => canvasText(locale, key, values), locale, media('video'), videoReference!,
+        { kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true });
+      expect(subjects).toBe(canvasText(locale, 'media.guideReferenceSubjects', { count: 9 }));
+      expect(subjects).toContain('@Image 1');
+      expect(subjects).toContain('9');
+      expect(subjects).not.toMatch(/第一帧|first frame/);
+    }
   });
 
   it('leaves every other port as it was, and shows no guide where nothing can be wired', () => {

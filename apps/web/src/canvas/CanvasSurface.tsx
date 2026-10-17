@@ -3768,7 +3768,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   })), [currentModelCatalogue, palette?.groups]);
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
     const catalogue = mediaCatalogueOf(mediaState);
-    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: mediaModelLabel(model, locale), group: mediaGroupLabel(locale), available: true, references: model.references }));
+    const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: mediaModelLabel(model, locale), group: mediaGroupLabel(locale), available: true, references: model.references, subjectReferences: model.subjectReferences }));
     return { image: of('image'), video: of('video'), model3d: of('model3d'), audio: of('audio') };
   }, [mediaState, locale]);
   const modelChoicesRef = useRef({ chat: chatModelChoices, media: mediaModelChoices });

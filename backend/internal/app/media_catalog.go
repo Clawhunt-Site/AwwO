@@ -148,7 +148,10 @@ func validMediaModel(m *mediaModel) error {
 	if !validMediaKindMode(m.Kind, m.Mode) {
 		return errors.New("kind")
 	}
-	if m.References != 0 {
+	// A model takes reference pictures only where its request names the field they go in (runningHubReferenceField),
+	// and a model with such a field takes some: a field for a model that takes none would never be used.
+	reference := runningHubReferenceField[m.ID]
+	if m.References < 0 || m.References > maxRunningHubReferences || (m.References > 0) != (reference != "") {
 		return errors.New("references")
 	}
 	if m.Prompt.MinLength < 1 || m.Prompt.MaxLength < m.Prompt.MinLength || m.Prompt.MaxLength > 32768 {
@@ -162,10 +165,17 @@ func validMediaModel(m *mediaModel) error {
 	}
 	names := map[string]bool{}
 	// Every field the request carries is sent once: a parameter's field (its own name, or its wire name) is never the
-	// prompt's field, a fixed field or another parameter's field.
+	// prompt's field, a fixed field, the reference pictures' field or another parameter's field, and the reference
+	// pictures' field is neither the prompt's nor a fixed one.
 	fields := map[string]bool{runningHubPromptFieldOf(m.ID): true}
 	for field := range runningHubFixed[m.ID] {
 		fields[field] = true
+	}
+	if reference != "" {
+		if fields[reference] {
+			return errors.New("reference field")
+		}
+		fields[reference] = true
 	}
 	for i := range m.Params {
 		p := &m.Params[i]
@@ -493,8 +503,14 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 			if !a.cfg.mediaProviderConfigured(m.Provider) || !a.mediaEntitled(entitlement, m.ID) {
 				continue
 			}
-			models = append(models, map[string]any{"id": m.ID, "name": m.Name, "label": m.shownLabel(), "vendor": m.Vendor, "kind": m.Kind,
-				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "references": m.References})
+			entry := map[string]any{"id": m.ID, "name": m.Name, "label": m.shownLabel(), "vendor": m.Vendor, "kind": m.Kind,
+				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "references": m.References}
+			// Every picture such a model starts from is a subject reference, a single one included (never a first frame),
+			// so a client says so instead of what a model that starts from one picture does.
+			if m.Provider == mediaProviderRunningHub && runningHubReferenceField[m.ID] != "" {
+				entry["referenceMode"] = "subjects"
+			}
+			models = append(models, entry)
 		}
 	}
 	writeJSON(w, 200, map[string]any{"configured": configured, "available": configured && len(models) > 0, "models": models,

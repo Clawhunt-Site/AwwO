@@ -31,6 +31,8 @@ export interface MediaComposerInfo {
   kind: MediaKind;
   references: number;
   referenceModels: string[];
+  /** Every picture is a subject reference, a single one included (never the video's first frame). */
+  subjects?: boolean;
 }
 
 export function mediaComposerInfo(node: { kind: string; agentKind?: string; model?: string }, choices: ReadonlyArray<NodeModelChoice> | undefined): MediaComposerInfo | undefined {
@@ -38,10 +40,12 @@ export function mediaComposerInfo(node: { kind: string; agentKind?: string; mode
   const kind = mediaKindOf(node.agentKind ?? '');
   if (!kind) return undefined;
   const all = choices ?? [];
+  const current = all.find(choice => choice.key === node.model);
   return {
     kind,
-    references: all.find(choice => choice.key === node.model)?.references ?? 0,
+    references: current?.references ?? 0,
     referenceModels: all.filter(choice => (choice.references ?? 0) > 0).map(choice => choice.label),
+    ...(current?.subjectReferences && (current.references ?? 0) > 0 ? { subjects: true } : {}),
   };
 }
 
@@ -79,7 +83,10 @@ export interface TileComposerProps {
 
 /** The notice under a media node's attachments: which picture is used, or why none is. */
 function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: MediaComposerInfo): string {
-  if (media.references > 0) return t(media.kind === 'model3d' ? 'attach.mediaRef3d' : media.kind === 'video' ? 'attach.mediaRefVideo' : 'attach.mediaRefImage', { count: media.references });
+  if (media.references > 0) {
+    const key = media.kind === 'model3d' ? 'attach.mediaRef3d' : media.kind === 'video' ? (media.subjects ? 'attach.mediaRefSubjects' : 'attach.mediaRefVideo') : 'attach.mediaRefImage';
+    return t(key, { count: media.references });
+  }
   if (media.referenceModels.length) return t('attach.mediaNoRefs', { models: media.referenceModels.join('、') });
   return t('attach.mediaNote');
 }
