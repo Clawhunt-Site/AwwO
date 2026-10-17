@@ -166,7 +166,13 @@ Chromium is BSD-3-Clause, Copyright The Chromium Authors, and bundles
 third-party components under their own licenses, all listed in
 `/usr/share/doc/chromium-common/copyright`), `fonts-dejavu-core` (Bitstream
 Vera license), `fonts-wqy-microhei` (Apache-2.0 or GPL-3+ with the font
-exception) and `procps` (GPL-2+ and LGPL-2+). Preserve the Debian packages'
+exception) and `procps` (GPL-2+ and LGPL-2+), and, for data scripts,
+`python3-numpy` and `python3-pandas` (BSD-3-Clause), `python3-matplotlib`
+(the Matplotlib license, PSF-based; its data package bundles fonts, DejaVu,
+STIX and BaKoMa's Computer Modern, under their own licenses), `python3-openpyxl` (MIT),
+`python3-xlsxwriter` (BSD-2-Clause), `python3-pil` (Pillow, HPND),
+`python3-pip` (MIT) and `curl` (the curl license), with the Debian packages
+they depend on, each under its own license. Preserve the Debian packages'
 copyright files under `/usr/share/doc` and the npm packages' LICENSE, NOTICE
 and ThirdPartyNotices.txt files when distributing the image. These tools run inside the sandbox only and do not
 change AwwO's own license.

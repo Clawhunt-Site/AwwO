@@ -11,7 +11,10 @@ COPY --from=certificates /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt
 # xdg-utils, which bring Mesa and LLVM (about 215 MB) that a headless browser never loads, so a local placeholder
 # package provides those two names. procps: rea needs a procps ps on PATH. Fonts: DejaVu (Latin, Greek, Cyrillic,
 # 3 MB) and WenQuanYi Micro Hei (Chinese, Japanese, Korean, 5 MB) instead of fonts-noto-cjk (91 MB); fontconfig
-# builds the font cache now, so no run writes one.
+# builds the font cache now, so no run writes one. Debian's numpy, pandas, matplotlib, openpyxl, XlsxWriter and Pillow:
+# an ordinary data script (a CSV summed up into a spreadsheet and a chart) needs no install, which would not fit the
+# 128 MiB workspace (2026-10-17: such a task spent 16 calls on pip installs that filled it). pip, for a small extra
+# package in a venv that keeps these (--system-site-packages), and curl, which the instructions name.
 RUN test -s /etc/ssl/certs/ca-certificates.crt \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && mkdir -p /tmp/placeholder/DEBIAN \
@@ -24,7 +27,10 @@ RUN test -s /etc/ssl/certs/ca-certificates.crt \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install -y --no-install-recommends python3 python3-venv git ca-certificates \
        procps chromium-headless-shell fontconfig fonts-dejavu-core fonts-wqy-microhei \
+       python3-pip curl python3-numpy python3-pandas python3-matplotlib python3-openpyxl python3-xlsxwriter python3-pil \
     && rm -rf /var/lib/apt/lists/*
+# matplotlib draws to files (no display), and keeps its font cache in /tmp, out of the workspace and its snapshot.
+ENV MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib
 
 # rea-agents and playwright-core at the exact versions and integrity hashes in tools/package-lock.json. No install
 # script runs: the only one in the tree is frida's (an optional rea dependency for live instrumentation), which would
@@ -40,7 +46,9 @@ COPY tools/awwo-check-page.mjs /opt/awwo/tools/
 RUN chmod 0755 /opt/awwo/tools/awwo-check-page.mjs \
     && ln -s /opt/awwo/tools/awwo-check-page.mjs /usr/local/bin/awwo-check-page \
     && ln -s /opt/awwo/tools/node_modules/.bin/rea /usr/local/bin/rea \
-    && rea --version && awwo-check-page --help > /dev/null && /usr/lib/chromium/chromium-headless-shell --version
+    && rea --version && awwo-check-page --help > /dev/null && /usr/lib/chromium/chromium-headless-shell --version \
+    && python3 -c 'import numpy, pandas, matplotlib, openpyxl, xlsxwriter, PIL' && curl --version > /dev/null \
+    && rm -rf /tmp/matplotlib
 
 # No application credentials, source checkout, Docker client, daemon socket or host volume is embedded.
 # Debian's node user has uid/gid 1000. The broker supplies bounded writable tmpfs mounts at runtime.

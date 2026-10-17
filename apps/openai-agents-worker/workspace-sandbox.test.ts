@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
 import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
-import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities } from './workspace-sandbox.ts';
+import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities, WORKSPACE_SOFTWARE } from './workspace-sandbox.ts';
 
 const config = { dockerExecutable: '/usr/bin/docker', image: 'awwo-workspace@sha256:' + 'a'.repeat(64) };
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
@@ -74,6 +74,16 @@ test('egress and tools configuration is both-or-neither and names only known pro
   const offline = sandboxAbilities(new Set(), false).join(' '), online = sandboxAbilities(new Set(['rea', 'check-page']), true).join(' ');
   assert.ok(offline.includes('no network') && !offline.includes('rea ') && !offline.includes('awwo-check-page'));
   assert.ok(online.includes('HTTPS_PROXY') && !online.includes('no network') && online.includes('rea analyze-javascript-application') && online.includes('window.awwoSelfTest'));
+  // Both name what the image has and how little room an install gets, so a data task uses the installed packages.
+  for (const text of [offline, online]) assert.ok(text.startsWith(WORKSPACE_SOFTWARE) && ['pandas', 'matplotlib', 'openpyxl', '128 MiB'].every(word => text.includes(word)));
+  assert.ok(online.includes('--system-site-packages') && !offline.includes('pip'));
+});
+
+test('the image installs every package the instructions name, in the Dockerfile the image is built from', async () => {
+  const dockerfile = await readFile(new URL('../../deploy/saas/workspace/Dockerfile', import.meta.url), 'utf8');
+  for (const name of ['python3-numpy', 'python3-pandas', 'python3-matplotlib', 'python3-openpyxl', 'python3-xlsxwriter', 'python3-pil', 'python3-pip', 'curl'])
+    assert.match(dockerfile, new RegExp(`\\s${name}\\s`), name);
+  assert.match(dockerfile, /MPLBACKEND=Agg/);
 });
 
 test('model paths are constrained before invoking the trusted helper', () => {
