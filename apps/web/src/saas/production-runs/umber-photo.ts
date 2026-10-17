@@ -8,6 +8,8 @@ const record: ProductionRunRecord = {
   "model": "Claude Opus 4.8",
   "capturedOn": "2026-10-17",
   "seconds": 7623,
+  "runs": 6,
+  "activeSeconds": 5874,
   "completed": 13,
   "total": 13,
   "limits": {
@@ -19,7 +21,40 @@ const record: ProductionRunRecord = {
   },
   "source": {
     "api": "19675fb7b97903be9cd17c922d6854762587c43e",
-    "worker": "e009cb3209d248510e815b02cd6964576efc1c50"
+    "worker": "82c58dbb3b793298b50d60b5a057288ffb3fe822",
+    "runs": [
+      {
+        "api": "bdd631342ffece08604896a194682389a54fb466",
+        "worker": "f0640f571df00c254b60f04e7f4c7e5cb1d013f5",
+        "nodes": [
+          "spec",
+          "core",
+          "shell",
+          "compositor",
+          "view",
+          "selection",
+          "paint",
+          "filters",
+          "panels",
+          "files"
+        ]
+      },
+      {
+        "api": "19675fb7b97903be9cd17c922d6854762587c43e",
+        "worker": "d18a8b8860a547f6fd87d8b8722cd1d5120d3c49",
+        "nodes": [
+          "page",
+          "test"
+        ]
+      },
+      {
+        "api": "19675fb7b97903be9cd17c922d6854762587c43e",
+        "worker": "82c58dbb3b793298b50d60b5a057288ffb3fe822",
+        "nodes": [
+          "review"
+        ]
+      }
+    ]
   },
   "canvasSHA256": "b1fe66b38038b0c757af7d538d4d94b8dd48fb825f23316a0636b2b83c35470d",
   "artifactNodeId": "test",
@@ -345,7 +380,7 @@ const record: ProductionRunRecord = {
       "label": "Spec"
     }
   ],
-  "note": "Run on 2026-10-17 on the live AwwO, in the operator’s own account and workspace, on Claude Opus 4.8, every agent working in its own sandbox computer. The first run of the canvas finished 7 of 13 nodes: two builders (Selection, Panels) used up their 64 model calls and one (Painting) stopped on a model error. Five more runs on the same canvas then ran only what had not finished, keeping what had: in the second the three builders and the assembly finished and the integration tester used up its model calls; the tester’s task was rewritten before each of the next three, it used up its calls again in the third and stopped on a model error after 19 minutes in the fourth, and it finished in the fifth with the task shown here; the sixth ran only the review again, which in the fifth had wrapped its report in a JSON block after a sentence (the worker now reads that). Each node shows its last run, and every node’s text is the canvas a member copies today. The spec, the nine builders and the assembly ran on runtime 2923df74 and API bdd63134, the tester on runtime fc62b065 and API 19675fb7, the review on runtime e009cb32 and API 19675fb7. The time shown runs from the first start to the last finish: the six runs took 1 h 38 min of it. The delivered page is the tester’s, exactly as delivered, with no manual edits.",
+  "note": "Run on 2026-10-17 on the live AwwO, in the operator’s own account and workspace, on Claude Opus 4.8, every agent working in its own sandbox computer. The first run of the canvas finished 7 of 13 nodes: two builders (Selection, Panels) used up their 64 model calls and one (Painting) stopped on a model error. Five more runs on the same canvas then ran only what had not finished, keeping what had: in the second the three builders and the assembly finished and the integration tester used up its model calls; the tester’s task was rewritten before each of the next three, it used up its calls again in the third and stopped on a model error after 19 minutes in the fourth, and it finished in the fifth with the task shown here; the sixth ran only the review again, which in the fifth had wrapped its report in a JSON block after a sentence (the worker now reads that). The spec wrapped its spec the same way in the first run, before that fix, and the builders read it so: it shows here as it was delivered. Each node shows its last run, and every node’s text is the canvas a member copies today. The receipt names the revisions each node ran on; the runtime’s directories on the host are named after the same files’ commits before a rebase (2923df74, fc62b065 and e009cb32). The delivered page is the tester’s, exactly as delivered, with no manual edits.",
   "verification": "Before publishing, the delivered page was opened in Chrome (1440×900 and 1280×720) with every network request blocked and no script errors: it opens on the 1600 × 1000 “Dusk” demo, nine layers (two of them adjustment layers) listed in the layers panel, the image fitted to the stage and 1600 × 1000 px in the status bar. Its self-test passes 61 of its 62 tests and rejects all 18 planted failures, as the tester reported; the one failing test, “panels: bring forward moves layer up”, is the one its report names. Adj in the layers panel adds a Hue/Saturation adjustment layer, and each click on its Hue slider re-colours the whole picture (the cover)."
 };
 export default record;

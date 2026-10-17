@@ -37,6 +37,8 @@ const RENDERING = 'Rendering', FRONT_END = 'Front end', PRODUCT = 'Product';
 const REVIEW = 'Review', BACKEND = 'Backend';
 /** The media nodes of a stage, shown as one slot of the team: they generate pictures and clips and are not agents. */
 export const MEDIA_ROLE = 'Media';
+/** A flagship's assembly: a stage member that makes the page from the modules with no model, so not an agent. */
+export const ASSEMBLY_ROLE = 'Assembly';
 const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
@@ -46,7 +48,7 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     id: 'umber-photo', kind: 'product', recording: true, footage: 'umber-real',
     title: 'Umber',
     brief: 'An open-source photo editor in one web page: layers with masks and 27 blend modes, adjustment layers, selection, painting and type tools, live filters and a history, built in a clean room and testing itself.',
-    stages: [['Spec'], ['Kernel', 'Interface', 'Compositing', 'Viewport', 'Selection', 'Painting', 'Filters', 'Panels', 'Files'], ['Assembly'], ['Test'], [REVIEW]],
+    stages: [['Spec'], ['Kernel', 'Interface', 'Compositing', 'Viewport', 'Selection', 'Painting', 'Filters', 'Panels', 'Files'], [ASSEMBLY_ROLE], ['Test'], [REVIEW]],
     deliverable: 'A layered photo editor in the browser',
   },
   {

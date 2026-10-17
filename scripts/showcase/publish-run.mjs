@@ -3,7 +3,9 @@
 // graph run with the canvas's own contract parser; nothing is rewritten except identifier redaction.
 //   node scripts/showcase/publish-run.mjs <raw-record.json> <notes.json>
 // notes.json: { "note": "…", "verification": "…", "edition": "…" (English: every case is English, in both interface languages),
-//   "source": { "api": "<commit>", "worker": "<commit>" }, "thinking": false, "model": "<label shown>" (optional),
+//   "source": { "api": "<commit>", "worker": "<commit>", "runs": [{ "api", "worker", "nodes": [<node ids>] }, …] (optional:
+//   a canvas that ran again between releases, which nodes ran on which, in order; api and worker are the last run's) },
+//   "thinking": false, "model": "<label shown>" (optional),
 //   "limits": { "contextWindow": n, "maxOutputTokens": n, "modelCallsPerNode": n, "concurrency": n } } — what happened in
 // the run, what was checked in a browser before publishing, where it ran, the revisions that ran, whether thinking was
 // off, and the execution settings it had. All required except the model label.
@@ -23,7 +25,8 @@ for (const key of ['note', 'verification', 'edition']) if (typeof notes[key] !==
 // Every case runs in English (owner 2026-10-14); a run in any other language is never published.
 if (raw.locale !== 'en') throw new Error(`${raw.caseId}: the run's locale is ${raw.locale}, not en; run the case in English`);
 // The revisions that ran and whether the model's thinking was off are part of the receipt, never assumed.
-if (!/^[0-9a-f]{8,40}$/.test(notes.source?.api || '') || !/^[0-9a-f]{8,40}$/.test(notes.source?.worker || '') || typeof notes.thinking !== 'boolean')
+const COMMIT = /^[0-9a-f]{8,40}$/;
+if (!COMMIT.test(notes.source?.api || '') || !COMMIT.test(notes.source?.worker || '') || typeof notes.thinking !== 'boolean')
   throw new Error('notes.source.api, notes.source.worker (commit hashes) and notes.thinking (boolean) are required');
 // The execution settings the run actually had (the model's own limits on the runtime that ran it), never a default.
 const LIMIT_KEYS = ['contextWindow', 'maxOutputTokens', 'modelCallsPerNode', 'concurrency'];
@@ -37,6 +40,14 @@ const { PRODUCTION_WORKFLOWS, createOfficialDocument, canonicalCanvasText, parse
 
 const workflow = PRODUCTION_WORKFLOWS[raw.caseId];
 if (!workflow) throw new Error(`Unknown case ${raw.caseId}`);
+// Which nodes ran on which revisions, when they were more than one: every node exactly once, the last entry the run's own.
+if (notes.source.runs !== undefined) {
+  const runs = notes.source.runs, named = Array.isArray(runs) ? runs.flatMap(entry => entry?.nodes ?? []) : [];
+  if (!Array.isArray(runs) || runs.length < 2 || runs.some(entry => !COMMIT.test(entry?.api || '') || !COMMIT.test(entry?.worker || '') || !entry.nodes?.length)
+    || named.length !== workflow.nodes.length || new Set(named).size !== named.length || named.some(id => !workflow.nodes.some(node => node.id === id))
+    || runs.at(-1).api !== notes.source.api || runs.at(-1).worker !== notes.source.worker)
+    throw new Error('notes.source.runs must name every node once, on two or more revisions, the last one source.api and source.worker');
+}
 // createOfficialDocument mints the agents first, then the case's image, video and 3D model nodes (officialMedia.ts).
 const mediaSpecs = workflow.media ?? [];
 if (mediaSpecs.some(spec => !['image', 'video', 'model3d'].includes(spec.kind))) throw new Error(`${raw.caseId}: only image, video and 3D model media nodes are published`);
@@ -77,9 +88,10 @@ const usage = item => {
   return Object.keys(tokens).length ? tokens : undefined;
 };
 // A node's tokens over all its model calls: one call for most nodes, dozens for one that worked in a sandbox computer.
+// A total is published only when every call reported its usage, never a partial sum.
 const totalUsage = items => {
   const counted = items.map(usage).filter(Boolean);
-  if (!counted.length) return undefined;
+  if (!counted.length || counted.length !== items.length) return undefined;
   const sum = key => counted.every(value => value[key] === undefined) ? undefined : counted.reduce((total, value) => total + (value[key] ?? 0), 0);
   const input = sum('input'), output = sum('output');
   return { ...(input !== undefined ? { input } : {}), ...(output !== undefined ? { output } : {}) };
@@ -102,7 +114,13 @@ const nodes = workflow.nodes.map((spec, index) => {
       const named = /^awwo-file:([A-Za-z0-9_-]+)$/.exec(JSON.parse(state.output || '{}').file || '')?.[1];
       const stored = (raw.files || []).find(value => value.nodeId === document.id && value.id === named);
       if (!stored) throw new Error(`${spec.id}: the run record has no stored file ${named} for the assembled page`);
-      file = { name: stored.name, bytes: stored.size ?? fs.statSync(path.join(STORED, stored.file)).size };
+      // The bytes on disk must be that file's: a record whose files share a name on disk (saved before 2026-10-17 12:40)
+      // is fetched again first (refetch_files.py), which names each by its artifact id and records its size and sha256.
+      const bytes = fs.readFileSync(path.join(STORED, stored.file));
+      if ((raw.files || []).some(value => value !== stored && value.file === stored.file) || !/^[0-9a-f]{64}$/.test(stored.sha256 || '')
+        || crypto.createHash('sha256').update(bytes).digest('hex') !== stored.sha256 || bytes.length !== stored.size)
+        throw new Error(`${spec.id}: the stored file ${stored.file} is not provably the artifact ${named}; fetch the run's files again`);
+      file = { name: stored.name, bytes: bytes.length };
     }
   } else if (state.state === 'done' && state.output) {
     const parsed = parseContractOutput(contract, state.output);
@@ -139,11 +157,25 @@ const media = mediaSpecs.map((spec, index) => {
     ...(state.detail ? { detail: redact(String(state.detail)) } : {}) };
 });
 const catalog = raw.catalog?.runtimes?.find(entry => entry.id === runtime);
+// A canvas that ran again for what had not finished: the runs and how long they took, without the time between them.
+// The first run's span is in its own record, which the retries' record sits beside (<stem>-<stamp>.json).
+const retries = Array.isArray(raw.retries) ? raw.retries : [];
+let activeSeconds;
+if (retries.length) {
+  const firstFile = path.resolve(rawFile).replace(/-retry\d+\.json$/, '.json');
+  const first = JSON.parse(fs.readFileSync(firstFile, 'utf8'));
+  if (firstFile === path.resolve(rawFile) || first.graph?.createdAt !== raw.graph.createdAt || first.retries?.length)
+    throw new Error(`${firstFile} is not the first run of this record`);
+  const spans = [seconds(first.graph.createdAt, first.graph.updatedAt), ...retries.map(entry => seconds(entry.startedAt, entry.finishedAt))];
+  if (spans.some(value => value === undefined)) throw new Error('a run of this record has no start or end time');
+  activeSeconds = spans.reduce((sum, value) => sum + value, 0);
+}
 const record = {
   caseId: raw.caseId,
   edition: notes.edition,
   runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
-  seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
+  seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), ...(retries.length ? { runs: retries.length + 1, activeSeconds } : {}),
+  completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
   limits: { contextWindow: notes.limits.contextWindow, maxOutputTokens: notes.limits.maxOutputTokens, modelCallsPerNode: notes.limits.modelCallsPerNode,
     concurrency: notes.limits.concurrency, thinking: notes.thinking },
   source: notes.source,

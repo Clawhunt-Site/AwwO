@@ -11,6 +11,7 @@
 .official-copy-model select:focus-visible,.official-copy-setup button:focus-visible { outline:2px solid var(--saas-accent,#347457); outline-offset:3px; }
 .official-copy-selection { display:flex; flex-direction:column; gap:5px; border-left:3px solid var(--saas-accent,#347457); padding:3px 12px; font-size:12px; }
 .official-copy-selection span { overflow-wrap:anywhere; color:var(--saas-muted,#667a6d); }
+.official-copy-selection small { color:var(--saas-muted,#667a6d); font-size:11.5px; line-height:1.5; }
 .official-copy-catalog { display:flex; align-items:start; gap:12px; justify-content:space-between; color:var(--saas-muted,#667a6d); }
 .official-copy-catalog p { font-size:12px; }
 .official-copy-catalog button { flex-shrink:0; }

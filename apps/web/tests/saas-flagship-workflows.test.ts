@@ -5,7 +5,9 @@ import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { assembleTemplate, templateIssues } from '../src/canvas/assembleNode';
 import { SANDBOX_RUNTIME } from '../src/canvas/nodeRuntime';
-import type { AssembleNode, SessionNode } from '../src/canvas/canvasDoc';
+import { sanitizeDocument, type AssembleNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { reconcileEdges } from '../src/canvas/ports';
+import { createOfficialCopyDocument } from '../src/saas/examples/OfficialCopySetup';
 
 const FLAGSHIPS = Object.values(FLAGSHIP_WORKFLOWS);
 
@@ -78,6 +80,7 @@ it('mints a fresh canvas for every copy: new IDs, no binding, model, history or 
     initial.binding = { companyId: 'private-tenant', agentId: 'private-agent', agentName: 'Private agent' };
     initial.model = 'private-model'; initial.issueId = 'private-conversation'; initial.preview = 'Private transcript';
     initial.lastOutput = { text: 'Private historical output', source: 'run', at: 1 };
+    initial.contract!.inputs[0].value = 'Private input';
     initial.contract!.outputs[0].value = 'Private published value';
     first.edges[0].toPort = 'in:mutated';
     const second = createOfficialDocument(item);
@@ -85,13 +88,40 @@ it('mints a fresh canvas for every copy: new IDs, no binding, model, history or 
     expect(second.nodes.every(node => !firstIDs.has(node.id)), item.id).toBe(true);
     for (const node of second.nodes) {
       if (node.kind !== 'session') continue;
-      expect(node.binding).toBeNull(); expect(node.model).toBe(''); expect(node.effort).toBe('');
+      expect(node.binding).toBeNull(); expect(node.bindAttempt).toBeNull(); expect(node.agentRef).toBeUndefined();
+      expect(node.model).toBe(''); expect(node.effort).toBe('');
       expect(node.issueId).toBeNull(); expect(node.preview).toBe(''); expect(node.lastOutput).toBeUndefined();
+      expect(node.threads).toBeUndefined(); expect(node.activeThreadId).toBeUndefined();
       expect(node.runtime, `${item.id}/${node.title}`).toBe(SANDBOX_RUNTIME);
       expect(node.contract!.outputs.every(field => field.value === '')).toBe(true);
     }
     expect(JSON.stringify(second)).not.toContain('Private');
     expect(JSON.stringify(item)).toBe(before);
+    expect(reconcileEdges(second.nodes, second.edges)).toEqual(second.edges);
+  }
+});
+
+it('saves and reloads each flagship canvas unchanged, its assembly and sandbox runtimes included', () => {
+  for (const item of FLAGSHIPS) {
+    const document = createOfficialDocument(item);
+    const restored = sanitizeDocument(JSON.parse(JSON.stringify(document)));
+    document.nodes.forEach((node, index) => expect(restored.nodes[index], `${item.id}/${index}`).toMatchObject(node));
+    expect(restored.edges).toEqual(document.edges);
+    expect(sanitizeDocument(restored)).toEqual(restored);
+  }
+});
+
+it('keeps every agent in its sandbox computer when a copy is given a model: that model where the sandbox offers it', () => {
+  // The copy dialog lists a model once, on the runtime AwwO runs it on, and says when the sandbox offers it too.
+  for (const item of FLAGSHIPS) {
+    const offered = createOfficialCopyDocument(item, { runtime: 'openai-agents', model: 'shared-model', label: 'Shared', sandbox: true });
+    const elsewhere = createOfficialCopyDocument(item, { runtime: 'openai-agents', model: 'gate-only', label: 'Gate only' });
+    for (const [document, model] of [[offered, 'shared-model'], [elsewhere, '']] as const) {
+      const agents = document.nodes.filter((node): node is SessionNode => node.kind === 'session');
+      expect(agents, item.id).toHaveLength(item.nodes.filter(node => !node.assemble).length);
+      for (const node of agents) expect([node.runtime, node.model, node.effort], `${item.id}/${node.title}`).toEqual([SANDBOX_RUNTIME, model, '']);
+    }
+    expect(canonicalCanvasText(elsewhere)).toBe(canonicalCanvasText(createOfficialDocument(item)));
   }
 });
 

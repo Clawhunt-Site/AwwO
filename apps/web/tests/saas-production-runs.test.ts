@@ -100,6 +100,19 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
     expect(record.completed, record.caseId).toBe(record.nodes.filter(node => node.status === 'done').length);
     expect(record.capturedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(record.seconds).toBeGreaterThan(0);
+    // A canvas that ran again: its runs, and how long they took, which is never more than from the first start to the
+    // last finish; its receipt names each node's revisions once, the last run's last.
+    if (record.runs === undefined) expect(record.activeSeconds, record.caseId).toBeUndefined();
+    else {
+      expect(record.runs, record.caseId).toBeGreaterThan(1);
+      expect(record.activeSeconds, record.caseId).toBeGreaterThan(0);
+      expect(record.activeSeconds!, record.caseId).toBeLessThanOrEqual(record.seconds);
+    }
+    if (record.source.runs) {
+      expect(record.source.runs.flatMap(entry => entry.nodes).sort(), record.caseId).toEqual(record.nodes.map(node => node.id).sort());
+      expect(record.source.runs.at(-1), record.caseId).toMatchObject({ api: record.source.api, worker: record.source.worker });
+      for (const entry of record.source.runs) expect(`${entry.api} ${entry.worker}`, record.caseId).toMatch(/^[0-9a-f]{8,40} [0-9a-f]{8,40}$/);
+    }
     // English, as every case is, down to what each agent delivered.
     for (const text of [record.edition, record.note, record.verification]) {
       expect(text.trim(), record.caseId).not.toBe('');

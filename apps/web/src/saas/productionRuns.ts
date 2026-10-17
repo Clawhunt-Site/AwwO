@@ -52,13 +52,20 @@ export interface ProductionRunRecord {
   readonly model: string;
   /** YYYY-MM-DD, UTC. */
   readonly capturedOn: string;
-  /** Wall time of the whole graph run. */
+  /** Wall time of the whole graph run: from the first run's start to the last one's end. */
   readonly seconds: number;
+  /** A canvas that ran again for what had not finished: how many graph runs there were (more than one), and how long
+   * they took, without the time between them. */
+  readonly runs?: number;
+  readonly activeSeconds?: number;
   readonly completed: number;
   readonly total: number;
   /** `thinking: false` when the runtime switched the model's hidden reasoning off. */
   readonly limits: { readonly contextWindow: number; readonly maxOutputTokens: number; readonly modelCallsPerNode: number; readonly concurrency: number; readonly thinking: boolean };
-  readonly source: { readonly api: string; readonly worker: string };
+  /** The revisions the run ran on. When its nodes ran on more than one (a canvas that ran again between releases),
+   * `runs` says which nodes ran on which, in order; `api` and `worker` are then the last run's. */
+  readonly source: { readonly api: string; readonly worker: string;
+    readonly runs?: ReadonlyArray<{ readonly api: string; readonly worker: string; readonly nodes: ReadonlyArray<string> }> };
   /** SHA-256 of the canvas text the run ran with (productionCanvasText.ts). */
   readonly canvasSHA256: string;
   readonly artifactNodeId?: string;

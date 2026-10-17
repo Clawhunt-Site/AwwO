@@ -4,10 +4,11 @@ import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus 
 import type { CanvasDocument } from '../../canvas/canvasDoc';
 import { mediaKindOf } from '../../canvas/mediaCatalog';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
-import { automaticEntries } from '../../canvas/nodeRuntime';
+import { automaticEntries, SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
 import './official-copy-setup.css';
 
-export type OfficialCopyModel = { runtime: string; model: string; label: string };
+/** `sandbox`: the sandbox computer offers the model too, so the agents of a canvas that works there take it with them. */
+export type OfficialCopyModel = { runtime: string; model: string; label: string; sandbox?: true };
 const modelKey = (value: OfficialCopyModel) => JSON.stringify([value.runtime, value.model]);
 
 /** The homepage has no active canvas bridge. Read this tenant directly and reuse
@@ -33,19 +34,27 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
         seen.add(key);
         return value;
       }));
-    // Each model once, on the runtime AwwO runs it on (nodeRuntime.ts): a member picks a model, never a runtime.
-    return automaticEntries(offered.map(value => ({ ...value, available: true }))).map(({ available: _available, ...value }) => value);
+    // Each model once, on the runtime AwwO runs it on (nodeRuntime.ts): a member picks a model, never a runtime. A model
+    // the sandbox computer offers too says so, for the agents that stay there (a flagship's).
+    const sandbox = new Set(offered.filter(value => value.runtime === SANDBOX_RUNTIME).map(value => value.model));
+    return automaticEntries(offered.map(value => ({ ...value, available: true }))).map(({ available: _available, ...value }) =>
+      sandbox.has(value.model) ? { ...value, sandbox: true as const } : value);
   } catch { throw invalid(); }
 }
 
 /** Apply only an explicit, validated choice to a freshly minted copy. The source
  * compiler and download/export path continue producing clean, unbound drafts. An image, video or 3D node keeps the
- * media model the case chose: the agent model a member picks is not one that generates pictures. */
+ * media model the case chose: the agent model a member picks is not one that generates pictures. An agent that works in
+ * its own sandbox computer (a flagship's: its task runs commands, checks and publishes files there) stays in it, and takes
+ * the chosen model when the sandbox offers it, else the sandbox's own default model. */
 export function createOfficialCopyDocument(item: OfficialWorkflow, model: OfficialCopyModel | null): CanvasDocument {
   const document = createOfficialDocument(item);
   if (!model) return document;
-  return { ...document, nodes: document.nodes.map(node => node.kind === 'session' && !mediaKindOf(node.agentKind)
-    ? { ...node, runtime: model.runtime, model: model.model, effort: '' } : node) };
+  return { ...document, nodes: document.nodes.map(node => {
+    if (node.kind !== 'session' || mediaKindOf(node.agentKind)) return node;
+    if (node.runtime === SANDBOX_RUNTIME) return { ...node, model: model.sandbox ? model.model : node.model, effort: '' };
+    return { ...node, runtime: model.runtime, model: model.model, effort: '' };
+  }) };
 }
 
 /** A production case's recorded run, whose deliveries the copy carries (productionCopy.ts). */
@@ -83,6 +92,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     return () => controller.abort();
   }, [tenantId, revision]);
   const chosen = models.find(model => modelKey(model) === selection);
+  const sandboxed = item.nodes.some(node => node.sandbox);
   const locked = busy || checking;
   const invalidChoice = selection !== '' && (!chosen || loading || catalogError);
   const close = () => { if (!busy && !checking && !submitting.current) onClose(); };
@@ -119,7 +129,10 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
           {models.map(model => <option key={modelKey(model)} value={modelKey(model)}>{model.label}</option>)}
         </select>
       </label>
-      {chosen && <div className="official-copy-selection"><strong>Applies to every new node</strong><span>{chosen.label}</span></div>}
+      {chosen && <div className="official-copy-selection"><strong>Applies to every new node</strong><span>{chosen.label}</span>
+        {sandboxed && <small>{chosen.sandbox
+          ? 'Its agents keep working in their sandbox computers, on this model.'
+          : 'This model does not run in a sandbox computer, so its agents keep working there on the sandbox’s own model.'}</small>}</div>}
       <div className="official-copy-catalog" aria-live="polite">
         {loading ? <p role="status">Loading models for this workspace…</p>
           : catalogError ? <p role="alert">Could not load the model catalog. Refresh it, or copy an unconfigured draft.</p>

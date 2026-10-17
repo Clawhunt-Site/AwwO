@@ -163,7 +163,8 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   return <section className={`production-made${focused ? ' is-result-focused' : ''}`} lang="en" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading">
       <div><span className="production-eyebrow"><span />HOW IT WAS MADE</span>
-        <h3 id={`${id}-title`}>{`${record.nodes.filter(value => value.kind !== 'assemble').length} agents, ${columns.length} stages, ${formatDuration(record.seconds, 'en')} end to end`}</h3>
+        <h3 id={`${id}-title`}>{`${record.nodes.filter(value => value.kind !== 'assemble').length} agents, ${columns.length} stages, ${record.runs && record.activeSeconds !== undefined
+          ? `${formatDuration(record.activeSeconds, 'en')} in ${record.runs} runs` : `${formatDuration(record.seconds, 'en')} end to end`}`}</h3>
         <p className="production-made-receipt"><span className="production-label is-real">Real run</span>
           <span>{record.model}</span><span>{record.capturedOn}</span><span>{`${nodesDone}/${nodeCount} nodes done`}</span></p></div>
       {reuse}
@@ -208,8 +209,11 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
       <details><summary>Run receipt</summary><dl>
         <dt>Environment</dt><dd>{record.edition}</dd>
         <dt>Runtime and model</dt><dd>{record.runtime} · {record.model}</dd>
-        <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode} model call${record.limits.modelCallsPerNode === 1 ? '' : 's'} per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd>
-        <dt>Release</dt><dd>API {record.source.api} · runtime {record.source.worker}</dd>
+        <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode === 1 ? '1 model call' : `up to ${record.limits.modelCallsPerNode} model calls`} per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd>
+        <dt>Release</dt><dd>{record.source.runs && record.source.runs.length > 1
+          ? record.source.runs.map(entry => `API ${entry.api.slice(0, 12)} · runtime ${entry.worker.slice(0, 12)} (${entry.nodes.map(title).join(', ')})`).join('; then ')
+          : `API ${record.source.api} · runtime ${record.source.worker}`}</dd>
+        {record.runs && record.activeSeconds !== undefined && <><dt>Time</dt><dd>{`${record.runs} runs took ${formatDuration(record.activeSeconds, 'en')}, ${formatDuration(record.seconds, 'en')} from the first start to the last finish`}</dd></>}
         {record.artifactSHA256 && <><dt>Result checksum</dt><dd><code>SHA-256 {record.artifactSHA256}</code></dd></>}
       </dl></details>
     </footer>

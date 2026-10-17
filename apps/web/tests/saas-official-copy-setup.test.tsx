@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { OfficialCopySetup, createOfficialCopyDocument, readOfficialCopyModels } from '../src/saas/examples/OfficialCopySetup';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { FLAGSHIP_WORKFLOWS } from '../src/saas/flagshipWorkflows';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { Identity, Tenant } from '../src/saas/api';
@@ -110,6 +111,20 @@ it('rejects duplicate models while excluding unavailable runtimes and preserves 
   // With both runtimes ready the model is offered once, on openai-agents.
   server();expect(await readOfficialCopyModels(tenant.id)).toEqual([{runtime:'openai-agents',model:'shared-model',label:'Python catalog model'}]);
   server(()=>json({...catalog,models:[...catalog.models,catalog.models[0]]}));await expect(readOfficialCopyModels(tenant.id)).rejects.toThrow('Invalid runtime model catalog');
+});
+
+it('says which models the sandbox computer offers too, and tells a flagship copier where its agents keep working',async()=>{
+  const withSandbox={...catalog,runtimes:[...catalog.runtimes,{id:'sandbox',name:'Sandbox computer',available:true,configured:true,tools:[]}],
+    models:[...catalog.models,{id:'shared-model',name:'Sandbox model',runtime:'sandbox'}]};
+  server(()=>json(withSandbox));
+  expect(await readOfficialCopyModels(tenant.id)).toEqual([{runtime:'openai-agents',model:'shared-model',label:'Python catalog model',sandbox:true}]);
+  setup({item:FLAGSHIP_WORKFLOWS['umber-photo']});await choose();
+  expect(screen.getByText('Its agents keep working in their sandbox computers, on this model.')).toBeVisible();
+  cleanup();server();setup({item:FLAGSHIP_WORKFLOWS['umber-photo']});await choose();
+  expect(screen.getByText(/does not run in a sandbox computer, so its agents keep working there/)).toBeVisible();
+  // A case without sandbox agents says nothing about it.
+  cleanup();server(()=>json(withSandbox));setup();await choose();
+  expect(screen.queryByText(/sandbox computer/)).toBeNull();
 });
 
 it('locks duplicate confirmation and cancellation until model validation and creation finish',async()=>{
