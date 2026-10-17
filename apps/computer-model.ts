@@ -14,9 +14,14 @@ type Entry = { handle: { cancel(): void }; cancelRequested: boolean; released: P
  *  `reason` names what failed. Pi makes the call in an isolated child (pi-worker/bedrock-call.mjs), as its Bedrock runs. */
 export type BedrockCall = (model: Profile, body: ObjectValue, signal: AbortSignal) => Promise<ObjectValue>;
 const MAX_BYTES = 524_288;
-// The bridge's streamed answer to one call: SSE framing costs far more than the text, so this is well above the 2 MiB
-// the API takes back from a worker; the completion gathered from it is what has to fit there.
+// A streamed answer to one call (the Bedrock bridge's, or LLM Gate's): SSE framing costs far more than the text, so this
+// is well above the 2 MiB the API takes back from a worker; the completion gathered from it is what has to fit there.
 const MAX_STREAM_BYTES = 16 * 1024 * 1024;
+/** The longest line a streamed answer may send (as the Pi worker's usage reader allows): a frame, not a whole answer. */
+const MAX_STREAM_LINE = 1_048_576;
+/** LLM Gate's origin (the workers' DEFAULTS.llmgate): a Gate profile may carry another provider label (older configs
+ *  name it "openai"), and only the URL chooses the destination. */
+const LLM_GATE_ORIGIN = 'https://api.clawhunt.site';
 const object = (v: unknown): v is ObjectValue => !!v && typeof v === 'object' && !Array.isArray(v);
 const identifier = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 const toolName = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
@@ -96,7 +101,10 @@ export const COMPUTER_COMPLETION_OPTIONS: readonly string[] = Object.freeze(['th
  *  `maxTokens` lowers the profile's output limit for this call, never raises it. */
 export interface ComputerCallOptions { thinking?: boolean; maxTokens?: number }
 
-export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue } {
+/** One provider call. `stream` says the call is sent streaming and its answer is to be gathered (gatherChatStream): a
+ *  Chat Completions call through LLM Gate, where Cloudflare cuts a response that sends nothing for about 100 s and a call
+ *  that is not streamed sends nothing until its last token. Every other call is sent whole, as before. */
+export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue; stream?: boolean } {
   const base = model.baseURL.replace(/\/+$/, '');
   const common = { model: model.model, stream: false };
   const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
@@ -140,8 +148,11 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   if (model.protocol !== 'chat_completions') return fail();
   // Personal OpenAI-compatible providers are normalized to "openai" during
   // binding. Match the existing Agents wire by checking Google's actual origin.
-  const google = new URL(base).origin === 'https://generativelanguage.googleapis.com';
-  return { url: `${base}/chat/completions`, headers, body: { ...common, messages: thread.map(({ reasoning_details: _, ...msg }) => msg),
+  const origin = new URL(base).origin;
+  const google = origin === 'https://generativelanguage.googleapis.com';
+  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN;
+  return { url: `${base}/chat/completions`, headers, ...(stream ? { stream } : {}), body: { ...common,
+    ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}), messages: thread.map(({ reasoning_details: _, ...msg }) => msg),
     ...(model.provider === 'openai' && !google ? { max_completion_tokens: maxTokens, store: false } : { max_tokens: maxTokens }),
     ...(effort && effort !== 'none' ? { reasoning_effort: effort } : {}),
     ...(options.thinking === false && model.provider !== 'openai' && !google ? { chat_template_kwargs: { enable_thinking: false } } : {}),
@@ -241,39 +252,69 @@ export function bedrockComputerRequest(completion: Completion, model: Profile, o
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
-/** Gathers a streamed Chat Completions answer (`chat.completion.chunk` SSE) into the one non-streaming answer
- *  computerCompletionResponse reads: the text, each tool call joined by its index, the finish reason and the usage.
- *  An error frame, a malformed chunk, or a stream that ends without a finish reason is a failed call; its `detail`
- *  says which (`error:<status>:<type>`, as the bridge names an AWS failure after the stream began, or `error:<type>`
- *  for its own refusal of what the model sent; `shape`, `content`, `tool-calls`, `size`, `truncated`). */
+/** Gathers a streamed Chat Completions answer (`chat.completion.chunk` SSE: the Bedrock bridge's, or LLM Gate's) into
+ *  the one non-streaming answer computerCompletionResponse reads: the text, each tool call joined by its index (or, sent
+ *  whole without one, by its id), the finish reason and the usage. Hidden reasoning (`reasoning_content` and the like),
+ *  comments and empty data lines (keep-alives) are passed over and never forwarded; reading stops at `[DONE]`, which a
+ *  gateway may send and then hold the connection open.
+ *  An error frame (an `error`, or a `code` or `message` in place of choices), a malformed chunk, or a stream without a
+ *  finish reason is a failed call; its `detail` says which: `error:<status>:<type>` (as the bridge names an AWS failure
+ *  after the stream began), `error:<type>` (the bridge's own refusal of what the model sent, a gateway's error frame),
+ *  `shape`, `content`, `tool-calls`, `size`, `truncated` (it ended without a finish reason) or `unfinished` (`[DONE]`
+ *  came without one). */
 export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promise<ObjectValue> {
+  type Call = { id: string; name: string; arguments: string };
   const decoder = new TextDecoder();
-  const calls: { id: string; name: string; arguments: string }[] = [];
-  let size = 0, pending = '', text = '', finish: string | undefined, usage: ObjectValue | undefined, done = false;
+  const calls: Call[] = [];
+  let size = 0, open: string[] = [], opened = 0, text = '', refused = '', finish: string | undefined, usage: ObjectValue | undefined, done = false;
+  const kind = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value);
+  // A call's id and name are said once: an empty one says nothing, a different one breaks the call.
+  const settle = (slot: Call, key: 'id' | 'name', value: unknown) => {
+    if (typeof value !== 'string' || !value) return;
+    if (slot[key] && slot[key] !== value) return fail('tool-calls');
+    slot[key] = value;
+  };
   const take = (line: string) => {
     if (!line.startsWith('data:')) return;
     const data = line.slice(5).trim();
+    if (!data) return;
     if (data === '[DONE]') { done = true; return; }
-    if (done) return fail('shape');
     const chunk = jsonObject(data, 'shape');
-    if (chunk.error !== undefined) {
-      const error = object(chunk.error) ? chunk.error : {};
-      return fail(['error', ...(Number.isInteger(error.status) ? [error.status] : []),
-        ...(typeof error.type === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.type) ? [error.type] : [])].join(':'));
+    if (chunk.error != null || (chunk.choices == null && (chunk.code != null || chunk.message != null))) {
+      const error = object(chunk.error) ? chunk.error : chunk.error != null ? {} : { code: chunk.code };
+      const type = kind(error.type) ? error.type : kind(error.code) ? error.code : undefined;
+      // `frame` keeps the frame's own code and type, as labels only, for a provider's refusal (a gateway's frame).
+      throw Object.assign(new Error('Invalid model protocol'), {
+        detail: ['error', ...(Number.isInteger(error.status) ? [error.status] : []), ...(type ? [type] : [])].join(':'),
+        frame: { ...(kind(error.code) ? { code: error.code } : {}), ...(kind(error.type) ? { type: error.type } : {}) } });
     }
     if (object(chunk.usage)) usage = chunk.usage;
-    if (chunk.choices === undefined) return;
+    if (chunk.choices == null) return;
     if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail('shape');
     for (const choice of chunk.choices) {
       const delta = object(choice?.delta) ? choice.delta : {};
       if (delta.content != null) { if (typeof delta.content !== 'string') return fail('content'); text += delta.content; }
+      // A refusal (OpenAI's) is kept as the answer read whole has it, for computerCompletionResponse to refuse; never forwarded.
+      if (delta.refusal != null) { if (typeof delta.refusal !== 'string') return fail('content'); refused += delta.refusal; }
       if (delta.tool_calls !== undefined) {
         if (!Array.isArray(delta.tool_calls)) return fail('tool-calls');
         for (const part of delta.tool_calls) {
-          if (!object(part) || !Number.isInteger(part.index) || part.index < 0 || part.index >= 32) return fail('tool-calls');
-          const slot = calls[part.index] ??= { id: '', name: '', arguments: '' };
-          if (typeof part.id === 'string') slot.id = part.id;
-          if (typeof part.function?.name === 'string') slot.name = part.function.name;
+          if (!object(part)) return fail('tool-calls');
+          let slot: Call | undefined;
+          if (part.index !== undefined) {
+            if (!Number.isInteger(part.index) || part.index < 0 || part.index >= 32) return fail('tool-calls');
+            slot = calls[part.index] ??= { id: '', name: '', arguments: '' };
+          } else {
+            // Sent whole without an index (as some compatible endpoints do): its id says which call it is.
+            if (typeof part.id !== 'string' || !part.id) return fail('tool-calls');
+            slot = calls.find(known => known?.id === part.id);
+            if (!slot) {
+              if (calls.length >= 32) return fail('tool-calls');
+              slot = calls[calls.length] = { id: '', name: '', arguments: '' };
+            }
+          }
+          settle(slot, 'id', part.id);
+          settle(slot, 'name', part.function?.name);
           if (typeof part.function?.arguments === 'string') slot.arguments += part.function.arguments;
         }
       }
@@ -281,21 +322,41 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
       if (typeof choice?.finish_reason === 'string' && choice.finish_reason) finish = choice.finish_reason;
     }
   };
-  for await (const chunk of source) {
-    size += chunk.length;
-    if (size > MAX_STREAM_BYTES) return fail('size');
-    pending += decoder.decode(chunk, { stream: true });
-    let end: number;
-    while ((end = pending.indexOf('\n')) >= 0) { take(pending.slice(0, end).replace(/\r$/, '')); pending = pending.slice(end + 1); }
+  try {
+    read: for await (const chunk of source) {
+      size += chunk.length;
+      if (size > MAX_STREAM_BYTES) return fail('size');
+      // The line still open is kept in pieces and joined once it ends, and each chunk is searched once: a stream that
+      // sends a long run without a line end costs one pass over it, never one per chunk, and no line may pass 1 MiB.
+      const piece = decoder.decode(chunk, { stream: true });
+      let start = 0;
+      for (let end = piece.indexOf('\n'); end >= 0; end = piece.indexOf('\n', start)) {
+        open.push(piece.slice(start, end));
+        take(open.join('').replace(/\r$/, ''));
+        open = []; opened = 0;
+        start = end + 1;
+        if (done) break read;
+      }
+      if (start < piece.length) {
+        open.push(piece.slice(start));
+        if ((opened += piece.length - start) > MAX_STREAM_LINE) return fail('size');
+      }
+    }
+  } catch (error) {
+    // The connection breaking after the answer's finish reason, with no line half read, takes only what comes after
+    // the answer (its usage, [DONE]): the answer stands. What the stream said wrong always fails it.
+    if (typeof (error as ObjectValue | undefined)?.detail === 'string' || !finish || open.length) throw error;
   }
-  pending += decoder.decode();
-  if (pending.trim()) take(pending.trim());
-  if (!finish) return fail('truncated');
+  if (!done) {
+    const rest = open.join('') + decoder.decode();
+    if (rest.trim()) take(rest.trim());
+  }
+  if (!finish) return fail(done ? 'unfinished' : 'truncated');
   // A call whose index skipped another leaves a hole, which some() would pass over.
   if ([...calls].some(call => call === undefined)) return fail('tool-calls');
   const toolCalls = calls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
-  return { choices: [{ index: 0, message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }],
-    ...(usage ? { usage } : {}) };
+  return { choices: [{ index: 0, message: { role: 'assistant', content: text || null, ...(refused ? { refusal: refused } : {}),
+    ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }], ...(usage ? { usage } : {}) };
 }
 
 async function readJSON(source: AsyncIterable<Uint8Array>, limit = MAX_BYTES): Promise<ObjectValue> {
@@ -304,10 +365,30 @@ async function readJSON(source: AsyncIterable<Uint8Array>, limit = MAX_BYTES): P
   return jsonObject(Buffer.concat(chunks).toString('utf8'), 'json');
 }
 
+/** Whether a provider answered a streamed call with its stream (Server-Sent Events) rather than one body. */
+const eventStream = (upstream: Response): boolean => (upstream.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase() === 'text/event-stream';
+
 /** A provider request that got no answer: `network`, with the socket's code where it has one (`network:ECONNRESET`). */
 function networkFailure(error: unknown): string {
   const code = (error as ObjectValue | undefined)?.cause?.code;
   return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? `network:${code}` : 'network';
+}
+
+/** How long a stream may send nothing before its close reads as an edge's cut: Cloudflare in front of LLM Gate closes a
+ *  response that sends nothing for about 100 s. */
+export const EDGE_IDLE_MS = 90_000;
+
+/** A streamed call whose stream closed before its end, on its way (the call's own cuts never come here). Its reason is
+ *  `stream:closed:idle` when the stream had sent nothing for `idleMs` or longer first, as an edge's cut of a silent
+ *  response ends it, and `stream:closed` for any other close: one the provider or a gateway made at once, which a task's
+ *  own words can bring about (a moderation stop, a parser failing on the model's output). Its detail says how: the
+ *  socket's code when its connection broke off (`UND_ERR_SOCKET`), `end` when it ended without a finish reason. The
+ *  worker's own wait for the next byte running out stays `network:UND_ERR_BODY_TIMEOUT`, as when an answer is read whole. */
+function streamClosed(error: unknown, quietMs: number, idleMs: number): { reason: string; detail?: string } {
+  const network = error === undefined ? undefined : networkFailure(error);
+  if (network === 'network:UND_ERR_BODY_TIMEOUT') return { reason: network };
+  return { reason: quietMs >= idleMs ? 'stream:closed:idle' : 'stream:closed',
+    detail: network === undefined ? 'end' : network === 'network' ? 'broken' : network.slice('network:'.length) };
 }
 
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
@@ -347,6 +428,8 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   /** The worker's Bedrock call, when it serves Bedrock models to managed execution (it says so on /health as
    *  computerBedrock); without it a Bedrock model is refused as before. */
   bedrockCall?: BedrockCall | null;
+  /** How long a stream's silence before its close makes it an edge's cut (EDGE_IDLE_MS); shorter in tests. */
+  edgeIdleMs?: number;
 }): Promise<void> {
   const received = performance.now();
   const reply = (status: number, value: ObjectValue) => { if (!response.destroyed) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); } };
@@ -409,6 +492,8 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   try {
     let raw: ObjectValue;
     let protocol = model.protocol;
+    // An answer gathered from a stream, which readJSON's limit has not held to the size of an answer read whole.
+    let gathered = false;
     if (bedrock) {
       const call = bedrockComputerRequest(completion, model, { maxTokens: body.maxTokens });
       try { raw = await options.bedrockCall!(model, call.body, controller.signal); }
@@ -418,6 +503,7 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
         return reject(502, 'PROVIDER_ERROR', label((error as ObjectValue)?.reason));
       }
       protocol = 'chat_completions';
+      gathered = true;
     } else {
       const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
       let upstream: Response;
@@ -433,17 +519,46 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
         return reject(502, 'PROVIDER_ERROR', reason);
       }
       if (!upstream.body) return reject(502, 'PROVIDER_ERROR', 'body');
-      try { raw = await readJSON(upstream.body); }
-      catch (error) {
-        if (controller.signal.aborted) throw error;
-        // An answer larger than the API takes back is the model's own output; one that is not JSON, or breaks off, is not.
-        const detail = detailOf(error);
-        if (detail === 'size') return reject(502, 'PROVIDER_ERROR', 'answer', 'size');
-        return reject(502, 'PROVIDER_ERROR', detail === 'json' ? 'body' : networkFailure(error));
+      if (provider.stream && eventStream(upstream)) {
+        // A streamed answer, gathered into one. What broke it is named by kind: the gateway's error frame (provider:200:…,
+        // as an error inside a 200 read whole), the stream closed before its end (streamClosed), or what the stream itself
+        // said wrong (stream:<detail>: a malformed chunk, more than a stream may carry, [DONE] without a finish reason).
+        const events = upstream.body;
+        // When the stream last sent anything: the silence before a close tells an edge's cut from the provider's close.
+        let heard = performance.now();
+        const reading = (async function* () {
+          try { for await (const chunk of events) { heard = performance.now(); yield chunk; } }
+          catch (cause) { throw Object.assign(new Error('The provider stream broke off'), { broke: cause }); }
+        })();
+        try { raw = await gatherChatStream(reading); }
+        catch (error) {
+          if (controller.signal.aborted) throw error;
+          const { broke, frame } = (error ?? {}) as ObjectValue;
+          // A gateway's error frame is its refusal inside a 200, named as an error inside a 200 read whole is.
+          if (frame) return reject(502, 'PROVIDER_ERROR', refusal(200, { error: frame }));
+          if (broke === undefined && detailOf(error) !== 'truncated') return reject(502, 'PROVIDER_ERROR', `stream:${detailOf(error)}`);
+          const quietMs = Math.round(performance.now() - heard);
+          const closed = streamClosed(broke, quietMs, options.edgeIdleMs ?? EDGE_IDLE_MS);
+          // The silence goes to the log line alone, so the edge's idle limit can be checked against real closes.
+          return reject(502, 'PROVIDER_ERROR', closed.reason, closed.detail, { quietMs });
+        }
+        gathered = true;
+      } else {
+        // A call sent whole, or a streamed call answered whole (a gateway's error in a 200, or one that does not stream).
+        try { raw = await readJSON(upstream.body); }
+        catch (error) {
+          if (controller.signal.aborted) throw error;
+          // An answer larger than the API takes back is the model's own output; one that is not JSON, or breaks off, is not.
+          const detail = detailOf(error);
+          if (detail === 'size') return reject(502, 'PROVIDER_ERROR', 'answer', 'size');
+          return reject(502, 'PROVIDER_ERROR', detail === 'json' ? 'body' : networkFailure(error));
+        }
+        // Some gateways answer an error with a 200: it is the provider's refusal, as a non-2xx would have been.
+        if (raw.error != null) return reject(502, 'PROVIDER_ERROR', refusal(upstream.status, raw));
       }
-      // Some gateways answer an error with a 200: it is the provider's refusal, as a non-2xx would have been.
-      if (raw.error != null) return reject(502, 'PROVIDER_ERROR', refusal(upstream.status, raw));
     }
+    // Past the size of an answer read whole, a gathered answer is the model's own output, refused as that one would be.
+    if (gathered && Buffer.byteLength(JSON.stringify(raw)) > MAX_BYTES) return reject(502, 'PROVIDER_ERROR', 'answer', 'size');
     let result: ObjectValue;
     try { result = computerCompletionResponse(raw, protocol, completion.tools); }
     catch (error) { return reject(502, 'PROVIDER_ERROR', 'answer', detailOf(error)); }

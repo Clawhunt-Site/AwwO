@@ -32,7 +32,7 @@ async function readBody(request) {
 }
 
 // Managed execution's Bedrock calls are made in an isolated child, as a Bedrock run's are (bedrockComputerCall).
-export function createPiServer(config, { startRun = startIsolatedRun, bedrockCall = bedrockComputerCall } = {}) {
+export function createPiServer(config, { startRun = startIsolatedRun, bedrockCall = bedrockComputerCall, edgeIdleMs } = {}) {
   const active = new Map();
   const sessions = new Set();
   const observability = createWorkerObservability(config, () => active.size);
@@ -57,7 +57,7 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockCal
     }
     if (!authorized(request, config.token)) return json(response, 401, { error: { code: 'UNAUTHORIZED', message: 'Internal service authentication required.' } });
     if (request.method === 'POST' && pathname === '/internal/computer-model') return handleComputerModel(request, response, {
-      config, runtime: 'pi', active, sessions, stopping: () => shuttingDown, bedrockCall,
+      config, runtime: 'pi', active, sessions, stopping: () => shuttingDown, bedrockCall, edgeIdleMs,
       resolveModel: resolveModelConfig, normalizeUsage, parentObservability, observe: (model, trace) => observability.begin(model, trace),
     });
     if (request.method === 'DELETE' && /^\/internal\/runs\/[A-Za-z0-9_-]+$/.test(pathname)) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { bedrockComputerRequest, computerCompletionResponse, threadOpening, validateComputerCompletion } from './computer-model.ts';
+import { bedrockComputerRequest, computerCompletionResponse, gatherChatStream, providerComputerRequest, threadOpening, validateComputerCompletion } from './computer-model.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -299,6 +299,8 @@ test('every provider gets the thread at its user turn, the engine\'s greeting in
   const gate = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Done.' }, finish_reason: 'stop' }] })), {}, 'pi');
   assert.equal((await gate.send(opened)).status, 200);
   assert.deepEqual(gate.calls[0].body.messages, [{ role: 'system', content: note }, { role: 'user', content: 'Build the project' }]);
+  // Sent streaming, answered whole without a content type: read whole, as before.
+  assert.equal(gate.calls[0].body.stream, true);
   const anthropic = await serve(t, 'anthropic_messages', (_body, _req, res) => res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] })));
   assert.equal((await anthropic.send(opened)).status, 200);
   assert.equal(anthropic.calls[0].body.system, note);
@@ -474,6 +476,230 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 3).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error', 'provider:524']);
   assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|tokens|quota|gate-400|not json/);
+});
+
+// An event stream as LLM Gate sends one: each frame a `data:` line (an object as JSON, a string as written), sent in
+// pieces of `piece` bytes, so that lines and characters arrive cut apart as a network may deliver them.
+async function events(res: any, frames: (object | string)[], { piece = 0, end = true } = {}) {
+  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' });
+  const bytes = Buffer.from(frames.map(frame => `${typeof frame === 'string' ? frame : `data: ${JSON.stringify(frame)}`}\n\n`).join(''));
+  for (let at = 0; at < bytes.length; at += piece || bytes.length) {
+    res.write(bytes.subarray(at, at + (piece || bytes.length)));
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  if (end) res.end();
+}
+
+test('a Chat Completions call through LLM Gate is streamed and gathered into one answer, its hidden reasoning never forwarded', async t => {
+  const frames = [
+    ': keep-alive',
+    { id: 'chatcmpl-1', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] },
+    { choices: [{ index: 0, delta: { reasoning_content: 'private reasoning' }, finish_reason: '' }] },
+    'data:',
+    { choices: [{ index: 0, delta: { content: '先看' } }] },
+    { choices: [{ index: 0, delta: { content: '一下。' } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'workspace_exec', arguments: '' } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":' } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"echo verified"}' } }] } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: null },
+    { choices: [], usage: { prompt_tokens: 21, completion_tokens: 7, total_tokens: 28 } },
+    'data: [DONE]',
+  ];
+  // Eleven bytes at a time: every line, and the Chinese characters, arrive cut apart.
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => void events(res, frames, { piece: 11 }), {}, 'pi');
+  const response = await s.send();
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(s.calls[0].body.stream, true);
+  assert.deepEqual(s.calls[0].body.stream_options, { include_usage: true });
+  assert.deepEqual(body.completion.choices[0].message, { role: 'assistant', content: '先看一下。', tool_calls: [call] });
+  assert.equal(body.completion.choices[0].finish_reason, 'tool_calls');
+  assert.equal(body.observability.usage.inputTokens, 21); assert.equal(body.observability.usage.source, 'provider_raw');
+  assert.equal(body.completion.usage.completion_tokens, 7);
+  assert.doesNotMatch(JSON.stringify(body), /private reasoning|secret-provider-key/);
+});
+
+test('only a Chat Completions call through LLM Gate streams: a Gate profile named "openai" too, no other provider or protocol', () => {
+  const completion = validateComputerCompletion({ messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] });
+  const profile = (baseURL: string, provider: string, protocol = 'chat_completions') => ({ model: 'm', apiKey: 'k', baseURL, provider, protocol, maxTokens: 1024, contextWindow: 32768 });
+  for (const model of [profile('https://api.clawhunt.site/v1', 'openai'), profile('https://api.clawhunt.site/v1/', 'llmgate'), profile('http://127.0.0.1:9/v1', 'llmgate')]) {
+    const call = providerComputerRequest(completion, model);
+    assert.equal(call.stream, true, model.baseURL);
+    assert.equal(call.body.stream, true);
+    assert.deepEqual(call.body.stream_options, { include_usage: true });
+  }
+  // A Gate profile labelled "openai" keeps that wire's own fields beside the stream's.
+  const labelled = providerComputerRequest(completion, profile('https://api.clawhunt.site/v1', 'openai')).body;
+  assert.equal(labelled.max_completion_tokens, 1024); assert.equal(labelled.store, false); assert.equal('max_tokens' in labelled, false);
+  for (const model of [profile('https://api.openai.com/v1', 'openai'), profile('https://generativelanguage.googleapis.com/v1beta/openai', 'openai'),
+    profile('http://127.0.0.1:11434/v1', 'ollama'), profile('https://api.clawhunt.site', 'anthropic', 'anthropic_messages'), profile('https://api.clawhunt.site/v1', 'openai', 'responses')]) {
+    const call = providerComputerRequest(completion, model);
+    assert.equal(call.stream, undefined, `${model.baseURL} ${model.protocol}`);
+    assert.equal(call.body.stream, false);
+    assert.equal('stream_options' in call.body, false);
+  }
+});
+
+test('a streamed tool call sent whole without an index is joined by its id; one with neither is a broken stream', async () => {
+  const from = (frames: object[]) => (async function* () { for (const frame of frames) yield Buffer.from(`data: ${JSON.stringify(frame)}\n\n`); })();
+  const second = { id: 'call-2', type: 'function', function: { name: 'workspace_exec', arguments: '{"command":"ls"}' } };
+  const raw = await gatherChatStream(from([
+    { choices: [{ delta: { tool_calls: [call] } }] },
+    { choices: [{ delta: { tool_calls: [second] }, finish_reason: 'tool_calls' }] },
+  ]));
+  assert.deepEqual(raw.choices[0].message.tool_calls, [call, second]);
+  await assert.rejects(gatherChatStream(from([{ choices: [{ delta: { tool_calls: [{ function: { arguments: '{}' } }] }, finish_reason: 'tool_calls' }] }])),
+    (error: any) => error.detail === 'tool-calls');
+});
+
+test('a stream line cut across many chunks is joined whole, and no open line may pass 1 MiB', async () => {
+  const framed = (content: string) => Buffer.from(`data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'stop' }] })}\r\n\r\ndata: [DONE]\r\n\r\n`);
+  const pieces = (bytes: Buffer, size: number) => (async function* () { for (let at = 0; at < bytes.length; at += size) yield bytes.subarray(at, at + size); })();
+  // One byte at a time cuts every character of a short answer apart; a long one (900 KB) comes in pieces of odd sizes.
+  assert.equal((await gatherChatStream(pieces(framed('完成了 done'), 1))).choices[0].message.content, '完成了 done');
+  const long = '长'.repeat(150_000) + 'x'.repeat(300_000);
+  for (const size of [4093, 65536]) assert.equal((await gatherChatStream(pieces(framed(long), size))).choices[0].message.content, long, `pieces of ${size}`);
+  // Fifteen MiB with no line end, in 64 KiB pieces: refused once the open line passes 1 MiB, without reading the rest.
+  const run = Buffer.alloc(64 * 1024, 'a');
+  let sent = 0;
+  await assert.rejects(gatherChatStream((async function* () { yield Buffer.from('data: {"choices":['); for (; sent < 240; sent++) yield run; })()),
+    (error: any) => error.detail === 'size');
+  assert.ok(sent <= 17, `read ${sent} pieces`);
+});
+
+test('a stream is read to [DONE] and no further, and a tool call keeps the id and name it was given', async () => {
+  const from = (lines: string[], hold = false) => (async function* () {
+    for (const line of lines) yield Buffer.from(`${line}\n\n`);
+    if (hold) await new Promise(() => {}); // a gateway that keeps the connection after its last frame
+  })();
+  const data = (value: object) => `data: ${JSON.stringify(value)}`;
+  const done = await gatherChatStream(from([data({ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }], error: null }), 'data: [DONE]', 'data: {"not": json'], true));
+  assert.equal(done.choices[0].message.content, 'OK');
+  const fails = async (lines: string[], detail: string) => assert.rejects(gatherChatStream(from(lines)), (error: any) => error.detail === detail);
+  await fails([data({ choices: [{ delta: { content: 'OK' } }] }), 'data: [DONE]'], 'unfinished');
+  await fails([data({ choices: [{ delta: { content: 'OK' } }] })], 'truncated');
+  // An error said in place of choices (as some providers send a moderation stop) is an error frame, by its code only.
+  await fails([data({ choices: [{ delta: { content: 'OK' } }] }), data({ code: 'DataInspectionFailed', message: 'secret-provider-key' })], 'error:DataInspectionFailed');
+  await fails([data({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'workspace_exec', arguments: '' } }] } }] }),
+    data({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'host_shell', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] })], 'tool-calls');
+  await fails([data({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'workspace_exec', arguments: '' } }] } }] }),
+    data({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-2', function: { arguments: '{}' } }] }, finish_reason: 'tool_calls' }] })], 'tool-calls');
+  // The source breaking after the finish reason keeps the answer; breaking inside a line, or before any finish, does not.
+  const breaks = (lines: string[], tail = '') => (async function* () {
+    for (const line of lines) yield Buffer.from(`${line}\n\n`);
+    if (tail) yield Buffer.from(tail);
+    throw Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } });
+  })();
+  assert.equal((await gatherChatStream(breaks([data({ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] })]))).choices[0].message.content, 'OK');
+  await assert.rejects(gatherChatStream(breaks([data({ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] })], 'data: {"usage":')), /terminated/);
+  await assert.rejects(gatherChatStream(breaks([data({ choices: [{ delta: { content: 'OK' } }] })])), /terminated/);
+  // An empty id or name in a later part says nothing.
+  const kept = await gatherChatStream(from([data({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'workspace_exec', arguments: '{"command":' } }] } }] }),
+    data({ choices: [{ delta: { tool_calls: [{ index: 0, id: '', function: { name: '', arguments: '"echo verified"}' } }] }, finish_reason: 'tool_calls' }] })]));
+  assert.deepEqual(kept.choices[0].message.tool_calls, [call]);
+});
+
+test('a Gate stream that breaks is a failed call named by kind, never a partial answer nor provider text', async t => {
+  const logged = rejections(t);
+  const partial = { choices: [{ index: 0, delta: { content: 'partial' } }] };
+  const later = (res: any, then: () => void) => void events(res, [partial], { end: false }).then(() => setTimeout(then, 900));
+  const scenarios: Record<string, (res: any, req: any) => void> = {
+    'error-frame': res => void events(res, [partial, { error: { message: 'secret-provider-key upstream failed', type: 'upstream_error', code: 'bad_response_status_code' } }]),
+    'no-finish': res => void events(res, [partial]),
+    unfinished: res => void events(res, [partial, 'data: [DONE]']),
+    garbled: res => void events(res, [partial, 'data: {"choices":[{"delta":{"content":"secret-provider-key']),
+    reset: (res, req) => void events(res, [partial], { end: false }).then(() => setTimeout(() => req.socket.destroy(), 20)),
+    // Silent for longer than the edge's idle limit (shortened to 400 ms here), then closed: the edge's cut.
+    'idle-reset': (res, req) => later(res, () => req.socket.destroy()),
+    'idle-end': res => later(res, () => res.end()),
+    length: res => void events(res, [partial, { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }, 'data: [DONE]']),
+    filtered: res => void events(res, [partial, { choices: [{ index: 0, delta: {}, finish_reason: 'content_filter' }] }, 'data: [DONE]']),
+    // Gathered past the size an answer read whole may have.
+    huge: res => void events(res, [{ choices: [{ index: 0, delta: { content: 'x'.repeat(600_000) }, finish_reason: 'stop' }] }, 'data: [DONE]']),
+    // The connection breaks after the finish reason, before usage and [DONE]: the answer stands (checked below).
+    'after-finish': (res, req) => void events(res, [{ choices: [{ index: 0, delta: { content: 'Done.' }, finish_reason: 'stop' }] }], { end: false })
+      .then(() => setTimeout(() => req.socket.destroy(), 20)),
+    // A streamed refusal (OpenAI's), refused as one read whole; an error said in place of choices, as a moderation stop.
+    refusal: res => void events(res, [{ choices: [{ index: 0, delta: { refusal: 'secret-provider-key: I cannot help' }, finish_reason: 'stop' }] }, 'data: [DONE]']),
+    moderation: res => void events(res, [partial, { code: 'DataInspectionFailed', message: 'secret-provider-key inappropriate content' }]),
+  };
+  const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi', { edgeIdleMs: 400 });
+  const socket = 'UND_ERR_SOCKET';
+  for (const [scenario, reason, detail] of [
+    // The gateway's error frame is its refusal inside a 200, as one read whole is (provider:200:<its code or type>).
+    ['error-frame', 'provider:200:bad_response_status_code', undefined], ['moderation', 'provider:200:DataInspectionFailed', undefined],
+    ['no-finish', 'stream:closed', 'end'], ['unfinished', 'stream:unfinished', undefined],
+    ['garbled', 'stream:shape', undefined], ['reset', 'stream:closed', socket], ['idle-reset', 'stream:closed:idle', socket], ['idle-end', 'stream:closed:idle', 'end'],
+    ['length', 'answer', 'finish:length'], ['filtered', 'answer', 'finish:content_filter'], ['huge', 'answer', 'size'], ['refusal', 'answer', 'refusal'],
+  ] as const) {
+    const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
+    assert.equal(response.status, 502, scenario);
+    const error = (await response.json()).error;
+    assert.equal(error.code, 'PROVIDER_ERROR', scenario);
+    assert.equal(error.reason, reason, scenario);
+    assert.equal(error.detail, detail, scenario);
+  }
+  const finished = await s.send(input({ completion: { messages: [{ role: 'user', content: 'after-finish' }], tools: [tool] } }));
+  assert.equal(finished.status, 200);
+  assert.equal((await finished.json()).completion.choices[0].message.content, 'Done.');
+  assert.equal(logged.length, 12);
+  // Each close's silence is on its log line alone (quietMs), never in the reply.
+  const closes = logged.filter(line => String(line.reason).startsWith('stream:closed'));
+  assert.equal(closes.length, 4);
+  for (const line of closes) assert.ok(line.reason === 'stream:closed:idle' ? line.quietMs >= 400 : line.quietMs < 400, JSON.stringify(line));
+  assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|partial|upstream failed|inappropriate|cannot help|xxxx/);
+});
+
+test('a Gate stream that stalls is cut by the call\'s own time limit, and a cancel mid-stream stays a cancel', { timeout: 10000 }, async t => {
+  const held: (() => void)[] = [];
+  t.after(() => held.forEach(release => release()));
+  // The provider tells when its first frame is on the wire: the cuts below come after it, while the stream is read.
+  let wrote!: () => void;
+  let sent = new Promise<void>(resolve => { wrote = resolve; });
+  const stall = (_body: any, _req: any, res: any) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: 'partial' } }] })}\n\n`, () => wrote());
+    held.push(() => res.destroy());
+  };
+  const slow = await serve(t, 'chat_completions', stall, { AWWO_PI_TIMEOUT_MS: '800' }, 'pi');
+  const started = performance.now();
+  const timing = slow.send();
+  await sent;
+  const timedOut = await timing;
+  assert.equal(timedOut.status, 499);
+  assert.equal((await timedOut.json()).error.reason, 'timeout');
+  assert.ok(performance.now() - started >= 750, 'cut by the time limit, after the stream began');
+  sent = new Promise<void>(resolve => { wrote = resolve; });
+  const s = await serve(t, 'chat_completions', stall, {}, 'pi');
+  const pending = s.send();
+  await sent;
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const stop = await fetch(`${s.origin}/internal/runs/run-1`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } });
+  assert.equal(stop.status, 202); await stop.body?.cancel();
+  const cut = await pending;
+  assert.equal(cut.status, 499);
+  assert.equal((await cut.json()).error.reason, 'cancelled');
+});
+
+test('a personal LLM Gate connection streams as the operator\'s does, gathered into one answer', async t => {
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => void events(res, [{ choices: [{ index: 0, delta: { content: 'Verified' }, finish_reason: 'stop' }] },
+    { choices: [], usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } }, 'data: [DONE]']), { AWWO_CREDENTIAL_MODE: 'user' }, 'pi');
+  // The binding pins the Gate's own address; its calls are led to this fixture.
+  const originalFetch = globalThis.fetch;
+  const gate = 'https://api.clawhunt.site/v1';
+  t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) =>
+    originalFetch(String(target) === `${gate}/chat/completions` ? `${s.baseURL}/v1/chat/completions` : target, init));
+  const selector = `byok_${'a'.repeat(33)}_${'c'.repeat(16)}`;
+  const response = await s.send(input({ model: selector, userModel: { id: selector, provider: 'llmgate', model: 'qwen3.8-27b-p6', baseURL: gate, apiKey: 'personal-gate-fixture-key',
+    protocol: 'chat_completions', contextWindow: 32768, maxTokens: 4096, reasoningEfforts: [], defaultReasoningEffort: '' } }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.completion.choices[0].message.content, 'Verified');
+  assert.equal(body.observability.usage.inputTokens, 5);
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].headers.authorization, 'Bearer personal-gate-fixture-key');
+  assert.equal(s.calls[0].body.stream, true);
+  assert.deepEqual(s.calls[0].body.stream_options, { include_usage: true });
 });
 
 const routing = (extra: Record<string, unknown> = {}) => input({ completion: { messages: [{ role: 'system', content: 'Route the message' }, { role: 'user', content: 'Build the project' }], tools: [] }, ...extra });

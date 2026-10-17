@@ -42,7 +42,7 @@ export async function probeWorkspace(config, signal) {
   } finally { await sandbox.close(); }
 }
 
-export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, workspaceProbe = probeWorkspace } = {}) {
+export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, workspaceProbe = probeWorkspace, edgeIdleMs } = {}) {
   const active = new Map();
   const sessions = new Set();
   const observability = createWorkerObservability(config, () => active.size);
@@ -69,7 +69,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, 
     }
     if (!authorized(request, config.token)) return json(response, 401, { error: { code: 'UNAUTHORIZED', message: 'Internal service authentication required.' } });
     if (request.method === 'POST' && pathname === '/internal/computer-model') return handleComputerModel(request, response, {
-      config, runtime: 'openai-agents', active, sessions, stopping: () => shuttingDown,
+      config, runtime: 'openai-agents', active, sessions, stopping: () => shuttingDown, edgeIdleMs,
       resolveModel: resolveModelConfig, normalizeUsage, parentObservability, observe: (model, trace) => observability.begin(model, trace),
     });
     if (request.method === 'DELETE' && /^\/internal\/runs\/[A-Za-z0-9_-]+$/.test(pathname)) {
