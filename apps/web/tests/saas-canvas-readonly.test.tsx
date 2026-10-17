@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, LEGACY_WORKFLOW_STORAGE_KEY, createFormNode, createSessionNode, loadDocumentWithStatus, type CanvasDocument } from '../src/canvas/canvasDoc';
+import { MODEL_DRAG_MIME } from '../src/canvas/canvasModelDrop';
+import { canvasText, type CanvasTextKey } from '../src/canvas/i18n';
 import { CANVAS_RUN_JOURNAL_KEY } from '../src/canvas/runJournal';
 import { appendTurn, resetAllSessions } from '../src/canvas/sessions';
 
@@ -34,6 +36,9 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const mod = { ctrlKey: true, bubbles: true, cancelable: true };
+// Matches a command palette row's label from the canvas's own table (src/canvas/i18n.tsx); a {value} in it matches any text.
+const paletteLabel = (key: CanvasTextKey) => expect.stringMatching(new RegExp(`^${canvasText('zh', key).split(/\{\w+\}/)
+  .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')}$`));
 
 describe('original canvas reader mode', () => {
   it('keeps graph, inspector, deliveries and server history without writing or recovering a run', async () => {
@@ -87,11 +92,17 @@ describe('original canvas reader mode', () => {
     const viewport = container.querySelector('.canvas-viewport')!;
     fireEvent.doubleClick(viewport, { clientX: 400, clientY: 300 });
     fireEvent.contextMenu(viewport, { clientX: 400, clientY: 300 });
-    fireEvent.drop(viewport, { dataTransfer: { getData: () => JSON.stringify({ kind: 'llm' }) } });
+    // A reader has no model rail to drag from, and its stage refuses a model dragged from another window's rail: it does not
+    // accept the dragover, so the browser never drops that model there.
+    expect(fireEvent.dragOver(viewport, { dataTransfer: { types: [MODEL_DRAG_MIME], getData: () => '' } })).toBe(true);
     fireEvent.keyDown(document, { key: 'p', code: 'KeyP', ...mod });
     const palette = container.querySelector('.canvas-cmdbar-overlay')!;
     expect(palette).toBeTruthy();
-    expect(palette.textContent).not.toMatch(/删除所选|保存路标|运行整张图|添加.*会话/);
+    // A reader is offered the commands that only look at the graph, never one that edits or runs it.
+    const offered = [...palette.querySelectorAll('.canvas-cmdbar-row-label')].map(label => label.textContent);
+    expect(offered).toContainEqual(paletteLabel('command.fit')); expect(offered).toContainEqual(paletteLabel('command.recallWaypoint'));
+    for (const key of ['command.addSession', 'command.addForm', 'command.run', 'command.stop', 'command.saveWaypoint', 'command.deleteSelection',
+      'command.runSelection', 'command.rerunNode', 'command.undo', 'command.redo'] as const) expect(offered).not.toContainEqual(paletteLabel(key));
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: '放大', exact: true }));
     act(() => appendTurn('agent', { role: 'agent', text: '后台缓存新预览' }));
