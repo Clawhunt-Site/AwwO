@@ -26,14 +26,14 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	}
 	free := func() bool { return true }
 	for _, code := range want {
-		if !graphRetryable(code, free) {
+		if !graphRetryable(code, free, free) {
 			t.Fatal("listed code not retried", code)
 		}
 	}
 	for _, code := range []string{"output_limit", "context_limit", "output_contract_invalid", "model_refused", "provider_auth_failed",
 		"media_content_rejected", "media_params_invalid", "media_provider_balance", "workspace_step_limit", "accounting_commit_failed",
 		"execution_interrupted", "interrupted", "cancelled", "media_timeout", "quota_exceeded", "plan_required", "invalid_runtime_event", ""} {
-		if graphRetryable(code, free) {
+		if graphRetryable(code, free, free) {
 			t.Fatal("retried a code the design keeps out", code)
 		}
 	}
@@ -42,12 +42,28 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 			t.Fatal("an accounting failure is never retried", code)
 		}
 	}
-	// A failed generation runs again only when its provider charged nothing, and only media_failed asks.
-	if graphRetryable("media_failed", func() bool { return false }) {
-		t.Fatal("retried a charged generation")
+	// No retry pays twice for work already done: each code asks exactly the question that rules that out, and only it.
+	never := func() bool { t.Helper(); t.Fatal("asked a question this code does not depend on"); return false }
+	no := func() bool { return false }
+	unsent := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable", "workspace_admission_failed", "workspace_unavailable"}
+	silent := []string{"provider_rate_limited", "provider_unavailable", "run_timeout", "runtime_failed", "runtime_stream_ended"}
+	for _, code := range unsent {
+		if !graphRetryable(code, never, never) {
+			t.Fatal("a run that never reached a model not retried", code)
+		}
 	}
-	if !graphRetryable("media_provider_busy", func() bool { t.Fatal("asked about charges for a code that does not depend on them"); return false }) {
-		t.Fatal("media_provider_busy not retried")
+	for _, code := range silent {
+		if graphRetryable(code, no, never) {
+			t.Fatal("retried a run that produced output", code)
+		}
+	}
+	for _, code := range want {
+		if strings.HasPrefix(code, "media_") && graphRetryable(code, never, no) {
+			t.Fatal("retried a generation that may have been charged", code)
+		}
+	}
+	if len(unsent)+len(silent) != len(want)-5 {
+		t.Fatal("every listed code has a class")
 	}
 }
 
@@ -205,6 +221,8 @@ type piReply struct {
 	failed string
 	text   string
 	hold   <-chan struct{}
+	// partial is text streamed before the run fails (with failed set).
+	partial string
 }
 
 // scriptedPi is a Pi worker that answers each call as reply says for the node the prompt names and the number of that
@@ -254,6 +272,10 @@ func newScriptedPi(t *testing.T, reply func(node string, call int) piReply) *scr
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
 		if answer.failed != "" {
+			if answer.partial != "" {
+				raw, _ := json.Marshal(map[string]string{"type": "text_delta", "delta": answer.partial})
+				fmt.Fprintf(w, "data: %s\n\n", raw)
+			}
 			failWorker(w, answer.failed)
 			return
 		}
@@ -513,6 +535,52 @@ func TestPostgresGraphNodeRetriesStopAtTheLimit(t *testing.T) {
 	}
 }
 
+// runtime_failed is the catch-all of unmapped worker codes, some of them permanent (a run that ran out of turns): a node
+// runs again only when its run produced nothing, so no retry pays twice for output already made.
+func TestPostgresGraphNodeRetriesOnlyRunsThatProducedNothing(t *testing.T) {
+	pi := newScriptedPi(t, func(node string, call int) piReply {
+		if node == "up" && call == 1 {
+			// The provider cut the call before its first event: nothing was produced.
+			return piReply{failed: "SOME_UNMAPPED_CODE"}
+		}
+		return piReply{text: "RESULT-" + strings.ToUpper(node)}
+	})
+	h := newHarness(t, pi.server.URL)
+	h.a.cfg.GraphNodeRetries = 2
+	h.a.graphRetryUnit = 20 * time.Millisecond
+	c, tid, _ := h.register(t, "graph-retry-silent@example.test")
+	base := "/tenants/" + tid + "/canvases/" + retryCanvas(t, h, c, tid) + "/graph-runs"
+	gid := h.request(t, c, "POST", base, map[string]any{"operationId": "graph-retry-silent", "documentVersion": 1}, 202)["id"].(string)
+	done := awaitGraph(t, h, c, base+"/"+gid, "completed")
+	if up := graphNodeResult(t, done, "up"); up["state"] != "done" || up["attempts"] != float64(1) {
+		t.Fatal("a silent runtime_failed not retried", up)
+	}
+
+	loud := newScriptedPi(t, func(node string, call int) piReply {
+		if node == "up" {
+			return piReply{partial: "half of a delivery", failed: "MaxTurnsExceeded"}
+		}
+		return piReply{text: "RESULT-DOWN"}
+	})
+	h2 := newHarness(t, loud.server.URL)
+	h2.a.cfg.GraphNodeRetries = 2
+	h2.a.graphRetryUnit = 20 * time.Millisecond
+	c2, tid2, _ := h2.register(t, "graph-retry-loud@example.test")
+	base2 := "/tenants/" + tid2 + "/canvases/" + retryCanvas(t, h2, c2, tid2) + "/graph-runs"
+	gid2 := h2.request(t, c2, "POST", base2, map[string]any{"operationId": "graph-retry-loud", "documentVersion": 1}, 202)["id"].(string)
+	failed := awaitGraph(t, h2, c2, base2+"/"+gid2, "failed")
+	up := graphNodeResult(t, failed, "up")
+	if up["state"] != "failed" || up["detail"] != "runtime_failed" || up["attempts"] != float64(0) {
+		t.Fatal("a run that produced output was retried", up)
+	}
+	if calls := loud.seen(); !slices.Equal(calls, []string{"up#1"}) {
+		t.Fatal(calls)
+	}
+	if len(graphExperiences(t, h2, tid2, gid2, "up")) != 0 {
+		t.Fatal("a retry was recorded for a run that produced output")
+	}
+}
+
 // Failures the request or the model decided are never retried, and with AWWO_GRAPH_NODE_RETRIES=0 nothing is: the
 // node fails at once as it always did, with no attempt recorded.
 func TestPostgresGraphNodeRetriesSkipPermanentFailuresAndCanBeTurnedOff(t *testing.T) {
@@ -666,12 +734,22 @@ func TestPostgresGraphMediaNodeRetries(t *testing.T) {
 	c, tid, _ := h.register(t, "media-retry@example.test")
 	base := "/tenants/" + tid
 	cid, canvas := mediaCanvas(t, h, c, tid, mediaDraftNode("img", "rh.seedream-v5-pro", "a red bicycle on a beach"))
+	// The provider accepted the first generation, then stopped answering about it: it may well charge for it, so the
+	// node is not sent again (a retry pays twice only when the provider provably charged nothing).
 	graph := h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"]}, 202)
 	gid := graph["id"].(string)
-	done := awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+gid, "completed", 15*time.Second)
+	done := awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+gid, "failed", 15*time.Second)
 	img := graphNodeResult(t, done, "img")
-	log := img["attemptLog"].([]any)
-	if img["state"] != "done" || img["attempts"] != float64(1) || len(log) != 1 || log[0].(map[string]any)["code"] != "media_provider_unavailable" {
+	if img["state"] != "failed" || img["detail"] != "media_provider_unavailable" || img["attempts"] != float64(0) || len(img["attemptLog"].([]any)) != 0 {
+		t.Fatal(img)
+	}
+	if submits, _ := rh.counts(); submits != 1 || len(graphExperiences(t, h, tid, gid, "img")) != 0 {
+		t.Fatal("an accepted generation was sent again", submits)
+	}
+	graph = h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": randomID(), "documentVersion": canvas["version"]}, 202)
+	gid = graph["id"].(string)
+	done = awaitGraph(t, h, c, base+"/canvases/"+cid+"/graph-runs/"+gid, "completed", 15*time.Second)
+	if img = graphNodeResult(t, done, "img"); img["state"] != "done" || img["attempts"] != float64(0) {
 		t.Fatal(img)
 	}
 	if submits, _ := rh.counts(); submits != 2 {
@@ -690,12 +768,7 @@ func TestPostgresGraphMediaNodeRetries(t *testing.T) {
 	h.a.cfg.MediaRunsPerDay = 50
 	var counted int
 	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM media_generations g WHERE g.tenant_id=$1 AND "+generationCounts, tid).Scan(&counted); e != nil || counted != 2 {
-		t.Fatal("each attempt is a generation of its own", counted, e)
-	}
-	exp := graphExperiences(t, h, tid, gid, "img")
-	if len(exp) != 1 || exp[0].outcome != "succeeded" || exp[0].code != "media_provider_unavailable" || exp[0].runtime != runtimeRunningHub ||
-		exp[0].model != "rh.seedream-v5-pro" || exp[0].outputType != mediaKindImage || exp[0].detail["agentKind"] != mediaKindImage {
-		t.Fatalf("%+v", exp)
+		t.Fatal("each generation is counted once", counted, e)
 	}
 
 	// The provider accepted, charged and failed the third generation: running it again could pay twice.

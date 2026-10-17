@@ -26,26 +26,43 @@ import (
 // refusal, a rejected credential, refused content or parameters, an empty provider balance, a workspace step limit),
 // accounting failures, a cancelled run or graph, and an interrupted run, whose provider outcome is uncertain (its
 // executor was lost, and the executor settles those without replay). A refusal at admission (quota, plan) is not a
-// run's failure and settles the node as before. A generation that failed as media_failed runs again only when its
-// provider charged nothing for it (mediaRunUnbilled).
+// run's failure and settles the node as before. No retry pays twice for work already done: a code that can end a run
+// after output (runtime_failed is the catch-all for unmapped worker codes) retries only a run that produced nothing
+// (graphRunSilent), and a generation runs again only when its provider provably charged nothing (mediaRunUnbilled).
 
-// graphRetryableCodes are the run error codes a canvas node is retried for: the closed list of the Canvas RSI design.
-var graphRetryableCodes = map[string]bool{
-	"runtime_rejected":           true,
-	"runtime_unavailable":        true,
-	"runtime_session_busy":       true,
-	"runtime_stream_ended":       true,
-	"provider_unavailable":       true,
-	"provider_rate_limited":      true,
-	"runtime_failed":             true,
-	"run_timeout":                true,
-	"workspace_unavailable":      true,
-	"workspace_admission_failed": true,
-	"media_provider_unavailable": true,
-	"media_provider_busy":        true,
-	"media_result_unavailable":   true,
-	"media_failed":               true,
-	"media_motion_failed":        true,
+// graphRetryClass says what must be true of a failed run before its node may run again.
+type graphRetryClass int
+
+const (
+	// retryUnsent: the run never reached a model (the worker refused or could not take it), so nothing was paid for.
+	retryUnsent graphRetryClass = iota + 1
+	// retryIfSilent: the code can also end a run that already produced output (runtime_failed is the catch-all for
+	// every unmapped worker code, including ones that ran out of turns or tools), so the node runs again only when its
+	// run produced nothing (graphRunSilent).
+	retryIfSilent
+	// retryIfUnbilled: a generation runs again only when its provider provably charged nothing (mediaRunUnbilled): a
+	// lost answer to a submission or a result that could not be stored may already have been paid for.
+	retryIfUnbilled
+)
+
+// graphRetryableCodes are the run error codes a canvas node is retried for: the closed list of the Canvas RSI design,
+// each with the condition that keeps a retry from paying twice for work already done.
+var graphRetryableCodes = map[string]graphRetryClass{
+	"runtime_rejected":           retryUnsent,
+	"runtime_unavailable":        retryUnsent,
+	"runtime_session_busy":       retryUnsent,
+	"workspace_unavailable":      retryUnsent,
+	"workspace_admission_failed": retryUnsent,
+	"runtime_stream_ended":       retryIfSilent,
+	"provider_unavailable":       retryIfSilent,
+	"provider_rate_limited":      retryIfSilent,
+	"runtime_failed":             retryIfSilent,
+	"run_timeout":                retryIfSilent,
+	"media_provider_unavailable": retryIfUnbilled,
+	"media_provider_busy":        retryIfUnbilled,
+	"media_result_unavailable":   retryIfUnbilled,
+	"media_failed":               retryIfUnbilled,
+	"media_motion_failed":        retryIfUnbilled,
 }
 
 const (
@@ -94,13 +111,29 @@ func (a *App) graphNodeRetries() int {
 	return min(max(a.cfg.GraphNodeRetries, 0), maxGraphNodeRetries)
 }
 
-// graphRetryable reports whether a node run that ended failed with code may run again. unbilled tells whether a
-// generation cost nothing and is asked only for media_failed.
-func graphRetryable(code string, unbilled func() bool) bool {
-	if !graphRetryableCodes[code] {
-		return false
+// graphRetryable reports whether a node run that ended failed with code may run again. silent tells whether the run
+// produced no output and is asked only for the codes that can end a run after output; unbilled tells whether a
+// generation cost nothing and is asked only for the media codes.
+func graphRetryable(code string, silent, unbilled func() bool) bool {
+	switch graphRetryableCodes[code] {
+	case retryUnsent:
+		return true
+	case retryIfSilent:
+		return silent()
+	case retryIfUnbilled:
+		return unbilled()
 	}
-	return code != "media_failed" || unbilled()
+	return false
+}
+
+// graphRunSilent reports whether a failed run produced nothing a retry would pay for twice: no output text stored and
+// no model call that streamed or reported output tokens. A run that only thought (a provider that cut the call before
+// its first event) is silent; its next attempt is the repair, not a duplicate.
+func (a *App) graphRunSilent(ctx context.Context, tid, runID string) bool {
+	var silent bool
+	err := a.db.QueryRow(ctx, `SELECT r.output='' AND NOT EXISTS(SELECT 1 FROM model_invocations i WHERE i.tenant_id=r.tenant_id AND i.run_id=r.id
+		AND (COALESCE(i.output_tokens,0)>0 OR i.worker_first_delta_ms IS NOT NULL)) FROM runs r WHERE r.tenant_id=$1 AND r.id=$2`, tid, runID).Scan(&silent)
+	return err == nil && silent
 }
 
 // mediaRunUnbilled reports whether a generation's provider charged nothing for it: the provider ended the task without

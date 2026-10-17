@@ -559,7 +559,9 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				// A run that failed for a transient reason sends its node back to waiting for another attempt, while
 				// it has retries left (graph_retry.go). Only the run's own failure counts: a delivery that completed
 				// but could not be accepted, a cancellation and an interruption are settled as before.
-				if rs == "failed" && a.graphNodeRetries() > 0 && graphRetryable(code, func() bool { return generation && a.mediaRunUnbilled(ctx, tid, s.RunID) }) {
+				if rs == "failed" && a.graphNodeRetries() > 0 && graphRetryable(code,
+					func() bool { return !generation && a.graphRunSilent(ctx, tid, s.RunID) },
+					func() bool { return generation && a.mediaRunUnbilled(ctx, tid, s.RunID) }) {
 					if retried, err := a.retryGraphNode(ctx, tid, id, n, s.RunID, code); err != nil || retried {
 						continue
 					}
