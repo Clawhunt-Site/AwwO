@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,7 +29,8 @@ const (
 )
 
 // tripoWireParams maps catalog parameter names (letters and digits, like every media parameter) onto Tripo's
-// request fields. A parameter without an entry here is refused by the catalog check, so none is ever dropped.
+// request fields. A parameter without an entry here is refused by the catalog check unless it is one of the rig and
+// animation chain's own settings (tripoChainParam), which no model request carries; so none is ever dropped.
 var tripoWireParams = map[string]string{
 	"texture": "texture", "pbr": "pbr", "textureQuality": "texture_quality", "geometryQuality": "geometry_quality",
 	"faceLimit": "face_limit", "negativePrompt": "negative_prompt", "autoSize": "auto_size",
@@ -51,24 +53,36 @@ func tripoModels() []*mediaModel {
 		Label: [2]string{"贴图质量", "Texture quality"}}
 	negative := mediaParam{Name: "negativePrompt", Type: "text", MaxLength: 255, Label: [2]string{"不要出现的内容", "Negative prompt"}}
 	autoSize := mediaParam{Name: "autoSize", Type: "boolean", Default: false, Label: [2]string{"按真实尺寸（米）", "Real-world size (m)"}}
-	// Users see a generic name in their language, never the provider's (owner decisions 2026-10-11).
+	// Users see a generic name in their language, never the provider's (owner decisions 2026-10-11). Both series end
+	// with the skeleton and animations a game character needs (tripoMotionParams).
 	return []*mediaModel{
 		{ID: "tripo.v3-1", Name: "3D · 高精度", Label: [2]string{"3D · 高精度", "3D · High detail"}, Vendor: mediaVendorShown,
 			Kind: mediaKindModel3D, Mode: "text-to-model3d", References: 1,
 			Endpoint: "/generation/text-to-model", Version: "v3.1-20260211", Prompt: mediaPrompt{MinLength: 1, MaxLength: 1024},
-			Params: []mediaParam{texture, pbr, textureQuality,
+			Params: append([]mediaParam{texture, pbr, textureQuality,
 				{Name: "geometryQuality", Type: "enum", Values: []string{"standard", "detailed"}, Default: "standard", Label: [2]string{"几何精度", "Geometry detail"}},
 				{Name: "faceLimit", Type: "integer", Min: number(1000), Max: number(500000), Label: [2]string{"面数上限", "Face limit"}},
-				negative, autoSize},
+				negative, autoSize}, tripoMotionParams()...),
 			Docs: "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard", Provider: mediaProviderTripo},
 		{ID: "tripo.p1", Name: "3D · 游戏低多边形", Label: [2]string{"3D · 游戏低多边形", "3D · Low-poly game asset"}, Vendor: mediaVendorShown,
 			Kind: mediaKindModel3D, Mode: "text-to-model3d", References: 1,
 			Endpoint: "/generation/text-to-model", Version: "P1-20260311", Prompt: mediaPrompt{MinLength: 1, MaxLength: 1024},
-			Params: []mediaParam{texture, pbr, textureQuality,
+			Params: append([]mediaParam{texture, pbr, textureQuality,
 				{Name: "faceLimit", Type: "integer", Min: number(500), Max: number(20000), Default: 5000.0, Label: [2]string{"面数上限", "Face limit"}},
-				negative, autoSize},
+				negative, autoSize}, tripoMotionParams()...),
 			Docs: "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p", Provider: mediaProviderTripo},
 	}
+}
+
+// tripoChainParam is a parameter that drives the rig and animation chain (tripo_motion.go) instead of the model request,
+// accepted only exactly as that chain defines it.
+func tripoChainParam(p *mediaParam) (known, exact bool) {
+	for _, want := range tripoMotionParams() {
+		if want.Name == p.Name {
+			return true, reflect.DeepEqual(*p, want)
+		}
+	}
+	return false, false
 }
 
 func validTripoModel(m *mediaModel) error {
@@ -95,8 +109,10 @@ func validTripoModel(m *mediaModel) error {
 	names := map[string]bool{}
 	for i := range m.Params {
 		p := &m.Params[i]
-		if !mediaParamName.MatchString(p.Name) || reservedMediaParams[p.Name] || names[p.Name] || tripoWireParams[p.Name] == "" ||
-			!cleanCatalogText(p.Label[0], 40) || !cleanCatalogText(p.Label[1], 40) {
+		// Each parameter is a field of the model request or a setting of the chain, never neither and never both.
+		chain, exact := tripoChainParam(p)
+		if !mediaParamName.MatchString(p.Name) || reservedMediaParams[p.Name] || names[p.Name] || (tripoWireParams[p.Name] == "") == !chain ||
+			(chain && !exact) || !cleanCatalogText(p.Label[0], 40) || !cleanCatalogText(p.Label[1], 40) {
 			return fmt.Errorf("parameter %q", p.Name)
 		}
 		names[p.Name] = true
@@ -104,7 +120,7 @@ func validTripoModel(m *mediaModel) error {
 			return fmt.Errorf("parameter %q: %w", p.Name, err)
 		}
 	}
-	return nil
+	return validMediaParamRequires(m.Params)
 }
 
 // tripoRequest is the body of one text-to-model task: the prompt, the pinned version and the resolved

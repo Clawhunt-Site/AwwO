@@ -157,9 +157,11 @@ export async function deleteCanvasUpload(id: string): Promise<void> {
   await api(`${tenantPath(scope.tenant.id)}/canvases/${encodeURIComponent(scope.canvasId)}/uploads/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-/** An image or video run reports the provider's own state; there is no invented percentage. */
+/** An image or video run reports the provider's own state; there is no invented percentage. A 3D model with a skeleton
+ *  reports its chain's steps too: the rig, then its animations. */
 const mediaStatusText = (status: unknown): string | null => status === 'queued' ? canvasText('排队等待生成…', 'Queued for generation…')
-  : status === 'running' ? canvasText('正在生成…', 'Generating…') : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…') : null;
+  : status === 'running' ? canvasText('正在生成…', 'Generating…') : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…')
+    : status === 'rigging' ? canvasText('正在绑定骨骼…', 'Rigging the model…') : status === 'animating' ? canvasText('正在生成动作…', 'Animating the model…') : null;
 
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',

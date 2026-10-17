@@ -81,6 +81,11 @@
 :is(.canvas-root, .awwo-results) .canvas-media-model-open:disabled { opacity: .7; cursor: progress; }
 :is(.canvas-root, .awwo-results) .canvas-media-model-open:focus-visible { outline: 2px solid var(--awwo-teal, var(--accent)); outline-offset: 2px; }
 :is(.canvas-root, .awwo-results) .canvas-media-model figcaption a { display: inline-flex; align-items: center; gap: 4px; }
+/* A rigged model's clips, and the files of further clips for its skeleton. */
+:is(.canvas-root, .awwo-results) :is(.canvas-media-clips, .canvas-media-clip-sets) { margin: 0; font-size: 12px; color: inherit; overflow-wrap: anywhere; }
+:is(.canvas-root, .awwo-results) .canvas-media-clip-sets { padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+:is(.canvas-root, .awwo-results) .canvas-media-clip-sets a { display: inline-flex; align-items: center; gap: 4px; color: var(--awwo-teal, var(--accent)); }
+.awwo-results .canvas-media-clip-sets a { color: var(--saas-link); }
 /* The 成果 view shows media too, framed like the rest of the result. */
 .awwo-results .canvas-media-result { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
 .awwo-results .canvas-media-summary { color: var(--saas-muted); font-size: var(--saas-text-xs); }

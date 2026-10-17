@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,6 +43,8 @@ type mediaPlan struct {
 	Params   map[string]any `json:"params"`
 	// References are the pictures the generation starts from, frozen at admission (media_refs.go).
 	References []mediaReference `json:"references,omitempty"`
+	// Motion is a 3D model's rig and animation chain, frozen at admission (tripo_motion.go); nil for every other run.
+	Motion *tripoMotion `json:"motion,omitempty"`
 }
 
 type mediaItem struct {
@@ -47,6 +52,11 @@ type mediaItem struct {
 	Name        string `json:"name"`
 	ContentType string `json:"contentType"`
 	Size        int64  `json:"size"`
+	// Animations are the names of the clips a stored GLB carries, read from the file itself (media_glb.go): written
+	// only for a GLB that has some.
+	Animations []string `json:"animations,omitempty"`
+	// ClipsOnly marks a GLB with clips and no mesh: clips for the skeleton of the record's first model.
+	ClipsOnly bool `json:"clipsOnly,omitempty"`
 }
 
 // Server-generated identifiers only; anything else never becomes part of a path.
@@ -242,16 +252,35 @@ func (a *App) mediaPlanSnapshot(document []byte, nodeID, model string, entitleme
 	if err != nil {
 		return executionSnapshot{}, setupError{"media_params_invalid", "Node media settings are invalid for its model"}
 	}
+	plan := &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}
 	runtime := runtimeRunningHub
 	switch m.Provider {
 	case mediaProviderTripo:
 		runtime = runtimeTripo
+		// A skeleton and its clips are a chain of further paid tasks after the model, frozen with the run.
+		if plan.Motion, err = tripoMotionFor(params); err != nil {
+			return executionSnapshot{}, setupError{"media_params_invalid", "Node media settings are invalid for its model"}
+		}
 	case mediaProviderXtasy:
 		runtime = runtimeXtasy
 	case mediaProviderJimeng:
 		runtime = runtimeJimeng
 	}
-	return executionSnapshot{Runtime: runtime, Model: m.ID, Media: &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}}, nil
+	return executionSnapshot{Runtime: runtime, Model: m.ID, Media: plan}, nil
+}
+
+// frozenMotionValid checks a stored plan's chain: only a Tripo model has one. A run starting now has exactly the chain
+// its parameters ask for, as it was admitted moments ago; a resumed run follows the one an earlier start froze, as it
+// is, when it has a shape this release could have frozen.
+func frozenMotionValid(m *mediaModel, plan *mediaPlan, fresh bool) bool {
+	if m.Provider != mediaProviderTripo {
+		return plan.Motion == nil
+	}
+	if !fresh {
+		return plan.Motion == nil || validTripoMotion(plan.Motion)
+	}
+	want, err := tripoMotionFor(plan.Params)
+	return err == nil && reflect.DeepEqual(want, plan.Motion)
 }
 
 func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
@@ -509,7 +538,7 @@ func mediaFailureCode(err error) string {
 func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, snapshot executionSnapshot) {
 	plan := snapshot.Media
 	m, ok := builtinMediaCatalog.model(plan.Model)
-	if !ok || m.Kind != plan.Kind || plan.Provider != m.Provider {
+	if !ok || m.Kind != plan.Kind || plan.Provider != m.Provider || !frozenMotionValid(m, plan, true) {
 		a.finish(tid, id, "failed", "", "snapshot_invalid")
 		return
 	}
@@ -592,7 +621,7 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 		// Polling still works in this process; only a restart could not resume it.
 		a.log.Warn("media task id not recorded", "event", "media_task_unrecorded")
 	}
-	a.followMedia(ctx, hub, tid, id, sid, m, task, recorded)
+	a.followMedia(ctx, hub, tid, id, sid, m, plan, task, recorded, motionProgress{})
 }
 
 // leaveForResume marks a media run that stopped only because the API is shutting down (or lost
@@ -626,14 +655,64 @@ func (a *App) resumesAfterRestart(id string) bool {
 // a cancel, which has already settled the run, or a shutdown, which leaves the run for the next
 // start when its provider task is recorded and otherwise lets dispatch mark it interrupted.
 func (a *App) mediaStopped(ctx context.Context, id string, recorded bool) bool {
+	halted, _ := a.mediaHalted(ctx, id, recorded)
+	return halted
+}
+
+// mediaHalted is mediaStopped that also says whether the run was left for the next start to resume (a shutdown while
+// its provider task is recorded) rather than cancelled, or left to be marked interrupted.
+func (a *App) mediaHalted(ctx context.Context, id string, recorded bool) (halted, resumes bool) {
 	err := ctx.Err()
 	if err == nil || errors.Is(err, context.DeadlineExceeded) {
-		return false
+		return false, false
 	}
-	if recorded {
-		a.leaveForResume(id)
+	return true, recorded && a.leaveForResume(id)
+}
+
+// pollMedia queries a submitted task until it succeeds, and returns it. Anything else returns what ended it: the run's
+// context (a cancel, a shutdown or its deadline), the task's own failure, too many transient answers in a row, or an
+// answer about another task (one provider account serves every workspace, so such an answer is never this run's
+// result). report, when given, is told each queued or running state once as it changes.
+func (a *App) pollMedia(ctx context.Context, hub mediaProvider, task rhTask, report func(state string)) (rhTask, error) {
+	reported, failures := "", 0
+	for task.Status != "SUCCESS" {
+		if state := strings.ToLower(task.Status); report != nil && state != reported && (state == "queued" || state == "running") {
+			reported = state
+			report(state)
+		}
+		select {
+		case <-ctx.Done():
+			return task, ctx.Err()
+		case <-time.After(a.cfg.MediaPollInterval):
+		}
+		next, err := hub.query(ctx, task.TaskID)
+		if err != nil {
+			if ctx.Err() != nil {
+				continue
+			}
+			if e, ok := asRHError(err); ok && e.is("media_pending") {
+				// "Still queued / running" answered as an error code: not a failure.
+				failures = 0
+				continue
+			}
+			if e, ok := asRHError(err); ok && e.Transient {
+				if failures++; failures > mediaPollFailures {
+					return task, &rhError{Code: "media_provider_unavailable"}
+				}
+				continue
+			}
+			return task, err
+		}
+		failures = 0
+		if next.TaskID == "" {
+			next.TaskID = task.TaskID
+		}
+		if next.TaskID != task.TaskID {
+			return task, &rhError{Code: "media_provider_unavailable"}
+		}
+		task = next
 	}
-	return true
+	return task, nil
 }
 
 // submitMedia sends a run's one provider task. Every answer is final except one that says no task was created
@@ -745,58 +824,40 @@ func (a *App) mediaStatus(ctx context.Context, tid, id, status string) {
 }
 
 // followMedia polls a submitted task until it succeeds, fails or the run's deadline passes, then
-// stores the results. recorded says whether the task id is durable, so a shutdown can leave the
-// run for the next start instead of settling it.
-func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, task rhTask, recorded bool) {
-	reported, failures := "", 0
-	for task.Status != "SUCCESS" {
-		if state := strings.ToLower(task.Status); state != reported && (state == "queued" || state == "running") {
-			reported = state
-			a.mediaStatus(ctx, tid, id, state)
+// stores the results, or for a 3D model with a skeleton runs its chain (followTripoMotion). recorded
+// says whether the task id is durable, so a shutdown can leave the run for the next start instead of
+// settling it; progress is how far a resumed run's chain got.
+func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, plan *mediaPlan, task rhTask, recorded bool, progress motionProgress) {
+	// A generation admitted with a chain was priced for it: until the chain runs, none of it is charged.
+	unchained := func() {
+		if plan.Motion != nil {
+			a.settleMotionCredits(tid, id, plan.Motion.credits())
 		}
-		select {
-		case <-ctx.Done():
-			if a.mediaStopped(ctx, id, recorded) {
-				return
+	}
+	task, err := a.pollMedia(ctx, hub, task, func(state string) { a.mediaStatus(ctx, tid, id, state) })
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if halted, resumes := a.mediaHalted(ctx, id, recorded); halted {
+			// A run the next start resumes is charged when it ends there.
+			if !resumes {
+				unchained()
 			}
-			a.finish(tid, id, "failed", "", "media_timeout")
-			return
-		case <-time.After(a.cfg.MediaPollInterval):
-		}
-		next, err := hub.query(ctx, task.TaskID)
-		if err != nil {
-			if ctx.Err() != nil {
-				continue
-			}
-			if e, ok := asRHError(err); ok && e.is("media_pending") {
-				// "Still queued / running" answered as an error code: not a failure.
-				failures = 0
-				continue
-			}
-			if e, ok := asRHError(err); ok && e.Transient {
-				if failures++; failures > mediaPollFailures {
-					a.finish(tid, id, "failed", "", "media_provider_unavailable")
-					return
-				}
-				continue
-			}
-			if e, ok := asRHError(err); ok && e.Unbilled {
-				a.unbillMedia(ctx, tid, id)
-			}
-			a.finish(tid, id, "failed", "", mediaFailureCode(err))
 			return
 		}
-		failures = 0
-		if next.TaskID == "" {
-			next.TaskID = task.TaskID
+		unchained()
+		a.finish(tid, id, "failed", "", "media_timeout")
+		return
+	}
+	if err != nil {
+		if e, ok := asRHError(err); ok && e.Unbilled {
+			a.unbillMedia(ctx, tid, id)
 		}
-		if next.TaskID != task.TaskID {
-			// One provider account serves every workspace: an answer about another task is never
-			// stored as this run's result.
-			a.finish(tid, id, "failed", "", "media_provider_unavailable")
-			return
-		}
-		task = next
+		unchained()
+		a.finish(tid, id, "failed", "", mediaFailureCode(err))
+		return
+	}
+	if plan.Motion != nil {
+		a.followTripoMotion(ctx, hub, tid, id, sid, m, plan.Motion, task, recorded, progress)
+		return
 	}
 	a.mediaStatus(ctx, tid, id, "saving")
 	output, err := a.storeMediaResults(ctx, hub, tid, id, sid, m, task.Results)
@@ -813,13 +874,16 @@ func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid s
 type resumableMedia struct {
 	tenant, run, session, task string
 	elapsed                    time.Duration
+	// How far a 3D model's chain got (tripo_motion.go).
+	motion motionProgress
 }
 
 // resumableMediaRuns lists media runs that were waiting on a provider task when the API stopped.
 // They are excluded from the restart sweep and resumed: their generation is already paid for.
 func resumableMediaRuns(ctx context.Context, tx pgx.Tx) ([]resumableMedia, error) {
 	rows, e := tx.Query(ctx, `SELECT tenant_id,id,session_id,media_task->>'taskId',
-		GREATEST(0,EXTRACT(EPOCH FROM now()-COALESCE(NULLIF(media_task->>'submittedAt','')::timestamptz,created_at)))::bigint
+		GREATEST(0,EXTRACT(EPOCH FROM now()-COALESCE(NULLIF(media_task->>'submittedAt','')::timestamptz,created_at)))::bigint,
+		COALESCE(media_task->'motionTasks','[]'::jsonb)::text,COALESCE(media_task->>'motionSent','0')
 		FROM runs WHERE status='running' AND media_task ? 'taskId'`)
 	if e != nil {
 		return nil, e
@@ -829,13 +893,27 @@ func resumableMediaRuns(ctx context.Context, tx pgx.Tx) ([]resumableMedia, error
 	for rows.Next() {
 		var item resumableMedia
 		var seconds int64
-		if e = rows.Scan(&item.tenant, &item.run, &item.session, &item.task, &seconds); e != nil {
+		var tasks, sent string
+		if e = rows.Scan(&item.tenant, &item.run, &item.session, &item.task, &seconds, &tasks, &sent); e != nil {
 			return nil, e
 		}
 		item.elapsed = time.Duration(seconds) * time.Second
+		item.motion = readMotionProgress(tasks, sent)
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// readMotionProgress reads a run's recorded chain. Anything it cannot read counts every step as sent, so none of them
+// is sent again: a resumed chain then follows the tasks it can read and fails at the first it cannot.
+func readMotionProgress(tasks, sent string) motionProgress {
+	var p motionProgress
+	n, err := strconv.Atoi(strings.TrimSpace(sent))
+	if json.Unmarshal([]byte(tasks), &p.tasks) != nil || err != nil || n < 0 {
+		return motionProgress{sent: math.MaxInt32}
+	}
+	p.sent = max(n, len(p.tasks))
+	return p
 }
 
 func (a *App) resumeMedia(items []resumableMedia) {
@@ -843,7 +921,7 @@ func (a *App) resumeMedia(items []resumableMedia) {
 		item := item
 		remaining := a.cfg.MediaTimeout - item.elapsed
 		if remaining <= 0 {
-			a.finish(item.tenant, item.run, "failed", "", "media_timeout")
+			a.expireMedia(item)
 			continue
 		}
 		a.dispatchFor(remaining, item.tenant, item.run, "node", func(ctx context.Context) {
@@ -854,6 +932,10 @@ func (a *App) resumeMedia(items []resumableMedia) {
 				return
 			}
 			m, ok := builtinMediaCatalog.model(snapshot.Media.Model)
+			if ok && !frozenMotionValid(m, snapshot.Media, false) {
+				a.finish(item.tenant, item.run, "failed", "", "snapshot_invalid")
+				return
+			}
 			var hub mediaProvider
 			if ok {
 				hub = a.mediaProviderFor(m.Provider)
@@ -862,7 +944,27 @@ func (a *App) resumeMedia(items []resumableMedia) {
 				a.finish(item.tenant, item.run, "failed", "", "media_unavailable")
 				return
 			}
-			a.followMedia(ctx, hub, item.tenant, item.run, item.session, m, rhTask{TaskID: item.task, Status: "RUNNING"}, true)
+			a.followMedia(ctx, hub, item.tenant, item.run, item.session, m, snapshot.Media, rhTask{TaskID: item.task, Status: "RUNNING"}, true, item.motion)
 		})
 	}
+}
+
+// expireMedia ends a resumable run whose time ran out while the API was down. A 3D model's chain is charged for the
+// steps Tripo accepted (their outcome unknown, as the model task's), and nothing for those it never got.
+func (a *App) expireMedia(item resumableMedia) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var raw []byte
+	var snapshot executionSnapshot
+	if a.db.QueryRow(ctx, "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", item.tenant, item.run).Scan(&raw) == nil &&
+		json.Unmarshal(raw, &snapshot) == nil && snapshot.Media != nil && validTripoMotion(snapshot.Media.Motion) {
+		motion, unbilled := snapshot.Media.Motion, snapshot.Media.Motion.credits()
+		for step := range min(len(item.motion.tasks), len(motion.Batches)+1) {
+			unbilled -= motion.stepCredits(step)
+		}
+		if unbilled > 0 {
+			a.settleMotionCredits(item.tenant, item.run, unbilled)
+		}
+	}
+	cancel()
+	a.finish(item.tenant, item.run, "failed", "", "media_timeout")
 }

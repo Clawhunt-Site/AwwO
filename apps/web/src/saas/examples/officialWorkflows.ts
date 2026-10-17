@@ -68,6 +68,10 @@ const MEDIA_PAGE_R186 = '\n\nThe canvas’s media nodes hand you the files they 
 // What AwwO's 3D model nodes hand over (seen in their GLBs, 2026-10-15): one textured PBR mesh that faces +X with +Y up,
 // centred on the origin and scaled so its longest side is 1 unit, and a rendered preview picture beside it.
 const MEDIA_MODEL_PAGE_R186 = ' A 3D model node hands over a GLB model and a rendered preview picture: a 3D scene loads the GLB with GLTFLoader by its path and shows the real model. The model faces +X with +Y up, centred on the origin and scaled so its longest side is 1 unit: scale it from its bounding box to its real size, stand it on the ground, and turn it about Y so +X points where it faces or travels; clone it for every copy (its materials are cloned once per tint, never per frame). A flat page shows the preview picture.';
+// Said only where a case's 3D model node is animated (its `motion` setting), so every canvas published before it keeps
+// its text: an animated model's clips are in its GLBs (tripo_motion.go in the API), the first with the model, later
+// ones with clips only for the same skeleton.
+const MEDIA_ANIMATED_MODEL_PAGE_R186 = ' An animated model’s clips are in its GLB, named as its input lists them: play them with THREE.AnimationMixer on the loaded scene (gltf.animations); a later file of the same node carries clips only, for the same skeleton, so apply them to model-1.glb’s scene by bone name.';
 /** The page rule of a workflow on three.js r186: the import map AwwO supplies, and nothing else from outside. With
  * `fonts`, the brand fonts AwwO supplies are named too. */
 const HTML_R186 = (pictures: boolean, fonts: boolean) => `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data. For 3D use three.js r186, which AwwO supplies with no network, through exactly this import map: ${THREE_MODULES_IMPORT_MAP}, importing 'three' and 'three/addons/…' in one module script; never paste a library’s source. ${fonts ? `${PREVIEW_FONT_RULE} ` : ''}No other external scripts, fonts, ${pictures ? 'images (the media nodes’ files excepted)' : 'images'} or network requests. Interactions must update real state.`;
@@ -104,8 +108,10 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
       ? modern ? HTML_R186(pictures.length > 0, item.fonts === true)
         : `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, ${pictures.length ? 'external images (the files the media nodes hand you excepted)' : 'images'} or network requests. Interactions must update real state.` : '';
     const models = pictures.some(picture => picture.kind === 'model3d');
+    const animated = pictures.some(picture => picture.kind === 'model3d' && typeof picture.params?.motion === 'string' && picture.params.motion !== 'none');
     const shows = pictures.length
-      ? modern ? `${MEDIA_PAGE_R186}${models ? MEDIA_MODEL_PAGE_R186 : ''}` : `${MEDIA_PAGE}${models ? MEDIA_MODEL_PAGE : ''}` : '';
+      ? modern ? `${MEDIA_PAGE_R186}${models ? MEDIA_MODEL_PAGE_R186 : ''}${animated ? MEDIA_ANIMATED_MODEL_PAGE_R186 : ''}`
+        : `${MEDIA_PAGE}${models ? MEDIA_MODEL_PAGE : ''}` : '';
     return { ...base, title: spec.title, w: 560, h: 420, ...(spec.sandbox ? { runtime: SANDBOX_RUNTIME } : {}),
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.

@@ -58,6 +58,8 @@ const runErrors: Record<string, [string, string]> = {
   media_timeout: ['生成超时，请稍后重试或换一个模型。', 'The generation timed out. Try again later or choose another model.'],
   media_task_missing: ['生成任务已不存在，请重新运行。', 'The generation task no longer exists. Run the node again.'],
   media_failed: ['生成失败，请调整描述或换一个模型后重试。', 'The generation failed. Adjust the description or choose another model, then try again.'],
+  // A 3D model was made, but rigging or animating it failed: nothing is delivered, and only what succeeded is charged.
+  media_motion_failed: ['模型已生成，但绑定骨骼或生成动作失败，这次没有交付文件；已成功的步骤照常计费，失败的步骤不计费。请重试，或换一种骨骼或动作。', 'The model was made, but rigging or animating it failed, so nothing was delivered. The steps that succeeded are charged as usual and the failed one is not. Try again, or choose another skeleton or animation set.'],
   media_no_output: ['生成服务没有返回结果，请重试。', 'The generation service returned no result. Please try again.'],
   media_result_invalid: ['生成结果不是有效的图像、视频或 3D 模型，已拒绝保存。', 'The result was not a valid image, video or 3D model and was not saved.'],
   media_result_refused: ['生成结果来自未允许的地址，已拒绝下载。', 'The result came from an address that is not allowed and was not downloaded.'],

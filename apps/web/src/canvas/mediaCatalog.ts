@@ -15,12 +15,16 @@ export interface MediaParam {
   name: string;
   type: MediaParamType;
   values?: string[];
+  /** An enum's values as users see them, [Chinese, English] for each value in order; without them a value shows as it is. */
+  valueLabels?: [string, string][];
   min?: number;
   max?: number;
   maxLength?: number;
   default?: MediaParamValue;
   /** [Chinese, English]. */
   label: [string, string];
+  /** The parameter applies only while an earlier enum parameter has one of these values, and otherwise keeps its default. */
+  requires?: { param: string; values: string[] };
 }
 
 export interface MediaModel {
@@ -45,6 +49,8 @@ export interface MediaCatalogue {
 }
 
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
+// The most pictures a model may start from: the server's own ceiling (X-tasy's video models take up to 10).
+const MAX_MEDIA_REFERENCES = 10;
 const MODEL_ID = /^(?:rh|tripo|xt)\.[a-z0-9][a-z0-9-]{0,62}$/;
 const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d']);
 const PARAM_TYPES: ReadonlySet<string> = new Set(['enum', 'integer', 'number', 'boolean', 'text']);
@@ -58,12 +64,24 @@ function parseParam(raw: unknown): MediaParam | null {
   const r = raw as Record<string, unknown>;
   if (typeof r.name !== 'string' || !PARAM_NAME.test(r.name) || typeof r.type !== 'string' || !PARAM_TYPES.has(r.type) || !label(r.label)) return null;
   const param: MediaParam = { name: r.name, type: r.type as MediaParamType, label: [r.label[0], r.label[1]] };
+  if (r.requires !== undefined) {
+    const requires = r.requires as Record<string, unknown> | null;
+    if (!requires || typeof requires !== 'object' || typeof requires.param !== 'string' || !PARAM_NAME.test(requires.param)
+      || !Array.isArray(requires.values) || !requires.values.length || requires.values.some(value => typeof value !== 'string')
+      || (param.type !== 'enum' && param.type !== 'boolean')) return null;
+    param.requires = { param: requires.param, values: [...requires.values as string[]] };
+  }
+  if (r.valueLabels !== undefined && param.type !== 'enum') return null;
   switch (param.type) {
     case 'enum': {
       if (!Array.isArray(r.values) || !r.values.length || r.values.some(value => typeof value !== 'string')) return null;
       param.values = r.values as string[];
       if (typeof r.default !== 'string' || !param.values.includes(r.default)) return null;
       param.default = r.default;
+      if (r.valueLabels !== undefined) {
+        if (!Array.isArray(r.valueLabels) || r.valueLabels.length !== param.values.length || !r.valueLabels.every(label)) return null;
+        param.valueLabels = (r.valueLabels as [string, string][]).map(([zh, en]) => [zh, en]);
+      }
       break;
     }
     case 'integer':
@@ -98,12 +116,14 @@ function parseModel(raw: unknown): MediaModel | null {
   const params: MediaParam[] = [];
   for (const entry of r.params) {
     const param = parseParam(entry);
-    // A model whose parameters cannot be read cannot be configured honestly; drop the model.
-    if (!param) return null;
+    // A model whose parameters cannot be read cannot be configured honestly; drop the model. A parameter depends only
+    // on an enum declared before it, by that enum's own values.
+    const on = param?.requires ? params.find(earlier => earlier.name === param.requires!.param) : undefined;
+    if (!param || (param.requires && (on?.type !== 'enum' || !param.requires.values.every(value => on.values?.includes(value))))) return null;
     params.push(param);
   }
   const shown: [string, string] = label(r.label) ? [r.label[0], r.label[1]] : [r.name, r.name];
-  const references = Number.isInteger(r.references) && (r.references as number) > 0 && (r.references as number) <= 4 ? r.references as number : 0;
+  const references = Number.isInteger(r.references) && (r.references as number) > 0 && (r.references as number) <= MAX_MEDIA_REFERENCES ? r.references as number : 0;
   return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params, references };
 }
 
@@ -154,9 +174,37 @@ export function invalidMediaParams(model: MediaModel, params: MediaParams | unde
   const failed: string[] = [];
   for (const [name, value] of Object.entries(params)) {
     const param = model.params.find(entry => entry.name === name);
-    if (!param || !validMediaValue(param, value)) failed.push(name);
+    // A choice for a parameter that does not apply under the others is refused too: it would be ignored, or not honoured.
+    if (!param || !validMediaValue(param, value) || (value !== param.default && !mediaParamApplies(model, param, params))) failed.push(name);
   }
   return failed;
+}
+
+/** Whether a parameter applies under the node's other choices (or their defaults): one without a dependency always does. */
+export function mediaParamApplies(model: MediaModel, param: MediaParam, params: MediaParams | undefined): boolean {
+  if (!param.requires) return true;
+  const on = model.params.find(entry => entry.name === param.requires!.param);
+  const value = on ? mediaParamValue(on, params) : undefined;
+  return typeof value === 'string' && param.requires.values.includes(value);
+}
+
+/**
+ * Set one parameter, as withMediaParam does, then drop every choice that no longer applies (they depend on earlier
+ * parameters only, so one pass in order settles a chain of them): turning a skeleton off, say, takes its animations
+ * with it, and the node never keeps a choice its run would refuse.
+ */
+export function withMediaChoice(model: MediaModel, params: MediaParams | undefined, param: MediaParam, value: MediaParamValue | undefined): MediaParams {
+  const next = withMediaParam(params, param, value);
+  for (const entry of model.params) {
+    if (Object.hasOwn(next, entry.name) && !mediaParamApplies(model, entry, next)) delete next[entry.name];
+  }
+  return next;
+}
+
+/** The name a client shows for one of an enum parameter's values, in the reader's language. */
+export function mediaValueLabel(param: MediaParam, value: string, locale: UiLocale): string {
+  const index = param.values?.indexOf(value) ?? -1;
+  return index >= 0 && param.valueLabels ? param.valueLabels[index][locale === 'zh' ? 0 : 1] : value;
 }
 
 function validMediaValue(param: MediaParam, value: MediaParamValue): boolean {

@@ -179,11 +179,49 @@ func mediaDeliveryText(n graphNode, output string) string {
 		title = n.ID
 	}
 	lines := []string{fmt.Sprintf("「%s」生成的%s文件（存放在这张画布的成果里，这里只列文件，不含内容）：", title, map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型"}[record.Kind])}
+	// A rigged model's GLBs name their clips; one with clips only is for the skeleton of the first model.
+	model, animated, clipsOnly := "", false, false
 	for _, item := range record.Items {
-		lines = append(lines, fmt.Sprintf("- %s/%s（%s，%d 字节）", n.ID, item.Name, item.ContentType, item.Size))
+		if item.ContentType == "model/gltf-binary" && !item.ClipsOnly && model == "" {
+			model = n.ID + "/" + item.Name
+		}
+	}
+	for _, item := range record.Items {
+		var extra string
+		if item.ContentType == "model/gltf-binary" {
+			if item.ClipsOnly {
+				extra, clipsOnly = "；只有动画，没有模型", true
+				if model != "" {
+					extra += "，骨骼与 " + model + " 相同"
+				}
+			}
+			if names := shownClipNames(item.Animations); names != "" {
+				extra, animated = extra+"；动画："+names, true
+			}
+		}
+		lines = append(lines, fmt.Sprintf("- %s/%s（%s，%d 字节%s）", n.ID, item.Name, item.ContentType, item.Size, extra))
 	}
 	lines = append(lines, "网页可以用上面的相对路径引用这些文件，AwwO 的预览会换成真实文件；不要编造其他文件名。")
+	if animated {
+		line := "带动画的 GLB 用 THREE.AnimationMixer 按上面的动画名播放它的动画（gltf.animations）。"
+		if clipsOnly && model != "" {
+			line += "只有动画的文件和 " + model + " 是同一副骨骼：加载它只取动画，按骨骼名用到 " + model + " 的场景上。"
+		}
+		lines = append(lines, line)
+	}
 	return strings.Join(lines, "\n")
+}
+
+// shownClipNames lists a GLB's clip names as a downstream prompt may name them: plain short names only (the API wrote
+// them from the file, media_glb.go, but a record is read back from the database), space separated.
+func shownClipNames(names []string) string {
+	shown := []string{}
+	for _, name := range names {
+		if glbClipName.MatchString(name) && len(shown) < maxGLBClips {
+			shown = append(shown, name)
+		}
+	}
+	return strings.Join(shown, " ")
 }
 
 // mediaMissingText is what a downstream input reads from a media node that made no file this time (it failed, was
@@ -217,6 +255,15 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 	}
 	if !a.mediaEntitled(entitlement, plan.Model) {
 		return errors.New("model_not_allowed")
+	}
+	// The generation is priced now (admitMediaGeneration), so its chain is derived again with it: price and chain by
+	// one release, even when the graph was admitted by an earlier one.
+	if m.Provider == mediaProviderTripo {
+		motion, err := tripoMotionFor(plan.Params)
+		if err != nil {
+			return errors.New("media_params_invalid")
+		}
+		plan.Motion = motion
 	}
 	var canvasID string
 	if e := tx.QueryRow(ctx, "SELECT canvas_id FROM node_sessions WHERE tenant_id=$1 AND id=$2", tid, sid).Scan(&canvasID); e != nil {

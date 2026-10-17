@@ -401,7 +401,8 @@ var mediaBaseCredits = map[string]int{
 // credit are both $0.01): with texture, without, and what detailed texture and detailed geometry add. Tripo's
 // tables (2026-10): H3.1 20 textured, 10 untextured, +10 detailed texture, +20 detailed geometry; P1 40, 30,
 // +10 detailed texture, and no geometry option. Building the model from a reference picture (image-to-model) costs
-// Tripo 10 more on every tier of both series (2026-10-12), so 30 more here.
+// Tripo 10 more on every tier of both series (2026-10-12), so 30 more here. A skeleton and its animations add their
+// chain's tasks (tripo_motion.go): the rig 75 (Tripo 25) and 150 (Tripo 50) for each retarget task.
 var model3DCredits = map[string]struct{ textured, untextured, detailedTexture, detailedGeometry, imageInput int }{
 	"tripo.v3-1": {textured: 60, untextured: 30, detailedTexture: 30, detailedGeometry: 60, imageInput: 30},
 	"tripo.p1":   {textured: 120, untextured: 90, detailedTexture: 30, imageInput: 30},
@@ -481,6 +482,10 @@ func mediaCreditsFor(model, kind string, params map[string]any) int {
 		}
 		if text("geometryQuality") == "detailed" {
 			n += price.detailedGeometry
+		}
+		// Settings the chain refuses never reach a price: admission refuses them first (mediaPlanSnapshot).
+		if motion, err := tripoMotionFor(params); err == nil {
+			n += motion.credits()
 		}
 		return n
 	}

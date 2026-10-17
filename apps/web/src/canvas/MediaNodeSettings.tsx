@@ -11,10 +11,13 @@ import {
   mediaKindOf,
   mediaModelLabel,
   mediaModelsOf,
+  mediaParamApplies,
   mediaParamValue,
-  withMediaParam,
+  mediaValueLabel,
+  withMediaChoice,
   type MediaCatalogue,
   type MediaKind,
+  type MediaModel,
   type MediaParam,
 } from './mediaCatalog';
 
@@ -76,7 +79,8 @@ export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: 
   if (!models.length) return <div className="canvas-inspector-hint" role="status">{t('media.noModels', { kind: kindLabel })}</div>;
   const model = models.find(entry => entry.id === node.model);
   const invalid = model ? invalidMediaParams(model, node.mediaParams) : [];
-  const set = (param: MediaParam, value: MediaParamValue | undefined) => onChange({ ...node, mediaParams: withMediaParam(node.mediaParams, param, value) });
+  const set = (current: MediaModel, param: MediaParam, value: MediaParamValue | undefined) =>
+    onChange({ ...node, mediaParams: withMediaChoice(current, node.mediaParams, param, value) });
   return <div className="canvas-inspector-media" data-testid="media-node-settings">
     <label className="canvas-inspector-label" htmlFor="cv-media-model">{t('media.model')}</label>
     <select id="cv-media-model" className="canvas-inspector-input" value={model?.id ?? ''} disabled={disabled}
@@ -91,8 +95,9 @@ export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: 
       </optgroup>
     </select>
     {model ? <>
-      {model.params.map(param => <MediaParamControl key={`${model.id}:${param.name}`} param={param} value={mediaParamValue(param, node.mediaParams)}
-        invalid={invalid.includes(param.name)} disabled={disabled} onChange={value => set(param, value)} />)}
+      {model.params.map(param => <MediaParamControl key={`${model.id}:${param.name}`} model={model} param={param} value={mediaParamValue(param, node.mediaParams)}
+        applies={mediaParamApplies(model, param, node.mediaParams)}
+        invalid={invalid.includes(param.name)} disabled={disabled} onChange={value => set(model, param, value)} />)}
       {invalid.length ? <div className="canvas-inspector-outcome canvas-inspector-outcome--err" role="alert">
         {t('media.invalidParams', { names: invalid.map(name => model.params.find(param => param.name === name)?.label[locale === 'zh' ? 0 : 1] ?? name).join(locale === 'zh' ? '、' : ', ') })}
       </div> : null}
@@ -102,9 +107,12 @@ export function MediaNodeSettings({ node, state, disabled, onChange, onRetry }: 
   </div>;
 }
 
-function MediaParamControl({ param, value, invalid, disabled, onChange }: {
+function MediaParamControl({ model, param, value, applies, invalid, disabled, onChange }: {
+  model: MediaModel;
   param: MediaParam;
   value: MediaParamValue | undefined;
+  /** False while the parameter's dependency is not met: its control is disabled and says what it waits for. */
+  applies: boolean;
   invalid: boolean;
   disabled: boolean;
   onChange: (value: MediaParamValue | undefined) => void;
@@ -112,17 +120,26 @@ function MediaParamControl({ param, value, invalid, disabled, onChange }: {
   const { locale, t } = useCanvasI18n();
   const label = param.label[locale === 'zh' ? 0 : 1];
   const id = `cv-media-${param.name}`;
-  const describe = (choice: string) => choice === param.default ? t('media.defaultValue', { value: choice }) : choice;
+  const hintId = `${id}-requires`;
+  const named = (choice: string) => mediaValueLabel(param, choice, locale);
+  const describe = (choice: string) => choice === param.default ? t('media.defaultValue', { value: named(choice) }) : named(choice);
+  const on = param.requires ? model.params.find(entry => entry.name === param.requires!.param) : undefined;
+  const waits = !applies && on ? <div id={hintId} className="canvas-inspector-hint">{t('media.requires', { name: on.label[locale === 'zh' ? 0 : 1],
+    values: param.requires!.values.map(choice => mediaValueLabel(on, choice, locale)).join(locale === 'zh' ? '、' : ', ') })}</div> : null;
+  const off = disabled || !applies;
   if (param.type === 'boolean') {
-    return <label className="canvas-inspector-check" htmlFor={id}>
-      <input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={event => onChange(event.target.checked)} />
-      <span>{label}</span>
-    </label>;
+    return <>
+      <label className="canvas-inspector-check" htmlFor={id}>
+        <input id={id} type="checkbox" checked={value === true} disabled={off} aria-describedby={waits ? hintId : undefined} onChange={event => onChange(event.target.checked)} />
+        <span>{label}</span>
+      </label>
+      {waits}
+    </>;
   }
   return <>
     <label className="canvas-inspector-label" htmlFor={id}>{label}</label>
-    {param.type === 'enum' ? <select id={id} className="canvas-inspector-input" aria-invalid={invalid || undefined} disabled={disabled}
-      value={typeof value === 'string' ? value : ''} onChange={event => onChange(event.target.value)}>
+    {param.type === 'enum' ? <select id={id} className="canvas-inspector-input" aria-invalid={invalid || undefined} disabled={off}
+      aria-describedby={waits ? hintId : undefined} value={typeof value === 'string' ? value : ''} onChange={event => onChange(event.target.value)}>
       {typeof value !== 'string' || !param.values?.includes(value) ? <option value="" disabled>{typeof value === 'string' ? value : ''}</option> : null}
       {param.values?.map(choice => <option key={choice} value={choice}>{describe(choice)}</option>)}
     </select> : param.type === 'text' ? <textarea id={id} className="canvas-inspector-persona" rows={2} aria-invalid={invalid || undefined}
@@ -138,5 +155,6 @@ function MediaParamControl({ param, value, invalid, disabled, onChange }: {
     {param.type === 'integer' || param.type === 'number'
       ? <div className="canvas-inspector-hint">{t('media.range', { min: param.min ?? '', max: param.max ?? '' })}
         {param.default !== undefined ? ` · ${t('media.defaultValue', { value: String(param.default) })}` : ''}</div> : null}
+    {waits}
   </>;
 }

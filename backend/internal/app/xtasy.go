@@ -167,7 +167,7 @@ func validXtasyModel(m *mediaModel) error {
 			return fmt.Errorf("parameter %q: %w", p.Name, err)
 		}
 	}
-	return nil
+	return validMediaParamRequires(m.Params)
 }
 
 // xtasyRequest is the body of one generation task: the pinned model, the prompt, the model's fixed parameters and

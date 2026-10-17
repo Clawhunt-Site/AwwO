@@ -151,7 +151,7 @@ func validJimengModel(m *mediaModel) error {
 			return fmt.Errorf("parameter %q: %w", p.Name, err)
 		}
 	}
-	return nil
+	return validMediaParamRequires(m.Params)
 }
 
 // jimengRequest is one generation as the client reads it: the canonical model, the mode, the words (with a literal

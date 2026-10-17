@@ -29,27 +29,17 @@ func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id,
 	if len(results) == 0 {
 		return "", &rhError{Code: "media_no_output"}
 	}
-	if !mediaPathPart.MatchString(tid) || !mediaPathPart.MatchString(id) {
-		return "", &rhError{Code: "media_storage_failed"}
-	}
-	var canvasID, nodeID string
-	if e := a.db.QueryRow(ctx, "SELECT canvas_id,node_id FROM node_sessions WHERE tenant_id=$1 AND id=$2", tid, sid).Scan(&canvasID, &nodeID); e != nil {
-		return "", &rhError{Code: "media_storage_failed"}
-	}
-	dir := filepath.Join(a.cfg.MediaDir, tid, id)
-	tmp := filepath.Join(a.cfg.MediaDir, ".tmp")
-	if os.MkdirAll(dir, 0o750) != nil || os.MkdirAll(tmp, 0o750) != nil {
-		return "", &rhError{Code: "media_storage_failed"}
+	d, err := a.mediaDestinationFor(ctx, tid, id, sid)
+	if err != nil {
+		return "", err
 	}
 	items := []mediaItem{}
 	for i, result := range results {
+		f, err := a.fetchMediaFile(ctx, hub, d.tmp, m, i+1, result)
 		var item mediaItem
-		var err error
-		if release, ok := a.reserveMediaSpace(hub.fileLimit()); !ok {
-			err = &rhError{Code: "media_storage_full"}
-		} else {
-			item, err = a.storeMediaResult(ctx, hub, tmp, tid, id, canvasID, nodeID, m, i+1, result)
-			release()
+		if err == nil {
+			item, err = a.keepMediaFile(ctx, d, tid, id, m, i+1, &f)
+			f.discard()
 		}
 		if err != nil {
 			// A 3D node's rendered preview is a convenience beside its model: once the model (the first
@@ -63,8 +53,120 @@ func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id,
 		}
 		items = append(items, item)
 	}
+	return mediaOutputRecord(m, items), nil
+}
+
+// mediaOutputRecord is a run's awwo.media record: the files it kept, in order.
+func mediaOutputRecord(m *mediaModel, items []mediaItem) string {
 	output, _ := json.Marshal(map[string]any{"type": mediaOutputType, "version": 1, "kind": m.Kind, "model": m.ID, "items": items})
-	return string(output), nil
+	return string(output)
+}
+
+// mediaDestination is where a run keeps its files: its node's canvas and id, and the media directory's temporary
+// folder, on the same filesystem as the run's own directory, which exists.
+type mediaDestination struct{ canvasID, nodeID, tmp string }
+
+func (a *App) mediaDestinationFor(ctx context.Context, tid, id, sid string) (mediaDestination, error) {
+	if !mediaPathPart.MatchString(tid) || !mediaPathPart.MatchString(id) {
+		return mediaDestination{}, &rhError{Code: "media_storage_failed"}
+	}
+	var d mediaDestination
+	if e := a.db.QueryRow(ctx, "SELECT canvas_id,node_id FROM node_sessions WHERE tenant_id=$1 AND id=$2", tid, sid).Scan(&d.canvasID, &d.nodeID); e != nil {
+		return mediaDestination{}, &rhError{Code: "media_storage_failed"}
+	}
+	d.tmp = filepath.Join(a.cfg.MediaDir, ".tmp")
+	if os.MkdirAll(filepath.Join(a.cfg.MediaDir, tid, id), 0o750) != nil || os.MkdirAll(d.tmp, 0o750) != nil {
+		return mediaDestination{}, &rhError{Code: "media_storage_failed"}
+	}
+	return d, nil
+}
+
+// fetchedMedia is one result file downloaded into the media directory's temporary folder and checked, not kept yet.
+type fetchedMedia struct {
+	path, sum, contentType, ext, kind string
+	size                              int64
+	// What a GLB's JSON chunk says of it (glbFacts): its clips' names, and that it has clips and no mesh.
+	animations []string
+	clipsOnly  bool
+}
+
+// discard removes a fetched file that was not kept.
+func (f *fetchedMedia) discard() {
+	if f.path != "" {
+		_ = os.Remove(f.path)
+		f.path = ""
+	}
+}
+
+// fetchMediaFile downloads one result into tmp, holding its space meanwhile, and checks that its bytes are what a node of
+// m's kind keeps at index, whatever the provider called it. A 3D node's GLB loses its maker's name from its JSON chunk
+// and is read for its clips (neutralizeGLB).
+func (a *App) fetchMediaFile(ctx context.Context, hub mediaProvider, tmp string, m *mediaModel, index int, result rhResult) (fetchedMedia, error) {
+	release, ok := a.reserveMediaSpace(hub.fileLimit())
+	if !ok {
+		return fetchedMedia{}, &rhError{Code: "media_storage_full"}
+	}
+	defer release()
+	file, err := os.CreateTemp(tmp, "download-*")
+	if err != nil {
+		return fetchedMedia{}, &rhError{Code: "media_storage_failed"}
+	}
+	f := fetchedMedia{path: file.Name()}
+	hash := sha256.New()
+	head := &headBuffer{limit: 64}
+	size, err := hub.download(ctx, result.URL, io.MultiWriter(file, hash, head))
+	if closeErr := file.Close(); err == nil && closeErr != nil {
+		err = &rhError{Code: "media_storage_failed"}
+	}
+	if err == nil {
+		f.contentType, f.ext, f.kind = sniffMedia(head.Bytes())
+		if !mediaResultFits(m.Kind, f.kind, index) || size == 0 {
+			err = &rhError{Code: "media_result_invalid"}
+		}
+	}
+	if err != nil {
+		f.discard()
+		return fetchedMedia{}, err
+	}
+	f.size, f.sum = size, hex.EncodeToString(hash.Sum(nil))
+	if m.Kind == mediaKindModel3D && f.kind == mediaKindModel3D {
+		a.neutralizeGLB(&f, tmp)
+	}
+	return f, nil
+}
+
+// keepMediaFile moves a fetched file into AWWO_MEDIA_DIR/<tenant>/<run>/<sha256>.<ext> and records it as an artifact of
+// the run's canvas node, named for its place in the result (index).
+func (a *App) keepMediaFile(ctx context.Context, d mediaDestination, tid, id string, m *mediaModel, index int, f *fetchedMedia) (mediaItem, error) {
+	rel := tid + "/" + id + "/" + f.sum + "." + f.ext
+	final := filepath.Join(a.cfg.MediaDir, tid, id, f.sum+"."+f.ext)
+	if os.MkdirAll(filepath.Dir(final), 0o750) != nil || os.Rename(f.path, final) != nil {
+		// An old empty run directory can be swept between the two calls; recreate it once.
+		if os.MkdirAll(filepath.Dir(final), 0o750) != nil || os.Rename(f.path, final) != nil {
+			return mediaItem{}, &rhError{Code: "media_storage_failed"}
+		}
+	}
+	f.path = ""
+	_ = os.Chmod(final, 0o640)
+	field := fmt.Sprintf("media-%d", index)
+	name := fmt.Sprintf("%s-%d.%s", m.Kind, index, f.ext)
+	if m.Kind == mediaKindModel3D {
+		name = fmt.Sprintf("model-%d.%s", index, f.ext)
+		if f.kind != mediaKindModel3D {
+			name = fmt.Sprintf("preview-%d.%s", index, f.ext)
+		}
+	}
+	item := mediaItem{ArtifactID: artifactID(tid, id, d.nodeID, field), Name: name, ContentType: f.contentType, Size: f.size,
+		Animations: f.animations, ClipsOnly: f.clipsOnly}
+	insert, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if _, e := a.db.Exec(insert, `INSERT INTO artifacts(id,tenant_id,canvas_id,run_id,node_id,field_id,name,size,sha256,content,storage_path,content_type)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,''::bytea,$10,$11)
+		ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,size=EXCLUDED.size,sha256=EXCLUDED.sha256,content=EXCLUDED.content,storage_path=EXCLUDED.storage_path,content_type=EXCLUDED.content_type`,
+		item.ArtifactID, tid, d.canvasID, id, d.nodeID, field, item.Name, f.size, f.sum, rel, f.contentType); e != nil {
+		return mediaItem{}, &rhError{Code: "media_storage_failed"}
+	}
+	return item, nil
 }
 
 // mediaFileResults keeps the results that are files. A provider may report a value next to the
@@ -79,61 +181,6 @@ func mediaFileResults(results []rhResult) []rhResult {
 		}
 	}
 	return files
-}
-
-func (a *App) storeMediaResult(ctx context.Context, hub mediaProvider, tmp, tid, id, canvasID, nodeID string, m *mediaModel, index int, result rhResult) (mediaItem, error) {
-	file, err := os.CreateTemp(tmp, "download-*")
-	if err != nil {
-		return mediaItem{}, &rhError{Code: "media_storage_failed"}
-	}
-	keep := false
-	defer func() {
-		if !keep {
-			_ = os.Remove(file.Name())
-		}
-	}()
-	hash := sha256.New()
-	head := &headBuffer{limit: 64}
-	size, err := hub.download(ctx, result.URL, io.MultiWriter(file, hash, head))
-	if closeErr := file.Close(); err == nil && closeErr != nil {
-		err = &rhError{Code: "media_storage_failed"}
-	}
-	if err != nil {
-		return mediaItem{}, err
-	}
-	contentType, ext, kind := sniffMedia(head.Bytes())
-	if !mediaResultFits(m.Kind, kind, index) || size == 0 {
-		return mediaItem{}, &rhError{Code: "media_result_invalid"}
-	}
-	sum := hex.EncodeToString(hash.Sum(nil))
-	rel := tid + "/" + id + "/" + sum + "." + ext
-	final := filepath.Join(a.cfg.MediaDir, tid, id, sum+"."+ext)
-	if os.MkdirAll(filepath.Dir(final), 0o750) != nil || os.Rename(file.Name(), final) != nil {
-		// An old empty run directory can be swept between the two calls; recreate it once.
-		if os.MkdirAll(filepath.Dir(final), 0o750) != nil || os.Rename(file.Name(), final) != nil {
-			return mediaItem{}, &rhError{Code: "media_storage_failed"}
-		}
-	}
-	keep = true
-	_ = os.Chmod(final, 0o640)
-	field := fmt.Sprintf("media-%d", index)
-	name := fmt.Sprintf("%s-%d.%s", m.Kind, index, ext)
-	if m.Kind == mediaKindModel3D {
-		name = fmt.Sprintf("model-%d.%s", index, ext)
-		if kind != mediaKindModel3D {
-			name = fmt.Sprintf("preview-%d.%s", index, ext)
-		}
-	}
-	item := mediaItem{ArtifactID: artifactID(tid, id, nodeID, field), Name: name, ContentType: contentType, Size: size}
-	insert, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if _, e := a.db.Exec(insert, `INSERT INTO artifacts(id,tenant_id,canvas_id,run_id,node_id,field_id,name,size,sha256,content,storage_path,content_type)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,''::bytea,$10,$11)
-		ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,size=EXCLUDED.size,sha256=EXCLUDED.sha256,content=EXCLUDED.content,storage_path=EXCLUDED.storage_path,content_type=EXCLUDED.content_type`,
-		item.ArtifactID, tid, canvasID, id, nodeID, field, item.Name, size, sum, rel, contentType); e != nil {
-		return mediaItem{}, &rhError{Code: "media_storage_failed"}
-	}
-	return item, nil
 }
 
 // headBuffer keeps the first bytes written through it, for content sniffing.

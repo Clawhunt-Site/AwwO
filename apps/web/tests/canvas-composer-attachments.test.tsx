@@ -111,10 +111,12 @@ describe('a media node composer', () => {
     expect(mediaComposerInfo({ kind: 'session', agentKind: 'llm', model: 'm' }, choices)).toBeUndefined();
   });
 
-  it('reads a model capability from the catalogue, 0 unless a small whole number', () => {
+  it('reads a model capability from the catalogue, 0 unless a whole number up to the server ceiling of 10', () => {
     const model = (references: unknown) => ({ id: 'xt.xtasy-3', name: 'x', label: ['图片', 'Image'], vendor: '媒体', kind: 'image', prompt: { minLength: 1, maxLength: 10 }, params: [], references });
-    const catalogue = parseMediaCatalogue({ configured: true, available: true, models: [model(1), { ...model('2'), id: 'xt.b' }, { ...model(9), id: 'xt.c' }, { ...model(undefined), id: 'xt.d' }] });
-    expect(catalogue.models.map(m => m.references)).toEqual([1, 0, 0, 0]);
+    // X-tasy's video models start from up to 9 and 10 pictures (xtasy.go); the catalogue once read those as none.
+    const catalogue = parseMediaCatalogue({ configured: true, available: true, models: [model(1), { ...model('2'), id: 'xt.b' }, { ...model(9), id: 'xt.c' },
+      { ...model(10), id: 'xt.e' }, { ...model(11), id: 'xt.f' }, { ...model(undefined), id: 'xt.d' }] });
+    expect(catalogue.models.map(m => m.references)).toEqual([1, 0, 9, 10, 0, 0]);
   });
 
   it('gives 3D and video nodes a reference input, as image nodes have, and text nodes none', () => {

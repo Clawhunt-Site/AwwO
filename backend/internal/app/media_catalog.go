@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -52,6 +53,19 @@ type mediaParam struct {
 	MaxLength int       `json:"maxLength,omitempty"`
 	Default   any       `json:"default,omitempty"`
 	Label     [2]string `json:"label"`
+	// ValueLabels are the names users see for an enum's values, [Chinese, English] for each value in order. An enum
+	// without them shows its values as they are.
+	ValueLabels [][2]string `json:"valueLabels,omitempty"`
+	// Requires makes the parameter depend on an earlier enum parameter of the same model: it applies only while that
+	// one has one of Values, and otherwise stays at its default (resolveMediaParams refuses any other value). Clients
+	// disable its control meanwhile, so no client needs to know what the parameters mean.
+	Requires *mediaParamRequires `json:"requires,omitempty"`
+}
+
+// mediaParamRequires names the enum parameter, and the values of it, under which another parameter applies.
+type mediaParamRequires struct {
+	Param  string   `json:"param"`
+	Values []string `json:"values"`
 }
 
 type mediaModel struct {
@@ -156,10 +170,61 @@ func validMediaModel(m *mediaModel) error {
 			return fmt.Errorf("parameter %q: %w", p.Name, err)
 		}
 	}
+	return validMediaParamRequires(m.Params)
+}
+
+// validMediaParamRequires checks every dependency between a model's parameters: it names an enum parameter declared
+// earlier (so a client resolving them in order never looks ahead), by some of that parameter's own values, each once,
+// and the dependent parameter is an enum or a boolean with a default, the value it keeps while it does not apply.
+func validMediaParamRequires(params []mediaParam) error {
+	for i := range params {
+		r := params[i].Requires
+		if r == nil {
+			continue
+		}
+		if t := params[i].Type; (t != "enum" && t != "boolean") || params[i].Default == nil || len(r.Values) == 0 {
+			return fmt.Errorf("parameter %q: requires", params[i].Name)
+		}
+		var on *mediaParam
+		for j := range params[:i] {
+			if params[j].Name == r.Param {
+				on = &params[j]
+			}
+		}
+		if on == nil || on.Type != "enum" {
+			return fmt.Errorf("parameter %q: requires an earlier enum", params[i].Name)
+		}
+		seen := map[string]bool{}
+		for _, v := range r.Values {
+			if seen[v] || !slices.Contains(on.Values, v) {
+				return fmt.Errorf("parameter %q: requires values", params[i].Name)
+			}
+			seen[v] = true
+		}
+	}
 	return nil
 }
 
+// applies reports whether a parameter with a dependency applies under the resolved values of the others.
+func (p *mediaParam) applies(values map[string]any) bool {
+	if p.Requires == nil {
+		return true
+	}
+	v, ok := values[p.Requires.Param].(string)
+	return ok && slices.Contains(p.Requires.Values, v)
+}
+
 func validMediaParamSpec(p *mediaParam) error {
+	if len(p.ValueLabels) > 0 {
+		if p.Type != "enum" || len(p.ValueLabels) != len(p.Values) {
+			return errors.New("value labels")
+		}
+		for _, label := range p.ValueLabels {
+			if !cleanCatalogText(label[0], 40) || !cleanCatalogText(label[1], 40) {
+				return errors.New("value labels")
+			}
+		}
+	}
 	switch p.Type {
 	case "enum":
 		if len(p.Values) == 0 || len(p.Values) > 32 || p.Min != nil || p.Max != nil || p.MaxLength != 0 {
@@ -321,6 +386,13 @@ func (m *mediaModel) resolveMediaParams(raw json.RawMessage) (map[string]any, er
 	}
 	for name := range given {
 		if !known[name] {
+			return nil, errMediaParams
+		}
+	}
+	// A parameter that does not apply under the others' values keeps its default: a choice the generation would
+	// ignore, or could not honour, is refused rather than dropped.
+	for i := range m.Params {
+		if p := &m.Params[i]; !p.applies(values) && values[p.Name] != p.Default {
 			return nil, errMediaParams
 		}
 	}

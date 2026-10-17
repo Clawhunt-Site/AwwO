@@ -18,7 +18,12 @@ const WITH_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-model', media:
 // A flagship canvas (an assembly node and agents that work in sandbox computers, dozens of model calls each) has its
 // own tests, saas-flagship-workflows.test.ts.
 const CASES = Object.values(PRODUCTION_WORKFLOWS).filter(item => !(PUBLISHED_FLAGSHIPS as readonly string[]).includes(item.id));
-const WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...CASES, WITH_MODEL];
+// The same copy on three.js r186 with a rigged, animated model: only an r186 page (one that loads GLBs) fed by an
+// animated 3D node is told where its clips are.
+const WITH_ANIMATED_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-animated-model', stack: 'r186', media: [...gt.media!, {
+  id: 'model', kind: 'model3d', title: '3D model', prompt: 'A 3D model of the driver',
+  model: 'tripo.p1', params: { texture: true, pbr: true, faceLimit: 6000, rig: 'biped', motion: 'combat', inPlace: true }, column: 0, row: 4, feeds: ['page'] }] };
+const WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...CASES, WITH_MODEL, WITH_ANIMATED_MODEL];
 
 describe.each(WORKFLOWS)('$id compiled canvas', item => {
   // A case's image, video and 3D nodes feed the pages that show them (officialMedia.ts feeds) by a soft wire.
@@ -59,6 +64,11 @@ describe.each(WORKFLOWS)('$id compiled canvas', item => {
       expect(node.persona.includes('media nodes hand you the files')).toBe(fed.length > 0);
       const model = fed.some(field => item.media?.find(spec => `media_${spec.id}` === field.id)?.kind === 'model3d');
       expect(node.persona.includes('A 3D model node hands over a GLB model')).toBe(model);
+      const animated = fed.some(field => {
+        const spec = item.media?.find(candidate => `media_${candidate.id}` === field.id);
+        return spec?.kind === 'model3d' && typeof spec.params?.motion === 'string' && spec.params.motion !== 'none';
+      });
+      expect(node.persona.includes('An animated model’s clips are in its GLB')).toBe(animated && item.stack === 'r186');
     }
     for (const [index, node] of media(document).entries()) {
       const spec = item.media![index];

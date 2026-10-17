@@ -16,9 +16,25 @@ export function mediaOutputSummaryKey(output: MediaOutput) {
   return output.kind === 'video' ? 'media.generatedVideos' as const : output.kind === 'model3d' ? 'media.generatedModels' as const : 'media.generatedImages' as const;
 }
 
-/** How many results a summary counts: a 3D result's rendered preview picture is part of its model, not another one. */
+/** How many results a summary counts: a 3D result's rendered preview picture, and a file of more clips for its skeleton,
+ *  are part of its model, not other ones. */
 export function mediaOutputCount(output: MediaOutput): number {
-  return output.kind === 'model3d' ? output.items.filter(item => item.contentType === 'model/gltf-binary').length : output.items.length;
+  return output.kind === 'model3d' ? output.items.filter(item => item.contentType === 'model/gltf-binary' && !item.clipsOnly).length : output.items.length;
+}
+
+/** A model's further clips: each file of animations for its skeleton, with its clips' names, to download. */
+function ClipSets({ sets }: { sets: MediaOutputItem[] }) {
+  const { t } = useCanvasI18n();
+  if (!sets.length) return null;
+  return <ul className="canvas-media-clip-sets">
+    {sets.map(set => {
+      const download = storedArtifactUrl(`awwo-file:${set.artifactId}`);
+      return <li key={set.artifactId}>
+        <span>{t('media.clipSet', { name: set.name, names: (set.animations ?? []).join(' ') })}</span>
+        {download ? <> <a href={download} download={set.name} rel="noreferrer"><Download size={12} aria-hidden="true" />{t('media.downloadClips', { name: set.name })}</a></> : null}
+      </li>;
+    })}
+  </ul>;
 }
 
 function MediaItem({ item, kind }: { item: MediaOutputItem; kind: MediaOutput['kind'] }) {
@@ -40,7 +56,7 @@ function MediaItem({ item, kind }: { item: MediaOutputItem; kind: MediaOutput['k
 
 /** A generated 3D model: the provider's rendered picture first, the model itself in the WebGL viewer on request
  *  (a textured model is megabytes, so it is fetched only when someone wants to turn it), and its download. */
-function ModelItem({ item, poster }: { item: MediaOutputItem; poster?: MediaOutputItem }) {
+function ModelItem({ item, poster, clipSets = [] }: { item: MediaOutputItem; poster?: MediaOutputItem; clipSets?: MediaOutputItem[] }) {
   const { t } = useCanvasI18n();
   const download = storedArtifactUrl(`awwo-file:${item.artifactId}`);
   const posterUrl = poster ? storedMediaUrl(poster.artifactId) : null;
@@ -79,19 +95,25 @@ function ModelItem({ item, poster }: { item: MediaOutputItem; poster?: MediaOutp
         {state === 'failed' ? <p role="alert">{t('media.unavailableFile')}</p> : state === 'large' ? <p role="status">{t('media.modelTooLarge')}</p> : null}
       </div>}
     <figcaption><a href={download} download={item.name} rel="noreferrer"><Download size={12} aria-hidden="true" />{t('media.downloadModel', { name: item.name })}</a></figcaption>
+    {item.animations?.length ? <p className="canvas-media-clips">{t('media.animations', { names: item.animations.join(' ') })}</p> : null}
+    <ClipSets sets={clipSets} />
   </figure>;
 }
 
 export function MediaResult({ output }: { output: MediaOutput }) {
   const { t } = useCanvasI18n();
   if (output.kind === 'model3d') {
-    const models = output.items.filter(item => item.contentType.startsWith('model/'));
+    // A file of clips only has no mesh to turn: it is listed, to download, under the model whose skeleton it animates.
+    const glbs = output.items.filter(item => item.contentType.startsWith('model/'));
+    const models = glbs.filter(item => !item.clipsOnly);
+    const clipSets = glbs.filter(item => item.clipsOnly);
     const pictures = output.items.filter(item => item.contentType.startsWith('image/'));
     return <div className="canvas-media-result" data-testid="media-result">
       <div className="canvas-media-summary">{t('media.generatedModels', { count: models.length })}</div>
       <div className="canvas-media-grid canvas-media-grid--model3d">
-        {models.map((item, index) => <ModelItem key={item.artifactId} item={item} poster={pictures[index] ?? pictures[0]} />)}
+        {models.map((item, index) => <ModelItem key={item.artifactId} item={item} poster={pictures[index] ?? pictures[0]} clipSets={index === 0 ? clipSets : []} />)}
       </div>
+      {models.length ? null : <ClipSets sets={clipSets} />}
     </div>;
   }
   return <div className="canvas-media-result" data-testid="media-result">
