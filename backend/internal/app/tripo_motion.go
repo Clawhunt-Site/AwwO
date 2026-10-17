@@ -205,7 +205,7 @@ type motionProgress struct {
 // followTripoMotion runs a 3D node's chain once its model task (model) succeeded, and settles the run: completed with
 // the chain's files and the model's preview, or failed, cancelled or left for the next start. recorded says whether the
 // model task is durable, so a shutdown can leave the run for the next start; progress is what a previous process did.
-func (a *App) followTripoMotion(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, motion *tripoMotion, model rhTask, recorded bool, progress motionProgress) {
+func (a *App) followTripoMotion(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, motion *tripoMotion, model rhTask, recorded bool, progress motionProgress, textureMax int) {
 	// Until Tripo accepts a step, the plan is not charged for it; a step Tripo ended unbilled is given back too.
 	unbilled := motion.credits()
 	settle := func() {
@@ -246,7 +246,7 @@ func (a *App) followTripoMotion(ctx context.Context, hub mediaProvider, tid, id,
 	glbs := max(1, len(motion.Batches))
 	for _, r := range model.Results {
 		if r.OutputType == "image" && strings.TrimSpace(r.URL) != "" {
-			if f, err := a.fetchMediaFile(ctx, hub, tmp, m, glbs+1, r); err != nil {
+			if f, err := a.fetchMediaFile(ctx, hub, tmp, m, glbs+1, r, 0); err != nil {
 				a.log.Warn("3D preview not stored", "event", "media_preview_skipped", "code", mediaFailureCode(err))
 			} else {
 				preview = f
@@ -332,7 +332,7 @@ func (a *App) followTripoMotion(ctx context.Context, hub mediaProvider, tid, id,
 			fail("media_motion_failed")
 			return
 		}
-		f, err := a.fetchMediaFile(ctx, hub, tmp, m, len(files)+1, glb)
+		f, err := a.fetchMediaFile(ctx, hub, tmp, m, len(files)+1, glb, textureMax)
 		if err != nil {
 			fail(mediaFailureCode(err))
 			return

@@ -861,11 +861,11 @@ func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid s
 		return
 	}
 	if plan.Motion != nil {
-		a.followTripoMotion(ctx, hub, tid, id, sid, m, plan.Motion, task, recorded, progress)
+		a.followTripoMotion(ctx, hub, tid, id, sid, m, plan.Motion, task, recorded, progress, textureMaxOf(plan.Params))
 		return
 	}
 	a.mediaStatus(ctx, tid, id, "saving")
-	output, err := a.storeMediaResults(ctx, hub, tid, id, sid, m, task.Results)
+	output, err := a.storeMediaResults(ctx, hub, tid, id, sid, m, task.Results, textureMaxOf(plan.Params))
 	if err != nil {
 		if a.mediaStopped(ctx, id, recorded) {
 			return

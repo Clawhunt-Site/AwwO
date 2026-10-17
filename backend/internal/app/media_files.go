@@ -24,7 +24,7 @@ import (
 // and records it as an artifact of the run's canvas node. A file whose bytes are not an image (for
 // an image node), a video (for a video node) or a binary glTF model (first, for a 3D node, beside its
 // rendered preview image) is refused, whatever the provider called it.
-func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult) (string, error) {
+func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult, textureMax int) (string, error) {
 	results = mediaFileResults(results)
 	if len(results) == 0 {
 		return "", &rhError{Code: "media_no_output"}
@@ -35,7 +35,7 @@ func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id,
 	}
 	items := []mediaItem{}
 	for i, result := range results {
-		f, err := a.fetchMediaFile(ctx, hub, d.tmp, m, i+1, result)
+		f, err := a.fetchMediaFile(ctx, hub, d.tmp, m, i+1, result, textureMax)
 		var item mediaItem
 		if err == nil {
 			item, err = a.keepMediaFile(ctx, d, tid, id, m, i+1, &f)
@@ -101,7 +101,8 @@ func (f *fetchedMedia) discard() {
 // fetchMediaFile downloads one result into tmp, holding its space meanwhile, and checks that its bytes are what a node of
 // m's kind keeps at index, whatever the provider called it. A 3D node's GLB loses its maker's name from its JSON chunk
 // and is read for its clips (neutralizeGLB).
-func (a *App) fetchMediaFile(ctx context.Context, hub mediaProvider, tmp string, m *mediaModel, index int, result rhResult) (fetchedMedia, error) {
+// textureMax, when above zero, is the longest side a 3D model's stored textures keep (webTexturesGLB).
+func (a *App) fetchMediaFile(ctx context.Context, hub mediaProvider, tmp string, m *mediaModel, index int, result rhResult, textureMax int) (fetchedMedia, error) {
 	release, ok := a.reserveMediaSpace(hub.fileLimit())
 	if !ok {
 		return fetchedMedia{}, &rhError{Code: "media_storage_full"}
@@ -131,6 +132,9 @@ func (a *App) fetchMediaFile(ctx context.Context, hub mediaProvider, tmp string,
 	f.size, f.sum = size, hex.EncodeToString(hash.Sum(nil))
 	if m.Kind == mediaKindModel3D && f.kind == mediaKindModel3D {
 		a.neutralizeGLB(&f, tmp)
+		if textureMax > 0 {
+			a.webTexturesGLB(&f, tmp, textureMax)
+		}
 	}
 	return f, nil
 }

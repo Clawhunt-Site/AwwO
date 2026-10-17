@@ -54,7 +54,8 @@ func tripoModels() []*mediaModel {
 	negative := mediaParam{Name: "negativePrompt", Type: "text", MaxLength: 255, Label: [2]string{"不要出现的内容", "Negative prompt"}}
 	autoSize := mediaParam{Name: "autoSize", Type: "boolean", Default: false, Label: [2]string{"按真实尺寸（米）", "Real-world size (m)"}}
 	// Users see a generic name in their language, never the provider's (owner decisions 2026-10-11). Both series end
-	// with the skeleton and animations a game character needs (tripoMotionParams).
+	// with the skeleton and animations a game character needs (tripoMotionParams) and the size its stored textures keep
+	// (tripoTextureParam): the settings of what happens after the model task (tripoChainParams).
 	return []*mediaModel{
 		{ID: "tripo.v3-1", Name: "3D · 高精度", Label: [2]string{"3D · 高精度", "3D · High detail"}, Vendor: mediaVendorShown,
 			Kind: mediaKindModel3D, Mode: "text-to-model3d", References: 1,
@@ -62,22 +63,28 @@ func tripoModels() []*mediaModel {
 			Params: append([]mediaParam{texture, pbr, textureQuality,
 				{Name: "geometryQuality", Type: "enum", Values: []string{"standard", "detailed"}, Default: "standard", Label: [2]string{"几何精度", "Geometry detail"}},
 				{Name: "faceLimit", Type: "integer", Min: number(1000), Max: number(500000), Label: [2]string{"面数上限", "Face limit"}},
-				negative, autoSize}, tripoMotionParams()...),
+				negative, autoSize}, tripoChainParams()...),
 			Docs: "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard", Provider: mediaProviderTripo},
 		{ID: "tripo.p1", Name: "3D · 游戏低多边形", Label: [2]string{"3D · 游戏低多边形", "3D · Low-poly game asset"}, Vendor: mediaVendorShown,
 			Kind: mediaKindModel3D, Mode: "text-to-model3d", References: 1,
 			Endpoint: "/generation/text-to-model", Version: "P1-20260311", Prompt: mediaPrompt{MinLength: 1, MaxLength: 1024},
 			Params: append([]mediaParam{texture, pbr, textureQuality,
 				{Name: "faceLimit", Type: "integer", Min: number(500), Max: number(20000), Default: 5000.0, Label: [2]string{"面数上限", "Face limit"}},
-				negative, autoSize}, tripoMotionParams()...),
+				negative, autoSize}, tripoChainParams()...),
 			Docs: "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p", Provider: mediaProviderTripo},
 	}
 }
 
-// tripoChainParam is a parameter that drives the rig and animation chain (tripo_motion.go) instead of the model request,
-// accepted only exactly as that chain defines it.
+// tripoChainParams are the settings of what follows the model task: the rig and animation chain (tripo_motion.go) and
+// the stored textures' size (media_glb_textures.go). None of them is sent with the model request.
+func tripoChainParams() []mediaParam {
+	return append(tripoMotionParams(), tripoTextureParam())
+}
+
+// tripoChainParam is a parameter that drives what follows the model task instead of the model request, accepted only
+// exactly as tripoChainParams defines it.
 func tripoChainParam(p *mediaParam) (known, exact bool) {
-	for _, want := range tripoMotionParams() {
+	for _, want := range tripoChainParams() {
 		if want.Name == p.Name {
 			return true, reflect.DeepEqual(*p, want)
 		}

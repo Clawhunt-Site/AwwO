@@ -557,8 +557,11 @@ const ASSETS: ReadonlyArray<PallwardAsset> = [
 
 // A model's settings on the low-poly game-asset model: humanoids take the full animation set (the only one with every
 // clip the game plays: fall, dive, jump, climb and shoot), beasts their one walk clip, in place; the rest no skeleton.
+// A textured model keeps its textures at 1024 px (textureSize): the page embeds every file it loads within the
+// preview's budget, and a 2048 px set is most of a character's bytes (a 5.5 MB animated knight is 2.8 MB at 1024).
 const modelParams = (item: PallwardAsset): MediaParams => ({
   texture: item.texture !== 'none', pbr: item.texture === 'pbr', textureQuality: 'standard', faceLimit: item.faceLimit,
+  ...(item.texture !== 'none' ? { textureSize: '1024' } : {}),
   ...(item.rig ? { rig: item.rig, motion: item.rig === 'biped' ? 'full' : 'locomotion', inPlace: true } : {}),
 });
 const PALLWARD_MEDIA: ReadonlyArray<OfficialMediaNode> = [

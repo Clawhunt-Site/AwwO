@@ -31,14 +31,17 @@ const MEDIA_INPUT_BYTES = 1200;
 const TEMPLATE = /## Part [AB] - [\s\S]*?End of the template\./;
 const outsideTemplate = (task: string) => task.replace(TEMPLATE, '');
 
-// The 3D and image models' closed settings, as the API publishes them (backend tripo.go, tripo_motion.go, xtasy.go):
-// the client's own validation (invalidMediaParams) is run on every media node against them.
+// The 3D and image models' closed settings, as the API publishes them (backend tripo.go, tripo_motion.go,
+// media_glb_textures.go, xtasy.go): the client's own validation (invalidMediaParams) is run on every media node against
+// them.
 const label: [string, string] = ['Setting', 'Setting'];
 const ANIMATED = ['biped', 'quadruped', 'hexapod', 'octopod', 'serpentine', 'aquatic'];
-const MOTION_PARAMS = [
+const CHAIN_PARAMS = [
   { name: 'rig', type: 'enum', values: ['none', 'biped', 'quadruped', 'hexapod', 'octopod', 'avian', 'serpentine', 'aquatic'], default: 'none', label },
   { name: 'motion', type: 'enum', values: ['none', 'locomotion', 'combat', 'full'], default: 'none', label, requires: { param: 'rig', values: ANIMATED } },
   { name: 'inPlace', type: 'boolean', default: true, label, requires: { param: 'motion', values: ['locomotion', 'combat', 'full'] } },
+  // The size the stored textures keep. Like the rig and its clips, it shapes what follows the model task (tripoChainParams).
+  { name: 'textureSize', type: 'enum', values: ['original', '2048', '1024', '512'], default: 'original', label },
 ];
 const TEXTURE_PARAMS = [
   { name: 'texture', type: 'boolean', default: true, label }, { name: 'pbr', type: 'boolean', default: true, label },
@@ -47,11 +50,11 @@ const TEXTURE_PARAMS = [
 const CATALOGUE = parseMediaCatalogue({ configured: true, available: true, models: [
   { id: 'tripo.p1', name: '3D', vendor: 'media', kind: 'model3d', prompt: { minLength: 1, maxLength: 1024 }, references: 1, params: [...TEXTURE_PARAMS,
     { name: 'faceLimit', type: 'integer', min: 500, max: 20000, default: 5000, label },
-    { name: 'negativePrompt', type: 'text', maxLength: 255, label }, { name: 'autoSize', type: 'boolean', default: false, label }, ...MOTION_PARAMS] },
+    { name: 'negativePrompt', type: 'text', maxLength: 255, label }, { name: 'autoSize', type: 'boolean', default: false, label }, ...CHAIN_PARAMS] },
   { id: 'tripo.v3-1', name: '3D HD', vendor: 'media', kind: 'model3d', prompt: { minLength: 1, maxLength: 1024 }, references: 1, params: [...TEXTURE_PARAMS,
     { name: 'geometryQuality', type: 'enum', values: ['standard', 'detailed'], default: 'standard', label },
     { name: 'faceLimit', type: 'integer', min: 1000, max: 500000, label },
-    { name: 'negativePrompt', type: 'text', maxLength: 255, label }, { name: 'autoSize', type: 'boolean', default: false, label }, ...MOTION_PARAMS] },
+    { name: 'negativePrompt', type: 'text', maxLength: 255, label }, { name: 'autoSize', type: 'boolean', default: false, label }, ...CHAIN_PARAMS] },
   { id: 'xt.seedream-5-pro', name: 'Image', vendor: 'media', kind: 'image', prompt: { minLength: 1, maxLength: 32000 }, references: 1, params: [
     { name: 'aspectRatio', type: 'enum', values: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: '1:1', label },
     { name: 'resolution', type: 'enum', values: ['2K', '1K'], default: '2K', label }] },
@@ -164,7 +167,9 @@ it('makes every concept and model on the settings the API takes: 2K square conce
     // The design asks for high detail nowhere in the core tier: every model is the low-poly game asset.
     expect(spec.model, spec.id).toBe('tripo.p1');
     expect(spec.feeds).toEqual(['assets']);
-    expect(Object.keys(spec.params ?? {}).filter(name => !['texture', 'pbr', 'textureQuality', 'faceLimit', 'rig', 'motion', 'inPlace'].includes(name))).toEqual([]);
+    expect(Object.keys(spec.params ?? {}).filter(name => !['texture', 'pbr', 'textureQuality', 'faceLimit', 'rig', 'motion', 'inPlace', 'textureSize'].includes(name))).toEqual([]);
+    // A painted model keeps its textures at 1,024 pixels, the size a page of dozens of models can embed; a banded one has none.
+    expect(spec.params?.textureSize, spec.id).toBe(spec.params?.texture ? '1024' : undefined);
     const rig = spec.params?.rig ?? 'none';
     if (rig === 'biped') expect(spec.params, spec.id).toMatchObject({ motion: 'full', inPlace: true });
     else if (rig === 'none') expect(spec.params?.motion ?? 'none', spec.id).toBe('none');
@@ -363,6 +368,8 @@ it('writes the canvas in English and names no product, company or other game', (
 
 // The canvas a published run will be checked against. Its SHA-256 is pinned below so that any change to a task, a
 // template, a wire or a media setting is made deliberately: update the snapshot (vitest -u) after reviewing the change.
+// The canonical text is the agents', the assembly's and the wires' (a published record carries its hash); it leaves out
+// the media nodes' models, prompts and settings, so those are pinned by a second hash.
 it('pins the canonical canvas text, its assembly template and sandbox runtimes included', () => {
   const text = canonicalCanvasText(createOfficialDocument(PALLWARD));
   expect(text).toContain('{{in:from_core}}');
@@ -372,4 +379,5 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const plain = { ...PALLWARD, nodes: PALLWARD.nodes.map(node => ({ ...node, sandbox: undefined })) };
   expect(canonicalCanvasText(createOfficialDocument(plain))).not.toBe(text);
   expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"8b898111441442806e53b785bd3c400fae198fda9aa7388911ce1aaa9c760098"`);
+  expect(createHash('sha256').update(JSON.stringify(PALLWARD.media)).digest('hex')).toMatchInlineSnapshot(`"a85991f713fee8afff2f72b232dbea6357ebb8102c3d462d68b57b72821f3c01"`);
 });
