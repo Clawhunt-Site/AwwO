@@ -157,6 +157,22 @@ it('does not expose writable model/persona controls in a reader canvas', () => {
   expect(screen.queryByRole('combobox', { name: '编排模型' })).toBeNull();
 });
 
+it('adds and saves nothing when a model is dropped on a reader canvas', async () => {
+  const { container } = render(<CanvasSurface readOnly storageMode="cloud" runtimeReadJson={runtimeReader} />);
+  // A few timer turns: before the drop for a catalogue read to land (a reader should start none), after it for any add.
+  const settle = () => act(async () => { for (let turn = 0; turn < 5; turn++) await new Promise(resolve => setTimeout(resolve, 0)); });
+  await settle();
+  const saved = canvasStorage().getItem(CANVAS_STORAGE_KEY);
+  // A browser never delivers this drop (the stage refuses a reader's dragover), so it is fired directly: the drag an
+  // editor's stage accepts above. The stage's model handler takes it (it cancels the drop before its checks), and a
+  // reader's canvas adds and saves nothing, whichever check refuses it.
+  expect(fireEvent.drop(container.querySelector('.awwo-stage-canvas')!, { clientX: 260, clientY: 320, dataTransfer: { types: [MODEL_DRAG_MIME],
+    getData: () => JSON.stringify({ version: 1, scope: 'workspace', key: '["pi","qwen-fixture"]', personaId: null }) } })).toBe(false);
+  await settle();
+  expect(screen.queryAllByTestId(/^canvas-tile-/)).toHaveLength(0);
+  expect(canvasStorage().getItem(CANVAS_STORAGE_KEY)).toBe(saved);
+});
+
 it('keeps a dragged model visible after undoing a plan back to the welcome screen', async () => {
   const originalRect = Element.prototype.getBoundingClientRect;
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
