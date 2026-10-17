@@ -158,6 +158,20 @@ test('nonzero command exit is returned for repair; timeout removes the whole con
   await sandbox.close();
 });
 
+test("a command's environment draws matplotlib to files and keeps its cache in /tmp, out of the workspace", async () => {
+  // The helper sets each command's whole environment, so the image's own ENV lines never reach a command.
+  let helper = '';
+  const runner: WorkspaceDockerRunner = async (args, options) => {
+    if (args[0] !== 'exec') return response('ok');
+    if (JSON.parse(options.input!).command === 'true') helper = args.at(-1)!;
+    return response({ exitCode: 0, stdout: '', stderr: '', truncated: false });
+  };
+  const sandbox = await createWorkspaceSandbox(config, { workspaceId: 'a', runId: 'b' }, undefined, runner);
+  await sandbox.exec('true');
+  await sandbox.close();
+  assert.match(helper, /env = \{[^}]*'HOME':'\/workspace'[^}]*'MPLBACKEND':'Agg','MPLCONFIGDIR':'\/tmp\/matplotlib'\}/);
+});
+
 test('start timeout, invalid publish checksum and cancellation cannot leak a container', async () => {
   let removes = 0;
   const runner: WorkspaceDockerRunner = async (args) => {

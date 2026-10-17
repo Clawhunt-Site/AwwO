@@ -375,7 +375,9 @@ payload = json.load(sys.stdin)
 limit = 65536
 chunks = {'stdout': bytearray(), 'stderr': bytearray()}
 truncated = False
-env = {'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/workspace','LANG':'C.UTF-8','PYTHONDONTWRITEBYTECODE':'1'}
+# Each command's whole environment (the image's own ENV lines do not reach it): matplotlib draws to files and keeps its
+# font cache in /tmp, out of the workspace and its snapshot.
+env = {'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/workspace','LANG':'C.UTF-8','PYTHONDONTWRITEBYTECODE':'1','MPLBACKEND':'Agg','MPLCONFIGDIR':'/tmp/matplotlib'}
 env.update({key: value for key, value in os.environ.items() if key in ('HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy')})
 process = subprocess.Popen(['/bin/sh', '-lc', payload['command']], cwd='/workspace', stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, env=env)
 selector = selectors.DefaultSelector()
