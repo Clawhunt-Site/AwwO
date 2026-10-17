@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { bedrockComputerRequest, bedrockOpening, computerCompletionResponse } from './computer-model.ts';
+import { bedrockComputerRequest, computerCompletionResponse, threadOpening } from './computer-model.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -233,7 +233,7 @@ test('a managed-execution thread that opens with the engine\'s greeting reaches 
   assert.equal((await response.json()).completion.choices[0].message.content, '51 JPH.');
   const sent = fake.sent[0].input;
   assert.deepEqual(sent.messages, [{ role: 'user', content: [{ text: 'Build the project' }] }]);
-  assert.deepEqual(sent.system, [{ text: 'You are AwwO workspace.' }, { text: `Earlier in this conversation you said:\n${greeting}` }]);
+  assert.deepEqual(sent.system, [{ text: `You are AwwO workspace.\n\nEarlier in this conversation you said:\n${greeting}` }]);
   assert.equal(sent.toolConfig.tools[0].toolSpec.name, 'workspace_exec');
   // An opening that called tools is not rewritten: the bridge refuses it, by kind, before any request is sent.
   const refused = await s.send(opened([{ role: 'assistant', content: null, tool_calls: [{ ...call, id: 'tooluse_Op1' }] },
@@ -245,10 +245,33 @@ test('a managed-execution thread that opens with the engine\'s greeting reaches 
   const message = { role: 'assistant', content: null, tool_calls: [{ ...call, id: 'tooluse_Ab12' }] };
   const body = bedrockComputerRequest({ tools: [tool], messages: [{ role: 'system', content: 'S' }, { role: 'assistant', content: greeting },
     { role: 'user', content: 'Build the project' }, message, { role: 'tool', tool_call_id: 'tooluse_Ab12', content: 'verified' }] }, { model: 'm', baseURL: 'http://b', maxTokens: 64 } as any).body;
-  assert.deepEqual(body.messages.map((m: any) => m.role), ['system', 'system', 'user', 'assistant', 'tool']);
+  assert.deepEqual(body.messages.map((m: any) => m.role), ['system', 'user', 'assistant', 'tool']);
   // Nothing to move: a thread that opens on its user turn, or an empty greeting, is sent as it came (less the greeting).
-  assert.deepEqual(bedrockOpening([{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]), [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]);
-  assert.deepEqual(bedrockOpening([{ role: 'assistant', content: '  ' }, { role: 'user', content: 'U' }]), [{ role: 'user', content: 'U' }]);
+  assert.deepEqual(threadOpening([{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]), [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }]);
+  assert.deepEqual(threadOpening([{ role: 'assistant', content: '  ' }, { role: 'user', content: 'U' }]), [{ role: 'user', content: 'U' }]);
+  // Without a system prompt the greeting becomes one; with several, it joins the last.
+  assert.deepEqual(threadOpening([{ role: 'assistant', content: 'G' }, { role: 'user', content: 'U' }]),
+    [{ role: 'system', content: 'Earlier in this conversation you said:\nG' }, { role: 'user', content: 'U' }]);
+  assert.deepEqual(threadOpening([{ role: 'system', content: 'A' }, { role: 'developer', content: 'B' }, { role: 'assistant', content: 'G' }, { role: 'user', content: 'U' }]),
+    [{ role: 'system', content: 'A' }, { role: 'developer', content: 'B\n\nEarlier in this conversation you said:\nG' }, { role: 'user', content: 'U' }]);
+});
+
+test('every provider gets the thread at its user turn, the engine\'s greeting in its one system prompt', async t => {
+  const greeting = "Hi, I'm AwwO workspace. What would you like me to do?";
+  const note = `You are AwwO workspace.\n\nEarlier in this conversation you said:\n${greeting}`;
+  const opened = input({ completion: { tools: [tool], messages: [{ role: 'system', content: 'You are AwwO workspace.' }, { role: 'assistant', content: greeting }, { role: 'user', content: 'Build the project' }] } });
+  // LLM Gate on the Pi worker, as production serves kimi-k3, claude-sonnet-5 and qwen.
+  const gate = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Done.' }, finish_reason: 'stop' }] })), {}, 'pi');
+  assert.equal((await gate.send(opened)).status, 200);
+  assert.deepEqual(gate.calls[0].body.messages, [{ role: 'system', content: note }, { role: 'user', content: 'Build the project' }]);
+  const anthropic = await serve(t, 'anthropic_messages', (_body, _req, res) => res.end(JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] })));
+  assert.equal((await anthropic.send(opened)).status, 200);
+  assert.equal(anthropic.calls[0].body.system, note);
+  assert.deepEqual(anthropic.calls[0].body.messages, [{ role: 'user', content: [{ type: 'text', text: 'Build the project' }] }]);
+  const responses = await serve(t, 'responses', (_body, _req, res) => res.end(JSON.stringify({ status: 'completed',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] }] })));
+  assert.equal((await responses.send(opened)).status, 200);
+  assert.deepEqual(responses.calls[0].body.input, [{ role: 'system', content: note }, { role: 'user', content: 'Build the project' }]);
 });
 
 test('a Bedrock stream that fails or ends early is a failed call, never a partial answer', async t => {

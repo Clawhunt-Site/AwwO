@@ -90,11 +90,12 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   const common = { model: model.model, stream: false };
   const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const thread = threadOpening(completion.messages);
   if (model.protocol === 'anthropic_messages') {
     headers['x-api-key'] = model.apiKey; headers['anthropic-version'] = '2023-06-01';
     const messages: ObjectValue[] = [];
     const system: string[] = [];
-    for (const msg of completion.messages) {
+    for (const msg of thread) {
       if (msg.role === 'system' || msg.role === 'developer') { system.push(msg.content ?? ''); continue; }
       const role = msg.role === 'tool' ? 'user' : msg.role;
       const content: ObjectValue[] = [];
@@ -113,7 +114,7 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   headers.authorization = `Bearer ${model.apiKey}`;
   if (model.protocol === 'responses') {
     const input: ObjectValue[] = [];
-    for (const msg of completion.messages) {
+    for (const msg of thread) {
       for (const detail of msg.reasoning_details ?? []) input.push({ type: 'reasoning', id: detail.id, encrypted_content: detail.data, summary: [] });
       if (msg.role === 'tool') input.push({ type: 'function_call_output', call_id: msg.tool_call_id, output: msg.content });
       else {
@@ -129,7 +130,7 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   // Personal OpenAI-compatible providers are normalized to "openai" during
   // binding. Match the existing Agents wire by checking Google's actual origin.
   const google = new URL(base).origin === 'https://generativelanguage.googleapis.com';
-  return { url: `${base}/chat/completions`, headers, body: { ...common, messages: completion.messages.map(({ reasoning_details: _, ...msg }) => msg),
+  return { url: `${base}/chat/completions`, headers, body: { ...common, messages: thread.map(({ reasoning_details: _, ...msg }) => msg),
     ...(model.provider === 'openai' && !google ? { max_completion_tokens: maxTokens, store: false } : { max_tokens: maxTokens }),
     ...(effort && effort !== 'none' ? { reasoning_effort: effort } : {}),
     ...(options.thinking === false && model.provider !== 'openai' && !google ? { chat_template_kwargs: { enable_thinking: false } } : {}),
@@ -187,21 +188,28 @@ export function computerCompletionResponse(raw: ObjectValue, protocol: string, t
   return { id: `chatcmpl-awwo-${randomUUID()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: 'awwo-model', choices: [{ index: 0, message, finish_reason: finish }] };
 }
 
-/** Converse opens a conversation on a user turn, and the bridge refuses one that does not. The managed-execution engine
- *  opens every task's thread with its own greeting, so its first request is the system prompt, an assistant message
- *  ("Hi, I'm AwwO workspace. What would you like me to do?") and only then the user's message (production,
- *  2026-10-12). Such an opening asks nothing: its text travels as context at the end of the system prompt and the
- *  conversation starts at the first user message. Only text is moved; an opening with tool calls or tool results stays
- *  as it is, and the bridge refuses it. */
-export function bedrockOpening(messages: Message[]): Message[] {
+/** The managed-execution engine opens every task's thread with its own greeting, so its first request is the system
+ *  prompt, an assistant message ("Hi, I'm AwwO workspace. What would you like me to do?") and only then the user's
+ *  message (production, 2026-10-12). Converse refuses a conversation that does not open on a user turn (the bridge
+ *  refuses it first), and so may other providers, their chat templates or the gateways in front of them; Qwen through
+ *  LLM Gate took it. Such an opening asks nothing, so for every provider its text travels as context at the end of the
+ *  system prompt, which stays one message (some chat templates take no second one), and the conversation starts at the
+ *  first user message. Only text is moved; an opening with tool calls or tool results stays as it is (the bridge
+ *  refuses it). */
+export function threadOpening(messages: Message[]): Message[] {
   const first = messages.findIndex(msg => msg.role === 'user');
   if (first <= 0) return messages;
   const opening = messages.slice(0, first);
   if (!opening.some(msg => msg.role === 'assistant') || opening.some(msg => msg.role === 'tool' || msg.tool_calls?.length)) return messages;
   const said = opening.filter(msg => msg.role === 'assistant' && msg.content?.trim()).map(msg => msg.content!.trim());
-  return [...opening.filter(msg => msg.role !== 'assistant'),
-    ...(said.length ? [{ role: 'system', content: `Earlier in this conversation you said:\n${said.join('\n\n')}` }] : []),
-    ...messages.slice(first)];
+  const kept = opening.filter(msg => msg.role !== 'assistant');
+  if (said.length) {
+    const note = `Earlier in this conversation you said:\n${said.join('\n\n')}`;
+    const last = kept.findLastIndex(msg => msg.role === 'system' || msg.role === 'developer');
+    if (last < 0) kept.unshift({ role: 'system', content: note });
+    else kept[last] = { ...kept[last], content: kept[last].content ? `${kept[last].content}\n\n${note}` : note };
+  }
+  return [...kept, ...messages.slice(first)];
 }
 
 /** A Bedrock profile's call goes to the Converse bridge, which answers streaming Chat Completions only: the call is
@@ -211,7 +219,7 @@ export function bedrockComputerRequest(completion: Completion, model: Profile, o
   const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
   return { url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: {
     model: model.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens,
-    messages: bedrockOpening(completion.messages).map(({ reasoning_details: _, ...msg }) => msg),
+    messages: threadOpening(completion.messages).map(({ reasoning_details: _, ...msg }) => msg),
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
