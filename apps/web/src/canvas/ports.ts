@@ -40,7 +40,8 @@ export interface PortSpec {
    * each upstream by source — but canConnect used to refuse the second wire, so the engine's
    * capability was unreachable from the canvas.
    *
-   * `reference` (an image session's source image) stays single: it is one picture, not a pile.
+   * `reference` stays single on an image or 3D session (the one picture it edits or builds from) and is multi on a
+   * video session, which keeps the look of every subject wired in: a character, a ship, a place (2026-10-17).
    */
   multi?: boolean;
 }
@@ -58,6 +59,7 @@ export interface PortRef {
  * - contract session:   input 'in:<id>' / output 'out:<id>' with each field's declared type
  * - session llm/coding: input 'context' (text, MULTI)                       → output 'result' (text)
  * - session image:      input 'context' (text, MULTI) + 'reference' (image) → output 'result' (image)
+ * - session video:      input 'context' (text, MULTI) + 'reference' (image, MULTI) → output 'result' (video)
  * - session model3d:    input 'context' (text, MULTI) + 'reference' (image) → output 'result' (file)
  * - session audio:      input 'context' (text, MULTI)                       → output 'result' (audio)
  */
@@ -83,7 +85,9 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   const ports: PortSpec[] = [{ id: 'context', side: 'input', dataType: 'text', multi: true }];
   // A picture wired here is the generation's reference where the node's model takes one (image edit, image-to-3D). An
   // audio node generates from its words alone.
-  if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') ports.push({ id: 'reference', side: 'input', dataType: 'image' });
+  if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') {
+    ports.push({ id: 'reference', side: 'input', dataType: 'image', ...(node.agentKind === 'video' ? { multi: true } : {}) });
+  }
   ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'audio' ? node.agentKind
     : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;

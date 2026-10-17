@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { InspectorPanel, type InspectorPanelProps } from '../src/canvas/InspectorPanel';
-import { createSessionNode, sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { portsFor } from '../src/canvas/ports';
+import { createSessionNode, sanitizeDocument, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
+import { canConnect, portsFor, reconcileEdges } from '../src/canvas/ports';
 import { createNodeTeam } from '../src/canvas/nodeTeam';
 import { LocaleProvider } from '../src/canvas/i18n';
 import { invalidMediaParams, parseMediaCatalogue, withMediaParam, type MediaCatalogue } from '../src/canvas/mediaCatalog';
@@ -65,6 +65,23 @@ describe('media catalogue', () => {
 });
 
 describe('media nodes in the document', () => {
+  it('lets a video node keep the look of several subjects wired in, and an image or 3D node one picture', () => {
+    const node = (kind: 'image' | 'video' | 'model3d', id: string, y = 0): SessionNode => ({ ...createSessionNode(kind, { x: 0, y }), id });
+    const nodes = [node('image', 'hero'), node('image', 'ship', 600), node('image', 'set', 1200), node('video', 'shot'), node('image', 'edit'), node('model3d', 'model')];
+    const wire = (from: string, to: string): CanvasEdge => ({ id: `${from}-${to}`, fromNode: from, fromPort: 'result', toNode: to, toPort: 'reference', dataType: 'image' });
+    let edges: CanvasEdge[] = [];
+    for (const from of ['hero', 'ship', 'set']) {
+      expect(canConnect(nodes, edges, { nodeId: from, portId: 'result' }, { nodeId: 'shot', portId: 'reference' }), from).toBe(true);
+      edges = [...edges, wire(from, 'shot')];
+    }
+    expect(portsFor(nodes[3]).find(port => port.id === 'reference')?.multi).toBe(true);
+    expect(reconcileEdges(nodes, edges).map(edge => edge.fromNode)).toEqual(['hero', 'ship', 'set']);
+    for (const target of ['edit', 'model']) {
+      expect(portsFor(nodes.find(item => item.id === target)!).find(port => port.id === 'reference')?.multi, target).toBeFalsy();
+      expect(canConnect(nodes, [wire('hero', target)], { nodeId: 'ship', portId: 'result' }, { nodeId: target, portId: 'reference' }), target).toBe(false);
+    }
+  });
+
   it('keeps video nodes and their well-formed parameters, and types their result port', () => {
     const document = sanitizeDocument({ version: 2, nodes: [
       { ...createSessionNode('video', { x: 0, y: 0 }), id: 'v', model: 'rh.kling-v3-pro', mediaParams: { duration: '10', loud: true, 'bad key': 1, deep: { x: 1 }, nan: Number.NaN } },

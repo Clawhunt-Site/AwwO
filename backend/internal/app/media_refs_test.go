@@ -113,6 +113,40 @@ func TestWiredReferenceLines(t *testing.T) {
 	}
 }
 
+// A video node keeps the look of several subjects (2026-10-17, M-1b): each wired image node's pictures become its
+// reference lines, in canvas order (top to bottom), before its own words.
+func TestGraphVideoTakesSeveralWiredReferences(t *testing.T) {
+	picture := func(id, name string) string {
+		raw, _ := json.Marshal(map[string]any{"type": mediaOutputType, "version": 1, "kind": "image", "items": []mediaItem{
+			{ArtifactID: id, Name: name, ContentType: "image/png", Size: 10}}})
+		return string(raw)
+	}
+	threads, _ := json.Marshal([]map[string]any{{"id": "default", "draft": "@Image 1 walks past @Image 2."}})
+	shot := graphNode{ID: "shot", Kind: "session", AgentKind: mediaKindVideo, Title: "Shot", Threads: threads}
+	d := graphDocument{Nodes: []graphNode{shot,
+		{ID: "ship", Kind: "session", AgentKind: mediaKindImage, Title: "Ship", Y: 600},
+		{ID: "hero", Kind: "session", AgentKind: mediaKindImage, Title: "Hero", Y: 0}},
+		Edges: []graphEdge{{ID: "e1", FromNode: "ship", FromPort: "result", ToNode: "shot", ToPort: "reference", DataType: "image"},
+			{ID: "e2", FromNode: "hero", FromPort: "result", ToNode: "shot", ToPort: "reference", DataType: "image"}}}
+	outputs := map[string]string{"hero": picture("ahero000000001", "image-1.png"), "ship": picture("aship000000001", "image-1.png")}
+	prompt, err := (&App{}).graphMediaPrompt(t.Context(), "t1", "", shot, d, outputs)
+	want := "[附件] image-1.png · awwo-file:ahero000000001\n[附件] image-1.png · awwo-file:aship000000001\n\n@Image 1 walks past @Image 2."
+	if err != nil || prompt != want {
+		t.Fatalf("prompt %q %v", prompt, err)
+	}
+	// The graph accepts the wires: both are image results into the video node's reference input.
+	raw, _ := json.Marshal(map[string]any{"nodes": []any{
+		map[string]any{"id": "shot", "kind": "session", "agentKind": "video", "title": "Shot", "binding": map[string]any{"agentId": "agent-shot"}, "runtime": "pi"},
+		map[string]any{"id": "hero", "kind": "session", "agentKind": "image", "title": "Hero", "binding": map[string]any{"agentId": "agent-hero"}, "runtime": "pi"},
+		map[string]any{"id": "ship", "kind": "session", "agentKind": "image", "title": "Ship", "binding": map[string]any{"agentId": "agent-ship"}, "runtime": "pi"}},
+		"edges": []any{
+			map[string]any{"id": "e1", "fromNode": "hero", "fromPort": "result", "toNode": "shot", "toPort": "reference", "dataType": "image"},
+			map[string]any{"id": "e2", "fromNode": "ship", "fromPort": "result", "toNode": "shot", "toPort": "reference", "dataType": "image"}}})
+	if _, _, err := parseGraph(raw, nil); err != nil {
+		t.Fatal("two pictures into a video node's reference", err)
+	}
+}
+
 func TestTripoUploadsAReference(t *testing.T) {
 	var got struct {
 		path, auth, field, name, contentType string
