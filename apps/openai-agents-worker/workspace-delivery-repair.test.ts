@@ -87,6 +87,17 @@ test('a prose final reply completes a delivery whose every field is already publ
   assert.throws(() => compileWorkspaceDelivery('Published core.js.', fields, new Map([['result', file('core.js', 'x')]])));
 });
 
+test('a final reply that wraps the delivery object in prose delivers the object, not the prose', () => {
+  const fields: OutputField[] = [{ id: 'result', type: 'markdown', required: true }];
+  const wrapped = 'No supplied files. Here is the static review.\n\n```json\n{"result":"# Review\\n\\nAll checks read."}\n```';
+  assert.equal(JSON.parse(compileWorkspaceDelivery(wrapped, fields, new Map())).result, '# Review\n\nAll checks read.');
+  // A fence that is not a delivery object (an example, an unknown key, two candidates) leaves the reply as prose.
+  const example = 'Use this shape:\n```json\n{"other":1}\n```';
+  assert.equal(JSON.parse(compileWorkspaceDelivery(example, fields, new Map())).result, example);
+  const two = '```json\n{"result":"a"}\n```\n```json\n{"result":"b"}\n```';
+  assert.equal(JSON.parse(compileWorkspaceDelivery(two, fields, new Map())).result, two);
+});
+
 test('a run that used up its steps after publishing every output it owes delivers what it published', async t => {
   // The 2026-10-17 flagship tester published nothing before its 64 steps ran out and lost the page it had made; one
   // that publishes as it goes keeps its last published page.

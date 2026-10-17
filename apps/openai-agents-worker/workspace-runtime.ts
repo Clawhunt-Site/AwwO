@@ -52,6 +52,19 @@ export function verifiedWorkspaceFile(value: unknown): WireFile {
 }
 
 /** Only broker-read bytes can satisfy file fields. A model cannot publish invented paths/content. */
+/** The delivery object when a final reply wraps it in prose: exactly one fenced block that parses to an object naming
+ *  only declared fields (a 2026-10-17 review answered "Here is the static review." and then the JSON in a fence). */
+function fencedDelivery(source: string, fields: OutputField[]): Record<string, unknown> | undefined {
+  const ids = new Set(fields.map(field => field.id));
+  const found = [...source.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```/g)].flatMap(match => {
+    try {
+      const value: unknown = JSON.parse(match[1]);
+      return record(value) && Object.keys(value).length && Object.keys(value).every(key => ids.has(key)) ? [value] : [];
+    } catch { return []; }
+  });
+  return found.length === 1 ? found[0] : undefined;
+}
+
 export function compileWorkspaceDelivery(source: string, fields: OutputField[], published: Map<string, WireFile>): string {
   if (!fields.length) {
     if (!source.trim()) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');
@@ -60,6 +73,9 @@ export function compileWorkspaceDelivery(source: string, fields: OutputField[], 
   let values: unknown;
   try { values = JSON.parse(source.trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1')); }
   catch {
+    values = fencedDelivery(source, fields);
+  }
+  if (values === undefined) {
     const unbound = fields.filter(field => !published.has(field.id));
     // Real files and published HTML are already bound by trusted receipts. A
     // single remaining handoff field can receive a natural-language final reply,
