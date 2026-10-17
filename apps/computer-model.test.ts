@@ -622,12 +622,15 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     // A streamed refusal (OpenAI's), refused as one read whole; an error said in place of choices, as a moderation stop.
     refusal: res => void events(res, [{ choices: [{ index: 0, delta: { refusal: 'secret-provider-key: I cannot help' }, finish_reason: 'stop' }] }, 'data: [DONE]']),
     moderation: res => void events(res, [partial, { code: 'DataInspectionFailed', message: 'secret-provider-key inappropriate content' }]),
+    // An upstream overloaded after the stream began, as the Gate passes Anthropic's error on.
+    overloaded: res => void events(res, [partial, { type: 'error', error: { type: 'overloaded_error', message: 'secret-provider-key Overloaded' } }]),
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi', { edgeIdleMs: 400 });
   const socket = 'UND_ERR_SOCKET';
   for (const [scenario, reason, detail] of [
     // The gateway's error frame is its refusal inside a 200, as one read whole is (provider:200:<its code or type>).
     ['error-frame', 'provider:200:bad_response_status_code', undefined], ['moderation', 'provider:200:DataInspectionFailed', undefined],
+    ['overloaded', 'provider:200:overloaded_error', undefined],
     ['no-finish', 'stream:closed', 'end'], ['unfinished', 'stream:unfinished', undefined],
     ['garbled', 'stream:shape', undefined], ['reset', 'stream:closed', socket], ['idle-reset', 'stream:closed:idle', socket], ['idle-end', 'stream:closed:idle', 'end'],
     ['length', 'answer', 'finish:length'], ['filtered', 'answer', 'finish:content_filter'], ['huge', 'answer', 'size'], ['refusal', 'answer', 'refusal'],
@@ -642,12 +645,12 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
   const finished = await s.send(input({ completion: { messages: [{ role: 'user', content: 'after-finish' }], tools: [tool] } }));
   assert.equal(finished.status, 200);
   assert.equal((await finished.json()).completion.choices[0].message.content, 'Done.');
-  assert.equal(logged.length, 12);
+  assert.equal(logged.length, 13);
   // Each close's silence is on its log line alone (quietMs), never in the reply.
   const closes = logged.filter(line => String(line.reason).startsWith('stream:closed'));
   assert.equal(closes.length, 4);
   for (const line of closes) assert.ok(line.reason === 'stream:closed:idle' ? line.quietMs >= 400 : line.quietMs < 400, JSON.stringify(line));
-  assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|partial|upstream failed|inappropriate|cannot help|xxxx/);
+  assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|partial|upstream failed|inappropriate|cannot help|Overloaded|xxxx/);
 });
 
 test('a Gate stream that stalls is cut by the call\'s own time limit, and a cancel mid-stream stays a cancel', { timeout: 10000 }, async t => {

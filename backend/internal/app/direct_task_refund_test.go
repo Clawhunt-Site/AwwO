@@ -430,7 +430,13 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		// a 524 (the refund session's reading of the owner's rule, 2026-10-17); a close at once, which a task's own words can
 		// bring about (a moderation stop), is not.
 		"stream:closed:idle": "computer_model_provider", "stream:closed": "computer_model_answer", "stream:closed:idle:x": "computer_model_answer",
-		// A Gate stream's error frame is the Gate's error inside a 200, as one read whole (not refunded).
+		// A Gate stream's error frame is the Gate's error inside a 200, as one read whole: the platform's when it names the
+		// provider's capacity or the operator's access, as its status would have; not a server error, the Gate's catch-all
+		// or a moderation code (the refund session, 2026-10-17).
+		"provider:200:overloaded_error": "computer_model_provider", "provider:200:rate_limit_error": "computer_model_provider",
+		"provider:200:rate_limit_exceeded": "computer_model_provider", "provider:200:insufficient_quota": "computer_model_provider",
+		"provider:200:insufficient_user_quota": "computer_model_provider", "provider:200:permission_error": "computer_model_provider",
+		"provider:200:server_error": "computer_model_failed", "provider:200:api_error": "computer_model_failed", "provider:200": "computer_model_failed",
 		"provider:200:bad_response_status_code": "computer_model_failed", "provider:200:DataInspectionFailed": "computer_model_failed",
 		"stream:unfinished": "computer_model_answer", "stream:error:429:throttlingException": "computer_model_provider", "stream:error:503:serviceUnavailableException": "computer_model_provider",
 		"stream:error:500:InternalServerException": "computer_model_provider", "stream:error:502:modelStreamErrorException": "computer_model_answer",
@@ -446,6 +452,7 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 	for reason, want := range map[string]string{"provider:503": "computer_model_failed", "provider:401:invalid_api_key": "computer_model_failed",
 		"network:ECONNREFUSED": "computer_model_failed", "body": "computer_model_failed", "provider:524": "computer_model_failed",
 		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_failed", "stream:closed:idle": "computer_model_failed", "stream:closed": "computer_model_failed",
+		"provider:200:overloaded_error": "computer_model_failed",
 		// A personal LLM Gate key streams too (its error frames read provider:200:…): no stream label, whatever produced it,
 		// is the platform's on a personal connection.
 		"stream:error:503:ServiceUnavailableException": "computer_model_failed", "worker": "computer_model_provider", "answer": "computer_model_answer"} {
@@ -476,8 +483,10 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 // The owner, 2026-10-17: with the platform's own credentials, a direct task whose LLM Gate call an edge's time limit cut
 // (a 524: a call that is not streamed answers nothing until its last token), or whose Gate call failed with a server
 // error however long it had run, failed for the platform's sake and gives its calls back. So does one whose streamed Gate
-// call's stream closed after a silence as long as the edge's idle limit (the same edge's cut of a streamed call); one
-// closed at once gives nothing back, nor does a call the task's own side gave up on, whatever its worker would have said.
+// call's stream closed after a silence as long as the edge's idle limit (the same edge's cut of a streamed call), or
+// whose Gate stream's error frame named the provider's capacity (as its status would have, sent whole); one closed at
+// once or stopped by moderation gives nothing back, nor does a call the task's own side gave up on, whatever its worker
+// would have said.
 func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 	// The "gone" call has reached its model worker: its task's side gives up on it from then on, not on a timer.
 	received := make(chan struct{}, 1)
@@ -504,6 +513,10 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 			case "idle", "closed":
 				time.Sleep(300 * time.Millisecond) // part of the answer streamed, then the stream closed on its way
 				reason = map[string]string{"idle": "stream:closed:idle", "closed": "stream:closed"}[b.Completion.Messages[0].Content]
+			case "overloaded", "moderated":
+				// Part of the answer streamed, then the Gate's error frame: the upstream overloaded, or a moderation stop.
+				time.Sleep(300 * time.Millisecond)
+				reason = map[string]string{"overloaded": "provider:200:overloaded_error", "moderated": "provider:200:DataInspectionFailed"}[b.Completion.Messages[0].Content]
 			case "gone":
 				// The stream is still coming when the task's own side gives up on the call; what the worker says afterwards
 				// reaches nobody.
@@ -568,7 +581,7 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 	for _, c := range []struct {
 		scenario string
 		refunds  float64
-	}{{"edge", 1}, {"late", 1}, {"idle", 1}, {"closed", 0}, {"gone", 0}} {
+	}{{"edge", 1}, {"late", 1}, {"idle", 1}, {"closed", 0}, {"gone", 0}, {"overloaded", 1}, {"moderated", 0}} {
 		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": "gate-refund-" + c.scenario, "prompt": c.scenario + " task", "runtime": "pi", "model": "test-model"}, 202)
 		id := run["id"].(string)
 		h.awaitRun(t, owner, tid, id, "failed")

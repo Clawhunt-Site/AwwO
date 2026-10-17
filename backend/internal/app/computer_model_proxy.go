@@ -366,8 +366,9 @@ func computerModelFailure(status int, body []byte, personal bool) string {
 //     what the model sent;
 //   - a provider behind LLM Gate refusing our key or our quota, missing the model, throttling, out of service or out of
 //     the edge's reach (provider:<401|404|429|503|529> and Cloudflare's 521, 522, 523, 525, 526 and 530; a 403 only with
-//     a kind in computerGateRefusals), whenever it comes, never a bare 403 (a firewall rule on the task's words can give
-//     one), another 5xx nor a refusal of the request (400 and the like);
+//     a kind in computerGateRefusals; an error inside a 200, a streamed call's error frame among them, only with a kind
+//     in computerCapacityKinds or computerGateRefusals), whenever it comes, never a bare 403 (a firewall rule on the
+//     task's words can give one), another 5xx nor a refusal of the request (400 and the like);
 //   - a Gate call cut by a time limit on its way: a 408, an edge's 504 or 524 (Cloudflare cuts a call that answers
 //     nothing for about 100 s, and a call that is not streamed answers nothing until its last token) or the worker's HTTP
 //     client's header or body limit. The owner, 2026-10-17: the platform's timeouts, not the user's or the task's;
@@ -394,7 +395,7 @@ func computerProviderFault(reason string) bool {
 	if rest, ok := strings.CutPrefix(reason, "provider:"); ok {
 		status, kind, _ := strings.Cut(rest, ":")
 		return slices.Contains([]string{"401", "404", "408", "429", "503", "504", "524", "529", "521", "522", "523", "525", "526", "530"}, status) ||
-			status == "403" && computerGateRefusals[kind]
+			status == "403" && computerGateRefusals[kind] || status == "200" && (computerCapacityKinds[kind] || computerGateRefusals[kind])
 	}
 	if code, ok := strings.CutPrefix(reason, "network:"); ok {
 		return computerConnectFailures[code] || code == "UND_ERR_HEADERS_TIMEOUT" || code == "UND_ERR_BODY_TIMEOUT"
@@ -407,6 +408,14 @@ func computerProviderFault(reason string) bool {
 // model service's own time limit among them (the owner, 2026-10-17).
 var computerAWSOutages = map[string]bool{"throttlingexception": true, "servicequotaexceededexception": true, "serviceunavailableexception": true,
 	"internalserverexception": true, "modelnotreadyexception": true, "modeltimeoutexception": true}
+
+// computerCapacityKinds are the kinds of an error inside a 200 (a streamed call's error frame, or a gateway's error in a
+// 200 read whole) that name the provider's capacity: Anthropic's overloaded_error and rate_limit_error, OpenAI's
+// rate_limit_exceeded and insufficient_quota, the failures whose statuses (529, 429) are the platform's whenever they
+// come. With computerGateRefusals they keep the owner's rule from depending on whether the call streamed (the refund
+// session, 2026-10-17). A server error (server_error, api_error), the Gate's catch-all bad_response_status_code and a
+// moderation code are not, as another 5xx is not.
+var computerCapacityKinds = map[string]bool{"overloaded_error": true, "rate_limit_error": true, "rate_limit_exceeded": true, "insufficient_quota": true}
 
 // computerGateRefusals are the kinds of a 403 behind LLM Gate that refuse the operator's access, never the task's words:
 // the gateway's balance run out (new-api's insufficient_user_quota) and a key without the right (Anthropic's
