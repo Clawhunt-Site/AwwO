@@ -404,9 +404,8 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"child-exit:SIGKILL": "computer_model_provider", "bedrock:400:ValidationException": "computer_model_failed", "stream": "computer_model_answer",
 		"answer": "computer_model_answer", "unknown": "computer_model_failed", "": "computer_model_failed", "bedrock:x:y": "computer_model_failed",
 		// A provider behind LLM Gate (apps/computer-model.ts): refusing our key, missing the model, throttling or out of
-		// service is the platform's side; a 403 (a firewall rule on the task's words), another 5xx (a long answer the gateway
-		// dropped), a refusal of the request or an error in a 200 is not, nor is no answer at all unless the provider was out
-		// of reach before the request was sent.
+		// service is the platform's side; a 403 (a firewall rule on the task's words), another 5xx, a refusal of the request
+		// or an error in a 200 is not, nor is no answer at all unless the provider was out of reach before the request was sent.
 		"provider:503": "computer_model_provider", "provider:529:overloaded_error": "computer_model_provider", "provider:429:rate_limit_exceeded": "computer_model_provider",
 		"provider:401:invalid_api_key": "computer_model_provider", "provider:404:model_not_found": "computer_model_provider",
 		// Cloudflare could not reach LLM Gate's origin: an outage; a 403 is the platform's only when it names the operator's
@@ -420,11 +419,11 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"provider:200:new_api_error": "computer_model_failed", "network:ECONNREFUSED": "computer_model_provider", "network:ENOTFOUND": "computer_model_provider",
 		"network": "computer_model_failed", "network:UND_ERR_SOCKET": "computer_model_failed", "network:ECONNRESET": "computer_model_failed",
 		"body": "computer_model_provider", "worker": "computer_model_provider",
-		// A time limit on the way (a 408, an edge's, or the worker's HTTP client's) is the call's length, which a model's own
-		// long answer can cause: a cut, never refunded.
-		"provider:408": "computer_model_cut", "provider:524": "computer_model_cut", "provider:504:gateway_timeout": "computer_model_cut",
-		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_cut", "network:UND_ERR_BODY_TIMEOUT": "computer_model_cut",
-		"stream:error:408:ModelTimeoutException": "computer_model_cut",
+		// A Gate call cut by a time limit on its way (a 408, an edge's 504 or 524, the worker's HTTP client's) and a Bedrock
+		// model's own time limit after its stream began are the platform's timeouts (the owner, 2026-10-17).
+		"provider:524": "computer_model_provider", "provider:504:gateway_timeout": "computer_model_provider",
+		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_provider", "network:UND_ERR_BODY_TIMEOUT": "computer_model_provider",
+		"stream:error:408:ModelTimeoutException": "computer_model_provider", "provider:408": "computer_model_provider",
 		// A Bedrock stream: an AWS outage after it began is the provider's; a model whose output broke it, the bridge's refusal
 		// of what the model sent and a stream that ended early are the answer's.
 		"stream:error:429:throttlingException": "computer_model_provider", "stream:error:503:serviceUnavailableException": "computer_model_provider",
@@ -432,37 +431,27 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"stream:error:502:ModelErrorException": "computer_model_answer", "stream:error:400:validationException": "computer_model_answer",
 		"stream:error:api_error": "computer_model_answer", "stream:error:503": "computer_model_answer", "stream:truncated": "computer_model_answer"} {
 		body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason, "detail": "finish:length"}})
-		if got := computerModelFailure(502, body, false, time.Second); got != want {
+		if got := computerModelFailure(502, body, false); got != want {
 			t.Fatalf("a provider error with reason %q reads %q, want %q", reason, got, want)
 		}
 	}
-	// With personal credentials the provider, its key and its quota are the user's: none of its failures is the platform's.
-	// Nor is a failure of a provider behind LLM Gate that came late, when a long answer may have caused it; a Bedrock
-	// outage or the worker's own failure stays the platform's, however late.
-	for _, c := range []struct {
-		reason   string
-		personal bool
-		elapsed  time.Duration
-		want     string
-	}{{"provider:503", true, time.Second, "computer_model_failed"}, {"provider:401:invalid_api_key", true, time.Second, "computer_model_failed"},
-		{"network:ECONNREFUSED", true, time.Second, "computer_model_failed"}, {"body", true, time.Second, "computer_model_failed"},
-		{"provider:524", true, time.Second, "computer_model_cut"}, {"worker", true, time.Second, "computer_model_provider"},
-		{"answer", true, time.Second, "computer_model_answer"}, {"provider:503", false, 31 * time.Second, "computer_model_failed"},
-		{"provider:521", false, 31 * time.Second, "computer_model_failed"}, {"network:ECONNREFUSED", false, 31 * time.Second, "computer_model_failed"},
-		{"provider:503", false, 30 * time.Second, "computer_model_provider"}, {"bedrock:503:ServiceUnavailableException", false, 5 * time.Minute, "computer_model_provider"},
-		{"stream:error:429:throttlingException", false, 5 * time.Minute, "computer_model_provider"}, {"worker", false, 5 * time.Minute, "computer_model_provider"}} {
-		body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": c.reason}})
-		if got := computerModelFailure(502, body, c.personal, c.elapsed); got != c.want {
-			t.Fatalf("a provider error with reason %q (personal %v, after %s) reads %q, want %q", c.reason, c.personal, c.elapsed, got, c.want)
+	// With personal credentials the provider, its key and its quota are the user's: none of its failures is the platform's,
+	// its time limits on the way included; the worker's own failure stays the platform's.
+	for reason, want := range map[string]string{"provider:503": "computer_model_failed", "provider:401:invalid_api_key": "computer_model_failed",
+		"network:ECONNREFUSED": "computer_model_failed", "body": "computer_model_failed", "provider:524": "computer_model_failed",
+		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_failed", "worker": "computer_model_provider", "answer": "computer_model_answer"} {
+		body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason}})
+		if got := computerModelFailure(502, body, true); got != want {
+			t.Fatalf("on a personal connection, a provider error with reason %q reads %q, want %q", reason, got, want)
 		}
 	}
-	if computerModelFailure(499, []byte(`{"error":{"code":"CANCELLED"}}`), false, 0) != "computer_model_cut" || computerModelFailure(502, []byte("not json"), false, 0) != "computer_model_failed" {
+	if computerModelFailure(499, []byte(`{"error":{"code":"CANCELLED"}}`), false) != "computer_model_cut" || computerModelFailure(502, []byte("not json"), false) != "computer_model_failed" {
 		t.Fatal("a cut call or an unreadable answer is classed wrongly")
 	}
 	// A call is cut by its own limit, its caller or a cancel, but lost with a worker that stopped under it.
 	for reason, want := range map[string]string{"timeout": "computer_model_cut", "disconnected": "computer_model_cut", "cancelled": "computer_model_cut", "stopping": "computer_model_transport"} {
 		for _, personal := range []bool{false, true} {
-			if got := computerModelFailure(499, []byte(`{"error":{"code":"CANCELLED","reason":"`+reason+`"}}`), personal, time.Minute); got != want {
+			if got := computerModelFailure(499, []byte(`{"error":{"code":"CANCELLED","reason":"`+reason+`"}}`), personal); got != want {
 				t.Fatalf("a call cancelled for %q reads %q, want %q", reason, got, want)
 			}
 		}
@@ -472,5 +461,64 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 	}
 	if odd := computerArtifactName(strings.Repeat("a", 190) + "." + strings.Repeat("x", 40)); len(odd) != 200 {
 		t.Fatalf("a name with an overlong extension became %d bytes", len(odd))
+	}
+}
+
+// The owner, 2026-10-17: with the platform's own credentials, a direct task whose LLM Gate call an edge's time limit cut
+// (a 524: a call that is not streamed answers nothing until its last token), or whose Gate call failed with a server
+// error however long it had run, failed for the platform's sake and gives its calls back.
+func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
+	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{
+				{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144}}})
+			return
+		}
+		var b struct {
+			Completion struct {
+				Messages []struct {
+					Content string `json:"content"`
+				} `json:"messages"`
+			} `json:"completion"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		reason := "provider:524"
+		if len(b.Completion.Messages) > 0 && b.Completion.Messages[0].Content == "late" {
+			time.Sleep(1500 * time.Millisecond) // a server error after the call has run a while
+			reason = "provider:503"
+		}
+		writeJSON(w, 502, map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason}})
+	}))
+	defer pi.Close()
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(200)
+			return
+		}
+		var input computerWorkerInput
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		computerProxyRequest(t, input, map[string]any{"messages": []map[string]string{{"role": "user", "content": strings.Fields(input.Prompt)[0]}}}, 502)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"CORE_EXECUTION_FAILED\"}\n\n")
+	}))
+	defer worker.Close()
+	h := newHarness(t, pi.URL)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "gate-refund@example.test")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	for _, scenario := range []string{"edge", "late"} {
+		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": "gate-refund-" + scenario, "prompt": scenario + " task", "runtime": "pi", "model": "test-model"}, 202)
+		id := run["id"].(string)
+		h.awaitRun(t, owner, tid, id, "failed")
+		if d := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); d["error"] != "computer_execution_failed" || d["calls"] != float64(1) || d["refundedCalls"] != float64(1) {
+			t.Fatalf("%s: the task reads %v with %v calls, refunded %v; want computer_execution_failed, 1, 1", scenario, d["error"], d["calls"], d["refundedCalls"])
+		}
 	}
 }
