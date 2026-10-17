@@ -487,6 +487,11 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
 	// workspace and across every workspace, counted from durable rows under the same lock.
 	if plan == nil && !operator && snapshot.Media.Provider == mediaProviderTripo {
+		// A rig and its animations cost the operator's balance several times a model (rig 25 Tripo credits, 50 per five
+		// clips), which a free 3D allowance counted per generation would hide: they need a paid plan.
+		if snapshot.Media.Motion != nil {
+			return none, &mediaRefusal{402, "model3d_motion_plan_required", "Rigging and animating a 3D model needs a paid plan"}
+		}
 		var mine, all int
 		if e := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE g.tenant_id=$1),count(*) FROM media_generations g
 			WHERE g.billed_user_id IS NULL AND g.model LIKE 'tripo.%' AND g.created_at>=date_trunc('day',clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND `+generationCounts, tid).Scan(&mine, &all); e != nil {

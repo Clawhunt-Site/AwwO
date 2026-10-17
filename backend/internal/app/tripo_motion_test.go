@@ -705,6 +705,8 @@ func TestPostgresTripoMotionChainsDeliverAnimatedModels(t *testing.T) {
 	h, _ := newMediaHarness(t)
 	f := newFakeTripo(t, h)
 	c, tid, _ := h.register(t, "tripo-motion@example.test")
+	// Rigging needs a paid plan or the operator's own workspace (admitMediaGeneration); this one is the operator's.
+	execSQL(t, h, "UPDATE users SET platform_role='admin' WHERE email=$1", "tripo-motion@example.test")
 	_, canvas := mediaCanvas(t, h, c, tid,
 		motionNode("combat", "tripo.p1", map[string]any{"rig": "biped", "motion": "combat"}),
 		motionNode("full", "tripo.v3-1", map[string]any{"rig": "biped", "motion": "full", "inPlace": false}),
@@ -1096,6 +1098,8 @@ func TestPostgresGraphRunPageTakesAnAnimatedTripoModel(t *testing.T) {
 	h.a.cfg.MediaMinFreeBytes = 0
 	f := newFakeTripo(t, h)
 	c, tid, _ := h.register(t, "media-animated@example.test")
+	// Rigging needs a paid plan or the operator's own workspace (admitMediaGeneration); this one is the operator's.
+	execSQL(t, h, "UPDATE users SET platform_role='admin' WHERE email=$1", "media-animated@example.test")
 	base := "/tenants/" + tid
 	aid := h.request(t, c, "POST", base+"/agents", map[string]any{"name": "Page", "adapterType": "pi", "model": "test-model", "instructions": "PAGE"}, 201)["id"].(string)
 	page := map[string]any{"id": "page", "kind": "session", "title": "Page", "runtime": "pi", "agentKind": "llm",

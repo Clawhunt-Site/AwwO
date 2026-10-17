@@ -288,6 +288,12 @@ func (a *App) followTripoMotion(ctx context.Context, hub mediaProvider, tid, id,
 				err = &rhError{Code: "media_provider_unavailable"}
 			}
 			if err != nil {
+				// A busy answer created no task (submitMedia sends again only after one): the step was not sent after
+				// all. Counting it back keeps a restart that finds the run waiting from failing it as a lost answer;
+				// it sends the step again instead.
+				if e, ok := asRHError(err); ok && e.RetryAfter > 0 && a.markMotionSent(ctx, tid, id, step) != nil {
+					a.log.Warn("motion step not counted back after a busy answer", "event", "media_motion_unmarked")
+				}
 				fail(motionFailureCode(err))
 				return
 			}
