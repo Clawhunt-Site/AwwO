@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import { loadWorkspaceEgress, parseWorkspaceTools, type WorkspaceEgress, type WorkspaceTool } from './workspace-sandbox.ts';
+import { loadWorkspaceEgress, parseWorkspaceTools, WORKSPACE_MEMORY_MB, type WorkspaceEgress, type WorkspaceTool } from './workspace-sandbox.ts';
 
 export const WORKSPACE_BODY_BYTES = 16 * 1024 * 1024;
 export const WORKSPACE_FILE_BYTES = 2 * 1024 * 1024;
@@ -22,6 +22,8 @@ export interface WorkspaceConfig {
   egress?: WorkspaceEgress;
   /** One command's limit (AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS): 30 s, or 120 s with the web. */
   commandTimeoutMs: number;
+  /** The container's memory in MiB (AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB); absent = 1,024. */
+  memoryMB?: number;
 }
 /** What the task process tells its agent about the workspace. */
 export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean }
@@ -50,7 +52,11 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
   const rawTimeout = env.AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS;
   const commandTimeoutMs = rawTimeout ? Number(rawTimeout) : egress ? 120_000 : 30_000;
   if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS must be 1000-120000');
-  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}) });
+  const rawMemory = env.AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB;
+  const memoryMB = rawMemory ? Number(rawMemory) : undefined;
+  if (memoryMB !== undefined && (!/^\d+$/.test(rawMemory!) || memoryMB < WORKSPACE_MEMORY_MB.min || memoryMB > WORKSPACE_MEMORY_MB.max))
+    throw new Error(`AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB must be ${WORKSPACE_MEMORY_MB.min}-${WORKSPACE_MEMORY_MB.max}`);
+  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}), ...(memoryMB !== undefined ? { memoryMB } : {}) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
   if (!object(value) || typeof value.name !== 'string' || !value.name || value.name.length > 200

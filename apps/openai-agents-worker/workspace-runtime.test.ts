@@ -33,6 +33,14 @@ test('workspace authorization is configured, bounded and bound to an exact callb
   assert.throws(() => validateWorkspaceRequest({ ...spec, callbackURL: 'http://127.0.0.1/api/internal/workspace-calls' }));
 });
 
+test('a workspace container has 1 GiB unless the worker is given 256-4,096 MiB', () => {
+  // A headless Chromium testing a large self-testing page needs more (the flagship tester's page, 2026-10-17).
+  const env = { AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE: 'awwo-workspace:test', AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER: '/usr/bin/docker', AWWO_OPENAI_AGENTS_WORKSPACE_CALLBACK_URL: workspace().callbackURL };
+  assert.equal(loadWorkspaceConfig(env)?.memoryMB, undefined);
+  assert.equal(loadWorkspaceConfig({ ...env, AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB: '3072' })?.memoryMB, 3072);
+  for (const value of ['255', '4097', '2.5', '-1', 'lots']) assert.throws(() => loadWorkspaceConfig({ ...env, AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB: value }), /MEMORY_MB/);
+});
+
 test('workspace defaults to 32 model calls, permits explicit 2..64, and preserves frozen 16-call runs', () => {
   const spec = workspace();
   const env = { AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE: 'awwo-workspace:test', AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER: '/usr/bin/docker', AWWO_OPENAI_AGENTS_WORKSPACE_CALLBACK_URL: spec.callbackURL };

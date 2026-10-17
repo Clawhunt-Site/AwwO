@@ -15,6 +15,14 @@ const digest = (content: Uint8Array) => createHash('sha256').update(content).dig
 const metadata = (path: string, content: Buffer) => ({ path, content: content.toString('base64'), encoding: 'base64', byteLength: content.length, sha256: digest(content) });
 const response = (value: unknown, code = 0, stderr = '') => ({ code, stdout: Buffer.from(JSON.stringify(value)), stderr: Buffer.from(stderr) });
 
+test('a workspace container takes the memory its worker is given, swap included, and nothing outside 256-4,096 MiB', () => {
+  const args = workspaceDockerArgs('awwo-ws-test', config.image, undefined, 3072);
+  assert.ok(args.includes('--memory=3072m') && args.includes('--memory-swap=3072m'));
+  assert.ok(!args.includes('--memory=1g'));
+  assert.ok(workspaceDockerArgs('awwo-ws-test', config.image, undefined, 1024).includes('--memory=1g'));
+  for (const value of [255, 4097, 1.5]) assert.throws(() => workspaceDockerArgs('awwo-ws-test', config.image, undefined, value), /memory/);
+});
+
 test('container arguments enforce isolation without host mounts, inherited credentials or a shell', () => {
   const args = workspaceDockerArgs('awwo-ws-test', config.image);
   for (const flag of ['--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--memory=1g', '--memory-swap=1g', '--cpus=1', '--pids-limit=128', '--pull=never']) assert.ok(args.includes(flag), flag);

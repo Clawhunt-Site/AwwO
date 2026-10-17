@@ -21,7 +21,11 @@ export interface WorkspaceSandboxConfig {
   maxFileBytes?: number;
   maxArchiveBytes?: number;
   egress?: WorkspaceEgress;
+  /** The container's memory in MiB, swap included (default 1,024; AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB). */
+  memoryMB?: number;
 }
+/** The workspace container's memory bounds, in MiB: a headless Chromium testing a large page needs more than 1 GiB. */
+export const WORKSPACE_MEMORY_MB = { default: 1024, min: 256, max: 4096 } as const;
 /** Programs the workspace image carries beyond Node and Python, named for the agent only when configured. */
 export const WORKSPACE_TOOLS = ['rea', 'check-page'] as const;
 export type WorkspaceTool = typeof WORKSPACE_TOOLS[number];
@@ -433,13 +437,15 @@ async def main():
 asyncio.run(main())
 `;
 
-export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }): string[] {
+export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }, memoryMB: number = WORKSPACE_MEMORY_MB.default): string[] {
+  if (!Number.isSafeInteger(memoryMB) || memoryMB < WORKSPACE_MEMORY_MB.min || memoryMB > WORKSPACE_MEMORY_MB.max) throw new Error('Invalid workspace memory');
+  const memory = memoryMB === 1024 ? '1g' : `${memoryMB}m`;
   const web = egress ? ['--mount', `type=bind,source=${egress.socketDir},target=${EGRESS_MOUNT},readonly`,
     ...['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'].flatMap(key => ['--env', `${key}=${egress.proxyURL}`]),
     ...['NO_PROXY', 'no_proxy'].flatMap(key => ['--env', `${key}=localhost,127.0.0.1,::1`])] : [];
   return ['run', '--detach', '--pull=never', '--name', name, '--label', 'awwo.workspace-sandbox=true',
     '--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-    '--memory=1g', '--memory-swap=1g', '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
+    `--memory=${memory}`, `--memory-swap=${memory}`, '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
     // exec: tools a project installs (a bundler's native binary) run from /workspace; /inputs and /tmp stay noexec.
     '--tmpfs', '/workspace:rw,nosuid,nodev,size=134217728,nr_inodes=8192,uid=1000,gid=1000,mode=0700,exec',
     // 8 MiB of inputs plus a page for each file's last partial one: tmpfs counts whole 4 KiB pages.
@@ -535,7 +541,7 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
   try {
     // Set before run: a client timeout may occur after the daemon has already created the container.
     created = true;
-    const start = await runDocker(workspaceDockerArgs(name, config.image, egress), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
+    const start = await runDocker(workspaceDockerArgs(name, config.image, egress, config.memoryMB), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
     if (start.code !== 0) throw new Error(`Workspace sandbox could not start: ${start.stderr.toString('utf8').slice(-1024)}`);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) throw new Error('Workspace operation cancelled');
