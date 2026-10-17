@@ -684,8 +684,7 @@
           "type": "enum",
           "values": [
             "480p",
-            "720p",
-            "1080p"
+            "720p"
           ],
           "default": "720p",
           "label": [
@@ -756,7 +755,7 @@
         }
       ],
       "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859282.md",
-      "verified": ""
+      "verified": "2026-10-17"
     },
     {
       "id": "rh.veo-3-1-fast",

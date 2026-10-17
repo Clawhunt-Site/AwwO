@@ -15,7 +15,7 @@ func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 	m, ok := builtinMediaCatalog.model("rh.seedance-2-multimodal")
 	if !ok || m.Kind != mediaKindVideo || m.Mode != "text-to-video" || m.Provider != mediaProviderRunningHub || m.References != 9 ||
 		m.Endpoint != "/openapi/v2/rhart-video/sparkvideo-2.0/multimodal-video" || m.Prompt != (mediaPrompt{MinLength: 1, MaxLength: 20480}) ||
-		m.Verified != "" || m.Label != [2]string{"视频 · 多图参考", "Video · From references"} || m.Vendor != mediaVendorShown ||
+		m.Verified != "2026-10-17" || m.Label != [2]string{"视频 · 多图参考", "Video · From references"} || m.Vendor != mediaVendorShown ||
 		m.Docs != "https://www.runninghub.ai/runninghub-api-doc-en/api-494859282.md" {
 		t.Fatalf("reference video model %+v", m)
 	}
@@ -31,7 +31,7 @@ func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 	if strings.Join(names, ",") != "resolution,duration,ratio,generateAudio,seed" {
 		t.Fatal("parameters", names)
 	}
-	if p := params["resolution"]; p.Type != "enum" || strings.Join(p.Values, ",") != "480p,720p,1080p" || p.Default != "720p" {
+	if p := params["resolution"]; p.Type != "enum" || strings.Join(p.Values, ",") != "480p,720p" || p.Default != "720p" {
 		t.Fatalf("resolution %+v", p)
 	}
 	if p := params["duration"]; p.Type != "enum" || strings.Join(p.Values, ",") != "4,5,6,7,8,9,10,11,12,13,14,15" || p.Default != "5" {
@@ -52,15 +52,22 @@ func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 			t.Fatal("accepted", raw)
 		}
 	}
-	// Priced exactly as the text-to-video model of its family, per five seconds and its settings; its pictures add
-	// nothing.
-	for _, settings := range []map[string]any{nil, {"duration": "5"}, {"duration": "10", "resolution": "1080p"}, {"duration": "15", "resolution": "480p"}} {
-		if got, want := mediaCreditsFor(m.ID, mediaKindVideo, settings), mediaCreditsFor("rh.seedance-2", mediaKindVideo, settings); got != want {
+	// Three times the measured cost ($1.00 for five seconds at 720p), per five seconds; its pictures add nothing, and
+	// 1080p, not measured yet, is not offered.
+	for duration, want := range map[string]int{"": 300, "5": 300, "4": 300, "10": 600, "15": 900} {
+		settings := map[string]any{"resolution": "720p"}
+		if duration != "" {
+			settings["duration"] = duration
+		}
+		if got := mediaCreditsFor(m.ID, mediaKindVideo, settings); got != want {
 			t.Fatal("priced", settings, got, "want", want)
 		}
 	}
-	if mediaCreditsFor(m.ID, mediaKindVideo, map[string]any{"duration": "10", "resolution": "1080p"}) != 600 || mediaReferenceCredits(m.ID, 9) != 0 {
-		t.Fatal("ten seconds at 1080p are 600 credits, and the pictures cost nothing more")
+	if mediaReferenceCredits(m.ID, 9) != 0 {
+		t.Fatal("the pictures cost nothing more")
+	}
+	if _, err := m.resolveMediaParams(json.RawMessage(`{"resolution":"1080p"}`)); err == nil {
+		t.Fatal("1080p is offered before it was measured")
 	}
 }
 
