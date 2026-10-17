@@ -426,7 +426,13 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"stream:error:408:ModelTimeoutException": "computer_model_provider", "provider:408": "computer_model_provider",
 		// A Bedrock stream: an AWS outage after it began is the provider's; a model whose output broke it, the bridge's refusal
 		// of what the model sent and a stream that ended early are the answer's.
-		"stream:error:429:throttlingException": "computer_model_provider", "stream:error:503:serviceUnavailableException": "computer_model_provider",
+		// A streamed Gate call whose stream closed after a silence as long as the edge's idle limit is the same edge's cut as
+		// a 524 (the refund session's reading of the owner's rule, 2026-10-17); a close at once, which a task's own words can
+		// bring about (a moderation stop), is not.
+		"stream:closed:idle": "computer_model_provider", "stream:closed": "computer_model_answer", "stream:closed:idle:x": "computer_model_answer",
+		// A Gate stream's error frame is the Gate's error inside a 200, as one read whole (not refunded).
+		"provider:200:bad_response_status_code": "computer_model_failed", "provider:200:DataInspectionFailed": "computer_model_failed",
+		"stream:unfinished": "computer_model_answer", "stream:error:429:throttlingException": "computer_model_provider", "stream:error:503:serviceUnavailableException": "computer_model_provider",
 		"stream:error:500:InternalServerException": "computer_model_provider", "stream:error:502:modelStreamErrorException": "computer_model_answer",
 		"stream:error:502:ModelErrorException": "computer_model_answer", "stream:error:400:validationException": "computer_model_answer",
 		"stream:error:api_error": "computer_model_answer", "stream:error:503": "computer_model_answer", "stream:truncated": "computer_model_answer"} {
@@ -439,7 +445,10 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 	// its time limits on the way included; the worker's own failure stays the platform's.
 	for reason, want := range map[string]string{"provider:503": "computer_model_failed", "provider:401:invalid_api_key": "computer_model_failed",
 		"network:ECONNREFUSED": "computer_model_failed", "body": "computer_model_failed", "provider:524": "computer_model_failed",
-		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_failed", "worker": "computer_model_provider", "answer": "computer_model_answer"} {
+		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_failed", "stream:closed:idle": "computer_model_failed", "stream:closed": "computer_model_failed",
+		// A personal LLM Gate key streams too (its error frames read provider:200:…): no stream label, whatever produced it,
+		// is the platform's on a personal connection.
+		"stream:error:503:ServiceUnavailableException": "computer_model_failed", "worker": "computer_model_provider", "answer": "computer_model_answer"} {
 		body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason}})
 		if got := computerModelFailure(502, body, true); got != want {
 			t.Fatalf("on a personal connection, a provider error with reason %q reads %q, want %q", reason, got, want)
@@ -466,8 +475,12 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 
 // The owner, 2026-10-17: with the platform's own credentials, a direct task whose LLM Gate call an edge's time limit cut
 // (a 524: a call that is not streamed answers nothing until its last token), or whose Gate call failed with a server
-// error however long it had run, failed for the platform's sake and gives its calls back.
+// error however long it had run, failed for the platform's sake and gives its calls back. So does one whose streamed Gate
+// call's stream closed after a silence as long as the edge's idle limit (the same edge's cut of a streamed call); one
+// closed at once gives nothing back, nor does a call the task's own side gave up on, whatever its worker would have said.
 func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
+	// The "gone" call has reached its model worker: its task's side gives up on it from then on, not on a timer.
+	received := make(chan struct{}, 1)
 	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{
@@ -483,9 +496,24 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&b)
 		reason := "provider:524"
-		if len(b.Completion.Messages) > 0 && b.Completion.Messages[0].Content == "late" {
-			time.Sleep(1500 * time.Millisecond) // a server error after the call has run a while
-			reason = "provider:503"
+		if len(b.Completion.Messages) > 0 {
+			switch b.Completion.Messages[0].Content {
+			case "late":
+				time.Sleep(1500 * time.Millisecond) // a server error after the call has run a while
+				reason = "provider:503"
+			case "idle", "closed":
+				time.Sleep(300 * time.Millisecond) // part of the answer streamed, then the stream closed on its way
+				reason = map[string]string{"idle": "stream:closed:idle", "closed": "stream:closed"}[b.Completion.Messages[0].Content]
+			case "gone":
+				// The stream is still coming when the task's own side gives up on the call; what the worker says afterwards
+				// reaches nobody.
+				select {
+				case received <- struct{}{}:
+				default:
+				}
+				time.Sleep(1500 * time.Millisecond)
+				reason = "stream:closed:idle"
+			}
 		}
 		writeJSON(w, 502, map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason}})
 	}))
@@ -501,7 +529,31 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 		}
 		var input computerWorkerInput
 		_ = json.NewDecoder(r.Body).Decode(&input)
-		computerProxyRequest(t, input, map[string]any{"messages": []map[string]string{{"role": "user", "content": strings.Fields(input.Prompt)[0]}}}, 502)
+		scenario := strings.Fields(input.Prompt)[0]
+		if scenario == "gone" {
+			// The task's own side gives up on the call (as the core's idle limit does) once it is running: its caller is gone.
+			raw, _ := json.Marshal(map[string]any{"messages": []map[string]string{{"role": "user", "content": scenario}}})
+			ctx, cancel := context.WithCancel(context.Background())
+			req, _ := http.NewRequestWithContext(ctx, "POST", input.ModelProxyURL+"/chat/completions", bytes.NewReader(raw))
+			req.Header.Set("Authorization", "Bearer "+input.ModelProxyToken)
+			req.Header.Set("Content-Type", "application/json")
+			done := make(chan struct{})
+			go func() {
+				if resp, e := http.DefaultClient.Do(req); e == nil {
+					resp.Body.Close()
+				}
+				close(done)
+			}()
+			select {
+			case <-received:
+			case <-time.After(10 * time.Second):
+				t.Error("the gone call never reached its model worker")
+			}
+			cancel()
+			<-done
+		} else {
+			computerProxyRequest(t, input, map[string]any{"messages": []map[string]string{{"role": "user", "content": scenario}}}, 502)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"CORE_EXECUTION_FAILED\"}\n\n")
 	}))
@@ -513,12 +565,15 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 	owner, tid, _ := h.register(t, "gate-refund@example.test")
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid
-	for _, scenario := range []string{"edge", "late"} {
-		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": "gate-refund-" + scenario, "prompt": scenario + " task", "runtime": "pi", "model": "test-model"}, 202)
+	for _, c := range []struct {
+		scenario string
+		refunds  float64
+	}{{"edge", 1}, {"late", 1}, {"idle", 1}, {"closed", 0}, {"gone", 0}} {
+		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": "gate-refund-" + c.scenario, "prompt": c.scenario + " task", "runtime": "pi", "model": "test-model"}, 202)
 		id := run["id"].(string)
 		h.awaitRun(t, owner, tid, id, "failed")
-		if d := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); d["error"] != "computer_execution_failed" || d["calls"] != float64(1) || d["refundedCalls"] != float64(1) {
-			t.Fatalf("%s: the task reads %v with %v calls, refunded %v; want computer_execution_failed, 1, 1", scenario, d["error"], d["calls"], d["refundedCalls"])
+		if d := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); d["error"] != "computer_execution_failed" || d["calls"] != float64(1) || d["refundedCalls"] != c.refunds {
+			t.Fatalf("%s: the task reads %v with %v calls, refunded %v; want computer_execution_failed, 1, %v", c.scenario, d["error"], d["calls"], d["refundedCalls"], c.refunds)
 		}
 	}
 }

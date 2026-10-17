@@ -346,7 +346,7 @@ func computerModelFailure(status int, body []byte, personal bool) string {
 		return "computer_model_transport"
 	case status == 499 || code == "CANCELLED":
 		return "computer_model_cut"
-	case code == "PROVIDER_ERROR" && personal && (strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "network") || reason == "body"):
+	case code == "PROVIDER_ERROR" && personal && (strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "network") || reason == "body" || strings.HasPrefix(reason, "stream:")):
 		return "computer_model_failed"
 	case code == "PROVIDER_ERROR" && computerProviderFault(reason):
 		return "computer_model_provider"
@@ -371,6 +371,11 @@ func computerModelFailure(status int, body []byte, personal bool) string {
 //   - a Gate call cut by a time limit on its way: a 408, an edge's 504 or 524 (Cloudflare cuts a call that answers
 //     nothing for about 100 s, and a call that is not streamed answers nothing until its last token) or the worker's HTTP
 //     client's header or body limit. The owner, 2026-10-17: the platform's timeouts, not the user's or the task's;
+//   - a streamed Gate call whose stream closed after it had sent nothing for the edge's idle limit (stream:closed:idle),
+//     the same edge's cut as a 524 of a call sent whole: the refund session's reading of the owner's rule, 2026-10-17.
+//     Any other close (stream:closed) is not: a provider or a gateway closing at once, which a task's own words can bring
+//     about (a moderation stop). The worker answers 499 for a call its own side cut and the API classes a call it gave
+//     up on as a cut, so neither is ever ours;
 //   - the provider out of reach before the request was sent (network:<one of computerConnectFailures>), a 2xx answer
 //     that is not JSON (body), or the worker failing on an answer it already held (worker).
 func computerProviderFault(reason string) bool {
@@ -378,6 +383,9 @@ func computerProviderFault(reason string) bool {
 		code, _, _ := strings.Cut(rest, ":")
 		n, err := strconv.Atoi(code)
 		return err == nil && (n >= 500 || n == 401 || n == 403 || n == 404 || n == 408 || n == 424 || n == 429)
+	}
+	if reason == "stream:closed:idle" {
+		return true
 	}
 	if rest, ok := strings.CutPrefix(reason, "stream:error:"); ok {
 		_, kind, _ := strings.Cut(rest, ":")
