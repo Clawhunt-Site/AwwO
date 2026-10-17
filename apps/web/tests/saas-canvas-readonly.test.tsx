@@ -77,6 +77,9 @@ describe('original canvas reader mode', () => {
     expect([...inspector.querySelectorAll('input, textarea, select')].every(el => (el as HTMLInputElement).disabled)).toBe(true);
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+    // An open node fills the stage: its camera glides off the brief tile, which culling then unmounts, sooner or later
+    // depending on the machine. Fit All (Ctrl+0) closes the node and shows the whole graph at once, with no glide.
+    fireEvent.keyDown(document, { key: '0', code: 'Digit0', ...mod });
     fireEvent.pointerDown(screen.getByTestId('canvas-tile-brief'), { button: 0, clientX: 30, clientY: 40 });
     fireEvent.pointerMove(window, { clientX: 400, clientY: 300 }); fireEvent.pointerUp(window);
     for (const event of [{ key: 'Delete', code: 'Delete' }, { key: 'z', code: 'KeyZ', ...mod },
