@@ -1,11 +1,13 @@
 import { expect, it } from 'vitest';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
 import type { SessionNode } from '../src/canvas/canvasDoc';
 
-const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS);
+// The single-call cases. A published flagship (flagshipWorkflows.ts) works in sandbox computers and assembles its page
+// with no model; tests/saas-flagship-workflows.test.ts holds its rules.
+const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS).filter(item => !(PUBLISHED_FLAGSHIPS as readonly string[]).includes(item.id));
 // A case's media nodes (image and video generators, officialMedia.ts) are not agents: on its card the media of one
 // stage count as one slot of the team, beside that stage's agents.
 const stagesOf = (id: string) => {

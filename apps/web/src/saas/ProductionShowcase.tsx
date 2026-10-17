@@ -96,8 +96,19 @@ function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; fil
 
 function NodeOutput({ node }: { node: ProductionRunNode }) {
   if (node.status !== 'done') return node.detail ? <p className="production-made-detail">{node.detail}</p> : null;
-  if (node.outputType === 'html') return <details className="production-made-source"><summary>{`View the page source (${(node.output || '').length.toLocaleString()} characters)`}</summary><pre><code>{node.output}</code></pre></details>;
+  if (node.kind === 'assemble') return <p className="production-made-file">{node.file
+    ? `${node.file.name}, ${Math.round(node.file.bytes / 1024).toLocaleString()} KB: the modules pasted into its template, byte for byte, with no model.`
+    : 'The modules pasted into its template, byte for byte, with no model.'}</p>;
+  const report = node.report ? <div className="production-made-markdown">{renderRecordMarkdown(node.report)}</div> : null;
+  if (node.outputType === 'html') return <>{report}<details className="production-made-source"><summary>{`View the page source (${(node.output || '').length.toLocaleString()} characters)`}</summary><pre><code>{node.output}</code></pre></details></>;
   return <div className="production-made-markdown">{renderRecordMarkdown(node.output || '')}</div>;
+}
+
+/** Where a node worked: the sandbox computer's files, commands and checks, and how many model calls that took. */
+function NodeWork({ node }: { node: ProductionRunNode }) {
+  if (node.kind === 'assemble') return <p className="production-made-work">Assembled with no model</p>;
+  if (!node.sandbox) return null;
+  return <p className="production-made-work">{`Worked in its own sandbox computer${node.calls ? ` · ${node.calls} model calls` : ''}${node.tokens?.output ? ` · ${node.tokens.output.toLocaleString()} output tokens` : ''}`}</p>;
 }
 
 /** How a case was made: its canvas stage by stage, what every agent actually handed over, and the
@@ -152,7 +163,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   return <section className={`production-made${focused ? ' is-result-focused' : ''}`} lang="en" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading">
       <div><span className="production-eyebrow"><span />HOW IT WAS MADE</span>
-        <h3 id={`${id}-title`}>{`${record.total} agents, ${columns.length} stages, ${formatDuration(record.seconds, 'en')} end to end`}</h3>
+        <h3 id={`${id}-title`}>{`${record.nodes.filter(value => value.kind !== 'assemble').length} agents, ${columns.length} stages, ${formatDuration(record.seconds, 'en')} end to end`}</h3>
         <p className="production-made-receipt"><span className="production-label is-real">Real run</span>
           <span>{record.model}</span><span>{record.capturedOn}</span><span>{`${nodesDone}/${nodeCount} nodes done`}</span></p></div>
       {reuse}
@@ -171,6 +182,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
         <article className="production-made-node" id={`${id}-node`}>
           <header><h4>{node.title}</h4>{role && <span>{role}</span>}<StatusChip status={node.status} /></header>
           {spec && <p className="production-made-task">{spec.task.split('\n')[0]}</p>}
+          <NodeWork node={node} />
           {spec && <p className="production-made-handoff"><ArrowDown size={13} aria-hidden="true" />{spec.output}</p>}
           {inputs.length > 0 && <div className="production-made-links"><span>RECEIVED</span>{inputs.map(edge => <button type="button" key={edge.from + edge.to} onClick={() => setSelected(edge.from)}>{title(edge.from)} · {edge.label}</button>)}</div>}
           {outputs.length > 0 && <div className="production-made-links"><span>HANDED TO</span>{outputs.map(edge => <button type="button" key={edge.from + edge.to} onClick={() => setSelected(edge.to)}>{title(edge.to)}</button>)}</div>}
@@ -196,7 +208,7 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
       <details><summary>Run receipt</summary><dl>
         <dt>Environment</dt><dd>{record.edition}</dd>
         <dt>Runtime and model</dt><dd>{record.runtime} · {record.model}</dd>
-        <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode} model call per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd>
+        <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode} model call${record.limits.modelCallsPerNode === 1 ? '' : 's'} per node${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context, up to ${record.limits.concurrency} nodes at a time`}</dd>
         <dt>Release</dt><dd>API {record.source.api} · runtime {record.source.worker}</dd>
         {record.artifactSHA256 && <><dt>Result checksum</dt><dd><code>SHA-256 {record.artifactSHA256}</code></dd></>}
       </dl></details>

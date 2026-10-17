@@ -42,8 +42,8 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(17);
-  expect(RECORDED).toHaveLength(12);
+  expect(CASES).toHaveLength(18);
+  expect(RECORDED).toHaveLength(13);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
@@ -51,13 +51,18 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
     copy.nodes.forEach((node, index) => {
       const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id)!;
       const session = node as SessionNode;
-      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text: recorded.output,
+      // A flagship's assembly makes its page file again on the copy's first run, with no model.
+      if (node.kind === 'assemble') { expect(session.lastOutput, `${id}/${recorded.id}`).toBeUndefined(); return; }
+      // A node with a report beside its result (a flagship's tester) carries both, as one object.
+      const text = recorded.report === undefined ? recorded.output : JSON.stringify({ result: recorded.output, report: recorded.report });
+      expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text,
         at: Date.parse(`${record.capturedOn}T00:00:00Z`), source: 'case', model: record.model });
       expect(session.deliverablesOpen).toBe(true);
       const parsed = parseContractOutput(session.contract!, session.lastOutput!.text);
       expect(parsed.errors).toEqual([]);
       if (recorded.outputType === 'markdown') expect(parsed.values.result).toBe(recorded.output);
       else expect(parsed.values.result).toMatch(/^<!doctype html>/i);
+      if (recorded.report !== undefined) expect(parsed.values.report).toBe(recorded.report);
     });
   }
 });
@@ -65,8 +70,11 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
 it('shows every agent what it received: each wired input resolves to its upstream recording, marked as one', () => {
   for (const id of RECORDED) {
     const copy = copyOf(id), byId = new Map(copy.nodes.map(node => [node.id, node as SessionNode]));
+    // What an assembly makes again on the copy's first run reaches the node it feeds then.
+    const remade = new Set(copy.nodes.filter(node => node.kind === 'assemble').map(node => node.id));
     for (const node of copy.nodes as SessionNode[]) {
       const incoming = copy.edges.filter(edge => edge.toNode === node.id);
+      if (incoming.some(edge => remade.has(edge.fromNode))) continue;
       const context = prepareNodeConversation(node, copy.nodes, copy.edges);
       expect(context.error, `${id}/${node.title}`).toBeUndefined();
       for (const edge of incoming) {

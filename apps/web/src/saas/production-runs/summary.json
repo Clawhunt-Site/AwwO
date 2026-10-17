@@ -171,5 +171,14 @@
     "capturedOn": "2026-10-14",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
+  },
+  "umber-photo": {
+    "completed": 13,
+    "total": 13,
+    "seconds": 7623,
+    "delivered": true,
+    "capturedOn": "2026-10-17",
+    "model": "Claude Opus 4.8",
+    "runtime": "sandbox"
   }
 }

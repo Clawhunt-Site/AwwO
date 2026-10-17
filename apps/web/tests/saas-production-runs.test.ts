@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { PRODUCTION_RUN_SUMMARY, formatDuration, loadProductionMedia, type ProductionMediaFile, type ProductionRunRecord } from '../src/saas/productionRuns';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
@@ -107,10 +107,15 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
     }
     for (const node of record.nodes) expect(`${node.title}\n${node.output ?? ''}\n${node.detail ?? ''}`, `${record.caseId}/${node.id}`).not.toMatch(/\p{Script=Han}/u);
     for (const node of record.nodes) {
-      if (node.status === 'done') {
+      if (node.kind === 'assemble') {
+        // An assemble node makes a file with no model: it has no text output, and its file is recorded when it ran.
+        expect(node.output, `${record.caseId}/${node.id}`).toBeUndefined();
+        if (node.status === 'done') expect(node.file?.bytes, `${record.caseId}/${node.id}`).toBeGreaterThan(0);
+      } else if (node.status === 'done') {
         expect(node.output?.trim(), `${record.caseId}/${node.id}`).toBeTruthy();
         if (node.outputType === 'html') expect(isCompleteHtmlDocument(node.output!), `${record.caseId}/${node.id}`).toBe(true);
       } else expect(node.output, `${record.caseId}/${node.id}`).toBeUndefined();
+      expect(`${node.report ?? ''}`, `${record.caseId}/${node.id}`).not.toMatch(/\p{Script=Han}/u);
     }
     const ids = new Set(record.nodes.map(node => node.id));
     for (const edge of record.edges) expect(ids.has(edge.from) && ids.has(edge.to), `${record.caseId}: ${edge.from}->${edge.to}`).toBe(true);
@@ -129,14 +134,24 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
     // Every task, persona, brief, contract and wire the run used is the copyable canvas today, word for word.
     expect(createHash('sha256').update(canonicalCanvasText(createOfficialDocument(workflow))).digest('hex'), record.caseId).toBe(record.canvasSHA256);
     expect(record.artifactNodeId === undefined || record.artifactNodeId === workflow.nodes.find(node => node.outputType === 'html')!.id).toBe(true);
+    expect(record.source?.api).toMatch(/^[0-9a-f]{8,40}$/);
+    expect(record.source?.worker).toMatch(/^[0-9a-f]{8,40}$/);
+    expect(record.limits!.concurrency, record.caseId).toBeLessThanOrEqual(workflow.nodes.length);
+    if ((PUBLISHED_FLAGSHIPS as readonly string[]).includes(record.caseId)) {
+      // A flagship's agents work in sandbox computers, dozens of model calls each: every agent node ran there, and its
+      // nine builders side by side.
+      expect(record.runtime, record.caseId).toBe('sandbox');
+      expect(record.nodes.filter(node => node.kind !== 'assemble').every(node => node.sandbox), record.caseId).toBe(true);
+      expect(record.nodes.filter(node => node.kind === 'assemble').map(node => node.id), record.caseId).toEqual(workflow.nodes.filter(node => node.assemble).map(node => node.id));
+      expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 32000, modelCallsPerNode: 64 });
+      expect(record.limits!.concurrency, record.caseId).toBe(9);
+      continue;
+    }
     // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.
     expect(record.model, record.caseId).toBe('Claude Opus 5.5');
     expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 32000, modelCallsPerNode: 1, thinking: true });
     // The most agents that ran at once: the larger cases run six modules side by side.
     expect([1, 2, 3, 4, 5, 6], record.caseId).toContain(record.limits?.concurrency);
-    expect(record.limits!.concurrency, record.caseId).toBeLessThanOrEqual(workflow.nodes.length);
-    expect(record.source?.api).toMatch(/^[0-9a-f]{8,40}$/);
-    expect(record.source?.worker).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.runtime).toBe('openai-agents');
   }
 });

@@ -3,19 +3,26 @@ import { parseContractOutput } from '../canvas/nodeContracts';
 import { validateNodeOutput } from '../canvas/runGraph';
 import { createOfficialCopyDocument, type OfficialCopyModel } from './examples/OfficialCopySetup';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
-import type { ProductionRunRecord } from './productionRuns';
+import type { ProductionRunNode, ProductionRunRecord } from './productionRuns';
 
 /** A single text field is its own source; text that happens to be JSON naming the field is wrapped,
- * so what a downstream node reads is exactly what the case delivered. */
-function recordedText(node: SessionNode | AssembleNode, output: string): string | null {
-  const field = node.contract?.outputs.length === 1 ? node.contract.outputs[0] : undefined;
-  if (!node.contract || !field) return null;
+ * so what a downstream node reads is exactly what the case delivered. A node with two fields (a flagship's
+ * tester: its page and its report) delivers both as one object, the record's output as `result` and its report
+ * as `report`. */
+function recordedText(node: SessionNode | AssembleNode, recorded: ProductionRunNode): string | null {
+  const outputs = node.contract?.outputs ?? [];
+  const output = recorded.output;
+  if (!node.contract || !outputs.length || !output?.trim()) return null;
+  const values = new Map<string, string>(outputs.length === 1 ? [[outputs[0].id, output]]
+    : [['result', output], ...(recorded.report === undefined ? [] : [['report', recorded.report] as [string, string]])]);
+  if (values.size !== outputs.length || outputs.some(field => !values.has(field.id))) return null;
   const keeps = (text: string) => {
     if (validateNodeOutput(node, text).length) return false;
-    const value = parseContractOutput(node.contract!, text).values[field.id];
-    return field.type === 'html' ? Boolean(value?.trim()) : value === output;
+    const parsed = parseContractOutput(node.contract!, text).values;
+    return outputs.every(field => field.type === 'html' ? Boolean(parsed[field.id]?.trim()) : parsed[field.id] === values.get(field.id));
   };
-  return [output, JSON.stringify({ [field.id]: output })].find(keeps) ?? null;
+  const object = JSON.stringify(Object.fromEntries(values));
+  return (outputs.length === 1 ? [output, object] : [object]).find(keeps) ?? null;
 }
 
 /**
@@ -47,7 +54,7 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     // An assemble node that also delivers a file is made afresh on the copy's first run: the file it delivered is
     // stored in the case's workspace, and the copy's run makes it again in a moment, without a model.
     if (node.kind === 'assemble' && node.contract.outputs.some(field => field.type === 'file')) return node;
-    const text = recorded.output?.trim() ? recordedText(node, recorded.output) : null;
+    const text = recorded.output?.trim() ? recordedText(node, recorded) : null;
     // The copy dialog counts every delivered node as carried, so a delivery the canvas cannot hold stops the copy.
     if (text === null) throw new Error(`The run record of ${record.caseId} has a delivery of ${recorded.id} its canvas cannot hold.`);
     // An assemble node ran no model: its recording carries none.

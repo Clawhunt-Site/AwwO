@@ -2,6 +2,7 @@ import type { AgentTemplateId } from '../canvas/agentTemplates';
 import type { OfficialWorkflow, OfficialWorkflowNode } from './examples/officialWorkflows';
 import type { OfficialMediaNode } from './examples/officialMedia';
 import { THREE_MODULES_IMPORT_MAP } from '../canvas/previewImportMap';
+import { FLAGSHIP_WORKFLOWS } from './flagshipWorkflows';
 
 /** The canvases behind the homepage production cases (productionCatalog.ts). Each one is a real
  * workflow: `createOfficialDocument` compiles it into the canvas a member can copy, and the run
@@ -769,6 +770,10 @@ const KNOWLEDGE: OfficialWorkflow = {
     e('product', 'review', 'Acceptance criteria'), e('data', 'review', 'Governance rules'), e('frontend', 'review', 'Page source')],
 };
 
+/** The flagship canvases (flagshipWorkflows.ts) published as cases: each has a run record in production-runs/. */
+export const PUBLISHED_FLAGSHIPS = ['umber-photo'] as const;
+
 /** Keyed by production case id. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(
-  [CAR, CIRCUIT, KEEP, MARS, STUDIO, KNOWLEDGE, NEON, SHANHAI, AURORA, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM].map(item => [item.id, item]));
+  [CAR, CIRCUIT, KEEP, MARS, STUDIO, KNOWLEDGE, NEON, SHANHAI, AURORA, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM,
+    ...PUBLISHED_FLAGSHIPS.map(id => FLAGSHIP_WORKFLOWS[id])].map(item => [item.id, item]));

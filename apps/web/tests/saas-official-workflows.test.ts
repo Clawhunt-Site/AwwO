@@ -5,7 +5,7 @@ import { mediaKindOf, parseMediaCatalogue, replacementMediaModel } from '../src/
 import { findCycle, preflightGraph, preflightGraphIssue, runGraph } from '../src/canvas/runGraph';
 import { normalizeContract } from '../src/canvas/nodeContracts';
 import { createOfficialDocument, type OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 
 // createOfficialDocument mints the canvas a member copies from every production case compiled from tasks
 // (productionWorkflows.ts), the knowledge base's included. Every case is English, so there is one canvas whatever
@@ -15,7 +15,10 @@ const gt = PRODUCTION_WORKFLOWS['aurora-gt'];
 const WITH_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-model', media: [...gt.media!, {
   id: 'model', kind: 'model3d', title: '3D model', prompt: 'A 3D model of the car',
   model: 'tripo.p1', params: { texture: true, pbr: true, textureQuality: 'detailed', faceLimit: 12000 }, column: 0, row: 4, feeds: ['page'] }] };
-const WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...Object.values(PRODUCTION_WORKFLOWS), WITH_MODEL];
+// A flagship canvas (an assembly node and agents that work in sandbox computers, dozens of model calls each) has its
+// own tests, saas-flagship-workflows.test.ts.
+const CASES = Object.values(PRODUCTION_WORKFLOWS).filter(item => !(PUBLISHED_FLAGSHIPS as readonly string[]).includes(item.id));
+const WORKFLOWS: ReadonlyArray<OfficialWorkflow> = [...CASES, WITH_MODEL];
 
 describe.each(WORKFLOWS)('$id compiled canvas', item => {
   // A case's image, video and 3D nodes feed the pages that show them (officialMedia.ts feeds) by a soft wire.

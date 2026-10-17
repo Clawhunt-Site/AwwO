@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { FLAGSHIP_WORKFLOWS } from '../src/saas/flagshipWorkflows';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { assembleTemplate, templateIssues } from '../src/canvas/assembleNode';
@@ -9,8 +9,11 @@ import type { AssembleNode, SessionNode } from '../src/canvas/canvasDoc';
 
 const FLAGSHIPS = Object.values(FLAGSHIP_WORKFLOWS);
 
-it('keeps flagship canvases apart from the published cases until a run of them is published', () => {
-  for (const item of FLAGSHIPS) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBeUndefined();
+it('publishes a flagship canvas as a case exactly when a run of it is published', () => {
+  for (const item of FLAGSHIPS) {
+    const published = (PUBLISHED_FLAGSHIPS as readonly string[]).includes(item.id);
+    expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBe(published ? item : undefined);
+  }
 });
 
 it('compiles each flagship into one DAG that runs left to right: spec, builders, assembly, a sandbox test, review', () => {
@@ -64,6 +67,31 @@ it('assembles the page from every builder with no model, and hands it to the san
     // The review reads the test report, never the whole page.
     const review = document.nodes.find(node => node.kind === 'session' && node.title === 'Review')!;
     expect(document.edges.filter(edge => edge.toNode === review.id && edge.fromNode === test!.id).map(edge => edge.fromPort)).toEqual(['out:report']);
+  }
+});
+
+it('mints a fresh canvas for every copy: new IDs, no binding, model, history or result, only the pinned sandbox', () => {
+  for (const item of FLAGSHIPS) {
+    const before = JSON.stringify(item);
+    const first = createOfficialDocument(item);
+    const initial = first.nodes.find((node): node is SessionNode => node.kind === 'session')!;
+    initial.binding = { companyId: 'private-tenant', agentId: 'private-agent', agentName: 'Private agent' };
+    initial.model = 'private-model'; initial.issueId = 'private-conversation'; initial.preview = 'Private transcript';
+    initial.lastOutput = { text: 'Private historical output', source: 'run', at: 1 };
+    initial.contract!.outputs[0].value = 'Private published value';
+    first.edges[0].toPort = 'in:mutated';
+    const second = createOfficialDocument(item);
+    const firstIDs = new Set(first.nodes.map(node => node.id));
+    expect(second.nodes.every(node => !firstIDs.has(node.id)), item.id).toBe(true);
+    for (const node of second.nodes) {
+      if (node.kind !== 'session') continue;
+      expect(node.binding).toBeNull(); expect(node.model).toBe(''); expect(node.effort).toBe('');
+      expect(node.issueId).toBeNull(); expect(node.preview).toBe(''); expect(node.lastOutput).toBeUndefined();
+      expect(node.runtime, `${item.id}/${node.title}`).toBe(SANDBOX_RUNTIME);
+      expect(node.contract!.outputs.every(field => field.value === '')).toBe(true);
+    }
+    expect(JSON.stringify(second)).not.toContain('Private');
+    expect(JSON.stringify(item)).toBe(before);
   }
 });
 

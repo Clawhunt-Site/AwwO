@@ -40,7 +40,8 @@ if (!workflow) throw new Error(`Unknown case ${raw.caseId}`);
 // createOfficialDocument mints the agents first, then the case's image, video and 3D model nodes (officialMedia.ts).
 const mediaSpecs = workflow.media ?? [];
 if (mediaSpecs.some(spec => !['image', 'video', 'model3d'].includes(spec.kind))) throw new Error(`${raw.caseId}: only image, video and 3D model media nodes are published`);
-const frozen = raw.graph.document.nodes.filter(node => node.kind === 'session');
+// A flagship canvas also has an assemble node, which makes its page from the modules with no model.
+const frozen = raw.graph.document.nodes.filter(node => node.kind === 'session' || node.kind === 'assemble');
 if (frozen.length !== workflow.nodes.length + mediaSpecs.length) throw new Error('The frozen canvas does not have the workflow’s nodes');
 // A node's canvas id (minted afresh for every canvas) names a media node's files in the page it feeds, and an agent may
 // name any node by it (a review listing the files it checked); the public record names each node by its own id instead
@@ -52,14 +53,36 @@ const plain = text => [...CANVAS_IDS].reduce((value, [from, to]) => value.split(
 const ranText = canonicalCanvasText(raw.graph.document);
 if (ranText !== canonicalCanvasText(createOfficialDocument(workflow)))
   throw new Error(`${raw.caseId}: this run used a different canvas (tasks, contracts or wires) from productionWorkflows.ts today; run the case again`);
+// The files a run stored sit beside its record, in <case stem>-files (a retried run's record, <stem>-<stamp>-retry<n>.json,
+// shares the folder of the run it retried).
+const STORED = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z(?:-retry\d+)?\.json$/, '')}-files`);
+// The runtime the agents ran on: a canvas's nodes may each name one (a flagship's work in sandbox computers), and the
+// ledger names the one each model call ran on; the record names it only when they all agree.
+const agentNodes = raw.graph.document.nodes.filter(node => node.kind === 'session');
+const ranOn = new Set(agentNodes.map(node => node.runtime || raw.runtime));
+const ledgerRuntimes = new Set(Object.values(raw.invocations || {}).flatMap(value => (value?.items || []).map(item => item.runtime)).filter(Boolean));
+if (ranOn.size !== 1 || [...ledgerRuntimes].some(runtime => !ranOn.has(runtime)))
+  throw new Error(`${raw.caseId}: the agents ran on ${[...ranOn].join(', ')} and the ledger names ${[...ledgerRuntimes].join(', ')}; one runtime is published`);
+const runtime = [...ranOn][0];
 const states = new Map((raw.graph.nodes || []).map(node => [node.nodeId, node]));
 const STATUS = new Set(['done', 'failed', 'blocked', 'cancelled', 'cached']);
 const seconds = (from, to) => from && to ? Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000)) : undefined;
+// The ledger reports token counts as numbers or as decimal strings.
+const count = value => (typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value);
 const usage = item => {
   const value = item?.usage;
   if (!value || item.usageStatus === 'invalid') return undefined;
-  const tokens = { ...(Number.isFinite(value.inputTokens) ? { input: value.inputTokens } : {}), ...(Number.isFinite(value.outputTokens) ? { output: value.outputTokens } : {}) };
+  const input = count(value.inputTokens), output = count(value.outputTokens);
+  const tokens = { ...(Number.isFinite(input) ? { input } : {}), ...(Number.isFinite(output) ? { output } : {}) };
   return Object.keys(tokens).length ? tokens : undefined;
+};
+// A node's tokens over all its model calls: one call for most nodes, dozens for one that worked in a sandbox computer.
+const totalUsage = items => {
+  const counted = items.map(usage).filter(Boolean);
+  if (!counted.length) return undefined;
+  const sum = key => counted.every(value => value[key] === undefined) ? undefined : counted.reduce((total, value) => total + (value[key] ?? 0), 0);
+  const input = sum('input'), output = sum('output');
+  return { ...(input !== undefined ? { input } : {}), ...(output !== undefined ? { output } : {}) };
 };
 const nodes = workflow.nodes.map((spec, index) => {
   const document = frozen[index];
@@ -67,19 +90,33 @@ const nodes = workflow.nodes.map((spec, index) => {
   const state = states.get(document.id);
   if (!state || !STATUS.has(state.state)) throw new Error(`${spec.id} ended as ${state?.state}`);
   const invocation = raw.invocations[spec.id] ?? raw.invocations[document.id];
-  const item = Array.isArray(invocation?.items) ? invocation.items.at(-1) : undefined;
+  const items = Array.isArray(invocation?.items) ? invocation.items : [];
+  const first = items[0], item = items.at(-1);
   const run = raw.runs[document.id];
   const contract = normalizeContract(document.contract);
-  let output;
-  if (state.state === 'done' && state.output) {
+  let output, report, file;
+  if (document.kind === 'assemble') {
+    // Its one output is the page as a file, which the run stored as an artifact: the one its output names (a canvas run
+    // again keeps the pages of earlier runs too).
+    if (state.state === 'done') {
+      const named = /^awwo-file:([A-Za-z0-9_-]+)$/.exec(JSON.parse(state.output || '{}').file || '')?.[1];
+      const stored = (raw.files || []).find(value => value.nodeId === document.id && value.id === named);
+      if (!stored) throw new Error(`${spec.id}: the run record has no stored file ${named} for the assembled page`);
+      file = { name: stored.name, bytes: stored.size ?? fs.statSync(path.join(STORED, stored.file)).size };
+    }
+  } else if (state.state === 'done' && state.output) {
     const parsed = parseContractOutput(contract, state.output);
     if (parsed.errors.length) throw new Error(`${spec.id}: ${parsed.errors.join('; ')}`);
     output = plain(redact(parsed.values.result));
+    if (typeof parsed.values.report === 'string') report = plain(redact(parsed.values.report));
   }
+  const took = seconds(first?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt);
   return { id: spec.id, title: spec.title, column: spec.column, row: spec.row, status: state.state,
-    ...(seconds(item?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt) !== undefined ? { seconds: seconds(item?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt) } : {}),
-    outputType: spec.outputType ?? 'markdown', ...(output !== undefined ? { output } : {}),
-    ...(state.detail ? { detail: plain(redact(String(state.detail))) } : {}), ...(usage(item) ? { tokens: usage(item) } : {}) };
+    ...(document.kind === 'assemble' ? { kind: 'assemble' } : {}), ...(document.runtime === 'sandbox' ? { sandbox: true } : {}),
+    ...(took !== undefined ? { seconds: took } : {}),
+    outputType: spec.outputType ?? 'markdown', ...(output !== undefined ? { output } : {}), ...(report !== undefined ? { report } : {}),
+    ...(file ? { file } : {}), ...(items.length > 1 ? { calls: items.length } : {}),
+    ...(state.detail ? { detail: plain(redact(String(state.detail))) } : {}), ...(totalUsage(items) ? { tokens: totalUsage(items) } : {}) };
 });
 const artifact = workflow.nodes.find(node => node.outputType === 'html');
 const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
@@ -101,11 +138,11 @@ const media = mediaSpecs.map((spec, index) => {
   return { id: spec.id, title: spec.title, kind: spec.kind, status: state.state, ...(took !== undefined ? { seconds: took } : {}), files,
     ...(state.detail ? { detail: redact(String(state.detail)) } : {}) };
 });
-const catalog = raw.catalog?.runtimes?.find(runtime => runtime.id === raw.runtime);
+const catalog = raw.catalog?.runtimes?.find(entry => entry.id === runtime);
 const record = {
   caseId: raw.caseId,
   edition: notes.edition,
-  runtime: raw.runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
+  runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
   seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
   limits: { contextWindow: notes.limits.contextWindow, maxOutputTokens: notes.limits.maxOutputTokens, modelCallsPerNode: notes.limits.modelCallsPerNode,
     concurrency: notes.limits.concurrency, thinking: notes.thinking },
@@ -131,7 +168,7 @@ console.log(`${raw.caseId}: ${record.completed}/${record.total} done, ${record.s
  * run's files stay in the case's folder.
  */
 function writeStaticMedia(manifestFile) {
-  const stored = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z\.json$/, '')}-files`);
+  const stored = STORED;
   const caseDir = path.join(ROOT, 'apps/web/showcase/media', raw.caseId);
   const scratch = fs.mkdtempSync(path.join(path.dirname(path.resolve(rawFile)), '.media-'));
   const manifest = {};

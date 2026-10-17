@@ -40,6 +40,15 @@ export const MEDIA_ROLE = 'Media';
 const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
+  // The flagship cases (flagshipWorkflows.ts): large systems written in a clean room by agents that work in sandbox
+  // computers, assembled with no model and tested in a real browser.
+  {
+    id: 'umber-photo', kind: 'product', recording: true, footage: 'umber-real',
+    title: 'Umber',
+    brief: 'An open-source photo editor in one web page: layers with masks and 27 blend modes, adjustment layers, selection, painting and type tools, live filters and a history, built in a clean room and testing itself.',
+    stages: [['Spec'], ['Kernel', 'Interface', 'Compositing', 'Viewport', 'Selection', 'Painting', 'Filters', 'Panels', 'Files'], ['Assembly'], ['Test'], [REVIEW]],
+    deliverable: 'A layered photo editor in the browser',
+  },
   {
     id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
     title: 'Neon City',

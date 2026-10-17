@@ -18,7 +18,18 @@ export interface ProductionRunNode {
   readonly output?: string;
   /** Why the node did not complete, exactly as recorded. */
   readonly detail?: string;
+  /** Over all of the node's model calls. */
   readonly tokens?: { readonly input?: number; readonly output?: number };
+  /** An assemble node: it made its page from the modules by its template, with no model. */
+  readonly kind?: 'assemble';
+  /** The file an assemble node made, as the run stored it. */
+  readonly file?: { readonly name: string; readonly bytes: number };
+  /** The node worked in its own sandbox computer: real files, commands and checks. */
+  readonly sandbox?: true;
+  /** How many model calls the node made, when more than one. */
+  readonly calls?: number;
+  /** A second, Markdown output beside the result: what the node reports for those downstream. */
+  readonly report?: string;
 }
 
 /** One image, video or 3D model node of a recorded case run, as the run stored it. */
@@ -53,7 +64,8 @@ export interface ProductionRunRecord {
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
-  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string }>;
+  /** The canvas's wires, as the workflow declares them: `port` when a wire carries a file or a report. */
+  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string; readonly port?: 'file' | 'report' }>;
   /** The canvas's image, video and 3D model nodes (not agents, so not in `nodes`): what each generated in this run.
    * Their files are published as static files (production-runs/<case>.media.json lists them), keyed by the
    * `<node id>/<file>` paths the page names. */
