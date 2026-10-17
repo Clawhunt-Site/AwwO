@@ -590,6 +590,60 @@ func storeWorkspaceSnapshot(ctx context.Context, tx pgx.Tx, tid, rid, sid string
 	return err
 }
 
+// workspaceQueueWait bounds how long a sandbox run waits for a free slot on its worker, which answers 429 (or 503)
+// while every slot runs a task; workspaceQueuePoll is how often it asks again. On 2026-10-17 a case canvas's twenty
+// builders found eight slots and twelve were refused at once. Variables so tests can shorten them.
+var (
+	workspaceQueueWait = 10 * time.Minute
+	workspaceQueuePoll = 5 * time.Second
+)
+
+// admitWorkspaceRun hands a sandbox run to its worker and returns the event stream, or the code the run fails with. A
+// worker whose slots are all taken is asked again every workspaceQueuePoll until one frees or the wait runs out
+// (workspaceQueueWait, and never more than half of what is left of the run's deadline), as a managed-execution task
+// waits (startComputerTask); the run records workspace_queued, then workspace_started once it runs. A wait that runs
+// out fails as workspace_busy, which a canvas node retries, since nothing ran; any other refusal ends the run at once.
+func (a *App) admitWorkspaceRun(ctx context.Context, tid, rid, runtime string, body []byte) (*http.Response, string) {
+	var queuedAt time.Time
+	limit := workspaceQueueWait
+	if deadline, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(deadline)/2)
+	}
+	for {
+		resp, err := a.admitRuntime(ctx, runtime, body)
+		if err != nil {
+			return nil, "runtime_unavailable"
+		}
+		if resp.StatusCode == 200 && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+			if !queuedAt.IsZero() {
+				_ = a.computerEvent(ctx, tid, rid, map[string]any{"type": "workspace_started", "waitedMs": time.Since(queuedAt).Milliseconds()})
+			}
+			return resp, ""
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable {
+			return nil, "workspace_runtime_rejected"
+		}
+		if queuedAt.IsZero() {
+			queuedAt = time.Now()
+			if a.log != nil {
+				a.log.Info("the sandbox worker is busy; the run waits for a slot", "run", rid, "status", resp.StatusCode)
+			}
+			_ = a.computerEvent(ctx, tid, rid, map[string]string{"type": "workspace_queued"})
+		}
+		if time.Since(queuedAt) >= limit {
+			return nil, "workspace_busy"
+		}
+		select {
+		case <-ctx.Done():
+			// The run's own outcome (stopped, timed out) replaces this code (failRun).
+			return nil, "workspace_busy"
+		case <-time.After(workspaceQueuePoll):
+		}
+	}
+}
+
 func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instructions, kind string, snap executionSnapshot) {
 	var closeWorkspace func()
 	var lease *workspaceLease
@@ -681,16 +735,12 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 			cancelWorker()
 		}
 	}()
-	resp, err := a.admitRuntime(ctx, snap.Runtime, body)
-	if err != nil {
-		failRun("runtime_unavailable")
+	resp, code := a.admitWorkspaceRun(ctx, tid, rid, snap.Runtime, body)
+	if code != "" {
+		failRun(code)
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		failRun("workspace_runtime_rejected")
-		return
-	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), maxWorkspaceWireBytes+4096)
 	var output strings.Builder

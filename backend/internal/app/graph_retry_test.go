@@ -20,7 +20,7 @@ import (
 func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	want := []string{"media_failed", "media_motion_failed", "media_provider_busy", "media_provider_unavailable", "media_result_unavailable",
 		"provider_rate_limited", "provider_unavailable", "run_timeout", "runtime_failed", "runtime_rejected", "runtime_session_busy",
-		"runtime_stream_ended", "runtime_unavailable", "workspace_admission_failed", "workspace_unavailable"}
+		"runtime_stream_ended", "runtime_unavailable", "workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
 	if got := slices.Sorted(maps.Keys(graphRetryableCodes)); !slices.Equal(got, want) {
 		t.Fatalf("retryable codes %v", got)
 	}
@@ -32,7 +32,8 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	}
 	for _, code := range []string{"output_limit", "context_limit", "output_contract_invalid", "model_refused", "provider_auth_failed",
 		"media_content_rejected", "media_params_invalid", "media_provider_balance", "workspace_step_limit", "accounting_commit_failed",
-		"execution_interrupted", "interrupted", "cancelled", "media_timeout", "quota_exceeded", "plan_required", "invalid_runtime_event", ""} {
+		"execution_interrupted", "interrupted", "cancelled", "media_timeout", "quota_exceeded", "plan_required", "invalid_runtime_event",
+		"workspace_runtime_rejected", ""} {
 		if graphRetryable(code, free, free) {
 			t.Fatal("retried a code the design keeps out", code)
 		}
@@ -45,7 +46,7 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	// No retry pays twice for work already done: each code asks exactly the question that rules that out, and only it.
 	never := func() bool { t.Helper(); t.Fatal("asked a question this code does not depend on"); return false }
 	no := func() bool { return false }
-	unsent := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable", "workspace_admission_failed", "workspace_unavailable"}
+	unsent := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable", "workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
 	silent := []string{"provider_rate_limited", "provider_unavailable", "run_timeout", "runtime_failed", "runtime_stream_ended"}
 	for _, code := range unsent {
 		if !graphRetryable(code, never, never) {

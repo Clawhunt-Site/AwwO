@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The sandbox computer is an OpenAI Agents worker in project-execution mode, chosen node by node: its models become the
@@ -175,6 +176,99 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 	var priced int
 	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND status='completed'", tid).Scan(&priced); e != nil || priced != 2 {
 		t.Fatalf("model calls accounted %d %v", priced, e)
+	}
+}
+
+// A sandbox run whose worker has every slot taken waits in line for one (2026-10-17: twenty builders found eight slots
+// and twelve failed at once): the worker's 429 or 503 is asked again until a slot frees, a wait that runs out fails as
+// workspace_busy (which a canvas node retries, since nothing ran), and any other refusal still ends the run at once.
+func TestPostgresSandboxRunWaitsInLineForASlot(t *testing.T) {
+	waitWas, pollWas := workspaceQueueWait, workspaceQueuePoll
+	workspaceQueueWait, workspaceQueuePoll = 5*time.Second, 20*time.Millisecond
+	defer func() { workspaceQueueWait, workspaceQueuePoll = waitWas, pollWas }()
+	snapshot := workspaceFixtureSnapshot(t)
+	var admissions, busyFor atomic.Int32
+	var refuse atomic.Int32 // a status the worker answers every admission with; 0 answers busyFor 429s, then runs
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			workspaceHealthWithLimit(w, 4)
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		var request struct {
+			Workspace workspaceRequest `json:"workspace"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		n := admissions.Add(1)
+		if code := refuse.Load(); code != 0 {
+			writeJSON(w, int(code), map[string]any{"error": map[string]string{"code": "WORKER_BUSY"}})
+			return
+		}
+		if n <= busyFor.Load() {
+			writeJSON(w, 429, map[string]any{"error": map[string]string{"code": "WORKER_BUSY"}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		callbackRequest(t, request.Workspace, map[string]any{"operation": "admit", "index": 1}, 200)
+		callbackRequest(t, request.Workspace, map[string]any{"operation": "settle", "index": 1, "status": "completed", "observability": json.RawMessage(observationFixture(3, 4))}, 200)
+		raw, _ := json.Marshal(map[string]any{"type": "completed", "text": "Tests pass.", "workspaceSnapshot": snapshot})
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}))
+	defer worker.Close()
+	h := newHarness(t, worker.URL)
+	h.a.cfg.SandboxAgentsURL, h.a.cfg.SandboxAgentsToken = worker.URL, strings.Repeat("s", 32)
+	h.a.cfg.WorkspaceCallbackURL = h.server.URL + "/api/internal/workspace-calls"
+	c, tid, _ := h.register(t, "sandbox-queue@example.test")
+	ctx := context.Background()
+	start := func(operation string) string {
+		cid, aid, sid := h.fixture(t, c, tid)
+		if _, e := h.db.Exec(ctx, `UPDATE canvases SET document=jsonb_set(document,'{nodes,0,runtime}',to_jsonb($2::text)) WHERE id=$1`, cid, runtimeSandbox); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := h.db.Exec(ctx, "UPDATE agents SET runtime=$2 WHERE id=$1", aid, runtimeSandbox); e != nil {
+			t.Fatal(e)
+		}
+		return h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": sid, "prompt": "go", "operationId": operation}, 202)["id"].(string)
+	}
+	events := func(id string) string {
+		var types string
+		if e := h.db.QueryRow(ctx, "SELECT COALESCE(string_agg(data->>'type',',' ORDER BY id),'') FROM run_events WHERE tenant_id=$1 AND run_id=$2 AND data->>'type' LIKE 'workspace_%'", tid, id).Scan(&types); e != nil {
+			t.Fatal(e)
+		}
+		return types
+	}
+
+	// Two busy answers, then a slot: the run waits and completes.
+	busyFor.Store(2)
+	id := start("queued-then-runs")
+	if status, code := awaitRunRow(t, h, tid, id, "completed", "failed"); status != "completed" || admissions.Load() != 3 {
+		t.Fatalf("a run that waited for a slot: %s %s after %d admissions", status, code, admissions.Load())
+	}
+	if got := events(id); got != "workspace_queued,workspace_started" {
+		t.Fatal("events", got)
+	}
+
+	// Busy for longer than the wait: workspace_busy, which a canvas node retries.
+	workspaceQueueWait = 300 * time.Millisecond
+	admissions.Store(0)
+	refuse.Store(429)
+	if _, code := awaitRunRow(t, h, tid, start("busy-all-along"), "failed"); code != "workspace_busy" || admissions.Load() < 3 {
+		t.Fatalf("a wait that ran out: %s after %d admissions", code, admissions.Load())
+	}
+	if graphRetryableCodes["workspace_busy"] != retryUnsent {
+		t.Fatal("workspace_busy is not retried as unsent")
+	}
+
+	// Any other refusal ends the run at once, as before.
+	admissions.Store(0)
+	refuse.Store(400)
+	if _, code := awaitRunRow(t, h, tid, start("refused-at-once"), "failed"); code != "workspace_runtime_rejected" || admissions.Load() != 1 {
+		t.Fatalf("a refusal: %s after %d admissions", code, admissions.Load())
 	}
 }
 

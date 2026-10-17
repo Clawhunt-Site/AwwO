@@ -52,6 +52,7 @@ var graphRetryableCodes = map[string]graphRetryClass{
 	"runtime_unavailable":        retryUnsent,
 	"runtime_session_busy":       retryUnsent,
 	"workspace_unavailable":      retryUnsent,
+	"workspace_busy":             retryUnsent,
 	"workspace_admission_failed": retryUnsent,
 	"runtime_stream_ended":       retryIfSilent,
 	"provider_unavailable":       retryIfSilent,
