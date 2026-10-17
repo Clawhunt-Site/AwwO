@@ -86,8 +86,12 @@ describe('personalized template library', () => {
       expect(within(preview).getByText(template.workflow[0])).toBeTruthy();
       expect(within(preview).getByRole('region', { name: '模板输入' })).toHaveTextContent(template.inputs[0].label);
       expect(within(preview).getByRole('region', { name: '模板输出' })).toHaveTextContent(template.outputs[0].label);
+      expect(screen.getByRole('button', { name: `添加${template.title}` })).toBeEnabled();
       expect(onAddAgent).not.toHaveBeenCalled();
     }
+    // The footer adds the previewed template, the library's last after the loop. Preview one that is neither the last
+    // nor the default, so the click proves the footer follows the selection.
+    fireEvent.click(screen.getByRole('button', { name: '预览交付验收模板' }));
     fireEvent.click(screen.getByRole('button', { name: '添加交付验收' }));
     expect(onAddAgent).toHaveBeenCalledExactlyOnceWith('review');
     expect(screen.queryByRole('dialog')).toBeNull();
