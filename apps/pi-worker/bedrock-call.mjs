@@ -37,8 +37,10 @@ export async function bedrockCall(message, { load = loadBridge } = {}) {
   }
   try {
     return { ok: true, raw: await gatherChatStream(upstream.body) };
-  } catch {
-    return { ok: false, reason: 'stream' };
+  } catch (error) {
+    // What broke the stream, by kind (gatherChatStream's detail): an AWS failure after it began (`stream:error:429:…`),
+    // the bridge's own refusal of what the model sent (`stream:error:api_error`), or a stream that ended or read wrong.
+    return { ok: false, reason: `stream:${typeof error?.detail === 'string' ? label(error.detail) : 'shape'}` };
   }
 }
 

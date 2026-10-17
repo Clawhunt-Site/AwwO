@@ -20,58 +20,69 @@ const MAX_STREAM_BYTES = 16 * 1024 * 1024;
 const object = (v: unknown): v is ObjectValue => !!v && typeof v === 'object' && !Array.isArray(v);
 const identifier = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
 const toolName = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
-const fail = (): never => { throw new Error('Invalid model protocol'); };
+/** What a refusal says of a failure: a label of this module's own, or a provider's error type, never provider text. */
+const LABEL = /^[A-Za-z0-9_.:-]{1,120}$/;
+const label = (value: unknown, fallback = 'unknown'): string => (typeof value === 'string' && LABEL.test(value) ? value : fallback);
+/** A request or an answer that does not hold; `detail` names the check it failed. */
+const fail = (detail = 'shape'): never => { throw Object.assign(new Error('Invalid model protocol'), { detail }); };
+const detailOf = (error: unknown): string => label((error as ObjectValue | undefined)?.detail, 'shape');
+const jsonObject = (text: string, detail: string): ObjectValue => {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return fail(detail); }
+  return object(value) ? value : fail(detail);
+};
 
 function opaqueReasoning(value: unknown): ObjectValue[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 32) return fail();
+  if (!Array.isArray(value) || value.length > 32) return fail('reasoning');
   return value.map(item => {
     if (!object(item) || item.type !== 'reasoning.encrypted' || item.format !== 'openai-responses-v1'
-      || typeof item.id !== 'string' || item.id.length > 256 || typeof item.data !== 'string' || item.data.length > 131072) return fail();
+      || typeof item.id !== 'string' || item.id.length > 256 || typeof item.data !== 'string' || !item.data || item.data.length > 131072) return fail('reasoning');
     return { type: item.type, format: item.format, id: item.id, data: item.data };
   });
 }
 
 export function validateComputerCompletion(value: unknown): Completion {
-  if (!object(value) || !Array.isArray(value.messages) || !value.messages.length || value.messages.length > 256) return fail();
-  if (value.stream !== undefined && typeof value.stream !== 'boolean') return fail();
+  if (!object(value) || !Array.isArray(value.messages) || !value.messages.length || value.messages.length > 256) return fail('messages');
+  if (value.stream !== undefined && typeof value.stream !== 'boolean') return fail('stream');
   const tools = value.tools ?? [];
-  if (!Array.isArray(tools) || tools.length > 64) return fail();
+  if (!Array.isArray(tools) || tools.length > 64) return fail('tools');
   const names = new Set<string>();
   const cleanTools = tools.map(tool => {
     const fn = tool?.function;
     if (tool?.type !== 'function' || !object(fn) || !toolName(fn.name) || names.has(fn.name)
-      || !object(fn.parameters) || fn.parameters.type !== 'object' || (fn.description !== undefined && typeof fn.description !== 'string')) return fail();
+      || !object(fn.parameters) || fn.parameters.type !== 'object' || (fn.description !== undefined && typeof fn.description !== 'string')) return fail('tool');
     names.add(fn.name);
     return { type: 'function', function: { name: fn.name, description: fn.description ?? '', parameters: fn.parameters } };
   });
   const pending = new Set<string>();
   const seen = new Set<string>();
   const messages = value.messages.map((item: unknown): Message => {
-    if (!object(item) || !['system', 'developer', 'user', 'assistant', 'tool'].includes(item.role)) return fail();
-    if (item.content !== null && typeof item.content !== 'string') return fail();
+    if (!object(item) || !['system', 'developer', 'user', 'assistant', 'tool'].includes(item.role)) return fail('role');
+    if (item.content !== null && typeof item.content !== 'string') return fail('content');
     const msg: Message = { role: item.role, content: item.content };
     if (msg.role === 'tool') {
-      if (typeof item.tool_call_id !== 'string' || !pending.delete(item.tool_call_id) || typeof msg.content !== 'string') return fail();
+      if (typeof item.tool_call_id !== 'string' || !pending.delete(item.tool_call_id) || typeof msg.content !== 'string') return fail('tool-result');
       msg.tool_call_id = item.tool_call_id;
-    } else if (pending.size) return fail();
+    } else if (pending.size) return fail('pending');
     if (item.tool_calls !== undefined) {
-      if (msg.role !== 'assistant' || !Array.isArray(item.tool_calls) || item.tool_calls.length > 32) return fail();
+      if (msg.role !== 'assistant' || !Array.isArray(item.tool_calls) || item.tool_calls.length > 32) return fail('tool-calls');
       msg.tool_calls = item.tool_calls.map((call: ObjectValue) => {
-        if (!object(call) || typeof call.id !== 'string' || call.id.length > 256 || !call.id || seen.has(call.id)
-          || call.type !== 'function' || !object(call.function) || !names.has(call.function.name)
-          || typeof call.function.arguments !== 'string' || !object(JSON.parse(call.function.arguments))) return fail();
+        if (!object(call) || typeof call.id !== 'string' || call.id.length > 256 || !call.id || seen.has(call.id)) return fail('tool-id');
+        if (call.type !== 'function' || !object(call.function) || typeof call.function.arguments !== 'string') return fail('tool-call');
+        if (!names.has(call.function.name)) return fail('tool-name');
+        jsonObject(call.function.arguments, 'tool-args');
         pending.add(call.id); seen.add(call.id);
         return { id: call.id, type: 'function', function: { name: call.function.name, arguments: call.function.arguments } };
       });
     }
     if (item.reasoning_details !== undefined) {
-      if (msg.role !== 'assistant') return fail();
+      if (msg.role !== 'assistant') return fail('reasoning');
       msg.reasoning_details = opaqueReasoning(item.reasoning_details);
     }
     return msg;
   });
-  if (pending.size) return fail();
+  if (pending.size) return fail('pending');
   return { messages, tools: cleanTools };
 }
 
@@ -137,6 +148,10 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
+/** The answer of one call as the executor reads it, or a failure whose `detail` names the check the provider's answer
+ *  failed: `finish:<reason>` (it stopped short, e.g. finish:length, finish:content_filter, finish:refusal), `refusal`,
+ *  `choices`, `content`, `tool-calls`, `tools-mismatch` (it said it called tools and did not, or the other way round),
+ *  `empty`, or `tool-id`, `tool-call`, `tool-name` and `tool-args` for a call that does not hold. */
 export function computerCompletionResponse(raw: ObjectValue, protocol: string, tools: ObjectValue[]): ObjectValue {
   const calls: ObjectValue[] = [];
   const details: ObjectValue[] = [];
@@ -144,43 +159,46 @@ export function computerCompletionResponse(raw: ObjectValue, protocol: string, t
   let finish = 'stop';
   let declaredTools: boolean | undefined;
   if (protocol === 'responses') {
-    if (raw.status !== 'completed' || !Array.isArray(raw.output)) return fail();
+    if (raw.status !== 'completed') return fail(`finish:${label(raw.status, 'none')}`);
+    if (!Array.isArray(raw.output)) return fail('shape');
     for (const item of raw.output) {
       if (item.type === 'message') {
-        if (!Array.isArray(item.content)) return fail();
+        if (!Array.isArray(item.content)) return fail('content');
         for (const part of item.content) {
-          if (part.type !== 'output_text' || typeof part.text !== 'string') return fail();
+          if (part.type !== 'output_text' || typeof part.text !== 'string') return fail(part.type === 'refusal' ? 'refusal' : 'content');
           text += part.text;
         }
       } else if (item.type === 'function_call') calls.push({ id: item.call_id, type: 'function', function: { name: item.name, arguments: item.arguments } });
       else if (item.type === 'reasoning') {
-        if (typeof item.encrypted_content === 'string') details.push({ type: 'reasoning.encrypted', format: 'openai-responses-v1', id: item.id, data: item.encrypted_content });
+        if (typeof item.encrypted_content === 'string' && item.encrypted_content) details.push({ type: 'reasoning.encrypted', format: 'openai-responses-v1', id: item.id, data: item.encrypted_content });
         // Provider summaries and unencrypted chain-of-thought are never forwarded.
-      } else return fail();
+      } else return fail('shape');
     }
   } else if (protocol === 'anthropic_messages') {
     declaredTools = raw.stop_reason === 'tool_use';
-    if (!['end_turn', 'tool_use'].includes(raw.stop_reason) || !Array.isArray(raw.content)) return fail();
+    if (!['end_turn', 'tool_use'].includes(raw.stop_reason)) return fail(`finish:${label(raw.stop_reason, 'none')}`);
+    if (!Array.isArray(raw.content)) return fail('shape');
     for (const part of raw.content) {
       if (part.type === 'text' && typeof part.text === 'string') text += part.text;
       else if (part.type === 'tool_use' && object(part.input)) calls.push({ id: part.id, type: 'function', function: { name: part.name, arguments: JSON.stringify(part.input) } });
-      else return fail();
+      else return fail('content');
     }
   } else {
-    if (!Array.isArray(raw.choices) || raw.choices.length !== 1) return fail();
+    if (!Array.isArray(raw.choices) || raw.choices.length !== 1) return fail('choices');
     const choice = raw.choices[0];
     declaredTools = choice.finish_reason === 'tool_calls';
-    if (!['stop', 'tool_calls'].includes(choice.finish_reason) || choice.message?.refusal) return fail();
-    if (choice.message?.content != null && typeof choice.message.content !== 'string') return fail();
+    if (!['stop', 'tool_calls'].includes(choice.finish_reason)) return fail(`finish:${label(choice.finish_reason, 'none')}`);
+    if (choice.message?.refusal) return fail('refusal');
+    if (choice.message?.content != null && typeof choice.message.content !== 'string') return fail('content');
     text = choice.message?.content ?? '';
     if (choice.message?.tool_calls !== undefined) {
-      if (!Array.isArray(choice.message.tool_calls)) return fail();
+      if (!Array.isArray(choice.message.tool_calls)) return fail('tool-calls');
       calls.push(...choice.message.tool_calls);
     }
   }
-  if (declaredTools !== undefined && declaredTools !== (calls.length > 0)) return fail();
+  if (declaredTools !== undefined && declaredTools !== (calls.length > 0)) return fail('tools-mismatch');
   if (calls.length) finish = 'tool_calls';
-  if (!text && !calls.length) return fail();
+  if (!text && !calls.length) return fail('empty');
   const message: Message = { role: 'assistant', content: text || null, ...(calls.length ? { tool_calls: calls } : {}), ...(details.length ? { reasoning_details: details } : {}) };
   // Validate provider-selected tools before returning them to the executor. Tool
   // execution remains exclusively behind the workspace's approval boundary.
@@ -225,7 +243,9 @@ export function bedrockComputerRequest(completion: Completion, model: Profile, o
 
 /** Gathers a streamed Chat Completions answer (`chat.completion.chunk` SSE) into the one non-streaming answer
  *  computerCompletionResponse reads: the text, each tool call joined by its index, the finish reason and the usage.
- *  An error frame, a malformed chunk, or a stream that ends without a finish reason is a failed call. */
+ *  An error frame, a malformed chunk, or a stream that ends without a finish reason is a failed call; its `detail`
+ *  says which (`error:<status>:<type>`, as the bridge names an AWS failure after the stream began, or `error:<type>`
+ *  for its own refusal of what the model sent; `shape`, `content`, `tool-calls`, `size`, `truncated`). */
 export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promise<ObjectValue> {
   const decoder = new TextDecoder();
   const calls: { id: string; name: string; arguments: string }[] = [];
@@ -234,50 +254,90 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!line.startsWith('data:')) return;
     const data = line.slice(5).trim();
     if (data === '[DONE]') { done = true; return; }
-    if (done) return fail();
-    const chunk: unknown = JSON.parse(data);
-    if (!object(chunk) || chunk.error !== undefined) return fail();
+    if (done) return fail('shape');
+    const chunk = jsonObject(data, 'shape');
+    if (chunk.error !== undefined) {
+      const error = object(chunk.error) ? chunk.error : {};
+      return fail(['error', ...(Number.isInteger(error.status) ? [error.status] : []),
+        ...(typeof error.type === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.type) ? [error.type] : [])].join(':'));
+    }
     if (object(chunk.usage)) usage = chunk.usage;
     if (chunk.choices === undefined) return;
-    if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail();
+    if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail('shape');
     for (const choice of chunk.choices) {
       const delta = object(choice?.delta) ? choice.delta : {};
-      if (delta.content != null) { if (typeof delta.content !== 'string') return fail(); text += delta.content; }
+      if (delta.content != null) { if (typeof delta.content !== 'string') return fail('content'); text += delta.content; }
       if (delta.tool_calls !== undefined) {
-        if (!Array.isArray(delta.tool_calls)) return fail();
+        if (!Array.isArray(delta.tool_calls)) return fail('tool-calls');
         for (const part of delta.tool_calls) {
-          if (!object(part) || !Number.isInteger(part.index) || part.index < 0 || part.index >= 32) return fail();
+          if (!object(part) || !Number.isInteger(part.index) || part.index < 0 || part.index >= 32) return fail('tool-calls');
           const slot = calls[part.index] ??= { id: '', name: '', arguments: '' };
           if (typeof part.id === 'string') slot.id = part.id;
           if (typeof part.function?.name === 'string') slot.name = part.function.name;
           if (typeof part.function?.arguments === 'string') slot.arguments += part.function.arguments;
         }
       }
-      if (typeof choice?.finish_reason === 'string') finish = choice.finish_reason;
+      // An empty reason on a chunk before the last one (as some providers send) ends nothing.
+      if (typeof choice?.finish_reason === 'string' && choice.finish_reason) finish = choice.finish_reason;
     }
   };
   for await (const chunk of source) {
     size += chunk.length;
-    if (size > MAX_STREAM_BYTES) return fail();
+    if (size > MAX_STREAM_BYTES) return fail('size');
     pending += decoder.decode(chunk, { stream: true });
     let end: number;
     while ((end = pending.indexOf('\n')) >= 0) { take(pending.slice(0, end).replace(/\r$/, '')); pending = pending.slice(end + 1); }
   }
   pending += decoder.decode();
   if (pending.trim()) take(pending.trim());
-  if (!finish) return fail();
-  if (calls.some(call => call === undefined)) return fail();
+  if (!finish) return fail('truncated');
+  // A call whose index skipped another leaves a hole, which some() would pass over.
+  if ([...calls].some(call => call === undefined)) return fail('tool-calls');
   const toolCalls = calls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
   return { choices: [{ index: 0, message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }],
     ...(usage ? { usage } : {}) };
 }
 
-async function readJSON(source: AsyncIterable<Uint8Array>): Promise<ObjectValue> {
+async function readJSON(source: AsyncIterable<Uint8Array>, limit = MAX_BYTES): Promise<ObjectValue> {
   let size = 0; const chunks: Uint8Array[] = [];
-  for await (const chunk of source) { size += chunk.length; if (size > MAX_BYTES) return fail(); chunks.push(chunk); }
-  const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (!object(value)) return fail();
-  return value;
+  for await (const chunk of source) { size += chunk.length; if (size > limit) return fail('size'); chunks.push(chunk); }
+  return jsonObject(Buffer.concat(chunks).toString('utf8'), 'json');
+}
+
+/** A provider request that got no answer: `network`, with the socket's code where it has one (`network:ECONNRESET`). */
+function networkFailure(error: unknown): string {
+  const code = (error as ObjectValue | undefined)?.cause?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? `network:${code}` : 'network';
+}
+
+/** A provider's refusal by its status, and by its own error code or type where its body names one as a label
+ *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`); its message is never read. */
+function refusal(status: number, body: ObjectValue = {}): string {
+  const error = object(body.error) ? body.error : body;
+  const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
+  return `provider:${status}${kind ? `:${kind}` : ''}`;
+}
+
+/** The refusal of a provider that answered a non-2xx. Its body is read for its kind only, at most 16 KiB for at most
+ *  2 s: a provider that sends an error's headers and then stalls must not hold the call (as computerRefusalWait does in
+ *  the API). */
+async function providerRefusal(upstream: Response): Promise<string> {
+  let body: ObjectValue | undefined;
+  const reader = upstream.body?.getReader();
+  const stalled = setTimeout(() => { void reader?.cancel().catch(() => {}); }, 2000);
+  try {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const next = await reader?.read();
+      if (!next || next.done) break;
+      if ((size += next.value.length) > 16_384) { await reader!.cancel(); break; }
+      chunks.push(next.value);
+    }
+    body = jsonObject(Buffer.concat(chunks).toString('utf8'), 'json');
+  } catch { await reader?.cancel().catch(() => {}); }
+  finally { clearTimeout(stalled); }
+  return refusal(upstream.status, body);
 }
 
 export async function handleComputerModel(request: IncomingMessage, response: ServerResponse, options: {
@@ -288,23 +348,37 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
    *  computerBedrock); without it a Bedrock model is refused as before. */
   bedrockCall?: BedrockCall | null;
 }): Promise<void> {
+  const received = performance.now();
   const reply = (status: number, value: ObjectValue) => { if (!response.destroyed) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); } };
-  const reject = (status: number, code: string, reason?: string) => reply(status, { error: { code, message: 'The managed model request could not be completed.', ...(reason ? { reason } : {}) } });
+  // The run and the model a refusal's log line names, once the request has said them.
+  const named: { runId?: string; model?: string } = {};
+  /** Refuses the call by kind only, in the reply and in one log line: its code and, where they tell more, a reason (what
+   *  failed: a provider's status, the network, the model's answer, a cut) and a detail (which check); never provider
+   *  text, the call's messages or a key. `counts` go to the log line alone. */
+  const reject = (status: number, code: string, reason?: string, detail?: string, counts: Record<string, number> = {}) => {
+    const kind = { ...(reason ? { reason } : {}), ...(detail ? { detail } : {}) };
+    console.error(JSON.stringify({ event: 'computer_model_rejected', runtime: options.runtime, ...named, status, code, ...kind, ...counts, ms: Math.round(performance.now() - received) }));
+    reply(status, { error: { code, message: 'The managed model request could not be completed.', ...kind } });
+  };
   const { config, active, sessions } = options;
   if (!config.ready || options.stopping()) return reject(503, 'RUNTIME_UNAVAILABLE');
   if ((request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') return reject(415, 'INVALID_CONTENT_TYPE');
   let body: ObjectValue, completion: Completion;
-  try {
-    body = await readJSON(request);
-    if (![body.runId, body.tenantId, body.sessionId].every(identifier) || typeof body.model !== 'string' || body.model.length > 256
-      || (body.thinking !== undefined && typeof body.thinking !== 'boolean')
-      || (body.maxTokens !== undefined && !(Number.isInteger(body.maxTokens) && body.maxTokens >= 1 && body.maxTokens <= 1_000_000))) return reject(400, 'INVALID_INPUT');
-    completion = validateComputerCompletion(body.completion);
-  } catch { return reject(400, 'INVALID_INPUT'); }
+  try { body = await readJSON(request); }
+  catch (error) { return reject(400, 'INVALID_INPUT', undefined, `body:${detailOf(error)}`); }
+  if (identifier(body.runId)) named.runId = body.runId;
+  if (typeof body.model === 'string') named.model = label(body.model, 'invalid');
+  if (![body.runId, body.tenantId, body.sessionId].every(identifier) || typeof body.model !== 'string' || body.model.length > 256) return reject(400, 'INVALID_INPUT', undefined, 'fields');
+  if ((body.thinking !== undefined && typeof body.thinking !== 'boolean')
+    || (body.maxTokens !== undefined && !(Number.isInteger(body.maxTokens) && body.maxTokens >= 1 && body.maxTokens <= 1_000_000))) return reject(400, 'INVALID_INPUT', undefined, 'options');
+  try { completion = validateComputerCompletion(body.completion); }
+  catch (error) { return reject(400, 'INVALID_INPUT', undefined, `completion:${detailOf(error)}`); }
   if (response.destroyed) return;
-  let model: Profile;
-  try { model = options.resolveModel(bindUserModel(config, body as any, options.runtime), body.model); }
-  catch { return reject(400, 'MODEL_NOT_FOUND'); }
+  let bound: any, model: Profile;
+  try { bound = bindUserModel(config, body as any, options.runtime); }
+  catch { return reject(400, 'MODEL_NOT_FOUND', undefined, 'connection'); }
+  try { model = options.resolveModel(bound, body.model); }
+  catch { return reject(400, 'MODEL_NOT_FOUND', undefined, 'catalog'); }
   // A Bedrock model is served through the worker's Bedrock call (the Converse bridge, which streams only: the call is
   // one streaming request gathered into one answer). A worker without one refuses such a model here, before any
   // capacity is taken or a request leaves the worker.
@@ -312,18 +386,22 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   if (bedrock && !options.bedrockCall) return reject(400, 'MODEL_NOT_SUPPORTED');
   const effort = (body.effort === '' ? undefined : body.effort) ?? (model.defaultReasoningEffort || undefined);
   if (effort !== undefined && effort !== 'none' && !model.reasoningEfforts?.includes(effort)) return reject(400, 'EFFORT_NOT_SUPPORTED');
-  if (Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32 > model.contextWindow - model.maxTokens - 256) return reject(413, 'CONTEXT_LIMIT');
+  const bytes = Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32, limit = model.contextWindow - model.maxTokens - 256;
+  if (bytes > limit) return reject(413, 'CONTEXT_LIMIT', undefined, undefined, { bytes, limit });
   const sessionKey = `${body.tenantId}:${body.sessionId}`;
   if (options.stopping()) return reject(503, 'RUNTIME_UNAVAILABLE');
   if (active.has(body.runId)) return reject(409, 'RUN_BUSY');
   if (sessions.has(sessionKey)) return reject(409, 'SESSION_BUSY');
   if (active.size >= config.maxConcurrency) return reject(429, 'CAPACITY_EXCEEDED');
   const controller = new AbortController();
+  // Why the call was cut, for its 499: its own time limit, its caller gone, the worker stopping, or a cancel.
+  let cut = '';
+  const stop = (why: string) => { cut ||= why; controller.abort(); };
   let release!: () => void;
-  const entry: Entry = { handle: { cancel: () => controller.abort() }, cancelRequested: false, released: new Promise(resolve => { release = resolve; }) };
+  const entry: Entry = { handle: { cancel: () => stop(options.stopping() ? 'stopping' : 'cancelled') }, cancelRequested: false, released: new Promise(resolve => { release = resolve; }) };
   active.set(body.runId, entry); sessions.add(sessionKey);
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs); timer.unref();
-  const disconnected = () => { if (!response.writableEnded) controller.abort(); };
+  const timer = setTimeout(() => stop('timeout'), config.timeoutMs); timer.unref();
+  const disconnected = () => { if (!response.writableEnded) stop('disconnected'); };
   response.once('close', disconnected);
   const started = performance.now();
   const observed = options.observe(model, request.headers.traceparent);
@@ -337,18 +415,38 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
       catch (error) {
         if (controller.signal.aborted) throw error;
         // The reason is a label (bedrock-call.mjs), never provider text: safe for the reply and the worker's log.
-        const reason = typeof (error as ObjectValue)?.reason === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test((error as ObjectValue).reason) ? (error as ObjectValue).reason : 'unknown';
-        console.error(JSON.stringify({ event: 'computer_model_bedrock_failed', model: model.id, reason }));
-        return reject(502, 'PROVIDER_ERROR', reason);
+        return reject(502, 'PROVIDER_ERROR', label((error as ObjectValue)?.reason));
       }
       protocol = 'chat_completions';
     } else {
       const provider = providerComputerRequest(completion, model, effort, { thinking: body.thinking, maxTokens: body.maxTokens });
-      const upstream = await fetch(provider.url, { method: 'POST', headers: provider.headers, body: JSON.stringify(provider.body), redirect: 'error', signal: controller.signal });
-      if (!upstream.ok || !upstream.body) { await upstream.body?.cancel(); return reject(502, 'PROVIDER_ERROR'); }
-      raw = await readJSON(upstream.body);
+      let upstream: Response;
+      try { upstream = await fetch(provider.url, { method: 'POST', headers: provider.headers, body: JSON.stringify(provider.body), redirect: 'error', signal: controller.signal }); }
+      catch (error) {
+        if (controller.signal.aborted) throw error;
+        return reject(502, 'PROVIDER_ERROR', networkFailure(error));
+      }
+      if (!upstream.ok) {
+        const reason = await providerRefusal(upstream);
+        // Cut while its error was read: the call is the cut's, not the provider's.
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return reject(502, 'PROVIDER_ERROR', reason);
+      }
+      if (!upstream.body) return reject(502, 'PROVIDER_ERROR', 'body');
+      try { raw = await readJSON(upstream.body); }
+      catch (error) {
+        if (controller.signal.aborted) throw error;
+        // An answer larger than the API takes back is the model's own output; one that is not JSON, or breaks off, is not.
+        const detail = detailOf(error);
+        if (detail === 'size') return reject(502, 'PROVIDER_ERROR', 'answer', 'size');
+        return reject(502, 'PROVIDER_ERROR', detail === 'json' ? 'body' : networkFailure(error));
+      }
+      // Some gateways answer an error with a 200: it is the provider's refusal, as a non-2xx would have been.
+      if (raw.error != null) return reject(502, 'PROVIDER_ERROR', refusal(upstream.status, raw));
     }
-    const result = computerCompletionResponse(raw, protocol, completion.tools);
+    let result: ObjectValue;
+    try { result = computerCompletionResponse(raw, protocol, completion.tools); }
+    catch (error) { return reject(502, 'PROVIDER_ERROR', 'answer', detailOf(error)); }
     const usage = options.normalizeUsage(raw.usage, protocol === 'anthropic_messages' ? 'anthropic' : protocol);
     const elapsed = Math.floor(performance.now() - started);
     const observability = options.parentObservability({ version: 1, usage, timing: { setupMs: 0, providerMs: elapsed, providerTtftMs: null } }, { totalMs: elapsed, outcome: 'completed' });
@@ -356,8 +454,10 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
     observed({ type: 'completed', observability }); terminalObserved = true;
     reply(200, { completion: result, observability });
   } catch {
-    // A Bedrock call's own failures answered above with their reason; what reaches here is an answer that did not hold.
-    reject(controller.signal.aborted ? 499 : 502, controller.signal.aborted ? 'CANCELLED' : 'PROVIDER_ERROR', bedrock && !controller.signal.aborted ? 'answer' : undefined);
+    // The provider's and the answer's failures answered above with their reason; what reaches here is a call cut short,
+    // or this worker failing on an answer it already held.
+    if (controller.signal.aborted) reject(499, 'CANCELLED', cut || 'cancelled');
+    else reject(502, 'PROVIDER_ERROR', 'worker');
   }
   finally {
     if (!terminalObserved) observed({ type: controller.signal.aborted ? 'cancelled' : 'failed', observability: options.parentObservability(undefined, { totalMs: performance.now() - started, outcome: 'failed' }) });

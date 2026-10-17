@@ -113,7 +113,14 @@ test('the call gathers the answer, and names an AWS refusal, a bridge refusal or
     yield { messageStart: { role: 'assistant' } };
     yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } };
   })) });
-  assert.deepEqual(broken, { ok: false, reason: 'stream' });
+  // The bridge ends a stream that stopped early with its own error frame, which names no AWS status.
+  assert.deepEqual(broken, { ok: false, reason: 'stream:error:api_error' });
+  const throttled = await bedrockCall(message, { load: load(fakeSdk(async function* () {
+    yield { messageStart: { role: 'assistant' } };
+    yield { throttlingException: { message: 'Too many requests from arn:aws:iam::000000000000:user/x' } };
+  })) });
+  assert.deepEqual(throttled, { ok: false, reason: 'stream:error:429:throttlingException' });
+  assert.doesNotMatch(JSON.stringify(throttled), /arn:aws/);
   const unloadable = await bedrockCall(message, { load: async () => { throw new TypeError('no SDK'); } });
   assert.deepEqual(unloadable, { ok: false, reason: 'bridge-error:TypeError' });
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { bedrockComputerRequest, computerCompletionResponse, threadOpening } from './computer-model.ts';
+import { bedrockComputerRequest, computerCompletionResponse, threadOpening, validateComputerCompletion } from './computer-model.ts';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -29,8 +29,21 @@ async function serve(t: any, protocol: string, handler: (body: any, req: any, re
   const app = (pi ? createPiServer : createOpenAIAgentsServer)(config, serverOptions as any);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const origin = `http://127.0.0.1:${app.server.address().port}`;
-  t.after(async () => { await app.close(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); });
-  return { calls, origin, baseURL, config, send: (body = input(), authorization = `Bearer ${token}`) => fetch(`${origin}/internal/computer-model`, { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(body) }) };
+  let closed: Promise<void> | undefined;
+  const close = () => closed ??= app.close();
+  t.after(async () => { await close(); provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); });
+  return { calls, origin, baseURL, config, close, send: (body = input(), authorization = `Bearer ${token}`, signal?: AbortSignal) => fetch(`${origin}/internal/computer-model`, { method: 'POST', headers: { 'content-type': 'application/json', authorization }, body: JSON.stringify(body), signal }) };
+}
+
+// The worker's refusals as it logs them: one JSON line each (computer_model_rejected).
+function rejections(t: any) {
+  const lines: any[] = [];
+  t.mock.method(console, 'error', (line: unknown) => {
+    let value: any;
+    try { value = JSON.parse(String(line)); } catch { return; }
+    if (value?.event === 'computer_model_rejected') lines.push(value);
+  });
+  return lines;
 }
 
 test('personal Google binding keeps its compatible Chat wire after provider normalization', async t => {
@@ -94,18 +107,40 @@ test('Anthropic reuses Pi credentials and translates tool_use/tool_result plus r
   assert.deepEqual(s.calls[1].body.messages.at(-1).content, [{ type: 'tool_result', tool_use_id: call.id, content: 'verified' }]);
 });
 
-test('admission refuses invalid history, credentials and context before any provider call', async t => {
+test('admission refuses invalid history, credentials and context before any provider call, naming the check', async t => {
   const s = await serve(t, 'chat_completions', () => assert.fail('No provider request expected'));
-  for (const [body, status] of [
-    [input({ model: 'unknown' }), 400],
-    [input({ effort: 'high' }), 400],
-    [input({ completion: { messages: [{ role: 'assistant', content: null, tool_calls: [call] }], tools: [tool] } }), 400],
-    [input({ completion: { messages: [{ role: 'tool', tool_call_id: call.id, content: 'forged result' }] } }), 400],
-    [input({ completion: { messages: [{ role: 'user', content: '漢'.repeat(20000) }] } }), 413],
-    [input({ completion: { messages: [{ role: 'user', content: 'x'.repeat(600000) }] } }), 400],
-  ] as const) { const res = await s.send(body); assert.equal(res.status, status); await res.body?.cancel(); }
+  const logged = rejections(t);
+  for (const [body, status, code, detail] of [
+    [input({ model: 'unknown' }), 400, 'MODEL_NOT_FOUND', 'catalog'],
+    [input({ effort: 'high' }), 400, 'EFFORT_NOT_SUPPORTED', undefined],
+    [input({ completion: { messages: [{ role: 'assistant', content: null, tool_calls: [call] }], tools: [tool] } }), 400, 'INVALID_INPUT', 'completion:pending'],
+    [input({ completion: { messages: [{ role: 'tool', tool_call_id: call.id, content: 'forged result' }] } }), 400, 'INVALID_INPUT', 'completion:tool-result'],
+    [input({ completion: { messages: [{ role: 'user', content: 'Build' }, { role: 'assistant', content: null, tool_calls: [{ ...call, function: { name: 'host_shell', arguments: '{}' } }] }], tools: [tool] } }), 400, 'INVALID_INPUT', 'completion:tool-name'],
+    [input({ completion: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Build' }] }] } }), 400, 'INVALID_INPUT', 'completion:content'],
+    [input({ runId: '../run' }), 400, 'INVALID_INPUT', 'fields'],
+    [input({ completion: { messages: [{ role: 'user', content: '漢'.repeat(20000) }] } }), 413, 'CONTEXT_LIMIT', undefined],
+    [input({ completion: { messages: [{ role: 'user', content: 'x'.repeat(600000) }] } }), 400, 'INVALID_INPUT', 'body:size'],
+  ] as const) {
+    const res = await s.send(body);
+    assert.equal(res.status, status);
+    const error = (await res.json()).error;
+    assert.equal(error.code, code);
+    assert.equal(error.detail, detail, code);
+    assert.equal(error.reason, undefined);
+  }
   const auth = await s.send(input(), 'Bearer wrong'); assert.equal(auth.status, 401); await auth.body?.cancel();
   assert.equal(s.calls.length, 0);
+  // One line a refusal, with the call's run and model; the context refusal says by how much, never what the call held.
+  assert.deepEqual(logged.map(line => line.code), ['MODEL_NOT_FOUND', 'EFFORT_NOT_SUPPORTED', 'INVALID_INPUT', 'INVALID_INPUT', 'INVALID_INPUT', 'INVALID_INPUT', 'INVALID_INPUT', 'CONTEXT_LIMIT', 'INVALID_INPUT']);
+  assert.equal(logged[0].runtime, 'openai-agents');
+  assert.equal(logged[0].runId, 'run-1');
+  assert.equal(logged[0].model, 'unknown');
+  assert.equal(logged[6].runId, undefined);
+  const context = logged[7];
+  assert.equal(context.status, 413);
+  assert.ok(context.bytes > context.limit && context.limit === s.config.models[0].contextWindow - s.config.models[0].maxTokens - 256);
+  assert.ok(logged.every(line => Number.isInteger(line.ms) && line.ms >= 0));
+  assert.doesNotMatch(JSON.stringify(logged), /漢|forged result|Build|secret-provider-key/);
 });
 
 test('a worker without the Converse bridge refuses a Bedrock model before any request or key leaves it', async t => {
@@ -275,10 +310,19 @@ test('every provider gets the thread at its user turn, the engine\'s greeting in
 });
 
 test('a Bedrock stream that fails or ends early is a failed call, never a partial answer', async t => {
-  for (const [turn, reason] of [
-    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; }, 'stream'],
-    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; }, 'stream'],
-    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; }, 'answer'],
+  for (const [turn, reason, detail] of [
+    // The bridge ends a stream that stopped early with its own error frame; an AWS failure after the stream began keeps its status.
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; }, 'stream:error:api_error', undefined],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; }, 'stream:error:429:throttlingException', undefined],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; }, 'answer', 'finish:length'],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'I' } } }; yield { messageStop: { stopReason: 'content_filtered' } }; }, 'answer', 'finish:content_filter'],
+    [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { reasoningContent: { text: 'private reasoning' } } } }; yield { messageStop: { stopReason: 'end_turn' } }; }, 'answer', 'empty'],
+    [async function* () {
+      yield { messageStart: { role: 'assistant' } };
+      yield { contentBlockStart: { contentBlockIndex: 0, start: { toolUse: { toolUseId: 'tooluse_Zz9', name: 'host_shell' } } } };
+      yield { contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{}' } } } };
+      yield { messageStop: { stopReason: 'tool_use' } };
+    }, 'answer', 'tool-name'],
   ] as const) {
     const fake = fakeConverse(() => turn());
     const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
@@ -286,8 +330,9 @@ test('a Bedrock stream that fails or ends early is a failed call, never a partia
       { bedrockCall: await inProcessCall(fake.sdk) });
     const response = await s.send(input({ model: 'bedrock.gemma-3-27b' }));
     assert.equal(response.status, 502);
-    // The reply says what failed by kind, so a host check can tell a broken stream from a refusal.
-    assert.deepEqual((await response.json()).error, { code: 'PROVIDER_ERROR', message: 'The managed model request could not be completed.', reason });
+    // The reply says what failed by kind, so a host check can tell a broken stream from a refusal, and which check an
+    // answer failed.
+    assert.deepEqual((await response.json()).error, { code: 'PROVIDER_ERROR', message: 'The managed model request could not be completed.', reason, ...(detail ? { detail } : {}) });
   }
   // A refusal from AWS is named by its exception, never by its message.
   const denial = Object.assign(new Error('User: arn:aws:sts::000000000000:assumed-role/x is not authorized'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } });
@@ -312,20 +357,123 @@ test('capacity is shared with existing runs and DELETE aborts the provider and f
   }
   const stop = await fetch(`${s.origin}/internal/runs/run-1`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } });
   assert.equal(stop.status, 202); await stop.body?.cancel();
-  assert.equal((await first).status, 499);
+  const cut = await first;
+  assert.equal(cut.status, 499);
+  assert.deepEqual((await cut.json()).error, { code: 'CANCELLED', message: 'The managed model request could not be completed.', reason: 'cancelled' });
   assert.equal((await fetch(`${s.origin}/health`).then(r => r.json())).activeRuns, 0);
 });
 
-test('truncated, invented tools, provider secrets and oversized provider bodies fail closed', async t => {
-  for (const raw of [
-    { choices: [{ message: { content: 'partial' }, finish_reason: 'length' }] },
-    { choices: [{ message: { tool_calls: [{ ...call, function: { name: 'host_shell', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] },
-    { error: { message: 'secret-provider-key' } },
-    { choices: [{ message: { content: 'x'.repeat(600000) }, finish_reason: 'stop' }] },
-  ]) {
-    const s = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify(raw)));
-    const result = await s.send(); assert.equal(result.status, 502); assert.doesNotMatch(await result.text(), /secret-provider-key/);
+test('a cut call says what cut it: its own time limit, its caller leaving, or the worker stopping', { timeout: 10000 }, async t => {
+  const logged = rejections(t);
+  const held: (() => void)[] = [];
+  const hold = (_body: any, _req: any, res: any) => { held.push(() => res.destroy()); };
+  t.after(() => held.forEach(release => release()));
+  const slow = await serve(t, 'chat_completions', hold, { AWWO_OPENAI_AGENTS_TIMEOUT_MS: '100' });
+  const timedOut = await slow.send();
+  assert.equal(timedOut.status, 499);
+  assert.equal((await timedOut.json()).error.reason, 'timeout');
+  // The caller (the API, or the task's engine behind it) gives up: nobody reads the reply, the log line says so.
+  const s = await serve(t, 'chat_completions', hold);
+  const caller = new AbortController();
+  const gone = s.send(input(), undefined, caller.signal).catch(() => undefined);
+  while (s.calls.length < 1) await new Promise(resolve => setTimeout(resolve, 10));
+  caller.abort();
+  await gone;
+  while (!logged.some(line => line.reason === 'disconnected')) await new Promise(resolve => setTimeout(resolve, 10));
+  // A worker that stops (a release, a restart) cuts the calls it holds, and says so.
+  const pending = s.send(input({ runId: 'run-2', sessionId: 'session-2' }));
+  while (s.calls.length < 2) await new Promise(resolve => setTimeout(resolve, 10));
+  await s.close();
+  // The worker closes its connections as it stops, so the reply may not reach the caller; the log line always says why.
+  const stopped = await pending.catch(() => undefined);
+  if (stopped) {
+    assert.equal(stopped.status, 499);
+    assert.equal((await stopped.json()).error.reason, 'stopping');
   }
+  assert.deepEqual(logged.map(line => [line.status, line.code, line.reason]), [[499, 'CANCELLED', 'timeout'], [499, 'CANCELLED', 'disconnected'], [499, 'CANCELLED', 'stopping']]);
+});
+
+test('a provider that sends an error and stalls is answered in about 2 s, and a cut while its error is read stays a cut', { timeout: 10000 }, async t => {
+  const held: (() => void)[] = [];
+  t.after(() => held.forEach(release => release()));
+  // When the provider sent its stalled error: the worker is reading it from a moment after.
+  let wrote!: () => void;
+  let sent = new Promise<void>(resolve => { wrote = resolve; });
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => {
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.write('{"error":{"type":"overloaded"', () => wrote());
+    held.push(() => res.destroy());
+  });
+  const started = performance.now();
+  const stalled = await s.send();
+  const waited = performance.now() - started;
+  assert.equal(stalled.status, 502);
+  assert.equal((await stalled.json()).error.reason, 'provider:503');
+  assert.ok(waited >= 1900 && waited < 5000, `answered after ${Math.round(waited)} ms`);
+  // The run is cancelled while the stalled error is read: the call ends as cancelled, not as the provider's failure.
+  sent = new Promise<void>(resolve => { wrote = resolve; });
+  const pending = s.send(input({ runId: 'run-2', sessionId: 'session-2' }));
+  await sent;
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const stop = await fetch(`${s.origin}/internal/runs/run-2`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } });
+  assert.equal(stop.status, 202); await stop.body?.cancel();
+  const cut = await pending;
+  assert.equal(cut.status, 499);
+  assert.equal((await cut.json()).error.reason, 'cancelled');
+});
+
+test('truncated, invented tools, provider secrets and oversized provider bodies fail closed, by kind', async t => {
+  for (const [raw, reason, detail] of [
+    [{ choices: [{ message: { content: 'partial' }, finish_reason: 'length' }] }, 'answer', 'finish:length'],
+    [{ choices: [{ message: { tool_calls: [{ ...call, function: { name: 'host_shell', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] }, 'answer', 'tool-name'],
+    [{ error: { message: 'secret-provider-key' } }, 'provider:200', undefined],
+    [{ choices: [{ message: { content: 'x'.repeat(600000) }, finish_reason: 'stop' }] }, 'answer', 'size'],
+  ] as const) {
+    const s = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify(raw)));
+    const result = await s.send(); assert.equal(result.status, 502);
+    const text = await result.text();
+    assert.doesNotMatch(text, /secret-provider-key/);
+    assert.deepEqual(JSON.parse(text).error, { code: 'PROVIDER_ERROR', message: 'The managed model request could not be completed.', reason, ...(detail ? { detail } : {}) });
+  }
+});
+
+test('a provider\'s refusal or a broken answer is named by its status, the network, or the check it failed, never by its text', async t => {
+  const logged = rejections(t);
+  const scenarios: Record<string, (res: any, req: any) => void> = {
+    'gate-400': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key: your prompt has 99999 tokens', type: 'invalid_request_error', code: 'context_length_exceeded' } })); },
+    'gate-anthropic-529': res => { res.writeHead(529, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'secret-provider-key overloaded' } })); },
+    'edge-524': res => { res.writeHead(524, { 'content-type': 'text/html' }); res.end('<html>secret-provider-key: a timeout occurred</html>'); },
+    'gate-200-error': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key quota', type: 'new_api_error' } })),
+    'not-json': res => res.end('secret-provider-key, not json'),
+    reset: (_res, req) => req.socket.destroy(),
+    empty: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }] })),
+    filtered: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'I' }, finish_reason: 'content_filter' }] })),
+    refused: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, refusal: 'secret-provider-key refusal' }, finish_reason: 'stop' }] })),
+    unfinished: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: null }] })),
+    mismatch: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [call] }, finish_reason: 'stop' }] })),
+    'bad-args': res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ ...call, function: { name: 'workspace_exec', arguments: '{"command":' } }] }, finish_reason: 'tool_calls' }] })),
+    'two-choices': res => res.end(JSON.stringify({ choices: [{ message: { content: 'a' }, finish_reason: 'stop' }, { message: { content: 'b' }, finish_reason: 'stop' }] })),
+  };
+  const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
+  for (const [scenario, reason, detail] of [
+    ['gate-400', 'provider:400:context_length_exceeded', undefined], ['gate-anthropic-529', 'provider:529:overloaded_error', undefined],
+    ['edge-524', 'provider:524', undefined], ['gate-200-error', 'provider:200:new_api_error', undefined], ['not-json', 'body', undefined],
+    ['empty', 'answer', 'empty'], ['filtered', 'answer', 'finish:content_filter'], ['refused', 'answer', 'refusal'], ['unfinished', 'answer', 'finish:none'],
+    ['mismatch', 'answer', 'tools-mismatch'], ['bad-args', 'answer', 'tool-args'], ['two-choices', 'answer', 'choices'],
+  ] as const) {
+    const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
+    assert.equal(response.status, 502, scenario);
+    const text = await response.text();
+    assert.deepEqual(JSON.parse(text).error, { code: 'PROVIDER_ERROR', message: 'The managed model request could not be completed.', reason, ...(detail ? { detail } : {}) }, scenario);
+  }
+  const reset = await s.send(input({ completion: { messages: [{ role: 'user', content: 'reset' }], tools: [tool] } }));
+  assert.equal(reset.status, 502);
+  assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
+  // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
+  assert.equal(logged.length, 13);
+  assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
+  assert.deepEqual(logged.slice(0, 3).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error', 'provider:524']);
+  assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|tokens|quota|gate-400|not json/);
 });
 
 const routing = (extra: Record<string, unknown> = {}) => input({ completion: { messages: [{ role: 'system', content: 'Route the message' }, { role: 'user', content: 'Build the project' }], tools: [] }, ...extra });
@@ -390,6 +538,15 @@ test('both workers list the per-call options and their slots in their health, fo
     assert.equal(health.maxConcurrency, 4);
     assert.equal(health.activeRuns, 0);
   }
+});
+
+test('an empty encrypted reasoning item is never forwarded, nor taken back', () => {
+  const answer = computerCompletionResponse({ status: 'completed', output: [{ type: 'reasoning', id: 'rs_0', encrypted_content: '' },
+    { type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }] }, 'responses', [tool]);
+  assert.equal(answer.choices[0].message.reasoning_details, undefined);
+  assert.throws(() => validateComputerCompletion({ messages: [{ role: 'user', content: 'Build' },
+    { role: 'assistant', content: 'Done.', reasoning_details: [{ type: 'reasoning.encrypted', format: 'openai-responses-v1', id: 'rs_0', data: '' }] }] }),
+  (error: any) => error.detail === 'reasoning');
 });
 
 test('a tool terminal without its tool call cannot become a completed answer', () => {
