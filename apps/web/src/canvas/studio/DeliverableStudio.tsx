@@ -4,7 +4,7 @@
 //
 // Read only. It shows published outputs (studioModel.ts) and the bytes the server stores for them; nothing here
 // edits a node, publishes, or runs anything outside the page sandbox (liveDocument.ts).
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle, Archive, Box, ChevronDown, ChevronRight, Clapperboard, Code2, Copy, Download, ExternalLink, Eye, File as FileIcon, FileCode2, FileImage,
@@ -59,6 +59,9 @@ const STATE_LABEL: Record<StudioGroup['state'], CanvasTextKey> = {
   run: 'results.stateRun', partial: 'results.statePartial', manual: 'results.stateManual', case: 'results.stateCase', none: 'results.stateNone',
 };
 const PREVIEWABLE: ReadonlySet<StudioKind> = new Set(['page', 'markdown', 'table']);
+/** The studio's own width (px) at and below which its file tree is laid over the file instead of beside it; studio.css
+ *  wraps the header at the same width (@container awwo-studio). */
+const STUDIO_NARROW = 760;
 
 /** An entry as the studio shows it once its bytes are known: a stored file takes its real name and kind. */
 function shown(entry: StudioEntry, loaded?: Loaded): StudioEntry {
@@ -95,7 +98,52 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const [reloadKey, setReloadKey] = useState(0);
   const [query, setQuery] = useState('');
   const [jump, setJump] = useState<{ entryId: string; line: number } | null>(null);
-  const [sidebar, setSidebar] = useState(() => typeof window === 'undefined' || window.innerWidth > 760);
+  // The file tree follows the studio's own width, not the window's (inline in the 成果 view the studio can be far
+  // narrower: beside the assistant's panel, say). Wider than STUDIO_NARROW it sits beside the file and starts open; at
+  // that width or below it lies over the file (studio.css) and starts closed. Crossing that width folds it away, or
+  // brings back what the reader last chose while it sat beside the file (open, until they close it); the toggle decides
+  // in between. A studio not laid out yet (its dialog before it opens) keeps the window's guess until its first width.
+  // Closing it with focus inside moves focus to its toggle, never to the page's body.
+  const root = useRef<HTMLDivElement>(null);
+  const treeToggle = useRef<HTMLButtonElement>(null);
+  const [sidebar, setSidebar] = useState(() => typeof window === 'undefined' || window.innerWidth > STUDIO_NARROW);
+  const wideSeen = useRef<boolean | null>(null);
+  const wideChoice = useRef(true);
+  /** Closes the tree, focus inside it going to the toggle first (the tree's buttons leave the page with it). */
+  const foldTree = useCallback(() => {
+    if (root.current?.querySelector('.awwo-studio-tree')?.contains(document.activeElement)) treeToggle.current?.focus();
+    setSidebar(false);
+  }, []);
+  useLayoutEffect(() => {
+    const element = root.current;
+    if (!element) return undefined;
+    const follow = (width: number) => {
+      if (width <= 0) return;
+      const wide = width > STUDIO_NARROW;
+      if (wideSeen.current === wide) return;
+      wideSeen.current = wide;
+      if (wide) setSidebar(wideChoice.current); else foldTree();
+    };
+    follow(element.clientWidth);
+    if (typeof ResizeObserver !== 'function') return undefined;
+    // The content box's width as the container query reads it, fractions included (clientWidth rounds).
+    const observer = new ResizeObserver(entries => follow(entries[0]?.contentBoxSize?.[0]?.inlineSize ?? element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [foldTree]);
+  /** Whether the tree lies over the file now: what the stylesheet laid out, where the tree is drawn; else the studio's
+   *  width (the window's before the studio has one). */
+  const treeOverFile = () => {
+    const tree = root.current?.querySelector('.awwo-studio-tree');
+    if (tree) return getComputedStyle(tree).position === 'absolute';
+    const width = root.current?.clientWidth ?? 0;
+    return width > 0 ? width <= STUDIO_NARROW : typeof window !== 'undefined' && window.innerWidth <= STUDIO_NARROW;
+  };
+  /** The reader opening or closing the tree: while it sits beside the file, what a widening brings back. */
+  const setTreeOpen = (open: boolean) => {
+    if (!treeOverFile()) wideChoice.current = open;
+    if (open) setSidebar(true); else foldTree();
+  };
   const [maximized, setMaximized] = useState(false);
   const [notice, setNotice] = useState<{ text: string; href?: string } | null>(null);
   const [bundling, setBundling] = useState<{ done: number; total: number } | null>(null);
@@ -201,6 +249,8 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     const group = groups.find(item => item.nodeId === focusNodeId);
     const entry = group?.entries.find(item => item.primary) ?? group?.entries[0];
     if (entry) { setSelectedId(entry.id); setJump(null); setMode('preview'); }
+    // Lying over the file, the tree would hide the step's deliverable.
+    if (entry && treeOverFile()) foldTree();
   }, [focusNodeId]);
 
   // Content search: inline values and every text file already read; text-like stored files are read when a search starts.
@@ -242,7 +292,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     if (line) setMode('code');
     else setMode(PREVIEWABLE.has(shown(entry, loaded[entry.id]).kind) || !isTextKind(shown(entry, loaded[entry.id]).kind) ? 'preview' : 'code');
     setReloadKey(0);
-    if (window.innerWidth <= 760) setSidebar(false);
+    if (treeOverFile()) foldTree();
   };
 
   const downloadSelected = async () => {
@@ -293,12 +343,11 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   }, [notice]);
 
   // Keyboard: Escape closes a studio window; Ctrl/⌘ + F or P searches.
-  const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (!root.current?.contains(document.activeElement) && variant === 'embedded') return;
       if ((event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'p')) {
-        event.preventDefault(); setSidebar(true); requestAnimationFrame(() => searchRef.current?.focus());
+        event.preventDefault(); setTreeOpen(true); requestAnimationFrame(() => searchRef.current?.focus());
       }
     };
     document.addEventListener('keydown', keydown, true);
@@ -314,7 +363,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
 
   const header = <header className="awwo-studio-header">
     <button type="button" className="awwo-studio-icon" aria-label={t(sidebar ? 'studio.hideFiles' : 'studio.showFiles')} title={t(sidebar ? 'studio.hideFiles' : 'studio.showFiles')}
-      aria-pressed={sidebar} onClick={() => setSidebar(value => !value)}><PanelLeft size={16} aria-hidden="true" /></button>
+      ref={treeToggle} aria-pressed={sidebar} onClick={() => setTreeOpen(!sidebar)}><PanelLeft size={16} aria-hidden="true" /></button>
     <div className="awwo-studio-title"><h2 id={titleId}>{title}</h2><span>{t('studio.fileCount', { count: total })}</span></div>
     {selected && <div className="awwo-studio-file" title={selected.label}>
       {(() => { const Icon = KIND_ICON[selected.kind]; return <Icon size={15} aria-hidden="true" />; })()}
@@ -614,7 +663,9 @@ function ImageView({ url, name, t }: { url: string; name: string; t: ReturnType<
 function StudioDialog({ labelledBy, onClose, children }: { labelledBy: string; onClose?: () => void; children: ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef(onClose); close.current = onClose;
-  useEffect(() => {
+  // Opened in a layout effect, before the studio's own (its parent's) measures its width: a dialog not open yet is
+  // 0 px wide, and the studio would lay its file tree out by the window's width for a frame.
+  useLayoutEffect(() => {
     const element = dialog.current!;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (typeof element.showModal === 'function' && !element.open) element.showModal(); else element.setAttribute('open', '');

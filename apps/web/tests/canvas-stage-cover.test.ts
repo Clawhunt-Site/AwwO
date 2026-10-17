@@ -113,15 +113,20 @@ describe('the stage overlays lay themselves out right of an assistant panel floa
     expect(declarations(sheet, '.awwo-studio-header', narrow)['flex-wrap']).toBe('wrap');
     expect([declarations(sheet, '.awwo-studio-file', narrow).order, declarations(sheet, '.awwo-studio-action span, .awwo-studio-title span', narrow).display])
       .toEqual(['3', 'none']);
+    // The file tree, too, lies over the file in a narrow studio, at most 86 % of its width (owner 2026-10-16: 「把文件树也改成
+    // 按工作台宽度」; DeliverableStudio starts it closed there, canvas-studio-tree.test.tsx).
+    const tree = declarations(sheet, '.awwo-studio-tree', narrow);
+    expect([tree.position, tree.inset, tree.width]).toEqual(['absolute', '0 auto 0 0', 'min(320px, 86%)']);
     // After the header's own rules, which it overrides at the same specificity (found in review).
     const query = sheet.indexOf(narrow);
-    for (const base of ['.awwo-studio-header {', '.awwo-studio-file {', '.awwo-studio-title {']) {
+    for (const base of ['.awwo-studio-header {', '.awwo-studio-file {', '.awwo-studio-title {', '.awwo-studio-tree {']) {
       expect(sheet.indexOf(base), base).toBeGreaterThanOrEqual(0);
       expect(sheet.indexOf(base), base).toBeLessThan(query);
     }
-    // The window's own breakpoint keeps only what belongs to a narrow window: the full-screen dialog, the tree laid over.
+    // The window's own breakpoint keeps only what belongs to a narrow window: the full-screen dialog.
     const windowRules = rules(sheet).filter(([prelude]) => prelude === '@media (max-width: 760px)').flatMap(([, body]) => rules(body).map(([selector]) => selector));
     expect(windowRules).not.toContain('.awwo-studio-header');
+    expect(windowRules).not.toContain('.awwo-studio-tree');
     expect(windowRules).toContain('.awwo-studio-dialog');
   });
 });
