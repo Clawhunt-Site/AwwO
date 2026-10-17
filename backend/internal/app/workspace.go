@@ -590,19 +590,25 @@ func storeWorkspaceSnapshot(ctx context.Context, tx pgx.Tx, tid, rid, sid string
 	return err
 }
 
-// workspaceQueueWait bounds how long a sandbox run waits for a free slot on its worker, which answers 429 (or 503)
-// while every slot runs a task; workspaceQueuePoll is how often it asks again. On 2026-10-17 a case canvas's twenty
-// builders found eight slots and twelve were refused at once. Variables so tests can shorten them.
+// workspaceQueueWait bounds how long a sandbox run waits for a free slot on its worker, which answers 429 while every
+// slot runs a task (its 503s mean it cannot run sandboxes at all); workspaceQueuePoll is how often it asks again. On
+// 2026-10-17 a case canvas's twenty builders found eight slots and twelve were refused at once. The worker is not told
+// how long a run waited, so its own run limit (25 minutes in production) plus the wait must fit the run's time (30):
+// five minutes, and a canvas node waits again on its retries. Variables so tests can shorten them.
 var (
-	workspaceQueueWait = 10 * time.Minute
+	workspaceQueueWait = 5 * time.Minute
 	workspaceQueuePoll = 5 * time.Second
 )
 
+// workspaceStoppedInLine is what admitWorkspaceRun answers when the run is stopped while it waits for a slot.
+const workspaceStoppedInLine = "workspace_stopped_in_line"
+
 // admitWorkspaceRun hands a sandbox run to its worker and returns the event stream, or the code the run fails with. A
-// worker whose slots are all taken is asked again every workspaceQueuePoll until one frees or the wait runs out
+// worker whose slots are all taken (429) is asked again every workspaceQueuePoll until one frees or the wait runs out
 // (workspaceQueueWait, and never more than half of what is left of the run's deadline), as a managed-execution task
 // waits (startComputerTask); the run records workspace_queued, then workspace_started once it runs. A wait that runs
-// out fails as workspace_busy, which a canvas node retries, since nothing ran; any other refusal ends the run at once.
+// out fails as workspace_busy, which a canvas node retries, since nothing ran; a stop during the wait answers
+// workspaceStoppedInLine; any other refusal (a 503: no sandbox to run in) ends the run at once.
 func (a *App) admitWorkspaceRun(ctx context.Context, tid, rid, runtime string, body []byte) (*http.Response, string) {
 	var queuedAt time.Time
 	limit := workspaceQueueWait
@@ -622,7 +628,7 @@ func (a *App) admitWorkspaceRun(ctx context.Context, tid, rid, runtime string, b
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable {
+		if resp.StatusCode != http.StatusTooManyRequests {
 			return nil, "workspace_runtime_rejected"
 		}
 		if queuedAt.IsZero() {
@@ -637,8 +643,7 @@ func (a *App) admitWorkspaceRun(ctx context.Context, tid, rid, runtime string, b
 		}
 		select {
 		case <-ctx.Done():
-			// The run's own outcome (stopped, timed out) replaces this code (failRun).
-			return nil, "workspace_busy"
+			return nil, workspaceStoppedInLine
 		case <-time.After(workspaceQueuePoll):
 		}
 	}
@@ -736,6 +741,13 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 		}
 	}()
 	resp, code := a.admitWorkspaceRun(ctx, tid, rid, snap.Runtime, body)
+	if code == workspaceStoppedInLine {
+		// Nothing ran: an API shutdown is the server's doing (interrupted, as a managed-execution task waiting for its
+		// worker is), anything else a member's stop.
+		closeWorkspace()
+		a.computerStopped(tid, rid)
+		return
+	}
 	if code != "" {
 		failRun(code)
 		return

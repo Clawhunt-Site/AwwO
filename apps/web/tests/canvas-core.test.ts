@@ -60,11 +60,11 @@ describe('ports: typed port derivation', () => {
     ]);
   });
 
-  it('gives a video session the same single picture reference input, its first frame', () => {
+  it('gives a video session a picture reference input that takes several wires, one per subject it keeps', () => {
     const ports = portsFor(createSessionNode('video', { x: 0, y: 0 }));
     expect(ports.filter((p) => p.side === 'input')).toEqual([
       { id: 'context', side: 'input', dataType: 'text', multi: true },
-      { id: 'reference', side: 'input', dataType: 'image' },
+      { id: 'reference', side: 'input', dataType: 'image', multi: true },
     ]);
   });
 

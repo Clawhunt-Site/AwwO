@@ -69,13 +69,26 @@ type referenceUploader interface {
 	uploadReference(ctx context.Context, ref mediaReference, data []byte, runID string) (string, error)
 }
 
+// subjectReferenceModel reports a model whose every picture is a subject reference its words call by number (@Image 1,
+// @Image 2): RunningHub's models that name a field for their pictures (runningHubReferenceField).
+func subjectReferenceModel(m *mediaModel) bool {
+	return m != nil && m.Provider == mediaProviderRunningHub && runningHubReferenceField[m.ID] != ""
+}
+
+// errSubjectReferenceUnusable refuses a subject-reference generation one of whose pictures cannot be used: leaving it
+// out would give every later picture another number, and the words would name the wrong subjects.
+var errSubjectReferenceUnusable = setupError{"media_reference_unavailable",
+	"Every picture this video is made from must be a PNG, JPEG or WebP of this canvas, up to 10 MB: one is not, and leaving it out would renumber the rest"}
+
 // freezeMediaReferences picks the pictures a generation of model m starts from: the first ones the text names, up
 // to the model's limit, that are this canvas's uploads or generated media of a type the provider takes. Anything
-// else the text names (another canvas's file, a document, a deleted upload, a picture too large) is left out.
+// else the text names (another canvas's file, a document, a deleted upload, a picture too large) is left out, except
+// for a subject-reference model, which refuses the generation instead (errSubjectReferenceUnusable).
 func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasID, text string, m *mediaModel) ([]mediaReference, error) {
 	if m == nil || m.References <= 0 || canvasID == "" {
 		return nil, nil
 	}
+	numbered := subjectReferenceModel(m)
 	types := mediaReferenceTypes[m.Provider]
 	limit := mediaReferenceLimit(m.Provider)
 	refs := []mediaReference{}
@@ -88,15 +101,24 @@ func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasI
 		e := q.QueryRow(ctx, "SELECT name,size,sha256,storage_path,content_type FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 AND (field_id=$4 OR field_id LIKE 'media-%')",
 			tid, canvasID, id, uploadField).Scan(&ref.Name, &ref.Size, &ref.SHA256, &rel, &contentType)
 		if noRows(e) {
+			if numbered {
+				return nil, errSubjectReferenceUnusable
+			}
 			continue
 		}
 		if e != nil {
 			return nil, e
 		}
 		if rel == nil || contentType == nil || !types[*contentType] || ref.Size <= 0 || ref.Size > limit || len(ref.SHA256) != 64 {
+			if numbered {
+				return nil, errSubjectReferenceUnusable
+			}
 			continue
 		}
 		if _, ok := a.mediaFile(tid, *rel); !ok {
+			if numbered {
+				return nil, errSubjectReferenceUnusable
+			}
 			continue
 		}
 		ref.ContentType, ref.Path = *contentType, *rel

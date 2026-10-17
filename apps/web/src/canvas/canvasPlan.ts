@@ -129,7 +129,7 @@ export function withMediaNodes(protocol: string, kinds: ReadonlyArray<MediaKind>
   const names = offered.map(kind => `${kind}=${MEDIA_KIND_WORDS[kind]}`).join('、');
   const line = `媒体节点（templateId 为 ${names}）：只在需求明确需要生成这类素材时添加，每个素材一个节点；在 inputValues.prompt 写这个素材完整、具体的生成提示词`
     + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona、acceptanceCriteria 和其他输入。'
-    + '媒体节点的输出端口 ID 为 result（图片、视频为对应类型，3D 模型为 file），图片节点和 3D 模型节点另有 reference 输入，可接上游图片节点的 result 作为参考图（按图改图、按图生成 3D 模型；先出角色或产品图、再做 3D 时就这样连），视频节点没有 reference 输入；连线只能接到类型相同的输入。'
+    + '媒体节点的输出端口 ID 为 result（图片、视频为对应类型，3D 模型为 file），图片节点和 3D 模型节点另有 reference 输入，可接上游图片节点的 result 作为参考图（按图改图、按图生成 3D 模型；先出角色或产品图、再做 3D 时就这样连）；视频节点的 reference 输入可接多个上游图片节点（每个要在视频里保持样子的人物、物品、场景各一条线）；连线只能接到类型相同的输入。'
     + '画布运行会按连线顺序生成媒体节点：提示词是节点自己的提示词，后面接上连到它 context 输入的上游文字；每次生成计入当天的生成次数。已有媒体节点的提示词用 set_input 的 fieldId:"prompt" 修改。';
   return protocol.split('\n').flatMap(text => text.startsWith('add_node:')
     ? [text.replace('|"review"', `|"review"${offered.map(kind => `|"${kind}"`).join('')}`), line] : [text]).join('\n');

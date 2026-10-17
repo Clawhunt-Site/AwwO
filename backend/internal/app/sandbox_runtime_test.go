@@ -264,11 +264,26 @@ func TestPostgresSandboxRunWaitsInLineForASlot(t *testing.T) {
 		t.Fatal("workspace_busy is not retried as unsent")
 	}
 
-	// Any other refusal ends the run at once, as before.
-	admissions.Store(0)
-	refuse.Store(400)
-	if _, code := awaitRunRow(t, h, tid, start("refused-at-once"), "failed"); code != "workspace_runtime_rejected" || admissions.Load() != 1 {
-		t.Fatalf("a refusal: %s after %d admissions", code, admissions.Load())
+	// Any other refusal ends the run at once, as before: a 400, and a 503 (the worker cannot run sandboxes at all).
+	for _, status := range []int32{400, 503} {
+		admissions.Store(0)
+		refuse.Store(status)
+		if _, code := awaitRunRow(t, h, tid, start(fmt.Sprintf("refused-at-once-%d", status)), "failed"); code != "workspace_runtime_rejected" || admissions.Load() != 1 {
+			t.Fatalf("a %d: %s after %d admissions", status, code, admissions.Load())
+		}
+	}
+
+	// A member's stop while the run waits in line cancels it, and it never reaches the worker again.
+	workspaceQueueWait = 5 * time.Second
+	refuse.Store(429)
+	id = start("stopped-in-line")
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(events(id), "workspace_queued") && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.request(t, c, "POST", "/tenants/"+tid+"/runs/"+id+"/cancel", map[string]any{}, 200)
+	if status, code := awaitRunRow(t, h, tid, id, "cancelled", "failed", "interrupted"); status != "cancelled" {
+		t.Fatalf("a run stopped in line: %s %s", status, code)
 	}
 }
 

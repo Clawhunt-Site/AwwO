@@ -507,7 +507,7 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 				"mode": m.Mode, "prompt": m.Prompt, "params": m.Params, "verified": m.Verified, "references": m.References}
 			// Every picture such a model starts from is a subject reference, a single one included (never a first frame),
 			// so a client says so instead of what a model that starts from one picture does.
-			if m.Provider == mediaProviderRunningHub && runningHubReferenceField[m.ID] != "" {
+			if subjectReferenceModel(m) {
 				entry["referenceMode"] = "subjects"
 			}
 			models = append(models, entry)

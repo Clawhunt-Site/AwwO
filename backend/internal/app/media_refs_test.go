@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func testReference(data []byte, contentType string) mediaReference {
@@ -110,6 +113,41 @@ func TestWiredReferenceLines(t *testing.T) {
 	lines := wiredReferenceLines([]graphEdge{{FromNode: "img"}, {FromNode: "txt"}}, outputs)
 	if lines != "[附件] image-1.png · awwo-file:aimage000000001" {
 		t.Fatal("only pictures an image node delivered become reference lines", lines)
+	}
+}
+
+// noArtifactQuerier finds no artifact: every picture a text names is missing (deleted, another canvas's).
+type noArtifactQuerier struct{}
+
+func (noArtifactQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, pgx.ErrNoRows
+}
+func (noArtifactQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return noArtifactRow{} }
+
+type noArtifactRow struct{}
+
+func (noArtifactRow) Scan(...any) error { return pgx.ErrNoRows }
+
+// A model whose words call its pictures by number (@Image 1, @Image 2) refuses a picture it cannot use instead of
+// leaving it out, which would renumber the rest; a model that starts from its pictures as they come still skips it.
+func TestSubjectReferenceModelsRefuseAnUnusablePicture(t *testing.T) {
+	text := "@Image 1 walks past @Image 2.\n[附件] hero.png · awwo-file:aimage000000001\n[附件] ship.png · awwo-file:aimage000000002"
+	subjects, _ := builtinMediaCatalog.model("rh.seedance-2-multimodal")
+	if !subjectReferenceModel(subjects) {
+		t.Fatal("the reference video is not a subject-reference model")
+	}
+	var refusal setupError
+	if _, err := (&App{}).freezeMediaReferences(t.Context(), noArtifactQuerier{}, "t1", "c1", text, subjects); !errors.As(err, &refusal) ||
+		refusal.code != "media_reference_unavailable" {
+		t.Fatal("a missing subject picture was left out", err)
+	}
+	for _, m := range builtinMediaCatalog.List() {
+		if m.References == 0 || subjectReferenceModel(m) {
+			continue
+		}
+		if refs, err := (&App{}).freezeMediaReferences(t.Context(), noArtifactQuerier{}, "t1", "c1", text, m); err != nil || len(refs) != 0 {
+			t.Fatal("a model taking its pictures as they come refused or kept a missing one", m.ID, refs, err)
+		}
 	}
 }
 
