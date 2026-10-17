@@ -194,6 +194,26 @@ it('shows a flagship run as it went: its agents without the assembly, its runs, 
   expect(within(made).getByText('umber.html, 176 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
 });
 
+it('shows Backprop as it went: thirteen agents over sixteen runs, and the two revisions its nodes ran on', async () => {
+  view();
+  fireEvent.click(screen.getByRole('button', { name: 'Backprop' }));
+  const dialog = screen.getByRole('dialog', { name: 'Backprop' });
+  // The reader, the spec, nine builders, the tester and the review; the assembly makes the page with no model.
+  expect(within(dialog).getByText('13 agents · 6 stages')).toBeVisible();
+  expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/backprop-real.mp4');
+  const made = await within(dialog).findByRole('region', { name: '13 agents, 6 stages, 359 min 22 s in 16 runs' });
+  expect(within(made).getByText('14/14 nodes done')).toBeVisible();
+  const receipt = [...made.querySelectorAll('details')].find(element => element.querySelector('summary')?.textContent === 'Run receipt')!.textContent!;
+  expect(receipt).toContain('up to 64 model calls per node with thinking off');
+  expect(receipt).toContain('16 runs took 359 min 22 s, 523 min 6 s from the first start to the last finish');
+  expect(receipt).toContain('API 19675fb7b979 · runtime 5317b5ec6266 (Read the library); then API c41723c6fbbe · runtime 5317b5ec6266 (Clean-room spec, Kernel');
+  const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
+  fireEvent.click(within(rail).getByRole('button', { name: /^Kernel/ }));
+  expect(within(made).getByText('Worked in its own sandbox computer · 10 model calls · 7,162 output tokens')).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Assembly/ }));
+  expect(within(made).getByText('backprop.html, 139 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
+});
+
 it('copies an illustrated case’s real canvas through the workspace’s copy flow, closing the case first', async () => {
   const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
   render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);

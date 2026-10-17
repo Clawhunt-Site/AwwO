@@ -771,7 +771,7 @@ const KNOWLEDGE: OfficialWorkflow = {
 };
 
 /** The flagship canvases (flagshipWorkflows.ts) published as cases: each has a run record in production-runs/. */
-export const PUBLISHED_FLAGSHIPS = ['umber-photo'] as const;
+export const PUBLISHED_FLAGSHIPS = ['umber-photo', 'backprop-lab'] as const;
 
 /** Keyed by production case id. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(

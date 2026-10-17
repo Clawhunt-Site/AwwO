@@ -52,6 +52,13 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     deliverable: 'A layered photo editor in the browser',
   },
   {
+    id: 'backprop-lab', kind: 'product', recording: true, footage: 'backprop-real',
+    title: 'Backprop',
+    brief: 'A self-training workbench in one web page: build small neural networks, train them in the browser and watch them learn, on nine datasets from point sets to digits and text, with seven optimizers, live loss and decision boundaries and a table of every run; its engine written in a clean room from evidence about an open-source library, and testing itself.',
+    stages: [['Reader'], ['Spec'], ['Kernel', 'Interface', 'Tensors', 'Layers', 'Optimizers', 'Datasets', 'Training', 'Visuals', 'Lab screens'], [ASSEMBLY_ROLE], ['Test'], [REVIEW]],
+    deliverable: 'A neural-network training workbench in the browser',
+  },
+  {
     id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
     title: 'Neon City',
     brief: 'A cinematic full-screen interactive brand page: a future city whose lights never go out on a rainy night.',
