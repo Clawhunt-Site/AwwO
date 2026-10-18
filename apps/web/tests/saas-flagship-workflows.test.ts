@@ -47,8 +47,23 @@ it('compiles each flagship into one DAG that runs left to right: spec, builders,
 it('assembles the page from every builder with no model, and hands it to the sandbox as a file', () => {
   for (const item of FLAGSHIPS) {
     const document = createOfficialDocument(item);
-    const pages = document.nodes.filter((node): node is AssembleNode => node.kind === 'assemble');
+    const assembled = document.nodes.filter((node): node is AssembleNode => node.kind === 'assemble');
+    // The page is the assembly the kernel boots from; any other assemble node writes a tool file from its template
+    // alone (Errand's recorder) and hands it by file to agents in their sandbox computers.
+    const pages = assembled.filter(node => (node.contract?.inputs ?? []).some(field => field.id === 'from_core'));
     expect(pages, item.id).toHaveLength(1);
+    for (const tool of assembled.filter(node => !pages.includes(node))) {
+      expect(tool.contract?.inputs ?? [], `${item.id}/${tool.title}`).toEqual([]);
+      expect(templateIssues(tool.template, [])).toEqual([]);
+      expect(tool.contract?.outputs.map(field => [field.id, field.type])).toEqual([['file', 'file']]);
+      const wires = document.edges.filter(edge => edge.fromNode === tool.id);
+      expect(wires.length, `${item.id}/${tool.title}`).toBeGreaterThan(0);
+      for (const wire of wires) {
+        expect([wire.fromPort, wire.dataType]).toEqual(['out:file', 'file']);
+        const agent = document.nodes.find((node): node is SessionNode => node.kind === 'session' && node.id === wire.toNode);
+        expect(agent?.runtime, `${item.id}/${tool.title} -> ${wire.toNode}`).toBe(SANDBOX_RUNTIME);
+      }
+    }
     const page = pages[0];
     const inputs = (page.contract?.inputs ?? []).map(field => field.id);
     expect(templateIssues(page.template, inputs)).toEqual([]);
