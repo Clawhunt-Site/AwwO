@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
 import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
 import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities, WORKSPACE_SOFTWARE } from './workspace-sandbox.ts';
+import { snapshotFailure } from './runner.mjs';
+import { EMPTY_WORKSPACE_SNAPSHOT } from './workspace-runtime.ts';
 
 const config = { dockerExecutable: '/usr/bin/docker', image: 'awwo-workspace@sha256:' + 'a'.repeat(64) };
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
@@ -274,6 +276,23 @@ test('a snapshot leaves out the package caches in HOME, and one made before them
   assert.equal(await readFile(join(older.workspace, 'p01.js'), 'utf8'), 'part one');
   await assert.rejects(readFile(join(older.workspace, '.npm/_cacache/index-v5/aa/bb/three')), /ENOENT/);
   await assert.rejects(readFile(join(older.workspace, '.cache/pip/selfcheck.json')), /ENOENT/);
+});
+
+test('the worker names why a snapshot failed in closed words, and the empty snapshot a run then keeps restores', async t => {
+  // The helper's own messages, as the runner sees them (its log never carries the paths they name).
+  const failure = async (prepare: (workspace: string) => Promise<void>) => {
+    const f = await filesystemFixture(t);
+    await prepare(f.workspace);
+    return f.call('archive').then(() => 'archived', (error: Error) => snapshotFailure(error));
+  };
+  assert.equal(await failure(async w => { await writeFile(join(w, 'real'), 'x'); await symlink(join(w, 'real'), join(w, 'link')); }), 'link_or_special_file');
+  assert.equal(await failure(async w => { await writeFile(join(w, 'big.bin'), randomBytes(2 * 1024 * 1024 + 1)); }), 'file_too_large');
+  assert.equal(await failure(async w => { for (const name of ['a.bin', 'b.bin']) await writeFile(join(w, name), randomBytes(1536 * 1024)); }), 'workspace_too_large');
+  assert.equal(snapshotFailure(new Error('Workspace sandbox is closed')), 'interrupted');
+  assert.equal(snapshotFailure(undefined), 'other');
+  const f = await filesystemFixture(t);
+  assert.deepEqual(await f.call('restore', { content: EMPTY_WORKSPACE_SNAPSHOT.content }), { ok: true });
+  assert.deepEqual(await readdir(f.workspace), []);
 });
 
 test('real filesystem helper rejects symlink files, symlink ancestors, special files and immutable inputs', async t => {

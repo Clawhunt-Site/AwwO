@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { compileWorkspaceDelivery, executeWorkspaceAgent, verifiedWorkspaceFile, WORKSPACE_MODEL_TIMEOUT_MS } from './workspace-runtime.ts';
+import { compileWorkspaceDelivery, EMPTY_WORKSPACE_SNAPSHOT, executeWorkspaceAgent, verifiedWorkspaceFile, WORKSPACE_MODEL_TIMEOUT_MS } from './workspace-runtime.ts';
 import { authorizeWorkspace, loadWorkspaceConfig, validateWorkspaceRequest, type WorkspaceRequest } from './workspace-protocol.ts';
 import { classifyError } from './errors.mjs';
 
@@ -156,6 +156,57 @@ test('a model call may wait for its first byte as long as the runtime says, not 
     broker: async name => { if (name === 'snapshot') return snapshot(); throw new Error('unexpected tool'); } });
   await assert.rejects(run(400), (error: unknown) => classifyError(error).code === 'DEADLINE_EXCEEDED');
   await run(10_000);
+});
+
+test('a workspace that cannot be snapshotted still delivers what the run published, keeping the snapshot it started from', { timeout: 20_000 }, async t => {
+  // PALLWARD's tester published a checked page and its report, answered, and lost both when its snapshot failed (2026-10-18).
+  const page = '<!doctype html><title>checked</title>';
+  const steps = [{ name: 'workspace_publish', arguments: { field: 'page', path: 'index.html' } }];
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const value = JSON.parse(body);
+    if (req.url === '/api/internal/workspace-calls') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ [value.operation === 'admit' ? 'admitted' : 'settled']: true, index: value.index })); return;
+    }
+    const step = steps[calls++];
+    res.setHeader('content-type', 'text/event-stream');
+    const send = (delta: unknown, finish: string | null) => res.write(`data: ${JSON.stringify({ id: `chat_${calls}`, object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    send({ role: 'assistant', ...(step ? { tool_calls: [{ index: 0, id: `tool_${calls}`, type: 'function', function: { name: step.name, arguments: JSON.stringify(step.arguments) } }] } : { content: '{"page":""}' }) }, null);
+    send({}, step ? 'tool_calls' : 'stop');
+    res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })}\n\ndata: [DONE]\n\n`); res.end();
+  });
+  const base = await listening(server); t.after(() => { server.closeAllConnections(); server.close(); });
+  const run = async (starting?: { name: string; content: string; encoding: 'base64'; sha256: string }, abort?: AbortController) => {
+    calls = 0;
+    const events: Record<string, unknown>[] = [];
+    await executeWorkspaceAgent({ request: { prompt: 'Publish the page', messages: [], workspace: { ...workspace(`${base}/api/internal/workspace-calls`), ...(starting ? { snapshot: starting } : {}) } },
+      modelConfig: { model: 'fixture', apiKey: 'fixture', baseURL: `${base}/v1`, protocol: 'chat_completions', contextWindow: 65_536, maxTokens: 4096 },
+      signal: (abort ?? new AbortController()).signal, emit: async event => { events.push(event); },
+      broker: async name => {
+        if (name === 'workspace_publish') return file('index.html', page);
+        if (name === 'snapshot') { abort?.abort(); throw new Error('Workspace operation failed'); }
+        throw new Error('unexpected tool');
+      } });
+    return events.at(-1)!;
+  };
+  // A node's first run: nothing to keep, so an empty snapshot.
+  const done = await run();
+  assert.equal(done.type, 'completed');
+  assert.equal(JSON.parse(String(done.text)).page, page);
+  assert.deepEqual(done.workspaceSnapshot, { name: 'workspace.zip', encoding: 'base64', content: EMPTY_WORKSPACE_SNAPSHOT.content, sha256: EMPTY_WORKSPACE_SNAPSHOT.sha256 });
+  // A later run keeps the snapshot it started from: the next run loses only this run's own changes, not the project.
+  const before = snapshot();
+  const later = await run({ name: 'workspace.zip', content: before.content, encoding: 'base64', sha256: before.sha256 });
+  assert.equal(later.type, 'completed');
+  assert.deepEqual(later.workspaceSnapshot, { name: 'workspace.zip', encoding: 'base64', content: before.content, sha256: before.sha256 });
+  // A run stopped while its snapshot is taken ends stopped, not completed.
+  await assert.rejects(run(undefined, new AbortController()), (error: unknown) => (error as Error)?.name === 'AbortError');
+  const empty = Buffer.from(EMPTY_WORKSPACE_SNAPSHOT.content, 'base64');
+  assert.equal(empty.length, 22);
+  assert.equal(empty.readUInt32LE(0), 0x06054b50, 'an end-of-central-directory record: a valid ZIP with no entries');
+  assert.equal(createHash('sha256').update(empty).digest('hex'), EMPTY_WORKSPACE_SNAPSHOT.sha256);
 });
 
 test('denied admission never reaches the provider or sandbox', { timeout: 10_000 }, async t => {

@@ -15,6 +15,19 @@ export const TASK_URL = new URL('./agent-task.mjs', import.meta.url);
 // API key or the short-lived credentials resolved here, over the same private IPC as any key.
 const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
+// Why a workspace snapshot failed, in closed words: the helper's message names paths a member made, which never reach a
+// log. The words follow workspace-sandbox.ts's file helper.
+export function snapshotFailure(error) {
+  const message = String(error?.message ?? '');
+  if (/symlink or special file/.test(message)) return 'link_or_special_file';
+  if (/exceeds snapshot size limit|archive exceeds size limit/.test(message)) return 'workspace_too_large';
+  if (/file exceeds size limit/i.test(message)) return 'file_too_large';
+  if (/too many entries/i.test(message)) return 'too_many_files';
+  if (/Invalid workspace path/.test(message)) return 'invalid_path';
+  if (/timed out|cancelled|closed/i.test(message)) return 'interrupted';
+  return 'other';
+}
+
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, tracing configuration and the launching user's configuration.
 export function workerEnvironment(directory, executable = process.execPath) {
@@ -118,8 +131,13 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
       toolPending = true;
       dispatchWorkspaceTool(sandbox, event.name, event.args).then(result => {
         if (!cancellation && !terminalEvent && child.connected) child.send({ type: 'workspace_result', sequence: event.sequence, ok: true, result }, () => {});
-      }, () => {
-        if (!cancellation && !terminalEvent && child.connected) child.send({ type: 'workspace_result', sequence: event.sequence, ok: false }, () => {});
+      }, (error) => {
+        if (!cancellation && !terminalEvent && child.connected) {
+          // A run keeps the snapshot it started from when its workspace cannot be kept; the log says why, in closed words
+          // only. A run being stopped ends as stopped, so it logs nothing here.
+          if (event.name === 'snapshot') console.error(JSON.stringify({ service: 'awwo-openai-agents-worker', runId: request.runId, event: 'workspace_snapshot_failed', reason: snapshotFailure(error) }));
+          child.send({ type: 'workspace_result', sequence: event.sequence, ok: false }, () => {});
+        }
       }).finally(() => { toolPending = false; });
       return;
     }

@@ -136,6 +136,19 @@ export const WORKSPACE_CONTEXT_RESERVE = 8192;
  *  reported as MODEL_UNAVAILABLE), other providers' by fetch's own header timeout, and every call by the run's limit and
  *  its cancel. */
 export const WORKSPACE_MODEL_TIMEOUT_MS = 30 * 60_000;
+/** What a run keeps of a workspace it cannot keep: an empty ZIP (the end-of-central-directory record alone). */
+export const EMPTY_WORKSPACE_SNAPSHOT: WireFile = Object.freeze({ path: 'workspace.zip', encoding: 'base64', byteLength: 22,
+  content: Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]).toString('base64'),
+  sha256: createHash('sha256').update(Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)])).digest('hex') });
+/** What a run whose workspace cannot be snapshotted keeps: the snapshot it started from, else the empty one. */
+export function startingSnapshot(previous: WorkspaceRequest['snapshot']): WireFile {
+  if (!previous || previous.encoding !== 'base64' || typeof previous.content !== 'string') return EMPTY_WORKSPACE_SNAPSHOT;
+  const bytes = Buffer.from(previous.content, 'base64');
+  // The request was validated when it arrived; checked again, as any bytes the run sends back are.
+  if (bytes.length > WORKSPACE_FILE_BYTES || bytes.toString('base64') !== previous.content
+    || createHash('sha256').update(bytes).digest('hex') !== previous.sha256) return EMPTY_WORKSPACE_SNAPSHOT;
+  return { path: 'workspace.zip', content: previous.content, encoding: 'base64', byteLength: bytes.length, sha256: previous.sha256 };
+}
 
 export async function executeWorkspaceAgent({ request, modelConfig, signal, emit, broker, modelFetch, abilities = { tools: [], web: false }, modelTimeoutMs = WORKSPACE_MODEL_TIMEOUT_MS }: {
   request: Request; modelConfig: ModelConfig; signal: AbortSignal; emit: (event: Event) => Promise<unknown>; broker: WorkspaceBroker;
@@ -290,7 +303,13 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
     }
   }
   if (text === undefined) throw new RuntimeError('OUTPUT_CONTRACT_INVALID');
-  const snapshot = verifiedWorkspaceFile(await broker('snapshot', {}));
+  // A workspace that cannot be kept (a symlink, a file or a ZIP over 2 MiB, too many files, a helper that timed out) no
+  // longer costs the run the delivery it published, as PALLWARD's tester lost a checked page and its report
+  // (2026-10-18): the run keeps the snapshot it started from, so the node's next run loses only this run's own changes,
+  // and an empty one when it started with none. The worker logs why (runner.mjs).
+  let snapshot: WireFile;
+  try { snapshot = verifiedWorkspaceFile(await broker('snapshot', {})); }
+  catch { signal.throwIfAborted(); snapshot = startingSnapshot(request.workspace.snapshot); }
   signal.throwIfAborted();
   // Final-only output: intermediate tool discussion is never mistaken for the published artifact.
   await emit({ type: 'completed', text, workspaceSnapshot: { name: 'workspace.zip', encoding: snapshot.encoding, content: snapshot.content, sha256: snapshot.sha256 } });
