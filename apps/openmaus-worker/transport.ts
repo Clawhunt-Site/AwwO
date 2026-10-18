@@ -14,6 +14,17 @@ export const TOOLS = [
   { name: 'archive', description: 'Publish the actual workspace source as workspace.zip.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ] as const;
 export type CapturedCall = { tool: string; arguments: Record<string, unknown> };
+/** The pinned core's chat driver lets a turn make 16 model calls (server/drivers/openai-chat.ts at UPSTREAM_REVISION:
+ *  `for (let round = 0; round < 16; round++)`) and fails the whole turn when the last answer still asks for a tool: a
+ *  task that had done its work lost its answer (2026-10-18). So the call that can be the turn's last asks for the
+ *  final answer instead, and a turn the core stopped at that limit is the task's call budget (runtime.ts). */
+export const CORE_MODEL_ROUNDS = 16;
+export const FINAL_CALL_NOTE = '[AwwO] This is the last model call this task allows: no model call follows it, so a tool you call now ends the task unfinished and you will not see its result. Do not call any tool. Reply with your final answer now: what you did and checked, the files you published, and what is still left and how to continue.';
+/** The number of the call that can be a task's last: its own budget, or the core's rounds when they come first. */
+export const finalModelCall = (request: Pick<RunRequest, 'maxModelCalls'>) => Math.min(request.maxModelCalls, CORE_MODEL_ROUNDS);
+/** The API's model proxy takes at most this many messages in one call (backend/internal/app/computer_model_proxy.go), so
+ *  a final call already at it goes as it came, without the note, rather than be refused for one message more. */
+export const PROXY_MESSAGES = 128;
 export async function listenLocal(server: Server): Promise<string> {
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
   const address = server.address(); if (!address || typeof address === 'string') throw new WorkerError('LISTEN_FAILED', 500);
@@ -69,10 +80,12 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
         const body = await readJSON(req, LIMITS.response);
         if (!record(body) || body.model !== 'awwo-model' || !Array.isArray(body.messages)) throw new WorkerError('INVALID_MODEL_REQUEST');
         if (++modelCalls > request.maxModelCalls) throw new WorkerError('MODEL_BUDGET_EXCEEDED', 429);
+        const messages = modelCalls === finalModelCall(request) && body.messages.length < PROXY_MESSAGES
+          ? [...body.messages, { role: 'user', content: FINAL_CALL_NOTE }] : body.messages;
         const endpoint = request.modelProxyURL.replace(/\/+$/, '');
         const response = await fetch(endpoint.endsWith('/chat/completions') ? endpoint : endpoint + '/chat/completions', {
           method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${request.modelProxyToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ ...body, model: 'awwo-model', stream: false, stream_options: undefined }), signal,
+          body: JSON.stringify({ ...body, messages, model: 'awwo-model', stream: false, stream_options: undefined }), signal,
         });
         if (!response.ok) {
           let code = 'MODEL_PROXY_REJECTED';

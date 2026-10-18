@@ -15,6 +15,28 @@ import { diagnostic, safeFailureDetails, type RuntimeStage } from './diagnostics
 // model wrote a long file stopped part-way (2026-10-16, CORE_EXECUTION_FAILED at stage poll). 10 minutes matches the API
 // proxy's computerModelCallTimeout and the workers' own per-call limit.
 export const CORE_MODEL_IDLE_TIMEOUT_MS = '600000';
+/** How the pinned core said it stopped a failed turn: it records an `error: <message>` activity (server/index.ts), with its
+ *  chat driver's messages at UPSTREAM_REVISION (server/drivers/openai-chat.ts). Only these closed labels reach a log,
+ *  never the text: a turn stopped at the core's 16 rounds is the task's call budget (transport.ts CORE_MODEL_ROUNDS),
+ *  which the API reads as such (computer_call_budget) instead of a platform failure. */
+const CORE_STOPS: ReadonlyArray<readonly [string, string]> = [
+  ['error: model-call limit reached before a final response', 'CORE_ROUND_LIMIT'],
+  ['error: One or more tool operations failed or were denied', 'CORE_TOOL_FAILED'],
+  ['error: provider did not finish the response', 'CORE_UNFINISHED_RESPONSE'],
+  ['error: provider returned an empty response', 'CORE_EMPTY_RESPONSE'],
+];
+export function coreStopReason(messages: unknown[]): string {
+  const stop = messages.findLast((message: unknown) => record(message) && message.kind === 'activity' && record(message.tool)
+    && typeof message.tool.name === 'string' && message.tool.name.startsWith('error: '));
+  if (!record(stop) || !record(stop.tool) || typeof stop.tool.name !== 'string') return 'UNCLASSIFIED';
+  const name = stop.tool.name;
+  return CORE_STOPS.find(([prefix]) => name.startsWith(prefix))?.[1] ?? 'CORE_ERROR';
+}
+/** The code of a turn the core failed: the task's call budget when it used its calls up, by the transport's count or
+ *  at the core's own rounds; else the core's failure. */
+export function failedTurnCode(modelCalls: number, request: Pick<RunRequest, 'maxModelCalls'>, stop: string): string {
+  return modelCalls > request.maxModelCalls || stop === 'CORE_ROUND_LIMIT' ? 'MODEL_BUDGET_EXCEEDED' : 'CORE_EXECUTION_FAILED';
+}
 /** What the agent is told about its workspace: the files it was given, the tools its image has and whether it reaches
  *  the web, as the deployment configured them (config.ts); without any, what it was always told. */
 export function workspaceSoul(config: Pick<WorkerConfig, 'tools'> & { sandbox: Pick<WorkerConfig['sandbox'], 'egress'> }, request: Pick<RunRequest, 'inputs'>): string {
@@ -87,6 +109,7 @@ export class ManagedRun {
     let result: WorkerEvent = { type: 'failed', code: 'RUN_FAILED', message: 'OpenMaus task failed.' };
     let stage: RuntimeStage = 'sandbox';
     let failure: { stage: RuntimeStage; errorName: string; reason: string } | undefined;
+    let coreStop = '';
     const timer = setTimeout(() => this.controller.abort(new WorkerError('TIMEOUT')), this.request.timeoutMs);
     const signal = this.controller.signal;
     try {
@@ -165,13 +188,18 @@ export class ManagedRun {
           const output = boundedText(safeMessage(terminal.text, secrets), 256 * 1024);
           result = { type: 'completed', output: output.text, truncated: output.truncated }; break;
         }
-        if (snapshot.phase === 'untracked' || snapshot.messages.some((message: unknown) => record(message) && message.turnSucceeded === false)) throw new WorkerError(transport.modelCalls() > this.request.maxModelCalls ? 'MODEL_BUDGET_EXCEEDED' : 'CORE_EXECUTION_FAILED');
+        if (snapshot.phase === 'untracked' || snapshot.messages.some((message: unknown) => record(message) && message.turnSucceeded === false)) {
+          coreStop = coreStopReason(snapshot.messages);
+          throw new WorkerError(failedTurnCode(transport.modelCalls(), this.request, coreStop));
+        }
         await delay(200, undefined, { signal });
       }
     } catch (error) {
       const reason = signal.aborted ? signal.reason : error;
       const code = reason instanceof WorkerError ? reason.code : 'RUN_FAILED';
       failure = { stage, ...safeFailureDetails(reason) };
+      // A turn the core failed says why in its own words, which only reach the log as a label.
+      if (coreStop && failure.reason === 'UNCLASSIFIED' && !signal.aborted) failure.reason = coreStop;
       result = code === 'CANCELLED' ? { type: 'cancelled' } : { type: 'failed', code, message: `OpenMaus task stopped (${code}).` };
     } finally {
       this.finished = true; clearTimeout(timer);
