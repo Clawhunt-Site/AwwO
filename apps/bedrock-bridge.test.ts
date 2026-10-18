@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockOrigin, bridgeFailure, chatUsage,
+  BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockOrigin, bridgeFailure, chatUsage,
   createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
   validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockSdk,
 } from './bedrock-bridge.ts';
@@ -337,7 +337,8 @@ test('the fetch serves only the pinned endpoint and pins the real Bedrock client
   const parsed = data.slice(0, -1).map(frame => JSON.parse(frame));
   assert.deepEqual(parsed.map(chunk => chunk.choices[0]?.delta ?? chunk.usage), [{ role: 'assistant', content: '' }, { content: 'OK' }, {}, { prompt_tokens: 3, completion_tokens: 1 }]);
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].config, { region: REGION, endpoint: 'https://bedrock-runtime.us-east-1.amazonaws.com', maxAttempts: 1, token: { token: BEARER.bearerToken }, authSchemePreference: ['httpBearerAuth'] });
+  assert.deepEqual(sent[0].config, { requestHandler: { disableConcurrentStreams: true, sessionTimeout: BEDROCK_STREAM_IDLE_MS }, region: REGION, endpoint: 'https://bedrock-runtime.us-east-1.amazonaws.com', maxAttempts: 1, token: { token: BEARER.bearerToken }, authSchemePreference: ['httpBearerAuth'] });
+  assert.ok(BEDROCK_STREAM_IDLE_MS > 600_000, 'a silent tool call of a whole output cap fits the idle limit');
   assert.deepEqual(sent[0].input.messages, [{ role: 'user', content: [{ text: 'Hello' }] }]);
   assert.equal(sent[0].destroyed, true);
 });

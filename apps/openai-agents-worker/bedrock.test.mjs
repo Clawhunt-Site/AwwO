@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import http2 from 'node:http2';
 import test from 'node:test';
-import { bedrockBridgeBaseURL, createBedrockFetch } from '../bedrock-bridge.ts';
+import { BEDROCK_STREAM_IDLE_MS, bedrockBridgeBaseURL, createBedrockFetch } from '../bedrock-bridge.ts';
 import { readBedrockCatalog } from '../bedrock-catalog.ts';
 import { executeAgent } from './agent-runtime.mjs';
 import { loadConfig, publicHealth, resolveModelConfig } from './config.mjs';
@@ -154,6 +155,50 @@ test('the official Agents SDK completes a turn through the bridge with provider 
   assert.equal(input.toolConfig, undefined);
   assert.equal(clientConfig.maxAttempts, 1);
   assert.deepEqual(clientConfig.token, { token: BEDROCK_KEY });
+});
+
+test('the real AWS SDK gives a Bedrock stream the bridge\'s idle limit, not its own 300 s', { timeout: 15_000 }, async () => {
+  // Bedrock sends nothing while the model writes a tool call's input, and the SDK closed such a silent HTTP/2 session
+  // after 300 s: PALLWARD's builder calls failed at 300.7 s (2026-10-18). The client the bridge builds must carry the
+  // longer limit through the SDK's own handler (an SDK upgrade that dropped the option would bring the cut back).
+  const real = await import('@aws-sdk/client-bedrock-runtime');
+  const clients = [];
+  class BedrockRuntimeClient extends real.BedrockRuntimeClient {
+    constructor(options) { super(options); clients.push(this); }
+    async send() { throw Object.assign(new Error('no network in tests'), { name: 'ServiceUnavailableException' }); }
+  }
+  const fetch = createBedrockFetch({ region: 'us-east-1', model: 'global.anthropic.claude-opus-5-5', auth: { bearerToken: BEDROCK_KEY }, sdk: { ...real, BedrockRuntimeClient } });
+  const response = await fetch(`${bedrockBridgeBaseURL('us-east-1')}/chat/completions`, { method: 'POST', body: JSON.stringify({ model: 'global.anthropic.claude-opus-5-5', messages: [{ role: 'user', content: 'Hi' }], stream: true, stream_options: { include_usage: true }, max_tokens: 64 }) });
+  assert.equal(response.status, 503);
+  assert.equal(clients.length, 1);
+  const handler = clients[0].config.requestHandler;
+  assert.equal(handler.constructor.name, 'NodeHttp2Handler');
+  // That handler sends one event-stream request to a local HTTP/2 server: the session it opens gets the bridge's idle
+  // limit as its own timeout, the one that destroyed silent sessions at 300 s.
+  const server = http2.createServer();
+  server.on('stream', stream => { stream.respond({ ':status': 200, 'content-type': 'application/vnd.amazon.eventstream' }); stream.end(); });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const timeouts = [];
+  const connect = handler.connectionManager.connect.bind(handler.connectionManager);
+  handler.connectionManager.connect = url => {
+    const session = connect(url);
+    const setTimeout = session.setTimeout.bind(session);
+    session.setTimeout = (ms, callback) => { timeouts.push(ms); return setTimeout(ms, callback); };
+    return session;
+  };
+  try {
+    const { response: answer } = await handler.handle({ protocol: 'http:', hostname: '127.0.0.1', port: server.address().port, path: '/model/x/converse-stream', method: 'POST', headers: {}, query: {} }, { isEventStream: true });
+    assert.equal(answer.statusCode, 200);
+    answer.body.resume();
+    await once(answer.body, 'end');
+  } finally {
+    handler.destroy();
+    server.close();
+  }
+  // Then 0 when the finished session is let go (ClientHttp2SessionRef); the only limit it ran under is the bridge's.
+  assert.deepEqual(timeouts.filter(ms => ms > 0), [BEDROCK_STREAM_IDLE_MS]);
+  assert.ok(BEDROCK_STREAM_IDLE_MS >= 15 * 60_000);
 });
 
 test('a Bedrock tool call runs the registered tool once and its result is the turn output', { timeout: 15_000 }, async () => {

@@ -71,6 +71,13 @@ export function validBedrockAuth(value: unknown): value is BedrockAuth {
 /** The OpenAI SDK requires an API key string; the bridge ignores the header it produces. */
 export const BEDROCK_BRIDGE_API_KEY = 'awwo-bedrock-bridge';
 
+/** How long a Bedrock stream may send nothing. Bedrock holds a tool call's input back until the model has written all of
+ *  it, so a call that writes a file in one tool call is silent for as long as it writes: 32,000 tokens take 6 to 10
+ *  minutes at the rates seen. The AWS SDK closes an HTTP/2 session after 300 s without traffic (its default for event
+ *  streams), which cut PALLWARD's builder calls at 300.7 s (2026-10-18). A run's own limit and its cancel still end a
+ *  call sooner. */
+export const BEDROCK_STREAM_IDLE_MS = 15 * 60_000;
+
 type ResolvedCredentials = { accessKeyId: string; secretAccessKey: string; sessionToken?: string; expiration?: Date };
 
 /** A child keeps the credentials it starts with for its whole run (at most a 600 s timeout plus
@@ -613,6 +620,9 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
     const forward = () => abort.abort(init.signal?.reason);
     if (init.signal?.aborted) forward(); else init.signal?.addEventListener('abort', forward, { once: true });
     const client = new sdk.BedrockRuntimeClient({
+      // The SDK's own HTTP/2 handler settings (one stream per session) with a longer idle limit; a test or an explicit
+      // request handler in clientOptions replaces them.
+      requestHandler: { disableConcurrentStreams: true, sessionTimeout: BEDROCK_STREAM_IDLE_MS },
       ...clientOptions,
       region,
       endpoint: bedrockOrigin(region),
