@@ -4,6 +4,7 @@ import { ASSEMBLY_ROLE, MEDIA_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, ty
 import { PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import { LazyBoundary } from './LazyBoundary';
+import { reloadAfterSaving } from './staleBuild';
 import './production-cases.css';
 
 const ProductionShowcase = lazy(() => import('./ProductionShowcase'));
@@ -124,7 +125,7 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
         </ol>
       </div>
       <LazyBoundary fallback={<p className="production-made-pending" role="alert">The run record could not be loaded.{' '}
-        <button type="button" className="saas-link" onClick={() => location.reload()}>Reload the page</button></p>}>
+        <button type="button" className="saas-link" onClick={() => void reloadAfterSaving()}>Reload the page</button></p>}>
         <Suspense fallback={<p className="production-made-pending" role="status">Loading the run record…</p>}>
           <ProductionShowcase item={item} onReuse={onReuse && (workflow => { onClose(); onReuse(workflow); })} />
         </Suspense>

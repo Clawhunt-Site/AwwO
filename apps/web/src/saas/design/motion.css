@@ -56,6 +56,7 @@
     animation: awwo-toast-in var(--saas-dur-3) var(--saas-ease);
   }
   .saas-session-ended { animation: awwo-toast-in var(--saas-dur-3) var(--saas-ease); }
+  .saas-stale-build { animation: awwo-rise-in var(--saas-dur-3) var(--saas-ease); }
 
   /* ── Agent cards ────────────────────────────────────────────────────────────────────────── */
   /* Opening an agent expands it out of its card. */

@@ -5,6 +5,7 @@ import { useSaaSPreferences } from './preferences';
 import { mainSiteURL } from './mainSite';
 import type { Identity } from './api';
 import { LazyBoundary } from './LazyBoundary';
+import { page, reloadAfterSaving } from './staleBuild';
 import './onboarding-host.css';
 
 const WorkModeTutorial = lazy(() => import('./WorkModeTutorial'));
@@ -122,15 +123,30 @@ export function SaaSOnboarding({ identity, children }: { identity: Identity; chi
 
 /** A tab opened before a deploy can lose the tutorial's chunk; a new account reloads instead of skipping
  * it. Like the tutorial it is a native modal dialog, so the page behind it is inert, and it cannot be
- * dismissed: Escape is ignored and a forced close reopens it. */
+ * dismissed: Escape is ignored and a forced close reopens it. The reload saves an open canvas first; should
+ * that fail, or an editor hold changes the canvas does not have yet, the page behind the dialog cannot be
+ * reached, so the dialog says so and lets the reload go on (the browser still asks before leaving unsaved
+ * canvas changes). */
 function TutorialUnavailable() {
   const { t } = useSaaSPreferences();
   const dialog = useRef<HTMLDialogElement>(null);
+  const [kept, setKept] = useState<'failed' | 'editor' | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => { const element = dialog.current; if (element && !element.open) element.showModal(); }, []);
+  const reload = async () => {
+    if (kept) { page.reload(); return; }
+    setSaving(true);
+    const outcome = await reloadAfterSaving();
+    setSaving(false);
+    setKept(outcome.kind === 'failed' || outcome.kind === 'editor' ? outcome.kind : null);
+  };
   return <dialog ref={dialog} className="saas-tutorial-unavailable" role="alertdialog" aria-labelledby="saas-tutorial-unavailable-text"
     onCancel={event => event.preventDefault()} onClose={() => { const element = dialog.current; if (element?.isConnected && !element.open) element.showModal(); }}>
     <p id="saas-tutorial-unavailable-text">{t('新手教程没能加载。刷新页面会重新打开它，看完就可以开始使用。', 'The tutorial could not load. Reloading the page opens it again; finish it to start using AwwO.')}</p>
-    <button type="button" autoFocus onClick={() => location.reload()}>{t('刷新页面', 'Reload page')}</button>
+    {kept && <p role="alert">{kept === 'failed'
+      ? t('画布有修改没能保存，现在刷新可能会丢失这些修改。', 'Your canvas has changes that could not be saved; reloading now may lose them.')
+      : t('有一个打开的编辑面板里还有没保存的修改，现在刷新会丢失这些修改。', 'An editor you have open holds changes the canvas does not have yet; reloading now loses them.')}</p>}
+    <button type="button" autoFocus disabled={saving} onClick={() => void reload()}>{kept ? t('仍然刷新', 'Reload anyway') : t('刷新页面', 'Reload page')}</button>
   </dialog>;
 }
 

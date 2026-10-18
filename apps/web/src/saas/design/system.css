@@ -189,7 +189,7 @@ button.saas-primary:not(:disabled):active, :is(.saas-login, .saas-dashboard, .sa
 /* Notices read as information, not alarm: a coloured dot, quiet text. */
 .saas-error-banner, .saas-runtime-note { font-size: var(--saas-text-sm); line-height: 1.55; }
 .saas-error-banner { background: var(--saas-danger-bg); color: var(--saas-danger); }
-.saas-session-ended { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-raised); box-shadow: var(--saas-shadow-lg); }
+.saas-session-ended, .saas-stale-build { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-raised); box-shadow: var(--saas-shadow-lg); }
 .saas-runtime-note.saas-personal-notice {
   position: relative; z-index: 21; justify-content: center; gap: 6px 12px; padding: 9px 20px;
   font-size: var(--saas-text-sm); line-height: 1.5; color: var(--saas-text);

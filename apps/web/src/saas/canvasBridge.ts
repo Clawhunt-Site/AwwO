@@ -54,6 +54,9 @@ export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | n
 export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
+/** Whether an editable canvas is open and saving: false while it loads, while its local drafts await review (they stay on
+ * this device through a reload) and for a read-only canvas. */
+export function canFlushSaaSCanvas(): boolean { return saveCanvas !== null; }
 export async function flushSaaSCanvas(): Promise<number | void> {
   if (!saveCanvas) throw new Error(canvasText('画布保存尚未就绪', 'Canvas saving is not ready.'));
   return saveCanvas();

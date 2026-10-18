@@ -23,6 +23,7 @@ import { createSaaSAccountApi } from './accountApi';
 import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiModeSwitch, LanguageSwitch } from './preferences';
 import { BootSurface } from './BootSurface';
 import { navigateTo } from './navigation';
+import { StaleBuildNotice } from './StaleBuildNotice';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
@@ -87,7 +88,8 @@ function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: str
 function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
 }
-export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /></SaaSPreferencesProvider>; }
+// Every page, signed in or not, can say that AwwO was updated after it opened and part of it is gone (staleBuild.ts).
+export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /><StaleBuildNotice /></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));

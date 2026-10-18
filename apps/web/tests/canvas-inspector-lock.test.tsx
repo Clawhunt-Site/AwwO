@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { InspectorPanel, type InspectorPanelProps } from '../src/canvas/InspectorPanel';
 import { createFormNode, createSessionNode } from '../src/canvas/canvasDoc';
+import { hasUnsavedEdits } from '../src/canvas/unsavedEdits';
 
 const hire = vi.fn();
 vi.mock('../src/canvasHire', async (original) => ({
@@ -148,5 +149,44 @@ describe('inspector graph-run lock', () => {
     await waitFor(() => expect(p.onBound).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(hire).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A save of the canvas does not carry what an open inspector holds; whoever offers a reload asks first (saas/staleBuild.ts).
+describe('inspector unsaved edits', () => {
+  const form = (): InspectorPanelProps => ({ ...props(), node: { ...createFormNode({ x: 0, y: 0 }), id: 'requirements', title: '需求' } });
+
+  it('says its edits are outside the canvas until it saves, and nothing once it is gone', () => {
+    const p = form();
+    const { unmount } = render(<InspectorPanel {...p} />);
+    expect(hasUnsavedEdits()).toBe(false);
+    fireEvent.change(screen.getByRole('textbox', { name: '字段 1 值' }), { target: { value: '保留这个目标' } });
+    expect(hasUnsavedEdits()).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(p.onSave).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(hasUnsavedEdits()).toBe(false);
+  });
+
+  it('holds nothing while read-only, and nothing when only opened', () => {
+    const p = form();
+    const { rerender, unmount } = render(<InspectorPanel {...p} readOnly />);
+    expect(hasUnsavedEdits()).toBe(false);
+    rerender(<InspectorPanel {...p} readOnly={false} />);
+    expect(hasUnsavedEdits()).toBe(false);
+    unmount();
+  });
+
+  it('holds a bind in flight, whose reply the canvas does not have yet', async () => {
+    const pending = deferred<unknown>();
+    hire.mockReturnValue(pending.promise);
+    const { unmount } = render(<InspectorPanel {...props()} />);
+    expect(hasUnsavedEdits()).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '绑定并创建真实 Agent' }));
+    expect(hasUnsavedEdits()).toBe(true);
+    pending.resolve({ outcome: 'rejected', status: 400, detail: 'no' });
+    await screen.findByText(/绑定被拒绝/);
+    unmount();
+    expect(hasUnsavedEdits()).toBe(false);
   });
 });

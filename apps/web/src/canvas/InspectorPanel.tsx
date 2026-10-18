@@ -36,6 +36,7 @@ import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHir
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
 import { NodeModelSettings } from './NodeModelSettings';
 import { SANDBOX_RUNTIME } from './nodeRuntime';
+import { registerUnsavedEdits } from './unsavedEdits';
 import { AssembleSettings } from './AssembleSettings';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
@@ -292,8 +293,12 @@ export function InspectorPanel({
   // a transient false that could allow the host to discard a real server response.
   useEffect(() => () => closeLockCallbackRef.current?.(false), []);
   const mutationLocked = () => readOnlyRef.current || bindingRef.current || Boolean(initializeRequest.current) || Boolean(heldBindingRef.current);
+  // Edited since it opened (the canvas has the edits only after Save), or holding a reply the canvas has not yet: a reload
+  // offered elsewhere (saas/staleBuild.ts) waits for it.
+  const touched = useRef(false);
+  useEffect(() => registerUnsavedEdits(() => !readOnlyRef.current && (touched.current || mutationLocked())), []); // eslint-disable-line react-hooks/exhaustive-deps
   const editDraft = (next: CanvasNode) => {
-    if (!mutationLocked()) { setDraft(next); setInitialization('idle'); setInitializationError(''); }
+    if (!mutationLocked()) { touched.current = true; setDraft(next); setInitialization('idle'); setInitializationError(''); }
   };
 
   const save = async () => {
