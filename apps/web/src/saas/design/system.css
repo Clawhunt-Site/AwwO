@@ -418,6 +418,11 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
    below them): the brand on the left, whatever follows it (the card or the choices) on the right. */
 .saas-login > .saas-login-brand { grid-row: 1; grid-column: 1; }
 .saas-login > .saas-login-brand + * { grid-row: 1; grid-column: 2; }
+/* The license texts of the code this page runs: one quiet line after the cases, 48px below them as the page's
+   bottom padding is (the 104px row gap is the hero's). */
+.saas-login > .saas-login-footer { grid-column: 1 / -1; margin-top: -56px; font-size: var(--saas-text-sm); }
+.saas-login-footer a { display: inline-flex; align-items: center; min-height: 32px; color: var(--saas-muted); text-decoration: underline; text-underline-offset: 3px; }
+.saas-login-footer a:hover { color: var(--saas-text); }
 .saas-login-brand { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; color: var(--saas-tank-ink, #eaf3f5); }
 .saas-login-brand > span, .saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-ink, #eaf3f5); }
 .saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-muted, #aec3ca); }
@@ -702,6 +707,7 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-login::before { grid-row: 1 / span 2; margin: -60px -12px -16px; border-radius: 26px; }
   .saas-login > .saas-login-brand { grid-row: 1; grid-column: 1; }
   .saas-login > .saas-login-brand + * { grid-row: 2; grid-column: 1; }
+  .saas-login > .saas-login-footer { margin-top: 0; }
   .saas-login::after { display: none; }
   .saas-login-brand h1, .saas-login h1 { margin: 20px 0 10px; font-size: 34px; }
   .saas-login-brand > p { font-size: var(--saas-text-md); }

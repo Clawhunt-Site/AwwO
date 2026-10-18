@@ -2,7 +2,7 @@ import { SecretInput } from './SecretInput';
 import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift } from 'lucide-react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale } from 'lucide-react';
 import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
@@ -45,6 +45,13 @@ import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from '.
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
+/** The license texts of the open-source code this site ships, which the hosted build writes to its root (scripts/bundle-licences.mjs). */
+const LICENSES_URL = '/third-party-licenses.txt';
+/** A link to them, in a tab of its own, as the skill library and the PDF preview open theirs. */
+function LicensesLink({ icon = false }: { icon?: boolean }) {
+  const { t } = useSaaSPreferences();
+  return <a href={LICENSES_URL} target="_blank" rel="noreferrer" title={t('打开开源许可（新窗口）', 'Open the open-source licenses in a new window')}>{icon && <Scale size={16}/>}{t('开源许可', 'Open-source licenses')}</a>;
+}
 const workspaceURL = (tenant?: string, canvas?: string) => {
   const query = new URLSearchParams();
   if (tenant) query.set('tenant', tenant);
@@ -299,7 +306,8 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}<ProductionCases /></main>;
+    </div>}<ProductionCases />
+    <footer className="saas-login-footer"><LicensesLink /></footer></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
@@ -333,6 +341,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
       <LanguageSwitch variant="menu" />
       <UiModeSwitch onSwitched={close} />
       <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
+      <LicensesLink icon />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
       {identity.authentication === 'clawhunt' && <a href={accountURL('invites')}><Gift size={16}/>{t('邀请好友', 'Invite friends')}</a>}
       <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>

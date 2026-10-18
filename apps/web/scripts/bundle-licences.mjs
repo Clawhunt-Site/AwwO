@@ -299,7 +299,7 @@ export function uncovered(committed, packages) {
   return packages.flatMap(entry => entry.parts).filter(part => !committed.includes(part.text)).map(part => part.label);
 }
 
-/** The Vite plugins: one that checks stylesheets before Vite inlines their @imports, one that checks the bundle. root: the app root (apps/web). */
+/** The Vite plugins: one that checks stylesheets before Vite inlines their @imports, one that checks the bundle, one that serves the committed text in the dev server. root: the app root (apps/web). */
 export function bundleLicences(root) {
   // npm stylesheets that stylesheets of their own package pull in, which the bundle holds without a module of their own:
   // found while Vite transforms the stylesheets, counted with the bundle.
@@ -328,6 +328,17 @@ export function bundleLicences(root) {
           + '`npm run licences:saas` in apps/web (a full build that writes the file) and commit it.');
       }
       this.emitFile({ type: 'asset', fileName: OUTPUT, source: current });
+    },
+  }, {
+    // The dev server answers OUTPUT with the committed text, so the app's links to it open it there too (and not the
+    // page Vite falls back to).
+    name: 'awwo-bundle-licences-serve', apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0] !== `/${OUTPUT}`) return next();
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(readFileSync(join(root, COMMITTED)));
+      });
     },
   }];
 }
