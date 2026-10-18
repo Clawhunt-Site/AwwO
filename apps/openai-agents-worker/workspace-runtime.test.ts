@@ -3,8 +3,9 @@ import test from 'node:test';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { compileWorkspaceDelivery, executeWorkspaceAgent, verifiedWorkspaceFile } from './workspace-runtime.ts';
+import { compileWorkspaceDelivery, executeWorkspaceAgent, verifiedWorkspaceFile, WORKSPACE_MODEL_TIMEOUT_MS } from './workspace-runtime.ts';
 import { authorizeWorkspace, loadWorkspaceConfig, validateWorkspaceRequest, type WorkspaceRequest } from './workspace-protocol.ts';
+import { classifyError } from './errors.mjs';
 
 const checksum = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 const workspace = (callbackURL = 'http://127.0.0.1:8087/api/internal/workspace-calls'): WorkspaceRequest => ({
@@ -128,6 +129,33 @@ test('SDK workspace loop edits, tests and publishes with one admission and recei
   assert.equal(events.at(-1)?.type, 'completed');
   assert.equal(JSON.parse(String(events.at(-1)?.text)).page, page);
   assert.equal(events.filter(event => event.type === 'text_delta').length, 0);
+});
+
+test('a model call may wait for its first byte as long as the runtime says, not the SDK default of 10 minutes', { timeout: 20_000 }, async t => {
+  // Bedrock answers a Claude call only once the model has thought: Opus 5.5's Rigs builder was cut at 600 s (2026-10-18).
+  assert.ok(WORKSPACE_MODEL_TIMEOUT_MS >= 30 * 60_000);
+  const server = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const value = JSON.parse(body);
+    if (req.url === '/api/internal/workspace-calls') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ [value.operation === 'admit' ? 'admitted' : 'settled']: true, index: value.index })); return;
+    }
+    // The provider says nothing for 1.2 s, then answers at once.
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    res.setHeader('content-type', 'text/event-stream');
+    res.write(`data: ${JSON.stringify({ id: 'chat_1', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta: { role: 'assistant', content: 'Thought it over.' }, finish_reason: null }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'chat_1', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })}\n\ndata: [DONE]\n\n`); res.end();
+  });
+  const base = await listening(server); t.after(() => { server.closeAllConnections(); server.close(); });
+  const run = (modelTimeoutMs: number) => executeWorkspaceAgent({ request: { prompt: 'Think, then answer', messages: [],
+    workspace: { ...workspace(`${base}/api/internal/workspace-calls`), outputFields: [] } },
+    modelConfig: { model: 'fixture', apiKey: 'fixture', baseURL: `${base}/v1`, protocol: 'chat_completions', contextWindow: 65_536, maxTokens: 4096 },
+    signal: new AbortController().signal, emit: async () => undefined, modelTimeoutMs,
+    broker: async name => { if (name === 'snapshot') return snapshot(); throw new Error('unexpected tool'); } });
+  await assert.rejects(run(400), (error: unknown) => classifyError(error).code === 'DEADLINE_EXCEEDED');
+  await run(10_000);
 });
 
 test('denied admission never reaches the provider or sandbox', { timeout: 10_000 }, async t => {

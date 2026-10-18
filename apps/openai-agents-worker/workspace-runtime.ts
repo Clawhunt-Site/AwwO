@@ -129,9 +129,18 @@ const definitions = [
   { name: 'workspace_archive', description: 'Publish the actual source project as a ZIP into a file output field. Includes README and tests you wrote. Does not mark unrun tests as passed.', properties: { field: property('string', 'Declared file output field ID') } },
 ] as const;
 export const WORKSPACE_CONTEXT_RESERVE = 8192;
+/** The OpenAI client's wait for a model call's first byte. Bedrock answers a Claude call only once the model has thought
+ *  (the response headers come with the first event), and Opus 5.5 can think for longer than the OpenAI SDK's default 10
+ *  minutes: PALLWARD's Rigs builder was cut at 600 s (DEADLINE_EXCEEDED, 2026-10-18). This no longer cuts first: a
+ *  Bedrock call's silent wait is bounded by the bridge's HTTP/2 session idle limit (BEDROCK_STREAM_IDLE_MS, 15 minutes,
+ *  reported as MODEL_UNAVAILABLE), other providers' by fetch's own header timeout, and every call by the run's limit and
+ *  its cancel. */
+export const WORKSPACE_MODEL_TIMEOUT_MS = 30 * 60_000;
 
-export async function executeWorkspaceAgent({ request, modelConfig, signal, emit, broker, modelFetch, abilities = { tools: [], web: false } }: {
+export async function executeWorkspaceAgent({ request, modelConfig, signal, emit, broker, modelFetch, abilities = { tools: [], web: false }, modelTimeoutMs = WORKSPACE_MODEL_TIMEOUT_MS }: {
   request: Request; modelConfig: ModelConfig; signal: AbortSignal; emit: (event: Event) => Promise<unknown>; broker: WorkspaceBroker;
+  /** How long one model call may wait for its first byte (WORKSPACE_MODEL_TIMEOUT_MS; tests set less). */
+  modelTimeoutMs?: number;
   /** What the worker's sandbox offers beyond Node and Python (workspaceAbilities); absent = nothing. */
   abilities?: WorkspaceAbilities;
   /** Serves model requests instead of the network, e.g. the Bedrock bridge. Never used for ledger callbacks. */
@@ -145,7 +154,7 @@ export async function executeWorkspaceAgent({ request, modelConfig, signal, emit
   let calls = 0;
   let activeObserver: ReturnType<typeof createProviderObserver> | undefined;
   const endpoint = `${modelConfig.baseURL.replace(/\/$/, '')}/${modelConfig.protocol === 'responses' ? 'responses' : 'chat/completions'}`;
-  const client = new OpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL, maxRetries: 0,
+  const client = new OpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL, maxRetries: 0, timeout: modelTimeoutMs,
     fetch: async (input, init) => {
       const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
       if (url.href !== endpoint || !activeObserver) throw new RuntimeError('MODEL_REQUEST_REJECTED');
