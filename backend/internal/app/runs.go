@@ -366,6 +366,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		AttachmentText       string   `json:",omitempty"`
 	}{b.SessionID, b.Prompt, b.KnowledgeRevisionIDs, b.AttachmentText})
 	hash := tokenHash(string(body))
+	// A plan's personal settings join the prompt after the hash, so a retry matches its first attempt (planCanvas).
+	b.Prompt = personalizedPrompt(r, b.Prompt)
 	tid := r.PathValue("tenantId")
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {

@@ -41,6 +41,30 @@ func isPlannerRequest(r *http.Request) bool {
 	return v
 }
 
+// The asker's personal settings for a plan (preferences.go plannerPersonalization), and where in the prompt they go:
+// after the canvas context, before the request. Only planCanvas sets it; a client cannot.
+type plannerPersonalKey struct{}
+type plannerPersonal struct {
+	text string
+	at   int
+}
+
+func withPlannerPersonalization(r *http.Request, text string, at int) *http.Request {
+	if text == "" {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), plannerPersonalKey{}, plannerPersonal{text, at}))
+}
+
+// personalizedPrompt is the prompt with the asker's settings in their place, or the prompt as it was.
+func personalizedPrompt(r *http.Request, prompt string) string {
+	p, ok := r.Context().Value(plannerPersonalKey{}).(plannerPersonal)
+	if !ok || p.at < 0 || p.at > len(prompt) || len(prompt)+len(p.text) > 128000 {
+		return prompt
+	}
+	return prompt[:p.at] + p.text + prompt[p.at:]
+}
+
 func (c *Config) plannerSettingsFromEnv() error {
 	c.PlannerPerWorkspaceDay, c.PlannerTotalPerDay, c.PlannerMaxInputBytes = defaultPlannerPerWorkspaceDay, defaultPlannerTotalPerDay, defaultPlannerMaxInputBytes
 	if raw := os.Getenv("AWWO_PLANNER_MODEL"); raw != "" {

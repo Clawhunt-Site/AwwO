@@ -28,6 +28,13 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "Planner requires bounded prompt, context and operationId")
 		return
 	}
+	// The asker's own standing preferences (设置 → 个性化) go before the request, added by createRun after it hashes
+	// the request, so a retry still matches its first attempt when the settings changed between them. A request already
+	// near the run's size limit is planned without them rather than refused.
+	personal := a.plannerPersonalization(r.Context(), currentUser(r).ID)
+	if len(prompt)+len(personal) > 128000 {
+		personal = ""
+	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -84,7 +91,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs, AttachmentText: b.Prompt})
 	// Only this request may run on the operator's planner model (planner_model.go).
-	next := withPlannerRequest(r)
+	next := withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context))
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")

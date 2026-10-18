@@ -24,6 +24,7 @@ import (
 type App struct {
 	workspaceLeases sync.Map // hashed ephemeral bearer -> one admitted coding run
 	computerLeases  sync.Map // hashed task token; never a provider credential
+	exports         accountExports
 
 	obs         *observability
 	pricing     *ModelPricing
@@ -274,6 +275,13 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/appearance", a.auth(a.appearance))
 	m.HandleFunc("PUT /api/v1/appearance", a.auth(a.updateAppearance))
 	m.HandleFunc("GET /api/v1/appearance/export", a.auth(a.exportAppearance))
+	m.HandleFunc("GET /api/v1/auth/preferences", a.auth(a.preferences))
+	m.HandleFunc("PUT /api/v1/auth/preferences", a.auth(a.updatePreferences))
+	m.HandleFunc("GET /api/v1/auth/deletion-request", a.auth(a.deletionRequest))
+	m.HandleFunc("POST /api/v1/auth/deletion-request", a.auth(a.authRate(a.requestDeletion)))
+	m.HandleFunc("DELETE /api/v1/auth/deletion-request", a.auth(a.withdrawDeletion))
+	// Not behind authRate: a long download must never hold one of the sign-in slots (accountExports limits it instead).
+	m.HandleFunc("GET /api/v1/auth/export", a.auth(a.exportAccount))
 	m.HandleFunc("GET /api/v1/invites/{token}", a.auth(a.previewInvite))
 	m.HandleFunc("POST /api/v1/invites/{token}/accept", a.auth(a.acceptInvite))
 	m.HandleFunc("GET /api/v1/auth/me", a.auth(func(w http.ResponseWriter, r *http.Request) { a.meResponse(w, r, currentUser(r), 200) }))
@@ -355,7 +363,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}/cancel", a.tenant(a.cancelGraphRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/operations/{operationId}/cancel", a.tenant(a.cancelGraphOperation, 2))
 	m.HandleFunc("GET /api/v1/admin/summary", a.admin(a.adminSummary))
-	for _, kind := range []string{"tenants", "users", "runs", "audit", "interests"} {
+	for _, kind := range []string{"tenants", "users", "runs", "audit", "interests", "deletions"} {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))
 	}
 	m.HandleFunc("PATCH /api/v1/admin/tenants/{id}", a.admin(a.adminTenant))
