@@ -88,18 +88,19 @@ it('is not listed as a case before a run of it is published', () => {
   expect(Object.keys(EPIC_WORKFLOWS)).toEqual(['pallward']);
 });
 
-it('has the design\'s 69 nodes, well under the 200-node cap: 3 design nodes, 10 concepts, 33 models, 20 builders, assembly, test and review', () => {
+it('has the design\'s 71 nodes, well under the 200-node cap: 3 design nodes, 10 concepts, 33 models, 20 builders, assembly, two fix passes with the first one\'s page between them, and review', () => {
   const document = createOfficialDocument(PALLWARD);
-  expect(PALLWARD.nodes).toHaveLength(26);
+  expect(PALLWARD.nodes).toHaveLength(28);
   expect(PALLWARD.media).toHaveLength(43);
-  expect(document.nodes).toHaveLength(69);
+  expect(document.nodes).toHaveLength(71);
   expect(document.nodes.length).toBeLessThanOrEqual(200);
   expect(PALLWARD.media!.filter(spec => spec.kind === 'image')).toHaveLength(10);
   expect(PALLWARD.media!.filter(spec => spec.kind === 'model3d')).toHaveLength(33);
   expect(builders(PALLWARD).map(node => node.id)).toEqual(MODULES);
-  // 75 wires between agents, one from each model into the assets builder, one from each concept into its model.
-  expect(PALLWARD.edges).toHaveLength(75);
-  expect(document.edges).toHaveLength(118);
+  // 81 wires between agents and assembly nodes, one from each model into the assets builder, one from each concept into
+  // its model.
+  expect(PALLWARD.edges).toHaveLength(81);
+  expect(document.edges).toHaveLength(124);
   expect(PALLWARD.stack).toBe('r186');
   expect(PALLWARD.fonts).toBe(true);
 });
@@ -126,7 +127,8 @@ it('compiles into one acyclic DAG that runs left to right, every wire compatible
     }
     const last = Math.max(...item.nodes.map(node => node.column));
     expect(item.nodes.filter(node => node.column === last).map(node => node.role)).toEqual(['review']);
-    expect(item.nodes.filter(node => node.outputType === 'html').map(node => node.id)).toEqual(['test']);
+    // Two fix passes: the first pass's page reaches the second as a file through an assemble node.
+    expect(item.nodes.filter(node => node.outputType === 'html').map(node => node.id)).toEqual(['test', 'test2']);
     for (const node of document.nodes) {
       for (const field of node.kind === 'session' || node.kind === 'assemble' ? (node.contract?.inputs ?? []) : []) {
         if (field.id === 'brief') continue;
@@ -211,7 +213,13 @@ it('assembles the page from all twenty builders with no model, in init order, an
   for (const item of EPICS) {
     const document = createOfficialDocument(item);
     const pages = document.nodes.filter((node): node is AssembleNode => node.kind === 'assemble');
-    expect(pages).toHaveLength(1);
+    expect(pages.map(node => node.title)).toEqual(['Assembly', 'First pass page']);
+    // The second assemble node hands the first fix pass's page, byte for byte, to the second as a file.
+    const handover = pages[1];
+    expect([handover.template, handover.fileName, (handover.contract?.inputs ?? []).map(field => field.id)]).toEqual(['{{in:from_test}}', 'pallward.html', ['from_test']]);
+    expect(handover.contract?.outputs.map(field => [field.id, field.type])).toEqual([['file', 'file']]);
+    const passed = assembleTemplate(handover.template, { from_test: '<!DOCTYPE html>\n<html><body>page</body></html>' });
+    expect(passed.ok && passed.text).toBe('<!DOCTYPE html>\n<html><body>page</body></html>');
     const page = pages[0];
     const inputs = (page.contract?.inputs ?? []).map(field => field.id);
     expect(inputs).toEqual(MODULES.map(id => `from_${id}`));
@@ -378,6 +386,6 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   expect(text).toContain(`"${SANDBOX_RUNTIME}"`);
   const plain = { ...PALLWARD, nodes: PALLWARD.nodes.map(node => ({ ...node, sandbox: undefined })) };
   expect(canonicalCanvasText(createOfficialDocument(plain))).not.toBe(text);
-  expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"8b898111441442806e53b785bd3c400fae198fda9aa7388911ce1aaa9c760098"`);
+  expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"7774dea723f4e14ee069263ec53a8de4b053a3787b50a02b176515621fd68a57"`);
   expect(createHash('sha256').update(JSON.stringify(PALLWARD.media)).digest('hex')).toMatchInlineSnapshot(`"a85991f713fee8afff2f72b232dbea6357ebb8102c3d462d68b57b72821f3c01"`);
 });

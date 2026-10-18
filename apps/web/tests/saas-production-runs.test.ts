@@ -146,7 +146,7 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
     expect(record.edges).toEqual(workflow.edges);
     // Every task, persona, brief, contract and wire the run used is the copyable canvas today, word for word.
     expect(createHash('sha256').update(canonicalCanvasText(createOfficialDocument(workflow))).digest('hex'), record.caseId).toBe(record.canvasSHA256);
-    expect(record.artifactNodeId === undefined || record.artifactNodeId === workflow.nodes.find(node => node.outputType === 'html')!.id).toBe(true);
+    expect(record.artifactNodeId === undefined || record.artifactNodeId === workflow.nodes.findLast(node => node.outputType === 'html')!.id).toBe(true);
     expect(record.source?.api).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.source?.worker).toMatch(/^[0-9a-f]{8,40}$/);
     expect(record.limits!.concurrency, record.caseId).toBeLessThanOrEqual(workflow.nodes.length);

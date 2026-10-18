@@ -138,7 +138,8 @@ const nodes = workflow.nodes.map((spec, index) => {
     ...(file ? { file } : {}), ...(items.length > 1 ? { calls: items.length } : {}),
     ...(state.detail ? { detail: plain(redact(String(state.detail))) } : {}), ...(totalUsage(items) ? { tokens: totalUsage(items) } : {}) };
 });
-const artifact = workflow.nodes.find(node => node.outputType === 'html');
+// A case's delivery is the last page its canvas makes (PALLWARD's second fix pass, after the first).
+const artifact = workflow.nodes.findLast(node => node.outputType === 'html');
 const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
 // Each media node as the run stored it: its state and the files it made, by the `<node id>/<file>` path the canvas handed
 // the page. They are not agents, so they stay out of `nodes` (a copy pins agents only).
