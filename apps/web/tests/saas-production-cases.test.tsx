@@ -194,20 +194,20 @@ it('shows a flagship run as it went: its agents without the assembly, its 23 run
   expect(within(made).getByText('umber.html, 182 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
 });
 
-it('shows Backprop as it went: thirteen agents over 24 runs, and the three revisions its nodes ran on', async () => {
+it('shows Backprop as it went: thirteen agents over 25 runs, and the four revisions its nodes ran on', async () => {
   view();
   fireEvent.click(screen.getByRole('button', { name: 'Backprop' }));
   const dialog = screen.getByRole('dialog', { name: 'Backprop' });
   // The reader, the spec, nine builders, the tester and the review; the assembly makes the page with no model.
   expect(within(dialog).getByText('13 agents · 6 stages')).toBeVisible();
   expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/backprop-real.mp4');
-  const made = await within(dialog).findByRole('region', { name: '13 agents, 6 stages, 441 min 38 s in 24 runs' });
+  const made = await within(dialog).findByRole('region', { name: '13 agents, 6 stages, 449 min 12 s in 25 runs' });
   expect(within(made).getByText('14/14 nodes done')).toBeVisible();
   const receipt = [...made.querySelectorAll('details')].find(element => element.querySelector('summary')?.textContent === 'Run receipt')!.textContent!;
   expect(receipt).toContain('up to 64 model calls per node with thinking off');
-  expect(receipt).toContain('24 runs took 441 min 38 s, 719 min 54 s from the first start to the last finish');
+  expect(receipt).toContain('25 runs took 449 min 12 s, 1851 min 49 s from the first start to the last finish');
   expect(receipt).toContain('API 19675fb7b979 · runtime 5317b5ec6266 (Read the library); then API c41723c6fbbe · runtime 5317b5ec6266 (Clean-room spec, Kernel');
-  expect(receipt).toContain('; then API 1eeffacb9d40 · runtime 5317b5ec6266 (Interface, Assembly, Test and fix, Review)');
+  expect(receipt).toContain('; then API 1eeffacb9d40 · runtime 5317b5ec6266 (Interface, Assembly); then API 98f8425aad58 · runtime 6a6d831b71ac (Test and fix, Review)');
   const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
   fireEvent.click(within(rail).getByRole('button', { name: /^Kernel/ }));
   expect(within(made).getByText('Worked in its own sandbox computer · 10 model calls · 7,162 output tokens')).toBeVisible();

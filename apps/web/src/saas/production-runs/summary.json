@@ -24,7 +24,7 @@
   "backprop-lab": {
     "completed": 14,
     "total": 14,
-    "seconds": 43194,
+    "seconds": 111109,
     "delivered": true,
     "capturedOn": "2026-10-17",
     "model": "Claude Opus 4.8",
