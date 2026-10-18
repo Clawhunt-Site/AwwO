@@ -953,7 +953,7 @@ export const SessionTile = memo(function SessionTile({
               <div className="awwo-node-chat">
                 {expanded ? <div className="awwo-chat-heading">
                   {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
-                  <span>{threadTitle(currentThread?.title, t)}</span>
+                  <span title={threadTitle(currentThread?.title, t)}>{threadTitle(currentThread?.title, t)}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
                   {/* What the node receives: always in developer mode, where its fields are added, and in the simple view once it has inputs to fill. */}
@@ -962,13 +962,14 @@ export const SessionTile = memo(function SessionTile({
                 {expanded && sessionNode && run?.state === 'failed' ? <NodeFailure detail={runDetail ?? ''}
                   onRerun={onRunNode && !viewOnly && !busy && (sessionNode.binding || initializeOnSend) ? () => onRunNode(nodeId) : undefined}
                   onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'fix') : undefined} /> : null}
+                {/* Beside the inputs or above a conversation the task card is one line until expanded, so what is being read keeps the column. */}
                 {expanded && sessionNode && !mediaNode && !(templateOpen && template) ? <NodeBrief key={nodeId} node={sessionNode} template={template}
-                  modelLabel={modelLabel} compact={inputOpen} onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'edit') : undefined} /> : null}
+                  modelLabel={modelLabel} compact={inputOpen || !emptyConversation} onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'edit') : undefined} /> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
                   <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
-                <div className="awwo-node-panel awwo-node-panel--conversation">
+                <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
                   {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} /> : null}
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>

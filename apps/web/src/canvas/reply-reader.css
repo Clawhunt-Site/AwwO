@@ -1,0 +1,35 @@
+/* A reply read at full size (ReplyReader.tsx): the button on a long reply, and the reading in the expanded preview.
+   The button sits in a sticky row at the reply's top: it takes the reply's first 28 px, none of its width (a float
+   narrowed field deliveries and tables for their whole height), and stays in view while any of the reply is, since a
+   short window shows a long reply's end, where its top is out of sight. The row lets clicks through to the text it
+   passes over; only the button takes them. */
+.canvas-root .canvas-transcript-reader-row { position: sticky; top: 4px; z-index: 1; display: flex; justify-content: flex-end; height: 26px; margin: -2px -4px 4px 0; pointer-events: none; white-space: normal; }
+.canvas-root .canvas-transcript-reader-open { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 8px; border: 1px solid var(--awwo-line, var(--line)); border-radius: 999px; background: var(--awwo-card, var(--panel, #fff)); color: var(--awwo-muted, var(--muted)); font: inherit; font-size: 11.5px; line-height: 1.2; white-space: nowrap; cursor: pointer; }
+.canvas-root .canvas-transcript-reader-open:hover { color: var(--awwo-ink, var(--text)); border-color: var(--awwo-teal, var(--accent)); }
+.canvas-root .canvas-transcript-reader-open:focus-visible { outline: 2px solid var(--awwo-teal, var(--accent)); outline-offset: 1px; }
+.awwo-reply-reader { display: flex; flex-direction: column; min-height: 100%; }
+.awwo-reply-reader-tools { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--line, #dde5e1); background: var(--bg-card, var(--panel, #fff)); }
+.awwo-reply-reader-tools button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line, #dde5e1); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.awwo-reply-reader-tools button:hover:not([aria-disabled='true']) { background: var(--accent-soft, #e8efeb); }
+.awwo-reply-reader-tools button[aria-disabled='true'] { opacity: .4; cursor: default; }
+.awwo-reply-reader-tools button:focus-visible { outline: 2px solid var(--accent, #237562); outline-offset: 2px; }
+.awwo-reply-reader-size { min-width: 44px; text-align: center; font-size: 12px; color: var(--muted, #5c6f65); font-variant-numeric: tabular-nums; }
+/* The reading follows its own text size: headings and tables scale with it, a wide table scrolls within its width.
+   The reply comes as the conversation renders it (outside the canvas's styles here): fields keep their labels, and a
+   text field keeps its lines as typed. */
+.awwo-reply-reader-body { width: min(100%, 1100px); margin: 0 auto; padding: 20px 28px 40px; box-sizing: border-box; line-height: 1.75; }
+.awwo-reply-reader-body .canvas-transcript-markdown { overflow-wrap: anywhere; white-space: normal; min-width: 0; }
+.awwo-reply-reader-body .canvas-transcript-markdown > :first-child { margin-top: 0; }
+.awwo-reply-reader-body h1 { font-size: 1.5em; }
+.awwo-reply-reader-body h2 { font-size: 1.28em; }
+.awwo-reply-reader-body h3 { font-size: 1.12em; }
+.awwo-reply-reader-body .canvas-transcript-fields { display: grid; gap: 20px; white-space: normal; min-width: 0; }
+.awwo-reply-reader-body .canvas-transcript-field { min-width: 0; }
+.awwo-reply-reader-body .canvas-transcript-field > h3 { margin: 0 0 8px; }
+.awwo-reply-reader-body .canvas-transcript-field-value { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.awwo-reply-reader-body :is(td, th) { font-size: inherit; vertical-align: top; }
+.awwo-reply-reader-body th { white-space: nowrap; }
+.awwo-reply-reader-body table { border-collapse: collapse; }
+.awwo-reply-reader-body .canvas-transcript-table { max-width: 100%; overflow-x: auto; }
+.awwo-reply-reader-body .canvas-transcript-table table { display: table; width: 100%; }
+.awwo-reply-reader-body a { color: var(--accent, #237562); text-decoration: underline; }

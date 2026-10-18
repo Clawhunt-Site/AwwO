@@ -129,6 +129,7 @@ export function ExpandedPreview({ title, closeLabel, onClose, children }: { titl
   return createPortal(<dialog ref={dialogRef} className="awwo-artifact-dialog" aria-modal="true" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); event.stopPropagation(); dismiss.current(); }}
     onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
+    onDoubleClick={event => event.stopPropagation()}
     onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
     onMouseDown={event => { event.stopPropagation(); if (event.target === event.currentTarget) dismiss.current(); }}>
     <header className="awwo-artifact-dialog-header"><h2 id={titleId}>{title}</h2>

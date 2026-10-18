@@ -2,7 +2,7 @@
 // (owner request 2026-10-15: opened components did not show their context in full, in either mode).
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
@@ -10,7 +10,7 @@ import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { looksLikeCode } from '../src/canvas/codeLike';
 import { DeliverableMarkdown } from '../src/canvas/DeliverableMarkdown';
 import { FOCUSED_SESSION_MIN_SIZE, openContentOf, openFrameFor, presentationNodes } from '../src/canvas/nodePresentation';
-import { resetAllSessions } from '../src/canvas/sessions';
+import { appendTurn, resetAllSessions } from '../src/canvas/sessions';
 
 beforeEach(() => { cleanup(); resetAllSessions(); });
 
@@ -142,6 +142,24 @@ describe('an opened node says what it was asked', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
     expect(region).not.toHaveClass('is-compact');
     expect(card.getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  // Customer report 2026-10-18: at 1280 × 720 with the assistant open the full card and the message box left a reply
+  // 26 px. Above a conversation the card is one line, and the conversation panel says it holds replies to keep room for.
+  it('takes one line above a conversation, which keeps the column, and its whole form again when expanded', () => {
+    const { rerender } = simple(<SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} />);
+    const region = screen.getByRole('region', { name: '「关卡设计」的任务' });
+    expect(region).not.toHaveClass('is-compact');
+    expect(document.querySelector('.awwo-node-panel--conversation')).not.toHaveClass('has-turns');
+    act(() => { appendTurn(brief.id, { role: 'user', text: '把关卡写成表格' }); appendTurn(brief.id, { role: 'agent', text: '| 段 | 检查点 |\n| --- | --- |\n| 屋顶街 | 1 |' }); });
+    rerender(<CanvasUiModeProvider mode="simple"><SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} /></CanvasUiModeProvider>);
+    expect(region).toHaveClass('is-compact');
+    expect(within(region).getByText('3 条验收标准 · 需要遵守 2 条约束')).toBeVisible();
+    expect(within(region).queryAllByRole('listitem')).toHaveLength(0);
+    expect(document.querySelector('.awwo-node-panel--conversation')).toHaveClass('has-turns');
+    fireEvent.click(within(region).getByRole('button', { name: '展开' }));
+    expect(region).not.toHaveClass('is-compact');
+    expect(within(region).getAllByRole('listitem')).toHaveLength(5);
   });
 
   it('offers the rest of a task the clamp hides: more lines than it shows, or text that overflows a narrow column', () => {

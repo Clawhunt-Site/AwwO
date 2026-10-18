@@ -28,6 +28,7 @@ import { parseMediaOutput } from './mediaOutput';
 import { MediaResult } from './MediaResult';
 import { MessageWithAttachments } from './ComposerAttachments';
 import { splitAttachments } from './attachments';
+import { ReplyReader, readerWorthy } from './ReplyReader';
 
 const markdownComponents: Components = {
   table: ({ node: _node, ...props }) => <div className="canvas-transcript-table"><table {...props} /></div>,
@@ -100,20 +101,25 @@ function TurnContent({ turn, mediaResults }: { turn: Turn; mediaResults: boolean
     </>;
   }
   if (output.fields.length) {
+    const fields = <div className="canvas-transcript-fields">
+      {output.fields.map(({ field, value, pendingFile }) => <section className="canvas-transcript-field" key={field.id}>
+        <h3>{field.label || field.id}</h3>
+        {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' && htmlPreviewSummary(value, locale)
+          ? <div>{htmlSummary}</div>
+          : field.type === 'markdown'
+          ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(value)}</ReactMarkdown></div>
+          : field.type === 'file'
+            ? storedArtifactUrl(value) ? <a href={storedArtifactUrl(value)!} download rel="noreferrer">{t('deliverable.downloadFile')}</a>
+              : <code className="canvas-transcript-field-value">{value}</code>
+            : <div className="canvas-transcript-field-value">{fileSafeDisplaySource(value)}</div>}
+      </section>)}
+    </div>;
+    // The full-size reader shows the fields exactly as here; it is offered by the length of what a person reads in them.
+    const reading = output.fields.filter(({ field, value, pendingFile }) => !pendingFile && field.type !== 'file'
+      && !(field.type === 'html' && htmlPreviewSummary(value, locale))).map(({ value }) => fileSafeDisplaySource(value)).join('\n');
     return <>
-      <div className="canvas-transcript-fields">
-        {output.fields.map(({ field, value, pendingFile }) => <section className="canvas-transcript-field" key={field.id}>
-          <h3>{field.label || field.id}</h3>
-          {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' && htmlPreviewSummary(value, locale)
-            ? <div>{htmlSummary}</div>
-            : field.type === 'markdown'
-            ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(value)}</ReactMarkdown></div>
-            : field.type === 'file'
-              ? storedArtifactUrl(value) ? <a href={storedArtifactUrl(value)!} download rel="noreferrer">{t('deliverable.downloadFile')}</a>
-                : <code className="canvas-transcript-field-value">{value}</code>
-              : <div className="canvas-transcript-field-value">{fileSafeDisplaySource(value)}</div>}
-        </section>)}
-      </div>
+      {turn.role === 'agent' && readerWorthy(reading) ? <ReplyReader text={reading}>{fields}</ReplyReader> : null}
+      {fields}
       <RawDetails label={t('transcript.rawResponse')} text={turn.text} />
     </>;
   }
@@ -125,11 +131,12 @@ function TurnContent({ turn, mediaResults }: { turn: Turn; mediaResults: boolean
   }
   const prose = turn.role === 'agent' && Boolean(turn.text) && !output.invalid && !rawEnvelope
     && turn.tone !== 'error' && turn.tone !== 'warn' && turn.presentation?.outputState !== 'failed';
+  const shown = fileSafeDisplaySource(turn.text);
+  const markdown = prose ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{shown}</ReactMarkdown></div> : null;
   return <>
+    {markdown && readerWorthy(shown) ? <ReplyReader text={shown}>{markdown}</ReplyReader> : null}
     {output.invalid ? <div className="canvas-transcript-format-notice" role="status">{t('transcript.invalidOutput')}</div> : null}
-    {prose
-      ? <div className="canvas-transcript-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fileSafeDisplaySource(turn.text)}</ReactMarkdown></div>
-      : fileSafeDisplaySource(turn.text)}
+    {markdown ?? shown}
   </>;
 }
 

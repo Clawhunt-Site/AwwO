@@ -44,6 +44,14 @@
 .canvas-root .awwo-node-panel--conversation { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 /* An opened node's conversation keeps room for its message box: the task card, a failure note and the inputs give way first. */
 .canvas-root .awwo-node.canvas-tile--focus .awwo-node-panel--conversation { min-height: min(160px, 45%); }
+/* With a conversation to read, the replies keep room above that box too (customer report 2026-10-18: at 1280 × 720 with
+   the assistant open the task card and the box left a reply 26 px). What it leaves is the heading's and the one-line
+   task card's (at least 40 + 74 px), and a failure note's (at least 54 px more) where there is one, so the box is never
+   pushed out of the node; it is never less than the box's own room above, so a short node is no worse than before;
+   beside the open inputs it keeps only the box's room, as before. */
+.canvas-root .awwo-node.canvas-tile--focus .awwo-node-panel--conversation.has-turns { min-height: max(min(160px, 45%), min(340px, calc(100% - 140px))); }
+.canvas-root .awwo-node.canvas-tile--focus .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns { min-height: max(min(160px, 45%), min(340px, calc(100% - 200px))); }
+.canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer + .awwo-node-panel--conversation.has-turns { min-height: min(160px, 45%); }
 .canvas-root .awwo-node-empty { flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 16px; color: var(--awwo-muted); font-size: 13px; }
 .canvas-root .awwo-node-empty > svg { color: var(--awwo-teal); margin-bottom: 4px; flex-shrink: 0; }
 .canvas-root .awwo-node-empty strong { color: var(--awwo-ink); font-size: 14px; font-weight: 600; }
@@ -307,6 +315,11 @@
 }
 .canvas-root .awwo-chat-heading { flex-wrap: wrap; }
 .canvas-root .awwo-chat-heading > button { flex-shrink: 0; white-space: nowrap; }
+/* The heading's conversation title never wraps the heading (the room kept for the conversation below counts on one row;
+   review 2026-10-18: a wrapped title cut the message box): from no width of its own it takes what the buttons leave, up
+   to its own width, and a long one ends in an ellipsis, its whole text in its tooltip. Only buttons that do not fit the
+   chat column (beside the conversation list or the deliverables) still wrap, as before. */
+.canvas-root .awwo-chat-heading > span { flex: 1 1 0; min-width: 0; max-width: max-content; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 600px) {
   .canvas-root .awwo-node.canvas-tile--focus .canvas-tile-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
