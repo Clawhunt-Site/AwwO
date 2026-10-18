@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a three.js version the image does not carry</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f7f7fb; color: #222244; }</style>
+</head>
+<body>
+<h1>Another three.js</h1>
+<p id="status">Loading…</p>
+<script type="module">
+// Only the version the image carries, at an address the CDN serves, is answered; these stay blocked like any other
+// request (jsDelivr serves npm packages under /npm/ only, unpkg has no /npm/), and the page copes.
+const attempt = url => import(url).then(() => 'loaded', () => 'refused');
+const [other, bareJsdelivr, unpkgNpm, port] = await Promise.all(['https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js',
+  'https://cdn.jsdelivr.net/three@0.186.1/build/three.module.js', 'https://unpkg.com/npm/three@0.186.1/build/three.module.js',
+  'https://cdn.jsdelivr.net:8443/npm/three@0.186.1/build/three.module.js'].map(attempt));
+document.getElementById('status').textContent = `three 0.150.0 ${other}`;
+window.awwoSelfTest = async () => ({ tests: [
+  { name: 'a version the image does not carry stays blocked', ok: other === 'refused', detail: other },
+  { name: 'jsDelivr without /npm/ stays blocked', ok: bareJsdelivr === 'refused', detail: bareJsdelivr },
+  { name: 'unpkg with /npm/ stays blocked', ok: unpkgNpm === 'refused', detail: unpkgNpm },
+  { name: 'another port stays blocked', ok: port === 'refused', detail: port },
+] });
+</script>
+</body>
+</html>

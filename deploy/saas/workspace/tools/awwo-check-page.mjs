@@ -7,26 +7,44 @@ import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { libraryFile, loadLibraries } from './libraries.mjs';
+import { excusable, globMatcher, MAX_PATTERNS, parseMissingOk } from './missing-ok.mjs';
 
 const CHROMIUM = '/usr/lib/chromium/chromium-headless-shell';
 const ORIGIN = 'https://awwo-check.invalid';
+// The library files AwwO's running preview supplies to a page that loads them from a CDN, as a three.js page does
+// through an import map (tools/libraries.mjs): a request for one of them, at its version and at an address the preview
+// knows, is answered from the image's copy and listed; any other file, version or address stays blocked, as the
+// preview's page would find it. PALLWARD's integration tester could not run its game in the check at all while three.js
+// 0.186.1 came only from cdn.jsdelivr.net (2026-10-18).
+const LIBRARIES = loadLibraries(path.dirname(fileURLToPath(import.meta.url)));
+const TYPES = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.css': 'text/css' };
 const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 };
-const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTestJson: 1_000_000, screenshotBytes: 400_000 };
+const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTestJson: 1_000_000, screenshotBytes: 400_000, allowedMissing: 2000, allowedUrl: 4096 };
 // A sandbox command gets 30 s (120 s when the workspace has the web) and is stopped when it overruns. So each step has its
 // own bound and also fits the --budget-ms counted from process start, less FINISH_MS kept back for closing and writing the report.
-const STEP_MS = { launch: 15_000, load: 10_000, probe: 5_000, screenshot: 5_000 };
-const FINISH_MS = 3000;
-const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800 };
+// A heavy WebGL page on SwiftShader and one CPU can keep its main thread busy for seconds: PALLWARD's world took more
+// than 5 s to screenshot (2026-10-18), so the probe and the screenshot get 10 and 20 s, always within the budget. The wait
+// keeps only SCREENSHOT_RESERVE_MS back for the screenshot, which seldom takes long, so the default budget still waits;
+// a page that did not load gets only that long for its screenshot, as before.
+const STEP_MS = { launch: 15_000, load: 10_000, probe: 10_000, screenshot: 20_000 };
+const FINISH_MS = 3000, SCREENSHOT_RESERVE_MS = 5000;
+const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800, missingOk: [] };
 const NUMBERS = { '--wait-ms': ['waitMs', 0, 60_000], '--timeout-ms': ['timeoutMs', 100, 600_000], '--budget-ms': ['budgetMs', 5000, 900_000] };
-const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH]';
+const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH] [--missing-ok GLOB]...';
 const HELP = `${USAGE}
 Serves the page and the files of its directory from a private https origin to headless Chromium (any other request is blocked
-and listed), waits --wait-ms (1500), screenshots the viewport (1280x800) and calls window.awwoSelfTest(), if the page defines it,
+and listed, except the three.js 0.186.1 files AwwO's preview supplies, answered from the image's copy at the jsDelivr and
+unpkg addresses the preview knows), waits --wait-ms (1500), screenshots the viewport (1280x800) and calls window.awwoSelfTest(), if the page defines it,
 for at most --timeout-ms (15000). It must resolve to { tests: [{ name, ok: boolean, detail? }], planted?: [{ name, rejected:
 boolean, detail? }] }, planted listing deliberately wrong variants of the code that the page's own tests must reject. Uncaught
 errors, unhandled rejections (cancelled ones too) and console.error fail the page; while the self-test runs, console errors and
-errors the page cancels are only listed. The check ends within --budget-ms (25000). Writes <out>/report.json and <out>/screenshot.png (out: ./check-out).
+errors the page cancels are only listed. A missing local file (a 404) is an error unless the page fetched it as data, a picture,
+sound, video or a font and its path, relative to the page, matches a --missing-ok pattern (* and ? within a directory, ** across
+them: **/*.glb is any .glb; at most ${MAX_PATTERNS}); those are only listed. A missing script or stylesheet always counts. The check ends within --budget-ms
+(25000). Writes <out>/report.json and <out>/screenshot.png (out: ./check-out).
 Exit 0: pass. 1: the page failed (an error, a test, a planted variant, a blank render). 2: usage. 3: the check could not run.`;
 // The container is the sandbox: Chromium's own needs user namespaces or setuid, which the container drops (Playwright
 // adds --no-sandbox). WebGL runs on SwiftShader. No name resolution or proxy: a second wall behind the request router.
@@ -64,6 +82,11 @@ function parseArgs(argv) {
       const match = /^(\d{2,4})x(\d{2,4})$/.exec(value() ?? '');
       if (!match || [match[1], match[2]].some(side => Number(side) < 64 || Number(side) > 2560)) throw new UsageError('--viewport takes WIDTHxHEIGHT, each 64 to 2560');
       [options.width, options.height] = [Number(match[1]), Number(match[2])];
+    } else if (flag === '--missing-ok') {
+      const pattern = parseMissingOk(value() ?? '');
+      if (pattern instanceof Error) throw new UsageError(pattern.message);
+      if (options.missingOk.length >= MAX_PATTERNS) throw new UsageError(`--missing-ok can be given at most ${MAX_PATTERNS} times`);
+      options.missingOk = [...options.missingOk, pattern];
     } else if (flag.startsWith('-')) throw new UsageError(`unknown option ${flag}`);
     else if (options.page === undefined) options.page = flag;
     else throw new UsageError('give one page');
@@ -99,9 +122,13 @@ function validateSelfTest(value) {
 
 async function runSelfTest(page, timeoutMs) {
   const result = { present: true, ok: false, passed: 0, failed: 0, plantedTotal: 0, plantedRejected: 0, items: null };
-  const presence = await within(page.evaluate(() => typeof window.awwoSelfTest === 'function'), left(STEP_MS.probe));
+  const probe = left(STEP_MS.probe);
+  const presence = await within(page.evaluate(() => typeof window.awwoSelfTest === 'function'), probe);
   if (presence.ok && !presence.value) return { ...result, present: false, ok: true };
-  if (!presence.ok) return { ...result, present: null, error: presence.timedOut ? 'the page stopped responding before awwoSelfTest could be looked up' : firstLine(presence.error) };
+  if (!presence.ok) {
+    const clipped = probe < STEP_MS.probe ? ` (${probe} ms, what --budget-ms had left)` : ` (${probe} ms)`;
+    return { ...result, present: null, error: presence.timedOut ? `the page did not answer while awwoSelfTest was looked up${clipped}` : firstLine(presence.error) };
+  }
   const allowed = left(timeoutMs), started = Date.now();
   const outcome = await within(page.evaluate(async limit => {
     const json = JSON.stringify(await window.awwoSelfTest()) ?? 'null';
@@ -150,12 +177,37 @@ async function measure(browser, png) {
 
 async function checkPage(browser, file, out, options, report) {
   const root = await realpath(path.dirname(file));
+  // allowedMissing: for each URL, how many excused 404s still have Chromium's console entry to come (one each).
+  const missingOk = options.missingOk.map(globMatcher), allowedMissing = new Map();
   const context = await browser.newContext({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false });
-  const block = (url, type) => { if (report.blockedRequests.length < MAX.blocked) report.blockedRequests.push({ url: clip(url, 500), type }); else report.blockedDropped += 1; };
+  const block = (url, type, reason) => {
+    if (report.blockedRequests.length < MAX.blocked) report.blockedRequests.push({ url: clip(url, 500), type, ...(reason ? { reason } : {}) }); else report.blockedDropped += 1;
+  };
+  const served = (url, status) => { if (report.libraryRequests.length < MAX.blocked) report.libraryRequests.push({ url: clip(url, 500), status }); else report.libraryRequestsDropped += 1; };
+  // A request for a library file the preview supplies, at its version, answered from the image (CORS open: a page's
+  // module imports are cross-origin); a .min.js names the same file, as in the preview. Any other file of that version
+  // is blocked like every other request, with the reason, because the preview's page could not load it either.
+  const library = async (route, url, type) => {
+    const found = libraryFile(url, LIBRARIES);
+    if (!found) return false;
+    const { library: carried, file: supplied } = found;
+    if (!supplied) {
+      block(url.href, type, `not one of the ${carried.files.size} ${carried.name} ${carried.version} files AwwO's preview supplies`);
+      await route.abort('blockedbyclient').catch(() => {});
+      return true;
+    }
+    const target = await realpath(path.join(carried.root, supplied)).catch(() => '');
+    const inside = target.startsWith(carried.root + path.sep);
+    served(url.href, inside ? 200 : 404);
+    await (inside ? route.fulfill({ path: target, headers: { 'access-control-allow-origin': '*', 'content-type': TYPES[path.extname(target)] ?? 'application/octet-stream' } })
+      : route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: '' })).catch(() => {});
+    return true;
+  };
   // A real origin, unlike file://, lets module imports, fetch and workers work: it serves the page's directory only.
   await context.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url());
     if (/^(?:data|blob|about):$/.test(url.protocol)) return route.continue().catch(() => {});
+    if (['GET', 'HEAD'].includes(request.method()) && await library(route, url, request.resourceType())) return;
     if (url.origin !== ORIGIN || !['GET', 'HEAD'].includes(request.method())) {
       block(request.url(), request.resourceType());
       return route.abort('blockedbyclient').catch(() => {});
@@ -163,7 +215,20 @@ async function checkPage(browser, file, out, options, report) {
     let target = '';
     try { target = await realpath(path.join(root, decodeURIComponent(url.pathname))); } catch { /* missing or malformed: 404 */ }
     const inside = target === root || target.startsWith(root + path.sep);
-    return (inside ? route.fulfill({ path: target }) : Promise.reject()).catch(() => route.fulfill({ status: 404, body: '' })).catch(() => {});
+    return (inside ? route.fulfill({ path: target }) : Promise.reject()).catch(() => {
+      // Data, a picture, sound, video or a font the caller said may be missing (--missing-ok, e.g. the models a sandbox
+      // does not have) is listed, not counted; missing code (a script, a stylesheet, a worker) always counts. The URLs
+      // excused are bounded, in number and length: past that, a missing file counts.
+      let relative = '';
+      try { relative = decodeURIComponent(url.pathname).replace(/^\/+/, ''); } catch { /* malformed: counted */ }
+      const type = request.resourceType();
+      if (relative && excusable(type, relative) && url.href.length <= MAX.allowedUrl && (allowedMissing.has(url.href) || allowedMissing.size < MAX.allowedMissing)
+        && missingOk.some(matches => matches(relative))) {
+        allowedMissing.set(url.href, (allowedMissing.get(url.href) ?? 0) + 1);
+        if (report.missingAllowed.length < MAX.blocked) report.missingAllowed.push({ url: clip(url.href, 500), type }); else report.missingAllowedDropped += 1;
+      }
+      return route.fulfill({ status: 404, body: '' });
+    }).catch(() => {});
   });
   await context.routeWebSocket(/.*/, socket => { block(socket.url(), 'websocket'); socket.close().catch(() => {}); });
   let phase = 'load';
@@ -185,19 +250,27 @@ async function checkPage(browser, file, out, options, report) {
   page.on('console', message => {
     if (message.type() !== 'error' || /net::ERR_BLOCKED_BY_CLIENT/.test(message.text())) return;
     const { url, lineNumber } = message.location();
+    // Chromium's own entry for an excused missing file: it comes with no arguments, which a page's console call has, and
+    // each excused 404 takes one entry for its URL away, so a missing script at the same URL still counts once.
+    const excused = allowedMissing.get(url) ?? 0;
+    if (excused && !message.args().length && /status of 404/.test(message.text())) { allowedMissing.set(url, excused - 1); return; }
     note('console', url ? `${message.text()} (${url.split('/').pop()}:${lineNumber + 1})` : message.text());
   });
   page.on('crash', () => note('crash', 'the page crashed (it may have run out of memory)'));
   report.url = `${ORIGIN}/${encodeURIComponent(path.basename(file))}`;
   let started = Date.now(), bound = left(STEP_MS.load);
   const loaded = await within(page.goto(report.url, { waitUntil: 'load', timeout: bound }), bound + 500);
-  report.load = loaded.ok ? { ok: true } : { ok: false, error: loaded.timedOut ? `the page did not load within ${bound} ms` : firstLine(loaded.error) };
-  Object.assign(report.timings, { loadMs: Date.now() - started, waitMs: report.load.ok ? left(options.waitMs, FINISH_MS + STEP_MS.screenshot) : 0 });
+  // Playwright's own timeout (the bound) mostly fires before within's (the bound + 500 ms): either is the step's timeout.
+  const timedOut = outcome => outcome.timedOut || outcome.error?.name === 'TimeoutError';
+  const cut = (ms, allowed) => `${ms} ms${ms < allowed ? ', what --budget-ms had left' : ''}`;
+  report.load = loaded.ok ? { ok: true } : { ok: false, error: timedOut(loaded) ? `the page did not load within ${cut(bound, STEP_MS.load)}` : firstLine(loaded.error) };
+  Object.assign(report.timings, { loadMs: Date.now() - started, waitMs: report.load.ok ? left(options.waitMs, FINISH_MS + SCREENSHOT_RESERVE_MS) : 0 });
   await delay(report.timings.waitMs);
   // Screenshot first: the blank signal judges what the page draws on its own, and a hanging self-test cannot spoil it.
-  [started, bound] = [Date.now(), left(STEP_MS.screenshot)];
+  const allowed = report.load.ok ? STEP_MS.screenshot : SCREENSHOT_RESERVE_MS;
+  [started, bound] = [Date.now(), left(allowed)];
   const shot = await within(page.screenshot({ timeout: bound }), bound + 500);
-  if (!shot.ok) report.screenshotError = shot.timedOut ? 'the screenshot timed out' : firstLine(shot.error);
+  if (!shot.ok) report.screenshotError = timedOut(shot) ? `the screenshot timed out (${cut(bound, allowed)})` : firstLine(shot.error);
   report.timings.screenshotMs = Date.now() - started;
   if (report.load.ok) {
     [phase, started] = ['selftest', Date.now()];
@@ -235,6 +308,10 @@ function summary(report) {
     ...unexpected.slice(0, 5).map(item => `    not as expected: ${item.name}${item.detail ? ` (${clip(item.detail, 200)})` : ''}`));
   else if (test.present === false) lines.push('  self-test: none (window.awwoSelfTest is not defined)');
   if (report.pixels) lines.push(`  render: ${report.blank ? 'BLANK' : 'not blank'} (${report.pixels.distinctColours} colours, luma sd ${report.pixels.lumaStdDev})`);
+  if (report.libraryRequests.length) lines.push(`  libraries: ${report.libraryRequests.length + report.libraryRequestsDropped} request(s) answered from the image's copy (${Object.entries(report.libraries).map(([name, version]) => `${name} ${version}`).join(', ')})`);
+  const unsupplied = report.blockedRequests.filter(request => request.reason);
+  if (unsupplied.length) lines.push(`  not supplied by AwwO's preview, so blocked: ${unsupplied.length} library file(s), first ${unsupplied[0].url}`);
+  if (report.missingAllowed.length) lines.push(`  missing, allowed by --missing-ok: ${report.missingAllowed.length + report.missingAllowedDropped} file(s), first ${report.missingAllowed[0].url}`);
   if (report.blockedRequests.length) lines.push(`  network: ${report.blockedRequests.length + report.blockedDropped} request(s) blocked, first ${report.blockedRequests[0].url}`);
   if (report.reportFile) lines.push(`  report: ${relative(report.reportFile)}${report.screenshot ? `, screenshot: ${relative(report.screenshot)}` : ''}`);
   return lines.join('\n');
@@ -250,7 +327,10 @@ async function main(argv) {
   await Promise.all(['report.json', 'screenshot.png'].map(name => rm(path.join(out, name), { force: true }))).catch(() => {});
   if (!(await stat(file).catch(() => null))?.isFile()) { console.error(`awwo-check-page: no such file: ${options.page}\n${USAGE}`); return EXIT.usage; }
   const report = { tool: 'awwo-check-page', schemaVersion: 1, page: file, url: null, verdict: 'error', exitCode: EXIT.error, reasons: [], errorCount: 0,
-    listedOnlyCount: 0, errors: [], errorsDropped: 0, blockedRequests: [], blockedDropped: 0, load: { ok: false },
+    listedOnlyCount: 0, errors: [], errorsDropped: 0, blockedRequests: [], blockedDropped: 0,
+    libraries: Object.fromEntries([...LIBRARIES.values()].map(library => [library.name, library.version])), libraryRequests: [], libraryRequestsDropped: 0,
+    missingOk: options.missingOk, missingAllowed: [], missingAllowedDropped: 0,
+    load: { ok: false },
     selfTest: { present: null, ok: false, passed: 0, failed: 0, plantedTotal: 0, plantedRejected: 0, items: null }, blank: null, pixels: null,
     screenshot: null, viewport: { width: options.width, height: options.height }, timings: {}, chromium: null };
   const finish = () => {

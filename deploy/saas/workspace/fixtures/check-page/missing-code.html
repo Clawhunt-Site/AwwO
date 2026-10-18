@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: missing code next to a missing model</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f7f7fb; color: #222244; }</style>
+</head>
+<body>
+<h1>Half a page</h1>
+<p id="status">Loading…</p>
+<!-- Its script is missing too: --missing-ok 'models/*' lists the model but never excuses missing code. -->
+<script src="models/main.js"></script>
+<script>
+const model = fetch('models/hero.glb').then(response => `stand-in (${response.status})`, () => 'stand-in (failed)');
+model.then(text => { document.getElementById('status').textContent = `hero: ${text}`; });
+// The same missing URL fetched as data (excused) and then loaded as a script (missing code): the script still counts.
+fetch('models/boot').then(() => document.body.append(Object.assign(document.createElement('script'), { src: 'models/boot' })), () => {});
+window.awwoSelfTest = async () => ({ tests: [{ name: 'a missing model falls back to its stand-in', ok: (await model) === 'stand-in (404)', detail: await model }] });
+</script>
+</body>
+</html>

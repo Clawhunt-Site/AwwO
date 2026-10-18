@@ -32,15 +32,17 @@ RUN test -s /etc/ssl/certs/ca-certificates.crt \
 # matplotlib draws to files (no display), and keeps its font cache in /tmp, out of the workspace and its snapshot.
 ENV MPLBACKEND=Agg MPLCONFIGDIR=/tmp/matplotlib
 
-# rea-agents and playwright-core at the exact versions and integrity hashes in tools/package-lock.json. No install
-# script runs: the only one in the tree is frida's (an optional rea dependency for live instrumentation), which would
-# download a prebuilt binary that static analysis does not use. Playwright drives the system Chromium and never
-# downloads a browser.
+# rea-agents, playwright-core and three at the exact versions and integrity hashes in tools/package-lock.json. No
+# install script runs: the only one in the tree is frida's (an optional rea dependency for live instrumentation), which
+# would download a prebuilt binary that static analysis does not use. Playwright drives the system Chromium and never
+# downloads a browser. Of three.js only the files AwwO's running preview supplies stay (three-preview-files.json, which
+# scripts/preview-modules.mjs writes with the preview's list), in this layer, so the check answers no other.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-COPY tools/package.json tools/package-lock.json /opt/awwo/tools/
+COPY tools/package.json tools/package-lock.json tools/three-preview-files.json tools/keep-preview-files.mjs /opt/awwo/tools/
 RUN npm ci --prefix /opt/awwo/tools --omit=dev --ignore-scripts --no-audit --no-fund --cache /tmp/npm-cache \
-    && rm -r /tmp/npm-cache
-COPY tools/awwo-check-page.mjs /opt/awwo/tools/
+    && rm -r /tmp/npm-cache \
+    && node /opt/awwo/tools/keep-preview-files.mjs && rm /opt/awwo/tools/keep-preview-files.mjs
+COPY tools/awwo-check-page.mjs tools/libraries.mjs tools/missing-ok.mjs /opt/awwo/tools/
 # Sandbox commands run with PATH=/usr/local/bin:/usr/bin:/bin, so both commands are linked into /usr/local/bin.
 # The last line only proves the wiring (links, module resolution, the browser binary); it writes nothing.
 RUN chmod 0755 /opt/awwo/tools/awwo-check-page.mjs \

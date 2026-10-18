@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: an error that names a file allowed to be missing</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f7f7fb; color: #222244; }</style>
+</head>
+<body>
+<h1>Not a 404</h1>
+<p id="status">Loading the model…</p>
+<script>
+// The model is missing, which --missing-ok allows. Then the page logs an error of its own from code whose source URL is
+// the model's and whose text reads like Chromium's: --missing-ok passes only Chromium's own entry, so this one counts.
+const model = fetch('models/hero.glb').then(response => `stand-in (${response.status})`, () => 'stand-in (failed)');
+model.then(text => {
+  document.getElementById('status').textContent = `hero: ${text}`;
+  (0, eval)(`console.error('Failed to load resource: the server responded with a status of 404 ()');\n//# sourceURL=${new URL('models/hero.glb', location.href).href}`);
+});
+window.awwoSelfTest = async () => ({ tests: [{ name: 'a missing model falls back to its stand-in', ok: (await model) === 'stand-in (404)', detail: await model }] });
+</script>
+</body>
+</html>

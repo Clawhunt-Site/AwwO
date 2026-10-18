@@ -2,9 +2,12 @@
 // Writes apps/web/src/canvas/previewModules.generated.ts: the three.js ES-module files AwwO's previews supply to a
 // delivered page (the core build and a curated set of addons), each with its size, sha256 and the files it imports.
 // The bytes come from the npm release installed in apps/web/node_modules/three, which must be exactly VERSION.
+// Also writes the same list, with each file's sha256, for the sandbox's page check
+// (deploy/saas/workspace/tools/three-preview-files.json): awwo-check-page answers exactly these files, and the workspace
+// image keeps only them of its three.js package, so a page passes the check only with files the preview supplies.
 //
-//   node scripts/preview-modules.mjs          (rewrite the generated file)
-//   node scripts/preview-modules.mjs --check  (exit 1 when the generated file is out of date)
+//   node scripts/preview-modules.mjs          (rewrite the generated files)
+//   node scripts/preview-modules.mjs --check  (exit 1 when a generated file is out of date)
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const THREE = path.join(ROOT, 'apps/web/node_modules/three');
 const OUT = path.join(ROOT, 'apps/web/src/canvas/previewModules.generated.ts');
+const WORKSPACE_LIST = path.join(ROOT, 'deploy/saas/workspace/tools/three-preview-files.json');
 const VERSION = '0.186.1';
 
 // Entry points a page may import (their own imports come along). Left out on purpose: loaders and physics that fetch
@@ -98,15 +102,22 @@ const lines = [
   '',
 ];
 const output = lines.join('\n');
+const list = `${JSON.stringify({ generatedBy: 'scripts/preview-modules.mjs, with apps/web/src/canvas/previewModules.generated.ts; do not edit by hand',
+  package: 'three', version: VERSION, files: Object.fromEntries(sorted.map(([file, entry]) => [file, entry.sha256])) }, null, 2)}\n`;
 if (process.argv.includes('--check')) {
-  let current = '';
-  try { current = readFileSync(OUT, 'utf8'); } catch { /* missing */ }
-  if (current !== output) { console.error(`${path.relative(ROOT, OUT)} is out of date: run node scripts/preview-modules.mjs`); process.exit(1); }
-  console.log(`${path.relative(ROOT, OUT)} is up to date (${files.size} files)`);
+  let stale = false;
+  for (const [file, text] of [[OUT, output], [WORKSPACE_LIST, list]]) {
+    let current = '';
+    try { current = readFileSync(file, 'utf8'); } catch { /* missing */ }
+    if (current !== text) { console.error(`${path.relative(ROOT, file)} is out of date: run node scripts/preview-modules.mjs`); stale = true; }
+  }
+  if (stale) process.exit(1);
+  console.log(`${path.relative(ROOT, OUT)} and ${path.relative(ROOT, WORKSPACE_LIST)} are up to date (${files.size} files)`);
 } else {
   writeFileSync(OUT, output);
+  writeFileSync(WORKSPACE_LIST, list);
   const total = sorted.reduce((sum, [, entry]) => sum + entry.bytes, 0);
-  console.log(`wrote ${path.relative(ROOT, OUT)}: ${files.size} files, ${(total / 1024).toFixed(0)} KiB`);
+  console.log(`wrote ${path.relative(ROOT, OUT)} and ${path.relative(ROOT, WORKSPACE_LIST)}: ${files.size} files, ${(total / 1024).toFixed(0)} KiB`);
 }
 }
 

@@ -11,6 +11,8 @@ import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
 import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities, WORKSPACE_SOFTWARE } from './workspace-sandbox.ts';
 import { snapshotFailure } from './runner.mjs';
 import { EMPTY_WORKSPACE_SNAPSHOT } from './workspace-runtime.ts';
+import { excusable, EXCUSABLE_TYPES, globMatcher, MAX_PATH_LENGTH, parseMissingOk } from '../../deploy/saas/workspace/tools/missing-ok.mjs';
+import { libraryFile, loadLibraries } from '../../deploy/saas/workspace/tools/libraries.mjs';
 
 const config = { dockerExecutable: '/usr/bin/docker', image: 'awwo-workspace@sha256:' + 'a'.repeat(64) };
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
@@ -65,7 +67,7 @@ test('the web is a read-only proxy socket and a run password, never a network in
   }
 });
 
-test('egress and tools configuration is both-or-neither and names only known programs', () => {
+test('egress and tools configuration is both-or-neither and names only known programs', async () => {
   assert.equal(loadWorkspaceEgress({}), undefined);
   assert.deepEqual(loadWorkspaceEgress({ AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress', AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }), { socketDir: '/srv/egress', secret: 'x'.repeat(40) });
   for (const env of [{ AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress' }, { AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }, { AWWO_WORKSPACE_EGRESS_DIR: '/srv/egress dir', AWWO_WORKSPACE_EGRESS_SECRET: 'x'.repeat(40) }])
@@ -75,10 +77,79 @@ test('egress and tools configuration is both-or-neither and names only known pro
   assert.throws(() => parseWorkspaceTools('rea,curl', 'AWWO_X'), /AWWO_X entry: curl/);
   const offline = sandboxAbilities(new Set(), false).join(' '), online = sandboxAbilities(new Set(['rea', 'check-page']), true).join(' ');
   assert.ok(offline.includes('no network') && !offline.includes('rea ') && !offline.includes('awwo-check-page'));
+  // The check answers the three.js the image carries (deploy/saas/workspace/tools pins it), so agents are told that version.
+  const three = JSON.parse(await readFile(fileURLToPath(new URL('../../deploy/saas/workspace/tools/package.json', import.meta.url)), 'utf8')).dependencies.three;
+  assert.ok(online.includes(`three.js ${three}`) && online.includes(`cdn.jsdelivr.net/npm/three@${three}/`), three);
+  assert.ok(online.includes("--missing-ok '**/*.glb'") && online.includes('awwo-check-page --help'));
   assert.ok(online.includes('HTTPS_PROXY') && !online.includes('no network') && online.includes('rea analyze-javascript-application') && online.includes('window.awwoSelfTest'));
   // Both name what the image has and how little room an install gets, so a data task uses the installed packages.
   for (const text of [offline, online]) assert.ok(text.startsWith(WORKSPACE_SOFTWARE) && ['pandas', 'matplotlib', 'openpyxl', '128 MiB'].every(word => text.includes(word)));
   assert.ok(online.includes('--system-site-packages') && !offline.includes('pip'));
+});
+
+test('--missing-ok patterns match paths as documented, refuse what can never match, and take bounded time', () => {
+  const matches = (glob: string, path: string) => {
+    const pattern = parseMissingOk(glob);
+    assert.ok(typeof pattern === 'string', `${glob}: ${pattern}`);
+    return globMatcher(pattern)(path);
+  };
+  const cases: [string, string, boolean][] = [
+    ['**/*.glb', 'cv-mvcbspb9-10-6pr6/model-1.glb', true], ['**/*.glb', 'model.glb', true], ['**/*.glb', 'a/b/c/x.glb', true],
+    ['**/*.glb', 'model.gltf', false], ['**/*.glb', 'x.glb.js', false], ['models/*.glb', 'models/hero.glb', true],
+    ['models/*.glb', 'models/sub/hero.glb', false], ['models/*.glb', 'hero.glb', false], ['a/**/b.bin', 'a/b.bin', true],
+    ['a/**/b.bin', 'a/x/y/b.bin', true], ['a/**', 'a/x/y', true], ['a/**', 'b/x', false], ['model-?.glb', 'model-1.glb', true],
+    ['model-?.glb', 'model-10.glb', false], ['model-?.glb', 'model-/.glb', false], ['[x].js', '[x].js', true], ['[x].js', 'x.js', false],
+    ['a+b(1).glb', 'a+b(1).glb', true], ['a.glb', 'aXglb', false], ['constructor/*.glb', 'constructor/a.glb', true],
+    ['__proto__', '__proto__', true], ['$x^', '$x^', true], ['textures/*.png', 'models/hero.glb', false], ['./models/*.glb', 'models/hero.glb', true],
+  ];
+  for (const [glob, path, expected] of cases) assert.equal(matches(glob, path), expected, `${glob} ${path}`);
+  for (const refused of ['', '/srv/*.glb', '../x', 'a/../b', 'a/./b', 'a\\b', 'a\u0000b', 'x'.repeat(201)]) assert.ok(parseMissingOk(refused) instanceof Error, JSON.stringify(refused));
+  // A regular expression of these patterns backtracks for seconds on paths far shorter (2026-10-18: 1.2 s on 41 characters).
+  const started = performance.now();
+  assert.equal(matches('*-*-*-*-*-*.glb', '-'.repeat(MAX_PATH_LENGTH)), false);
+  assert.equal(matches('**a**a**a**a**a**a**a**a', 'a'.repeat(MAX_PATH_LENGTH - 1) + 'b'), false);
+  assert.equal(matches('**/'.repeat(10) + 'x', 'a/'.repeat(MAX_PATH_LENGTH / 2)), false);
+  assert.ok(performance.now() - started < 2000, `${performance.now() - started} ms`);
+  assert.equal(matches('**', 'x'.repeat(MAX_PATH_LENGTH + 1)), false);
+  // Missing code always counts, whatever the patterns say: by request type, and by name however it was asked for.
+  assert.ok(['fetch', 'image', 'media', 'font'].every(type => EXCUSABLE_TYPES.has(type)) && ['script', 'stylesheet', 'document', 'other'].every(type => !EXCUSABLE_TYPES.has(type)));
+  for (const [type, path, expected] of [['fetch', 'models/hero.glb', true], ['image', 'textures/a.png', true], ['script', 'models/hero.glb', false],
+    ['fetch', 'lib/decoder.wasm', false], ['fetch', 'mod.MJS', false], ['xhr', 'page.html', false], ['fetch', 'theme.css', false],
+    ['fetch', 'x'.repeat(MAX_PATH_LENGTH + 1), false]] as const) assert.equal(excusable(type, path), expected, `${type} ${path.slice(0, 40)}`);
+});
+
+test('the page check answers exactly the three.js files the preview supplies, at the version the tools pin', async () => {
+  const read = (path: string) => readFile(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+  const list = JSON.parse(await read('../../deploy/saas/workspace/tools/three-preview-files.json'));
+  const generated = await read('../web/src/canvas/previewModules.generated.ts');
+  const supplied = Object.fromEntries([...generated.matchAll(/^ {2}"([^"]+)": \{ bytes: \d+, sha256: '([0-9a-f]{64})'/gm)].map(match => [match[1], match[2]]));
+  // scripts/preview-modules.mjs writes both from the same list (--check fails when either is stale).
+  assert.equal(list.version, /THREE_MODULES_VERSION = '([^']+)'/.exec(generated)?.[1]);
+  assert.deepEqual(list.files, supplied);
+  assert.ok(Object.keys(list.files).length > 50 && list.files['build/three.module.js']);
+  assert.equal(JSON.parse(await read('../../deploy/saas/workspace/tools/package.json')).dependencies.three, list.version);
+  const dockerfile = await read('../../deploy/saas/workspace/Dockerfile');
+  assert.match(dockerfile, /npm ci [^\n]*\n[^\n]*\n\s*&& node \/opt\/awwo\/tools\/keep-preview-files\.mjs/);
+  assert.match(dockerfile, /COPY tools\/awwo-check-page\.mjs tools\/libraries\.mjs tools\/missing-ok\.mjs \/opt\/awwo\/tools\//);
+  // The check names a file from a URL as the preview's pinnedModuleFile does (apps/web/tests/canvas-preview-modules.test.ts):
+  // the four addresses on the default port, the path as written, a .min.js naming the same file.
+  const libraries = new Map([['three', { name: 'three', version: list.version, files: new Set(Object.keys(list.files)), root: '/x' }]]);
+  const named = (url: string) => { const found = libraryFile(new URL(url), libraries); return found === null ? null : found.file; };
+  const base = `https://cdn.jsdelivr.net/npm/three@${list.version}/`;
+  assert.equal(named(`${base}build/three.module.js`), 'build/three.module.js');
+  assert.equal(named(`https://unpkg.com/three@${list.version}/examples/jsm/controls/OrbitControls.js?module`), 'examples/jsm/controls/OrbitControls.js');
+  assert.equal(named(`${base}build/three.module.min.js`), 'build/three.module.js');
+  assert.equal(named(`https://fastly.jsdelivr.net/npm/three@${list.version}/examples/jsm/math/SimplexNoise.min.js`), 'examples/jsm/math/SimplexNoise.js');
+  assert.equal(named(`https://gcore.jsdelivr.net/npm/three@${list.version}/build/three.core.js`), 'build/three.core.js');
+  // A file of the release the preview does not supply: named, but not one of its files ('').
+  for (const file of ['examples/jsm/loaders/DRACOLoader.js', 'examples/jsm/libs/lil-gui.module.min.js', 'build/three.webgpu.js', 'build/three%2Emodule.js',
+    'constructor', '__proto__', 'toString', 'hasOwnProperty']) assert.equal(named(`${base}${file}`), '', file);
+  // Not the release at an address the preview knows: not a library request at all.
+  for (const url of ['https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js', `https://esm.sh/three@${list.version}`, `http://cdn.jsdelivr.net/npm/three@${list.version}/build/three.module.js`,
+    `https://cdn.jsdelivr.net:8443/npm/three@${list.version}/build/three.module.js`, `https://cdn.jsdelivr.net/three@${list.version}/build/three.module.js`,
+    `https://unpkg.com/npm/three@${list.version}/build/three.module.js`, `https://cdn.jsdelivr.net/npm/constructor@${list.version}/x.js`]) assert.equal(named(url), null, url);
+  // Without its list, or with another version installed, the check answers nothing.
+  assert.equal(loadLibraries(fileURLToPath(new URL('.', import.meta.url))).size, 0);
 });
 
 test('the image installs every package the instructions name, in the Dockerfile the image is built from', async () => {
@@ -447,6 +518,25 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
           assert.equal(report.selfTest.passed, 3);
         } },
         webgl: { exitCode: 0, check: report => assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [2, 0]) },
+        // The three.js 0.186.1 files AwwO's preview supplies, from jsDelivr (an addon from unpkg, a .min.js one from
+        // fastly.jsdelivr.net), are answered from the image's copy; it draws a box. A file the preview does not supply
+        // (lil-gui) stays blocked, with the reason.
+        three: { exitCode: 0, check: report => {
+          assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [5, 0], JSON.stringify(report.selfTest.items));
+          assert.equal(report.libraries.three, '0.186.1');
+          const served = report.libraryRequests.map((request: any) => new URL(request.url).pathname);
+          for (const expected of ['/npm/three@0.186.1/build/three.module.js', '/three@0.186.1/examples/jsm/math/ImprovedNoise.js', '/npm/three@0.186.1/examples/jsm/math/SimplexNoise.min.js']) assert.ok(served.includes(expected), `${expected} in ${JSON.stringify(served)}`);
+          assert.ok(report.libraryRequests.every((request: any) => request.status === 200));
+          assert.deepEqual(report.blockedRequests.map((request: any) => [new URL(request.url).pathname, /files AwwO's preview supplies/.test(request.reason)]), [['/npm/three@0.186.1/examples/jsm/libs/lil-gui.module.min.js', true]]);
+        } },
+        // Any other version, or an address the CDN does not serve, is blocked like every other request.
+        'three-version': { exitCode: 0, check: report => {
+          assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [4, 0], JSON.stringify(report.selfTest.items));
+          const blocked = report.blockedRequests.map((request: any) => request.url);
+          for (const expected of ['https://cdn.jsdelivr.net/npm/three@0.150.0/', 'https://cdn.jsdelivr.net/three@0.186.1/', 'https://unpkg.com/npm/three@0.186.1/', 'https://cdn.jsdelivr.net:8443/npm/three@0.186.1/']) assert.ok(blocked.some((url: string) => url.startsWith(expected)), expected);
+          assert.equal(report.libraryRequests.length, 0);
+          assert.ok(report.blockedRequests.every((request: any) => request.reason === undefined));
+        } },
         // Served from the page's directory over the check's private origin: modules, fetch and a worker all load.
         modules: { exitCode: 0, check: report => assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [4, 0]) },
         cancelled: { exitCode: 1, check: report => {
@@ -463,6 +553,34 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
         expected.check(report);
         t.diagnostic(`${page}: exit ${run.exitCode}, ${report.timings.totalMs} ms (launch ${report.timings.launchMs} ms), Chromium ${report.chromium.version}`);
       }
+      // A missing local file is an error, unless --missing-ok names it and the page fetched it as data, a picture, sound,
+      // video or a font: then it is listed and the page passes. Missing code always counts, and so does a page's own
+      // error that only reads like the browser's entry for an allowed file.
+      const check = async (name: string, page: string, flags = '') => {
+        const run = await sandbox.exec(`awwo-check-page /inputs/check-page/${page}.html --out checks/${name} ${flags}`);
+        return { run, report: await json(`checks/${name}/report.json`) };
+      };
+      const missing = await check('missing-model', 'missing-model');
+      assert.equal(missing.run.exitCode, 1, missing.run.stdout);
+      assert.ok(missing.report.errors.some((error: any) => /404/.test(error.message)));
+      assert.equal((await check('missing-other', 'missing-model', "--missing-ok 'textures/*.png'")).run.exitCode, 1);
+      const allowed = await check('missing-allowed', 'missing-model', "--missing-ok './models/*.glb'");
+      assert.equal(allowed.run.exitCode, 0, allowed.run.stdout);
+      assert.deepEqual([allowed.report.errorCount, allowed.report.selfTest.passed, allowed.report.missingOk], [0, 1, ['models/*.glb']]);
+      assert.deepEqual(allowed.report.missingAllowed.map((entry: any) => [new URL(entry.url).pathname, entry.type]), [['/models/hero.glb', 'fetch']]);
+      const code = await check('missing-code', 'missing-code', "--missing-ok 'models/*'");
+      assert.equal(code.run.exitCode, 1, code.run.stdout);
+      assert.ok(code.report.errors.some((error: any) => /404/.test(error.message) && error.message.includes('main.js')), JSON.stringify(code.report.errors));
+      // models/boot was fetched as data (excused, listed) and then loaded as a script: one of its two 404s still counts.
+      assert.equal(code.report.errorCount, 2, JSON.stringify(code.report.errors));
+      assert.deepEqual(code.report.missingAllowed.map((entry: any) => new URL(entry.url).pathname).sort(), ['/models/boot', '/models/hero.glb']);
+      const spoof = await check('missing-spoof', 'missing-spoof', "--missing-ok 'models/*.glb'");
+      assert.equal(spoof.run.exitCode, 1, spoof.run.stdout);
+      assert.equal(spoof.report.errorCount, 1, JSON.stringify(spoof.report.errors));
+      assert.ok(spoof.report.missingAllowed.some((entry: any) => entry.url.endsWith('/models/hero.glb')));
+      for (const pattern of ['../x', '/srv/*.glb']) assert.equal((await sandbox.exec(`awwo-check-page /inputs/check-page/pass.html --out checks/bad-pattern --missing-ok '${pattern}'`)).exitCode, 2, pattern);
+      const many = Array.from({ length: 21 }, (_, index) => `--missing-ok 'm${index}/*'`).join(' ');
+      assert.equal((await sandbox.exec(`awwo-check-page /inputs/check-page/pass.html --out checks/bad-pattern ${many}`)).exitCode, 2);
       // A screenshot over 400,000 bytes is kept smaller, so the workspace snapshot keeps room.
       assert.ok((await sandbox.read('checks/noise/screenshot.png')).byteLength <= 400_000);
       const hang = await sandbox.exec('awwo-check-page /inputs/check-page/hang.html --out checks/hang --timeout-ms 1000');

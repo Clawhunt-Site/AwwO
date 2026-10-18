@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "playwright-core": "1.64.1",
-    "rea-agents": "6.5.0"
+    "rea-agents": "6.5.0",
+    "three": "0.186.1"
   }
 }

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a model the workspace does not have</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; margin: 40px; background: #f7f7fb; color: #222244; }</style>
+</head>
+<body>
+<h1>Stand-in</h1>
+<p id="status">Loading the model…</p>
+<script>
+// The page asks for a model next to it that is not there (a sandbox has no models) and draws its stand-in instead.
+const model = fetch('models/hero.glb').then(response => response.ok ? 'loaded' : `stand-in (${response.status})`, () => 'stand-in (failed)');
+model.then(text => { document.getElementById('status').textContent = `hero: ${text}`; });
+window.awwoSelfTest = async () => ({ tests: [{ name: 'a missing model falls back to its stand-in', ok: (await model) === 'stand-in (404)', detail: await model }] });
+</script>
+</body>
+</html>
