@@ -197,6 +197,10 @@ import os, sys, json, stat, base64, hashlib, io, zipfile
 WORKSPACE = '/workspace'
 INPUTS = '/inputs'
 SKIP = {'.git', 'node_modules', '__pycache__', '.venv', '.pytest_cache', '.mypy_cache', 'inputs'}
+# HOME is /workspace, so package managers keep their caches and per-user installs in its root: npm's tarballs alone
+# outgrow a snapshot and failed runs after their last answer. A snapshot leaves them out (they are fetched again); one
+# made before this keeps every other file when restored.
+HOME_CACHES = {'.npm', '.cache', '.local', '.node-gyp'}
 payload = json.load(sys.stdin)
 FILE_LIMIT = payload['fileLimit']
 ARCHIVE_LIMIT = payload['archiveLimit']
@@ -268,7 +272,7 @@ def file_result(path, data):
 def walk(fd, prefix='', result=None):
     if result is None: result = []
     for name in sorted(os.listdir(fd)):
-        if name in SKIP: continue
+        if name in SKIP or (not prefix and name in HOME_CACHES): continue
         path = prefix + name
         parts(path)
         info = os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -347,6 +351,7 @@ elif action == 'restore':
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         entries = archive.infolist()
         if len(entries) > ENTRY_LIMIT: raise ValueError('Archive has too many entries')
+        entries = [info for info in entries if info.filename.split('/', 1)[0] not in HOME_CACHES]
         seen = set()
         total = 0
         for info in entries:

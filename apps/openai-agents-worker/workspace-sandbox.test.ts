@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { link, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
@@ -244,6 +244,36 @@ test('real filesystem helper reads/writes bytes and restores a source ZIP withou
   await restored.call('restore', { content: zip.content });
   assert.deepEqual(await readFile(join(restored.workspace, 'site/index.html')), content);
   await assert.rejects(readFile(join(restored.workspace, 'node_modules/cache')), /ENOENT/);
+});
+
+test('a snapshot leaves out the package caches in HOME, and one made before them restores everything else', async t => {
+  const f = await filesystemFixture(t);
+  // npm's cache of one install of three.js (a tarball that does not compress) outgrew the 2 MiB snapshot: PALLWARD's
+  // builders failed after their last answer (2026-10-18). Caches deeper in the project are the project's own files.
+  for (const [path, size] of [['.npm/_cacache/content-v2/sha512/aa/bb/three', 3 * 1024 * 1024], ['.cache/pip/http/wheel', 1024],
+    ['.local/lib/python3/site-packages/x.py', 64], ['.node-gyp/24.0.0/include/node.h', 64]] as const) {
+    await mkdir(join(f.workspace, dirname(path)), { recursive: true });
+    await writeFile(join(f.workspace, path), randomBytes(size));
+  }
+  await f.call('write', { path: 'src/main.js', content: Buffer.from('export const ok = 1;').toString('base64') });
+  await f.call('write', { path: 'tool/.cache/state.json', content: Buffer.from('{}').toString('base64') });
+  const zip = await f.call('archive');
+  // The archive itself (also what workspace_archive publishes, which is never restored) names the sources only.
+  const listed = await python('import base64,io,json,sys,zipfile; print(json.dumps(zipfile.ZipFile(io.BytesIO(base64.b64decode(json.load(sys.stdin)))).namelist()))', zip.content);
+  assert.equal(listed.code, 0, listed.stderr);
+  assert.deepEqual(JSON.parse(listed.stdout).sort(), ['src/main.js', 'tool/.cache/state.json']);
+  const restored = await filesystemFixture(t);
+  await restored.call('restore', { content: zip.content });
+  assert.equal(await readFile(join(restored.workspace, 'src/main.js'), 'utf8'), 'export const ok = 1;');
+  assert.equal(await readFile(join(restored.workspace, 'tool/.cache/state.json'), 'utf8'), '{}');
+  await assert.rejects(readFile(join(restored.workspace, '.npm/_cacache/content-v2/sha512/aa/bb/three')), /ENOENT/);
+  // A snapshot made before this release still holds npm's cache: the cache is left out, every other file comes back.
+  const before = await craftedZip([{ path: '.npm/_cacache/index-v5/aa/bb/three' }, { path: '.cache/pip/selfcheck.json' }, { path: 'p01.js', content: 'part one' }]);
+  const older = await filesystemFixture(t);
+  await older.call('restore', { content: before });
+  assert.equal(await readFile(join(older.workspace, 'p01.js'), 'utf8'), 'part one');
+  await assert.rejects(readFile(join(older.workspace, '.npm/_cacache/index-v5/aa/bb/three')), /ENOENT/);
+  await assert.rejects(readFile(join(older.workspace, '.cache/pip/selfcheck.json')), /ENOENT/);
 });
 
 test('real filesystem helper rejects symlink files, symlink ancestors, special files and immutable inputs', async t => {
