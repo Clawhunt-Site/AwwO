@@ -3,18 +3,24 @@
 // package only what awwo-check-page answers, the files AwwO's running preview supplies (three-preview-files.json, which
 // scripts/preview-modules.mjs writes with the preview's own list), and the package's LICENSE and package.json. The rest
 // (sources, other builds, libraries the preview does not supply) goes, so the image holds the same three.js files as
-// the web app ships. Fails, and so fails the build, when a listed file is missing or differs from the list's sha256,
-// or when the installed version is not the list's.
+// the web app ships: build/three.module.js without the two shaders three.js took from Shadertoy, cut out as the web
+// app's builds do it (three-shadertoy.mjs, the copy of apps/web/scripts/three-shadertoy.mjs that
+// scripts/preview-modules.mjs writes here). Fails, and so fails the build, when a listed file is missing or differs
+// from the list's sha256, when the installed version is not the list's, or when the cut does not find its shaders.
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHADERTOY_FILES, shippedText } from './three-shadertoy.mjs';
 
 const TOOLS = path.dirname(fileURLToPath(import.meta.url));
 const list = JSON.parse(readFileSync(path.join(TOOLS, 'three-preview-files.json'), 'utf8'));
 const root = path.join(TOOLS, 'node_modules', list.package);
 const version = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 if (version !== list.version) throw new Error(`${list.package} ${version} is installed; the preview's list is for ${list.version}`);
+// A listed file the builds cut the shaders out of is cut the same way first; its sha256 in the list is the cut file's.
+const cut = SHADERTOY_FILES.filter(entry => entry.pkg === list.package && Object.hasOwn(list.files, entry.file));
+for (const entry of cut) writeFileSync(path.join(root, entry.file), shippedText(path.join(root, entry.file)));
 for (const [file, sha256] of Object.entries(list.files)) {
   const stats = lstatSync(path.join(root, file), { throwIfNoEntry: false });
   if (!stats?.isFile()) throw new Error(`${list.package} ${version} has no file ${file}`);
@@ -35,4 +41,5 @@ const prune = relative => {
   }
 };
 prune('');
-console.log(`${list.package} ${version}: kept ${keep.size} files (the ${Object.keys(list.files).length} the preview supplies, LICENSE, package.json), removed ${removed}`);
+console.log(`${list.package} ${version}: kept ${keep.size} files (the ${Object.keys(list.files).length} the preview supplies, LICENSE, package.json), removed ${removed}; `
+  + `cut the shaders from Shadertoy out of ${cut.map(entry => entry.file).join(', ') || 'no file'}`);

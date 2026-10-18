@@ -152,8 +152,10 @@ The workspace sandbox image (`deploy/saas/workspace/Dockerfile`) installs
 Corporation; its NOTICE says it contains code derived from Puppeteer, also
 Apache-2.0) and `three` `0.186.1` (MIT, Copyright © 2010-2026 three.js
 authors), of which the image keeps only its LICENSE and the 89 files AwwO's
-running preview supplies, which `awwo-check-page` serves unchanged to the pages
-it checks, with the dependency tree pinned in
+running preview supplies, as the web app ships them (build/three.module.js
+without the two shaders three.js took from Shadertoy, see the web app's entry
+below), which `awwo-check-page` serves to the pages it checks, with the
+dependency tree pinned in
 `deploy/saas/workspace/tools/package-lock.json`: 180 packages, among them the
 `playwright-core` `1.58.2` that `rea-agents` pins for itself, and `frida`
 `17.23.2` (LGPL-2.0 WITH WxWindows-exception-3.1), an optional dependency
@@ -193,9 +195,10 @@ of npm packages at the versions `apps/web/package-lock.json` pins. A build of
 
 - React 19.2.6 (react, react-dom and scheduler 0.27.0; MIT), minified.
 - three.js 0.186.1 (three; MIT), minified where the app itself shows 3D models,
-  and 89 of its files unchanged, which a running preview loads as ES modules;
-  and three.js r128 (three 0.128.0, installed as three-r128; MIT), its
-  build/three.min.js unchanged, for previews that load r128.
+  and 89 of its files, which a running preview loads as ES modules, unchanged
+  but for two shaders cut out of build/three.module.js (below); and three.js
+  r128 (three 0.128.0, installed as three-r128; MIT), its build/three.min.js
+  without one of them, for previews that load r128.
 - pdf.js 6.3.289 (pdfjs-dist; Apache-2.0, without a NOTICE file): its main
   build minified; its worker unchanged, which embeds Brotli's decoder (MIT,
   Copyright 2017 Google Inc.) and the JavaScript loaders of pdf.js's qcms
@@ -219,7 +222,7 @@ bundle (@tanstack/react-query, react-router-dom and @tailwindcss/typography
 among them; the rest are build, test or type packages).
 
 Minifying drops the license comments in the code; of the libraries' banners
-only those in files that ship unchanged remain (three.js's build files and
+only those in files that ship unminified remain (three.js's build files and
 pdf.js's worker). So the hosted build writes the license texts into one file at
 the root of the site, third-party-licenses.txt: for each package above, its
 license and notice files from its top directory and from every directory
@@ -266,9 +269,11 @@ Ericson's book, zz85's path flow demo and a few shaders' blog posts among
 them), and code under share-alike or non-commercial Creative Commons terms,
 which a license text alone does not settle: in three.js, two Stack Overflow
 answers and GeometryUtils' two Hilbert curves, from sketches on OpenProcessing
-(CC BY-SA), and two shaders on Shadertoy (the dithering, and N8's bicubic
-texture filtering for transmission), whose default license is CC BY-NC-SA. It
-leaves out, and
+(CC BY-SA). Two shaders three.js took from Shadertoy, whose default license is
+CC BY-NC-SA, do not ship at all: the builds cut its renderer's dithering (in
+r128 too) and N8's bicubic texture filtering for transmission out of every
+copy of three.js they ship, each function kept as a stand-in that compiles
+(`apps/web/scripts/three-shadertoy.mjs`). The text leaves out, and
 names, two license files of such directories whose files the bundle does not
 hold: pdf.js's Liberation Sans license and three.js's SculptGL license; either
 comes back as soon as any other file of its directory ships. The text is

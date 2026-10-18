@@ -4,7 +4,7 @@
   "version": "0.186.1",
   "files": {
     "build/three.core.js": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
-    "build/three.module.js": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
+    "build/three.module.js": "0e96afcc22779a83c004de67d147094265199540c292ad1cbd2a91117d3f03d5",
     "examples/jsm/animation/AnimationClipCreator.js": "0afb4c1b147420e7104a2c1d7f0e2ca19fef030572e95a10f53ebc09397c4dc5",
     "examples/jsm/controls/FirstPersonControls.js": "4f6c4bf60c8956a1201c966de1592f4f035be47b4f6fe97879a782898945992c",
     "examples/jsm/controls/MapControls.js": "5a686152c498914389d1503b60121f484d06f15cb4f7405c15fb6b8ddcc1bdb6",

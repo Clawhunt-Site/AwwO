@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { assetFileNames } from './scripts/asset-names.mjs';
 import { bundleLicences } from './scripts/bundle-licences.mjs';
 import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
+import { withoutShadertoyShaders } from './scripts/three-shadertoy.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -46,7 +47,12 @@ export default defineConfig({
   inlinedFontLicences(join(root, 'src', 'canvas', 'fonts'), familyLicences(PREVIEW_FONTS)),
   // The license texts of the npm code the bundle ships, in one file at the root of the site, from the committed
   // src/saas/bundleLicences.txt; the build fails when the bundle needs a text that file lacks (scripts/bundle-licences.mjs).
-  bundleLicences(root)],
+  bundleLicences(root),
+  // three.js without the two shaders it took from Shadertoy (CC BY-NC-SA unless their author says otherwise), as in the
+  // native build (vite.config.mjs) and both test configs (scripts/three-shadertoy.mjs).
+  withoutShadertoyShaders()],
+  // A worker's bundle is built with these plugins only, besides Vite's own (bundleLicences refuses workers today).
+  worker: { plugins: () => [withoutShadertoyShaders()] },
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,
     proxy: { '/api/v1': { target: process.env.AWWO_API_TARGET || 'http://127.0.0.1:8087' } } },

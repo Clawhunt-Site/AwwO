@@ -6,20 +6,20 @@ the repository); from third-party files kept in the repository, which its
 THIRD_PARTY_NOTICES.md lists with their licenses; and from code and files of the npm
 packages below. Building the app minifies their code, which drops the license comments
 in it, and serves some of their files as they are: pdf.js's worker, character maps and
-two fonts, and the three.js modules a running preview loads. For each package, at the
-version the app's lockfile pins, this file carries its license and notice files, from
-its top directory and from each directory between it and a file the app uses (and
-pdf.js's wasm/ directory, for the loaders its worker embeds), and the comment at the
-top of a file the build minifies when that comment grants a license. It adds, kept in
-AwwO's repository, the licenses of three pieces of code that reach the app with no
-license text of their own: Brotli's decoder in pdf.js's worker, the module preload
-polyfill Vite adds (from es-module-shims), and Rolldown's runtime helpers (with the
-list of licenses Rolldown's LICENSE links); and the licenses of other open-source
-projects whose code a package carries without their license: code a file or its
-package's README says it took, ported or adapted, or that follows a project the file
-lists as a reference (in three.js also code its sources credit in shader comments its
-build strips, and two functions only an older three.js credits), a library kept whole
-(stats.js), and the runtime Emscripten and wasm-bindgen write into the loaders of
+two fonts, and the three.js modules a running preview loads (without two shaders, see
+below). For each package, at the version the app's lockfile pins, this file carries its
+license and notice files, from its top directory and from each directory between it and
+a file the app uses (and pdf.js's wasm/ directory, for the loaders its worker embeds),
+and the comment at the top of a file the build minifies when that comment grants a
+license. It adds, kept in AwwO's repository, the licenses of three pieces of code that
+reach the app with no license text of their own: Brotli's decoder in pdf.js's worker,
+the module preload polyfill Vite adds (from es-module-shims), and Rolldown's runtime
+helpers (with the list of licenses Rolldown's LICENSE links); and the licenses of other
+open-source projects whose code a package carries without their license: code a file or
+its package's README says it took, ported or adapted, or that follows a project the
+file lists as a reference (in three.js also code its sources credit in shader comments
+its build strips, and two functions only an older three.js credits), a library kept
+whole (stats.js), and the runtime Emscripten and wasm-bindgen write into the loaders of
 pdf.js's worker.
 Among them: earcut, paper.js, gl-matrix, Geometric Tools, MathGeoLib, lightgl.js,
 ltc_code, Filament and glTF-Sample-Viewer in three.js's core and shaders; the
@@ -31,8 +31,10 @@ notice converted from Latin-1). Not covered: credits that name a paper, a book, 
 article or code published without a license, and code under share-alike or
 non-commercial Creative Commons terms, which a license text alone does not settle: in
 three.js, two Stack Overflow answers and GeometryUtils' two Hilbert curves, from
-sketches on OpenProcessing (CC BY-SA), and two shaders on Shadertoy, whose default
-license is CC BY-NC-SA.
+sketches on OpenProcessing (CC BY-SA). Not shipped: the two shaders three.js took from
+Shadertoy, whose default license is CC BY-NC-SA, its renderer's dithering (in r128 too)
+and N8's bicubic filtering of the transmission buffer, which the build cuts out of
+every copy of three.js the app ships.
 
 ================================================================================
 @ungap/structured-clone 1.3.1 (ISC)

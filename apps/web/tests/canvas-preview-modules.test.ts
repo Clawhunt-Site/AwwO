@@ -10,6 +10,7 @@ import { pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, scriptSpecifiers, THREE_MODUL
 import { THREE_MODULE_FILES, THREE_MODULES_VERSION } from '../src/canvas/previewModules.generated';
 import { THREE_MODULES_VERSION as RELEASE_VERSION } from '../src/canvas/previewImportMap';
 import { assetScript, buildLiveDocument } from '../src/canvas/studio/liveDocument';
+import { shadertoyFile, shippedText } from '../scripts/three-shadertoy.mjs';
 
 const THREE_DIR = path.resolve(__dirname, '../node_modules/three');
 const decode = (url: string) => Buffer.from(url.slice(url.indexOf(',') + 1), 'base64').toString('utf8');
@@ -30,12 +31,14 @@ window.started = [THREE.REVISION, typeof EffectComposer, typeof UnrealBloomPass,
 </script></body></html>`;
 
 describe('three.js as ES modules, supplied through the page import map', () => {
-  it('pins every generated file to the npm release installed for the web app', () => {
+  it('pins every generated file to the npm release installed for the web app, as the builds ship it', () => {
     expect(JSON.parse(readFileSync(path.join(THREE_DIR, 'package.json'), 'utf8')).version).toBe(THREE_MODULES_VERSION);
     // The release node instructions and build scripts name (previewImportMap.ts) is the one the files pin.
     expect(RELEASE_VERSION).toBe(THREE_MODULES_VERSION);
     for (const [file, entry] of Object.entries(THREE_MODULE_FILES)) {
-      const bytes = readFileSync(path.join(THREE_DIR, file));
+      // build/three.module.js ships without the shaders three.js took from Shadertoy (scripts/three-shadertoy.mjs).
+      const absolute = path.join(THREE_DIR, file);
+      const bytes = shadertoyFile(absolute) ? Buffer.from(shippedText(absolute)) : readFileSync(absolute);
       expect(bytes.length, file).toBe(entry.bytes);
       expect(createHash('sha256').update(bytes).digest('hex'), file).toBe(entry.sha256);
       const imports = moduleSpecifiers(bytes.toString('utf8'));

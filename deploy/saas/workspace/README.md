@@ -14,7 +14,7 @@
 | rea | `rea-agents` 6.5.0 | npm, `tools/package-lock.json` | `rea` |
 | playwright-core | 1.64.1 | npm, `tools/package-lock.json` | `/opt/awwo/tools/node_modules` |
 | awwo-check-page | this repository | `tools/awwo-check-page.mjs` | `awwo-check-page` |
-| three.js (for `awwo-check-page`) | `three` 0.186.1 | npm, `tools/package-lock.json`; files `tools/three-preview-files.json` | `/opt/awwo/tools/node_modules/three`: only the 89 files AwwO's preview supplies, `LICENSE` and `package.json` (served to checked pages) |
+| three.js (for `awwo-check-page`) | `three` 0.186.1 | npm, `tools/package-lock.json`; files `tools/three-preview-files.json` | `/opt/awwo/tools/node_modules/three`: only the 89 files AwwO's preview supplies, as the web app ships them (`build/three.module.js` without the two shaders three.js took from Shadertoy, cut by `tools/three-shadertoy.mjs`, a copy of the web app's cut that `scripts/preview-modules.mjs` writes), `LICENSE` and `package.json` (served to checked pages) |
 
 The image is 1.19 GB unpacked (531 MB before these tools; 300 MB of compressed layers, from 131 MB): Chromium and its libraries 339 MB, the npm tools 145 MB.
 
