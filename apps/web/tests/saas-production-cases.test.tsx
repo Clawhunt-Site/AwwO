@@ -171,27 +171,27 @@ it('opens a case as brief → team → delivery, then shows how it was made from
   expect(pixel).toHaveFocus();
 });
 
-it('shows a flagship run as it went: its agents without the assembly, its runs, and the revisions each node ran on', async () => {
+it('shows a flagship run as it went: its agents without the assembly, its 14 runs, and the three revisions its nodes ran on', async () => {
   view();
   fireEvent.click(screen.getByRole('button', { name: 'Umber' }));
   const dialog = screen.getByRole('dialog', { name: 'Umber' });
   // Twelve agents: the assembly makes the page with no model.
   expect(within(dialog).getByText('12 agents · 5 stages')).toBeVisible();
   expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/umber-real.mp4');
-  // Six runs of the same canvas took 97 min 54 s; the first start to the last finish was 127 min 3 s.
-  const made = await within(dialog).findByRole('region', { name: '12 agents, 5 stages, 97 min 54 s in 6 runs' });
+  // Fourteen runs of the same canvas over two days took 182 min 12 s of work.
+  const made = await within(dialog).findByRole('region', { name: '12 agents, 5 stages, 182 min 12 s in 14 runs' });
   expect(within(made).getByText('13/13 nodes done')).toBeVisible();
   const receipt = [...made.querySelectorAll('details')].find(element => element.querySelector('summary')?.textContent === 'Run receipt')!.textContent!;
   expect(receipt).toContain('up to 64 model calls per node with thinking off');
-  expect(receipt).toContain('6 runs took 97 min 54 s, 127 min 3 s from the first start to the last finish');
-  expect(receipt).toContain('API bdd631342ffe · runtime f0640f571df0 (Clean-room spec, Kernel');
-  expect(receipt).toContain('; then API 19675fb7b979 · runtime d18a8b8860a5 (Assembly, Test and fix); then API 19675fb7b979 · runtime 82c58dbb3b79 (Review)');
+  expect(receipt).toContain('14 runs took 182 min 12 s, 1662 min 26 s from the first start to the last finish');
+  expect(receipt).toContain('API bdd631342ffe · runtime f0640f571df0 (Clean-room spec, Compositing');
+  expect(receipt).toContain('; then API 1eeffacb9d40 · runtime 5317b5ec6266 (Filters); then API 1eeffacb9d40 · runtime 861cf0651a10 (Kernel, Interface, Assembly, Test and fix, Review)');
   const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
   fireEvent.click(within(rail).getByRole('button', { name: /^Kernel/ }));
-  expect(within(made).getByText('Worked in its own sandbox computer · 17 model calls · 13,115 output tokens')).toBeVisible();
+  expect(within(made).getByText('Worked in its own sandbox computer · 60 model calls · 44,718 output tokens')).toBeVisible();
   fireEvent.click(within(rail).getByRole('button', { name: /^Assembly/ }));
   expect(within(made).getByText('Assembled with no model')).toBeVisible();
-  expect(within(made).getByText('umber.html, 176 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
+  expect(within(made).getByText('umber.html, 184 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
 });
 
 it('shows Backprop as it went: thirteen agents over 24 runs, and the three revisions its nodes ran on', async () => {
