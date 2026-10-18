@@ -6,9 +6,9 @@
 // files at its top, in each directory between it and those files and in the directories ALSO names; the comment at the
 // top of a file the build minifies when that comment grants a license (vfile's lib/minpath.browser.js does, for code it
 // took from path-browserify and Node.js); and the texts SUPPLEMENTS keeps in licences/ for code that came with no
-// license of its own. Its text is COMMITTED, so that a person reads each license before it ships: the build fails when
-// the bundle needs a text that file lacks, and `npm run licences:saas` (scripts/write-bundle-licences.mjs) writes the
-// file again from a full build. The build also fails on the ways it knows of for npm code to enter unseen: a stylesheet
+// license of its own, or that a package took from another open-source project without that project's license. Its text
+// is COMMITTED, so that a person reads each license before it ships: the build fails when the bundle needs a text that
+// file lacks, and `npm run licences:saas` (scripts/write-bundle-licences.mjs) writes the file again from a full build. The build also fails on the ways it knows of for npm code to enter unseen: a stylesheet
 // (also a page's <style>) that pulls in npm CSS by @import or CSS Modules' composes/@value … from, which Vite inlines
 // without a module; a Web Worker, which Vite bundles in a build of its own; and pdf.js's legacy build, which embeds
 // core-js. It does not see a small npm file that a stylesheet's url() or a script's new URL() names, which Vite inlines
@@ -44,16 +44,151 @@ const LEFT_OUT = [
 // Directories whose license files come with a file outside them: pdf.js's worker embeds the JavaScript of pdf.js's
 // qcms, OpenJPEG and JBIG2 builds, whose licenses it keeps in wasm/ beside their WebAssembly, which this site does not ship.
 const ALSO = [{ name: 'pdfjs-dist', uses: /^build\/pdf\.worker(?:\.min)?\.mjs$/, directory: 'wasm' }];
-// Texts kept in licences/ for code that came with no license of its own, each pinned by the SHA-256 of the file a person
-// read and by the version of the package it was read for: a changed file, or another version, stops the build until
-// someone has checked the text again. `uses` is a file of the package the bundle ships, `helper` a tool's helper module.
+// Texts kept in licences/ for code that came with no license of its own, and for code a package's file says it took,
+// ported or adapted from another open-source project whose license that package does not carry. Each is pinned by the
+// SHA-256 of the file a person read and by the version of the package it was read for: a changed file, or another
+// version, stops the build until someone has checked the text again. `uses` is a file of the package the bundle ships,
+// `helper` a tool's helper module. three.js comes twice: 0.186.1, and 0.128.0 (installed as three-r128), whose
+// build/three.min.js holds the same kind of code under older credits.
+const PDF_WORKER = /^build\/pdf\.worker(?:\.min)?\.mjs$/, THREE_CORE = /^build\/three\.core\.js$/, THREE_MODULE = /^build\/three\.module\.js$/;
+const THREE_R128 = /^build\/three\.min\.js$/;
+const SVG_LOADER = /^examples\/jsm\/loaders\/SVGLoader\.js$/;
 const SUPPLEMENTS = [
-  { name: 'pdfjs-dist', version: '6.3.289', uses: /^build\/pdf\.worker(?:\.min)?\.mjs$/, file: 'licences/LICENSE-brotli.txt',
+  { name: 'pdfjs-dist', version: '6.3.289', uses: PDF_WORKER, file: 'licences/LICENSE-brotli.txt',
     sha256: '2a57418d6b10947fe0dfbec3a600269e2745136c125cbf15b256e5ae18af23cb',
     label: 'Brotli\'s license, for the decoder its worker embeds (external/brotli/LICENSE_BROTLI in pdf.js at v6.3.289)' },
-  { name: 'pdfjs-dist', version: '6.3.289', uses: /^build\/pdf\.worker(?:\.min)?\.mjs$/, file: 'licences/NOTICE-brotli-decode.txt',
+  { name: 'pdfjs-dist', version: '6.3.289', uses: PDF_WORKER, file: 'licences/NOTICE-brotli-decode.txt',
     sha256: '192a8ef8abda29b039350d266468f1499d3e0f6647514990fe54e2e57e45e60c',
     label: 'the comment at the top of that decoder, which its build drops (external/brotli/decode.js in pdf.js at v6.3.289)' },
+  { name: 'pdfjs-dist', version: '6.3.289', uses: PDF_WORKER, file: 'licences/LICENSE-emscripten.txt',
+    sha256: '620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86',
+    label: 'Emscripten\'s license, for the runtime its compiler writes into the JavaScript of the OpenJPEG and JBIG2 decoders the worker embeds (LICENSE in Emscripten, the same from 4.0.23 to 5.0.7, the releases current when pdf.js built those decoders, on 2026-02-13 and 2026-04-23, from emsdk:latest)' },
+  { name: 'pdfjs-dist', version: '6.3.289', uses: PDF_WORKER, file: 'licences/LICENSE-wasm-bindgen-mit.txt',
+    sha256: '378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397',
+    label: 'wasm-bindgen\'s license (the MIT one of the two it offers), for the glue it writes into the JavaScript of the qcms build the worker embeds (LICENSE-MIT in wasm-bindgen, the same from 0.2.100 to 0.2.129, around pdf.js\'s qcms build of 2026-07-27)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-earcut-3.0.2.txt',
+    sha256: '324139c19d87af03fda38afea1590e00ca354c4159bdb2ae9e9cec070cfa46a8',
+    label: 'earcut\'s license, for the copy of earcut 3.0.2 in build/three.core.js (LICENSE in mapbox/earcut at v3.0.2)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-paper.js.txt',
+    sha256: 'f8833a38807922b4652421eb0cf29065400c55abd6f4832b9c3250dae87e1958',
+    label: 'paper.js\'s license, for ShapePath\'s port of its Path#getInteriorPoint() and reorientPaths() in build/three.core.js (LICENSE.txt in paperjs/paper.js at 92775f52, the same since 2020)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-gl-matrix.txt',
+    sha256: 'af62d31a0cdc1bf95d5e19428c3e0de368b727d9d5b6b6cdb466f8a52e68ad06',
+    label: 'gl-matrix\'s license, for Matrix4.invert() in build/three.core.js, which three.js bases on gl-matrix (LICENSE.md in toji/gl-matrix at v3.4.4)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/NOTICE-geometrictools-dist-ray-segment.txt',
+    sha256: '33b0bc55a7218588bef0b5d8d387ee083b3c1eb6b56a6ececbf7be908b3f4f88',
+    label: 'the notice of Geometric Tools\' GteDistRaySegment.h, which Ray.distanceSqToSegment() in build/three.core.js comes from (in pmjoniak/GeometricTools, a copy of David Eberly\'s GTEngine, at ae6e933f)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-boost-1.0-geometrictools.txt',
+    sha256: '8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b',
+    label: 'the Boost Software License that notice names (LICENSE in pmjoniak/GeometricTools at ae6e933f)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/NOTICE-mathgeolib-sphere.txt',
+    sha256: '7b4b3c57712161e2077a136c7721a441b607c49e2be038a0f3f6e39c3b9cf20d',
+    label: 'the notice of MathGeoLib\'s Sphere.cpp, for Sphere.expandByPoint() and union() in build/three.core.js, which three.js r128 credits to it and later releases keep without the credit (src/Geometry/Sphere.cpp in juj/MathGeoLib at 2940b99b, written in Latin-1)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'the Apache License 2.0 that notice names (LICENSE-2.0.txt from apache.org)' },
+  { name: 'three', version: '0.186.1', uses: THREE_CORE, file: 'licences/LICENSE-lightgl.js.txt',
+    sha256: '223d9247d30f9d8f842cca7de8e2454d104edb435674305ef3df473bae17d44b',
+    label: 'lightgl.js\'s license, for CameraHelper in build/three.core.js, based on the frustum of lightgl.js\'s shadow map example (LICENSE in evanw/lightgl.js at 2581efd1)' },
+  { name: 'three', version: '0.186.1', uses: THREE_MODULE, file: 'licences/LICENSE-ltc-code.txt',
+    sha256: '692a54e97fcadd0f04b14027386e53809c1dcf96de3e15b15af15731b15c1e94',
+    label: 'ltc_code\'s license, for the area lights\' linearly transformed cosines and the ACES fit RRTAndODTFit() in build/three.module.js\'s shaders, which three.js\'s sources credit to it in GLSL comments its build strips (LICENSE in selfshadow/ltc_code at 31e5e96b)' },
+  { name: 'three', version: '0.186.1', uses: THREE_MODULE, file: 'licences/LICENSE-filament.txt',
+    sha256: '02d70b593dd8e9355dd8e1ca8d13c303bee5bcaf3065b66ff6e4f534e1e6a2c1',
+    label: 'Filament\'s license, for D_Charlie(), V_Neubelt(), the anisotropy code and the AgX tone mapping in build/three.module.js\'s shaders, which three.js\'s sources credit to Filament\'s code and documentation (LICENSE in google/filament at fc6744ba, which merged its AgX tone mapper; the same at main)' },
+  { name: 'three', version: '0.186.1', uses: THREE_MODULE, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'glTF-Sample-Viewer\'s license, for the transmission code in build/three.module.js\'s shaders, which three.js\'s sources base on it, and the iridescence functions evalSensitivity() and evalIridescence(), which follow its iridescence.glsl, comments included (LICENSE.md in KhronosGroup/glTF-Sample-Viewer at f6fa7574, the same since 2019: the Apache License 2.0 as apache.org gives it)' },
+  { name: 'three', version: '0.186.1', uses: THREE_MODULE, file: 'licences/NOTICE-agx-minimal.txt',
+    sha256: 'fa303e2dfcdaebe8d210304700088a090d9a7c7c8edb84ce74cf1deca63c2384',
+    label: 'the notice of Missing Deadlines\' minimal AgX, for agxDefaultContrastApprox() in build/three.module.js\'s shaders (the listing in the appendix of iolite-engine.com/blog_posts/minimal_agx_implementation, read on 2026-10-18)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/environments\/RoomEnvironment\.js$/, file: 'licences/NOTICE-model-viewer-environment-scene.txt',
+    sha256: 'b608791cc198a537e976fa3c395c367e953b6fc29238fcf920443d58635ef1c4',
+    label: 'the notice of model-viewer\'s EnvironmentScene.ts, which RoomEnvironment.js is based on (packages/model-viewer/src/three-components/EnvironmentScene.ts in google/model-viewer at 2aeefa32, the version current when three.js r117 added RoomEnvironment.js)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/environments\/RoomEnvironment\.js$/, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'the Apache License 2.0 that notice names (LICENSE-2.0.txt from apache.org)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/objects\/Sky\.js$/, file: 'licences/NOTICE-kocmoc-demo.txt',
+    sha256: 'f8b0a4e69a58f1e35379230ab2c9e23d854a81894405e56731129ae160a5ecdd',
+    label: 'the license section of Simon Wallner\'s kocmoc-demo, for Sky.js\'s sky shader, which comes from that project\'s media/shaders/sky.frag and scattering.glsl; it puts the project\'s source code under the MIT license and its "media files (textures, sounds, etc...)" under CC BY-NC-SA, and Wallner\'s page on the shader (simonwallner.at/project/atmospheric-scattering) says "the source files are licensed under the MIT license and assets are license under the creative commons license" (README.rst in SimonWallner/kocmoc-demo at c4d23868, its RTVIS branch, where those shaders are)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/shaders\/DigitalGlitch\.js$/, file: 'licences/NOTICE-unityglitch.txt',
+    sha256: '176e1006e1e8ec5b79c3fde7d9c7f7e6bd22b4d2796d80d695ff14b2129bcccb',
+    label: 'the license of staffantan\'s unityglitch, for DigitalGlitch.js, based on its glitch shader for Unity (README in staffantan/unityglitch at dac385b8: the Creative Commons Attribution 3.0 Unported License)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/libs\/stats\.module\.js$/, file: 'licences/LICENSE-stats.js.txt',
+    sha256: '9d23ed2d037cc4b97860dc61dc3787ca2c1faac8b11402064a6fa90e91360adc',
+    label: 'stats.js\'s license, for examples/jsm/libs/stats.module.js, stats.js r16 (LICENSE in mrdoob/stats.js at r16)' },
+  { name: 'three', version: '0.186.1', uses: SVG_LOADER, file: 'licences/LICENSE-svg-numbers.txt',
+    sha256: '94bf05d174a5097c436b8d49702c4ff7f50261c6da6bbd3b9164c8b4669decfa',
+    label: 'svg-numbers\' license, for the number parser examples/jsm/loaders/SVGLoader.js takes from it (LICENSE in ppvg/svg-numbers at e3e8e311)' },
+  { name: 'three', version: '0.186.1', uses: SVG_LOADER, file: 'licences/NOTICE-kopp-dsyev2.txt',
+    sha256: '546e88c04ebff4d58fa3e2a96fd6f202a876100f79927e213f8226ab0f250503',
+    label: 'the notice of Joachim Kopp\'s dsyev2.c, the eigensolver for symmetric 2x2 matrices that SVGLoader.js adapts in eigenDecomposition(), under the GNU LGPL 2.1 or later (dsyev2.c in dsyev2-C-1.0.tar.gz from www.mpi-hd.mpg.de/personalhomes/globes/3x3)' },
+  { name: 'three', version: '0.186.1', uses: SVG_LOADER, file: 'licences/LICENSE-lgpl-2.1-kopp.txt',
+    sha256: '0a7e6662e43a02c5dc761b64d9b32a79856afbbb78fcba772f8466a589ddb1e9',
+    label: 'the GNU Lesser General Public License 2.1 that notice names (COPYING in the same archive)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/math\/ConvexHull\.js$/, file: 'licences/LICENSE-quickhull3d.txt',
+    sha256: '583f44e645afa79058068d52b60f312e169f580163fc2772ccf5418904dcda60',
+    label: 'quickhull3d\'s license, for examples/jsm/math/ConvexHull.js, a port of quickhull3d (LICENSE in mauriciopoppe/quickhull3d at bef4fb45, added in 2021 with its year left as YYYY; its package said MIT before)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/(?:shaders\/SMAAShader|postprocessing\/SMAAPass)\.js$/, file: 'licences/LICENSE-smaa.txt',
+    sha256: '70086e9cb87b85f58919782bd387abc471f57e3243fb3b693ba0305e6cf6a228',
+    label: 'SMAA\'s license, for SMAAShader.js, a port of SMAA 2.8, and the lookup textures SMAAPass.js embeds (LICENSE.txt in iryoku/smaa at v2.8)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/shaders\/SSAOShader\.js$/, file: 'licences/LICENSE-mcnopper-opengl.txt',
+    sha256: 'b467b00620b105f5c4d2fbfbce7cb8a7cd6e721ee7a616cd885f473ebc196e65',
+    label: 'the license of Norbert Nopper\'s OpenGL examples, for SSAOShader.js, whose shader follows their Example28/shader/ssao.frag.glsl, which it lists as a reference (LICENSE in McNopper/OpenGL at edbc34e2: MIT since 2026-04-13; the repository had no license when three.js took the shader in 2018, and Apache 2.0 from 2022)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/shaders\/(?:BrightnessContrast|HueSaturation|DotScreen)Shader\.js$/, file: 'licences/LICENSE-glfx.js.txt',
+    sha256: '223d9247d30f9d8f842cca7de8e2454d104edb435674305ef3df473bae17d44b',
+    label: 'glfx.js\'s license, for the brightness-contrast, hue-saturation and dot-screen shaders three.js takes from its filters (LICENSE in evanw/glfx.js at 86ae72ac)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/(?:shaders\/ConvolutionShader|postprocessing\/BloomPass)\.js$/, file: 'licences/NOTICE-o3d-convolution.txt',
+    sha256: '15f31a6ab87adf03759c722d7fd043df7d5aafca56aecf7b5bc398d3b46e1d51',
+    label: 'the notice of O3D\'s convolution sample, for ConvolutionShader.js, ported from it, and the Gaussian kernel BloomPass.js builds as it does (o3d/samples/convolution.html in Chromium at 11.0.696.0, the same at 9.0.597.0)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/shaders\/VignetteShader\.js$/, file: 'licences/NOTICE-3-dreams-of-black.txt',
+    sha256: '70d78d43fdf5a15366448573823cbe46b5ebc9eda4f457f1103bb944f5ee6670',
+    label: 'how 3 Dreams of Black opens its code, for VignetteShader.js, based on its PaintEffect post-process (README.md in dataarts/3-dreams-of-black at 9c8ef595)' },
+  { name: 'three', version: '0.186.1', uses: /^examples\/jsm\/shaders\/VignetteShader\.js$/, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'the Apache License 2.0 that README names (LICENSE-2.0.txt from apache.org)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-earcut-2.2.2.txt',
+    sha256: 'cd661c432ea8243974e6fde6fc433ebee3e96525ca8b66321b9d9971674ede60',
+    label: 'earcut\'s license, for build/three.min.js\'s port of earcut 2.2.2 (LICENSE in mapbox/earcut at v2.2.2)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/NOTICE-geometrictools-dist-ray-segment.txt',
+    sha256: '33b0bc55a7218588bef0b5d8d387ee083b3c1eb6b56a6ececbf7be908b3f4f88',
+    label: 'the notice of Geometric Tools\' GteDistRaySegment.h, which Ray.distanceSqToSegment() comes from (in pmjoniak/GeometricTools, a copy of David Eberly\'s GTEngine, at ae6e933f; three.js r128 names it at www.geometrictools.com)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/NOTICE-geometrictools-intr-ray3-triangle3.txt',
+    sha256: 'efa1f7cf1993281ffb95a6b9f8c31023792216720774c28916bff80075e5daf4',
+    label: 'the notice of Geometric Tools\' GteIntrRay3Triangle3.h, which Ray.intersectTriangle() comes from (the same)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-boost-1.0-geometrictools.txt',
+    sha256: '8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b',
+    label: 'the Boost Software License those notices name (LICENSE in pmjoniak/GeometricTools at ae6e933f)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/NOTICE-mathgeolib-sphere.txt',
+    sha256: '7b4b3c57712161e2077a136c7721a441b607c49e2be038a0f3f6e39c3b9cf20d',
+    label: 'the notice of MathGeoLib\'s Sphere.cpp, which Sphere.expandByPoint() and union() come from (src/Geometry/Sphere.cpp in juj/MathGeoLib at 2940b99b, the commit three.js names, written in Latin-1)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'the Apache License 2.0 that notice names (LICENSE-2.0.txt from apache.org)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-lightgl.js.txt',
+    sha256: '223d9247d30f9d8f842cca7de8e2454d104edb435674305ef3df473bae17d44b',
+    label: 'lightgl.js\'s license, for CameraHelper, based on the frustum of lightgl.js\'s shadow map example (LICENSE in evanw/lightgl.js at 2581efd1)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-ltc-code.txt',
+    sha256: '692a54e97fcadd0f04b14027386e53809c1dcf96de3e15b15af15731b15c1e94',
+    label: 'ltc_code\'s license, for the area lights\' linearly transformed cosines and the ACES fit RRTAndODTFit() in the shaders, which three.js\'s sources credit to it in GLSL comments its build strips (LICENSE in selfshadow/ltc_code at 31e5e96b)' },
+  { name: 'three', version: '0.128.0', uses: THREE_R128, file: 'licences/LICENSE-apache-2.0.txt',
+    sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30',
+    label: 'Filament\'s license, for D_Charlie() and V_Neubelt() in the shaders, which three.js\'s sources credit to Filament\'s brdf.fs (LICENSE in google/filament at 7b80b313, of 2019: the Apache License 2.0 as apache.org gives it)' },
+  { name: 'lucide-react', version: '0.468.0', uses: /^dist\/esm\/icons\//, file: 'licences/LICENSE-feather.txt',
+    sha256: 'afcab584f9ecaf796069d8b3cd2a02e3135d89743a2cf17def2e7935dad91e5d',
+    label: 'Feather\'s license, for the parts of Lucide\'s icons that come from Feather, which its LICENSE above names (LICENSE in feathericons/feather at v4.28.0, the release before Lucide\'s fork of 2020-06-08; the same at v4.29.0)' },
+  { name: 'react-dom', version: '19.2.6', uses: /^cjs\/react-dom-client\.[a-z]+\.js$/, file: 'licences/LICENSE-modernizr.txt',
+    sha256: '0145debb9e5fc97a7b40e5d9c6ae7aa59072f36097acd22eda33be12fa0777cd',
+    label: 'Modernizr\'s license, for the event check react-dom-client takes from "Modernizr 3.0.0pre (Custom Build) | MIT", as its code says (LICENSE in Modernizr/Modernizr at 2b6caa10, of 2021, the first to give the MIT text: until then it held that one line)' },
+  { name: 'extend', version: '3.0.2', uses: /\.js$/, file: 'licences/LICENSE-jquery-1.7.2.txt',
+    sha256: '0ade425df7c0386e04fbaa6b49e97a71ec504e53a4c01137c4bfb425a9a92344',
+    label: 'jQuery\'s MIT license, for extend(), a port of jQuery.extend() as its package says (MIT-LICENSE.txt in jquery/jquery at 1.7.2, the release current when node-extend was written in April 2012; jQuery then offered the MIT License or the GPL 2.0)' },
+  { name: 'fflate', version: '0.8.3', uses: /\.[cm]?js$/, file: 'licences/LICENSE-uzip.js.txt',
+    sha256: '786adae9320db47cd483f9a8774ebd3edab8876d714caa4fb0aee8e5b2c3edc0',
+    label: 'UZIP.js\'s license, for the code fflate says is similar to UZIP.js\'s, its Huffman tree builder among it (LICENSE in photopea/UZIP.js, the same since 2018)' },
+  { name: 'vfile', version: '6.0.3', uses: /^lib\/minurl\.(?:browser|shared)\.js$/, file: 'licences/LICENSE-nodejs.txt',
+    sha256: 'fbc04dcc36cecba7c042277274bbbd510ec34c496bd1ebbaf8d5febd1f403ac3',
+    label: 'the part of Node.js\'s license that covers Node.js itself, for isUrl() and urlToPath() in lib/minurl.*.js, from Node.js\'s lib/internal/url.js (LICENSE in nodejs/node at 6a3403c, the commit vfile names, up to its list of the libraries Node.js bundles)' },
   { name: 'vite', version: '8.0.16', helper: /^\0vite\/modulepreload-polyfill/, file: 'licences/LICENSE-es-module-shims.txt',
     sha256: '13dc18f97f767475f7ad48fdd12a2e45be30fb309c604730f406f625cf7d8f7f',
     label: 'es-module-shims\' license (its LICENSE from 1.0.0 to 1.5.18), for the module preload polyfill Vite adapted from it, which Rolldown 1.0.3 writes without that notice' },
@@ -282,9 +417,25 @@ top of a file the build minifies when that comment grants a license. It adds, ke
 AwwO's repository, the licenses of three pieces of code that reach the app with no
 license text of their own: Brotli's decoder in pdf.js's worker, the module preload
 polyfill Vite adds (from es-module-shims), and Rolldown's runtime helpers (with the
-list of licenses Rolldown's LICENSE links). Each is copied as it was written, with LF
-line ends. Code that a package credits to another project only in a comment, without
-that project's license text, is not covered here.
+list of licenses Rolldown's LICENSE links); and the licenses of other open-source
+projects whose code a package carries without their license: code a file or its
+package's README says it took, ported or adapted, or that follows a project the file
+lists as a reference (in three.js also code its sources credit in shader comments its
+build strips, and two functions only an older three.js credits), a library kept whole
+(stats.js), and the runtime Emscripten and wasm-bindgen write into the loaders of
+pdf.js's worker.
+Among them: earcut, paper.js, gl-matrix, Geometric Tools, MathGeoLib, lightgl.js,
+ltc_code, Filament and glTF-Sample-Viewer in three.js's core and shaders; the
+libraries and shaders three.js's add-ons draw on, among them a function of SVGLoader.js
+under the GNU LGPL 2.1 or later and DigitalGlitch.js's shader under CC BY 3.0; Feather
+in Lucide's icons, Modernizr in React DOM, jQuery in extend, UZIP.js in fflate and
+Node.js in vfile. Each is copied as it was written, with LF line ends (MathGeoLib's
+notice converted from Latin-1). Not covered: credits that name a paper, a book, an
+article or code published without a license, and code under share-alike or
+non-commercial Creative Commons terms, which a license text alone does not settle: in
+three.js, two Stack Overflow answers and GeometryUtils' two Hilbert curves, from
+sketches on OpenProcessing (CC BY-SA), and two shaders on Shadertoy, whose default
+license is CC BY-NC-SA.
 `;
 
 /** The whole document for these packages. */

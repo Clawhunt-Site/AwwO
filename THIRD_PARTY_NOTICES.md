@@ -229,8 +229,39 @@ version of the package it was checked for: Brotli's license and the comment
 its decoder starts with, from pdf.js's repository at v6.3.289; es-module-shims'
 license, which Vite 5 kept above the polyfill and Rolldown's version of it no
 longer does; and the list of licenses Rolldown's LICENSE links (Rollup's and
-esbuild's), from its repository at v1.0.3. Code that a package credits to
-another project only in a comment is not covered. It leaves out, and
+esbuild's), from its repository at v1.0.3. For code of another open-source
+project that a package carries without that project's license (code a file or
+its package's README says it took, ported or adapted, or that follows a project
+the file lists as a reference; in three.js also code its sources credit in
+shader comments its build strips, and two functions only an older release
+credits; a library kept whole; the runtime a tool writes), it adds that
+project's license, kept and pinned the same way: in three.js 0.186.1's core,
+earcut 3.0.2 (ISC), paper.js (MIT), gl-matrix (MIT), Geometric Tools (Boost
+Software License 1.0), MathGeoLib (Apache-2.0) and lightgl.js (MIT); in its
+renderer's shaders, selfshadow's ltc_code (a BSD-style license), Filament and
+glTF-Sample-Viewer (Apache-2.0) and Missing Deadlines' minimal AgX (MIT); in
+the add-ons it ships, stats.js (MIT), svg-numbers (MIT), quickhull3d (MIT), SMAA
+2.8 (a BSD-style license), glfx.js (MIT), O3D's convolution sample
+(BSD-3-Clause), 3 Dreams of Black and model-viewer (Apache-2.0), Simon
+Wallner's kocmoc-demo (MIT), Norbert Nopper's OpenGL examples (MIT),
+unityglitch (CC BY 3.0) and Joachim Kopp's
+eigensolver for symmetric 2x2 matrices, which SVGLoader.js adapts, under the GNU
+LGPL 2.1 or later; in r128, earcut 2.2.2, Geometric Tools, MathGeoLib,
+lightgl.js, ltc_code and Filament; Feather (MIT), for the parts of Lucide's
+icons that come from it; Modernizr (MIT), for an event check in React DOM;
+jQuery (MIT), for extend, a port of its extend(); Emscripten (MIT or NCSA) and
+wasm-bindgen (MIT or Apache-2.0), for the code those tools write into the
+loaders pdf.js's worker embeds; UZIP.js (MIT), for fflate; and Node.js (MIT),
+for vfile's URL helpers. Not covered: credits that name a paper, a book, an
+article or code published without a license (in three.js, Eric Lengyel's
+tangent and oblique clipping code, Ken Perlin's improved noise, Christer
+Ericson's book, zz85's path flow demo and a few shaders' blog posts among
+them), and code under share-alike or non-commercial Creative Commons terms,
+which a license text alone does not settle: in three.js, two Stack Overflow
+answers and GeometryUtils' two Hilbert curves, from sketches on OpenProcessing
+(CC BY-SA), and two shaders on Shadertoy (the dithering, and N8's bicubic
+texture filtering for transmission), whose default license is CC BY-NC-SA. It
+leaves out, and
 names, two license files of such directories whose files the bundle does not
 hold: pdf.js's Liberation Sans license and three.js's SculptGL license; either
 comes back as soon as any other file of its directory ships. The text is

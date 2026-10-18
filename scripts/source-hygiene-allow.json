@@ -113,5 +113,10 @@
     "path": "docs/pglite-feasibility.md",
     "categories": ["zero-width"],
     "reason": "Historical feasibility record that quotes a garbled backup file name byte for byte (replacement characters plus U+200B); the record is kept as written."
+  },
+  {
+    "path": "apps/web/src/saas/bundleLicences.txt",
+    "categories": ["control"],
+    "reason": "The hosted site's third-party licenses, written by apps/web/scripts/bundle-licences.mjs from texts kept as written: the GNU LGPL 2.1 among them (apps/web/licences/LICENSE-lgpl-2.1-kopp.txt) separates its pages with two form feeds (U+000C)."
   }
 ]

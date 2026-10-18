@@ -166,7 +166,8 @@ describe("the hosted bundle's third-party licenses", () => {
     // The worker brings wasm/'s licenses and the texts kept for it in licences/, pinned to what was read.
     const worker = fonts(['build/pdf.worker.min.mjs']);
     expect(worker.parts.map(part => part.label)).toEqual(['pdfjs-dist 6.3.289', 'pdfjs-dist 6.3.289: LICENSE', 'pdfjs-dist 6.3.289: wasm/LICENSE_PDFJS_QCMS',
-      'pdfjs-dist 6.3.289: licences/LICENSE-brotli.txt', 'pdfjs-dist 6.3.289: licences/NOTICE-brotli-decode.txt']);
+      'pdfjs-dist 6.3.289: licences/LICENSE-brotli.txt', 'pdfjs-dist 6.3.289: licences/NOTICE-brotli-decode.txt',
+      'pdfjs-dist 6.3.289: licences/LICENSE-emscripten.txt', 'pdfjs-dist 6.3.289: licences/LICENSE-wasm-bindgen-mit.txt']);
     expect(worker.parts[3]!.text).toBe(`----- pdfjs-dist 6.3.289: Brotli's license, for the decoder its worker embeds (external/brotli/LICENSE_BROTLI in pdf.js at v6.3.289) -----\n${readFileSync(path.join(WEB, 'licences', 'LICENSE-brotli.txt'), 'utf8')}\n`);
     // Its legacy build embeds core-js as well, whose license nothing here carries: refused.
     for (const file of ['legacy/build/pdf.mjs', 'legacy/build/pdf.worker.min.mjs']) expect(() => fonts([file]), file).toThrow(new RegExp(`pdfjs-dist 6\\.3\\.289 ships ${file.replace(/\./g, '\\.')}: pdf\\.js's legacy build embeds core-js`));
@@ -185,6 +186,60 @@ describe("the hosted bundle's third-party licenses", () => {
     writeFileSync(path.join(root, 'node_modules', 'vite', 'LICENSE.md'), MIT('Vite'));
     expect(() => parts('vite', [], ['\0vite/preload-helper.js'])).toThrow(/no longer has the heading "# Licenses of bundled dependencies"/);
     expect(() => parts('none', [['index.js', true]])).toThrow(/none 0\.1\.0 .* has no license file/);
+  });
+
+  it('carry the license of a project whose code a file the bundle ships took, with the file that took it', () => {
+    const root = app({ 'three/LICENSE': MIT('2010 three.js authors'), 'three-r128/LICENSE': MIT('2010 three.js authors'), 'later-three/LICENSE': MIT('three'),
+      'lucide-react/LICENSE': 'ISC License\n', 'react-dom/LICENSE': MIT('Meta'), 'fflate/LICENSE': MIT('Arjun Barrett'), 'vfile/license': MIT('Titus Wormer'),
+      'extend/LICENSE': MIT('2014 Stefan Thomas') },
+    { three: { name: 'three', version: '0.186.1', license: 'MIT' }, 'three-r128': { name: 'three', version: '0.128.0', license: 'MIT' },
+      'later-three': { name: 'three', version: '0.187.0', license: 'MIT' }, 'lucide-react': { name: 'lucide-react', version: '0.468.0', license: 'ISC' },
+      'react-dom': { name: 'react-dom', version: '19.2.6', license: 'MIT' }, fflate: { name: 'fflate', version: '0.8.3', license: 'MIT' },
+      vfile: { name: 'vfile', version: '6.0.3', license: 'MIT' }, extend: { name: 'extend', version: '3.0.2', license: 'MIT' } });
+    cpSync(path.join(WEB, 'licences'), path.join(root, 'licences'), { recursive: true });
+    const kept = (name: string) => readFileSync(path.join(WEB, 'licences', name), 'utf8');
+    const added = (name: string, files: string[]) => packageParts(path.join(root, 'node_modules', name).replace(/\\/g, '/'), { files: new Map(files.map(file => [file, false])) }, root)
+      .parts.slice(2).map(part => part.label.slice(part.label.indexOf('licences/') + 'licences/'.length));
+    const core = ['LICENSE-earcut-3.0.2.txt', 'LICENSE-paper.js.txt', 'LICENSE-gl-matrix.txt', 'NOTICE-geometrictools-dist-ray-segment.txt', 'LICENSE-boost-1.0-geometrictools.txt',
+      'NOTICE-mathgeolib-sphere.txt', 'LICENSE-apache-2.0.txt', 'LICENSE-lightgl.js.txt'];
+    expect(added('three', ['build/three.core.js'])).toEqual(core);
+    // An add-on brings what it took, and only when it ships: SVGLoader.js its number parser and Joachim Kopp's LGPL eigensolver.
+    expect(added('three', ['build/three.core.js', 'examples/jsm/loaders/SVGLoader.js'])).toEqual([...core, 'LICENSE-svg-numbers.txt', 'NOTICE-kopp-dsyev2.txt', 'LICENSE-lgpl-2.1-kopp.txt']);
+    // The renderer's shaders, in build/three.module.js, whose credits three.js's sources keep in GLSL comments its build strips.
+    expect(added('three', ['build/three.module.js'])).toEqual(['LICENSE-ltc-code.txt', 'LICENSE-filament.txt', 'LICENSE-apache-2.0.txt', 'NOTICE-agx-minimal.txt']);
+    expect(added('three', ['examples/jsm/loaders/FontLoader.js', 'examples/jsm/controls/OrbitControls.js'])).toEqual([]);
+    for (const [file, texts] of [['examples/jsm/libs/stats.module.js', ['LICENSE-stats.js.txt']], ['examples/jsm/math/ConvexHull.js', ['LICENSE-quickhull3d.txt']],
+      ['examples/jsm/postprocessing/SMAAPass.js', ['LICENSE-smaa.txt']], ['examples/jsm/shaders/SMAAShader.js', ['LICENSE-smaa.txt']],
+      ['examples/jsm/shaders/DotScreenShader.js', ['LICENSE-glfx.js.txt']], ['examples/jsm/shaders/HueSaturationShader.js', ['LICENSE-glfx.js.txt']],
+      ['examples/jsm/shaders/BrightnessContrastShader.js', ['LICENSE-glfx.js.txt']], ['examples/jsm/shaders/ConvolutionShader.js', ['NOTICE-o3d-convolution.txt']],
+      ['examples/jsm/postprocessing/BloomPass.js', ['NOTICE-o3d-convolution.txt']], ['examples/jsm/shaders/VignetteShader.js', ['NOTICE-3-dreams-of-black.txt', 'LICENSE-apache-2.0.txt']],
+      ['examples/jsm/environments/RoomEnvironment.js', ['NOTICE-model-viewer-environment-scene.txt', 'LICENSE-apache-2.0.txt']],
+      ['examples/jsm/objects/Sky.js', ['NOTICE-kocmoc-demo.txt']], ['examples/jsm/shaders/DigitalGlitch.js', ['NOTICE-unityglitch.txt']],
+      ['examples/jsm/shaders/SSAOShader.js', ['LICENSE-mcnopper-opengl.txt']]] as const) {
+      expect(added('three', [file]), file).toEqual(texts);
+    }
+    // r128's build has the same kind of code under its own credits. A file one version's texts are for, shipped by the other
+    // version, stops the build until someone has read them for it.
+    const r128 = packageParts(path.join(root, 'node_modules', 'three-r128').replace(/\\/g, '/'), { files: new Map([['build/three.min.js', false]]) }, root);
+    expect(r128.parts[0]!.text).toContain('three 0.128.0 (MIT), installed as three-r128');
+    expect(added('three-r128', ['build/three.min.js'])).toEqual(['LICENSE-earcut-2.2.2.txt', 'NOTICE-geometrictools-dist-ray-segment.txt', 'NOTICE-geometrictools-intr-ray3-triangle3.txt',
+      'LICENSE-boost-1.0-geometrictools.txt', 'NOTICE-mathgeolib-sphere.txt', 'LICENSE-apache-2.0.txt', 'LICENSE-lightgl.js.txt', 'LICENSE-ltc-code.txt', 'LICENSE-apache-2.0.txt']);
+    expect(() => added('three', ['build/three.min.js'])).toThrow(/three 0\.186\.1 is not the three 0\.128\.0 that licences\/LICENSE-earcut-2\.2\.2\.txt was checked for/);
+    expect(() => added('three-r128', ['build/three.core.js'])).toThrow(/three 0\.128\.0 is not the three 0\.186\.1 that licences\/LICENSE-earcut-3\.0\.2\.txt was checked for/);
+    // Each text is what was read, under a heading that says what it is for; MathGeoLib's notice reads as written, decoded from Latin-1.
+    expect(r128.parts[6]!.text).toBe(`----- three 0.128.0: the notice of MathGeoLib's Sphere.cpp, which Sphere.expandByPoint() and union() come from (src/Geometry/Sphere.cpp in juj/MathGeoLib at 2940b99b, the commit three.js names, written in Latin-1) -----\n${kept('NOTICE-mathgeolib-sphere.txt')}`);
+    expect(kept('NOTICE-mathgeolib-sphere.txt')).toMatch(/^\/\* Copyright Jukka Jylänki\n/);
+    expect(kept('NOTICE-kopp-dsyev2.txt')).toContain('version 2.1 of the License, or (at your option) any later version.');
+    // A later three.js stops the build until someone has read its texts again.
+    expect(() => added('later-three', ['build/three.core.js'])).toThrow(/three 0\.187\.0 is not the three 0\.186\.1 that licences\/LICENSE-earcut-3\.0\.2\.txt was checked for/);
+    expect(added('lucide-react', ['dist/esm/icons/x.js'])).toEqual(['LICENSE-feather.txt']);
+    expect(added('lucide-react', ['dist/esm/Icon.js'])).toEqual([]);
+    expect(added('react-dom', ['cjs/react-dom-client.production.js'])).toEqual(['LICENSE-modernizr.txt']);
+    expect(added('react-dom', ['cjs/react-dom.production.js', 'index.js'])).toEqual([]);
+    expect(added('fflate', ['esm/browser.js'])).toEqual(['LICENSE-uzip.js.txt']);
+    expect(added('vfile', ['lib/minurl.shared.js', 'lib/minurl.browser.js'])).toEqual(['LICENSE-nodejs.txt']);
+    expect(added('vfile', ['lib/index.js', 'lib/minproc.browser.js'])).toEqual([]);
+    expect(added('extend', ['index.js'])).toEqual(['LICENSE-jquery-1.7.2.txt']);
   });
 
   it('refuse a stylesheet that pulls in npm CSS, itself or through one it pulls in, and follow one package\'s own', async () => {
