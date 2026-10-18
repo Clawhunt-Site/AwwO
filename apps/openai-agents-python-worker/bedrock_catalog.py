@@ -14,6 +14,10 @@ from pathlib import Path
 
 from bedrock_bridge import BEARER, BEDROCK_REGIONS, valid_region
 
+# A model's output limit per call, as apps/bedrock-catalog.ts has it: Claude Opus 5.5 always thinks first and can spend
+# a whole 32,000-token call on thinking alone, so it gets 64,000.
+MAX_OUTPUT_TOKENS = 65_536
+
 # The worker runs from the repository/release tree (apps/openai-agents-python-worker), where the
 # shared catalog sits one level up; a copy next to this module (a packaged install) takes precedence.
 CATALOG_PATHS = (Path(__file__).resolve().parent / "bedrock-models.json", Path(__file__).resolve().parent.parent / "bedrock-models.json")
@@ -57,7 +61,7 @@ def parse_catalog_file(value) -> tuple:
         if (not isinstance(e["id"], str) or not CATALOG_ID.fullmatch(e["id"]) or e["id"] in ids
                 or not _valid_name(e["name"]) or not isinstance(e["vendor"], str) or not VENDOR.fullmatch(e["vendor"])
                 or not isinstance(e["target"], str) or not TARGET.fullmatch(e["target"]) or e["target"] in targets
-                or not _integer(e["contextWindow"], 4096, 2_000_000) or not _integer(e["maxTokens"], 128, 32_768)
+                or not _integer(e["contextWindow"], 4096, 2_000_000) or not _integer(e["maxTokens"], 128, MAX_OUTPUT_TOKENS)
                 or e["maxTokens"] + 256 >= e["contextWindow"]
                 or not isinstance(e["input"], list) or not e["input"] or any(kind not in ("text", "image") for kind in e["input"]) or "text" not in e["input"]
                 or not isinstance(e["tools"], bool) or e["runtime"] not in ("pi", "openai-agents")

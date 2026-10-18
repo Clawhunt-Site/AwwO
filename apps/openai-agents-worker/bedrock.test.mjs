@@ -33,7 +33,7 @@ test('the built-in catalog adds Bedrock profiles to the Agents worker after its 
   const health = publicHealth(c);
   const claude = health.models.find(model => model.id === 'bedrock.claude-opus-5-5');
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', providerModel: 'global.anthropic.claude-opus-5-5', provider: 'bedrock',
-    runtime: 'openai-agents', protocol: 'chat_completions', contextWindow: 200000, maxOutputTokens: 32000, maxContextTextBytes: 167744,
+    runtime: 'openai-agents', protocol: 'chat_completions', contextWindow: 200000, maxOutputTokens: 64000, maxContextTextBytes: 135744,
     messageOverheadBytes: 32, reasoningEfforts: [], defaultReasoningEffort: '' });
   // Health never carries a base URL, region or key.
   assert.doesNotMatch(JSON.stringify(health), /amazonaws|ABSK|sk-llmgate/);
@@ -155,6 +155,17 @@ test('the official Agents SDK completes a turn through the bridge with provider 
   assert.equal(input.toolConfig, undefined);
   assert.equal(clientConfig.maxAttempts, 1);
   assert.deepEqual(clientConfig.token, { token: BEDROCK_KEY });
+});
+
+test('Claude Opus 5.5 gets 64,000 output tokens per call, room to answer after its own thinking', { timeout: 15_000 }, async () => {
+  // Opus 5.5 always thinks first (Bedrock refuses thinking.type disabled for it), and PALLWARD's builders spent whole
+  // 32,000-token calls thinking and ended with nothing (MODEL_OUTPUT_LIMIT, 2026-10-18).
+  const bedrock = fakeBedrock(textTurn('Ready.'));
+  const { events, error } = await bridged('bedrock.claude-opus-5-5', bedrock.sdk, request({ model: 'bedrock.claude-opus-5-5', prompt: 'Say ready' }));
+  assert.equal(error, undefined);
+  assert.equal(events.at(-1).type, 'completed');
+  assert.deepEqual(bedrock.sent[0].input.inferenceConfig, { maxTokens: 64000 });
+  assert.equal(readBedrockCatalog().filter(entry => entry.maxTokens > 32_768).map(entry => entry.id).join(), 'bedrock.claude-opus-5-5', 'only the model measured to need it');
 });
 
 test('the real AWS SDK gives a Bedrock stream the bridge\'s idle limit, not its own 300 s', { timeout: 15_000 }, async () => {

@@ -30,6 +30,10 @@ export type BedrockProfile = Readonly<{
 
 export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock']);
 const ENTRY_FIELDS = ['id', 'name', 'vendor', 'target', 'contextWindow', 'maxTokens', 'input', 'tools', 'runtime', 'verified'];
+/** A model's output limit per call. Claude Opus 5.5 always thinks first (adaptive thinking: Bedrock refuses a request that
+ *  turns it off) and can spend a whole 32,000-token call on thinking alone, ending it with nothing to show; Bedrock takes
+ *  64,000 for it. */
+const MAX_OUTPUT_TOKENS = 65_536;
 const CATALOG_ID = /^bedrock\.[a-z0-9][a-z0-9-]{0,62}$/;
 // A Converse modelId: an optional geographic/global profile prefix, a provider and a model.
 const TARGET = /^(?:(?:global|us|eu|apac|jp|au|ca)\.)?[a-z0-9-]+\.[A-Za-z0-9.:-]{1,120}$/;
@@ -66,7 +70,7 @@ export function parseBedrockCatalogFile(value: unknown): BedrockCatalog {
     if (typeof e.id !== 'string' || !CATALOG_ID.test(e.id) || ids.has(e.id)
       || !validName(e.name) || typeof e.vendor !== 'string' || !VENDOR.test(e.vendor)
       || typeof e.target !== 'string' || !TARGET.test(e.target) || targets.has(e.target)
-      || !integer(e.contextWindow, 4096, 2_000_000) || !integer(e.maxTokens, 128, 32_768)
+      || !integer(e.contextWindow, 4096, 2_000_000) || !integer(e.maxTokens, 128, MAX_OUTPUT_TOKENS)
       || (e.maxTokens as number) + 256 >= (e.contextWindow as number)
       || !Array.isArray(e.input) || !e.input.length || e.input.some(kind => kind !== 'text' && kind !== 'image') || !e.input.includes('text')
       || typeof e.tools !== 'boolean' || (e.runtime !== 'pi' && e.runtime !== 'openai-agents')

@@ -121,7 +121,10 @@ class CatalogTests(unittest.TestCase):
         good = {"id": "bedrock.test", "name": "Test", "vendor": "test", "target": "test.model-v1:0", "contextWindow": 32768,
                 "maxTokens": 4096, "input": ["text"], "tools": True, "runtime": "openai-agents", "verified": ""}
         self.assertEqual(len(parse_catalog({"version": 1, "regions": ["us-east-1"], "models": [good]})), 1)
-        for bad in ({**good, "tools": False}, {**good, "extra": 1}, {**good, "target": "nope"}, {**good, "input": ["image"]}, {**good, "name": "a\u0000b"}):
+        # The output limit per call goes up to 65,536 (Claude Opus 5.5 has 64,000), as in apps/bedrock-catalog.ts.
+        self.assertEqual(len(parse_catalog({"version": 1, "regions": ["us-east-1"], "models": [{**good, "contextWindow": 200000, "maxTokens": 65536}]})), 1)
+        for bad in ({**good, "tools": False}, {**good, "extra": 1}, {**good, "target": "nope"}, {**good, "input": ["image"]}, {**good, "name": "a\u0000b"},
+                    {**good, "contextWindow": 200000, "maxTokens": 65537}):
             with self.subTest(bad), self.assertRaises(ValueError):
                 parse_catalog({"version": 1, "regions": ["us-east-1"], "models": [bad]})
         # The regions the entries were verified in are part of the catalog.

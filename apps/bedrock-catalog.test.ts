@@ -36,7 +36,7 @@ test('a malformed catalog stops the worker instead of guessing', () => {
     catalogOf(entry({ id: 'claude' })), catalogOf(entry(), entry()), catalogOf(entry(), entry({ id: 'bedrock.other' })),
     catalogOf(entry({ name: '' })), catalogOf(entry({ name: 'a\u0000b' })), catalogOf(entry({ vendor: 'Bad Vendor' })),
     catalogOf(entry({ target: 'no-provider' })), catalogOf(entry({ target: 'test.model https://x' })),
-    catalogOf(entry({ contextWindow: 1000 })), catalogOf(entry({ maxTokens: 40000 })), catalogOf(entry({ contextWindow: 4096, maxTokens: 4000 })),
+    catalogOf(entry({ contextWindow: 1000 })), catalogOf(entry({ maxTokens: 70000 })), catalogOf(entry({ contextWindow: 4096, maxTokens: 4000 })),
     catalogOf(entry({ input: [] })), catalogOf(entry({ input: ['image'] })), catalogOf(entry({ input: ['text', 'audio'] })),
     catalogOf(entry({ tools: 'yes' })), catalogOf(entry({ runtime: 'codex' })), catalogOf(entry({ tools: false })),
     catalogOf(entry({ verified: 'yesterday' })), catalogOf({ ...entry(), extra: true }),
@@ -69,7 +69,7 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   assert.equal(agents.length + pi.length, entries.length, 'every catalog model is offered exactly once by default');
   const claude = agents.find(profile => profile.id === 'bedrock.claude-opus-5-5')!;
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', provider: 'bedrock', model: 'global.anthropic.claude-opus-5-5', name: 'Claude Opus 5.5', vendor: 'anthropic',
-    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 32000, input: ['text', 'image'] });
+    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'] });
   // A model the catalog lists as text-only stays so.
   assert.deepEqual(agents.find(profile => profile.id === 'bedrock.deepseek-v3-2')!.input, ['text']);
 });
