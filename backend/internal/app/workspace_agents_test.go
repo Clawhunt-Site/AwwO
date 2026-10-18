@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestWorkspaceAgentReferenceValidation(t *testing.T) {
@@ -35,6 +36,7 @@ func TestPostgresWorkspaceAgentReferenceIdentityAndExecution(t *testing.T) {
 	})
 	defer pi.Close()
 	h := newHarness(t, pi.URL)
+	h.a.promptClock = func() time.Time { return identityTestNow }
 	cookie, tid, _ := h.register(t, "agent-reference@example.test")
 	base := "/tenants/" + tid
 	instructions := "AUTHORITATIVE-" + strings.Repeat("x", 19000)
@@ -67,7 +69,8 @@ func TestPostgresWorkspaceAgentReferenceIdentityAndExecution(t *testing.T) {
 	run := h.request(t, cookie, "POST", base+"/runs", map[string]string{"sessionId": a["issueId"].(string), "prompt": "Return answer", "operationId": "workspace-agent-proof"}, 202)
 	h.awaitRun(t, cookie, tid, run["id"].(string), "completed")
 	mu.Lock()
-	if len(seen) != 1 || seen[0].Model != "alternate" || seen[0].SystemPrompt != instructions || seen[0].SessionID != a["issueId"] {
+	// The Agent's own instructions, ended by the note naming its model (model_identity.go).
+	if len(seen) != 1 || seen[0].Model != "alternate" || seen[0].SystemPrompt != instructions+"\n\n"+modelIdentityNote("", "alternate", identityTestNow) || seen[0].SessionID != a["issueId"] {
 		t.Fatal("execution did not use the real selected Agent")
 	}
 	mu.Unlock()

@@ -589,7 +589,7 @@
         "runId": "<run:collab-01-proposal-author>",
         "runtime": "pi",
         "sessionId": "<session:author>",
-        "systemPrompt": "AUTHOR-PERSONA: propose a plan",
+        "systemPrompt": "AUTHOR-PERSONA: propose a plan\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:collaboration-owner>"
       },
       "contentType": "application/json",
@@ -605,7 +605,7 @@
         "runId": "<run:collab-02-proposal-reviewer>",
         "runtime": "openai-agents",
         "sessionId": "<session:reviewer>",
-        "systemPrompt": "REVIEWER-PERSONA: find the risks",
+        "systemPrompt": "REVIEWER-PERSONA: find the risks\n\nModel and date: you run on the AwwO model oa-default, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:collaboration-owner>"
       },
       "contentType": "application/json",
@@ -630,7 +630,7 @@
         "runId": "<run:collab-03-review-author>",
         "runtime": "pi",
         "sessionId": "<session:author>",
-        "systemPrompt": "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\nNode instructions (JSON string; preserve persona and content requirements):\n\"AUTHOR-PERSONA: propose a plan\"\n\nServer-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities.",
+        "systemPrompt": "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\nNode instructions (JSON string; preserve persona and content requirements):\n\"AUTHOR-PERSONA: propose a plan\"\n\nServer-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities.\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:collaboration-owner>"
       },
       "contentType": "application/json",
@@ -655,7 +655,7 @@
         "runId": "<run:collab-04-review-reviewer>",
         "runtime": "openai-agents",
         "sessionId": "<session:reviewer>",
-        "systemPrompt": "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\nNode instructions (JSON string; preserve persona and content requirements):\n\"REVIEWER-PERSONA: find the risks\"\n\nServer-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities.",
+        "systemPrompt": "Follow the node persona and responsibilities below. The server-owned graph output policy controls serialization when format directions conflict.\n\nNode instructions (JSON string; preserve persona and content requirements):\n\"REVIEWER-PERSONA: find the risks\"\n\nServer-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities.\n\nModel and date: you run on the AwwO model oa-default, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:collaboration-owner>"
       },
       "contentType": "application/json",
@@ -688,7 +688,7 @@
         "runId": "<run:collab-05-synthesis-author>",
         "runtime": "pi",
         "sessionId": "<session:author>",
-        "systemPrompt": "AUTHOR-PERSONA: propose a plan",
+        "systemPrompt": "AUTHOR-PERSONA: propose a plan\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:collaboration-owner>"
       },
       "contentType": "application/json",

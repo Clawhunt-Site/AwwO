@@ -109,13 +109,19 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 			return
 		}
 		var request struct {
-			Runtime   string           `json:"runtime"`
-			Workspace workspaceRequest `json:"workspace"`
+			Runtime      string           `json:"runtime"`
+			SystemPrompt string           `json:"systemPrompt"`
+			Workspace    workspaceRequest `json:"workspace"`
 		}
 		if e := json.NewDecoder(r.Body).Decode(&request); e != nil || request.Runtime != runtimeOpenAIAgents || request.Workspace.MaxModelCalls != 4 {
 			t.Errorf("sandbox worker request runtime %q budget %d %v", request.Runtime, request.Workspace.MaxModelCalls, e)
 			w.WriteHeader(400)
 			return
+		}
+		// A sandbox run is told which model it runs on and the day, once (customer report 2026-10-18).
+		if strings.Count(request.SystemPrompt, "Model and date: ") != 1 || !strings.Contains(request.SystemPrompt, "the AwwO model test-model") ||
+			!strings.HasSuffix(request.SystemPrompt, "work from what the user tells you about it.") {
+			t.Errorf("sandbox system prompt %q", request.SystemPrompt)
 		}
 		sandboxRuns.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -141,6 +147,10 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		if _, has := request["workspace"]; has {
 			t.Error("a plain node was sent a workspace")
+		}
+		var system string
+		if e := json.Unmarshal(request["systemPrompt"], &system); e != nil || strings.Count(system, "Model and date: ") != 1 {
+			t.Errorf("plain system prompt %q %v", system, e)
 		}
 		plainRuns.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")

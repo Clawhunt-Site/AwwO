@@ -134,7 +134,7 @@
           "runId": "<run:image-manual-run>",
           "runtime": "pi",
           "sessionId": "<session:image-manual>",
-          "systemPrompt": "PERSONA-Image manual agent",
+          "systemPrompt": "PERSONA-Image manual agent\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
           "tenantId": "<tenant:errors-owner>"
         },
         "contentType": "application/json",
@@ -150,7 +150,7 @@
           "runId": "<run:graph-image-graph>",
           "runtime": "pi",
           "sessionId": "<session:image-graph>",
-          "systemPrompt": "PERSONA-Image graph agent",
+          "systemPrompt": "PERSONA-Image graph agent\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
           "tenantId": "<tenant:errors-owner>"
         },
         "contentType": "application/json",

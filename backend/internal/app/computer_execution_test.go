@@ -199,6 +199,14 @@ func TestPostgresComputerPersonalModelApprovalArtifactsAndIsolation(t *testing.T
 	rid := run["id"].(string)
 	detailPath := base + "/computer-runs/" + rid
 	input := <-received
+	// The task's instructions end with its step budget, then the note naming its model by the model's own name and id
+	// (model_identity.go), each once; the personal connection's label is not repeated to the model.
+	step, note := strings.Index(input.Instructions, computerStepNote(16)), strings.Index(input.Instructions, "Model and date: you run on ")
+	if strings.Count(input.Instructions, computerStepNote(16)) != 1 || strings.Count(input.Instructions, "Model and date:") != 1 || step < 0 || note < step ||
+		!strings.Contains(input.Instructions[note:], model) || strings.Contains(input.Instructions[note:], " · ") ||
+		!strings.HasSuffix(input.Instructions, "work from what the user tells you about it.") || !strings.HasPrefix(input.Instructions, computerInstructions) {
+		t.Fatalf("direct task instructions lack the step budget or the model note: %q", input.Instructions)
+	}
 	detail := awaitComputerApproval(t, h, owner, detailPath)
 	if detail["approvals"].([]any)[0].(map[string]any)["arguments"].(map[string]any)["content"] != strings.Repeat("<", 100000) {
 		t.Fatal("large approval arguments were truncated or hidden")

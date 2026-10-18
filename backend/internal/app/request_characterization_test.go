@@ -725,6 +725,8 @@ func newCharacterizationHarness(t *testing.T, openAIAgents bool) (*harness, *cha
 	// Outcomes are pinned, latency is not: a shared loaded host must not turn a slow
 	// run into a timeout that reads as a changed contract. No golden contains this value.
 	h.a.cfg.RunTimeout = time.Minute
+	// The system prompt names the day (model_identity.go); a golden pins one.
+	h.a.promptClock = func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) }
 	if openAIAgents {
 		workers.enableOpenAIAgents(h)
 	}

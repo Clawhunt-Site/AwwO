@@ -477,6 +477,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 		a.finish(tid, rid, "failed", "", "invalid_computer_snapshot")
 		return
 	}
+	instructions = a.sentInstructions(instructions, snap)
 	// The workspace holds none of the canvas the task came from, nor anything of the user's earlier tasks, so the task
 	// reads an account of both after the user's words (earlier_tasks.go, canvas_briefing.go); the transcript keeps the
 	// user's words alone. The earlier tasks take a share of what the model budget leaves after everything else.

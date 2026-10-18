@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -612,9 +613,17 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		return "", errors.New("tool_unavailable")
 	}
 	budget -= toolBytes
+	// The member's system prompt ends with the note naming its model (model_identity.go), so its budget leaves room.
+	identity := a.modelIdentity(health, m.Model)
+	if identity != "" {
+		budget -= len(identity) + 2
+	}
 	prompt, instructions, history, inputContext, err := prepareTeamInput(snap, m, input, budget, overhead)
 	if err != nil {
 		return "", err
+	}
+	if instructions = withPromptNote(instructions, identity); len(utf16.Encode([]rune(instructions))) > 32768 {
+		return "", errors.New("context_limit")
 	}
 	messagesRaw, _ := json.Marshal(history)
 	contextRaw, _ := json.Marshal(inputContext)

@@ -723,7 +723,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 			return
 		}
 	}
-	instructions = taskFrameSystemPrompt(instructions, snap.TaskFrame)
+	instructions = a.sentInstructions(taskFrameSystemPrompt(instructions, snap.TaskFrame), snap)
 	history = boundedHistoryWithLimits(history, len(prompt)+len(instructions), snap.Budget, snap.Overhead)
 	request := map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snap.Model, "runtime": workerRuntime(snap.Runtime), "workspace": work}
 	if snap.Effort != "" {

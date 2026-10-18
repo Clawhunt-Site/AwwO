@@ -654,7 +654,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			snapshot.Computer.Inputs = withWorkspaceFiles(snapshot.Computer.Inputs, attached.Workspace)
 		}
 	}
-	framedInstructions := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory)
+	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
 	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
 	if team == nil && (len(framedPrompt) > 128000 || len(framedPrompt)+len(framedInstructions)+overhead > budget || ((snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
@@ -828,7 +828,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeWorkspace(ctx, tid, id, sid, prompt, instructions, kind, snapshot)
 		return
 	}
-	instructions = taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
+	instructions = a.sentInstructions(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot)
 	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return

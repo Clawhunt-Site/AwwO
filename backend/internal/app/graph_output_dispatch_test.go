@@ -281,7 +281,8 @@ func TestPostgresExistingPlannerSessionUsesCurrentOutputProtocol(t *testing.T) {
 	var calls atomic.Int32
 	pi := teamProvider(t, func(w http.ResponseWriter, r *http.Request, call observedPiCall) {
 		calls.Add(1)
-		if call.SystemPrompt != plannerInstructions || !strings.Contains(call.SystemPrompt, "declared output contracts define serialization") {
+		// The current instructions, then the note naming the planner's model (model_identity.go), and nothing else.
+		if !strings.HasPrefix(call.SystemPrompt, plannerInstructions+"\n\nModel and date: you run on ") || strings.Count(call.SystemPrompt, "Model and date:") != 1 || strings.Contains(call.SystemPrompt, "OBSOLETE") || !strings.Contains(call.SystemPrompt, "declared output contracts define serialization") {
 			t.Error("planner continued using obsolete instructions", call.SystemPrompt)
 		}
 		completePi(w, `{"version":1,"summary":"Need more detail","operations":[]}`)

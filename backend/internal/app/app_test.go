@@ -322,8 +322,9 @@ func TestPostgresRunsSSEIdempotencyCancellationAndAdmin(t *testing.T) {
 		if e := json.NewDecoder(r.Body).Decode(&b); e != nil {
 			t.Error(e)
 		}
-		if b.SystemPrompt != "Use plain words" {
-			t.Error("saved agent instructions missing")
+		// The saved instructions, then the note naming the run's model and the day (model_identity.go).
+		if want := "Use plain words\n\n" + modelIdentityNote("", "test-model", time.Date(2026, 10, 19, 2, 0, 0, 0, time.FixedZone("UTC+8", 8*3600))); b.SystemPrompt != want {
+			t.Error("saved agent instructions or the model note missing", b.SystemPrompt)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
@@ -336,6 +337,8 @@ func TestPostgresRunsSSEIdempotencyCancellationAndAdmin(t *testing.T) {
 	}))
 	defer pi.Close()
 	h := newHarness(t, pi.URL)
+	// 02:00 on the 19th at UTC+8 is still the 18th in UTC, the day the note must name.
+	h.a.promptClock = func() time.Time { return time.Date(2026, 10, 19, 2, 0, 0, 0, time.FixedZone("UTC+8", 8*3600)) }
 	a, tid, _ := h.register(t, "runs@example.test")
 	b, tb, _ := h.register(t, "outsider@example.test")
 	canvas, _, sid := h.fixture(t, a, tid)

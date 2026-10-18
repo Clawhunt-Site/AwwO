@@ -859,7 +859,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
-	framedInstructions := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory)
+	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap)
 	framedPrompt := evidenceUserPrompt(prompt, snap.Knowledge, snap.Memory)
 	if len(framedPrompt) > 128000 || (snap.Team == nil && (len(framedPrompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		return errors.New("context_limit")

@@ -389,7 +389,7 @@
         "runId": "<run:manual-pi-run>",
         "runtime": "pi",
         "sessionId": "<session:pi-node>",
-        "systemPrompt": "MANUAL-PI-PERSONA",
+        "systemPrompt": "MANUAL-PI-PERSONA\n\nModel and date: you run on the AwwO model test-model, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:manual-owner>"
       },
       "contentType": "application/json",
@@ -405,7 +405,7 @@
         "runId": "<run:manual-oa-run-one>",
         "runtime": "openai-agents",
         "sessionId": "<session:oa-node>",
-        "systemPrompt": "MANUAL-OA-PERSONA",
+        "systemPrompt": "MANUAL-OA-PERSONA\n\nModel and date: you run on the AwwO model oa-default, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:manual-owner>"
       },
       "contentType": "application/json",
@@ -430,7 +430,7 @@
         "runId": "<run:manual-oa-run-two>",
         "runtime": "openai-agents",
         "sessionId": "<session:oa-node>",
-        "systemPrompt": "MANUAL-OA-PERSONA",
+        "systemPrompt": "MANUAL-OA-PERSONA\n\nModel and date: you run on the AwwO model oa-default, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:manual-owner>"
       },
       "contentType": "application/json",
@@ -447,7 +447,7 @@
         "runId": "<run:manual-oa-effort-run>",
         "runtime": "openai-agents",
         "sessionId": "<session:oa-effort-node>",
-        "systemPrompt": "MANUAL-OA-EFFORT-PERSONA",
+        "systemPrompt": "MANUAL-OA-EFFORT-PERSONA\n\nModel and date: you run on the AwwO model oa-default, and today is 2026-10-18 (UTC). Your training data ends before today, so models, products and versions released since then exist, the model you run on among them. Never say that a model or product does not exist only because you do not know it; when you cannot verify its details, say so and work from what the user tells you about it.",
         "tenantId": "<tenant:manual-owner>"
       },
       "contentType": "application/json",
