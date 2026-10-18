@@ -252,7 +252,7 @@ it('offers workspace creation even to a user without memberships and cancels wit
   fireEvent.click(await screen.findByRole('button', { name: '更多选项' }));
   fireEvent.click(screen.getByRole('button', { name: '新建工作区' }));
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  expect(screen.queryByRole('dialog')).toBeNull(); expect(fetcher.mock.calls.filter(call => !String(call[0]).endsWith('/appearance'))).toHaveLength(1);
+  expect(screen.queryByRole('dialog')).toBeNull(); expect(fetcher.mock.calls.filter(call => !['/appearance', '/auth/preferences'].some(path => String(call[0]).endsWith(path)))).toHaveLength(1);
 });
 
 it('preserves workspace input on failure, then creates the independent workspace', async () => {

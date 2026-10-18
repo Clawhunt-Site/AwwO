@@ -1,6 +1,6 @@
 import { api } from './api';
 
-export type AdminKind = 'tenants' | 'users' | 'runs' | 'audit' | 'interests';
+export type AdminKind = 'tenants' | 'users' | 'runs' | 'audit' | 'interests' | 'deletions';
 export type AdminRow = Record<string, any>;
 export type AdminPage = { items: AdminRow[]; nextCursor: string | null; snapshot?: string };
 export function adminPage(kind: AdminKind, cursor: string | null, signal?: AbortSignal, limit = 50) {

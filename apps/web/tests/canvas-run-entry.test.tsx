@@ -205,3 +205,29 @@ describe('manual run acceptance persists composer drafts', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 });
+
+describe('the host hears when watched work ends', () => {
+  it('reports the plan, then the run, each once, and whether a node failed', async () => {
+    const settled = vi.fn();
+    render(<CanvasSurface runtimeReadJson={runtimeReadJson} planRequest={async () => plan} onWorkSettled={settled} />);
+    expect(settled).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: 'Create A then B' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成画布', exact: true }));
+    await waitFor(() => expect(settled).toHaveBeenCalledWith({ kind: 'plan', failed: false }));
+    await bind('A');
+    await bind('B');
+    execute.mockImplementationOnce(async () => ({ ok: false, output: '', error: 'fixture failure' }) as never);
+    fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+    await waitFor(() => expect(settled).toHaveBeenCalledWith({ kind: 'run', failed: true }));
+    expect(settled.mock.calls.map(([event]) => event.kind)).toEqual(['plan', 'run']);
+  });
+
+  it('reports a plan that failed as failed', async () => {
+    const settled = vi.fn();
+    render(<CanvasSurface runtimeReadJson={runtimeReadJson} planRequest={async () => { throw new Error('planner unavailable'); }} onWorkSettled={settled} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: 'Create A then B' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成画布', exact: true }));
+    await waitFor(() => expect(settled).toHaveBeenCalledWith({ kind: 'plan', failed: true }));
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+});

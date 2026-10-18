@@ -53,7 +53,8 @@ export default defineConfig({
   withoutShadertoyShaders()],
   // A worker's bundle is built with these plugins only, besides Vite's own (bundleLicences refuses workers today).
   worker: { plugins: () => [withoutShadertoyShaders()] },
-  define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1') },
+  // The product version the 设置 → 关于 page shows, from this package.
+  define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1'), 'import.meta.env.VITE_AWWO_VERSION': JSON.stringify(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version) },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,
     proxy: { '/api/v1': { target: process.env.AWWO_API_TARGET || 'http://127.0.0.1:8087' } } },
   build: { outDir: 'dist-saas', rollupOptions: { input: fileURLToPath(new URL('./saas.html', import.meta.url)), output: { assetFileNames } } },

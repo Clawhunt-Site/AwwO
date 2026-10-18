@@ -11,6 +11,8 @@ import { canvasKnowledgeRevisionIds, subscribeCanvasKnowledge } from './canvasBr
 import { createKnowledgeSource } from './knowledgeApi';
 import { announceRouteUsageChanged } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
+import { useAccountPreferences } from './accountPreferences';
+import { notifyTaskFinished } from './taskNotifications';
 import { cancelExecutionRun, createExecutionRun, executionArtifactURL, executionTerminal, readExecutionRun, readExecutionRuns, readExecutionRuntime,
   respondToExecutionRun, type ExecutionApproval, type ExecutionArtifact, type ExecutionInput, type ExecutionModel,
   type ExecutionResponseInput, type ExecutionRun, type ExecutionRuns, type ExecutionRuntime } from './managedExecutionApi';
@@ -220,6 +222,21 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   const [staleLabel, setStaleLabel] = useState('');
   // Whether the chosen model is the reader's own choice (kept for the workspace), not the service's first model.
   const [chosenByReader, setChosenByReader] = useState(false);
+  const chosenByReaderRef = useRef(false);
+  chosenByReaderRef.current = chosenByReader;
+  // The account's default model (设置 → 通用 → 画布助手默认模型), as a model key; '' when none.
+  const accountDefault = useAccountPreferences()?.preferences?.defaultModel;
+  const accountDefaultKey = !readOnly && accountDefault ? executionModelKey(accountDefault.runtime, accountDefault.model) : '';
+  const accountDefaultRef = useRef(accountDefaultKey);
+  accountDefaultRef.current = accountDefaultKey;
+  useEffect(() => {
+    // Settings that arrive after the catalogue take the place of the service's first model, never of a reader's pick.
+    const models = runtimeRef.current?.models;
+    const offered = (key: string) => Boolean(key) && Boolean(models?.some(item => executionModelKey(item.runtime, item.id) === key));
+    if (!accountDefaultKey || chosenByReaderRef.current || offered(readStoredModel(modelStoreKey)) || !offered(accountDefaultKey)) return;
+    if (accountDefaultKey !== modelKeyRef.current) setEffort('');
+    chooseKey(accountDefaultKey); setStaleLabel('');
+  }, [accountDefaultKey, chooseKey]);
   const modelStoreKey = !readOnly && userId ? workspaceKey(userId, tenantId, MODEL_KEY) : null;
   const [effort, setEffort] = useState('');
   const [selectedId, setSelectedId] = useState('');
@@ -349,9 +366,13 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
         const previous = modelKeyRef.current;
         if (!previous) {
           // The reader's earlier choice in this workspace, where the service still offers it; else its first model.
+          // Then the default model of the account's settings (设置 → 通用), where this workspace offers it.
           const stored = readStoredModel(modelStoreKey);
-          const kept = stored && models.some(item => executionModelKey(item.runtime, item.id) === stored) ? stored : '';
-          chooseKey(kept || (models[0] ? executionModelKey(models[0].runtime, models[0].id) : '')); setChosenByReader(Boolean(kept)); setStaleLabel('');
+          const offered = (key: string) => Boolean(key) && models.some(item => executionModelKey(item.runtime, item.id) === key);
+          // Only the reader's pick here becomes the model of the components a plan adds; the account default is the
+          // assistant's alone, so they keep the workspace default.
+          const kept = offered(stored) ? stored : offered(accountDefaultRef.current) ? accountDefaultRef.current : '';
+          chooseKey(kept || (models[0] ? executionModelKey(models[0].runtime, models[0].id) : '')); setChosenByReader(Boolean(kept) && kept === stored); setStaleLabel('');
         }
         else if (models.some(item => executionModelKey(item.runtime, item.id) === previous)) setStaleLabel('');
         else {
@@ -401,6 +422,12 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
             // A notice that waited on this task's next state (a response or a stop being checked) is answered now.
             if (awaitingOutcome.current) { awaitingOutcome.current = false; setNotice(''); setNoticeWarning(false); }
             if (!endedTasks.current.has(value.id)) { endedTasks.current.add(value.id); announceRouteUsageChanged(); }
+            // Only a task seen running in this read ends here; one already over when it was opened tells no one.
+            if (attempt > 0) notifyTaskFinished({
+              title: value.status === 'completed' ? t('任务已完成', 'Task finished') : t('任务已结束，未完成', 'Task ended without finishing'),
+              // Not the task's text: a notification can show on a locked screen.
+              body: t('回到 AwwO 查看结果。', 'Open AwwO to see the result.'), failed: value.status !== 'completed',
+            });
             return;
           }
           await pause(controller.signal);

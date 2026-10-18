@@ -59,9 +59,10 @@ const gate = () =>
     </SaaSPreferencesProvider>,
   );
 
-it("does not request personal credentials in platform LLM Gate mode", () => {
+it("does not request personal credentials in platform LLM Gate mode", async () => {
   history.replaceState(null, "", "/?account=engines");
-  const fetch = vi.fn();
+  // The 设置 page lists the workspace's models; nothing asks for or about personal credentials.
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ ready: true, capabilities: { workspace: true, approvals: true }, models: [] }), { headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetch);
   render(
     <SaaSPreferencesProvider>
@@ -70,9 +71,10 @@ it("does not request personal credentials in platform LLM Gate mode", () => {
       </PersonalEngineGate>
     </SaaSPreferencesProvider>,
   );
-  expect(screen.getByText(/AwwO provides models through LLM Gate/)).toBeVisible();
+  expect(await screen.findByText(/AwwO provides models through LLM Gate/)).toBeVisible();
   expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
-  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.queryByText("Canvas content")).not.toBeInTheDocument();
+  expect(fetch.mock.calls.map(([url]) => String(url)).filter(url => url.includes("/auth/connections"))).toEqual([]);
 });
 
 it("keeps existing workspace access visible without a personal connection", async () => {

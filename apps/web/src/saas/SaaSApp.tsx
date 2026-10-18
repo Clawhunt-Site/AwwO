@@ -2,7 +2,7 @@ import { SecretInput } from './SecretInput';
 import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale } from 'lucide-react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale, Settings2 } from 'lucide-react';
 import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
@@ -39,10 +39,13 @@ import { executionHost } from './AssistantExecution';
 import { routeAssistantMessage } from './assistantRouteApi';
 import type { RouteAssistant } from '../canvas/assistantRouting';
 import { useManagedExecution } from './useManagedExecution';
+import { notifyTaskFinished } from './taskNotifications';
+import { signOut } from './signOut';
+import { AccountPreferencesProvider } from './accountPreferences';
 import { AppearanceScope } from './SaaSAppearance';
 import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
-import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, trustedClawHuntLogoutURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
+import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 /** The license texts of the open-source code this site ships, which the hosted build writes to its root (scripts/bundle-licences.mjs). */
@@ -144,7 +147,7 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <AppearanceScope key={identity.user.id} userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity}>{content}</PersonalEngineGate></SaaSOnboarding></AppearanceScope>;
+  return <AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding></AccountPreferencesProvider></AppearanceScope>;
 }
 /** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
 function SessionEndedNotice({ identity }: { identity: Identity }) {
@@ -338,6 +341,7 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {}) }} />
     <ThemePicker />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
+      <a href={accountURL('general')}><Settings2 size={16}/>{t('设置', 'Settings')}</a>
       <LanguageSwitch variant="menu" />
       <UiModeSwitch onSwitched={close} />
       <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
@@ -347,15 +351,8 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
       <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>
       {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
-      forgetPendingInvite();
-      try {
-        const result = await api<null | { logoutURL: string }>('/auth/logout', { method: 'POST' });
-        if (identity.authentication === 'clawhunt') {
-          const logoutURL = trustedClawHuntLogoutURL(result?.logoutURL, identity.clawhuntSiteURL);
-          if (!logoutURL) { setError(t('AwwO 已退出，但无法确认 ClawHunt 主站退出。请到主站检查登录状态。', 'You signed out of AwwO, but we could not confirm ClawHunt sign-out. Check your main-site session.')); return; }
-          location.assign(logoutURL);
-        } else location.reload();
-      } catch { setError(t('退出失败，请重试。', 'Sign-out failed. Please try again.')); }
+      const failure = await signOut(identity, t);
+      if (failure) setError(failure);
     }}><LogOut size={16}/><span>{t('退出登录', 'Sign out')}</span></button>
     </>}</ActionMenu>
     {creatingWorkspace && <CreateWorkspaceDialog onClose={() => setCreatingWorkspace(false)} onCreated={id => navigate(id)} />}
@@ -816,6 +813,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
+      onWorkSettled={event => notifyTaskFinished(event.kind === 'plan'
+        ? { title: event.failed ? t('画布规划没有完成', 'Canvas plan did not finish') : t('画布规划已完成', 'Canvas plan finished'), body: record.name, failed: event.failed }
+        : { title: event.failed ? t('画布运行结束，有节点未完成', 'Canvas run ended with unfinished nodes') : t('画布运行已完成', 'Canvas run finished'), body: record.name, failed: event.failed })}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />}{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
         if (pending.current || saving.current || failed.current || !scopedStorage.current) return;

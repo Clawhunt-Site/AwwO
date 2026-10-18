@@ -1,0 +1,292 @@
+/* The 设置 centre (SettingsCenter.tsx): a left navigation of grouped sections beside the section's own page. */
+.saas-settings-layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.saas-settings-nav {
+  position: sticky;
+  /* Below the sticky page header (12px from the top, 64px tall). */
+  top: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 12px;
+  border: 1px solid var(--saas-border);
+  border-radius: 16px;
+  background: var(--saas-card);
+  max-height: calc(100dvh - 108px);
+  overflow-y: auto;
+}
+.saas-settings-nav a,
+.saas-settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--saas-text);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.saas-settings-nav a:hover,
+.saas-settings-nav button:hover {
+  background: color-mix(in srgb, var(--saas-accent) 10%, transparent);
+}
+.saas-settings-nav a[aria-current='page'] {
+  background: color-mix(in srgb, var(--saas-accent) 16%, transparent);
+  color: var(--saas-text);
+  font-weight: 600;
+}
+.saas-settings-nav a:focus-visible,
+.saas-settings-nav button:focus-visible {
+  outline: 2px solid var(--saas-accent);
+  outline-offset: 1px;
+}
+.saas-settings-back {
+  color: var(--saas-muted) !important;
+}
+.saas-settings-group-items {
+  margin-top: 4px;
+  display: grid;
+  gap: 2px;
+}
+.saas-settings-group-label {
+  display: block;
+  padding: 0 10px;
+  color: var(--saas-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.saas-settings-nav-foot {
+  display: grid;
+  gap: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--saas-border);
+}
+.saas-settings-content {
+  min-width: 0;
+}
+.saas-settings-content > .saas-page-intro {
+  margin-top: 0;
+}
+.saas-settings-stack {
+  display: grid;
+  gap: 20px;
+}
+.saas-settings-card h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.saas-settings-card > * + * {
+  margin-top: 12px;
+}
+.saas-settings-description {
+  margin: 0;
+  color: var(--saas-muted);
+  line-height: 1.6;
+}
+.saas-settings-segments {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--saas-border);
+  border-radius: 12px;
+}
+.saas-settings-segments button {
+  min-height: 34px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--saas-text);
+  cursor: pointer;
+}
+.saas-settings-segments button[aria-checked='true'] {
+  background: var(--saas-accent);
+  color: var(--saas-accent-text);
+}
+.saas-personal .saas-settings-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.saas-personal .saas-settings-toggle input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.saas-settings-toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.saas-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.saas-settings-form {
+  display: grid;
+  gap: 16px;
+}
+.saas-settings-form textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--saas-border);
+  border-radius: 12px;
+  background: var(--saas-input, var(--saas-card));
+  color: var(--saas-text);
+}
+.saas-settings-form small {
+  justify-self: end;
+  margin-top: -10px;
+  color: var(--saas-muted);
+}
+.saas-settings-tenant {
+  max-width: 360px;
+}
+.saas-settings-keys {
+  width: 100%;
+  border-collapse: collapse;
+}
+.saas-settings-keys td {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--saas-border);
+}
+.saas-settings-keys tr:last-child td {
+  border-bottom: 0;
+}
+.saas-settings-keys td:last-child {
+  text-align: end;
+  white-space: nowrap;
+}
+.saas-settings-keys kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--saas-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+}
+.saas-settings-models,
+.saas-settings-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.saas-settings-models li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.saas-settings-models span {
+  color: var(--saas-muted);
+  font-size: 13px;
+}
+.saas-settings-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.saas-settings-help {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.saas-settings-pending {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--saas-danger) 40%, var(--saas-border));
+  border-radius: 12px;
+}
+.saas-settings-pending p {
+  margin: 0;
+}
+.saas-settings-actions {
+  margin-bottom: 16px;
+}
+.saas-settings-usage .saas-route-usage {
+  max-width: 100%;
+}
+.saas-settings-themes .saas-theme-choices {
+  max-height: none;
+}
+/* The page's own pill buttons must not reshape the style cards: they keep the popover's look (theme-picker.css). */
+.saas-settings-themes .saas-theme-option,
+.saas-settings-themes .saas-theme-auto {
+  min-height: 0;
+  border-radius: var(--saas-radius);
+  padding: 6px 6px 10px;
+}
+.saas-settings-themes .saas-theme-auto {
+  padding: 6px 40px 6px 6px;
+}
+@media (max-width: 640px) {
+  .saas-settings-themes .saas-theme-auto {
+    padding-right: 6px;
+  }
+}
+.saas-settings-library .awwo-library {
+  position: static;
+  inset: auto;
+  max-height: none;
+  min-height: 560px;
+  border-radius: 16px;
+}
+@media (max-width: 860px) {
+  .saas-settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .saas-settings-nav {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 10px;
+  }
+  .saas-settings-group {
+    flex-shrink: 0;
+  }
+  .saas-settings-group-items {
+    display: flex;
+    gap: 4px;
+    margin-top: 0;
+  }
+  .saas-settings-group-label {
+    display: none;
+  }
+  .saas-settings-nav a,
+  .saas-settings-nav button {
+    white-space: nowrap;
+    width: auto;
+  }
+  .saas-settings-nav-foot {
+    display: flex;
+    padding-top: 0;
+    border-top: 0;
+    flex-shrink: 0;
+  }
+}

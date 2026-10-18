@@ -296,6 +296,8 @@ export interface CanvasSurfaceProps {
   /** A new external draft, never sent without the normal planning action. */
   taskDraft?: { id: string; prompt: string } | null;
   onOpenSettings?: () => void;
+  /** A run or a plan this page was watching has ended (the host may tell a reader who is away). */
+  onWorkSettled?: (event: { kind: 'run' | 'plan'; failed: boolean }) => void;
   /** Hosted accounts either supply their own model credential or use a platform-managed one. */
   personalCredentialsRequired?: boolean;
   /** A host-provided reason execution is unavailable. Cloud canvases remain editable. */
@@ -378,7 +380,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -2696,7 +2698,31 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (wasSpending.current && !spending) announceRouteUsageChanged();
     wasSpending.current = spending;
   }, [spending]);
+  // The host hears when a run or a plan this page was watching ends (设置 → 任务提醒), with whether any node failed.
+  const workSettled = useRef(onWorkSettled);
+  workSettled.current = onWorkSettled;
+  const settledRuns = useRef(runs);
+  settledRuns.current = runs;
+  // A run counts as watched once it is seen running after recovery has settled: a journal-restored run that recovery
+  // finds already over ends without a word.
+  const watchingRun = useRef(false);
+  useEffect(() => {
+    if (running && !recovering) watchingRun.current = true;
+    if (running) return;
+    if (watchingRun.current) workSettled.current?.({ kind: 'run', failed: Object.values(settledRuns.current).some(run => run.state === 'failed' || run.state === 'blocked') });
+    watchingRun.current = false;
+  }, [running, recovering]);
+  // A plan that ends says whether it failed (its error is set in the same update); one the reader stopped says nothing.
+  const wasPlanning = useRef(false);
+  const planStopped = useRef(false);
+  const planFailed = useRef('');
+  useEffect(() => {
+    if (wasPlanning.current && !planningBusy && !planStopped.current) workSettled.current?.({ kind: 'plan', failed: Boolean(planFailed.current) });
+    if (planningBusy) planStopped.current = false;
+    wasPlanning.current = planningBusy;
+  }, [planningBusy]);
   const [planningError, setPlanningError] = useState('');
+  planFailed.current = planningError;
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
   const [recoveryLoaded, setRecoveryLoaded] = useState(!canInitialize);
   const [recoveryChecking, setRecoveryChecking] = useState(false);
@@ -2940,6 +2966,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const prompt = request?.prompt ?? planningRecovery?.prompt;
     if (!request && !planningRecovery?.pending) return;
     planningRequest.current = null;
+    planStopped.current = true;
     request?.controller.abort();
     setPlanningBusy(false);
     setPlanningProgress(undefined);

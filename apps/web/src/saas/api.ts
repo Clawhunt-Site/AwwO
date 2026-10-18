@@ -167,6 +167,8 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     skill_name_conflict: ['这个工作区已经有同名技能，换一个名称再试。', 'This workspace already has a skill with that name. Choose another name.'],
     skill_limit: ['一个工作区最多保存 100 个技能，请先归档不用的技能。', 'A workspace keeps at most 100 skills. Archive one you no longer use first.'],
     skill_unavailable: ['节点挂载的某个技能已不可用（已被归档）。请在节点配置里移除它后再运行。', 'A skill attached to a node is no longer available (it was archived). Remove it in the node configuration and run again.'],
+    preferences_version_conflict: ['设置刚在别的页面里改过，这里已换成最新的值，请重新选择。', 'Your settings changed in another tab. The latest values are shown; choose again.'],
+    export_busy: ['已有一份导出正在进行，或这一小时的导出次数已用完，请稍后再试。', 'An export is already running, or this hour’s exports are used up. Try again later.'],
     skill_version_conflict: ['这个技能刚被别人改过。请先复制你的修改，取消编辑，再从列表重新打开它修改；直接保存会被拒绝。', 'Someone changed this skill meanwhile. Copy your changes first, cancel, then open it again from the list and edit it; saving as it is will be refused.'],
     skill_context_limit: ['这个节点挂载的技能内容太长，一次调用放不下，请移除一个技能。', 'The skills on this node are too long to fit in one call. Remove one.'],
     invalid_memory: ['记忆内容不符合要求：标题占一行、不超过 200 个字符，正文不超过 2 KiB，且不能含不可见的格式字符；搜索词不超过 200 个字符。更长的资料请存入知识库。', 'The memory note does not meet the requirements: a one-line title of at most 200 characters, text of at most 2 KiB and no invisible formatting characters; a search is at most 200 characters. Save longer material to the knowledge base.'],

@@ -24,7 +24,7 @@ it('rejects the admin surface for an ordinary user before loading administrative
   const fetch = vi.fn(async (url: string) => response(url.endsWith('/appearance') ? appearanceFixture : identity)); vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
   expect(await screen.findByRole('heading', { name: '无平台管理权限' })).toBeVisible();
-  expect(fetch.mock.calls.filter(call => !String(call[0]).endsWith('/appearance'))).toHaveLength(1);
+  expect(fetch.mock.calls.filter(call => !['/appearance', '/auth/preferences'].some(path => String(call[0]).endsWith(path)))).toHaveLength(1);
 });
 
 it('keeps platform administration and logout reachable for a bootstrap administrator with no tenant', async () => {
@@ -45,7 +45,7 @@ it('keeps tenant switching and logout available on a suspended tenant and does n
   expect(screen.getByRole('option', { name: '另一工作区' })).toHaveValue('tenant-b');
   fireEvent.click(screen.getByRole('button', { name: '更多选项' }));
   expect(screen.getByRole('button', { name: '退出登录' })).toBeVisible();
-  expect(fetch.mock.calls.filter(call => !String(call[0]).endsWith('/appearance'))).toHaveLength(1);
+  expect(fetch.mock.calls.filter(call => !['/appearance', '/auth/preferences'].some(path => String(call[0]).endsWith(path)))).toHaveLength(1);
 });
 
 it('gives readers a cloud-backed browse and export view without mounting the writer or touching local drafts', async () => {

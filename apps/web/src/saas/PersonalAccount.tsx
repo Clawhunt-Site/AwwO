@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, saasErrorMessage, type Identity } from "./api";
 import { PreferenceControls, useSaaSPreferences } from "./preferences";
 import "./personal-account.css";
 import { GuideLauncher, MainSiteLink, TutorialLauncher } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
-import { InviteFriends } from './InviteFriends';
-import { PlansPage } from './PlansPage';
+import { LazyBoundary } from './LazyBoundary';
+import { isSettingsSection, SettingsFrame, useInSettingsFrame } from './settingsFrame';
 
 type Provider = { id: string; name: string; runtimes: string[] };
 type Connection = {
@@ -56,6 +56,14 @@ function AccountLayout({
   title: string;
   intro: string;
 }) {
+  // Inside the 设置 centre the page is one of its sections: the centre draws the header and the navigation.
+  if (useInSettingsFrame()) return <>
+    <section className="saas-page-intro">
+      <h1>{title}</h1>
+      <p>{intro}</p>
+    </section>
+    {children}
+  </>;
   return (
     <main className="saas-dashboard saas-personal">
       <header>
@@ -73,13 +81,24 @@ function AccountLayout({
   );
 }
 
+/** A page's own links, left out inside the 设置 centre, whose navigation has them all. */
+function PageNav({ children }: { children: ReactNode }) {
+  return useInSettingsFrame() ? null : <nav className="saas-personal-nav">{children}</nav>;
+}
+
+// Loaded on first use: every canvas page imports this module (accountURL), and the centre's pages are not theirs.
+const SettingsCenter = lazy(() => import('./SettingsCenter'));
+
 /** A personal key is required for execution, but never for viewing an existing workspace. */
 export function PersonalEngineGate({
   identity,
   children,
+  onProfile,
 }: {
   identity: Identity;
   children: ReactNode;
+  /** A display name saved in the 设置 centre's workspace page, for the rest of the page to show. */
+  onProfile?: (name: string) => void;
 }) {
   const { t, locale } = useSaaSPreferences();
   const section = new URLSearchParams(location.search).get("account");
@@ -102,73 +121,60 @@ export function PersonalEngineGate({
       });
     return () => controller.abort();
   }, [identity.user.id, needed, revision]);
-  if (section === "security") return <AccountSecurity personalCredentialsRequired={needed} identity={identity} />;
-  if (section === "invites") return <AccountLayout title={t("邀请好友", "Invite friends")} intro={t("每个开通了 AwwO 的账号都有 3 个邀请码。把邀请链接发给好友，对方就能用 ClawHunt 账号开通 AwwO。", "Every account with AwwO access has three invite codes. Send a friend an invite link and they can open AwwO with their ClawHunt account.")}>
-    <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
-    <InviteFriends identity={identity} />
-  </AccountLayout>;
-  if (section === "plans") return <AccountLayout title={t("套餐与点数", "Plans and credits")} intro={t("免费版每天的次数里也能用 Claude、GPT 等高级模型（全站每天共享一份免费名额）。Pro 和 Max 每月另给一笔点数，用于这些模型和图片视频生成，不占免费名额，默认模型的次数也更多。", "The free plan can use premium models such as Claude and GPT within its daily calls (the service shares one daily number of free premium calls). Pro and Max add monthly credits for these models and for image or video generation, outside that free number, and more default-model calls.")}>
-    <nav className="saas-personal-nav"><a href={home()}>{t("返回工作区", "Back to workspace")}</a><a href={accountURL("security")}>{t("账号安全", "Account security")}</a></nav>
-    <PlansPage identity={identity} />
-  </AccountLayout>;
-  if (section === "engines" && !needed) return <AccountLayout title={t("模型服务", "Model service")} intro={t("AwwO 已通过 LLM Gate 提供模型，无需填写个人 API Key。", "AwwO provides models through LLM Gate. No personal API key is needed.")}><a href={home()}>{t("返回工作区", "Back to workspace")}</a></AccountLayout>;
-  if (!needed) return <>{children}</>;
   const hasUsableConnection = catalog?.items.some((item) =>
     connectionUsable(item, catalog),
   ) ?? false;
-  if (section !== "engines") {
-    const needsEngine = Boolean(catalog && !hasUsableConnection);
-    const canvasPage = new URLSearchParams(location.search).has("canvas");
-    const content = <>
-      {(Boolean(error) || needsEngine) && (
-        <div className="saas-runtime-note saas-personal-notice" role={error ? "alert" : "status"}>
-          <strong>{error
-            ? t("无法检查执行引擎连接", "Could not check engine connections")
-            : t("尚未连接执行引擎", "No execution engine connected")}</strong>
-          <span>{error
-            ? t("工作区和历史仍可使用。", "Your workspaces and history remain available.") + " " + saasErrorMessage(error, locale)
-            : canvasPage
-              ? t("画布仍可编辑；运行前请连接 API Key。", "You can still edit this canvas. Connect an API key before running it.")
-              : t("现有工作区、画布和历史仍可浏览及编辑；运行任务前请连接自己的 API Key。", "You can still browse and edit your workspaces, canvases and history. Connect your own API key before running tasks.")}</span>
-          <a href={accountURL("engines")}>{t("连接执行引擎", "Connect an engine")}</a>
-          {Boolean(error) && <button type="button" onClick={() => setRevision(value => value + 1)}>{t("重新检查", "Retry check")}</button>}
-        </div>
-      )}
-      {children}
-    </>;
-    return canvasPage
-      ? <div className={`saas-personal-gated-canvas${needsEngine ? " saas-personal-gated-canvas--needs-engine" : ""}`}>{content}</div>
-      : content;
+  // Every ?account= page is a section of the 设置 centre; an account that brings its own key manages it under 连接器.
+  if (isSettingsSection(section)) {
+    const engines = !needed || section !== "engines" ? null
+      : error ? <AccountLayout
+          title={t("连接执行引擎", "Connect an engine")}
+          intro={t("使用你自己的模型凭证。", "Use your own model credentials.")}
+        >
+          <p role="alert">{saasErrorMessage(error, locale)}</p>
+          <button onClick={() => location.reload()}>
+            {t("重新连接", "Retry")}
+          </button>
+        </AccountLayout>
+      : !catalog ? <AccountLayout
+          title={t("连接执行引擎", "Connect an engine")}
+          intro={t("正在读取个人配置…", "Loading your settings…")}
+        >
+          <p role="status">{t("请稍候…", "Please wait…")}</p>
+        </AccountLayout>
+      : <ConnectionSettings catalog={catalog} onChange={setCatalog} onboarding={!hasUsableConnection} />;
+    const opening = <main className="saas-dashboard saas-personal"><p role="status">{t("正在打开设置…", "Opening settings…")}</p></main>;
+    return <SettingsFrame.Provider value={true}>
+      <LazyBoundary fallback={<main className="saas-dashboard saas-personal"><p role="alert">{t("设置没能加载，请刷新页面重试。", "Settings could not load. Reload the page to try again.")}</p><a href={home()}>{t("返回工作区", "Back to workspace")}</a></main>}>
+        <Suspense fallback={opening}>
+          <SettingsCenter identity={identity} section={section} engines={engines} onProfile={onProfile} />
+        </Suspense>
+      </LazyBoundary>
+    </SettingsFrame.Provider>;
   }
-  if (error)
-    return (
-      <AccountLayout
-        title={t("连接执行引擎", "Connect an engine")}
-        intro={t("使用你自己的模型凭证。", "Use your own model credentials.")}
-      >
-        <p role="alert">{saasErrorMessage(error, locale)}</p>
-        <button onClick={() => location.reload()}>
-          {t("重新连接", "Retry")}
-        </button>
-        <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
-      </AccountLayout>
-    );
-  if (!catalog)
-    return (
-      <AccountLayout
-        title={t("连接执行引擎", "Connect an engine")}
-        intro={t("正在读取个人配置…", "Loading your settings…")}
-      >
-        <p role="status">{t("请稍候…", "Please wait…")}</p>
-      </AccountLayout>
-    );
-  return (
-    <ConnectionSettings
-      catalog={catalog}
-      onChange={setCatalog}
-      onboarding={!hasUsableConnection}
-    />
-  );
+  if (!needed) return <>{children}</>;
+  const needsEngine = Boolean(catalog && !hasUsableConnection);
+  const canvasPage = new URLSearchParams(location.search).has("canvas");
+  const content = <>
+    {(Boolean(error) || needsEngine) && (
+      <div className="saas-runtime-note saas-personal-notice" role={error ? "alert" : "status"}>
+        <strong>{error
+          ? t("无法检查执行引擎连接", "Could not check engine connections")
+          : t("尚未连接执行引擎", "No execution engine connected")}</strong>
+        <span>{error
+          ? t("工作区和历史仍可使用。", "Your workspaces and history remain available.") + " " + saasErrorMessage(error, locale)
+          : canvasPage
+            ? t("画布仍可编辑；运行前请连接 API Key。", "You can still edit this canvas. Connect an API key before running it.")
+            : t("现有工作区、画布和历史仍可浏览及编辑；运行任务前请连接自己的 API Key。", "You can still browse and edit your workspaces, canvases and history. Connect your own API key before running tasks.")}</span>
+        <a href={accountURL("engines")}>{t("连接执行引擎", "Connect an engine")}</a>
+        {Boolean(error) && <button type="button" onClick={() => setRevision(value => value + 1)}>{t("重新检查", "Retry check")}</button>}
+      </div>
+    )}
+    {children}
+  </>;
+  return canvasPage
+    ? <div className={`saas-personal-gated-canvas${needsEngine ? " saas-personal-gated-canvas--needs-engine" : ""}`}>{content}</div>
+    : content;
 }
 
 export function ConnectionSettings({
@@ -225,7 +231,7 @@ export function ConnectionSettings({
         <li aria-current="step">{t('2 · 连接模型服务', '2 · Connect a provider')}</li>
         <li>{t('3 · 创建画布', '3 · Create a canvas')}</li>
       </ol>}
-      <nav className="saas-personal-nav">
+      <PageNav>
         <a href={accountURL("security")}>{t("账号安全", "Account security")}</a>
         <button
           onClick={async () => {
@@ -236,7 +242,7 @@ export function ConnectionSettings({
           {t("退出登录", "Sign out")}
         </button>
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
-      </nav>
+      </PageNav>
       <div className="saas-connection-grid">
         <form
           ref={providerForm}
@@ -518,11 +524,11 @@ export function AccountSecurity({ personalCredentialsRequired = true, identity }
         ? t('你的 AwwO 账号已关联 ClawHunt。账号资料与密码由主站管理；这里可以管理 AwwO 登录会话。', 'Your AwwO account is linked to ClawHunt. Manage your profile and password on the main site, and your AwwO sessions here.')
         : t('管理密码和已登录的会话。', 'Manage your password and signed-in sessions.')}
     >
-      <nav className="saas-personal-nav">
+      <PageNav>
         {personalCredentialsRequired && <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>}
         {unified && <a href={accountURL("invites")}>{t("邀请好友", "Invite friends")}</a>}
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
-      </nav>
+      </PageNav>
       {error !== null && (
         <p role="alert" className="saas-error">
           {saasErrorMessage(error, locale)}
