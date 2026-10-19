@@ -184,8 +184,9 @@
 .canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice, .canvas-root .awwo-node .canvas-composer-disclaimer { font-size: 10px; line-height: 1.4; }
 /* A chat column too short to read in (useShortColumn.ts: under 440 px, a laptop's window beside the assistant) keeps
    its reading room: the message box is one line that grows as one types, its "+" inside it like the send button, and
-   the one-line task card drops its counts. A media node's prompt box keeps its size, and so does the terminal look's
-   (its ">" prompt sits where the "+" would go); the block padding alone changes, so a centred column stays centred. */
+   the one-line task card drops its counts. A media node's prompt box keeps its size. The terminal look's ">" prompt
+   sits where the "+" goes here, so the box's own rules leave that look out and it lays out its short box itself
+   (node-view-styles.css). The block padding alone changes, so a centred column stays centred. */
 .canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer { padding-block: 6px 8px; }
 .canvas-root:not([data-node-layout='terminal']) .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-input { min-height: 44px; max-height: 120px; padding: 10px 40px 10px 12px; field-sizing: content; }
 .canvas-root:not([data-node-layout='terminal']) .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-row:has(> .canvas-composer-attach) .canvas-composer-input { padding-left: 40px; }

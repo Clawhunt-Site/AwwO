@@ -148,6 +148,17 @@ html:root .canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row > .canvas-composer-attach { grid-area: attach; justify-self: start; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row::before { content: '>'; content: '>' / ''; position: absolute; grid-area: input; top: 9px; left: 12px; color: var(--nv-muted); font-family: var(--nv-mono); font-size: var(--nv-size); pointer-events: none; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input { grid-area: input; padding-left: 30px; font-family: var(--nv-mono); }
+/* A short chat column (useShortColumn.ts, awwo-node.css `.is-short`) keeps its reading room here too: the box is one line
+   that grows as one types, as in the other looks, and its "+" is inside it at the right, beside the send button (the
+   other looks put it at the left, where this prompt starts the line). With no grid area of its own the "+" is placed
+   in the row's padding box, as the send button is, and leaves the 'attach' row empty (0 px), so the prompt stays at the
+   box's first line. The block and right padding are the hosted skin's own, stated for the native app's box too (28 px
+   under its text and 12 px at its right otherwise). A media node's prompt box keeps its size, as in the other looks. */
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)):not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-input { min-height: 44px; max-height: 120px; padding-block: 10px; padding-right: 44px;
+    field-sizing: content; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)):not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-row:has(> .canvas-composer-attach) .canvas-composer-input { padding-right: 78px; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)):not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-row > .canvas-composer-attach { position: absolute; grid-area: auto; right: 42px; bottom: 8px; z-index: 1;
+    width: 28px; height: 28px; margin: 0; border-color: transparent; background: transparent; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { width: 100%; border: 0; border-radius: 0; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { padding-left: 22px; font-family: var(--nv-mono); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-chevron { display: none; }

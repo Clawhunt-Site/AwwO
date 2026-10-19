@@ -343,6 +343,26 @@ describe('the terminal look', () => {
     expect(rule('.canvas-composer-row::before')).toMatchObject({ content: "'>' / ''", position: 'absolute', 'grid-area': 'input', top: '9px', left: '12px', 'pointer-events': 'none' });
   });
 
+  it('fits a short chat column: one line that grows as one types, its "+" inside the box beside the send button', () => {
+    // 2026-10-19 at 1366 × 657 and 1280 × 720 (a chat column under SHORT_COLUMN_PX): the other looks' short rules leave
+    // this one out, so it kept its "+" row over a 64 px box, which pushed the row under the box (用户须知, the model) 17 to
+    // 34 px below the node's body.
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/node-view-styles.css'), 'utf8');
+    const short = (part: string) => declarations(css, `${scope}:not([data-content='media']) .awwo-node-chat.is-short ${part}`);
+    expect(short('.canvas-composer-input')).toEqual({ 'min-height': '44px', 'max-height': '120px', 'padding-block': '10px', 'padding-right': '44px', 'field-sizing': 'content' });
+    // Out of the 'attach' area, which is then empty, so the prompt keeps the box's first line; in it, the "+" would be
+    // drawn above the box. Placed like the send button (28 px, 8 px in), 6 px to its left, and the text stops before it.
+    expect(short('.canvas-composer-row > .canvas-composer-attach')).toMatchObject({ position: 'absolute', 'grid-area': 'auto', right: '42px', bottom: '8px', width: '28px', height: '28px', margin: '0' });
+    expect(short('.canvas-composer-row:has(> .canvas-composer-attach) .canvas-composer-input')).toEqual({ 'padding-right': '78px' });
+    // The other looks' short box puts its "+" at the left (a left inset as well would make this "+" drop its right one)
+    // and its text 12 px in, both where this look's prompt is: every one of those rules still leaves this look out.
+    const node = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+    const boxRules = node.replace(/\/\*[\s\S]*?\*\//g, '').split('}').map(block => block.split('{')[0].trim())
+      .filter(head => head.includes('.is-short') && /\.canvas-composer-(input|attach)\b/.test(head));
+    expect(boxRules).toHaveLength(3); // the box, the box beside a "+", the "+"
+    expect(boxRules.filter(head => !head.startsWith(".canvas-root:not([data-node-layout='terminal']) "))).toEqual([]);
+  });
+
   it('keeps the "+" and the box as children of the row itself, which those rules place', () => {
     const shown = (container: HTMLElement) => [...container.querySelector('.canvas-composer-row')!.children]
       .filter(child => !(child as HTMLElement).hidden).map(child => [...child.classList].find(name => name.startsWith('canvas-composer-')));
