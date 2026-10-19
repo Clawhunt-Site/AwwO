@@ -9,17 +9,19 @@ import { readCanvasDrafts } from '../src/saas/canvasDraft';
 import * as bridge from '../src/saas/canvasBridge';
 import { channelHub, countedLocks, memoryBackend, quotaStorage, settle } from './saas-canvas-store-fakes';
 
-// A hosted canvas's saves when its page closes with one out (the reply never comes, the server stores it anyway).
-// Found by the signed-in production check of 2026-10-19 on a 142-node canvas.
+// A hosted canvas's saves when its page closes with one out (the reply never comes, the server stores it anyway), and
+// autosave's pace on a slow, big canvas. Found by the signed-in production check of 2026-10-19 on a 142-node canvas.
 const A = 'awwo.saas:user-a:tenant-a:canvas-a:';
 const identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' },
   tenants: [{ id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }] };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 const record = (document: CanvasDocument, version = 7) => ({ id: 'canvas-a', tenantId: 'tenant-a', name: 'Canvas', document, version, createdAt: '', updatedAt: '' });
-/** One node at `x`. */
-const documentAt = (title: string, x = 0): CanvasDocument => ({ ...emptyDocument(), updatedAt: 1, view: { x: 0, y: 0, scale: 1 },
-  nodes: [{ ...createSessionNode('llm', { x, y: 0 }), id: 'node-a', title }] });
+/** One node at `x`, carrying `filler` characters of output (a big canvas's weight: autosave paces from 1 million). */
+const documentAt = (title: string, x = 0, filler = 0): CanvasDocument => ({ ...emptyDocument(), updatedAt: 1, view: { x: 0, y: 0, scale: 1 },
+  nodes: [{ ...createSessionNode('llm', { x, y: 0 }), id: 'node-a', title, ...(filler ? { lastOutput: { text: 'x'.repeat(filler), at: 1, source: 'run' as const } } : {}) }] });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const pointer = (type: string, pointerId = 1) => Object.assign(new Event(type), { pointerId });
+const BUSY = () => response({ error: { code: 'canvas_save_busy', message: 'Canvas saves are busy; try again shortly' } }, 503);
 
 async function writerReady() {
   await waitFor(() => {
@@ -28,9 +30,10 @@ async function writerReady() {
   }, { timeout: 5000 });
   return vi.mocked(bridge.configureSaaSCanvasSave).mock.lastCall![0]!;
 }
-type Serve = { hang?: boolean; read?: () => Promise<void> };
+type Serve = { hang?: boolean; read?: () => Promise<void>; held?: Promise<void>; busy?: boolean };
 /** The API: a PUT stores its document as the next version. `hang`: its reply never comes (the page has closed); `read`:
- * the canvas's own GET answers once it settles. */
+ * the canvas's own GET answers once it settles; `held`: the first PUT's reply waits for it; `busy`: every PUT is
+ * answered busy, storing nothing. */
 function serve(cloud: { current: ReturnType<typeof record> }, puts: CanvasDocument[], options: Serve = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.endsWith('/appearance')) return response(appearanceFixture);
@@ -41,8 +44,10 @@ function serve(cloud: { current: ReturnType<typeof record> }, puts: CanvasDocume
     if (init.method === 'PUT') {
       const body = JSON.parse(init.body as string);
       puts.push(body.document);
+      if (options.busy) return BUSY();
       cloud.current = record(body.document, body.version + 1);
       if (options.hang) return new Promise<Response>(() => {});
+      if (options.held && puts.length === 1) { const stored = cloud.current; await options.held; return response(stored); }
     }
     if (options.read && url.endsWith('/canvases/canvas-a')) await options.read();
     return response(cloud.current);
@@ -175,3 +180,62 @@ it('leaves a draft identical to the cloud for review while another tab has the c
   expect(screen.getByRole('heading', { name: '发现未同步的本机草稿' })).toBeVisible();
   expect(readCanvasDrafts(canvasStorage())).toHaveLength(1);
 });
+
+it('saves a slow drag of a big canvas once, after the pointer lifts, not once per frame', async () => {
+  const cloud = { current: record(documentAt('大画布', 0, 1_000_000)) }; const puts: CanvasDocument[] = [];
+  serve(cloud, puts);
+  render(<SaaSApp />); await writerReady();
+  window.dispatchEvent(pointer('pointerdown'));
+  // Frames 700 ms apart, slower than autosave's plain wait.
+  for (const x of [10, 20, 30]) { act(() => { saveDocument(documentAt('大画布', x, 1_000_000)); }); await act(async () => { await sleep(700); }); }
+  expect(puts).toHaveLength(0);
+  window.dispatchEvent(pointer('pointerup'));
+  await waitFor(() => expect(puts).toHaveLength(1), { timeout: 6000 });
+  expect(puts[0].nodes[0].x).toBe(30);
+  await act(async () => { await sleep(600); });
+  expect(puts).toHaveLength(1);
+});
+
+it('sends a big canvas\'s edit made while autosave\'s save was out once that edit\'s burst is over, and a run\'s save at once', async () => {
+  const big = 1_200_000;
+  const cloud = { current: record(documentAt('画布', 0, big)) }; const puts: CanvasDocument[] = [];
+  let reply!: () => void;
+  serve(cloud, puts, { held: new Promise<void>(resolve => { reply = resolve; }) });
+  render(<SaaSApp />); const flush = await writerReady();
+  act(() => { saveDocument(documentAt('第一次', 1, big)); });
+  await waitFor(() => expect(puts).toHaveLength(1), { timeout: 4000 });
+  // A burst of edits 1.2 s apart while that save is out; its reply comes mid-burst.
+  act(() => { saveDocument(documentAt('第二次', 2, big)); });
+  await act(async () => { await sleep(1200); });
+  act(() => { saveDocument(documentAt('第三次', 3, big)); });
+  await act(async () => { reply(); await sleep(200); });
+  expect(puts).toHaveLength(1);
+  await waitFor(() => expect(puts).toHaveLength(2), { timeout: 8000 });
+  expect(puts[1].nodes[0].title).toBe('第三次');
+  // A run saves first, at once, even with a pointer held down.
+  window.dispatchEvent(pointer('pointerdown'));
+  act(() => { saveDocument(documentAt('运行前', 4, big)); });
+  await act(async () => { await flush(); });
+  expect(puts).toHaveLength(3);
+  expect(puts[2].nodes[0].title).toBe('运行前');
+  window.dispatchEvent(pointer('pointerup'));
+}, 30000);
+
+it('counts the busy answers of an autosave whose canvas keeps changing, and says the save failed after the third', async () => {
+  const big = 1_200_000;
+  const cloud = { current: record(documentAt('画布', 0, big)) }; const puts: CanvasDocument[] = [];
+  serve(cloud, puts, { busy: true });
+  render(<SaaSApp />); await writerReady();
+  act(() => { saveDocument(documentAt('第一次', 1, big)); });
+  await waitFor(() => expect(puts).toHaveLength(1), { timeout: 4000 });
+  // Then edits 700 ms apart through every 2 s wait for a turn.
+  let step = 0;
+  const editing = setInterval(() => { step += 1; act(() => { saveDocument(documentAt(`忙时第 ${step} 次`, step, big)); }); }, 700);
+  try {
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('保存失败：Canvas saves are busy'), { timeout: 20000 });
+  } finally { clearInterval(editing); }
+  expect(puts).toHaveLength(4);
+  await act(async () => { await sleep(3000); });
+  expect(puts).toHaveLength(4);
+  expect(readCanvasDrafts(canvasStorage())).toHaveLength(1);
+}, 40000);

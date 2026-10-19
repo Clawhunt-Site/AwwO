@@ -8,6 +8,7 @@ import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitia
 import { configureCanvasStorage, canvasStorage, canvasStorageKey, canvasStore, canvasStoragePrefix, canvasStoreUsable, openCanvasStorage, openCanvasStorageInMemory, setLegacyCachePreservation } from '../canvas/canvasStorage';
 import { sweepLegacyCanvasStorage } from './canvasStoreSweep';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, preserveLegacyCanvasCache, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, canvasDocumentHash, restorableCanvasDraftBase, type CanvasDraft, type CanvasDraftSending, type SavedCanvasDraft } from './canvasDraft';
+import { AUTOSAVE_QUIET_MS, autosavePace } from './autosavePace';
 import { CanvasSurface, type CanvasResultsOptions, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
@@ -651,14 +652,29 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     let disposed = false;
     const setupAbort = new AbortController();
     let initializationQueue: Promise<unknown> = Promise.resolve();
-    const flush = async () => {
+    const pace = autosavePace();
+    // Autosave goes when the pace lets it (autosavePace.ts): a held pointer or a burst of writes still going puts it off.
+    const later = (delay: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(function due() {
+        const wait = pace.wait();
+        if (wait > 0) { timer = setTimeout(due, wait); return; }
+        void flush(true).catch(() => {});
+      }, delay);
+    };
+    const flush = async (autosave = false) => {
       while (saving.current && !disposed) await new Promise(resolve => setTimeout(resolve, 20));
       if (failed.current || disposed) throw new Error('画布未同步，请先解决保存错误再运行。');
       if (!current.current || !pending.current) return current.current?.version;
       saving.current = true;
       let busyRetries = 0;
+      let retrying = false;
       try {
         while (pending.current && !failed.current && !disposed) {
+          // An edit made while autosave's last save was out goes once its own burst is over, as the first one did; a run
+          // or a node setup sends it at once, and so does a save the API answered busy (its turns are counted here).
+          if (autosave && !retrying && pace.wait() > 0) { later(pace.wait()); break; }
+          retrying = false;
           const pendingDocument = pending.current;
           const pendingCanonical = canonicalCanvasDocumentJSON(pendingDocument);
           // An editor may re-publish the same snapshot while its previous PUT is in flight.
@@ -678,7 +694,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             break;
           }
           const sent: CanvasDraft = draft.current || persistCanvasDraft(storage, writerId, current.current!.version, pendingDocument);
-          const document: CanvasDocument = sent.document; pending.current = null;
+          const document: CanvasDocument = sent.document; pending.current = null; pace.sent();
           // Drafts written while this save is out record what it sends (CanvasDraft.sending).
           sending.current = { baseVersion: current.current!.version,
             hash: canvasDocumentHash(document, document === pendingDocument ? pendingCanonical : undefined) };
@@ -707,6 +723,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
               busyRetries += 1; pending.current ||= document;
               if (!disposed) setSaveState('等待同步…');
               await new Promise(resolve => setTimeout(resolve, 2000));
+              retrying = true;
               continue;
             }
             const alreadyFailed = failed.current;
@@ -727,15 +744,17 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     };
     const observe = (event: Event) => {
       if ((event as CustomEvent).detail?.storageKey !== cacheKey) return;
+      let size = 0;
       try {
-        const document: CanvasDocument = JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}');
+        const raw = storage.getItem(CANVAS_STORAGE_KEY) || '{}'; size = raw.length;
+        const document: CanvasDocument = JSON.parse(raw);
         if (!pending.current && !draft.current && canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document)) return;
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!, sending.current);
       } catch (error) {
         failed.current = true; setSaveState('未同步'); setError(localDraftFailure(error)); return;
       }
-      setSaveState('等待同步…'); clearTimeout(timer); timer = setTimeout(() => void flush().catch(() => {}), 450);
+      setSaveState('等待同步…'); later(pace.wrote(size));
     };
     const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('awwo:canvas-cache-write', observe); window.addEventListener('beforeunload', leave);
@@ -799,8 +818,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     const handoff = takePlanHandoff(handoffScope);
     if (handoff) setInitialPlan({ ...handoff, claim: () => claimPlanHandoff(handoffScope),
       done: () => { clearPlanHandoff(handoffScope); setInitialPlan(null); } });
-    if (pending.current) timer = setTimeout(() => void flush().catch(() => {}), 450);
-    return () => { disposed = true; setupAbort.abort(); configureSaaSCanvasSave(null); configureSaaSCanvasInitialize(null); clearTimeout(timer); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
+    if (pending.current) later(AUTOSAVE_QUIET_MS);
+    return () => { disposed = true; setupAbort.abort(); configureSaaSCanvasSave(null); configureSaaSCanvasInitialize(null); clearTimeout(timer); pace.dispose(); window.removeEventListener('awwo:canvas-cache-write', observe); window.removeEventListener('beforeunload', leave); };
   }, [record, recovery, tenant.id, canvasId, writerId]);
   // The cloud document's hash for the recovery, once per version: a big canvas's takes a moment.
   const cloudHash = useMemo(() => { let hash: string | null = null; return () => hash ??= canvasDocumentHash(record?.document); }, [record]);
