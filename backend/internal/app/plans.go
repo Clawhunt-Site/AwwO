@@ -54,8 +54,9 @@ const (
 	// charged less than its reserve.
 	estimateBytesPerToken = 2
 	unseenTokensPerSecond = 120
-	// The hidden-reasoning estimate is capped at the largest output any configured model may produce in one call.
-	maxHiddenTokens = 32000
+	// The hidden-reasoning estimate is capped at the largest output any configured model may produce in one call: the
+	// model catalog's cap (MAX_OUTPUT_TOKENS in apps/bedrock-catalog.ts; Claude Opus 5.5 declares 64,000 since 10-18).
+	maxHiddenTokens = 65536
 )
 
 // creditsFor converts an official-price cost to credits: × 1.5, rounded up to a whole credit.

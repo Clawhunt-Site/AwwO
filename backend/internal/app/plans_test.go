@@ -6,11 +6,32 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+// The hidden-reasoning estimate's cap is the model catalog's own per-call output cap (apps/bedrock-catalog.ts), so a
+// call of a model the catalog lets write more is never estimated as if it wrote less (Opus 5.5 declares 64,000).
+func TestMaxHiddenTokensIsTheCatalogsOutputCap(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "apps", "bedrock-catalog.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`const MAX_OUTPUT_TOKENS = ([0-9_]+);`).FindSubmatch(source)
+	if match == nil {
+		t.Fatal("apps/bedrock-catalog.ts has no MAX_OUTPUT_TOKENS")
+	}
+	catalogCap, err := strconv.Atoi(strings.ReplaceAll(string(match[1]), "_", ""))
+	if err != nil || catalogCap != maxHiddenTokens {
+		t.Fatalf("catalog cap %q, maxHiddenTokens %d", match[1], maxHiddenTokens)
+	}
+}
 
 // planPricing prices the paid models the plan tests call: claude-sonnet-5 at $2 / $10 per million tokens (a
 // reserve of 12 credits) and bedrock.claude-opus-5-5 at $4.40 / $22 (26 credits) through both runtimes, and the
@@ -173,9 +194,13 @@ func TestCreditChargeIsTheUsageOrAnEstimateThatErrsHigh(t *testing.T) {
 	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, time.Minute); got != 13 {
 		t.Fatal("hidden reasoning", got)
 	}
-	// Cancelled while the model reasoned, before any text: ten minutes is capped at 32,000 tokens, so 4,000 +
-	// 320,000 microdollars, × 1.5 → 49 credits.
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, 10*time.Minute); got != 49 {
+	// Cancelled while the model reasoned, before any text: five minutes is 36,000 tokens, past the old 32,000 cap, so
+	// 4,000 + 360,000 microdollars, × 1.5 → 55 credits; ten minutes (72,000) is capped at the catalog's 65,536 per
+	// call, so 4,000 + 655,360 microdollars, × 1.5 → 99 credits.
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, 5*time.Minute); got != 55 {
+		t.Fatal("cancelled while reasoning for five minutes", got)
+	}
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, 10*time.Minute); got != 99 {
 		t.Fatal("cancelled while reasoning", got)
 	}
 	// A report of no output for a call that streamed some is not believed: it is estimated.
