@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createWorkspaceSandbox, sandboxAbilities, type WorkspaceSandbox } from '../openai-agents-worker/workspace-sandbox.ts';
 import { type WorkerConfig, WORKER_DIR, coreInstalled } from './config.ts';
-import { closeServer, createTransport, listenLocal } from './transport.ts';
+import { TOOLS, closeServer, createTransport, listenLocal, modelToolName, type CapturedCall } from './transport.ts';
 import { WorkerError, boundedText, hash, record, responseJSON, safeMessage, type ApprovalAnswer, type RunRequest, type WorkerEvent } from './protocol.ts';
 import { diagnostic, safeFailureDetails, type RuntimeStage } from './diagnostics.ts';
 
@@ -61,7 +61,41 @@ export async function stopProcess(child: ChildProcess): Promise<void> {
   kill('SIGTERM'); await Promise.race([exit, delay(1500)]);
   if (child.exitCode === null && child.signalCode === null) { kill('SIGKILL'); await Promise.race([exit, delay(3000).then(() => { throw new WorkerError('CORE_CLEANUP_FAILED', 500); })]); }
 }
-type Approval = { kind: 'approval' | 'question'; answer?: string; pending?: Promise<void> };
+/** The names the core can open a card for or ask a question with: the workspace tools it mounts, and its own ask_user. */
+const ADVERTISED = new Set<string>([...TOOLS.map(tool => modelToolName(tool.name)), 'ask_user']);
+/** A captured call paired with its card: one whose arguments could be taken. */
+export type PairedCall = CapturedCall & { arguments: Record<string, unknown> };
+/** The captured call a tool's approval card is for. The pinned core takes an answer's tool calls one at a time, in order
+ *  (server/drivers/openai-chat.ts at UPSTREAM_REVISION), and every call it takes leaves an activity naming the model's
+ *  call id (tool.itemId): at once for a call it refuses before any card (arguments that are not a JSON object or do not
+ *  fit its tool's schema) and for a question, and only once its card is answered for a call with a card. So while a card
+ *  is open, the call it is for is the first captured call with no activity and no card. A call to a tool the core does
+ *  not advertise is refused before any card, and may leave no activity (none is written for a name ending in __ask_bot,
+ *  server/index.ts), so it is passed over. A card is paired with that call only when it names the same tool, no other
+ *  captured call has its id, and its arguments could be taken; anything else stops the task, since a card must never
+ *  show another call's arguments, nor let them be allowed (2026-10-18: paired first-in-first-out by tool name, a card
+ *  could carry those of a call the core had refused). */
+export function cardCall(calls: readonly CapturedCall[], messages: readonly unknown[], tool: unknown): PairedCall {
+  const taken = new Set<string>();
+  for (const message of messages) {
+    if (record(message) && message.kind === 'activity' && record(message.tool) && typeof message.tool.itemId === 'string') taken.add(message.tool.itemId);
+  }
+  const call = calls.find(call => call.card === undefined && !taken.has(call.id) && ADVERTISED.has(call.tool));
+  if (!call || call.tool !== tool || calls.some(other => other !== call && other.id === call.id)) throw new WorkerError('APPROVAL_CALL_UNMATCHED');
+  if (!call.arguments) throw new WorkerError('APPROVAL_ARGUMENTS_UNAVAILABLE');
+  return call as PairedCall;
+}
+/** A JSON value with its objects' keys in one order, so two values compare equal exactly when they are the same value. */
+const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+  : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+/** The allowed call the core may run now: the same tool with the same arguments (the core passes on the JSON it parsed,
+ *  unchanged), if any. */
+export function allowedCall(allowed: Iterable<CapturedCall>, name: string, args: unknown): CapturedCall | undefined {
+  const tool = modelToolName(name), value = JSON.stringify(canonical(args));
+  for (const call of allowed) if (call.tool === tool && JSON.stringify(canonical(call.arguments)) === value) return call;
+  return undefined;
+}
+type Approval = { kind: 'approval' | 'question'; call?: PairedCall; answer?: string; pending?: Promise<void> };
 export function approvalDisplay(kind: Approval['kind'], card: Record<string, unknown>, capturedTool: string | undefined, secrets: string[]) {
   const title = boundedText(safeMessage(String(kind === 'approval' && capturedTool ? capturedTool : card.title || card.tool || 'Workspace approval'), secrets), 200);
   // The complete, original arguments travel separately. Upstream tool subtitles
@@ -74,10 +108,16 @@ export function approvalDisplay(kind: Approval['kind'], card: Record<string, unk
 export class ManagedRun {
   readonly controller = new AbortController();
   readonly approvals = new Map<string, Approval>();
+  /** The calls whose cards were allowed and that have not run: each allow runs one call (authorize). */
+  private readonly allowed = new Set<CapturedCall>();
   private coreURL = ''; private coreToken = ''; private botId = ''; private threadId = '';
   private finished = false;
   readonly request: RunRequest; readonly config: WorkerConfig; readonly emit: (event: WorkerEvent) => void;
-  constructor(request: RunRequest, config: WorkerConfig, emit: (event: WorkerEvent) => void) { this.request = request; this.config = config; this.emit = emit; }
+  private readonly createSandbox: typeof createWorkspaceSandbox;
+  /** `createSandbox` is the Docker workspace; tests give a stand-in. */
+  constructor(request: RunRequest, config: WorkerConfig, emit: (event: WorkerEvent) => void, createSandbox = createWorkspaceSandbox) {
+    this.request = request; this.config = config; this.emit = emit; this.createSandbox = createSandbox;
+  }
   cancel() { this.controller.abort(new WorkerError('CANCELLED')); }
   async respond(answer: ApprovalAnswer): Promise<void> {
     const approval = this.approvals.get(answer.requestId);
@@ -87,15 +127,34 @@ export class ManagedRun {
     if (this.finished || this.controller.signal.aborted) throw new WorkerError('RUN_NOT_ACTIVE', 409);
     if (approval.kind === 'question' && answer.behavior === 'allow' && !answer.message?.trim()) throw new WorkerError('QUESTION_REQUIRES_ANSWER');
     approval.answer = fingerprint;
+    // An allow is for the arguments its card showed: their call may run once, from before the core can take the answer.
+    const allow = approval.kind === 'approval' && answer.behavior === 'allow' ? approval.call : undefined;
+    if (allow) this.allowed.add(allow);
     approval.pending = (async () => {
-      const result = await this.api(`/api/bots/${this.botId}/respond`, {
-        threadId: this.threadId, requestId: answer.requestId,
-        behavior: approval.kind === 'question' && answer.behavior === 'allow' ? 'answer' : answer.behavior, message: answer.message,
-      });
-      if (!record(result) || !['allowed-once', 'rejected', 'answered'].includes(String(result.outcome))) throw new WorkerError('APPROVAL_UNAVAILABLE', 409);
+      let outcome = '';
+      try {
+        const result = await this.api(`/api/bots/${this.botId}/respond`, {
+          threadId: this.threadId, requestId: answer.requestId,
+          behavior: approval.kind === 'question' && answer.behavior === 'allow' ? 'answer' : answer.behavior, message: answer.message,
+        });
+        outcome = record(result) ? String(result.outcome) : '';
+      } finally {
+        // An allow the core did not take (its card had gone), or may not have, runs nothing; the API already holds such
+        // an answer as unknown, which a task cannot complete with.
+        if (allow && outcome !== 'allowed-once') this.allowed.delete(allow);
+      }
+      if (!['allowed-once', 'rejected', 'answered'].includes(outcome)) throw new WorkerError('APPROVAL_UNAVAILABLE', 409);
     })();
     // A failed/uncertain write is never repeated; subsequent identical calls observe the same result.
     return approval.pending;
+  }
+  /** A workspace tool runs only as a card allowed it: the core's call must have the tool and exactly the arguments of a
+   *  call whose card was allowed, and each allow runs one call. In Ask mode the core runs nothing no card allowed, so
+   *  anything else does not run and stops the task. */
+  private authorize(name: string, args: unknown) {
+    const call = allowedCall(this.allowed, name, args);
+    if (!call) { const error = new WorkerError('TOOL_CALL_NOT_ALLOWED'); this.controller.abort(error); throw error; }
+    this.allowed.delete(call);
   }
   private async api(path: string, body?: unknown, owner?: string): Promise<unknown> {
     const response = await fetch(this.coreURL + path, { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
@@ -118,9 +177,9 @@ export class ManagedRun {
       await mkdir(this.config.dataRoot, { recursive: true, mode: 0o700 });
       home = await mkdtemp(join(this.config.dataRoot, 'run-'));
       await mkdir(join(home, 'tmp'), { mode: 0o700 });
-      sandbox = await createWorkspaceSandbox(this.config.sandbox, { workspaceId: hash(this.request.tenantId + '\0' + this.request.sessionId), runId: this.request.runId,
+      sandbox = await this.createSandbox(this.config.sandbox, { workspaceId: hash(this.request.tenantId + '\0' + this.request.sessionId), runId: this.request.runId,
         inputs: this.request.inputs.map(input => ({ name: input.name, content: input.content, encoding: input.encoding, sha256: input.sha256 })) }, signal);
-      transport = await createTransport(this.request, sandbox, signal, this.emit);
+      transport = await createTransport(this.request, sandbox, signal, this.emit, (name, args) => this.authorize(name, args));
       stage = 'core_health';
       const owner = randomBytes(32).toString('base64url');
       const [port, webhookPort] = await Promise.all([freePort(), freePort()]);
@@ -174,13 +233,19 @@ export class ManagedRun {
             this.emit({ type: 'computer_message', id: message.id, role: message.role === 'user' ? 'user' : 'assistant', ...text });
           }
           if (record(message.card) && typeof message.card.requestId === 'string' && !message.card.answered && !message.card.dismissed && !message.card.expired && !this.approvals.has(message.card.requestId)) {
-            const card = message.card, kind = card.questionRequest ? 'question' : 'approval';
-            const index = transport.calls.findIndex(call => call.tool === card.tool);
-            const captured = index >= 0 ? transport.calls.splice(index, 1)[0] : undefined;
-            if (kind === 'approval' && !captured) throw new WorkerError('APPROVAL_ARGUMENTS_UNAVAILABLE');
-            this.approvals.set(card.requestId as string, { kind });
-            this.emit({ type: 'computer_approval', requestId: card.requestId,
-              ...approvalDisplay(kind, card, captured?.tool, secrets), kind, arguments: captured?.arguments ?? (record(card.questionRequest) ? card.questionRequest : {}) });
+            const card = message.card, requestId = card.requestId as string;
+            if (card.questionRequest) {
+              // A question carries its own questions.
+              this.approvals.set(requestId, { kind: 'question' });
+              this.emit({ type: 'computer_approval', requestId, ...approvalDisplay('question', card, undefined, secrets), kind: 'question',
+                arguments: record(card.questionRequest) ? card.questionRequest : {} });
+            } else {
+              // A tool's card carries the arguments of the very call it is for, and never any others.
+              const call = cardCall(transport.calls, snapshot.messages, card.tool);
+              call.card = requestId;
+              this.approvals.set(requestId, { kind: 'approval', call });
+              this.emit({ type: 'computer_approval', requestId, ...approvalDisplay('approval', card, call.tool, secrets), kind: 'approval', arguments: call.arguments });
+            }
           }
         }
         if (snapshot.phase === 'settled') {

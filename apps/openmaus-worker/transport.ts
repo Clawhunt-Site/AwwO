@@ -14,7 +14,15 @@ export const TOOLS = [
   { name: 'publish', description: 'Publish exact verified bytes of an existing file as an AwwO artifact.', inputSchema: { type: 'object', properties: { path: prop('Relative existing file path') }, required: ['path'], additionalProperties: false } },
   { name: 'archive', description: 'Publish the actual workspace source as workspace.zip.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
 ] as const;
-export type CapturedCall = { tool: string; arguments: Record<string, unknown> };
+/** One tool call of a model answer as the model made it: its call id, its function name and, when the broker could take
+ *  them (a JSON object within LIMITS.toolArguments), its arguments. Every call of an answer is kept, in the answer's order,
+ *  readable or not, because a card is paired with the call it is for by the core's own record of the calls it has taken
+ *  (runtime.ts cardCall), never by a tool's name: the core refuses some calls before any card. `card` is the request id of
+ *  the card paired with it. */
+export type CapturedCall = { id: string; tool: string; arguments?: Record<string, unknown>; card?: string };
+/** The name the pinned core gives a tool of an MCP server it mounts: `${server}_${tool}` (server/drivers/chat-mcp-tools.ts at
+ *  UPSTREAM_REVISION), for the one server it mounts here, awwo_workspace (runtime.ts). */
+export const modelToolName = (name: string) => `awwo_workspace_${name}`;
 /** The pinned core's chat driver lets a turn make 16 model calls (server/drivers/openai-chat.ts at UPSTREAM_REVISION:
  *  `for (let round = 0; round < 16; round++)`) and fails the whole turn when the last answer still asks for a tool: a
  *  task that had done its work lost its answer (2026-10-18). So the call that can be the turn's last asks for the
@@ -52,7 +60,11 @@ export async function listenLocal(server: Server): Promise<string> {
 }
 export async function closeServer(server: Server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 
-export async function createTransport(request: RunRequest, sandbox: WorkspaceSandbox, signal: AbortSignal, emit: (event: WorkerEvent) => void) {
+/** `authorize` is asked before every workspace tool runs, with the name and arguments the core calls it with; it throws
+ *  to refuse. A managed run allows only a call its card allowed (runtime.ts); a test that means to allow every call says
+ *  so with `() => {}`. */
+export async function createTransport(request: RunRequest, sandbox: WorkspaceSandbox, signal: AbortSignal, emit: (event: WorkerEvent) => void,
+  authorize: (name: string, args: unknown) => void) {
   const token = randomBytes(32).toString('base64url'), calls: CapturedCall[] = [];
   const published = new Set<string>(); let artifactBytes = 0, modelCalls = 0;
   const publish = (file: WorkspaceRead) => {
@@ -66,6 +78,7 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
     emit({ type: 'computer_artifact', name: file.path.split('/').at(-1)!, path: file.path, content: bytes.toString('base64'), encoding: 'base64', sha256: file.sha256 });
   };
   async function tool(name: string, args: unknown): Promise<unknown> {
+    authorize(name, args);
     if (!record(args)) throw new WorkerError('INVALID_TOOL_ARGUMENTS');
     const schema = TOOLS.find(tool => tool.name === name);
     if (!schema || Object.keys(args).some(key => !(key in schema.inputSchema.properties))) throw new WorkerError('TOOL_NOT_ALLOWED');
@@ -129,10 +142,14 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
         const choice = completion.choices[0];
         if (record(choice) && record(choice.message) && Array.isArray(choice.message.tool_calls)) {
           if (choice.message.tool_calls.length > 32) throw new WorkerError('TOOL_BUDGET_EXCEEDED');
-          for (const call of choice.message.tool_calls) {
-            if (!record(call) || !record(call.function) || typeof call.function.name !== 'string') continue;
-            let args: unknown; try { args = JSON.parse(textField(call.function.arguments, LIMITS.toolArguments, true)); } catch { continue; }
-            if (record(args)) calls.push({ tool: call.function.name, arguments: args });
+          // Every call of the turn's own answers, in order, under the model's call id: one whose arguments are too large, not
+          // JSON or not an object is kept without them, so a card for it can never be given another call's. An answer to a
+          // call that declared no tools (the core's text-only helper: a summary, a memory note) runs no call and opens no
+          // card, so its calls are never kept (review 2026-10-19).
+          if (Array.isArray(body.tools) && body.tools.length) for (const call of choice.message.tool_calls) {
+            const fn = record(call) && record(call.function) ? call.function : undefined;
+            let args: unknown; try { args = JSON.parse(textField(fn?.arguments, LIMITS.toolArguments, true)); } catch { args = undefined; }
+            calls.push({ id: record(call) && typeof call.id === 'string' ? call.id : '', tool: typeof fn?.name === 'string' ? fn.name : '', ...(record(args) ? { arguments: args } : {}) });
           }
         }
         return json(res, 200, completion);

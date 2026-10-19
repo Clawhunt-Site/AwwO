@@ -13,7 +13,8 @@ test('fixed RPC rejects unknown tools, validates artifact hashes, deduplicates e
   const file: WorkspaceRead = { path: 'reports/result.html', name: 'result.html', content: 'verified', encoding: 'utf8', byteLength: 8, sha256: hash('verified'), mimeType: 'text/html' };
   const sandbox: WorkspaceSandbox = { list: async () => [], read: async () => file, write: async () => file, exec: async () => ({ exitCode: 0, stdout: '', stderr: '', truncated: false }), publish: async () => corrupted ? { ...file, sha256: '0'.repeat(64) } : file, archive: async () => ({ ...file, encoding: 'base64', content: Buffer.from(file.content).toString('base64') }), close: async () => {} };
   const request: RunRequest = { runId: 'run', tenantId: 'tenant', sessionId: 'session', prompt: 'test', instructions: '', modelProxyURL: url + '/v1', modelProxyToken: 'scope-token-long-enough', timeoutMs: 1000, maxModelCalls: 1, inputs: [] };
-  const transport = await createTransport(request, sandbox, new AbortController().signal, event => events.push(event));
+  // Every tool call allowed: the RPC itself is what this test checks (a managed run allows only what a card allowed).
+  const transport = await createTransport(request, sandbox, new AbortController().signal, event => events.push(event), () => {});
   const headers = { authorization: `Bearer ${transport.token}`, 'content-type': 'application/json' };
   const call = async (name: string, args: unknown) => (await fetch(transport.url + '/mcp', { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })).json();
   try {
@@ -48,7 +49,7 @@ test('a tool slip the model can correct is an ordinary result that did nothing, 
     close: async () => {},
   };
   const request: RunRequest = { runId: 'run', tenantId: 'tenant', sessionId: 'session', prompt: 'test', instructions: '', modelProxyURL: 'http://127.0.0.1:9/v1', modelProxyToken: 'scope-token-long-enough', timeoutMs: 1000, maxModelCalls: 1, inputs: [] };
-  const transport = await createTransport(request, sandbox, new AbortController().signal, event => events.push(event));
+  const transport = await createTransport(request, sandbox, new AbortController().signal, event => events.push(event), () => {});
   const headers = { authorization: `Bearer ${transport.token}`, 'content-type': 'application/json' };
   const call = async (name: string, args: unknown) => (await fetch(transport.url + '/mcp', { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })).json();
   const text = (response: { result: { content: Array<{ text: string }> } }) => JSON.parse(response.result.content[0].text);
@@ -107,7 +108,7 @@ test('the call that can be a task\'s last asks for the final answer, and only th
   const run = async (maxModelCalls: number, calls: number, earlier = 0) => {
     seen.length = 0;
     const request: RunRequest = { runId: 'run', tenantId: 'tenant', sessionId: 'session', prompt: 'test', instructions: '', modelProxyURL: url + '/v1', modelProxyToken: 'scope-token-long-enough', timeoutMs: 1000, maxModelCalls, inputs: [] };
-    const transport = await createTransport(request, sandbox, new AbortController().signal, () => {});
+    const transport = await createTransport(request, sandbox, new AbortController().signal, () => {}, () => {});
     const headers = { authorization: `Bearer ${transport.token}`, 'content-type': 'application/json' };
     const statuses: number[] = [];
     try {
