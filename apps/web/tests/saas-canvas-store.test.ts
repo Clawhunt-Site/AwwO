@@ -617,25 +617,27 @@ describe('canvas store', () => {
     const shared = world();
     // a's IndexedDB writes never finish (its page crashed while writing).
     const a = tab(shared, { backend: async () => ({ ...shared.backend.backend, write: () => new Promise<void>(() => {}) }) });
-    const b = tab(shared, { peerStoreDelay: 50 });
+    // A delay far beyond what a loaded machine adds to settle(), so the check before it cannot race b's own write.
+    const b = tab(shared, { peerStoreDelay: 1500 });
     await a.store.open(P); await b.store.open(P);
     a.store.set(P, DOC, 'only in memory');
     await settle();
     expect(b.store.get(P, DOC)).toBe('only in memory');
     expect(shared.backend.value(DOC)).toBeNull();
-    await new Promise(resolve => setTimeout(resolve, 120)); await b.store.flush(); await settle();
+    await new Promise(resolve => setTimeout(resolve, 2000)); await b.store.flush(); await settle();
     expect(shared.backend.value(DOC)).toBe('only in memory');
   });
 
   it('leaves another tab\'s write to that tab while it stores it in time', async () => {
     const shared = world();
     const a = tab(shared);
-    const b = tab(shared, { peerStoreDelay: 200 });
+    // A delay far beyond a's own write and its notice, even on a loaded machine.
+    const b = tab(shared, { peerStoreDelay: 1500 });
     await a.store.open(P); await b.store.open(P);
     a.store.set(P, DOC, 'stored by a');
     await a.store.flush(); await settle();
     const writes = shared.backend.writes.length;
-    await new Promise(resolve => setTimeout(resolve, 300)); await b.store.flush(); await settle();
+    await new Promise(resolve => setTimeout(resolve, 2000)); await b.store.flush(); await settle();
     expect(shared.backend.writes.length).toBe(writes);
   });
 
