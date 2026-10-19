@@ -248,3 +248,11 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 - **日志**：每次换用备选写一行 `bedrock_profile_fallback`（from、to、after），每次失败的 Bedrock 调用写一行 `bedrock_call_failed`（model、error、status、stage = request 或 stream、upstream = true 表示 AWS 的回答或通往它的路上出的错（含网络、凭证），false 表示桥自己拒绝：请求或内容无法转换），只有模型 ID、错误名和状态码，不含提示词、回答或 AWS 消息。Pi 与 JS worker 由子进程经 IPC 报给父进程再写（子进程本身没有输出），Python worker 直接写 stderr。此前 Pi worker 的规划运行失败时日志里看不到 AWS 异常名，这次一并补上。
 - **计费**：用户按目录 id 计点数，换用 US 不改变用户的费用；AWS 按 US 配置文件的价格向账号收费，可能与 global 不同。被拒绝的那次请求没有处理任何 token（Bedrock 按 token 计费）。
 - **回滚**：去掉目录里的 `fallbackTarget` 或回滚 worker 发布即可停用；IAM 可把两个策略的默认版本设回 v3。
+
+## 2026-10-19：Python worker 的 Bedrock 流 15 分钟无字节即失败
+
+- **起因**（运营方 10-19「第4条做吧」）：05:19–07:37Z 同一张画布的 5 个 Opus 5.5 节点在 Python worker 上各只发出一次调用，整整 25 分钟没有任何返回（没有用量；CloudTrail 只记到调用开始，之后没有别的调用），提示词 2–14 KB；同样的节点重跑 64–164 s 就完成。Python 桥的 botocore 读超时等于运行时限（1,500 s），一次停滞的调用就用掉整个运行，以 `run_timeout` 结束，不再自动重试。
+- **改动**：botocore 的读超时改为流的空闲上限 15 分钟（与 JS 桥的 `BEDROCK_STREAM_IDLE_MS` 相同；运行时限更短时仍用运行时限，`stream_read_timeout`）。连续 15 分钟收不到一个字节，桥报 504 `ReadTimeoutError`（等响应时是 botocore 的，流已开始后是 urllib3 的），worker 记为 `MODEL_UNAVAILABLE`（API 显示 `provider_unavailable`），画布节点只要还没有任何输出就按 R-1 自动重跑；日志是一行 `bedrock_call_failed`（`error` 为 `ReadTimeoutError`，`status` 504）。不换用备选配置文件：停滞不是配置文件的拒绝，而且剩下的时间可能不够一次长调用，到时限的 `run_timeout` 反而不再重试。整个运行仍由 worker 自己的运行时限兜底（`asyncio.timeout`）。
+- **为什么是 15 分钟**：Opus 5.5 先思考再写第一个字，思考完之前 Bedrock 什么都不发，正常的流也会安静几分钟。10-12 到 10-19 三个 worker 上完成的 3,384 次 Opus 5.5 调用里，等第一个 token 最长 436 s（第 99 百分位 230–296 s），没有一次超过 600 s；沙箱 worker 自 10-18 起首字节可以等 30 分钟，最长也只有 354 s。
+- **计费**：停滞的调用照旧按估算计费（没有用量报告：输入字节加隐藏推理，上限 65,536 token，`plans.go` 的 `creditCharge`），与以前 25 分钟后以 `run_timeout` 结束时相同；R-1 重跑的每一次都单独计费，所以重跑若再次停滞会再计一次。
+- **回滚**：回滚 Python worker 发布。

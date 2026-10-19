@@ -40,6 +40,12 @@ BRIDGE_PATH = "/awwo-bedrock-converse/v1"
 BRIDGE_API_KEY = "awwo-bedrock-bridge"
 # Six pictures of 3.75 MiB are 31.5 MB as base64; the rest is room for the largest text the worker accepts.
 MAX_REQUEST_BYTES = 40 * 1024 * 1024
+# How long a Bedrock stream may send nothing (BEDROCK_STREAM_IDLE_MS in apps/bedrock-bridge.ts). Claude Opus 5.5 thinks
+# before its first word and Bedrock sends nothing until it is done, so a working stream is silent for minutes: of the
+# 3,384 Opus 5.5 calls that completed on the three workers from 2026-10-12 to 10-19, the longest wait for the first token
+# was 436 s (99th percentile 230-296 s), none over 600 s. One silent for longer has stalled: on 2026-10-19 five Opus 5.5
+# calls gave nothing back for their runs' whole 25 minutes, and the same nodes, run again, answered in 64-164 s.
+BEDROCK_STREAM_IDLE_SECONDS = 15 * 60
 TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 TOOL_USE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 BEARER = re.compile(r"[\x21-\x7e]{16,8192}")
@@ -549,10 +555,20 @@ def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
     return None
 
 
+def stream_read_timeout(run_seconds: float) -> float:
+    """botocore's read timeout for a call: the stream's idle limit, or the run's own deadline when that comes first."""
+    return min(run_seconds, BEDROCK_STREAM_IDLE_SECONDS)
+
+
 def bridge_failure(error: BaseException) -> BridgeError:
     """Status and type only: SDK messages can carry account IDs and role ARNs."""
     if isinstance(error, BridgeError):
         return error
+    if any(cls.__name__ == "ReadTimeoutError" for cls in type(error).__mro__):
+        # botocore's read timeout (urllib3's inside a stream): Bedrock sent nothing for the stream's idle limit. The
+        # service failed, not the run's deadline (MODEL_UNAVAILABLE, never DEADLINE_EXCEEDED): a canvas node whose call
+        # stalled before anything streamed runs again (graph_retry.go).
+        return BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True)
     if type(error).__name__ in CREDENTIAL_ERRORS:
         # No usable AWS credentials: an authentication failure, like a rejected key.
         return BridgeError(401, "api_error", "The Bedrock request failed", upstream=True)

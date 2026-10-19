@@ -3,8 +3,10 @@ and the real Agents SDK over the bridge transport with a fake boto3 client (no n
 import asyncio
 import json
 import os
+import socket
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,7 +17,7 @@ from botocore.exceptions import ClientError, EventStreamError
 
 from bedrock_bridge import (
     BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure, default_client,
-    to_converse_input, valid_auth, with_claude_prompt_cache,
+    stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -373,10 +375,11 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.record["read_timeout"], 120.0)
         self.assertEqual(self.record["thread"], "awwo-bedrock-converse", "boto3 never blocks the event loop")
 
-    async def test_a_long_deadline_reaches_the_bridge_and_the_client_and_opus_may_write_64000_tokens(self):
+    async def test_a_long_deadline_reaches_the_client_bedrock_waits_its_idle_limit_and_opus_may_write_64000_tokens(self):
         # Production gives a run 25 minutes, since Claude Opus 5.5 thinks before its first word (2026-10-18: a node cut
-        # at 600 s with nothing written): Bedrock's read and the OpenAI client's own timeout follow the run's deadline,
-        # never the SDK's 600 s default, and the call may write the model's 64,000 tokens.
+        # at 600 s with nothing written): the OpenAI client's own timeout follows the run's deadline, never the SDK's
+        # 600 s default, and the call may write the model's 64,000 tokens. Bedrock's read waits at most the stream's
+        # idle limit for the next byte (2026-10-19: stalled calls rode out whole 25-minute runs).
         import runner
         seen = {}
         original = runner.AsyncOpenAI
@@ -390,7 +393,7 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
         events = [event async for event in stream_run(request, config, asyncio.Event())]
         self.assertEqual(events[-1]["type"], "completed", events[-1])
-        self.assertEqual(self.record["read_timeout"], 1500.0)
+        self.assertEqual(self.record["read_timeout"], 900.0)
         self.assertEqual((seen["timeout"].read, seen["timeout"].connect), (1500.0, 5.0))
         self.assertEqual(self.record["input"]["inferenceConfig"]["maxTokens"], 64000)
 
@@ -749,6 +752,114 @@ class FallbackRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([json.loads(line) for line in written.splitlines() if line], [{
             "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_profile_fallback",
             "from": OPUS, "to": OPUS_US, "after": "ServiceUnavailableException"}])
+
+
+STUB_AWS = {"AWS_ACCESS_KEY_ID": "AKIAEXAMPLESTUB00000", "AWS_SECRET_ACCESS_KEY": "stub-secret-stub-secret-0000",
+            "AWS_EC2_METADATA_DISABLED": "true", "AWS_CONFIG_FILE": os.devnull, "AWS_SHARED_CREDENTIALS_FILE": os.devnull}
+
+
+def stalling_endpoint(test, headers):
+    """A local endpoint that takes ConverseStream requests and then sends nothing (headers False) or only the response's
+    headers (headers True) until the test ends: a Bedrock call that stalled. Returns its URL and the connections it took."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    taken = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            taken.append(conn)
+            conn.recv(65536)
+            if headers:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\n"
+                             b"Transfer-Encoding: chunked\r\nx-amzn-RequestId: stub\r\n\r\n")
+    threading.Thread(target=serve, daemon=True).start()
+
+    def stop():
+        listener.close()
+        for conn in taken:
+            conn.close()
+    test.addCleanup(stop)
+    return f"http://127.0.0.1:{listener.getsockname()[1]}", taken
+
+
+def local_client(url, seen=None):
+    """A real boto3 Bedrock client for the transport's client_factory, sent to `url` with stub credentials."""
+    def factory(region, auth, read_timeout):
+        import boto3
+        from botocore.config import Config
+        if seen is not None:
+            seen.append(read_timeout)
+        return boto3.session.Session().client("bedrock-runtime", region_name=region, endpoint_url=url, config=Config(
+            read_timeout=read_timeout, connect_timeout=2, retries={"total_max_attempts": 1, "mode": "standard"}))
+    return factory
+
+
+class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
+    """A Bedrock call that sends nothing for the stream's idle limit fails as the service's outage (MODEL_UNAVAILABLE,
+    which a canvas node runs again after) instead of riding out its run: real botocore against a local endpoint, no AWS."""
+
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, STUB_AWS))
+
+    def test_the_idle_limit_and_both_read_timeouts_botocore_raises(self):
+        self.assertEqual(stream_read_timeout(120.0), 120.0, "a run's shorter deadline stays the read timeout")
+        self.assertEqual(stream_read_timeout(1500.0), 900.0)
+        from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeout
+        from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
+        # botocore raises its own while it waits for the response, urllib3's inside a stream that already answered.
+        for error in (BotocoreReadTimeout(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com"), Urllib3ReadTimeout(None, None, "Read timed out.")):
+            with self.subTest(type(error).__module__):
+                failure = bridge_failure(error)
+                self.assertEqual((failure.status, failure.kind, failure.upstream), (504, "ReadTimeoutError", True))
+                self.assertEqual(classify_error(failure)["code"], "MODEL_UNAVAILABLE")
+
+    async def test_a_stalled_call_fails_at_the_idle_limit_and_never_turns_to_the_other_profile(self):
+        # With a fallback the first event is read ahead; without one the stream is read in the worker's own loop.
+        for (headers, stage), fallback in [(case, fallback) for case in ((False, "request"), (True, "stream")) for fallback in (OPUS_US, "")]:
+            with self.subTest(stage=stage, fallback=fallback):
+                url, taken = stalling_endpoint(self, headers)
+                facts = []
+                transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=1.0,
+                                                     client_factory=local_client(url), fallback_model=fallback, report=facts.append)
+                body = {"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]}
+                started = time.monotonic()
+                async with httpx2.AsyncClient(transport=transport) as http:
+                    response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
+                self.assertLess(time.monotonic() - started, 8)
+                error = (response.json() if stage == "request" else
+                         json.loads([line for line in response.text.split("\n") if line.startswith("data: ")][-1][6:]))["error"]
+                self.assertEqual((response.status_code, error["type"], error["status"]), (504 if stage == "request" else 200, "ReadTimeoutError", 504))
+                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
+                self.assertEqual(len(taken), 1, "a stall is not a profile's refusal: the other profile is never asked")
+
+    async def test_a_run_whose_call_stalls_ends_as_the_service_unavailable_long_before_its_deadline(self):
+        set_trace_processors([])
+        import runner
+        original = runner.BedrockConverseTransport
+        self.addCleanup(setattr, runner, "BedrockConverseTransport", original)
+        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="30000")
+        request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
+        # The JSON 504 answered before a stream, and the error frame inside one, both read as the service's outage.
+        for headers, stage in ((False, "request"), (True, "stream")):
+            with self.subTest(stage):
+                url, _ = stalling_endpoint(self, headers)
+                seen = []
+                runner.BedrockConverseTransport = lambda **kwargs: original(**kwargs, client_factory=local_client(url, seen))
+                started = time.monotonic()
+                with mock.patch("bedrock_bridge.BEDROCK_STREAM_IDLE_SECONDS", 1), mock.patch("sys.stderr") as stderr:
+                    events = [event async for event in stream_run(request, config, asyncio.Event())]
+                self.assertLess(time.monotonic() - started, 15, "the idle limit, not the run's 30 s deadline")
+                self.assertEqual(seen, [1])
+                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_UNAVAILABLE"), events[-1])
+                written = "".join(call.args[0] for call in stderr.write.call_args_list)
+                self.assertEqual([json.loads(line) for line in written.splitlines() if line.startswith('{"service"')], [{
+                    "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_call_failed", "model": OPUS,
+                    "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
 
 
 if __name__ == "__main__":

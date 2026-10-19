@@ -11,7 +11,7 @@ from typing import AsyncIterator
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Timeout
 
-from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport, bedrock_fact_line
+from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport, bedrock_fact_line, stream_read_timeout
 from config import MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from provider_observation import ProviderObservation
@@ -264,15 +264,16 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
                 if line:
                     print(line, file=sys.stderr, flush=True)
 
+            # A stream that sends nothing for 15 minutes fails as the service's outage instead of riding out the run.
             bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
-                                              read_timeout=config.timeout_ms / 1000, prompt_cache=profile.prompt_cache,
+                                              read_timeout=stream_read_timeout(config.timeout_ms / 1000), prompt_cache=profile.prompt_cache,
                                               fallback_model=profile.fallback_model, report=report)
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
         }, **({"transport": bridge} if bridge else {}))
         # The SDK's own 600 s default would cut a call short of the run's deadline (the Bedrock bridge keeps its own read
-        # timeout, set from the same deadline above).
+        # timeout, the stream's idle limit above).
         client = AsyncOpenAI(base_url=profile.base_url, api_key=BRIDGE_API_KEY if bridge else profile.api_key, max_retries=0, http_client=http_client,
                              timeout=Timeout(config.timeout_ms / 1000, connect=5.0))
         tools = _build_tools(request, config)
