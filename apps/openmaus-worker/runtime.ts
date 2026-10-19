@@ -44,6 +44,7 @@ export function workspaceSoul(config: Pick<WorkerConfig, 'tools'> & { sandbox: P
   if (request.inputs.length) parts.push(`The files the user attached are read-only in /inputs: ${request.inputs.map(input => input.name).join(', ')}.`);
   parts.push(...sandboxAbilities(config.tools, !!config.sandbox.egress));
   parts.push('No desktop, live browser, host shell, peers, skills or external integrations are available. Publish files you actually created; never claim unrun tests passed.');
+  parts.push('A tool result with failed: true did nothing: correct the call, or say in your answer what failed. Only published: true delivered a file.');
   return parts.join(' ');
 }
 

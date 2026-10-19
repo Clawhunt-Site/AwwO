@@ -29,6 +29,8 @@ test('the agent is told about its files, the tools its image has and the web, an
   const full = workspaceSoul({ tools: new Set(['rea', 'check-page']), sandbox: { egress: { socketDir: '/srv/egress', secret: 'x'.repeat(32) } } }, { inputs });
   assert.ok(full.includes('/inputs: app.zip') && full.includes('rea analyze-javascript-application') && full.includes('awwo-check-page'));
   assert.ok(full.includes('HTTPS_PROXY') && !full.includes('no network') && !full.includes('x'.repeat(32)));
+  // A recoverable tool failure is an ordinary result (tool-failures.ts): the agent is told what it means.
+  for (const soul of [plain, full]) assert.ok(soul.includes('failed: true did nothing') && soul.includes('Only published: true delivered a file.'));
 });
 test('answers and payload bounds reject malformed input', async () => {
   assert.deepEqual(parseAnswer({ requestId: 'r', behavior: 'deny' }), { requestId: 'r', behavior: 'deny' });

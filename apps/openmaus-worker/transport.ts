@@ -3,11 +3,12 @@ import { randomBytes } from 'node:crypto';
 import type { WorkspaceSandbox, WorkspaceRead } from '../openai-agents-worker/workspace-sandbox.ts';
 import { LIMITS, WorkerError, hash, json, readJSON, record, responseJSON, safeEqual, textField, type RunRequest, type WorkerEvent } from './protocol.ts';
 import { diagnostic, proxyErrorCode } from './diagnostics.ts';
+import { ToolFailure, failedResult, recoverableFailure } from './tool-failures.ts';
 
 const prop = (description: string) => ({ type: 'string', description });
 export const TOOLS = [
   { name: 'list', description: 'List files in the isolated AwwO workspace. No host files are available.', inputSchema: { type: 'object', properties: { path: prop('Relative directory; empty for root') }, additionalProperties: false } },
-  { name: 'read', description: 'Read a real file in the isolated workspace.', inputSchema: { type: 'object', properties: { path: prop('Relative file path') }, required: ['path'], additionalProperties: false } },
+  { name: 'read', description: 'Read a real file in the isolated workspace. A result holds at most 50 KiB: a longer file comes back cut and says truncated: true, and exec can read the rest (for example sed -n or tail -c).', inputSchema: { type: 'object', properties: { path: prop('Relative file path') }, required: ['path'], additionalProperties: false } },
   { name: 'write', description: 'Write UTF-8 source in the isolated workspace. Never writes host files.', inputSchema: { type: 'object', properties: { path: prop('Relative file path'), content: prop('Complete UTF-8 content') }, required: ['path', 'content'], additionalProperties: false } },
   { name: 'exec', description: 'Execute a shell command inside the real Docker workspace, without host credentials (your instructions say whether it reaches the web). Inspect exitCode and output. This is not a desktop or browser.', inputSchema: { type: 'object', properties: { command: prop('Shell command within /workspace') }, required: ['command'], additionalProperties: false } },
   { name: 'publish', description: 'Publish exact verified bytes of an existing file as an AwwO artifact.', inputSchema: { type: 'object', properties: { path: prop('Relative existing file path') }, required: ['path'], additionalProperties: false } },
@@ -25,6 +26,25 @@ export const finalModelCall = (request: Pick<RunRequest, 'maxModelCalls'>) => Ma
 /** The API's model proxy takes at most this many messages in one call (backend/internal/app/computer_model_proxy.go), so
  *  a final call already at it goes as it came, without the note, rather than be refused for one message more. */
 export const PROXY_MESSAGES = 128;
+/** The model sees a tool result's first 50 KiB of UTF-8, cut wherever that falls (OUTPUT_BYTES in the pinned core's
+ *  server/drivers/chat-mcp-tools.ts at UPSTREAM_REVISION), and the core ends the turn on a reply frame over 2 MiB, which
+ *  a whole large file could reach (its text escaped twice). So a read's whole result stays within those 50 KiB, and
+ *  says it was cut before its text: a flag after the text was itself cut off (review 2026-10-18). */
+export const RESULT_BYTES = 50 * 1024;
+const encoded = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+const readResult = (file: WorkspaceRead) => {
+  const { content, ...about } = file;
+  if (encoded(file) <= RESULT_BYTES) return { ...about, content };
+  // The longest start that fits: never half a UTF-16 pair, and a base64 text in whole 4-character groups.
+  const start = (end: number) => file.encoding === 'base64' ? end - end % 4 : /[\ud800-\udbff]/.test(content[end - 1] ?? '') ? end - 1 : end;
+  const cut = (end: number) => ({ ...about, truncated: true, content: content.slice(0, start(end)) });
+  let low = 0, high = Math.min(content.length, RESULT_BYTES);
+  while (low < high) { const mid = Math.ceil((low + high) / 2); if (encoded(cut(mid)) <= RESULT_BYTES) low = mid; else high = mid - 1; }
+  return cut(low);
+};
+const BAD_PATH = new ToolFailure('INVALID_PATH', 'The path is empty, longer than 1,024 bytes, or holds a NUL character.');
+const BAD_CONTENT = new ToolFailure('TOO_LARGE', 'The content is larger than a workspace file may be (2 MiB), or holds a NUL character.');
+const BAD_COMMAND = new ToolFailure('INVALID_COMMAND', 'The command is empty, longer than 32 KiB, or holds a NUL character.');
 export async function listenLocal(server: Server): Promise<string> {
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
   const address = server.address(); if (!address || typeof address === 'string') throw new WorkerError('LISTEN_FAILED', 500);
@@ -40,7 +60,8 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
     if (bytes.length > LIMITS.artifact || bytes.length !== file.byteLength || hash(bytes) !== file.sha256) throw new WorkerError('ARTIFACT_INVALID');
     const identity = file.path + '\0' + file.sha256;
     if (published.has(identity)) return;
-    if (published.size >= 16 || artifactBytes + bytes.length > LIMITS.artifacts) throw new WorkerError('ARTIFACT_BUDGET_EXCEEDED');
+    // Over the task's files nothing more is delivered (the API holds the same limit), and the model can still say so.
+    if (published.size >= 16 || artifactBytes + bytes.length > LIMITS.artifacts) throw new ToolFailure('ARTIFACT_BUDGET', 'A task publishes at most 16 files and 8 MiB; this file was not delivered.');
     artifactBytes += bytes.length; published.add(identity);
     emit({ type: 'computer_artifact', name: file.path.split('/').at(-1)!, path: file.path, content: bytes.toString('base64'), encoding: 'base64', sha256: file.sha256 });
   };
@@ -48,12 +69,16 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
     if (!record(args)) throw new WorkerError('INVALID_TOOL_ARGUMENTS');
     const schema = TOOLS.find(tool => tool.name === name);
     if (!schema || Object.keys(args).some(key => !(key in schema.inputSchema.properties))) throw new WorkerError('TOOL_NOT_ALLOWED');
-    const path = () => textField(args.path, 1024);
+    const field = (value: unknown, max: number, failure: ToolFailure, empty = false) => {
+      try { return textField(value, max, empty); } catch { throw failure; }
+    };
+    const path = () => field(args.path, 1024, BAD_PATH);
     switch (name) {
-      case 'list': return sandbox.list(args.path === undefined || args.path === '.' ? '' : textField(args.path, 1024, true));
-      case 'read': return sandbox.read(path());
-      case 'write': return sandbox.write(path(), textField(args.content, LIMITS.artifact, true));
-      case 'exec': return sandbox.exec(textField(args.command, 32_768));
+      case 'list': return sandbox.list(args.path === undefined || args.path === '.' ? '' : field(args.path, 1024, BAD_PATH, true));
+      case 'read': return readResult(await sandbox.read(path()));
+      // The file's own bytes stay in the workspace: echoing them back cost the model's context and could pass the core's reply limit.
+      case 'write': { const file = await sandbox.write(path(), field(args.content, LIMITS.artifact, BAD_CONTENT, true)); return { path: file.path, byteLength: file.byteLength, sha256: file.sha256, written: true }; }
+      case 'exec': return sandbox.exec(field(args.command, 32_768, BAD_COMMAND));
       case 'publish': { const file = await sandbox.publish(path()); publish(file); return { path: file.path, sha256: file.sha256, byteLength: file.byteLength, published: true }; }
       case 'archive': { const file = await sandbox.archive(); publish(file); return { path: file.path, sha256: file.sha256, byteLength: file.byteLength, published: true }; }
     }
@@ -72,7 +97,13 @@ export async function createTransport(request: RunRequest, sandbox: WorkspaceSan
         else if (body.method === 'ping') result = {};
         else if (body.method === 'tools/call' && record(body.params) && typeof body.params.name === 'string') {
           try { result = { content: [{ type: 'text', text: JSON.stringify(await tool(body.params.name, body.params.arguments || {})) }] }; }
-          catch (e) { result = { isError: true, content: [{ type: 'text', text: e instanceof WorkerError ? e.code : 'Workspace operation failed; do not claim it succeeded.' }] }; }
+          catch (e) {
+            // A failure the model can correct or report is an ordinary result that did nothing (tool-failures.ts): the
+            // core refuses the final answer of a turn that saw any error.
+            const failure = recoverableFailure(e);
+            result = failure ? { content: [{ type: 'text', text: JSON.stringify(failedResult(body.params.name, failure)) }] }
+              : { isError: true, content: [{ type: 'text', text: e instanceof WorkerError ? e.code : 'Workspace operation failed; do not claim it succeeded.' }] };
+          }
         } else return json(res, 200, { jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Method not allowed' } });
         return json(res, 200, { jsonrpc: '2.0', id: body.id, result });
       }
