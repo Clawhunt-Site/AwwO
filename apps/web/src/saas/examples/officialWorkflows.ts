@@ -31,6 +31,9 @@ export interface OfficialWorkflowNode {
   readonly sandbox?: true;
   /** A second, Markdown output (`report`) beside its result, for what downstream reads instead of a large result. */
   readonly report?: string;
+  /** A sandbox agent's file output (`file`) beside its result, labelled so: what it hands to the agent after it (a file
+   *  wire, `port: 'file'`), e.g. a project folder packed as one file. */
+  readonly handoff?: string;
 }
 /** A wire of a case canvas: from the source's result, or from its `file` output (a file input on the target) or its
  *  `report` output. */
@@ -117,7 +120,8 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
       // that template's unrelated guide instead of the official case's task and acceptance.
       persona: `${spec.task}\n\nAcceptance:\n${spec.acceptance.map(check => `- ${check}`).join('\n')}\n\n${EVIDENCE}${html}${shows}`,
       contract: { version: 1, inputs, outputs: [{ id: 'result', label: spec.output, type: outputType, required: true, value: '',
-        help: spec.acceptance.join('\n') }, ...(spec.report ? [{ id: 'report', label: spec.report, type: 'markdown' as const, required: true, value: '' }] : [])] },
+        help: spec.acceptance.join('\n') }, ...(spec.report ? [{ id: 'report', label: spec.report, type: 'markdown' as const, required: true, value: '' }] : []),
+        ...(spec.handoff ? [{ id: 'file', label: spec.handoff, type: 'file' as const, required: true, value: '' }] : [])] },
     };
   });
   const byId = new Map(item.nodes.map((spec, index) => [spec.id, nodes[index]]));

@@ -1,6 +1,7 @@
 import type { OfficialWorkflow, OfficialWorkflowNode } from './examples/officialWorkflows';
 import { builderFor } from './flagshipRules';
 import { ERRAND } from './flagshipErrand';
+import { ROOST } from './flagshipRoost';
 
 /** Flagship canvases (owner request 2026-10-16): complex products, not single pages. A reading node writes the spec
  * in a clean room; module builders write the program in parallel from that spec alone; an assemble node puts their
@@ -207,4 +208,4 @@ const BACKPROP: OfficialWorkflow = {
 };
 
 /** Keyed by case id, like PRODUCTION_WORKFLOWS. */
-export const FLAGSHIP_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([UMBER, BACKPROP, ERRAND].map(item => [item.id, item]));
+export const FLAGSHIP_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([UMBER, BACKPROP, ERRAND, ROOST].map(item => [item.id, item]));
