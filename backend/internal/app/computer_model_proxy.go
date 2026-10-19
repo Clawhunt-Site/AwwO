@@ -333,12 +333,13 @@ func computerWorkerLabel(s string) string {
 
 // computerModelFailure is the ledger's code for a model call the worker answered with an error (apps/computer-model.ts):
 // lost with the worker (cancelled because it was stopping: a release or a restart); cut off (499, the worker's own time
-// limit, its caller leaving, a cancel); the provider or the call's machinery failing (computerProviderFault); the model's
-// own answer not holding (reason answer, or stream: a Bedrock answer the model's output broke, such as too many tool calls
-// at once or a malformed tool call); or not known (computer_model_failed, among them a request the provider refused before
-// any work). Only the first and the provider's are the platform's faults (invocationFailure, direct_task_refund.go;
-// security review 2026-10-16). With personal credentials the provider, its key and its quota are the user's own, so its
-// failures are never the platform's.
+// limit, its caller leaving, a cancel); cut by a time limit on its way (computerPlatformTimeout); the provider or the
+// call's machinery failing otherwise (computerProviderFault); the model's own answer not holding (reason answer, or
+// stream: a Bedrock answer the model's output broke, such as too many tool calls at once or a malformed tool call); or not
+// known (computer_model_failed, among them a request the provider refused before any work). The first and the provider's
+// are the platform's faults, which give back a task's calls; a time limit on the way is the platform's too, but gives back
+// only the call it cut (invocationFailure, direct_task_refund.go; security reviews 2026-10-16 and 2026-10-18). With
+// personal credentials the provider, its key and its quota are the user's own, so its failures are never the platform's.
 func computerModelFailure(status int, body []byte, personal bool) string {
 	code, reason, _ := computerWorkerError(body)
 	switch {
@@ -348,6 +349,8 @@ func computerModelFailure(status int, body []byte, personal bool) string {
 		return "computer_model_cut"
 	case code == "PROVIDER_ERROR" && personal && (strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "network") || reason == "body" || strings.HasPrefix(reason, "stream:")):
 		return "computer_model_failed"
+	case code == "PROVIDER_ERROR" && computerProviderFault(reason) && computerPlatformTimeout(reason):
+		return "computer_model_timeout"
 	case code == "PROVIDER_ERROR" && computerProviderFault(reason):
 		return "computer_model_provider"
 	case code == "PROVIDER_ERROR" && (reason == "answer" || reason == "stream" || strings.HasPrefix(reason, "stream:")):
@@ -401,6 +404,50 @@ func computerProviderFault(reason string) bool {
 		return computerConnectFailures[code] || code == "UND_ERR_HEADERS_TIMEOUT" || code == "UND_ERR_BODY_TIMEOUT"
 	}
 	return reason == "credentials" || reason == "body" || reason == "worker" || strings.HasPrefix(reason, "bridge-error:") || strings.HasPrefix(reason, "child")
+}
+
+// computerCallBroke is the ledger's code for a model call whose worker never answered in full (e: no answer, or one that
+// broke off; done: the call's own context ended). Cut by its own limit (computerModelCallTimeout), by its caller giving up
+// on it (the task's own idle limit, a stop) or by its task ending: not the platform failing, as a task's own time limit is
+// not (security review 2026-10-16). Cut by this API's HTTP client's own time limit (its Timeout, AWWO_RUN_TIMEOUT): a time
+// limit on the way, as computerPlatformTimeout's, which gives back only itself; a task could otherwise reach it on purpose
+// and have its every call back where that limit is the shorter one (security review 2026-10-19). A worker that cannot be
+// reached or drops the connection is the platform's transport.
+func computerCallBroke(e error, done bool) string {
+	var limit interface{ Timeout() bool }
+	switch {
+	case done:
+		return "computer_model_cut"
+	case !dialFailed(e) && errors.As(e, &limit) && limit.Timeout():
+		return "computer_model_timeout"
+	}
+	return "computer_model_transport"
+}
+
+// computerPlatformTimeout says whether a platform fault (computerProviderFault) is a time limit on the call's way: a Gate
+// call's 408, an edge's 504 or 524, the worker's HTTP client's header or body limit, a streamed Gate call's stream closed
+// after a silence as long as the edge's idle limit, a Bedrock call's 408 or 504 or its model's own time limit after the stream
+// began (ModelTimeoutException). A task can run into one on purpose, with a call made to run long, so such a call gives
+// back itself, never its task's other calls (security review 2026-10-18, and the owner's 「Refund only the cut call」 of
+// the same day: refundedCutCall in direct_task_refund.go).
+func computerPlatformTimeout(reason string) bool {
+	if reason == "stream:closed:idle" {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(reason, "bedrock:"); ok {
+		code, _, _ := strings.Cut(rest, ":")
+		return code == "408" || code == "504"
+	}
+	if rest, ok := strings.CutPrefix(reason, "stream:error:"); ok {
+		_, kind, _ := strings.Cut(rest, ":")
+		return strings.EqualFold(kind, "ModelTimeoutException")
+	}
+	if rest, ok := strings.CutPrefix(reason, "provider:"); ok {
+		status, _, _ := strings.Cut(rest, ":")
+		return status == "408" || status == "504" || status == "524"
+	}
+	code, ok := strings.CutPrefix(reason, "network:")
+	return ok && (code == "UND_ERR_HEADERS_TIMEOUT" || code == "UND_ERR_BODY_TIMEOUT")
 }
 
 // computerAWSOutages are the AWS exceptions after a Bedrock stream began that are the service's own trouble, as the
@@ -473,6 +520,14 @@ func (a *App) settleComputerCall(tid, id, status, code string, facts *invocation
 		after, e := a.settleInvocation(ctx, tx, tid, id, status, code, facts)
 		if e != nil {
 			return e
+		}
+		// A call a time limit on its way cut (computerPlatformTimeout) is noted with its settling, as the ledger now holds
+		// it, so that its task ending for the platform's sake gives back this call alone (refundedCutCall).
+		if code == "computer_model_timeout" {
+			if _, e = tx.Exec(ctx, `INSERT INTO refunded_calls(tenant_id,invocation_id,reason) SELECT tenant_id,id,'timeout' FROM model_invocations
+				WHERE tenant_id=$1 AND id=$2 AND status='failed' AND failure_class='timeout' ON CONFLICT DO NOTHING`, tid, id); e != nil {
+				return e
+			}
 		}
 		if e = tx.Commit(ctx); e == nil && after != nil {
 			after()
@@ -590,13 +645,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		if dialFailed(e) {
 			facts.Admission = "rejected_before_start"
 		}
-		code = "computer_model_transport"
-		if ctx.Err() != nil {
-			// Cut by its own limit (computerModelCallTimeout), by its caller giving up on it (the task's own idle limit,
-			// a stop) or by its task ending: not the platform failing, as a task's own time limit is not (security
-			// review 2026-10-16). A worker that cannot be reached or drops the connection is.
-			code = "computer_model_cut"
-		}
+		code = computerCallBroke(e, ctx.Err() != nil)
 		a.logComputerCall(lease, index, 0, nil, code, facts)
 		fail(w, 502, "computer_model_transport", "Model response is unavailable; the call will not be retried")
 		return
@@ -613,10 +662,8 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	facts.OutputBytes = int64(len(data))
 	if e != nil || len(data) > 2<<20 || response.StatusCode != 200 {
 		switch {
-		case e != nil && ctx.Err() != nil:
-			code = "computer_model_cut"
 		case e != nil:
-			code = "computer_model_transport" // the worker's answer broke off
+			code = computerCallBroke(e, ctx.Err() != nil) // the worker's answer broke off, or was cut
 		default:
 			code = computerModelFailure(response.StatusCode, data, a.cfg.UserCredentials)
 		}

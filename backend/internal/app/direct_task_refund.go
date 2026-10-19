@@ -14,6 +14,12 @@ import "strconv"
 // plan running out, an invalid event or file are not recorded. At most refundedCallsPerDay calls a day come back to a
 // workspace (to an account for a plan's free calls).
 //
+// A call that a time limit on its way cut (computer_model_timeout: an edge's 504 or 524, a stream the edge closed when
+// silent, the provider's own time limit; computerPlatformTimeout) is the platform's fault too, but a task can run into one
+// on purpose with a call made to run long, so it gives back only itself, never the task's other calls (security review
+// 2026-10-18; the owner, the same day: 「Refund only the cut call」). It is noted in refunded_calls as it settles, and
+// comes back once its task ended for the platform's sake (refunded_runs), as the task's calls would.
+//
 // A refund is the daily total's only: route allowances and the deployment-wide ceilings still count the calls, as the
 // operator paid for them; credits are not touched.
 
@@ -26,7 +32,8 @@ const refundedCallsPerDay = 32
 // machinery; computerModelFailure and invocationFailure). Not a call the model's own answer failed (protocol: its output
 // cap, a refusal, too many or malformed tool calls), one refused before any work (validation, quota), one cut by its
 // own limit, its caller or its task ending (timeout), nor one left open when the run ended (restart): a model cannot
-// reach a refund on purpose that way (security review 2026-10-16).
+// reach a refund on purpose that way (security review 2026-10-16). A call a time limit on its way cut is a timeout as
+// well: it gives back only itself (refundedCutCall).
 const refundEvidence = `(rr.reason IN ('interrupted','dropped') OR EXISTS(SELECT 1 FROM model_invocations f WHERE f.tenant_id=rr.tenant_id AND f.run_id=rr.run_id
 	AND f.status IN ('failed','interrupted') AND f.failure_class IN ('transport','provider')))`
 
@@ -36,12 +43,21 @@ const refundedRun = `EXISTS(SELECT 1 FROM refunded_runs rr WHERE rr.tenant_id=r.
 // refundedDirectTaskCall matches a ledger row (alias mi) of a run whose calls are given back.
 const refundedDirectTaskCall = `EXISTS(SELECT 1 FROM refunded_runs rr WHERE rr.tenant_id=mi.tenant_id AND rr.run_id=mi.run_id AND ` + refundEvidence + `)`
 
+// refundedCutCall matches a ledger row (alias call) that a time limit on its way cut (refunded_calls) in a run that ended
+// for the platform's sake (refunded_runs): that call is given back, whatever its run's other calls do.
+func refundedCutCall(call string) string {
+	return `EXISTS(SELECT 1 FROM refunded_calls rc JOIN refunded_runs rr ON rr.tenant_id=rc.tenant_id AND rr.run_id=` + call +
+		`.run_id WHERE rc.tenant_id=` + call + `.tenant_id AND rc.invocation_id=` + call + `.id)`
+}
+
 // dailyCalls is the SQL count, over ledger rows (alias mi) the query already selects, of the calls in window that spend
-// a daily allowance (countsTowardsDaily; p holds the planner model), less the refunded ones, up to refundedCallsPerDay.
-// A query that selects only today's rows passes window "true", keeping the day in its WHERE for the index.
+// a daily allowance (countsTowardsDaily; p holds the planner model), less the refunded ones (refundedDirectTaskCall,
+// refundedCutCall), up to refundedCallsPerDay. A query that selects only today's rows passes window "true", keeping the
+// day in its WHERE for the index.
 func dailyCalls(p, window string) string {
 	counted := window + ` AND ` + countsTowardsDaily(p)
-	return `(count(*) FILTER (WHERE ` + counted + `) - LEAST(count(*) FILTER (WHERE ` + counted + ` AND ` + refundedDirectTaskCall + `), ` +
+	refunded := `(` + refundedDirectTaskCall + ` OR ` + refundedCutCall("mi") + `)`
+	return `(count(*) FILTER (WHERE ` + counted + `) - LEAST(count(*) FILTER (WHERE ` + counted + ` AND ` + refunded + `), ` +
 		strconv.Itoa(refundedCallsPerDay) + `))`
 }
 

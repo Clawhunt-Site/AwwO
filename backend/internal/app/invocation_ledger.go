@@ -261,7 +261,7 @@ func invocationFailure(status, code string) string {
 		return "cancelled"
 	}
 	switch code {
-	case "run_timeout", "team_timeout", "computer_model_cut":
+	case "run_timeout", "team_timeout", "computer_model_cut", "computer_model_timeout":
 		return "timeout"
 	case "runtime_failed", "model_refused", "provider_auth_failed", "provider_rate_limited", "provider_unavailable", "computer_model_provider":
 		return "provider"

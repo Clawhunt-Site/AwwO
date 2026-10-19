@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,7 +51,11 @@ func (f *refundFixture) run(kind, status, code string, calls ...string) string {
 	}
 	for _, call := range calls {
 		parts := strings.Split(call, "/")
-		execSQL(f.t, f.h, "INSERT INTO model_invocations(id,tenant_id,run_id,status,cost_status,admission_status,failure_class,model_id) VALUES($1,$2,$3,$4,$5,$6,$7,'bedrock.test')", randomID(), f.tid, rid, parts[0], parts[1], parts[2], parts[3])
+		id := randomID()
+		execSQL(f.t, f.h, "INSERT INTO model_invocations(id,tenant_id,run_id,status,cost_status,admission_status,failure_class,model_id) VALUES($1,$2,$3,$4,$5,$6,$7,'bedrock.test')", id, f.tid, rid, parts[0], parts[1], parts[2], parts[3])
+		if len(parts) > 4 && parts[4] == "noted" { // as settleComputerCall notes a call a time limit on its way cut
+			execSQL(f.t, f.h, "INSERT INTO refunded_calls(tenant_id,invocation_id,reason) VALUES($1,$2,'timeout')", f.tid, id)
+		}
 	}
 	return rid
 }
@@ -59,6 +64,7 @@ const (
 	callDone    = "completed/unavailable/accepted/none"
 	callCut     = "failed/unavailable/unknown/transport"                 // the connection to the worker broke: the platform's side
 	callLimit   = "failed/unavailable/unknown/timeout"                   // cut by its own limit or its caller: not the platform's
+	callEdge    = "failed/unavailable/unknown/timeout/noted"             // cut by a time limit on its way: the platform's, itself only
 	callAnswer  = "failed/unavailable/unknown/protocol"                  // the model's own answer did not hold
 	callRefused = "failed/not_incurred/rejected_before_start/validation" // refused before any work
 )
@@ -71,7 +77,7 @@ func TestPostgresPlatformFailedDirectTasksGiveTheirCallsBack(t *testing.T) {
 	h := newHarness(t, "")
 	ctx := context.Background()
 	f, tid, c := newRefundFixture(t, h, "refund-owner@awwo.invalid")
-	execSQL(t, h, `UPDATE tenants SET route_limits='{"gate":5,"bedrock":19,"media":1}'::jsonb,max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	execSQL(t, h, `UPDATE tenants SET route_limits='{"gate":5,"bedrock":29,"media":1}'::jsonb,max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
 	failed := f.run("computer", "failed", "computer_execution_failed", callDone, callCut)      // given back: 2
 	refused := f.run("computer", "failed", "computer_execution_failed", callDone, callRefused) // counts 1
 	f.run("computer", "failed", "computer_stream_ended", callDone)                             // given back: 1, the service dropped it
@@ -85,7 +91,14 @@ func TestPostgresPlatformFailedDirectTasksGiveTheirCallsBack(t *testing.T) {
 	f.run("plain", "failed", "computer_execution_failed", callDone, callCut)                   // counts 2: not a direct task
 	f.run("computer", "queued", "", "running/not_incurred/unknown/none")                       // counts 1: still running
 	f.run("plain", "completed", "", callRefused, "running/not_incurred/not_attempted/none")    // counts 1
-	const counted, inRoute = 14, 18                                                            // 20 calls: 4 given back; the route counts all but the 2 settled not_incurred
+	// The owner, 2026-10-18: a call a time limit on its way cut gives back itself only, once its task ended for the
+	// platform's sake; not the task's other calls, unless another of them failed on the platform's side; nothing for a
+	// task that completed or that its own limit ended.
+	edge := f.run("computer", "failed", "computer_execution_failed", callDone, callDone, callEdge) // given back: 1, counts 2
+	mixed := f.run("computer", "failed", "computer_execution_failed", callDone, callEdge, callCut) // given back: 3
+	f.run("computer", "completed", "", callDone, callEdge)                                         // counts 2
+	ownLimit := f.run("computer", "failed", computerFailureCode("TIMEOUT"), callDone, callEdge)    // counts 2: its own limit
+	const counted, inRoute = 20, 28                                                                // 30 calls: 8 given back; the route counts all but the 2 settled not_incurred
 
 	v := h.request(t, c, "GET", "/tenants/"+tid+"/route-usage", nil, 200)
 	if _, used := allowanceOf(t, v, "daily"); used != counted {
@@ -112,13 +125,19 @@ func TestPostgresPlatformFailedDirectTasksGiveTheirCallsBack(t *testing.T) {
 	}
 
 	for _, want := range []struct {
-		id, code       string
-		calls, refunds float64
-	}{{failed, "computer_execution_failed", 2, 2}, {refused, "computer_execution_failed", 1, 0},
-		{timeout, "computer_task_timeout", 2, 0}, {quota, "quota_exceeded", 1, 0}} {
+		id, code, scope string
+		calls, refunds  float64
+	}{{failed, "computer_execution_failed", "task", 2, 2}, {refused, "computer_execution_failed", "", 1, 0},
+		{timeout, "computer_task_timeout", "", 2, 0}, {quota, "quota_exceeded", "", 1, 0},
+		{edge, "computer_execution_failed", "cut", 3, 1}, {mixed, "computer_execution_failed", "task", 3, 3},
+		{ownLimit, "computer_task_timeout", "", 2, 0}} {
 		detail := h.request(t, c, "GET", "/tenants/"+tid+"/computer-runs/"+want.id, nil, 200)
 		if detail["calls"] != want.calls || detail["refundedCalls"] != want.refunds || detail["error"] != want.code {
 			t.Fatalf("task %s reads calls=%v refundedCalls=%v error=%v", want.code, detail["calls"], detail["refundedCalls"], detail["error"])
+		}
+		// Which calls came back: every call of the task, or only those a time limit on their way cut; none, none.
+		if (want.refunds > 0 && detail["refundScope"] != want.scope) || (want.refunds == 0 && detail["refundScope"] != nil) {
+			t.Fatalf("task %s gave back %v calls as %v, want %q", want.code, want.refunds, detail["refundScope"], want.scope)
 		}
 	}
 	list := h.request(t, c, "GET", "/tenants/"+tid+"/canvases/"+f.canvas+"/computer-runs", nil, 200)
@@ -143,21 +162,24 @@ func TestPostgresPlatformFailedDirectTasksGiveTheirCallsBack(t *testing.T) {
 		}
 		g.run("computer", "failed", "computer_stream_ended", calls...)
 	}
+	for range 2 { // a call a time limit cut counts against the same cap
+		g.run("computer", "failed", "computer_execution_failed", callEdge, callDone)
+	}
 	daily := func() int {
 		t.Helper()
 		_, used := allowanceOf(t, h.request(t, cm, "GET", "/tenants/"+other+"/route-usage", nil, 200), "daily")
 		return used
 	}
-	if used := daily(); used != 48-refundedCallsPerDay {
-		t.Fatalf("48 refunded calls left %d counted, want %d", used, 48-refundedCallsPerDay)
+	if used := daily(); used != 52-refundedCallsPerDay {
+		t.Fatalf("52 calls, 50 of them refunded, left %d counted, want %d", used, 52-refundedCallsPerDay)
 	}
 	h.request(t, cm, "DELETE", "/tenants/"+other+"/canvases/"+g.canvas, nil, 204)
 	var runs int
 	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM runs WHERE tenant_id=$1", other).Scan(&runs); e != nil || runs != 0 {
 		t.Fatalf("the canvas's runs are still there (%d, %v)", runs, e)
 	}
-	if used := daily(); used != 48-refundedCallsPerDay {
-		t.Fatalf("after the canvas was deleted %d calls count, want %d", used, 48-refundedCallsPerDay)
+	if used := daily(); used != 52-refundedCallsPerDay {
+		t.Fatalf("after the canvas was deleted %d calls count, want %d", used, 52-refundedCallsPerDay)
 	}
 }
 
@@ -394,6 +416,10 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 	if !computerRefundable("computer_execution_failed") || !computerRefundable("computer_stream_ended") || computerRefundable("computer_task_timeout") || computerRefundable("quota_exceeded") {
 		t.Fatal("only the execution service's failures may be refunded")
 	}
+	// A call a time limit on its way cut is a timeout in the ledger, never evidence that gives back its task's every call.
+	if invocationFailure("failed", "computer_model_timeout") != "timeout" || invocationFailure("failed", "computer_model_provider") != "provider" {
+		t.Fatal("a cut on the way must be a timeout, a provider's failure the provider's")
+	}
 	long := strings.Repeat("长", 70) + ".html" // 215 bytes: an ordinary Chinese title
 	got := computerArtifactName(long)
 	if len(got) > 200 || !utf8.ValidString(got) || !strings.HasSuffix(got, ".html") || !cleanName(got) || !strings.HasPrefix(long, strings.TrimSuffix(got, ".html")) {
@@ -420,16 +446,21 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"network": "computer_model_failed", "network:UND_ERR_SOCKET": "computer_model_failed", "network:ECONNRESET": "computer_model_failed",
 		"body": "computer_model_provider", "worker": "computer_model_provider",
 		// A Gate call cut by a time limit on its way (a 408, an edge's 504 or 524, the worker's HTTP client's) and a Bedrock
-		// model's own time limit after its stream began are the platform's timeouts (the owner, 2026-10-17).
-		"provider:524": "computer_model_provider", "provider:504:gateway_timeout": "computer_model_provider",
-		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_provider", "network:UND_ERR_BODY_TIMEOUT": "computer_model_provider",
-		"stream:error:408:ModelTimeoutException": "computer_model_provider", "provider:408": "computer_model_provider",
+		// model's own time limit (its 408, or after its stream began) are the platform's timeouts (the owner, 2026-10-17),
+		// which give back only the call they cut (the owner, 2026-10-18). A connection that never opened is an outage.
+		"provider:524": "computer_model_timeout", "provider:504:gateway_timeout": "computer_model_timeout", "provider:504": "computer_model_timeout",
+		"network:UND_ERR_HEADERS_TIMEOUT": "computer_model_timeout", "network:UND_ERR_BODY_TIMEOUT": "computer_model_timeout",
+		"stream:error:408:ModelTimeoutException": "computer_model_timeout", "stream:error:408:modelTimeoutException": "computer_model_timeout",
+		"provider:408": "computer_model_timeout", "bedrock:408:ModelTimeoutException": "computer_model_timeout",
+		// The bridge names an AWS 504 it has no exception name for api_error (bridgeFailure in apps/bedrock-bridge.ts).
+		"network:UND_ERR_CONNECT_TIMEOUT": "computer_model_provider", "bedrock:504:api_error": "computer_model_timeout",
+		"provider:5240": "computer_model_failed", "bedrock:4080:x": "computer_model_provider", // a status, not its prefix
 		// A Bedrock stream: an AWS outage after it began is the provider's; a model whose output broke it, the bridge's refusal
 		// of what the model sent and a stream that ended early are the answer's.
 		// A streamed Gate call whose stream closed after a silence as long as the edge's idle limit is the same edge's cut as
 		// a 524 (the refund session's reading of the owner's rule, 2026-10-17); a close at once, which a task's own words can
 		// bring about (a moderation stop), is not.
-		"stream:closed:idle": "computer_model_provider", "stream:closed": "computer_model_answer", "stream:closed:idle:x": "computer_model_answer",
+		"stream:closed:idle": "computer_model_timeout", "stream:closed": "computer_model_answer", "stream:closed:idle:x": "computer_model_answer",
 		// A Gate stream's error frame is the Gate's error inside a 200, as one read whole: the platform's when it names the
 		// provider's capacity or the operator's access, as its status would have; not a server error, the Gate's catch-all
 		// or a moderation code (the refund session, 2026-10-17).
@@ -507,6 +538,8 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 		reason := "provider:524"
 		if len(b.Completion.Messages) > 0 {
 			switch b.Completion.Messages[0].Content {
+			case "answer":
+				reason = "answer" // the model's own answer did not hold: the call counts, and is never the platform's
 			case "late":
 				time.Sleep(1500 * time.Millisecond) // a server error after the call has run a while
 				reason = "provider:503"
@@ -565,7 +598,14 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 			cancel()
 			<-done
 		} else {
-			computerProxyRequest(t, input, map[string]any{"messages": []map[string]string{{"role": "user", "content": scenario}}}, 502)
+			// One call per part, in order: a call whose own answer failed, then the one the scenario is about.
+			parts := map[string][]string{"answeredge": {"answer", "edge"}, "answerlate": {"answer", "late"}}[scenario]
+			if parts == nil {
+				parts = []string{scenario}
+			}
+			for _, part := range parts {
+				computerProxyRequest(t, input, map[string]any{"messages": []map[string]string{{"role": "user", "content": part}}}, 502)
+			}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"CORE_EXECUTION_FAILED\"}\n\n")
@@ -578,15 +618,116 @@ func TestPostgresDirectTaskGateTimeoutsAndLateErrorsAreRefunded(t *testing.T) {
 	owner, tid, _ := h.register(t, "gate-refund@example.test")
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid
+	runs := map[string]string{}
+	// The owner, 2026-10-18: a time limit on the way (the edge's 524, its idle cut) gives back only the call it cut, so a
+	// task with another call gets one back; a server error after a while gives back the task's every call.
 	for _, c := range []struct {
-		scenario string
-		refunds  float64
-	}{{"edge", 1}, {"late", 1}, {"idle", 1}, {"closed", 0}, {"gone", 0}, {"overloaded", 1}, {"moderated", 0}} {
+		scenario, scope string
+		calls, refunds  float64
+	}{{"edge", "cut", 1, 1}, {"late", "task", 1, 1}, {"idle", "cut", 1, 1}, {"closed", "", 1, 0}, {"gone", "", 1, 0},
+		{"overloaded", "task", 1, 1}, {"moderated", "", 1, 0}, {"answeredge", "cut", 2, 1}, {"answerlate", "task", 2, 2}} {
 		run := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": "gate-refund-" + c.scenario, "prompt": c.scenario + " task", "runtime": "pi", "model": "test-model"}, 202)
 		id := run["id"].(string)
+		runs[c.scenario] = id
 		h.awaitRun(t, owner, tid, id, "failed")
-		if d := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); d["error"] != "computer_execution_failed" || d["calls"] != float64(1) || d["refundedCalls"] != c.refunds {
-			t.Fatalf("%s: the task reads %v with %v calls, refunded %v; want computer_execution_failed, 1, %v", c.scenario, d["error"], d["calls"], d["refundedCalls"], c.refunds)
+		d := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200)
+		if d["error"] != "computer_execution_failed" || d["calls"] != c.calls || d["refundedCalls"] != c.refunds {
+			t.Fatalf("%s: the task reads %v with %v calls, refunded %v; want computer_execution_failed, %v, %v", c.scenario, d["error"], d["calls"], d["refundedCalls"], c.calls, c.refunds)
 		}
+		if (c.refunds > 0 && d["refundScope"] != c.scope) || (c.refunds == 0 && d["refundScope"] != nil) {
+			t.Fatalf("%s: the refund reads %v, want %q", c.scenario, d["refundScope"], c.scope)
+		}
+	}
+	// The ledger: a cut on the way is a timeout, noted with its call; a server error is the provider's, noted nowhere.
+	for scenario, want := range map[string]string{"answeredge": "protocol,timeout|1", "answerlate": "protocol,provider|0", "idle": "timeout|1", "gone": "timeout|0"} {
+		var classes string
+		var noted int
+		if e := h.db.QueryRow(context.Background(), `SELECT string_agg(failure_class, ',' ORDER BY created_at, id),
+			(SELECT count(*) FROM refunded_calls rc JOIN model_invocations c ON c.tenant_id=rc.tenant_id AND c.id=rc.invocation_id WHERE c.tenant_id=$1 AND c.run_id=$2)
+			FROM model_invocations WHERE tenant_id=$1 AND run_id=$2`, tid, runs[scenario]).Scan(&classes, &noted); e != nil {
+			t.Fatal(e)
+		}
+		if got := fmt.Sprintf("%s|%d", classes, noted); got != want {
+			t.Fatalf("%s: the ledger reads %s, want %s", scenario, got, want)
+		}
+	}
+	// The day's total gives back what the tasks read: 1+1+1+1+1+2 of the 11 calls.
+	if _, used := allowanceOf(t, h.request(t, owner, "GET", base+"/route-usage", nil, 200), "daily"); used != 11-7 {
+		t.Fatalf("the meter shows %d calls today, want %d", used, 11-7)
+	}
+}
+
+// 039 can run again unchanged on a database that already holds refunded calls; it takes no other reason, and a deleted
+// workspace takes its notes along.
+func TestPostgresRefundedCallsMigrationRunsAgain(t *testing.T) {
+	h := newHarness(t, "")
+	ctx := context.Background()
+	_, tid, _ := h.register(t, "refund-migration@awwo.invalid")
+	execSQL(t, h, "INSERT INTO refunded_calls(tenant_id,invocation_id,reason) VALUES($1,'call-1','timeout')", tid)
+	sql, _ := migrations.ReadFile("migrations/039_refunded_calls.sql")
+	for run := 0; run < 2; run++ {
+		tx, e := h.db.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = tx.Exec(ctx, string(sql)); e != nil {
+			tx.Rollback(ctx)
+			t.Fatal("039 run again, run", run+1, e)
+		}
+		if e = tx.Commit(ctx); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var rows int
+	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM refunded_calls WHERE tenant_id=$1 AND invocation_id='call-1' AND reason='timeout'", tid).Scan(&rows); e != nil || rows != 1 {
+		t.Fatal("the noted call did not keep its row", rows, e)
+	}
+	if _, e := h.db.Exec(ctx, "INSERT INTO refunded_calls(tenant_id,invocation_id,reason) VALUES($1,'call-2','provider')", tid); e == nil {
+		t.Fatal("a reason other than a timeout was taken")
+	}
+	var onDelete string
+	if e := h.db.QueryRow(ctx, "SELECT confdeltype::text FROM pg_constraint WHERE conrelid='refunded_calls'::regclass AND contype='f'").Scan(&onDelete); e != nil || onDelete != "c" {
+		t.Fatal("refunded_calls must go with its workspace", onDelete, e)
+	}
+}
+
+// A call whose worker never answered in full (security review 2026-10-19): cut on its way when this API's HTTP client's
+// own time limit ended it, whether no answer came or an answer stalled; cut, never the platform's, when the call's own
+// context ended; the platform's transport when the worker could not be reached or its answer broke off.
+func TestComputerCallBrokeReadsTheClientsOwnTimeLimit(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/stall" {
+			w.WriteHeader(200)
+			w.(http.Flusher).Flush()
+		}
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	_, silent := client.Get(slow.URL + "/silent")
+	if got := computerCallBroke(silent, false); got != "computer_model_timeout" {
+		t.Fatalf("no answer within the client's limit reads %q (%v)", got, silent)
+	}
+	response, e := client.Get(slow.URL + "/stall")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, stalled := io.ReadAll(response.Body)
+	response.Body.Close()
+	if got := computerCallBroke(stalled, false); got != "computer_model_timeout" {
+		t.Fatalf("an answer stalled past the client's limit reads %q (%v)", got, stalled)
+	}
+	if got := computerCallBroke(stalled, true); got != "computer_model_cut" {
+		t.Fatalf("a call whose own context ended reads %q", got)
+	}
+	_, refused := (&http.Client{Timeout: time.Second}).Get("http://127.0.0.1:1/")
+	if got := computerCallBroke(refused, false); got != "computer_model_transport" {
+		t.Fatalf("an unreachable worker reads %q (%v)", got, refused)
+	}
+	if got := computerCallBroke(io.ErrUnexpectedEOF, false); got != "computer_model_transport" {
+		t.Fatalf("an answer that broke off reads %q", got)
 	}
 }
