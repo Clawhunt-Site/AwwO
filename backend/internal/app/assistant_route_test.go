@@ -234,15 +234,75 @@ func TestModelRouteAsksThePlannerDefaultWithThinkingOffAndASmallAnswer(t *testin
 		}
 		json.NewEncoder(w).Encode(content(`{"route":"execute"}`))
 	})
-	route, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan, routeExecute})
+	route, _, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan, routeExecute})
 	if err != nil || route != routeExecute || *calls != 1 {
 		t.Fatalf("got %q %v after %d calls", route, err, *calls)
 	}
 	// With free models configured, the planner's default is used when it is one of them.
 	free := routeApp(worker)
 	free.cfg.RouteFreeModels = []string{"qwen-test"}
-	if route, err := free.modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan, routeExecute}); err != nil || route != routeExecute {
+	if route, _, err := free.modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan, routeExecute}); err != nil || route != routeExecute {
 		t.Fatalf("free default: %q %v", route, err)
+	}
+}
+
+// The reader never picks a way by hand (owner, 2026-10-18): a message that corrects how the request before it was
+// handled comes back as a redirect, so the client hands that request over; only where the last request went the
+// other way and has its answer.
+func TestModelRouteMarksACorrectionOfTheRequestBeforeIt(t *testing.T) {
+	answer := `{"route":"execute","redirect":true}`
+	worker, _ := routeWorker(t, func(w http.ResponseWriter, _ map[string]any) { json.NewEncoder(w).Encode(content(answer)) })
+	both := []string{routePlan, routeExecute}
+	in := validRouteInput()
+	in.Message = "别改画布，直接帮我写"
+	if route, redirect, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, in, both); err != nil || route != routeExecute || !redirect {
+		t.Fatalf("correction after a plan: %q %v %v", route, redirect, err)
+	}
+	// The last request already went this way, or has no answer yet: nothing to hand over.
+	for name, recent := range map[string][]assistantRouteTurn{
+		"same way":  {{Role: "user", Route: routeExecute, Text: "写一封邮件"}, {Role: "assistant", Route: routeExecute, Text: "(a task)"}},
+		"no answer": {{Role: "assistant", Route: routePlan, Text: "加了两个节点"}, {Role: "user", Route: routePlan, Text: "先搭一个团队"}},
+		"no route":  {{Role: "user", Text: "你好"}, {Role: "assistant", Text: "你好"}},
+		"empty":     nil,
+	} {
+		in.Recent = recent
+		if route, redirect, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, in, both); err != nil || route != routeExecute || redirect {
+			t.Errorf("%s: %q %v %v", name, route, redirect, err)
+		}
+	}
+	for text, want := range map[string]bool{
+		`{"route":"plan","redirect":true}`:                              true,
+		`<think>a correction</think>{"route":"plan", "redirect": true}`: true,
+		`{"route":"plan","redirect":false}`:                             false,
+		`{"route":"plan"} "redirect":true`:                              false,
+		`{"route":"plan","redirect":"true"}`:                            false,
+		"plan":                                                          false,
+	} {
+		if got := parseRouteRedirect(text); got != want {
+			t.Errorf("parseRouteRedirect(%q) = %v, want %v", text, got, want)
+		}
+	}
+	if !strings.Contains(assistantRouterInstructions, `"redirect":true`) {
+		t.Error("the router is not told how to mark a correction")
+	}
+}
+
+// Right after a task, a canvas edit in so many words may correct that task, so the model reads it rather than the rule.
+func TestConversationRuleRouteLeavesACorrectionOfATaskToTheModel(t *testing.T) {
+	both := []string{routePlan, routeExecute}
+	in := validRouteInput()
+	in.Message = "还是在画布上加几个节点来做吧"
+	if route, ok := conversationRuleRoute(in, both); !ok || route != routePlan {
+		t.Fatalf("after a plan the rule plans: %q %v", route, ok)
+	}
+	in.Recent = []assistantRouteTurn{{Role: "user", Route: routeExecute, Text: "写一份发布说明"}, {Role: "assistant", Route: routeExecute, Text: "(a task)"}}
+	if route, ok := conversationRuleRoute(in, both); ok {
+		t.Fatalf("after a task the rule decided %q", route)
+	}
+	// A task still being answered (no reply yet) is not a request to correct: the rule plans.
+	in.Recent = in.Recent[:1]
+	if route, ok := conversationRuleRoute(in, both); !ok || route != routePlan {
+		t.Fatalf("no reply yet: %q %v", route, ok)
 	}
 }
 
@@ -273,7 +333,7 @@ func TestModelRouteSpendsNothingItShouldNot(t *testing.T) {
 		routeActive = 0
 		a := routeApp(worker)
 		a.cfg.RouteFreeModels, a.cfg.UserCredentials = c.free, c.personal
-		if route, err := a.modelRoute(t.Context(), "tenant-1", c.entitlement, validRouteInput(), both); err == nil || *calls != 0 {
+		if route, _, err := a.modelRoute(t.Context(), "tenant-1", c.entitlement, validRouteInput(), both); err == nil || *calls != 0 {
 			t.Errorf("%s: routed to %q after %d model calls", name, route, *calls)
 		}
 	}
@@ -294,7 +354,7 @@ func TestModelRouteFailsClosedToTheCaller(t *testing.T) {
 		"not JSON":   func(w http.ResponseWriter, _ map[string]any) { io.WriteString(w, `<html>`) },
 	} {
 		worker, _ := routeWorker(t, reply)
-		if route, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), both); err == nil {
+		if route, _, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), both); err == nil {
 			t.Errorf("%s: routed to %q", name, route)
 		}
 	}
@@ -302,7 +362,7 @@ func TestModelRouteFailsClosedToTheCaller(t *testing.T) {
 	worker, _ := routeWorker(t, func(w http.ResponseWriter, _ map[string]any) {
 		json.NewEncoder(w).Encode(content(`{"route":"execute"}`))
 	})
-	if _, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan}); err == nil {
+	if _, _, err := routeApp(worker).modelRoute(t.Context(), "tenant-1", modelEntitlement{}, validRouteInput(), []string{routePlan}); err == nil {
 		t.Fatal("router obeyed an unavailable route")
 	}
 	// A slow model is abandoned at the caller's deadline instead of holding the message.
@@ -313,7 +373,7 @@ func TestModelRouteFailsClosedToTheCaller(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	if _, err := routeApp(slow).modelRoute(ctx, "tenant-1", modelEntitlement{}, validRouteInput(), both); err == nil || time.Since(started) > 350*time.Millisecond {
+	if _, _, err := routeApp(slow).modelRoute(ctx, "tenant-1", modelEntitlement{}, validRouteInput(), both); err == nil || time.Since(started) > 350*time.Millisecond {
 		t.Fatalf("slow router not abandoned in time: %v after %s", err, time.Since(started))
 	}
 }

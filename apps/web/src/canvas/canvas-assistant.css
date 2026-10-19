@@ -92,12 +92,9 @@
 .awwo-canvas-assistant--panel .awwo-assistant-composer-block { padding: 0 16px 16px; }
 .awwo-canvas-assistant--panel .awwo-assistant-composer { padding: 10px; border-radius: 12px; box-shadow: none; }
 .awwo-canvas-assistant--panel .awwo-assistant-composer textarea { min-height: 46px; font-size: 13px; max-height: 160px; }
-/* Where the host also does tasks, the server routes each message: each reply says how it was handled, and the
- * latest request can be handed over to the other way. Nothing is chosen beforehand. */
+/* Where the host also does tasks, the server routes each message and each reply says how it was handled. Nothing is
+ * chosen by hand: a correction in the conversation hands the latest request over to the other way. */
 .awwo-assistant-route { display: block; margin-bottom: 5px; color: var(--awwo-muted, #68736d); font-size: 11px; font-weight: 600; line-height: 1.4; }
-.awwo-assistant-switch { align-self: flex-start; margin-top: -10px; }
-.awwo-assistant-switch > button { padding: 3px 1px; border: 0; border-radius: 3px; background: transparent; color: var(--awwo-accent, #286454); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
-.awwo-assistant-switch > button:disabled { opacity: .55; }
 .awwo-assistant-readonly { margin: 0; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.55; }
 .awwo-assistant-message.is-pending { opacity: .62; }
 .awwo-assistant-route-notice { margin: 0 0 10px; color: var(--awwo-muted, #68736d); font-size: 12px; line-height: 1.55; }

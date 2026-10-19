@@ -32,8 +32,6 @@ export interface UnifiedAssistant {
   notices?: ReactNode;
   /** In the composer's toolbar, beside the attach button: the model (and effort) a direct task uses. */
   settings?: ReactNode;
-  /** Hands the latest request over to the other way, where it can be. */
-  switchRoute?: { to: AssistantRoute; onSwitch: () => void };
   /** How messages are handled while one way is closed. */
   notice?: string;
   /** Viewing only: the conversation and its tasks, without a composer. */
@@ -330,10 +328,6 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
             : message.status === 'stale' ? <span className="awwo-assistant-message-status is-stale" role="alert">{t('assistant.stale')}</span> : null}
         </li>)}
         {pending ? <li className="awwo-assistant-message awwo-assistant-message--user is-pending"><MessageWithAttachments text={pending.prompt} /></li> : null}
-        {unified?.switchRoute ? <li className="awwo-assistant-switch">
-          <button type="button" disabled={busy || routing} onClick={unified.switchRoute.onSwitch}>
-            {t(unified.switchRoute.to === 'execute' ? 'assistant.switchToExecute' : 'assistant.switchToPlan')}</button>
-        </li> : null}
       {/* A viewer sends nothing, so it is the host's task list that says whether there is anything to see. */}
       </ol> : unified?.readOnly ? null : <p className="awwo-assistant-empty">{t(unified ? 'assistant.unifiedEmpty' : 'assistant.empty')}</p>}
     </div>}

@@ -15,7 +15,11 @@ export interface AssistantRouteRequest {
   recent: Array<{ role: 'user' | 'assistant'; route?: AssistantRoute; text: string }>;
 }
 
-export type RouteAssistant = (request: AssistantRouteRequest, signal: AbortSignal) => Promise<AssistantRoute>;
+/** How the server will have a message handled. `redirect`: the message corrects how the request before it was handled
+ *  (别改画布，直接写吧), so that request is handed over to `route` with the message added, as a person would expect. */
+export interface AssistantRouteDecision { route: AssistantRoute; redirect?: boolean }
+
+export type RouteAssistant = (request: AssistantRouteRequest, signal: AbortSignal) => Promise<AssistantRouteDecision>;
 
 /** What a message being handled waits for before it joins the conversation. */
 export type AssistantPendingPhase = 'routing' | 'starting' | 'stopping';

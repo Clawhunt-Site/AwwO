@@ -436,16 +436,11 @@ describe('one conversation where the host also does tasks', () => {
     expect(screen.getByRole('status')).toHaveTextContent('暂时不能调整画布，消息会作为任务直接执行。');
   });
 
-  it('offers the latest request to the other way, and not while something is in progress', () => {
-    const onSwitch = vi.fn();
+  it('says how a reply was handled without offering a way to pick by hand', () => {
     const messages = [{ id: 'u', role: 'user' as const, content: '写一封给客户的邮件', route: 'plan' as const },
       { id: 'a', role: 'assistant' as const, content: '画布不需要改动', route: 'plan' as const }];
-    const { rerender } = render(<Harness mode="panel" messages={messages} unified={unified({ switchRoute: { to: 'execute', onSwitch } })} />);
-    fireEvent.click(screen.getByRole('button', { name: '改为直接执行' }));
-    expect(onSwitch).toHaveBeenCalledOnce();
-    rerender(<Harness mode="panel" messages={messages} busy unified={unified({ switchRoute: { to: 'plan', onSwitch } })} />);
-    expect(screen.getByRole('button', { name: '改为调整画布' })).toBeDisabled();
-    rerender(<Harness mode="panel" messages={messages} unified={unified()} />);
+    render(<Harness mode="panel" messages={messages} unified={unified()} />);
+    expect(screen.getByText('回复 · 画布没有改动')).toBeVisible();
     expect(screen.queryByRole('button', { name: /改为/ })).toBeNull();
   });
 

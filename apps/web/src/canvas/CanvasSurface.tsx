@@ -2857,7 +2857,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return live.models.map(entry => ({ runtime: entry.runtime, model: entry.model, available: entry.available, name: entry.displayName || entry.label,
       ...(entry.efforts ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { requiresUpgrade: true } : {}) }));
   };
-  const sendPlanningMessage = async (request?: string, resume = false) => {
+  // `shown`: the reader's own words for the conversation, where the planner is given more (a hand-over's request).
+  const sendPlanningMessage = async (request?: string, resume = false, shown?: string) => {
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
     const blocked = planBlocker(resume);
     if (blocked !== null) { if (blocked) setPlanningError(blocked); return; }
@@ -2876,8 +2877,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const route = assistantExecution ? 'plan' as const : undefined;
     setPlanning(previous => resume
       ? { ...previous, draft: previous.draft.trim() === prompt ? '' : previous.draft }
-      : { draft: request === undefined || previous.draft.trim() === prompt ? '' : previous.draft,
-        messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: prompt, ...(route ? { route } : {}) }].slice(-60) });
+      : { draft: request === undefined || previous.draft.trim() === (shown ?? prompt) ? '' : previous.draft,
+        messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: shown ?? prompt, ...(route ? { route } : {}),
+          ...(shown !== undefined && shown !== prompt ? { request: prompt } : {}) }].slice(-60) });
     try {
       const reportProgress = (progress: PlanProgress) => {
         // A superseded or cancelled request must not repaint the current one's progress.
@@ -3053,6 +3055,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Handlers resume after awaiting the server; what they read then is the latest render's (set below).
   const assistantLatest = useRef<{ planBlocker: typeof planBlocker; sendPlanningMessage: typeof sendPlanningMessage;
     canUndoPlan: boolean; undo: typeof undo } | null>(null);
+  // Hands the latest request over to the other way with a correction added, as the latest render can (set below):
+  // false when it cannot, so the correction is handled as a message of its own.
+  const redirectLatest = useRef<((to: AssistantRoute, correction: string) => boolean) | null>(null);
   // Routing needs to know whether a task can start, so a canvas that routes has the service read once it opens.
   useEffect(() => { if (!readOnly && routeAssistant) executionRef.current?.activate(); }, [readOnly, routeAssistant]);
   // The unconfirmed turn a settled submission belongs to: the one carrying its identity. None may be here (another
@@ -3118,7 +3123,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return routes;
   };
   const failureText = (error: unknown) => error instanceof Error && error.message ? error.message : t('assistant.unavailable');
-  const userTurn = (id: string, prompt: string, route: AssistantRoute) => ({ id: `${id}-user`, role: 'user' as const, content: prompt, route });
+  // `request`: a hand-over's whole request, kept on the turn so a later correction hands it over again.
+  const userTurn = (id: string, prompt: string, route: AssistantRoute, request?: string) => ({ id: `${id}-user`, role: 'user' as const, content: prompt, route,
+    ...(request !== undefined && request !== prompt ? { request } : {}) });
   // The identity a task is sent under, chosen here so its turn can carry it.
   const submissionId = () => `execution-${crypto.randomUUID()}`;
   // A message routed to a task. Started, it joins the conversation with its task; refused, with the reason, and the
@@ -3147,9 +3154,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // A message routed to the canvas: refused with the reason (the box keeps it), or planned.
   const planRouted = (prompt: string, id: string) => {
-    // The planner takes at most 8000 bytes. A longer message is not turned into a task for its length: the
-    // reply says so, the box keeps it, and 「换一种方式」 offers the task.
+    // The planner takes at most 8000 bytes. A longer message goes to a task when one can start, as the reader would
+    // expect of an assistant; otherwise the reply says so and the box keeps it.
     if (new TextEncoder().encode(prompt).length > 8000) {
+      if (executionRef.current?.ready) { void startAssistantTask(prompt, id); return; }
       setPlanning(previous => ({ ...previous, messages: [...previous.messages, userTurn(id, prompt, 'plan'),
         { id: `${id}-assistant`, role: 'assistant' as const, content: t('assistant.tooLongToPlan'), status: 'error' as const, route: 'plan' as const }].slice(-60) }));
       return;
@@ -3172,16 +3180,20 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     setPlanningError('');
     let route: AssistantRoute = routes.includes('plan') ? 'plan' : routes[0];
+    let redirect = false;
     if (routes.length > 1) {
       const controller = new AbortController();
       const request = assistantRouteRequest(prompt, routes, docRef.current, planning.messages, taskId => executionRef.current?.outcome?.(taskId));
       setPending({ id, prompt, phase: 'routing' }, controller);
-      try { route = await routeAssistant(request, controller.signal); }
+      try { ({ route, redirect = false } = await routeAssistant(request, controller.signal)); }
       catch { /* The router did not answer: the message is handled the default way rather than lost. */ }
       // Stopped while it was routed (the box still holds it), or the page has gone.
       if (pendingId() !== id || controller.signal.aborted || !mounted.current) return;
       setPending(null);
     }
+    // A correction (别改画布，直接写吧) hands the request before it over to the other way, with the correction added:
+    // the reader never picks a way by hand. Where that request cannot be handed over, the message is handled alone.
+    if (redirect && redirectLatest.current?.(route, prompt)) return;
     if (route === 'execute') await startAssistantTask(prompt, id);
     else planRouted(prompt, id);
   };
@@ -3520,20 +3532,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     </div> } : {}),
   };
 
-  // The latest request and its reply, which 「换一种方式」 hands over to the other way. A hand-over that fails
-  // changes nothing but says why: a plan on the canvas is undone only once its task exists, and a running task is
-  // stopped only where the canvas can take the request.
+  // The latest request and its reply, which a correction from the reader (别改画布，直接写吧) hands over to the other
+  // way. A hand-over that fails changes nothing but says why: a plan on the canvas is undone only once its task exists,
+  // and a running task is stopped only where the canvas can take the request.
   let lastRequestIndex = -1;
   planning.messages.forEach((message, index) => { if (message.role === 'user') lastRequestIndex = index; });
   const lastRequest = lastRequestIndex >= 0 ? planning.messages[lastRequestIndex] : undefined;
   const lastReply = lastRequest ? planning.messages.slice(lastRequestIndex + 1).find(message => message.role === 'assistant' && message.route) : undefined;
-  const switchToTask = async (prompt: string, planOnCanvas: boolean) => {
+  // `prompt` is what the other way is given (the request with the correction after it); `shown`, the reader's own words.
+  const switchToTask = async (prompt: string, planOnCanvas: boolean, shown = prompt) => {
     const host = executionRef.current;
     if (!host) return;
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     const operationId = submissionId();
     setPlanningError('');
-    setPending({ id, prompt, phase: 'starting', operationId });
+    setPending({ id, prompt: shown, phase: 'starting', operationId });
     try {
       const taskId = await host.start(prompt, operationId);
       if (!mounted.current) return;
@@ -3541,9 +3554,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // happened is reported as one.
       const latest = assistantLatest.current!;
       const undone = planOnCanvas && latest.canUndoPlan && latest.undo();
-      setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
+      setPlanning(previous => ({ draft: previous.draft.trim() === shown ? '' : previous.draft, messages: [...previous.messages,
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
-        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
+        userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
       refocus('.awwo-canvas-assistant--panel textarea');
     } catch (error) {
@@ -3551,8 +3564,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
       // and the plan stays until it is known.
       if (error instanceof TaskStartUnconfirmed) {
-        setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
-          ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: t('assistant.planKept') }] : []), userTurn(id, prompt, 'execute'),
+        setPlanning(previous => ({ draft: previous.draft.trim() === shown ? '' : previous.draft, messages: [...previous.messages,
+          ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: t('assistant.planKept') }] : []), userTurn(id, shown, 'execute', prompt),
           { id: `${id}-task`, role: 'assistant' as const, content: t('assistant.startUnconfirmed'), status: 'unconfirmed' as const, route: 'execute' as const,
             operationId }].slice(-60) }));
       } else setPlanningError(failureText(error));
@@ -3561,18 +3574,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A bare follow-up (继续, 重试…) hands the canvas the request it followed: planned alone, the word says nothing.
   const handOverRequest = (messages: PlanningMessage[], index: number) => {
     for (let i = index; i >= 0; i--) {
-      if (messages[i].role === 'user' && !FOLLOW_UP.test(messages[i].content.trim())) return messages[i].content;
+      if (messages[i].role === 'user' && !FOLLOW_UP.test(messages[i].content.trim())) return messages[i].request ?? messages[i].content;
     }
-    return messages[index].content;
+    return messages[index].request ?? messages[index].content;
   };
-  const switchToCanvas = async (prompt: string, taskId?: string) => {
+  const switchToCanvas = async (prompt: string, taskId?: string, shown = prompt) => {
     const blocked = planBlocker();
     if (blocked !== null) { setPlanningError(blocked || t('assistant.canvasBusy')); return; }
     const host = executionRef.current;
     if (taskId && host && !host.finished(taskId)) {
       const id = `turn-${Date.now()}-${++planningSequence.current}`;
       setPlanningError('');
-      setPending({ id, prompt, phase: 'stopping' });
+      setPending({ id, prompt: shown, phase: 'stopping' });
       try { await host.stop(taskId); }
       catch (error) { if (mounted.current) setPlanningError(failureText(error)); return; }
       finally { if (pendingId() === id) setPending(null); }
@@ -3581,24 +3594,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const again = assistantLatest.current!.planBlocker();
       if (again !== null) { setPlanningError(`${t('assistant.taskStopped')}${again || t('assistant.canvasBusy')}`); return; }
     }
-    void assistantLatest.current!.sendPlanningMessage(prompt);
+    void assistantLatest.current!.sendPlanningMessage(prompt, false, shown);
   };
-  const switchLastRequest = (to: AssistantRoute) => {
-    if (!lastRequest || !lastReply || pendingRef.current || planningRequest.current) return;
-    if (to === 'plan') { void switchToCanvas(handOverRequest(planning.messages, lastRequestIndex), lastReply.taskId); return; }
+  // Whether the latest request can be handed over to `to`: it went the other way, has its reply, and that way can take it
+  // now. A task whose start is unconfirmed may exist, so it is reconciled, never planned over. A plan still on the canvas
+  // is undone once its task exists where it can be, and otherwise kept, and the conversation says which.
+  const canHandOver = (to: AssistantRoute) => Boolean(unifiedHost && !readOnly && lastRequest?.route && lastRequest.route !== to && lastReply && !planningBusy
+    && (to === 'execute' ? unifiedHost.ready : planAvailable && lastReply.status !== 'unconfirmed'));
+  // Hands the latest request over with the reader's correction after it; false where nothing was done with it.
+  const switchLastRequest = (to: AssistantRoute, correction: string) => {
+    if (!lastRequest || !lastReply || pendingRef.current || planningRequest.current) return false;
+    const request = to === 'plan' ? handOverRequest(planning.messages, lastRequestIndex) : lastRequest.request ?? lastRequest.content;
+    const prompt = `${request}\n\n${correction}`;
+    // The planner takes at most 8000 bytes: a longer hand-over is not made, and the correction is planned on its own.
+    if (to === 'plan' && new TextEncoder().encode(prompt).length > 8000) return false;
+    if (to === 'plan') { void switchToCanvas(prompt, lastReply.taskId, correction); return true; }
     const planOnCanvas = lastReply.status === 'applied' && !undoneHere(lastReply);
-    if (planOnCanvas && !canUndoPlan) return;
     // A node that began talking since this render would keep the plan from being undone once the task exists.
-    if (planOnCanvas && !canEditStructure()) { setPlanningError(surfaceNotice(t, 'planning_busy')); return; }
-    void switchToTask(lastRequest.content, planOnCanvas);
+    if (planOnCanvas && !canEditStructure()) { setPlanningError(surfaceNotice(t, 'planning_busy')); return true; }
+    void switchToTask(prompt, planOnCanvas, correction);
+    return true;
   };
-  const switchRoute = unifiedHost && !readOnly && lastRequest?.route && lastReply && !assistantPending && !planningBusy
-    ? lastRequest.route === 'plan'
-      ? (unifiedHost.ready && (lastReply.status !== 'applied' || undoneHere(lastReply) || canUndoPlan)
-        ? { to: 'execute' as const, onSwitch: () => switchLastRequest('execute') } : undefined)
-      // A task whose start is unconfirmed may exist: it is reconciled, never planned over.
-      : (planAvailable && lastReply.status !== 'unconfirmed' ? { to: 'plan' as const, onSwitch: () => switchLastRequest('plan') } : undefined)
-    : undefined;
+  redirectLatest.current = (to, correction) => canHandOver(to) && switchLastRequest(to, correction);
   // Tasks the conversation mentions; the host lists the canvas's others (earlier ones, other devices') at its top.
   const mentionedTasks = useMemo(() => new Set(planning.messages.flatMap(message => message.taskId ? [message.taskId] : [])), [planning.messages]);
   // With the planner closed, tasks are the one way left, and the composer says so.
@@ -3609,7 +3626,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     earlier: assistantExecution.renderEarlier(mentionedTasks, readOnly),
     notices: assistantExecution.renderNotices(planAvailable),
     settings: assistantExecution.settings,
-    ...(switchRoute ? { switchRoute } : {}),
     ...(routeNotice ? { notice: routeNotice } : {}),
     readOnly,
   } : undefined;
@@ -3641,10 +3657,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       : planningBusy ? { kind: 'planning', progress: planningProgress }
         : latestTask && panelShown && assistantExecution?.running?.(latestTask) ? { kind: 'task' }
           : !nodes.length && mentionedTasks.size > 0 ? { kind: 'empty' } : undefined;
-  // Offered on the stage only where nothing is under way: handing a running task over stops it, which the stage
-  // would not say (the conversation's own button is beside the task). A task no longer read may still run.
-  const stageSwitch = switchRoute?.to === 'plan' && stageActivity?.kind === 'empty' && (!latestTask || assistantExecution?.finished(latestTask))
-    ? switchRoute.onSwitch : undefined;
   // The stage shrinking under an open node until the floating assistant leaves it no readable room steps the assistant
   // aside, as opening the node there does; bringing it back over the node is the reader's (no size changes then).
   const stageSeen = useRef(size);
@@ -3855,7 +3867,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       assistant={assistantPanel} assistantStowed={assistantStowed} stageCover={stageCover}
       // One composer at a time: on an empty canvas whose conversation is in the side panel, the welcome steps aside.
       welcome={readOnly || assistantPanel ? undefined : <CanvasAssistant mode="welcome" {...assistantProps} unified={unified} />}
-      emptyStage={stageActivity && !nodes.length ? <StageActivity state={stageActivity} {...(stageSwitch ? { onSwitchToPlan: stageSwitch } : {})} /> : undefined}
+      emptyStage={stageActivity && !nodes.length ? <StageActivity state={stageActivity} /> : undefined}
       // The toggle reports the panel as it is drawn; tasks need no canvas, so it is offered on an empty one with them.
       assistantOpen={panelShown} assistantAvailable={viewerTasks || mentionedTasks.size > 0} assistantHint={assistantHint}
       onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (panelShown) closeAssistant(); else setAssistantOpen(true); }}

@@ -324,8 +324,6 @@ html:root .saas-canvas-shell {
   .awwo-stage-activity-headline { color: var(--saas-text); font-family: var(--saas-font); }
   .awwo-stage-activity-headline svg { color: var(--saas-signal); }
   .awwo-stage-activity-headline small, .awwo-stage-activity-body { color: var(--saas-muted); font-family: var(--saas-font); }
-  .awwo-stage-activity-switch { border-color: var(--saas-border); background: var(--saas-raised); color: var(--saas-link); font: 600 var(--saas-text-sm)/1.4 var(--saas-font);
-    &:hover:not(:disabled) { border-color: var(--saas-link); color: var(--saas-link-hover); } }
   .awwo-stage-activity.is-compact { border-color: var(--saas-hairline); background: var(--saas-raised); box-shadow: var(--saas-shadow-md); }
   .awwo-stage-activity .awwo-assistant-steps { margin-top: 4px; padding-left: 0; }
 
@@ -849,9 +847,8 @@ html:root .saas-canvas-shell {
   .awwo-planner-connection > span { background: var(--saas-warning-dot); }
   .awwo-planner-connection .is-ready { background: var(--saas-success-dot); }
   .awwo-planner-connection > button { color: var(--saas-link); font-weight: 600; font-size: var(--saas-text-xs); }
-  /* How each reply was handled, said quietly above it, and the one link that hands the request over. */
+  /* How each reply was handled, said quietly above it. */
   .awwo-assistant-route { color: var(--saas-muted); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); }
-  .awwo-assistant-switch > button { color: var(--saas-link); font: 600 var(--saas-text-xs)/1.4 var(--saas-font); &:hover:not(:disabled) { color: var(--saas-link-hover); } }
   .awwo-assistant-readonly, .awwo-assistant-route-notice { color: var(--saas-muted); font-size: var(--saas-text-xs); }
 
   /* ── The generation moment ──────────────────────────────────────────────────────────────── */

@@ -7,7 +7,7 @@ import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { StageActivity, showsStageLine } from '../src/canvas/StageActivity';
 import { executionHost } from '../src/saas/AssistantExecution';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
-import type { AssistantExecutionHost, AssistantRoute, AssistantRouteRequest } from '../src/canvas/assistantRouting';
+import type { AssistantExecutionHost, AssistantRoute, AssistantRouteDecision, AssistantRouteRequest } from '../src/canvas/assistantRouting';
 import { emptyDocument, saveDocument } from '../src/canvas/canvasDoc';
 import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import { savePlanningConversation, type requestCanvasPlan } from '../src/canvas/canvasPlanning';
@@ -20,7 +20,14 @@ const toggle = () => within(document.querySelector('.awwo-canvas-bar') as HTMLEl
 const panel = () => within(document.querySelector('.awwo-planner-sidebar') as HTMLElement);
 const empty = () => document.querySelector('.awwo-empty') as HTMLElement | null;
 const pill = () => document.querySelector('.awwo-stage-activity.is-compact');
-const routeTo = (route: AssistantRoute) => vi.fn(async (_request: AssistantRouteRequest, _signal: AbortSignal) => route);
+const routeTo = (route: AssistantRoute) => vi.fn(async (_request: AssistantRouteRequest, _signal: AbortSignal): Promise<AssistantRouteDecision> => ({ route }));
+// A router that reads every message as a correction toward `route`, and the correction these tests send.
+const correcting = (route: AssistantRoute) => vi.fn(async (_request: AssistantRouteRequest, _signal: AbortSignal): Promise<AssistantRouteDecision> => ({ route, redirect: true }));
+const CORRECTION = '还是放到画布上吧';
+const sendCorrection = () => {
+  fireEvent.change(panel().getByRole('textbox', { name: '画布需求' }), { target: { value: CORRECTION } });
+  fireEvent.click(panel().getByRole('button', { name: '发送' }));
+};
 const taskConversation = () => savePlanningConversation({ draft: '', messages: [
   { id: 'turn-1-user', role: 'user', content: '做一个专属游戏', route: 'execute' },
   { id: 'turn-1-task', role: 'assistant', content: '', route: 'execute', taskId: 'task-1' }] });
@@ -53,19 +60,23 @@ beforeEach(() => {
 });
 
 describe('the stage says what the canvas assistant is doing', () => {
-  it('says on an empty canvas that a direct task left it as it is, in place of the example, and hands the request to the planner', async () => {
+  it('says on an empty canvas that a direct task left it as it is, in place of the example, with no way to pick by hand', async () => {
     taskConversation();
     const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
-    render(<CanvasSurface assistantExecution={fakeHost({ running: false })} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    render(<CanvasSurface assistantExecution={fakeHost({ running: false })} routeAssistant={correcting('plan')} planRequest={planRequest} />);
     fireEvent.click(toggle());
     const stage = within(empty()!);
     expect(stage.getByText('画布上还没有节点')).toBeVisible();
-    expect(stage.getByText('直接执行的任务不改画布，结果都在对话里。想让助手把最近的请求搭成画布上的一组 Agent，可以改为调整画布。')).toBeVisible();
+    expect(stage.getByText('直接执行的任务不改画布，结果都在对话里。')).toBeVisible();
     expect(stage.queryByText('把想法，交给一组 Agent。')).toBeNull();
     expect(document.querySelector('.awwo-empty-diagram')).toBeNull();
-    fireEvent.click(stage.getByRole('button', { name: '改为调整画布' }));
+    expect(document.querySelector('.awwo-stage-activity button')).toBeNull();
+    // Said in the conversation, the request goes to the planner with the correction after it.
+    sendCorrection();
     await waitFor(() => expect(planRequest).toHaveBeenCalled());
-    expect(planRequest.mock.calls[0][0]).toBe('做一个专属游戏');
+    expect(planRequest.mock.calls[0][0]).toBe(`做一个专属游戏
+
+${CORRECTION}`);
   });
 
   it('says a direct task is under way, and leaves stopping it to the conversation, beside the task', async () => {
@@ -73,19 +84,19 @@ describe('the stage says what the canvas assistant is doing', () => {
     const state = { running: true };
     const host = fakeHost(state);
     const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
-    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    render(<CanvasSurface assistantExecution={host} routeAssistant={correcting('plan')} planRequest={planRequest} />);
     fireEvent.click(toggle());
     const stage = within(empty()!);
     expect(stage.getByText('正在直接执行，画布不会变化')).toBeVisible();
     expect(stage.getByText('助手在独立的工作区里做这件事，画布上不会有变化。进展和结果都在对话里。')).toBeVisible();
-    // Handing a running task over stops it, which the stage would not say: the hand-over stays in the conversation.
-    expect(stage.queryByRole('button', { name: '改为调整画布' })).toBeNull();
-    fireEvent.click(panel().getByRole('button', { name: '改为调整画布' }));
+    expect(document.querySelector('.awwo-stage-activity button')).toBeNull();
+    // A correction in the conversation stops the task and hands its request to the planner.
+    sendCorrection();
     await waitFor(() => expect(planRequest).toHaveBeenCalled());
     expect(host.stop).toHaveBeenCalledExactlyOnceWith('task-1');
   });
 
-  it('offers no hand-over on the stage while the latest task, no longer read, is not known to have ended', () => {
+  it('offers nothing to press on the stage while the latest task, no longer read, is not known to have ended', () => {
     taskConversation();
     // Its reading paused: not counted as under way, yet it may still run, and handing it over would stop it.
     const host = { ...fakeHost({ running: false }), finished: () => false };
@@ -94,7 +105,7 @@ describe('the stage says what the canvas assistant is doing', () => {
     const stage = within(empty()!);
     expect(stage.getByText('画布上还没有节点')).toBeVisible();
     expect(stage.getByText('直接执行的任务不改画布，结果都在对话里。')).toBeVisible();
-    expect(stage.queryByRole('button', { name: '改为调整画布' })).toBeNull();
+    expect(document.querySelector('.awwo-stage-activity button')).toBeNull();
   });
 
   it('hands the canvas the request a bare 「继续」 followed, not the word', async () => {
@@ -104,11 +115,13 @@ describe('the stage says what the canvas assistant is doing', () => {
       { id: 'turn-2-user', role: 'user', content: '继续', route: 'execute' },
       { id: 'turn-2-task', role: 'assistant', content: '', route: 'execute', taskId: 'task-2' }] });
     const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
-    render(<CanvasSurface assistantExecution={fakeHost({ running: false })} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    render(<CanvasSurface assistantExecution={fakeHost({ running: false })} routeAssistant={correcting('plan')} planRequest={planRequest} />);
     fireEvent.click(toggle());
-    fireEvent.click(within(empty()!).getByRole('button', { name: '改为调整画布' }));
+    sendCorrection();
     await waitFor(() => expect(planRequest).toHaveBeenCalled());
-    expect(planRequest.mock.calls[0][0]).toBe('做一个专属游戏');
+    expect(planRequest.mock.calls[0][0]).toBe(`做一个专属游戏
+
+${CORRECTION}`);
   });
 
   it('shows a plan being made over a canvas with nodes as one line, gone once the plan is on the canvas', async () => {

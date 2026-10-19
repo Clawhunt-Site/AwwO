@@ -24,9 +24,6 @@ export interface StageActivityProps {
   compact?: boolean;
   /** Said to screen readers as it changes: only while the conversation, which says it too, is not on screen. */
   announce?: boolean;
-  /** Hands the latest request to the planner (「改为调整画布」), where the conversation offers that too. */
-  onSwitchToPlan?: () => void;
-  switchDisabled?: boolean;
 }
 
 /** Whether the one line shows over a canvas with nodes: a plan being made or a direct task under way, on the canvas view,
@@ -35,7 +32,7 @@ export function showsStageLine(state: StageActivityState | undefined, stage: { n
   return (state?.kind === 'planning' || state?.kind === 'task') && stage.nodes > 0 && !stage.results && !stage.note;
 }
 
-export function StageActivity({ state, compact = false, announce = false, onSwitchToPlan, switchDisabled = false }: StageActivityProps) {
+export function StageActivity({ state, compact = false, announce = false }: StageActivityProps) {
   const { t } = useCanvasI18n();
   const progress = state.kind === 'planning' ? state.progress : undefined;
   const headline = state.kind === 'pending' ? t(PENDING[state.phase]) : t(state.kind === 'planning' ? 'stage.planning' : state.kind === 'task' ? 'stage.task' : 'stage.empty');
@@ -43,7 +40,7 @@ export function StageActivity({ state, compact = false, announce = false, onSwit
   const facts = progress ? [...(progress.nodes > 0 ? [t('assistant.factNodes', { count: progress.nodes })] : []),
     ...(progress.edges > 0 ? [t('assistant.factEdges', { count: progress.edges })] : [])] : [];
   const body = compact ? '' : state.kind === 'task' ? t('stage.taskBody')
-    : state.kind === 'empty' ? t(onSwitchToPlan ? 'stage.emptyBodySwitch' : 'stage.emptyBody') : '';
+    : state.kind === 'empty' ? t('stage.emptyBody') : '';
   return <section className={`awwo-stage-activity${compact ? ' is-compact' : ''} is-${state.kind}`} aria-label={t('stage.activity')}>
     {/* Not paragraphs: an empty canvas's own paragraph styles (the introduction's) must not reach these. */}
     <div className="awwo-stage-activity-headline" {...(announce ? { 'aria-live': 'polite' as const } : {})}>
@@ -53,7 +50,5 @@ export function StageActivity({ state, compact = false, announce = false, onSwit
     </div>
     {body ? <div className="awwo-stage-activity-body">{body}</div> : null}
     {state.kind === 'planning' && !compact ? <PlanSteps stage={progress?.stage} label={t('assistant.progressDetail')} /> : null}
-    {onSwitchToPlan && !compact ? <button type="button" className="awwo-stage-activity-switch" disabled={switchDisabled} onClick={onSwitchToPlan}>
-      {t('assistant.switchToPlan')}</button> : null}
   </section>;
 }
