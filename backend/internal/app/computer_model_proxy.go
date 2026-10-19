@@ -17,7 +17,7 @@ import (
 // computerModelCallTimeout bounds one managed-execution model call through the proxy: the workers stop a call
 // themselves at their own per-call limit (AWWO_PI_TIMEOUT_MS, 10 minutes in production), the OpenMaus core waits as
 // long for the answer (CORE_MODEL_IDLE_TIMEOUT_MS in apps/openmaus-worker/runtime.ts), and the task's lease ends it
-// sooner when the task stops. Thinking models routinely need more than the 30 s an ordinary API request gets.
+// sooner when the task ends. Thinking models routinely need more than the 30 s an ordinary API request gets.
 const computerModelCallTimeout = 10 * time.Minute
 
 // OpenMaus receives a task-scoped bearer, never a user's provider key. Only the
@@ -508,8 +508,11 @@ func computerCallFits(raw []byte, completion map[string]json.RawMessage, lease *
 	return len(computerForwardBody(lease, completion))+4096 <= computerWorkerBodyLimit
 }
 
+// computerCallSettleLimit bounds one settleComputerCall, its retries included.
+const computerCallSettleLimit = 5 * time.Second
+
 func (a *App) settleComputerCall(tid, id, status, code string, facts *invocationFacts) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), computerCallSettleLimit)
 	defer cancel()
 	return a.persistExecutionContext(ctx, func(ctx context.Context) error {
 		tx, e := a.db.Begin(ctx)
@@ -577,10 +580,14 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lease.busy = true
+	idle := make(chan struct{})
+	lease.idle = idle
 	lease.calls++
 	index := lease.calls
 	lease.mu.Unlock()
-	defer func() { lease.mu.Lock(); lease.busy = false; lease.mu.Unlock() }()
+	// Registered first, so it runs last: the lease goes idle only once this handler is done, its call settled (the
+	// deferred settling below), which the task's ending waits for (computerLease.drain).
+	defer func() { lease.mu.Lock(); lease.busy = false; close(idle); lease.mu.Unlock() }()
 	// Not the API's 30 s request deadline (requestDeadlineApplies): its own bound, and the task's lease.
 	ctx, cancel := context.WithTimeout(r.Context(), computerModelCallTimeout)
 	defer cancel()

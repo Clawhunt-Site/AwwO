@@ -146,6 +146,8 @@ type computerLease struct {
 	snapshot                   executionSnapshot
 	calls                      int
 	busy, closed               bool
+	// idle is closed once the call in progress has ended, after its handler settled it (computerModelProxy).
+	idle chan struct{}
 	// refusal is an allowance or plan refusal of one of the run's model calls; the run fails with it.
 	refusal string
 	// blocks are the reference blocks added to the task's words (earlier tasks, canvas briefing), in the order a model
@@ -493,7 +495,10 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 	token := randomID() + randomID()
 	payload := map[string]any{"runId": rid, "tenantId": tid, "sessionId": sid, "instructions": instructions, "modelProxyURL": a.cfg.ComputerModelProxyURL, "modelProxyToken": token, "timeoutMs": computerRunTimeout(a.cfg.RunTimeout).Milliseconds(), "maxModelCalls": snap.Computer.MaxModelCalls}
 	blocks = fitComputerStart(payload, request, blocks)
-	lease := &computerLease{ctx: ctx, tenantID: tid, runID: rid, sessionID: sid, snapshot: snap, blocks: blocks}
+	// The task's model calls run under callCtx, which its ending cuts (computerLease.drain).
+	callCtx, cutCalls := context.WithCancel(ctx)
+	defer cutCalls()
+	lease := &computerLease{ctx: callCtx, tenantID: tid, runID: rid, sessionID: sid, snapshot: snap, blocks: blocks}
 	key := tokenHash(token)
 	a.computerLeases.Store(key, lease)
 	defer func() {
@@ -508,13 +513,22 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			response.Body.Close()
 		}
 	}()
+	// However the task ends, the model call it still has running is cut and settled by its handler first.
+	finish := func(status, output, code string) {
+		lease.drain(cutCalls, computerCallSettleWait)
+		a.finish(tid, rid, status, output, code)
+	}
+	stopped := func() {
+		lease.drain(cutCalls, computerCallSettleWait)
+		a.computerStopped(tid, rid)
+	}
 	// Sent only when the message named files, so a task without any is the request it always was; after the fit above,
 	// which bounds the start's text (the files ride beside it, within the broker's larger LIMITS.request).
 	if len(snap.Computer.Inputs) > 0 {
 		// Encoded once: a task waiting for a worker slot sends the same request again every few seconds.
 		encoded, err := json.Marshal(snap.Computer.Inputs)
 		if err != nil {
-			a.finish(tid, rid, "failed", "", "computer_input_invalid")
+			finish("failed", "", "computer_input_invalid")
 			return
 		}
 		payload["inputs"] = json.RawMessage(encoded)
@@ -537,14 +551,14 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 		events++
 		total += len(raw)
 		if events > 1024 || total > 32<<20 {
-			a.finish(tid, rid, "failed", "", "computer_output_limit")
+			finish("failed", "", "computer_output_limit")
 			return
 		}
 		if !a.computerRunActive(ctx, tid, rid) {
 			if ctx.Err() != nil {
-				a.computerStopped(tid, rid)
+				stopped()
 			} else {
-				a.finish(tid, rid, "failed", "", "execution_revoked")
+				finish("failed", "", "execution_revoked")
 			}
 			return
 		}
@@ -568,13 +582,13 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			Code        string          `json:"code"`
 		}
 		if json.Unmarshal(raw, &ev) != nil {
-			a.finish(tid, rid, "failed", "", "invalid_computer_event")
+			finish("failed", "", "invalid_computer_event")
 			return
 		}
 		switch ev.Type {
 		case "computer_message":
 			if len(ev.Text) > 65536 || !utf8.ValidString(ev.Text) || strings.ContainsRune(ev.Text, 0) || (ev.Role != "assistant" && ev.Role != "user" && ev.Role != "tool" && ev.Role != "system") {
-				a.finish(tid, rid, "failed", "", "invalid_computer_message")
+				finish("failed", "", "invalid_computer_message")
 				return
 			}
 			if ev.Role == "user" {
@@ -583,21 +597,21 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			e = a.computerEvent(ctx, tid, rid, map[string]any{"type": ev.Type, "id": randomID(), "role": ev.Role, "text": ev.Text, "truncated": ev.Truncated, "createdAt": time.Now().UTC()})
 		case "computer_approval":
 			if ev.RequestID == "" || len(ev.RequestID) > 200 || !cleanName(ev.Title) || len(ev.Description) > 8192 || len(ev.Arguments) > 512<<10 || (ev.Kind != "approval" && ev.Kind != "question") {
-				a.finish(tid, rid, "failed", "", "invalid_computer_approval")
+				finish("failed", "", "invalid_computer_approval")
 				return
 			}
 			if len(ev.Arguments) == 0 {
 				// A tool's card carries the arguments of the very call it approves (the broker pairs it with that call:
 				// apps/openmaus-worker/runtime.ts cardCall). One without them is refused, never allowed as if it had none.
 				if ev.Kind == "approval" {
-					a.finish(tid, rid, "failed", "", "invalid_computer_approval")
+					finish("failed", "", "invalid_computer_approval")
 					return
 				}
 				ev.Arguments = json.RawMessage(`{}`)
 			}
 			var args map[string]any
 			if json.Unmarshal(ev.Arguments, &args) != nil || args == nil {
-				a.finish(tid, rid, "failed", "", "invalid_computer_approval")
+				finish("failed", "", "invalid_computer_approval")
 				return
 			}
 			hash := tokenHash(ev.RequestID + "\x00" + ev.Title + "\x00" + ev.Description + "\x00" + ev.Kind + "\x00" + string(ev.Arguments))
@@ -630,7 +644,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 				ev.Path = ev.Name
 			}
 			if err != nil || ev.Encoding != "base64" || files > 16 || len(data) > 8<<20 || fileBytes > 16<<20 || !cleanName(ev.Name) || path.Base(ev.Name) != ev.Name || strings.ContainsAny(ev.Name, "\\\x00") || !validComputerArtifactPath(ev.Path) || tokenHash(string(data)) != ev.SHA256 {
-				a.finish(tid, rid, "failed", "", "invalid_computer_artifact")
+				finish("failed", "", "invalid_computer_artifact")
 				return
 			}
 			var cid string
@@ -645,7 +659,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			}
 		case "completed":
 			if len(ev.Output) > 256<<10 || !utf8.ValidString(ev.Output) || strings.ContainsRune(ev.Output, 0) {
-				a.finish(tid, rid, "failed", "", "computer_output_limit")
+				finish("failed", "", "computer_output_limit")
 				return
 			}
 			var pending bool
@@ -668,16 +682,16 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 				}
 			}
 			if e != nil || pending {
-				a.finish(tid, rid, "failed", "", "computer_approval_unresolved")
+				finish("failed", "", "computer_approval_unresolved")
 				return
 			}
 			if ev.Truncated {
 				if e = a.computerEvent(ctx, tid, rid, map[string]string{"type": "computer_output_truncated"}); e != nil {
-					a.finish(tid, rid, "failed", "", "computer_event_persistence_failed")
+					finish("failed", "", "computer_event_persistence_failed")
 					return
 				}
 			}
-			a.finish(tid, rid, "completed", ev.Output, "")
+			finish("completed", ev.Output, "")
 			return
 		case "failed":
 			a.log.Warn("managed execution task failed", "run", rid, "code", computerWorkerCode(ev.Code))
@@ -687,7 +701,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 				code = lease.refusal
 			}
 			lease.mu.Unlock()
-			a.finish(tid, rid, "failed", "", code)
+			finish("failed", "", code)
 			return
 		case "cancelled":
 			// The user's stop cancels the task's context before the broker hears of it (cancelRun, then the deferred
@@ -695,33 +709,33 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 			// shutting down or restarting, the platform's doing (code review 2026-10-16).
 			switch refusal := lease.refused(); {
 			case ctx.Err() != nil:
-				a.computerStopped(tid, rid)
+				stopped()
 			case refusal != "":
-				a.finish(tid, rid, "failed", "", refusal)
+				finish("failed", "", refusal)
 			default:
-				a.finish(tid, rid, "interrupted", "", "execution service restarted before completion")
+				finish("interrupted", "", "execution service restarted before completion")
 			}
 			return
 		default:
 			e = errors.New("invalid_computer_event")
 		}
 		if e != nil {
-			a.finish(tid, rid, "failed", "", "computer_event_persistence_failed")
+			finish("failed", "", "computer_event_persistence_failed")
 			return
 		}
 	}
 	switch refusal := lease.refused(); {
 	case ctx.Err() != nil:
-		a.computerStopped(tid, rid)
+		stopped()
 	case refusal != "":
 		// One of its calls was refused by an allowance or a plan: that is how it ended, whatever the stream did.
-		a.finish(tid, rid, "failed", "", refusal)
+		finish("failed", "", refusal)
 	case total >= computerBrokerEventsNear:
 		// The broker cuts a task's stream without a last event once its events pass 16 MiB (LIMITS.events in
 		// apps/openmaus-worker/protocol.ts): the task's own output, not the platform failing (security review 2026-10-16).
-		a.finish(tid, rid, "failed", "", "computer_output_limit")
+		finish("failed", "", "computer_output_limit")
 	default:
-		a.finish(tid, rid, "failed", "", "computer_stream_ended")
+		finish("failed", "", "computer_stream_ended")
 	}
 }
 
@@ -736,6 +750,34 @@ func (l *computerLease) refused() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.refusal
+}
+
+// computerCallSettleWait bounds how long a direct task's ending waits for the model call it cut to be settled by its
+// handler: a little longer than one settling may take (computerCallSettleLimit). A handler that settles twice (its
+// first settling of an answered call failed) can take longer; its call is then settled as left open.
+var computerCallSettleWait = computerCallSettleLimit + time.Second // a variable for the tests only
+
+// drain takes no more calls, cuts the one still running, if any (its task is over: its answer would reach nobody), and
+// waits, up to wait, for that call's handler to settle it with what it knows of the call, its bytes and its time
+// (plans.go creditCharge), and be done (the lease goes idle). Only then does the task end, so its ending never
+// settles that call in its handler's stead, as a call left open (settleAbandonedInvocations: its reserve, class
+// restart), unless the handler could not settle it in time (the owner, 2026-10-19: every ending, a stop's too).
+func (l *computerLease) drain(cut context.CancelFunc, wait time.Duration) {
+	l.mu.Lock()
+	// Closed as it looks, so that no call starts between the look and the cut.
+	l.closed = true
+	busy, idle := l.busy, l.idle
+	l.mu.Unlock()
+	cut()
+	if !busy {
+		return
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-idle:
+	case <-timer.C:
+	}
 }
 func (a *App) respondComputer(w http.ResponseWriter, r *http.Request) {
 	var b struct {

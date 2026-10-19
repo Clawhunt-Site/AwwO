@@ -1352,6 +1352,9 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status string) error {
 	// Completed member records are immutable; only abandoned active records need
 	// reconciliation after the execution goroutine has stopped calling providers.
+	// A direct task's calls are settled by their own handler (computerModelProxy),
+	// which its ending cuts and waits for (computerLease.drain): one still running
+	// here is one its handler could not settle in time.
 	if _, e := tx.Exec(ctx, "UPDATE run_turns SET status=$3,error=CASE WHEN $3='interrupted' THEN 'execution_interrupted' ELSE error END,updated_at=now() WHERE tenant_id=$1 AND run_id=$2 AND status IN ('queued','running')", tid, id, status); e != nil {
 		return e
 	}
