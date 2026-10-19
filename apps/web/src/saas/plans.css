@@ -12,8 +12,7 @@
   background: var(--saas-card);
   color: var(--saas-text);
 }
-.saas-plans-current h2,
-.saas-plan h2 {
+.saas-plans-current h2 {
   margin: 0 0 8px;
   font-size: var(--saas-text-lg, 18px);
 }
@@ -40,6 +39,10 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+.saas-plans-lead {
+  margin: 0;
+  font-weight: 600;
+}
 .saas-plans-hint,
 .saas-plans-note p {
   margin: 12px 0 0;
@@ -47,53 +50,6 @@
   font-size: var(--saas-text-sm, 13px);
   line-height: 1.6;
 }
-.saas-plans-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-}
-.saas-plan {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.saas-plan.is-current {
-  border-color: var(--saas-accent);
-}
-.saas-plan-price {
-  margin: 0;
-  color: var(--saas-muted);
-}
-.saas-plan-price strong {
-  color: var(--saas-text);
-  font-size: 32px;
-  font-weight: 700;
-}
-.saas-plan ul {
-  display: grid;
-  gap: 8px;
-  flex: 1;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.saas-plan li {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  line-height: 1.5;
-}
-.saas-plan li svg {
-  flex: none;
-  margin-top: 3px;
-  color: var(--saas-accent);
-}
-.saas-plan-state {
-  margin: 0;
-  color: var(--saas-accent);
-  font-weight: 600;
-}
-.saas-plan button,
 .saas-plans-current button {
   width: 100%;
 }

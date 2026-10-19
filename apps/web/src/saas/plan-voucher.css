@@ -1,0 +1,263 @@
+/* The plans as vouchers (PlanVoucher.tsx; owner 2026-10-19: 「要做出来 coupon 这种质感的东西，兑换券的感觉，要吸引他们购买」):
+ * a face value, a tear-off stub joined by a perforation with two notches, a fine security pattern, and a stamp on the
+ * plan the account holds. Only the design system's tokens, so every theme preset, light or dark, colours it; the text
+ * colours are mixed toward the theme's ink, which keeps them AA on the tinted paper. */
+.saas-vouchers {
+  container-type: inline-size;
+  display: grid;
+  gap: 20px;
+}
+.saas-voucher {
+  --voucher-tone: var(--saas-bio);
+  --voucher-tone-2: var(--saas-accent);
+  /* The ink of the tones: AA as text on the voucher's paper, light or dark. */
+  --voucher-ink: color-mix(in srgb, var(--voucher-tone) 58%, var(--saas-text));
+  --voucher-ink-2: color-mix(in srgb, var(--voucher-tone-2) 66%, var(--saas-text));
+  --voucher-notch: 13px;
+  --voucher-stub: 220px;
+  --voucher-cut: calc(100% - var(--voucher-stub));
+  --voucher-shadow: var(--saas-shadow-rgb, 11 34 48);
+  position: relative;
+  /* The shadow follows the notched outline: it is drawn here, around the masked ticket inside. */
+  filter: drop-shadow(0 14px 22px rgb(var(--voucher-shadow) / 14%)) drop-shadow(0 2px 4px rgb(var(--voucher-shadow) / 8%));
+  transition: transform var(--saas-dur-3) var(--saas-ease), filter var(--saas-dur-3) var(--saas-ease);
+}
+.saas-voucher-max {
+  --voucher-tone: var(--saas-warning-dot);
+  --voucher-tone-2: var(--saas-bio-lilac, var(--saas-accent));
+}
+.saas-voucher:hover {
+  transform: translateY(-2px);
+  filter: drop-shadow(0 20px 28px rgb(var(--voucher-shadow) / 18%)) drop-shadow(0 3px 6px rgb(var(--voucher-shadow) / 10%));
+}
+.saas-voucher-ticket {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--voucher-stub);
+  overflow: hidden;
+  border-radius: var(--saas-radius-lg);
+  background:
+    radial-gradient(120% 150% at 0% 0%, color-mix(in srgb, var(--voucher-tone) 15%, transparent), transparent 58%),
+    radial-gradient(90% 130% at 100% 100%, color-mix(in srgb, var(--voucher-tone-2) 13%, transparent), transparent 62%),
+    var(--saas-card);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--voucher-tone) 28%, var(--saas-border));
+  color: var(--saas-text);
+  /* Two half-circles bitten out of the top and bottom edges where the perforation meets them. */
+  -webkit-mask:
+    radial-gradient(circle var(--voucher-notch) at var(--voucher-cut) 0, #0000 97%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle var(--voucher-notch) at var(--voucher-cut) 100%, #0000 97%, #000) bottom / 100% 51% no-repeat;
+  mask:
+    radial-gradient(circle var(--voucher-notch) at var(--voucher-cut) 0, #0000 97%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle var(--voucher-notch) at var(--voucher-cut) 100%, #0000 97%, #000) bottom / 100% 51% no-repeat;
+}
+/* A sheen across the paper on hover, under the print. */
+.saas-voucher-ticket::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(105deg, transparent 34%, rgb(255 255 255 / 22%) 50%, transparent 66%);
+  transform: translateX(-110%);
+  transition: transform 1100ms var(--saas-ease);
+  pointer-events: none;
+}
+:root[data-theme='dark'] .saas-voucher-ticket::after {
+  background: linear-gradient(105deg, transparent 34%, rgb(255 255 255 / 7%) 50%, transparent 66%);
+}
+.saas-voucher:hover .saas-voucher-ticket::after {
+  transform: translateX(110%);
+}
+.saas-voucher-body,
+.saas-voucher-stub {
+  position: relative;
+  z-index: 1;
+}
+.saas-voucher-body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 22px 26px 18px;
+  /* The fine diagonal lines of printed money. */
+  background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--voucher-tone) 7%, transparent) 0 1px, transparent 1px 10px);
+}
+.saas-voucher-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0;
+  color: var(--voucher-ink);
+  font: 700 var(--saas-text-xs)/1.3 var(--saas-font);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.saas-voucher-tag {
+  padding: 3px 9px;
+  border-radius: var(--saas-radius-pill);
+  background: color-mix(in srgb, var(--voucher-tone) 14%, var(--saas-card));
+  color: var(--saas-text);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.saas-voucher h2 {
+  margin: 0;
+  font: 800 var(--saas-text-3xl)/1.1 var(--saas-font-display);
+  font-stretch: var(--saas-head-stretch);
+  letter-spacing: var(--saas-head-track);
+}
+.saas-voucher-face {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+}
+.saas-voucher-face-label {
+  align-self: center;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--voucher-tone) 45%, var(--saas-border));
+  border-radius: var(--saas-radius-xs);
+  color: var(--voucher-ink);
+  font: 700 var(--saas-text-xs)/1.3 var(--saas-font);
+  letter-spacing: 0.08em;
+}
+.saas-voucher-face strong {
+  background: linear-gradient(100deg, var(--voucher-ink), var(--voucher-ink-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font: 800 var(--saas-text-5xl)/1 var(--saas-font-display);
+  font-stretch: var(--saas-display-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--saas-display-track);
+}
+.saas-voucher-unit {
+  color: var(--voucher-ink);
+  font: 700 var(--saas-text-xl)/1 var(--saas-font);
+}
+.saas-voucher-face-note {
+  margin: 0;
+  color: var(--saas-muted);
+  font-size: var(--saas-text-sm);
+}
+.saas-voucher-perks {
+  display: grid;
+  gap: 7px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.saas-voucher-perks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+.saas-voucher-perks svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--voucher-ink);
+}
+.saas-voucher-serial {
+  margin: 4px 0 0;
+  color: var(--saas-subtle);
+  font: 600 11px/1 var(--saas-font-mono);
+  letter-spacing: 0.3em;
+}
+.saas-voucher-stamp {
+  align-self: center;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 2px solid currentColor;
+  border-radius: var(--saas-radius-xs);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
+  color: color-mix(in srgb, var(--saas-success) 88%, var(--saas-text));
+  font: 800 var(--saas-text-md)/1.2 var(--saas-font);
+  letter-spacing: 0.24em;
+  opacity: 0.9;
+  transform: rotate(-9deg);
+  pointer-events: none;
+}
+.saas-voucher-stub {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px 20px;
+  background: color-mix(in srgb, var(--voucher-tone) 9%, transparent);
+  text-align: center;
+}
+/* The perforation the stub tears off along, between the two notches. */
+.saas-voucher-stub::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--voucher-notch) + 8px);
+  bottom: calc(var(--voucher-notch) + 8px);
+  left: -1px;
+  border-left: 2px dashed color-mix(in srgb, var(--voucher-tone) 50%, var(--saas-border));
+}
+.saas-voucher-price {
+  margin: 0;
+  color: var(--saas-muted);
+  font-size: var(--saas-text-sm);
+}
+.saas-voucher-price strong {
+  display: block;
+  color: var(--saas-text);
+  font: 800 var(--saas-text-4xl)/1 var(--saas-font-display);
+  font-stretch: var(--saas-head-stretch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--saas-head-track);
+}
+.saas-voucher-stub button {
+  width: 100%;
+}
+.saas-voucher-state {
+  margin: 0;
+  color: color-mix(in srgb, var(--saas-success) 88%, var(--saas-text));
+  font-weight: 700;
+}
+.saas-voucher-fine {
+  margin: 0;
+  color: var(--saas-muted);
+  font-size: var(--saas-text-xs);
+  line-height: 1.5;
+}
+.saas-voucher.is-current .saas-voucher-ticket {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--saas-success) 60%, var(--saas-border));
+}
+
+/* Narrow: the stub goes under the body, along a straight perforation; no notches (their place would move with the
+   stub's text). */
+@container (max-width: 560px) {
+  .saas-voucher-ticket {
+    grid-template-columns: minmax(0, 1fr);
+    -webkit-mask: none;
+    mask: none;
+  }
+  .saas-voucher-body { padding: 20px 20px 16px; }
+  .saas-voucher-stub { padding: 18px 20px 20px; }
+  .saas-voucher-stub::before {
+    top: -1px;
+    right: 18px;
+    bottom: auto;
+    left: 18px;
+    border-top: 2px dashed color-mix(in srgb, var(--voucher-tone) 50%, var(--saas-border));
+    border-left: 0;
+  }
+  .saas-voucher-face strong { font-size: var(--saas-text-4xl); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saas-voucher,
+  .saas-voucher-ticket::after { transition: none; }
+  .saas-voucher:hover { transform: none; }
+  .saas-voucher:hover .saas-voucher-ticket::after { transform: translateX(-110%); }
+}
+/* Forced colours drop the gradient behind clipped text: give the face value its system colour back. */
+@media (forced-colors: active) {
+  .saas-voucher-face strong { background: none; color: CanvasText; }
+  .saas-voucher-ticket { -webkit-mask: none; mask: none; border: 1px solid CanvasText; }
+}

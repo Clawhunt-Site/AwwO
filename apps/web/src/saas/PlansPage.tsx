@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check } from 'lucide-react';
 import { saasErrorMessage, type Identity } from './api';
-import { billingNavigation, fetchBilling, formatCredits, openBillingPortal, planName, startCheckout, stripePage, type Billing, type CatalogPlan, type PlanId } from './billing';
+import { billingNavigation, fetchBilling, formatCredits, openBillingPortal, planName, startCheckout, stripePage, type Billing, type PlanId } from './billing';
+import { PlanVoucher } from './PlanVoucher';
 import { useSaaSPreferences } from './preferences';
 import './plans.css';
 
@@ -78,13 +78,7 @@ export function PlansPage({ identity }: { identity: Identity }) {
   const current = billing.plan?.entitled ? billing.plan : null;
   // Subscribed, but not entitled: a first payment or a renewal that has not gone through.
   const held = !current && billing.plan && SUBSCRIBED.has(billing.plan.status) ? billing.plan : null;
-  const features = (plan: CatalogPlan) => [
-    t(`每月 ${formatCredits(plan.credits, locale)} 点（1 点 = 1 美分），用于 Claude、GPT、Bedrock 和图片视频`, `${formatCredits(plan.credits, locale)} credits a month (1 credit = 1 cent) for Claude, GPT, Bedrock, images and video`),
-    t(`默认模型每天 ${formatCredits(plan.dailyCalls, locale)} 次，不扣点`, `${formatCredits(plan.dailyCalls, locale)} default-model calls a day, free of credits`),
-    t(`同时运行 ${plan.concurrentAgents} 个 Agent`, `${plan.concurrentAgents} agents at once`),
-    t(`最多 ${plan.workspaces} 个工作区`, `Up to ${plan.workspaces} workspaces`),
-    t(`每天最多 ${plan.mediaPerDay} 次图片 / 视频生成`, `Up to ${plan.mediaPerDay} image or video generations a day`),
-  ];
+  const smallest = billing.catalog.reduce((least, plan) => (plan.credits < least.credits ? plan : least), billing.catalog[0]);
   return <div className="saas-plans">
     {returned.current === 'cancel' && <p className="saas-plans-notice" role="status">{t('已取消支付，没有扣款。', 'Payment cancelled; you were not charged.')}</p>}
     {returned.current === 'success' && <p className="saas-plans-notice" role="status">{syncing ? t('支付完成，正在开通套餐…', 'Payment complete. Turning on your plan…')
@@ -108,21 +102,28 @@ export function PlansPage({ identity }: { identity: Identity }) {
         <p className="saas-plans-current-name">{planName(held.id)}</p>
         <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
         <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
-      </> : <p>{t('免费版：每天有固定的总次数，默认模型和 Claude / GPT、Bedrock 等高级模型都能用（高级模型全站每天共享一份免费名额），图片视频另有免费次数；详见工作区顶部的「今日额度」。Claude Opus 5.5 和标着「不含」的模型需要 Pro 或 Max。', 'Free: a daily number of calls for the default model and for premium models such as Claude / GPT and Bedrock (premium calls share one service-wide daily number), plus free image or video calls; see Today’s allowance at the top of a workspace. Claude Opus 5.5, and what is marked Not included, need Pro or Max.')}</p>}
+      </> : <>
+        <p>{t('免费版：每天有固定的总次数，默认模型和 Claude / GPT、Bedrock 等高级模型都能用（高级模型全站每天共享一份免费名额），图片视频另有免费次数；详见工作区顶部的「今日额度」。Claude Opus 5.5 和标着「不含」的模型需要 Pro 或 Max。', 'Free: a daily number of calls for the default model and for premium models such as Claude / GPT and Bedrock (premium calls share one service-wide daily number), plus free image or video calls; see Today’s allowance at the top of a workspace. Claude Opus 5.5, and what is marked Not included, need Pro or Max.')}</p>
+        {billing.checkoutEnabled && <p className="saas-plans-lead">{t('选一张点数券：付款成功后点数自动到账，按月订阅，可随时取消。', 'Pick a voucher: the credits arrive automatically once the payment goes through. Monthly, cancel anytime.')}</p>}
+      </>}
     </section>
-    <div className="saas-plans-grid">
+    <div className="saas-vouchers">
       {billing.catalog.map(plan => {
         const isCurrent = current?.id === plan.id;
         const subscribed = current ?? held;
-        return <section key={plan.id} className={`saas-card saas-plan${isCurrent ? ' is-current' : ''}`} aria-labelledby={`saas-plan-${plan.id}`}>
-          <h2 id={`saas-plan-${plan.id}`}>{planName(plan.id)}</h2>
-          <p className="saas-plan-price"><strong>${plan.priceUsd}</strong>{t(' / 月', ' / month')}</p>
-          <ul>{features(plan).map(text => <li key={text}><Check size={15} aria-hidden="true" />{text}</li>)}</ul>
-          {isCurrent ? <p className="saas-plan-state">{t('当前套餐', 'Your plan')}</p>
-            : subscribed ? <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{t(`在管理订阅中切换到 ${planName(plan.id)}`, `Switch to ${planName(plan.id)} in Manage subscription`)}</button>
-              : billing.checkoutEnabled ? <button type="button" className="saas-primary" disabled={busy !== null} onClick={() => go(plan.id)}>{busy === plan.id ? t('正在打开支付页…', 'Opening checkout…') : t(`订阅 ${planName(plan.id)}`, `Subscribe to ${planName(plan.id)}`)}</button>
-                : <button type="button" disabled>{t('即将开放', 'Coming soon')}</button>}
-        </section>;
+        const name = planName(plan.id);
+        const buying = busy === plan.id;
+        const action = isCurrent ? <p className="saas-voucher-state">{t('当前套餐', 'Your plan')}</p>
+          : subscribed ? <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{t(`在管理订阅中切换到 ${name}`, `Switch to ${name} in Manage subscription`)}</button>
+            : billing.checkoutEnabled ? <button type="button" className="saas-primary" disabled={busy !== null} onClick={() => go(plan.id)}>{buying ? t('正在打开支付页…', 'Opening checkout…') : t(`立即开通 ${name}`, `Get ${name}`)}</button>
+              : <button type="button" disabled>{t('即将开放', 'Coming soon')}</button>;
+        // An upgrade during a paid period adds what its prorated charge paid (the hint below says how credits work); a
+        // subscription not paid yet has no difference to pay.
+        const upgrade = current !== null && plan.credits > (billing.catalog.find(item => item.id === current.id)?.credits ?? Infinity);
+        const fine = isCurrent ? (current?.cancelAtPeriodEnd ? t('已取消续费，本期结束前照常可用', 'Renewal cancelled; on until the period ends') : t('每期自动续费，点数随新一期到账', 'Renews each period with new credits'))
+          : subscribed ? (upgrade ? t('期中升级只补按剩余天数折算的差价，补多少钱就加多少点', 'Upgrading mid-period charges only the prorated difference and adds 1 credit per cent of it') : undefined)
+            : billing.checkoutEnabled ? t('按月订阅 · 可随时取消 · 由 Stripe 安全支付', 'Monthly · cancel anytime · paid securely through Stripe') : undefined;
+        return <PlanVoucher key={plan.id} plan={plan} smallest={smallest} current={isCurrent} action={action} fine={fine} />;
       })}
     </div>
     {Boolean(actionError) && <p role="alert" className="saas-error">{saasErrorMessage(actionError, locale)}</p>}

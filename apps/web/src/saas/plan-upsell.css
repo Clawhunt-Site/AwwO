@@ -1,2 +1,64 @@
-.saas-plan-upsell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--saas-border, var(--line)); border-radius: 9px; background: var(--saas-soft, transparent); }
-.saas-plan-upsell p { margin: 0; color: var(--saas-muted, var(--muted)); }
+/* The upgrade offered where a run was refused for want of a plan (PlanUpsell.tsx): a small voucher, as the plans page's
+ * (plan-voucher.css), its stub holding the way to the plans along a perforation. Narrow (the canvas assistant's panel),
+ * the stub goes under the text. */
+.saas-plan-upsell {
+  --upsell-tone: var(--saas-bio, var(--accent));
+  container-type: inline-size;
+  margin: 10px 0;
+}
+.saas-plan-upsell-ticket {
+  display: grid;
+  /* The stub's button wraps within its share: an `auto` column would take the button's whole width first and leave the
+     text a sliver. */
+  grid-template-columns: minmax(0, 1fr) fit-content(42%);
+  overflow: hidden;
+  border-radius: var(--saas-radius, 12px);
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--upsell-tone) 14%, transparent), transparent 60%),
+    var(--saas-card, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--upsell-tone) 30%, var(--saas-border, var(--line)));
+}
+.saas-plan-upsell-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 14px;
+  background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--upsell-tone) 7%, transparent) 0 1px, transparent 1px 9px);
+}
+.saas-plan-upsell-body p { margin: 0; color: var(--saas-muted, var(--muted)); line-height: 1.55; }
+.saas-plan-upsell-body .saas-plan-upsell-kicker {
+  color: color-mix(in srgb, var(--upsell-tone) 58%, var(--saas-text, currentColor));
+  font: 700 var(--saas-text-xs, 12px)/1.3 var(--saas-font, inherit);
+  letter-spacing: 0.12em;
+}
+.saas-plan-upsell-stub {
+  position: relative;
+  display: grid;
+  align-items: center;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--upsell-tone) 9%, transparent);
+}
+.saas-plan-upsell-stub a {
+  padding-block: 8px;
+  line-height: 1.35;
+  text-align: center;
+}
+.saas-plan-upsell-stub::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -1px;
+  border-left: 2px dashed color-mix(in srgb, var(--upsell-tone) 50%, var(--saas-border, var(--line)));
+}
+@container (max-width: 480px) {
+  .saas-plan-upsell-ticket { grid-template-columns: minmax(0, 1fr); }
+  .saas-plan-upsell-stub::before {
+    top: -1px;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    border-top: 2px dashed color-mix(in srgb, var(--upsell-tone) 50%, var(--saas-border, var(--line)));
+    border-left: 0;
+  }
+}

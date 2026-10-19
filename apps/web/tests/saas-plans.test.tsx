@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PlansPage, returnPoll } from '../src/saas/PlansPage';
 import { RouteUsageMeter } from '../src/saas/RouteUsageMeter';
 import { billingNavigation, stripePage } from '../src/saas/billing';
@@ -38,14 +38,66 @@ it('shows both plans as coming soon while checkout is closed', async () => {
   const soon = screen.getAllByRole('button', { name: '即将开放' });
   expect(soon).toHaveLength(2);
   soon.forEach(button => expect(button).toBeDisabled());
-  expect(screen.getByText(/每月 2,000 点/)).toBeVisible();
+  expect(within(screen.getByRole('region', { name: 'Pro' })).getByText('2,000')).toBeVisible();
   expect(screen.getByText(/默认模型每天 1,000 次/)).toBeVisible();
+});
+
+it('shows each plan as a voucher: its credits as the face value, its price on the stub, and the plan held stamped', async () => {
+  serve(() => response(free));
+  page();
+  const proVoucher = await screen.findByRole('region', { name: 'Pro' });
+  expect(within(proVoucher).getByText('面值')).toBeVisible();
+  expect(within(proVoucher).getByText('2,000')).toBeVisible();
+  expect(within(proVoucher).getByText('$20')).toBeVisible();
+  expect(within(proVoucher).getByText('日常创作')).toBeVisible();
+  expect(within(proVoucher).getByText('按月订阅 · 可随时取消 · 由 Stripe 安全支付')).toBeVisible();
+  // Every figure is the catalog's: Max says how many times Pro's credits it holds, from the two plans' credits.
+  const maxVoucher = screen.getByRole('region', { name: 'Max' });
+  expect(within(maxVoucher).getByText('10,000')).toBeVisible();
+  expect(within(maxVoucher).getByText('进阶创作 · 点数是 Pro 的 5 倍')).toBeVisible();
+  expect(within(maxVoucher).getByText(/默认模型每天 1,000 次/)).toBeVisible();
+  expect(screen.getByText(/选一张点数券/)).toBeVisible();
+  expect(screen.queryByText('使用中')).toBeNull();
+  cleanup();
+  serve(() => response(pro));
+  page();
+  const held = await screen.findByRole('region', { name: 'Pro' });
+  expect(within(held).getByText('使用中')).toBeInTheDocument();
+  // Only the plan held is stamped.
+  expect(within(screen.getByRole('region', { name: 'Max' })).queryByText('使用中')).toBeNull();
+  expect(within(held).getByText('当前套餐')).toBeVisible();
+  expect(within(held).getByText('每期自动续费，点数随新一期到账')).toBeVisible();
+  // Switching up says what an upgrade costs; the page never offers a second checkout to a subscriber.
+  expect(within(screen.getByRole('region', { name: 'Max' })).getByText('期中升级只补按剩余天数折算的差价，补多少钱就加多少点')).toBeVisible();
+  expect(screen.queryByText(/选一张点数券/)).toBeNull();
+  expect(screen.queryByRole('button', { name: /^立即开通/ })).toBeNull();
+  cleanup();
+  // A Max subscriber looking at Pro is not told an upgrade's terms.
+  serve(() => response({ ...pro, plan: { ...pro.plan, id: 'max' } }));
+  page();
+  const lower = await screen.findByRole('region', { name: 'Pro' });
+  expect(within(lower).getByRole('button', { name: '在管理订阅中切换到 Pro' })).toBeEnabled();
+  expect(within(lower).queryByText(/期中升级/)).toBeNull();
+  expect(within(screen.getByRole('region', { name: 'Max' })).getByText('使用中')).toBeInTheDocument();
+  cleanup();
+  // A cancelled renewal says the plan stays on until the period ends.
+  serve(() => response({ ...pro, plan: { ...pro.plan, cancelAtPeriodEnd: true } }));
+  page();
+  expect(within(await screen.findByRole('region', { name: 'Pro' })).getByText('已取消续费，本期结束前照常可用')).toBeVisible();
+  cleanup();
+  // A subscription not paid yet has no difference to pay: no upgrade line, and nothing stamped.
+  serve(() => response({ ...free, plan: { ...pro.plan, status: 'incomplete', entitled: false } }));
+  page();
+  const unpaid = await screen.findByRole('region', { name: 'Max' });
+  expect(within(unpaid).getByRole('button', { name: '在管理订阅中切换到 Max' })).toBeEnabled();
+  expect(within(unpaid).queryByText(/期中升级/)).toBeNull();
+  expect(screen.queryByText('使用中')).toBeNull();
 });
 
 it('opens Stripe checkout for the chosen plan, and only Stripe’s own page', async () => {
   const calls = serve((url, init) => url.endsWith('/billing/checkout') ? response({ url: 'https://checkout.stripe.com/c/pay/cs_1' }) : response(free));
   page();
-  fireEvent.click(await screen.findByRole('button', { name: '订阅 Max' }));
+  fireEvent.click(await screen.findByRole('button', { name: '立即开通 Max' }));
   await waitFor(() => expect(go).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_1'));
   const post = calls.find(call => call.init.method === 'POST')!;
   expect(JSON.parse(String(post.init.body))).toEqual({ plan: 'max' });
@@ -53,10 +105,10 @@ it('opens Stripe checkout for the chosen plan, and only Stripe’s own page', as
   go.mockClear();
   serve((url, init) => init.method === 'POST' ? response({ url: 'https://evil.example/c/pay' }) : response(free));
   page();
-  fireEvent.click(await screen.findByRole('button', { name: '订阅 Pro' }));
+  fireEvent.click(await screen.findByRole('button', { name: '立即开通 Pro' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('支付页面地址无效');
   expect(go).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: '订阅 Pro' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '立即开通 Pro' })).toBeEnabled();
 });
 
 it('shows the current plan with its credits and sends changes to the billing portal', async () => {
@@ -121,7 +173,7 @@ it('sends a subscription that has not gone through to the billing portal, never 
   const calls = serve((url, init) => init.method === 'POST' ? response({ url: 'https://billing.stripe.com/p/session/2' }) : response({ ...free, plan: { ...pro.plan, status: 'incomplete', entitled: false } }));
   page();
   expect(await screen.findByText(/订阅还没有生效/)).toBeVisible();
-  expect(screen.queryByRole('button', { name: /^订阅/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^(订阅|立即开通)/ })).toBeNull();
   expect(screen.getByRole('button', { name: '在管理订阅中切换到 Max' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: '管理订阅' }));
   await waitFor(() => expect(go).toHaveBeenCalledWith('https://billing.stripe.com/p/session/2'));
@@ -131,13 +183,13 @@ it('sends a subscription that has not gone through to the billing portal, never 
 it('frees its buttons when the browser comes back from Stripe with Back', async () => {
   serve((url, init) => init.method === 'POST' ? response({ url: 'https://checkout.stripe.com/c/pay/cs_9' }) : response(free));
   page();
-  fireEvent.click(await screen.findByRole('button', { name: '订阅 Pro' }));
+  fireEvent.click(await screen.findByRole('button', { name: '立即开通 Pro' }));
   await waitFor(() => expect(go).toHaveBeenCalled());
-  expect(screen.getByRole('button', { name: '订阅 Max' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '立即开通 Max' })).toBeDisabled();
   const restored = new Event('pageshow') as PageTransitionEvent;
   Object.defineProperty(restored, 'persisted', { value: true });
   window.dispatchEvent(restored);
-  await waitFor(() => expect(screen.getByRole('button', { name: '订阅 Max' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: '立即开通 Max' })).toBeEnabled());
 });
 
 it('says a cancelled checkout charged nothing', async () => {
