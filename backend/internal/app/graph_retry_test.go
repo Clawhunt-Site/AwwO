@@ -425,6 +425,11 @@ func TestPostgresGraphNodeRetriesTransientFailureThenSucceeds(t *testing.T) {
 	if up := graphNodeResult(t, graph, "up"); up["state"] != "running" || up["detail"] != "" {
 		t.Fatal("a running retry still says it is waiting to retry", up)
 	}
+	// The execution timeline's times: a node in flight has begun and not ended; one not reached has neither.
+	if up, down := graphNodeResult(t, graph, "up"), graphNodeResult(t, graph, "down"); up["startedAt"] == nil || up["endedAt"] != nil ||
+		down["startedAt"] != nil || down["endedAt"] != nil {
+		t.Fatal("times while the retry runs", up, down)
+	}
 	close(release)
 	done := awaitGraph(t, h, c, path, "completed")
 	if calls := pi.seen(); !slices.Equal(calls, []string{"up#1", "up#2", "down#1"}) {
@@ -452,6 +457,19 @@ func TestPostgresGraphNodeRetriesTransientFailureThenSucceeds(t *testing.T) {
 	}
 	if down["state"] != "done" || down["attempts"] != float64(0) || len(down["attemptLog"].([]any)) != 0 {
 		t.Fatal(down)
+	}
+	// Each settled node's times are its current run's own: the retry's admission and end, not the failed attempt's.
+	for node, run := range map[string]string{"up": runs[1].id, "down": down["runId"].(string)} {
+		var created, updated time.Time
+		if e := h.db.QueryRow(context.Background(), "SELECT created_at,updated_at FROM runs WHERE id=$1", run).Scan(&created, &updated); e != nil {
+			t.Fatal(e)
+		}
+		result := graphNodeResult(t, done, node)
+		started, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(result["startedAt"]))
+		ended, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(result["endedAt"]))
+		if !started.Equal(created) || !ended.Equal(updated) || ended.Before(started) {
+			t.Fatalf("%s times %v..%v, its run %v..%v", node, result["startedAt"], result["endedAt"], created, updated)
+		}
 	}
 	var downStart, upEnd time.Time
 	if e := h.db.QueryRow(context.Background(), "SELECT (SELECT created_at FROM runs WHERE id=$1),(SELECT updated_at FROM runs WHERE id=$2)", down["runId"], runs[1].id).Scan(&downStart, &upEnd); e != nil || !downStart.After(upEnd) {
@@ -652,6 +670,10 @@ func TestPostgresGraphCancelStopsAPendingRetry(t *testing.T) {
 	up := graphNodeResult(t, graph, "up")
 	if graph["status"] != "running" || up["state"] != "waiting" || up["attempts"] != float64(1) || len(runs) != 1 || up["runId"] != runs[0].id || runs[0].status != "failed" {
 		t.Fatalf("waiting for its retry: %v %+v", up, runs)
+	}
+	// Its run is the failed attempt's: the timeline shows no start until the next attempt is admitted.
+	if up["startedAt"] != nil || up["endedAt"] != nil {
+		t.Fatal("times while waiting for a retry", up)
 	}
 	var due time.Time
 	if e := h.db.QueryRow(context.Background(), "SELECT retry_at FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id='up'", tid, gid).Scan(&due); e != nil || time.Until(due) < 5*time.Second {

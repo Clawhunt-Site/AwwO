@@ -170,6 +170,17 @@ func TestPostgresCollaborationSessionsEvidenceAndFinalBoundary(t *testing.T) {
 		} else if n["partial"] != true || n["output"] != "OUTPUT-6" {
 			t.Fatal("critique overwrote candidate", n)
 		}
+		// A collaboration node's turns are its runs: the timeline reads its first turn's start and its last turn's end.
+		var first, last time.Time
+		if e := h.db.QueryRow(context.Background(), `SELECT min(r.created_at),max(r.updated_at) FROM graph_collaboration_turns t
+			JOIN runs r ON r.tenant_id=t.tenant_id AND r.id=t.run_id WHERE t.graph_id=$1 AND t.node_id=$2`, done["id"], n["nodeId"]).Scan(&first, &last); e != nil {
+			t.Fatal(e)
+		}
+		started, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(n["startedAt"]))
+		ended, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(n["endedAt"]))
+		if !started.Equal(first) || !ended.Equal(last) {
+			t.Fatalf("%v times %v..%v, its turns %v..%v", n["nodeId"], n["startedAt"], n["endedAt"], first, last)
+		}
 	}
 	var count int
 	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM node_sessions WHERE tenant_id=$1", tid).Scan(&count); e != nil || count != 2 {

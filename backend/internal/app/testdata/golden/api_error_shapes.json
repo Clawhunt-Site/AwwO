@@ -189,11 +189,13 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": null,
           "nodeId": "image-graph",
           "output": "",
           "partial": false,
           "runId": null,
           "sessionId": "<session:image-graph>",
+          "startedAt": null,
           "state": "waiting"
         }
       ],
@@ -235,11 +237,13 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": "<timestamp>",
           "nodeId": "image-graph",
           "output": "pi reply 2 from test-model",
           "partial": false,
           "runId": "<run:graph-image-graph>",
           "sessionId": "<session:image-graph>",
+          "startedAt": "<timestamp>",
           "state": "done"
         }
       ],

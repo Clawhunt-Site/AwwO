@@ -108,22 +108,26 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": null,
           "nodeId": "author",
           "output": "",
           "partial": true,
           "runId": null,
           "sessionId": "<session:author>",
+          "startedAt": null,
           "state": "waiting"
         },
         {
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": null,
           "nodeId": "reviewer",
           "output": "",
           "partial": true,
           "runId": null,
           "sessionId": "<session:reviewer>",
+          "startedAt": null,
           "state": "waiting"
         }
       ],
@@ -246,22 +250,26 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": "<timestamp>",
           "nodeId": "author",
           "output": "pi reply 5 from test-model",
           "partial": false,
           "runId": "<run:collab-05-synthesis-author>",
           "sessionId": "<session:author>",
+          "startedAt": "<timestamp>",
           "state": "done"
         },
         {
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": "<timestamp>",
           "nodeId": "reviewer",
           "output": "openai-agents reply 2 from oa-default",
           "partial": true,
           "runId": "<run:collab-04-review-reviewer>",
           "sessionId": "<session:reviewer>",
+          "startedAt": "<timestamp>",
           "state": "done"
         }
       ],

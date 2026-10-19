@@ -26,6 +26,9 @@ export interface CanvasRunJournalNode {
   /** A cloud graph's automatic retries of this node and their limit (RunNodeStatus). */
   attempts?: number;
   retryLimit?: number;
+  /** When this node's run began and ended (epoch ms), as recorded; the execution timeline draws its bar from them. */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface CanvasRunJournal {
@@ -59,6 +62,8 @@ const states = new Set<RunNodeState>(['waiting', 'running', 'done', 'failed', 'b
 const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value : null;
 const retryCount = (value: unknown): number | undefined => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5 ? Number(value) : undefined;
 
+const stamp = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
 /** Invalid/torn storage never becomes an active lock. */
 export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage()): CanvasRunJournal | null {
   let raw: unknown;
@@ -87,6 +92,8 @@ export function loadRunJournal(storage: Pick<Storage, 'getItem'> = canvasStorage
       ...(Number.isInteger(item.round) && Number(item.round) >= 0 && Number(item.round) <= 3 ? { round: Number(item.round) } : {}),
       ...(retryCount(item.attempts) ? { attempts: retryCount(item.attempts) } : {}),
       ...(retryCount(item.attempts) && retryCount(item.retryLimit) ? { retryLimit: retryCount(item.retryLimit) } : {}),
+      ...(stamp(item.startedAt) !== undefined ? { startedAt: stamp(item.startedAt),
+        ...(stamp(item.endedAt) !== undefined && stamp(item.endedAt)! >= stamp(item.startedAt)! ? { endedAt: stamp(item.endedAt) } : {}) } : {}),
     };
   }
   if (!scope.length || scope.length > 1000 || scope.some(id => !Object.hasOwn(nodes, id))) return null;

@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { InspectorPanel } from '../src/canvas/InspectorPanel';
 import { RunControls, summaryNote } from '../src/canvas/RunControls';
-import { RunTimeline, type RunView } from '../src/canvas/RunTimeline';
+import { RunTimeline, timelineRuns, type RunView } from '../src/canvas/RunTimeline';
 import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
 import { CommandBar } from '../src/canvas/CommandBar';
 import { createFormNode, createSessionNode, type FormNode, type SessionNode } from '../src/canvas/canvasDoc';
@@ -366,6 +366,38 @@ describe('RunTimeline', () => {
     // The graph may contain scratch or out-of-scope nodes. Missing run state is absence of
     // participation, not evidence that the node was queued.
     expect(screen.queryByTestId('runline-not-in-run')).toBeNull();
+  });
+
+  it('keeps the times a page recorded when fresh statuses arrive, and stamps only transitions it saw', () => {
+    const before: Record<string, RunView> = {
+      a: { state: 'running', startedAt: 1_000 },
+      b: { state: 'waiting' },
+      c: { state: 'running', startedAt: 2_000 },
+    };
+    const next = timelineRuns(before, {
+      a: { state: 'running' }, // a cloud poll without times: the recorded start stays
+      b: { state: 'running' }, // seen to begin: stamped now
+      c: { state: 'done' }, // seen to settle: ended now
+      d: { state: 'done' }, // first seen settled: no invented start
+      e: { state: 'done', startedAt: 500, endedAt: 900 }, // the server's own times win
+      f: { state: 'running', startedAt: 600, endedAt: 700 }, // nothing in flight has ended
+    }, 5_000);
+    expect(next.a).toEqual({ state: 'running', startedAt: 1_000 });
+    expect(next.b).toEqual({ state: 'running', startedAt: 5_000 });
+    expect(next.c).toEqual({ state: 'done', startedAt: 2_000, endedAt: 5_000 });
+    expect(next.d).toEqual({ state: 'done' });
+    expect(next.e).toEqual({ state: 'done', startedAt: 500, endedAt: 900 });
+    expect(next.f).toEqual({ state: 'running', startedAt: 600 });
+    // A node that went back to waiting (a retry, a review round) has no end; one blocked before it began has no start.
+    const again = timelineRuns(next, { c: { state: 'waiting' }, b: { state: 'blocked' } }, 6_000);
+    expect(again.c).toEqual({ state: 'waiting', startedAt: 2_000 });
+    expect(timelineRuns({ x: { state: 'waiting' } }, { x: { state: 'blocked' } }, 6_000).x).toEqual({ state: 'blocked' });
+    // Drawn: a row with recorded times has its bar and elapsed time.
+    const node = sessionNode({ id: 'e', title: '已记录' });
+    render(<RunTimeline nodes={[node]} runs={next} runStartedAt={500} now={5_000} onClose={vi.fn()} />);
+    const row = screen.getByTestId('runline-e');
+    expect(row.querySelector('.canvas-runline-fill')).not.toBeNull();
+    expect(within(row).getByText('0:00')).toBeTruthy();
   });
 
   it('localizes persisted recovery codes in the state detail', () => {

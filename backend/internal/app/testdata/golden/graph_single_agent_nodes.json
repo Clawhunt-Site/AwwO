@@ -78,22 +78,26 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": null,
           "nodeId": "research",
           "output": "",
           "partial": false,
           "runId": null,
           "sessionId": "<session:research>",
+          "startedAt": null,
           "state": "waiting"
         },
         {
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": null,
           "nodeId": "report",
           "output": "",
           "partial": false,
           "runId": null,
           "sessionId": "<session:report>",
+          "startedAt": null,
           "state": "waiting"
         }
       ],
@@ -186,22 +190,26 @@
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": "<timestamp>",
           "nodeId": "research",
           "output": "pi reply 1 from test-model",
           "partial": false,
           "runId": "<run:graph-research>",
           "sessionId": "<session:research>",
+          "startedAt": "<timestamp>",
           "state": "done"
         },
         {
           "attemptLog": [],
           "attempts": 0,
           "detail": "",
+          "endedAt": "<timestamp>",
           "nodeId": "report",
           "output": "{\"artifact\":\"awwo-file:<artifact:report:artifact>\",\"summary\":\"Summary 2 from openai-agents.\"}",
           "partial": false,
           "runId": "<run:graph-report>",
           "sessionId": "<session:report>",
+          "startedAt": "<timestamp>",
           "state": "done"
         }
       ],

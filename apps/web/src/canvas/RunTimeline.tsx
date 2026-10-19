@@ -69,6 +69,33 @@ const DRAWER_STYLE: CSSProperties = {
   overflow: 'auto',
 };
 
+const SETTLED: ReadonlySet<RunNodeStatus['state']> = new Set(['done', 'failed', 'cancelled']);
+
+/**
+ * The timeline's rows for a fresh set of node statuses (a run journal, a cloud graph's snapshot): each keeps the times
+ * the statuses carry (a cloud graph's come from the server's own runs), else the times this page already recorded,
+ * else a time stamped now for a transition this page saw happen (waiting → running, running → settled). A node first
+ * seen mid-run or already settled gets no invented start: it draws no bar until a recorded time says when it began.
+ */
+export function timelineRuns(
+  previous: Readonly<Record<string, RunView>>,
+  next: Readonly<Record<string, RunNodeStatus & { startedAt?: number; endedAt?: number }>>,
+  now: number,
+): Record<string, RunView> {
+  const result: Record<string, RunView> = {};
+  for (const [id, status] of Object.entries(next)) {
+    const before = previous[id];
+    const began = before && before.state === 'waiting' && status.state !== 'waiting' && status.state !== 'blocked' && status.state !== 'cached';
+    const startedAt = status.startedAt ?? before?.startedAt ?? (began ? now : undefined);
+    const settled = SETTLED.has(status.state);
+    const endedAt = !settled || startedAt === undefined ? undefined
+      : status.endedAt ?? before?.endedAt ?? (before && !SETTLED.has(before.state) ? now : undefined);
+    const { startedAt: _s, endedAt: _e, ...rest } = status;
+    result[id] = { ...rest, ...(startedAt !== undefined ? { startedAt } : {}), ...(endedAt !== undefined && endedAt >= startedAt! ? { endedAt } : {}) };
+  }
+  return result;
+}
+
 function fmtElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;

@@ -77,7 +77,7 @@ import { GraphSettings } from './GraphSettings';
 import { addReviewPartner } from './reviewPartner';
 import { preflightReviewGraphIssue, runReviewGraph } from './reviewGraph';
 import { beginReviewRound, prepareReviewTurn } from './reviewJournal';
-import { RunTimeline, type RunView } from './RunTimeline';
+import { RunTimeline, timelineRuns, type RunView } from './RunTimeline';
 import { Minimap } from './Minimap';
 import { CommandBar, type CommandBarMode, type CanvasCommandActions } from './CommandBar';
 import { useCanvasKeys, keyHintMap } from './useCanvasKeys';
@@ -1243,7 +1243,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const active = loadRunJournal(laneStorage(lane));
       if (active) {
         const { setRuns, setRunning, setRecovering } = laneSetters[lane];
-        laneList[lane].journal.current = active; setRuns(active.nodes); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
+        laneList[lane].journal.current = active; setRuns(timelineRuns({}, active.nodes, Date.now())); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
       }
     };
     window.addEventListener('storage', observeOtherTab);
@@ -1397,7 +1397,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         timer = setTimeout(() => void poll(), 2500); return;
       }
       journal.current = next;
-      setRuns(next.nodes);
+      setRuns(prev => timelineRuns(prev, next.nodes, Date.now()));
       setReviewRound(next.review?.round ?? 0);
       setRunStartedAt(next.startedAt);
       if (!next.collaboration && next.scope.length > 1 && !simpleRef.current) setTimelineOpen(true);
@@ -1600,7 +1600,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const durable = loadRunJournal();
     if (durable) {
       journal.current = durable;
-      setRuns(durable.nodes); setReviewRound(durable.review?.round ?? 0); setRunning(true); setRecovering(true);
+      setRuns(timelineRuns({}, durable.nodes, Date.now())); setReviewRound(durable.review?.round ?? 0); setRunning(true); setRecovering(true);
       return;
     }
     if (manualMessage && submittedNode && !await prepareManualHistoryCapacity(
@@ -1733,7 +1733,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         saveRunJournal(recovered, submissionStorage);
         if (currentSaaSCanvas() !== cloud) return;
         journal.current = recovered;
-        setRuns(recovered.nodes);
+        setRuns(prev => timelineRuns(prev, recovered.nodes, Date.now()));
         if (ac.signal.aborted) await cancelCloudGraph(journal.current);
       } catch (error) {
         if (!admitted && graphAdmissionRejected(error)) {
@@ -1845,7 +1845,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         const next = beginReviewRound(journal.current!, round);
         if (!saveRunJournal(next)) throw new Error(surfaceNotice(t, 'storage_write_failed'));
         journal.current = next;
-        setRuns(next.nodes); setReviewRound(round);
+        setRuns(timelineRuns({}, next.nodes, Date.now())); setReviewRound(round);
       },
       beforeTurn: async node => {
         const live = docRef.current.nodes.find(item => item.id === node.id);
@@ -1893,7 +1893,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         const historical = recoveryJournalForDocument(persistedCanvas.doc, journal.current!);
         journal.current = historical; saveRunJournal(historical);
         docRef.current = applyRecoveredDocument(persistedCanvas.doc, { ...historical, inputFingerprint: pending.inputFingerprint! });
-        setDoc(docRef.current); setRuns(historical.nodes); finalSummary = journalSummary(historical);
+        setDoc(docRef.current); setRuns(timelineRuns({}, historical.nodes, Date.now())); finalSummary = journalSummary(historical);
         setHandoffNote(surfaceNotice(t, 'recovery_input_changed'));
       }
       if (!saveLocalDocument(docRef.current)) { setRecovering(true); return; }
@@ -1960,7 +1960,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             state: result.cancelled ? 'cancelled' : 'failed', detail: result.status,
           });
           if (saveRunJournal(confirmed)) {
-            journal.current = confirmed; setRuns(confirmed.nodes);
+            journal.current = confirmed; setRuns(prev => timelineRuns(prev, confirmed.nodes, Date.now()));
           } else setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
         }, () => setHandoffNote(surfaceNotice(t, 'execution_owned_elsewhere')), undefined, true);
       });

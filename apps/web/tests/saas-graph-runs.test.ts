@@ -98,6 +98,36 @@ describe('durable cloud graph identity and recovery', () => {
     expect(rejected.nodes.b.detail).toBe('recovery_input_changed'); // An omitted node was not refreshed.
   });
 
+  // Live 2026-10-18: every row of the execution timeline drew no bar and 「—」 for a cloud run, because the graph's nodes
+  // carried no times and each poll replaced the page's own. The server now says when each node's run began and ended.
+  it('carries each node’s recorded run times into the journal, through a reload, and drops an end the run no longer has', () => {
+    const begun = Date.parse('2026-09-08T03:04:06.000Z');
+    const ended = Date.parse('2026-09-08T03:04:36.500Z');
+    const journal = graphRecoveryJournal(snapshot({ nodes: [
+      { nodeId: 'a', state: 'done', runId: 'run-a', sessionId: 'session-a', output: 'A', startedAt: '2026-09-08T03:04:06.000Z', endedAt: '2026-09-08T03:04:36.500Z' },
+      { nodeId: 'b', state: 'running', runId: 'run-b', startedAt: '2026-09-08T03:04:37.000Z', endedAt: null },
+      { nodeId: 'upstream', state: 'cached', output: 'Published source', startedAt: null, endedAt: null },
+    ] }), tenant.id, document());
+    expect(journal.nodes.a).toMatchObject({ startedAt: begun, endedAt: ended });
+    expect(journal.nodes.b).toMatchObject({ startedAt: Date.parse('2026-09-08T03:04:37.000Z') });
+    expect(journal.nodes.b).not.toHaveProperty('endedAt');
+    expect(journal.nodes.upstream).not.toHaveProperty('startedAt');
+    const storage = memoryStorage();
+    expect(saveRunJournal(journal, storage)).toBe(true);
+    expect(loadRunJournal(storage)!.nodes.a).toMatchObject({ startedAt: begun, endedAt: ended });
+    // A retry's new run: its own start, and no end yet.
+    const retried = mergeGraphSnapshot(journal, snapshot({ nodes: [{ nodeId: 'a', state: 'running', runId: 'run-a-2', startedAt: '2026-09-08T03:05:00.000Z', endedAt: null }] }));
+    expect(retried.nodes.a.startedAt).toBe(Date.parse('2026-09-08T03:05:00.000Z'));
+    expect(retried.nodes.a).not.toHaveProperty('endedAt');
+    // Unreadable or backwards times are not drawn; a node the server gives none keeps what it had.
+    const odd = mergeGraphSnapshot(journal, snapshot({ nodes: [{ nodeId: 'a', state: 'done', startedAt: 'yesterday' }, { nodeId: 'b', state: 'done', startedAt: '2026-09-08T03:04:37.000Z', endedAt: '2026-09-08T03:00:00.000Z' }] }));
+    expect(odd.nodes.a).toMatchObject({ startedAt: begun, endedAt: ended });
+    expect(odd.nodes.b).not.toHaveProperty('endedAt');
+    storage.setItem('awwo.canvas.active-run.v1', JSON.stringify({ ...journal, nodes: { ...journal.nodes, a: { ...journal.nodes.a, startedAt: 'soon', endedAt: ended } } }));
+    expect(loadRunJournal(storage)!.nodes.a).not.toHaveProperty('startedAt');
+    expect(loadRunJournal(storage)!.nodes.a).not.toHaveProperty('endedAt');
+  });
+
   it('shows a node waiting for its automatic retry with its attempts and limit, through a reload and its next attempt', () => {
     const failed = { runId: 'run-a-1', code: 'runtime_rejected', endedAt: '2026-09-08T03:05:00Z', attempt: 1 };
     const retrying = snapshot({ nodeRetries: 2, nodes: [

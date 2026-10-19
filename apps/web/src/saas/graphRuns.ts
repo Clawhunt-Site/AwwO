@@ -22,6 +22,9 @@ export interface GraphNodeResult {
   attempts?: number;
   /** Each failed attempt the node was retried after, oldest first. */
   attemptLog?: GraphNodeAttempt[];
+  /** When the node's current run was admitted and when it settled (null while in flight, or for a node with no run). */
+  startedAt?: string | null;
+  endedAt?: string | null;
 }
 export interface GraphNodeAttempt { runId: string; code: string; endedAt: string; attempt: number }
 export type GraphCollaborationPhase = 'proposal' | 'review' | 'synthesis';
@@ -209,6 +212,13 @@ export async function observeCloudGraph(journal: CanvasRunJournal, signal?: Abor
   return mergeGraphSnapshot(journal, snapshot);
 }
 
+/** A server timestamp as epoch milliseconds, or nothing for a missing or unreadable one. */
+function graphTime(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : undefined;
+}
+
 export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRunSnapshot): CanvasRunJournal {
   if (!journal.serverGraph || snapshot.canvasId !== journal.serverGraph.canvasId || snapshot.operationId !== journal.id
     || (journal.serverGraph.id && journal.serverGraph.id !== snapshot.id)) {
@@ -261,6 +271,9 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
     // A fresh authoritative node snapshot replaces its previous diagnostic too. In particular,
     // a local observer's input-mismatch warning must not survive a later matching server result.
     const { detail: _previousDetail, attempts: _previousAttempts, retryLimit: _previousLimit, ...previousState } = previous;
+    // The server's times for the node's current run, which the timeline draws; a node it has none for keeps what it had.
+    const startedAt = graphTime(result.startedAt);
+    const endedAt = startedAt !== undefined ? graphTime(result.endedAt) : undefined;
     // A node's retries show only while the server reports them, with the limit they count towards.
     const attempts = retryCount(result.attempts);
     const retryLimit = retryCount(snapshot.nodeRetries);
@@ -273,7 +286,9 @@ export function mergeGraphSnapshot(journal: CanvasRunJournal, snapshot: GraphRun
       ...(collaboration ? { partial: snapshot.status !== 'completed' || result.partial !== false || result.nodeId !== collaboration.synthesizerNodeId }
         : result.partial !== undefined ? { partial: result.partial } : {}),
       ...(result.phase ? { phase: result.phase } : {}), ...(result.round !== undefined ? { round: result.round } : {}),
+      ...(startedAt !== undefined ? { startedAt, ...(endedAt !== undefined && endedAt >= startedAt ? { endedAt } : {}) } : {}),
     };
+    if (startedAt !== undefined && (endedAt === undefined || endedAt < startedAt)) delete nodes[result.nodeId].endedAt;
   }
   // A terminal graph cannot keep an unobserved node perpetually waiting.
   if (!graphIsActive(snapshot)) for (const node of Object.values(nodes)) {
