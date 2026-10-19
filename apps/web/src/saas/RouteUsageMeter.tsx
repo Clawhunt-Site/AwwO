@@ -120,8 +120,8 @@ function CallsNote() {
   return <>
     <p className="saas-route-usage-calls">{t('1 次 = 模型回答一次（或生成一张图片 / 一段视频）。一个任务里模型常要回答好几次，比如先读文件、再写代码、再检查，所以一条消息可能用掉不止 1 次。',
       '1 call = one answer from a model (or one image / video generation). A task often needs several answers, for example to read files, write code and check it, so one message can use more than 1 call.')}</p>
-    <p className="saas-route-usage-calls">{t('直接执行的任务如果因为平台原因失败（比如执行服务出错或重启），用掉的次数退还到当天的总次数，每天最多退还 32 次；下面单独限次的几行不退。',
-      'A direct task that fails because of the platform (for example the execution service failed or restarted) gives its calls back to that day’s total, up to 32 a day; the rows below with limits of their own keep counting them.')}</p>
+    <p className="saas-route-usage-calls">{t('直接执行的任务如果因为平台原因失败（比如执行服务出错或重启），用掉的次数退还到当天的总次数；被平台的时间限制掐断的，只退被掐断的那次。每天最多退还 32 次；下面单独限次的几行不退。',
+      'A direct task that fails because of the platform (for example the execution service failed or restarted) gives its calls back to that day’s total; one that a platform time limit cut gives back only the cut call. Up to 32 a day; the rows below with limits of their own keep counting them.')}</p>
   </>;
 }
 

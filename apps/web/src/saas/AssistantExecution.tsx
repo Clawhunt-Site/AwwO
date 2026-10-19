@@ -224,8 +224,11 @@ function TaskDetail({ execution, actions }: { execution: ManagedExecution; actio
     {run.truncated && <p className="awwo-execution-note">{t('记录超过显示上限，部分过程未展示。', 'The record exceeds the display limit; part of the process is not shown.')}</p>}
     {run.error && <p className="awwo-execution-error" role="alert">{run.status === 'interrupted'
       ? t('服务重启，任务被中断了，没有做完。', 'The service restarted and interrupted the task before it finished.') : taskErrorText(t, locale, run.error)}</p>}
-    {(run.refundedCalls ?? 0) > 0 && <p className="awwo-execution-note">{t('这是平台的原因：这次用掉的次数退还到当天的总次数；每天最多退还 32 次，超出的照常计算。',
-      'This was the platform’s fault: the calls it used go back to that day’s total; at most 32 a day go back, the rest count as usual.')}</p>}
+    {(run.refundedCalls ?? 0) > 0 && <p className="awwo-execution-note">{run.refundScope === 'cut'
+      ? t('这是平台的原因：平台的时间限制掐断了调用，被掐断的调用退还到当天的总次数，这个任务的其他调用照常计算；每天最多退还 32 次。',
+        'This was the platform’s fault: a platform time limit cut a call. The calls it cut go back to that day’s total, and the task’s other calls count as usual; at most 32 a day go back.')
+      : t('这是平台的原因：这次用掉的次数退还到当天的总次数；每天最多退还 32 次，超出的照常计算。',
+        'This was the platform’s fault: the calls it used go back to that day’s total; at most 32 a day go back, the rest count as usual.')}</p>}
     {run.error && planUpsellCode([run.error]) ? <PremiumTaskActions execution={execution} code={run.error} />
       : terminal && run.id === execution.selectedId && (run.status === 'interrupted' || (run.status === 'failed' && RETRYABLE.has(run.error)))
         && actions?.send && !execution.readOnly && run.prompt.trim()

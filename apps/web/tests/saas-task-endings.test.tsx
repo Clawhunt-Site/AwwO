@@ -53,6 +53,18 @@ describe('a direct task that ended without its result', () => {
     expect(screen.getByText('这是平台的原因：这次用掉的次数退还到当天的总次数；每天最多退还 32 次，超出的照常计算。')).toBeVisible();
   });
 
+  it('says only the calls a platform time limit cut go back (owner 2026-10-18)', async () => {
+    await shown({ error: 'computer_execution_failed', refundedCalls: 1, refundScope: 'cut' }, { send: vi.fn() });
+    expect(await screen.findByText('任务在执行途中失败了（执行服务或一次模型调用出了错），没有做完。')).toBeVisible();
+    expect(screen.getByText('这是平台的原因：平台的时间限制掐断了调用，被掐断的调用退还到当天的总次数，这个任务的其他调用照常计算；每天最多退还 32 次。')).toBeVisible();
+    expect(screen.queryByText(/这次用掉的次数退还/)).toBeNull();
+  });
+
+  it('reads a server without the refund scope as every call given back', async () => {
+    await shown({ error: 'computer_execution_failed', refundedCalls: 7, refundScope: undefined }, { send: vi.fn() });
+    expect(await screen.findByText('这是平台的原因：这次用掉的次数退还到当天的总次数；每天最多退还 32 次，超出的照常计算。')).toBeVisible();
+  });
+
   it('says a restart interrupted it', async () => {
     await shown({ status: 'interrupted', error: 'API restarted before completion' }, { send: vi.fn() });
     expect(await screen.findByText('服务重启，任务被中断了，没有做完。')).toBeVisible();

@@ -20,6 +20,9 @@ export interface ExecutionRun extends ExecutionRunSummary {
   /** The model calls the task spent (or is spending), and those given back to today's total because the platform
    *  failed it (direct_task_refund.go on the server). */
   calls?: number; refundedCalls?: number;
+  /** Which calls came back, read with refundedCalls: every call of the task ('task'), or only those a platform time
+   *  limit cut on their way ('cut'); null when none did. An older server leaves it out: every call. */
+  refundScope?: string | null;
 }
 export interface ExecutionInput { operationId: string; prompt: string; runtime: string; model: string; effort?: string; knowledgeRevisionIds?: string[] }
 export interface ExecutionResponseInput { requestId: string; behavior: 'allow' | 'deny'; message?: string; operationId: string }

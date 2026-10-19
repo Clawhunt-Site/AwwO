@@ -57,7 +57,7 @@ it('says what one call is and what a failed direct task gives back', async () =>
   meter();
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
   expect(screen.getByText(/^1 次 = 模型回答一次/)).toBeVisible();
-  expect(screen.getByText(/用掉的次数退还到当天的总次数，每天最多退还 32 次；下面单独限次的几行不退。$/)).toBeVisible();
+  expect(screen.getByText(/用掉的次数退还到当天的总次数；被平台的时间限制掐断的，只退被掐断的那次。每天最多退还 32 次；下面单独限次的几行不退。$/)).toBeVisible();
 });
 
 it('reads the numbers again as soon as a task says it ended', async () => {
