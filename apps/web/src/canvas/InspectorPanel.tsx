@@ -38,6 +38,8 @@ import { NodeModelSettings } from './NodeModelSettings';
 import { SANDBOX_RUNTIME } from './nodeRuntime';
 import { registerUnsavedEdits } from './unsavedEdits';
 import { AssembleSettings } from './AssembleSettings';
+import { EditSettings } from './EditSettings';
+import type { EditWiredFiles } from './editNode';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import {
@@ -70,6 +72,8 @@ export interface InspectorPanelProps {
   media?: MediaCatalogueState;
   /** Read the media catalogue again after a failed read. */
   onRetryMedia?: () => void;
+  /** An edit node's wired files (editWiredFiles), which its settings' example timeline names. */
+  editFiles?: EditWiredFiles;
   /** A hosted workspace's chat models, each once on the runtime AwwO runs it on (automaticGroups): the node's model is
    *  picked from these and its runtime is never shown (nodeRuntime.ts). Absent → the runtime picker of a local host. */
   modelGroups?: ReadonlyArray<ModelPaletteGroup>;
@@ -178,6 +182,7 @@ export function InspectorPanel({
   onInitialize,
   media,
   onRetryMedia,
+  editFiles,
   modelGroups,
   sandboxGroups,
   modelsLoading = false,
@@ -266,6 +271,7 @@ export function InspectorPanel({
   const sandboxNode = sessionDraft?.runtime === SANDBOX_RUNTIME;
   const formDraft = draft.kind === 'form' ? draft : null;
   const assembleDraft = draft.kind === 'assemble' ? draft : null;
+  const editNodeDraft = draft.kind === 'edit' ? draft : null;
   const mediaCatalogue = mediaCatalogueOf(media);
   // A SaaS host saves a media node only once its catalog model and parameters are valid; a host
   // without the media service never saves one.
@@ -692,6 +698,8 @@ export function InspectorPanel({
           </>
         ) : assembleDraft ? (
           <AssembleSettings draft={assembleDraft} busy={busy} onChange={editDraft} />
+        ) : editNodeDraft ? (
+          <EditSettings draft={editNodeDraft} busy={busy} files={editFiles} onChange={editDraft} />
         ) : null}
       </div>
 

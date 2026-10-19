@@ -1,4 +1,5 @@
 import { ArtifactPreview, StoredArtifactPreview } from '../canvas/ArtifactPreview';
+import { nodeContract } from '../canvas/canvasDoc';
 import { normalizeContract, parseContractOutput } from '../canvas/nodeContracts';
 import { readableOutput, type ReadableOutput } from '../canvas/readableTranscript';
 import type { GraphNodeResult, GraphRunSnapshot } from './graphRuns';
@@ -36,7 +37,7 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
   // Missing or ambiguous historical identity cannot supply a trustworthy field contract.
   const historicalNodes = Array.isArray(graph.document?.nodes) ? graph.document.nodes.filter(item => item.id === node.nodeId) : [];
   const snapshot = historicalNodes.length === 1 ? historicalNodes[0] : undefined;
-  const historicalContract = snapshot && snapshot.kind !== 'form' ? snapshot.contract : undefined;
+  const historicalContract = snapshot ? nodeContract(snapshot) : undefined;
   const output = readableOutput({ id: 0, role: 'agent', text: node.output,
     presentation: { outputState: final ? 'final' : 'failed', outputContract: historicalContract } });
   const fields = output.fields.length || !final || output.invalid ? output.fields : plainHistoricalFields(node.output, historicalContract);

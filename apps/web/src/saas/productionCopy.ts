@@ -49,7 +49,8 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     const spec = workflow.nodes[index];
     if (!spec || fed.has(spec.id)) return node;
     const recorded = record.nodes.find(value => value.id === spec.id);
-    if (node.kind === 'form' || recorded?.status !== 'done') return node;
+    // A case canvas has no edit node (createOfficialCopyDocument mints sessions and assemble nodes).
+    if (node.kind === 'form' || node.kind === 'edit' || recorded?.status !== 'done') return node;
     if (spec.outputType === 'html' && files.some(file => recorded.output?.includes(file))) return node;
     // An assemble node that also delivers a file is made afresh on the copy's first run: the file it delivered is
     // stored in the case's workspace, and the copy's run makes it again in a moment, without a model.

@@ -7,6 +7,8 @@ export interface WorkspaceCapabilities {
   memory: { enabled: boolean; maxRunItems: number; maxRunBytes: number; maxPerScope: number };
   webReader: { enabled: boolean; perDay: number; usedToday: number };
   render: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFps: number; maxWidth: number; maxHeight: number; maxFrames: number; maxHtmlBytes: number } };
+  /** Edit nodes (edits.go), rendered on the same worker. Absent from a server older than them. */
+  edit?: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFiles: number; maxTimelineBytes: number } };
 }
 
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);

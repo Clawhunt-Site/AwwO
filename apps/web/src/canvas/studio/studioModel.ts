@@ -1,15 +1,16 @@
 // What a canvas made, as files: the model behind the deliverable studio (成果工作台) and the live card previews.
 //
 // Read from published outputs only (the same rules as canvasResultModel): each node's contract fields become
-// files (a page, a document, a stored file, a scalar summary), an image/video/3D node's generated media become
-// their own files, and a field that named a file no server holds is listed as missing, never as a delivery.
+// files (a page, a document, a stored file, a scalar summary), an image/video/3D node's generated media (and an edit's
+// film, subtitles, report and stills) become their own files, and a field that named a file no server holds is listed
+// as missing, never as a delivery.
 // Stored bytes are not fetched here; the studio loads them when a file is opened (studioData.ts).
-import type { CanvasDocument, CanvasNode, SessionNode } from '../canvasDoc';
+import { nodeContract, type CanvasDocument, type CanvasNode, type SessionNode } from '../canvasDoc';
 import { canvasResult, type DeliveryState } from '../canvasResultModel';
 import { deliveryPresentation } from '../fileDeliveryPresentation';
 import { htmlDocumentSource } from '../htmlDeliverable';
 import { mediaKindOf } from '../mediaCatalog';
-import { parseMediaOutput } from '../mediaOutput';
+import { parseEditFacts, parseMediaOutput } from '../mediaOutput';
 import { emptyContract } from '../nodeContracts';
 
 export type StudioKind = 'page' | 'markdown' | 'text' | 'code' | 'data' | 'table' | 'image' | 'video' | 'audio' | 'model' | 'pdf'
@@ -60,7 +61,7 @@ export interface StudioGroup {
 const EXTENSION_KIND: ReadonlyArray<readonly [RegExp, StudioKind]> = [
   [/\.html?$/i, 'page'],
   [/\.(?:md|markdown|mdx)$/i, 'markdown'],
-  [/\.(?:txt|text|log|rtf)$/i, 'text'],
+  [/\.(?:txt|text|log|rtf|srt|vtt)$/i, 'text'],
   [/\.(?:json|jsonc|geojson)$/i, 'data'],
   [/\.(?:csv|tsv)$/i, 'table'],
   [/\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i, 'image'],
@@ -139,7 +140,7 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
   // An assemble node's page and file are deliverables like an agent's.
   if (node.kind === 'form' || !node.lastOutput?.text.trim()) return [];
   const nodeTitle = node.title.trim() || node.id;
-  const contract = node.contract || emptyContract();
+  const contract = nodeContract(node) || emptyContract();
   const base = { nodeId: node.id, nodeTitle, folder: [] as string[], state, ...(review ? { review: true } : {}) };
   const text = node.lastOutput.text;
   const entries: StudioEntry[] = [];
@@ -151,7 +152,7 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
     used.add(candidate.toLowerCase());
     return candidate;
   };
-  if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind)) {
+  if (!contract.outputs.length && (node.kind === 'edit' || (node.kind === 'session' && mediaKindOf(node.agentKind)))) {
     const media = parseMediaOutput(text);
     for (const item of media?.items ?? []) {
       const extension = EXTENSION_OF_TYPE[item.contentType] ?? '';
@@ -159,6 +160,8 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
       entries.push({ ...base, id: `${node.id}:media:${item.artifactId}`, name, label: item.name, size: item.size,
         kind: kindOfType(item.contentType) ?? kindOfName(name), source: { type: 'media', artifactId: item.artifactId, contentType: item.contentType, size: item.size } });
     }
+    // An edit's film comes with its subtitles and report (kept as artifact content) and its stills (stored like its film).
+    if (node.kind === 'edit' && entries.length) entries.push(...editEntries(text, base, unique));
     if (entries.length) {
       // A 3D node stores its model and a preview picture: the model is what it made.
       const model = entries.find(entry => entry.kind === 'model');
@@ -213,6 +216,19 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
   const primary = [...entries].sort((a, b) => rank(a) - rank(b))[0];
   if (primary) primary.primary = true;
   return entries;
+}
+
+type EntryBase = Pick<StudioEntry, 'nodeId' | 'nodeTitle' | 'folder' | 'state' | 'review'>;
+
+/** An edit's other files: its subtitles and report, read like a stored file (they are kept as artifact content), and its
+ *  stills, shown like its film (stored pictures). Nothing when its record's edit block is malformed (parseEditFacts). */
+function editEntries(text: string, base: EntryBase, unique: (name: string) => string): StudioEntry[] {
+  return (parseEditFacts(text)?.files ?? []).map((file): StudioEntry => {
+    const entry = { ...base, id: `${base.nodeId}:edit:${file.artifactId}`, name: unique(file.name), label: file.name, size: file.size };
+    return file.role === 'still'
+      ? { ...entry, kind: 'image', source: { type: 'media', artifactId: file.artifactId, contentType: file.contentType, size: file.size } }
+      : { ...entry, kind: file.role === 'report' ? 'data' : 'text', source: { type: 'stored', reference: `awwo-file:${file.artifactId}` } };
+  });
 }
 
 /** The file a node's card previews: its primary deliverable. */

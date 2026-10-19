@@ -51,6 +51,15 @@ export interface PortRef {
   portId: string;
 }
 
+/** An edit node's ports, as the API types them (edits.go editPort): one timeline, any number of each medium, the film. */
+const EDIT_PORTS: ReadonlyArray<PortSpec> = [
+  { id: 'timeline', side: 'input', dataType: 'text' },
+  { id: 'clips', side: 'input', dataType: 'video', multi: true },
+  { id: 'sounds', side: 'input', dataType: 'audio', multi: true },
+  { id: 'pictures', side: 'input', dataType: 'image', multi: true },
+  { id: 'result', side: 'output', dataType: 'video' },
+];
+
 /**
  * The typed ports a node exposes, derived from its own kind/agentKind. Order is stable and
  * meaningful: it drives the vertical anchor layout in `portAnchorWorld`.
@@ -62,11 +71,14 @@ export interface PortRef {
  * - session video:      input 'context' (text, MULTI) + 'reference' (image, MULTI) → output 'result' (video)
  * - session model3d:    input 'context' (text, MULTI) + 'reference' (image) → output 'result' (file)
  * - session audio:      input 'context' (text, MULTI)                       → output 'result' (audio)
+ * - edit:               input 'timeline' (text) + 'clips' (video, MULTI) + 'sounds' (audio, MULTI)
+ *                       + 'pictures' (image, MULTI)                         → output 'result' (video)
  */
 export function portsFor(node: CanvasNode): PortSpec[] {
   if (node.kind === 'form') {
     return [{ id: 'data', side: 'output', dataType: 'text' }];
   }
+  if (node.kind === 'edit') return EDIT_PORTS.map(port => ({ ...port }));
   // An assemble node always has a contract: its inputs are its slots, its outputs the page and/or its file.
   const contract = node.contract;
   if (contract) {
@@ -133,14 +145,19 @@ export function isMediaSessionNode(node: CanvasNode): boolean {
   return node.kind === 'session' && !node.contract && (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' || node.agentKind === 'audio');
 }
 
+/** Does `node` deliver an awwo.media record: a media node, or an edit node (its film)? The API's graphMediaSource. */
+export function isMediaSourceNode(node: CanvasNode): boolean {
+  return isMediaSessionNode(node) || node.kind === 'edit';
+}
+
 /**
- * May this output feed this input? The same type, or a media node's result (a picture, a clip, a 3D model, a sound) into
- * a text input: that input then reads the files the generation stored, by the paths a page names them with, so a canvas
- * run hands its media to the page that uses them. The API applies the same rule to a run's graph (edgeTypesFit).
+ * May this output feed this input? The same type, or a media node's or an edit's result (a picture, a clip, a 3D model, a
+ * sound, a film) into a text input: that input then reads the files the node stored, by the paths a page names them with,
+ * so a canvas run hands its media to the page that uses them. The API applies the same rule to a run's graph (edgeTypesFit).
  */
 export function canFeed(fromNode: CanvasNode, out: PortSpec, inp: PortSpec): boolean {
   if (arePortTypesCompatible(out.dataType, inp.dataType)) return true;
-  return inp.dataType === 'text' && out.id === 'result' && isMediaSessionNode(fromNode)
+  return inp.dataType === 'text' && out.id === 'result' && isMediaSourceNode(fromNode)
     && (out.dataType === 'image' || out.dataType === 'video' || out.dataType === 'audio' || out.dataType === 'file');
 }
 

@@ -253,7 +253,7 @@ export function searchCanvas(
         push('字段', node.template);
         continue;
       }
-    } else {
+    } else if (node.kind === 'form') {
       const field = node.fields.find((f) => matchField(f.label, q) || matchField(f.value, q));
       if (field) {
         push('字段', `${field.label}: ${field.value}`);

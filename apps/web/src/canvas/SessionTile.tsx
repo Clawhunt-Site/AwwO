@@ -30,7 +30,7 @@
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Clapperboard, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
@@ -52,6 +52,7 @@ import { ContractFields } from './ContractFields';
 import { emptyContract, type ContractField } from './nodeContracts';
 import { NodeDeliverables } from './NodeDeliverables';
 import { AssembleTileBody } from './AssembleTileBody';
+import { EditTileBody, editPreview } from './EditTileBody';
 import type { AssembleInputView } from './assembleNode';
 import { ReworkFindingsNote } from './ReworkFindingsNote';
 import { NodeBrief, NodeFailure } from './NodeBrief';
@@ -271,6 +272,7 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
 function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   if (node.kind === 'assemble') return { glyph: '⧉', kindClass: 'assemble', label: canvasText(locale, 'tile.assemble') };
+  if (node.kind === 'edit') return { glyph: '✂', kindClass: 'edit', label: canvasText(locale, 'tile.edit') };
   const meta = AGENT_KIND_META[node.agentKind];
   const label = canvasText(locale, node.agentKind === 'coding' ? 'node.coding' : node.agentKind === 'image' ? 'node.image' : node.agentKind === 'video' ? 'node.video' : node.agentKind === 'model3d' ? 'node.model3d'
     : node.agentKind === 'audio' ? 'node.audio' : 'node.llm');
@@ -729,6 +731,7 @@ export const SessionTile = memo(function SessionTile({
       const outputs = node.contract.outputs.map(field => field.label || field.id).join(' + ');
       return t('tile.assembleSummary', { inputs: node.contract.inputs.length, outputs });
     }
+    if (node.kind === 'edit') return editPreview(node, t);
     return livePreview(session.turns, node.contract?.outputs, locale, mediaKindOf(node.agentKind) ? locale : undefined) || htmlPreviewSummary(node.preview, locale) || node.preview;
   }, [node, session.turns, locale, t]);
   const compactPreview = node.kind === 'session'
@@ -770,7 +773,7 @@ export const SessionTile = memo(function SessionTile({
   const toggleInputs = () => { if (!inputOpen) setInputsTakeColumn(true); setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); };
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
-  const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
+  const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.kind === 'edit' ? Clapperboard : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
     : node.agentKind === 'model3d' ? Box : node.agentKind === 'audio' ? Music : Bot;
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
@@ -954,6 +957,13 @@ export const SessionTile = memo(function SessionTile({
           ) : node.kind === 'assemble' ? (
             <AssembleTileBody node={node} expanded={expanded} canvasEntries={canvasEntries}
               inputs={assembleInputs ?? node.contract.inputs.map(field => ({ id: field.id, label: field.label || field.id, required: field.required, source: null, bytes: 0, used: true }))} />
+          ) : node.kind === 'edit' ? (
+            <>
+              {/* What stopped the film (often the render worker's words about the timeline) is what fixing it needs. */}
+              {expanded && run?.state === 'failed' ? <NodeFailure detail={runDetail ?? ''}
+                onRerun={onRunNode && !viewOnly && !busy ? () => onRunNode(nodeId) : undefined} /> : null}
+              <EditTileBody node={node} expanded={expanded} />
+            </>
           ) : (
             <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}${caseIntro ? ' is-case-intro' : ''}`}>
               {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>

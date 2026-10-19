@@ -338,6 +338,17 @@ function nodeInput(node: CanvasNode, inScope: boolean) {
         : null,
     };
   }
+  if (node.kind === 'edit') {
+    return {
+      id: node.id,
+      kind: node.kind,
+      title: node.title,
+      timeline: node.timeline,
+      reusedOutput: inScope ? null : node.lastOutput
+        ? { text: node.lastOutput.text, partial: node.lastOutput.partial === true }
+        : null,
+    };
+  }
   return {
     id: node.id,
     kind: node.kind,
@@ -464,7 +475,7 @@ export function mergeRecoveredManualConversation(
   }, new Set());
 }
 
-// A form or assemble node has no conversation: its journal entry names the thread 'form'.
+// A form, assemble or edit node has no conversation: its journal entry names the thread 'form'.
 function belongsToJournalThread(node: CanvasNode, threadId: string): boolean {
   return node.kind !== 'session' ? threadId === 'form' : activeThreadId(node) === threadId;
 }

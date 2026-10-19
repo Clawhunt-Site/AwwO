@@ -16,6 +16,8 @@ function executionKey(node: CanvasNode): string {
     return JSON.stringify([node.kind, node.title, node.template, node.fileName ?? '', node.contract.version,
       node.contract.inputs.map(field => fieldKey(field)), node.contract.outputs.map(field => fieldKey(field, true))]);
   }
+  // An edit is its timeline; its title names its film's files in a downstream prompt.
+  if (node.kind === 'edit') return JSON.stringify([node.kind, node.title, node.timeline]);
   const binding = node.binding ? [node.binding.companyId, node.binding.agentId, node.binding.agentName] : null;
   const contract = node.contract
     ? [node.contract.version, node.contract.inputs.map(field => fieldKey(field)), node.contract.outputs.map(field => fieldKey(field, true))]

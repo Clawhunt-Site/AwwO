@@ -6,7 +6,7 @@
 // came from and how complete it is are kept as recorded: a manual publication is never called a run's
 // result, a copied case's recording is never called this canvas's run, and a failed run's partial capture
 // is evidence, never a delivered result.
-import type { CanvasDocument, CanvasNode, NodeOutput } from './canvasDoc';
+import { nodeContract, type CanvasDocument, type CanvasNode, type NodeOutput } from './canvasDoc';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { deliveryPresentation } from './fileDeliveryPresentation';
 import { mediaKindOf } from './mediaCatalog';
@@ -68,6 +68,9 @@ function finalDelivery(node: CanvasNode): boolean {
     && FINAL_DELIVERY.test(`${field.id.replace(/([a-z])([A-Z])/g, '$1 $2')} ${field.label}`)));
 }
 
+/** A node whose result is generated files (an image, video, 3D or audio node), or an edit's film. */
+const mediaNode = (node: CanvasNode) => node.kind === 'edit' || (node.kind === 'session' && Boolean(mediaKindOf(node.agentKind)));
+
 export function stepDelivery(node: CanvasNode, depth: number, reviewer = false): StepDelivery {
   const input = node.kind === 'form';
   const review = node.kind === 'session' && (reviewer || (!finalDelivery(node)
@@ -77,8 +80,8 @@ export function stepDelivery(node: CanvasNode, depth: number, reviewer = false):
   const base = { node, depth, output, input, review };
   if (!output || !output.text.trim()) return { ...base, output: null, state: 'none', kind: null };
   const state: DeliveryState = output.partial ? 'partial' : output.source === 'manual' ? 'manual' : output.source === 'case' ? 'case' : 'run';
-  const contract = (node.kind !== 'form' && node.contract) || emptyContract();
-  if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind) && parseMediaOutput(output.text)) return { ...base, state, kind: 'media' };
+  const contract = nodeContract(node) || emptyContract();
+  if (!contract.outputs.length && mediaNode(node) && parseMediaOutput(output.text)) return { ...base, state, kind: 'media' };
   const parsed = deliveryPresentation(contract, output.text);
   const published = parsed.errors.length ? [] : contract.outputs.filter(field => {
     if (parsed.pendingFiles.has(field.id)) return true;
@@ -173,8 +176,9 @@ export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Pa
     const node = step.node;
     if (step.input || !step.output || node.kind === 'form') continue;
     const nodeTitle = node.title.trim() || node.id;
-    const contract = node.contract || emptyContract();
-    if (!contract.outputs.length && node.kind === 'session' && mediaKindOf(node.agentKind)) {
+    const contract = nodeContract(node) || emptyContract();
+    // An edit lists its film, like a video; its subtitles, report and stills open with it.
+    if (!contract.outputs.length && mediaNode(node)) {
       const media = parseMediaOutput(step.output.text);
       for (const item of media?.items ?? []) {
         const kind: DeliveredItemKind = item.contentType.startsWith('video/') ? 'video' : item.contentType.startsWith('model/') ? 'model'

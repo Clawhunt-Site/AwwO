@@ -2,7 +2,7 @@
 // under the assistant's reply, so a reader who only talks to the assistant sees which nodes it changed and how (owner
 // request 2026-10-15: beginners stay in the assistant instead of opening every node in developer mode). The model's own
 // summary says what it meant to do; these lines say what the canvas now holds.
-import type { CanvasDocument, CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
+import { nodeContract, type CanvasDocument, type CanvasEdge, type CanvasNode, type SessionNode } from './canvasDoc';
 import type { CanvasTranslate } from './i18n';
 import type { UiLocale } from '../locale';
 import { mediaKindOf } from './mediaCatalog';
@@ -30,7 +30,7 @@ function frameOf(node: SessionNode): { constraints: string; acceptance: string }
 
 function inputValues(node: CanvasNode): string {
   if (node.kind === 'form') return JSON.stringify(node.fields.map(field => [field.id, field.value]));
-  return JSON.stringify(node.contract?.inputs.map(field => [field.id, field.value]) ?? []);
+  return JSON.stringify(nodeContract(node)?.inputs.map(field => [field.id, field.value]) ?? []);
 }
 
 function fieldShape(node: SessionNode): string {

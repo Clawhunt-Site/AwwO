@@ -171,6 +171,8 @@ export function RunTimeline({
               ? t('timeline.form')
               : node.kind === 'assemble'
                 ? t('timeline.assemble')
+              : node.kind === 'edit'
+                ? t('timeline.edit')
               : runsOnMediaModel(node)
                 ? [mediaGroupLabel(locale), modelLabel].filter(Boolean).join(' · ')
                 : node.runtime

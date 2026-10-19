@@ -8,6 +8,7 @@ import { caseRunLabel, type CanvasEdge, type CanvasNode, type ReviewGraphPolicy 
 import { canvasResult, deliveredItems, type DeliveredItem, type StepDelivery } from './canvasResultModel';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { DeliverableMarkdown, NodeDeliverables } from './NodeDeliverables';
+import { EditResult } from './EditTileBody';
 import type { ModelNameSources } from './modelNames';
 import type { RunNodeStatus } from './runGraph';
 import { storedArtifactUrl } from '../saas/canvasBridge';
@@ -202,7 +203,8 @@ function SelectedStep({ step, final, complete, pending, stage, total, onBackToRe
         {step.node.fields.some(field => field.value.trim()) ? <dl>{step.node.fields.filter(field => field.value.trim()).map(field => <div key={field.id}>
           <dt>{field.label || field.id}</dt><dd>{field.value}</dd></div>)}</dl> : <p>{t('results.inputEmpty')}</p>}
       </section>
-        : step.output ? <NodeDeliverables key={`${step.node.id}:${step.output.at}:${fieldId ?? ''}`} node={step.node} readOnly presentation="result" initialFieldId={fieldId} canvasEntries={canvasEntries} />
+        : step.output ? step.node.kind === 'edit' ? <EditResult node={step.node} />
+          : <NodeDeliverables key={`${step.node.id}:${step.output.at}:${fieldId ?? ''}`} node={step.node} readOnly presentation="result" initialFieldId={fieldId} canvasEntries={canvasEntries} />
           : <p className="awwo-results-nothing">{t('results.noStepDelivery')}</p>}
     </div>
   </article>;

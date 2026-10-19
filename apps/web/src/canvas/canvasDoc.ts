@@ -187,7 +187,26 @@ export interface AssembleNode extends CanvasNodeBase {
   lastOutput?: NodeOutput | null;
 }
 
-export type CanvasNode = SessionNode | FormNode | AssembleNode;
+/**
+ * A node that joins the clips, sounds and pictures wired into it into one film by an awwo.timeline/1 document, without a
+ * model (editNode.ts; the API's edits.go, rendered by ffmpeg on the render worker). The timeline is the text wired into
+ * its timeline port (an agent's answer) or else its own. It runs only in a cloud canvas run, and delivers an awwo.media
+ * record of kind video: the film, with its subtitles, report and stills beside it.
+ */
+export interface EditNode extends CanvasNodeBase {
+  kind: 'edit';
+  /** Its own awwo.timeline/1 JSON text, used when no timeline is wired in; '' = none. */
+  timeline: string;
+  lastOutput?: NodeOutput | null;
+}
+
+export type CanvasNode = SessionNode | FormNode | AssembleNode | EditNode;
+
+/** A node's delivery contract: a session's, when it has one, or an assemble node's. A form and an edit have none (an
+ *  edit's ports are fixed: ports.ts). */
+export function nodeContract(node: CanvasNode): NodeContract | undefined {
+  return node.kind === 'session' || node.kind === 'assemble' ? node.contract : undefined;
+}
 
 export interface CanvasEdge {
   id: string;
@@ -247,6 +266,7 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
 export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
 export const ASSEMBLE_NODE_SIZE = { w: 320, h: 220 } as const;
+export const EDIT_NODE_SIZE = { w: 320, h: 240 } as const;
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d', 'audio'];
 const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'];
@@ -315,6 +335,20 @@ export function createAssembleNode(pos: { x: number; y: number }, locale: 'zh' |
       inputs: [{ id: 'module', label: zh ? '代码模块' : 'Code module', type: 'text', required: true, value: '' }],
       outputs: [{ id: 'result', label: zh ? '页面' : 'Page', type: 'html', required: true, value: '' }],
     },
+  };
+}
+
+/** An edit with no timeline yet: one is wired in, or written in its settings. */
+export function createEditNode(pos: { x: number; y: number }, locale: 'zh' | 'en' = 'zh'): EditNode {
+  return {
+    id: mintId(),
+    kind: 'edit',
+    x: pos.x,
+    y: pos.y,
+    w: EDIT_NODE_SIZE.w,
+    h: EDIT_NODE_SIZE.h,
+    title: locale === 'zh' ? '剪辑' : 'Edit',
+    timeline: '',
   };
 }
 
@@ -438,6 +472,21 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       template: str(r.template),
       contract,
       ...(typeof r.fileName === 'string' && r.fileName.trim() ? { fileName: r.fileName } : {}),
+      lastOutput: sanitizeOutput(r.lastOutput),
+    };
+  }
+
+  if (r.kind === 'edit') {
+    // Only what an edit is: its timeline text is checked by the API and the render worker when it runs.
+    return {
+      id,
+      kind: 'edit',
+      x: num(r.x),
+      y: num(r.y),
+      w: num(r.w, EDIT_NODE_SIZE.w),
+      h: num(r.h, EDIT_NODE_SIZE.h),
+      title: str(r.title, '剪辑'),
+      timeline: str(r.timeline),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }

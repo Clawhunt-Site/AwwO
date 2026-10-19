@@ -6,15 +6,16 @@
 // that leaks a capture-phase window listener would keep swallowing presses after it is gone.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Layers, MonitorPlay } from 'lucide-react';
+import { Clapperboard, Layers, MonitorPlay } from 'lucide-react';
 import type { AgentKind } from './canvasDoc';
 import { getAgentTemplates, type AgentTemplateId } from './agentTemplates';
 import { AgentGlyph } from './AgentWorkspace';
 import { displayText } from './displayCopy';
 import { useCanvasI18n } from './i18n';
 
-/** What the menu can create: a user-authored form, a session tile of one agent kind, or a 预览展示 window. */
-export type AddNodeKind = 'form' | AgentKind | AgentTemplateId | 'display' | 'assemble';
+/** What the menu can create: a user-authored form, a session tile of one agent kind, an assemble or edit node, or a 预览展示
+ *  window. */
+export type AddNodeKind = 'form' | AgentKind | AgentTemplateId | 'display' | 'assemble' | 'edit';
 
 export interface AddNodeMenuProps {
   /** Position relative to the `.canvas-root` element (already converted by the caller). */
@@ -28,9 +29,11 @@ export interface AddNodeMenuProps {
   mediaKinds?: ReadonlyArray<'image' | 'video' | 'model3d' | 'audio'>;
   /** Offer a 预览展示 window (displayNodes.ts), picked as kind 'display'. */
   withDisplay?: boolean;
+  /** Offer an edit node (editNode.ts), picked as kind 'edit': a cloud canvas whose server renders edits. */
+  withEdit?: boolean;
 }
 
-export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf, mediaKinds = [], withDisplay = false }: AddNodeMenuProps) {
+export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenModelShelf, mediaKinds = [], withDisplay = false, withEdit = false }: AddNodeMenuProps) {
   const { locale, t } = useCanvasI18n();
   const items = getAgentTemplates(locale).filter(item => !onOpenModelShelf || item.id === 'general');
   const ref = useRef<HTMLDivElement>(null);
@@ -46,7 +49,7 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
       x: Math.max(8, Math.min(at.x, bounds.width - menu.offsetWidth - 8)),
       y: Math.max(8, Math.min(at.y, bounds.height - menu.offsetHeight - 8)),
     });
-  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary), mediaKinds.length, withDisplay]);
+  }, [at.x, at.y, locale, Boolean(onOpenModelShelf), Boolean(onOpenAgentLibrary), mediaKinds.length, withDisplay, withEdit]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -104,6 +107,11 @@ export function AddNodeMenu({ at, onPick, onClose, onOpenAgentLibrary, onOpenMod
         <span className="canvas-tile-glyph"><Layers size={16} aria-hidden="true" /></span>
         <span><strong>{t('assemble.title')}</strong><small>{t('tile.assembleNoModel')}</small></span>
       </button>
+      {withEdit ? <button type="button" role="menuitem" className="canvas-add-menu-item awwo-template-menu-item" aria-label={t('edit.add')}
+        data-template="edit" onClick={(e) => { e.stopPropagation(); onPick('edit'); }}>
+        <span className="canvas-tile-glyph"><Clapperboard size={16} aria-hidden="true" /></span>
+        <span><strong>{t('edit.title')}</strong><small>{t('edit.addHint')}</small></span>
+      </button> : null}
       {withDisplay ? <>
         <div className="canvas-add-menu-title">{displayText(locale, 'display.addSection')}</div>
         <button type="button" role="menuitem" className="canvas-add-menu-item awwo-template-menu-item" aria-label={displayText(locale, 'display.add')}

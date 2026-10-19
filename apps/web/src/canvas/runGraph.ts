@@ -15,11 +15,12 @@
 // receives per-node status callbacks to drive badges. Nothing here fakes progress: every state
 // change mirrors a real event.
 
-import type { AssembleNode, CanvasEdge, CanvasNode, FormNode, SessionNode } from './canvasDoc';
+import { nodeContract, type AssembleNode, type CanvasEdge, type CanvasNode, type FormNode, type SessionNode } from './canvasDoc';
 import { assembleTemplate } from './assembleNode';
+import { EDIT_CLOUD_ONLY } from './editNode';
 import { mediaInputText } from './mediaOutput';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
-import { isMediaSessionNode, isSoftMediaFeed, reconcileEdges } from './ports';
+import { isMediaSourceNode, isSoftMediaFeed, reconcileEdges } from './ports';
 import { validateNodeTeam } from './nodeTeam';
 
 export type RunNodeState = 'waiting' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled' | 'cached';
@@ -116,7 +117,8 @@ export function findCycle(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray
 }
 
 /** Pre-flight problems that make a run impossible — reported up front, never mid-run. */
-export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle' | 'invalid_team';
+export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle' | 'invalid_team'
+  | 'edit_timeline';
 export interface PreflightIssue {
   code: PreflightIssueCode;
   values: Record<string, string | number | string[]>;
@@ -147,11 +149,19 @@ export function preflightGraphIssue(
       const issues = validateNodeTeam(node.team);
       if (issues.length) return { code: 'invalid_team', values: { nodeTitle: node.title, detail: issues[0].message }, message: `「${node.title}」协作配置无效：${issues[0].message}` };
     }
-    if (options.conversation || node.kind === 'form' || !node.contract) continue;
+    if (node.kind === 'edit') {
+      // One timeline, wired or its own, as the API admits an edit (validateEditNode).
+      const wired = validEdges.filter((edge) => edge.toNode === node.id && edge.toPort === 'timeline').length;
+      if (wired > 1) return { code: 'multiple_inputs', values: { nodeTitle: node.title, field: 'timeline' }, message: `「${node.title}」输入「timeline」只能连接一个来源。` };
+      if (!wired && !node.timeline.trim()) return { code: 'edit_timeline', values: { nodeTitle: node.title }, message: `「${node.title}」需要一份时间线：接入一份，或在它的设置里写一份。` };
+      continue;
+    }
+    const contract = nodeContract(node);
+    if (options.conversation || !contract) continue;
     // Wired fields are checked once their actual values arrive. A missing or incompatible
     // source port must never stand in for a required value during preflight.
     const local: ContractField[] = [];
-    for (const field of node.contract.inputs) {
+    for (const field of contract.inputs) {
       const incoming = validEdges.filter((edge) => edge.toNode === node.id && edge.toPort === `in:${field.id}`);
       if (incoming.length > 1) {
         const fieldName = field.label || field.id;
@@ -230,7 +240,8 @@ function resolvedInputs(node: SessionNode, upstream: ReadonlyArray<UpstreamInput
 
 /** The same publication gate for graph runs, cached results, and manual chat selections. */
 export function validateNodeOutput(node: CanvasNode, output: string): string[] {
-  return node.kind !== 'form' && node.contract ? parseContractOutput(node.contract, output).errors : [];
+  const contract = nodeContract(node);
+  return contract ? parseContractOutput(contract, output).errors : [];
 }
 
 /** An assemble node's result in a run on this device: no model, its inputs' exact text in its template's slots. A
@@ -377,6 +388,12 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         set(id, { state: 'cached', output: stored, detail: '沿用上次产出' });
         return true;
       }
+      // An edit renders on the cloud's worker from the files the cloud stores: nothing on this device can make its film,
+      // so it fails at once instead of after waiting for its inputs.
+      if (nodeById.get(id)?.kind === 'edit') {
+        set(id, { state: 'failed', detail: EDIT_CLOUD_ONLY });
+        return false;
+      }
       const deps = dependenciesOf(id);
       const upstreamOk = await Promise.all(deps.map((d) => exec(d.fromNode)));
       if (signal?.aborted) {
@@ -405,15 +422,16 @@ export async function runGraph(opts: RunGraphOptions): Promise<RunSummary> {
         set(id, { state: 'done', output });
         return true;
       }
+      if (node.kind === 'edit') return false; // failed at once, above
       const upstream: UpstreamInput[] = deps.map((d) => {
         const source = nodeById.get(d.fromNode);
         const text = outputs.get(d.fromNode) ?? '';
+        const contract = source && nodeContract(source);
         return {
           fromTitle: source?.title ?? d.fromNode,
           toPort: d.toPort,
-          output: source && source.kind !== 'form' && source.contract
-            ? parseContractOutput(source.contract, text).values[d.fromPort.slice('out:'.length)] ?? ''
-            : source && isMediaSessionNode(source) ? mediaInputText(source, outputs.get(d.fromNode)) : text,
+          output: contract ? parseContractOutput(contract, text).values[d.fromPort.slice('out:'.length)] ?? ''
+            : source && isMediaSourceNode(source) ? mediaInputText(source, outputs.get(d.fromNode)) : text,
         };
       });
       if (node.kind === 'assemble') {

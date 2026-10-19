@@ -78,13 +78,29 @@ const RECOVERY_DETAIL_KEYS = {
   'Cached upstream output holds no deliverable': 'surface.cachedOutputEmpty',
   timed_out: 'session.timedOut',
   retrying: 'surface.retrying',
+  // An edit node's failures (edits.go, edit_worker.go): what stopped the film, and the local engine's refusal.
+  timeout: 'edit.timeout',
+  edit_cloud_only: 'edit.cloudOnly',
+  edit_allowance: 'edit.allowance',
+  edit_unavailable: 'edit.unavailable',
+  edit_busy: 'edit.busy',
+  edit_rejected: 'edit.rejectedBare',
+  edit_failed: 'edit.failed',
+  edit_file_mismatch: 'edit.fileMismatch',
+  edit_file_missing: 'edit.fileMissing',
+  edit_output_invalid: 'edit.outputInvalid',
+  edit_storage_failed: 'edit.storageFailed',
 } as const satisfies Record<string, CanvasTextKey>;
+
+/** A timeline the render worker refused keeps the worker's own words (editFailureDetail in edits.go). */
+const EDIT_REJECTED = 'edit_rejected: ';
 
 /** Known persisted/native status codes are localized; unknown evidence remains verbatim. */
 export function recoveryDetailMessage(t: CanvasTranslate, detail?: string): string | undefined {
   if (!detail) return undefined;
   const key = RECOVERY_DETAIL_KEYS[detail as keyof typeof RECOVERY_DETAIL_KEYS];
   if (key) return t(key);
+  if (detail.startsWith(EDIT_REJECTED)) return t('edit.rejected', { detail: detail.slice(EDIT_REJECTED.length) });
   // The API's delivery-contract refusals (graph_contracts.go graphOutputFiles) say what a model's answer lacked, in
   // terms of field IDs the reader never sees; the reader is told what it means and what to do.
   if (DELIVERY_FORMAT_DETAIL.test(detail)) return t('surface.deliveryFormat');
@@ -101,6 +117,7 @@ const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   missing_inputs: 'run.preflightMissingInputs',
   cycle: 'run.preflightCycle',
   invalid_team: 'run.preflightInvalidTeam',
+  edit_timeline: 'edit.preflightTimeline',
 };
 
 const REVIEW_PREFLIGHT_KEYS: Record<ReviewPreflightReason, CanvasTextKey> = {

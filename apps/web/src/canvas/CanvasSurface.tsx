@@ -8,6 +8,7 @@ import { saasErrorMessage } from '../saas/api';
 import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
+import { readCapabilities } from '../saas/capabilitiesApi';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
@@ -56,6 +57,7 @@ import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversatio
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { assembleInputViews } from './assembleNode';
+import { editWiredFiles } from './editNode';
 import { followupDeliveryContract } from './followupDelivery';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
 import { CanvasViewport } from './CanvasViewport';
@@ -85,6 +87,7 @@ import {
   CANVAS_STORAGE_KEY,
   createFormNode,
   createAssembleNode,
+  createEditNode,
   createSessionNode,
   loadDocumentWithStatus,
   migrateFromLegacy,
@@ -464,6 +467,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return () => controller.abort();
   }, [canInitialize, cloudScope, readOnly, mediaRefresh]);
   const mediaKinds = useMemo(() => (['image', 'video', 'model3d', 'audio'] as const).filter(kind => mediaModelsOf(mediaCatalogueOf(mediaState), kind).length > 0), [mediaState]);
+  // Whether this server renders edit nodes (capabilities.go): null until read, or when it does not say. Only a server
+  // that says no hides the edit node; otherwise a run that cannot make the film says why on the node.
+  const [editEnabled, setEditEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    setEditEnabled(null);
+    if (!canInitialize || readOnly || !cloudScope) return;
+    const controller = new AbortController();
+    void readCapabilities(cloudScope.tenant.id, controller.signal).then(value => {
+      if (!controller.signal.aborted && typeof value.edit?.enabled === 'boolean') setEditEnabled(value.edit.enabled);
+    }, () => undefined);
+    return () => controller.abort();
+  }, [canInitialize, cloudScope, readOnly]);
   const inspectorCloseLocked = useRef(false);
   const [bindingLocked, setBindingLocked] = useState(false);
   const onInspectorLockChange = useCallback((locked: boolean) => {
@@ -2146,6 +2161,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // team. The first catalog model is shown, and runs only once the operator saves it.
       const node = kind === 'form' ? createFormNode(world)
         : kind === 'assemble' ? createAssembleNode(world, locale)
+        : kind === 'edit' ? createEditNode(world, locale)
         : media ? { ...createSessionNode(media, world), title: t(media === 'video' ? 'node.video' : media === 'model3d' ? 'node.model3d' : media === 'audio' ? 'node.audio' : 'node.image'),
           model: mediaModelsOf(mediaCatalogueOf(mediaState), media)[0]?.id ?? '' }
         : kind === 'llm' || kind === 'coding' || kind === 'image' || kind === 'video' || kind === 'model3d' || kind === 'audio'
@@ -2299,6 +2315,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     } else if (live.kind === 'assemble' && draft.kind === 'assemble') {
       saveNode({ ...live, title: draft.title, template: draft.template, contract: draft.contract,
         ...(draft.fileName ? { fileName: draft.fileName } : { fileName: undefined }) });
+    } else if (live.kind === 'edit' && draft.kind === 'edit') {
+      saveNode({ ...live, title: draft.title, timeline: draft.timeline });
     }
   }, [canEditStructure, saveNode]);
   const initializeInspector = useCallback(async (draft: SessionNode) => {
@@ -3837,6 +3855,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
+      editFiles={node.kind === 'edit' ? editWiredFiles(node, nodes, edges) : undefined}
       modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
       onRetryModels={() => setPaletteRefresh(value => value + 1)}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
@@ -4066,6 +4085,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <AddNodeMenu
           onOpenModelShelf={modelShelf ? () => setShelfCollapsed(false) : undefined}
           mediaKinds={canInitialize ? mediaKinds : undefined}
+          withEdit={canInitialize && editEnabled !== false}
           withDisplay
           onOpenAgentLibrary={loadWorkspaceAgents ? () => { setAddMenu(null); setAgentLibraryRequest(value => value + 1); } : undefined}
           at={addMenu.at}

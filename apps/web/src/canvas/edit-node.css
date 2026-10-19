@@ -1,0 +1,16 @@
+/* The edit node: no conversation; its film, what the edit says of it and its other files, or what to wire into it. */
+.canvas-root .canvas-tile--edit::before { background: var(--kind-form); }
+.awwo-edit-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding: 4px 2px; }
+.awwo-edit-result { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.awwo-edit-empty { display: flex; flex-direction: column; gap: 4px; color: var(--awwo-ink); font-size: 12.5px; line-height: 1.45; }
+.awwo-edit-note { margin: 0; color: var(--awwo-muted); font-size: 12px; line-height: 1.45; }
+.awwo-edit-summary { margin: 0; color: var(--awwo-ink); font-family: var(--awwo-mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.awwo-edit-files { display: flex; flex-direction: column; gap: 6px; }
+.awwo-edit-files h4 { margin: 0; color: var(--awwo-muted); font-size: 12px; font-weight: 600; }
+.awwo-edit-files ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.awwo-edit-files a, .awwo-edit-files li > span { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.awwo-edit-stills { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.awwo-edit-stills img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; border: 1px solid var(--awwo-line); }
+.awwo-edit-settings { display: flex; flex-direction: column; gap: 6px; }
+.awwo-edit-timeline { min-height: 260px; font-family: var(--awwo-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.5; white-space: pre; resize: vertical; }
+.awwo-edit-wired { overflow-wrap: anywhere; }

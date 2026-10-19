@@ -225,14 +225,24 @@ export interface TilePortsProps {
 
 type Translate = ReturnType<typeof useCanvasI18n>['t'];
 
+/** An edit node's ports (ports.ts): their names, and what each takes or gives. */
+const EDIT_PORT_LABEL: Readonly<Record<string, CanvasTextKey>> = {
+  timeline: 'edit.portTimeline', clips: 'edit.portClips', sounds: 'edit.portSounds', pictures: 'edit.portPictures', result: 'edit.portResult',
+};
+const EDIT_PORT_GUIDE: Readonly<Record<string, CanvasTextKey>> = {
+  timeline: 'edit.guideTimeline', clips: 'edit.guideClips', sounds: 'edit.guideSounds', pictures: 'edit.guidePictures', result: 'edit.guideResult',
+};
+
 /**
  * What a media node's port takes or gives, in a sentence or two: shown beside the port while it is hovered or
  * focused, so the wiring is learnt where it is done. The facts are the ones `portsFor` and the run engine hold:
  * `context` takes any number of text wires, which a canvas run puts after the node's own prompt; `reference` takes
  * one picture, used only where the node's model takes one (image edit, image-to-3D); `result` carries the files to
- * an input of the same type. Null for every other node and port: those keep their plain label.
+ * an input of the same type. An edit node's ports say what its timeline and media take and where its film goes. Null
+ * for every other node and port: those keep their plain label.
  */
 export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, port: PortSpec, media?: MediaComposerInfo): string | null {
+  if (node.kind === 'edit') return Object.hasOwn(EDIT_PORT_GUIDE, port.id) ? t(EDIT_PORT_GUIDE[port.id]) : null;
   if (node.kind !== 'session' || node.contract) return null;
   const kind = mediaKindOf(node.agentKind ?? '');
   if (!kind) return null;
@@ -267,6 +277,7 @@ export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
   const unzoom = 1 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
   const hasContract = node.kind === 'session' && Boolean(node.contract);
   const mediaPorts = node.kind === 'session' && !hasContract && Boolean(mediaKindOf(node.agentKind ?? ''));
+  const editPorts = node.kind === 'edit';
   return (
     <>
       {portsFor(node).map((p) => {
@@ -282,13 +293,14 @@ export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
         const sideLabel = t(p.side === 'input' ? 'ports.input' : 'ports.output');
         const typeLabel = t(TYPE_LABEL[p.dataType]);
         const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel })
+          : editPorts && Object.hasOwn(EDIT_PORT_LABEL, p.id) ? t(EDIT_PORT_LABEL[p.id])
           : p.id === 'reference' ? t('ports.reference')
             : mediaPorts && p.id === 'context' ? t('media.portContext')
               : mediaPorts && p.id === 'result' ? t('media.portResult') : p.id;
         const portKey = `${p.side}:${p.id}`;
         const expanded = expandedLabel === portKey;
         const headline = `${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}`
-          : mediaPorts && p.side === 'input' ? ` · ${t('media.portSingle')}` : ''}${wires ? ` · ${t('ports.connected', { count: wires })}` : ''}`;
+          : (mediaPorts || editPorts) && p.side === 'input' ? ` · ${t('media.portSingle')}` : ''}${wires ? ` · ${t('ports.connected', { count: wires })}` : ''}`;
         // A media port that can be wired explains itself where the wiring happens. Inert ports (read-only, simple
         // mode, a run in progress) do not: nothing can be wired there.
         const guide = interactive ? mediaPortGuide(t, locale, node, p, media) : null;

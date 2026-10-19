@@ -201,6 +201,9 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
         inputs: node.contract.inputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         outputs: node.contract.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}), ...runView(extras.runs?.[node.id]) };
+      // An edit node runs no model either, and the planner does not make or change one: only that it is there.
+      if (node.kind === 'edit') return { id: node.id, kind: node.kind, title: node.title,
+        ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}), ...runView(extras.runs?.[node.id]) };
       // A media node is described by what it makes and the prompt it will make it from, never by its model.
       const media = mediaKindOf(node.agentKind);
       if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft, ...runView(extras.runs?.[node.id]) };

@@ -6,7 +6,7 @@
 // The API runs the same algorithm for cloud runs (backend/internal/app/graph_assemble.go); both are checked against
 // backend/internal/app/testdata/assemble_vectors.json.
 
-import type { AssembleNode, CanvasEdge, CanvasNode } from './canvasDoc';
+import { nodeContract, type AssembleNode, type CanvasEdge, type CanvasNode } from './canvasDoc';
 import { parseContractOutput } from './nodeContracts';
 
 export const MAX_ASSEMBLE_TEMPLATE_BYTES = 64 * 1024;
@@ -120,8 +120,8 @@ export function assembleInputViews(node: AssembleNode, nodes: ReadonlyArray<Canv
     let value = field.value;
     if (edge) {
       const delivered = upstream?.lastOutput && !upstream.lastOutput.partial ? upstream.lastOutput.text : '';
-      value = upstream && upstream.kind !== 'form' && upstream.contract
-        ? parseContractOutput(upstream.contract, delivered).values[edge.fromPort.slice('out:'.length)] ?? '' : delivered;
+      const contract = upstream && nodeContract(upstream);
+      value = contract ? parseContractOutput(contract, delivered).values[edge.fromPort.slice('out:'.length)] ?? '' : delivered;
     }
     return { id: field.id, label: field.label || field.id, required: field.required,
       source: edge ? upstream?.title ?? edge.fromNode : null, bytes: utf8Length(unfenceAssembleValue(value)), used: used.has(field.id) };

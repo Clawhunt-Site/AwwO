@@ -1,5 +1,5 @@
 import { AGENT_TEMPLATES, createAgentTemplate, type AgentTemplateId } from './agentTemplates';
-import { createSessionNode, type CanvasDocument, type CanvasNode, type SessionNode } from './canvasDoc';
+import { createSessionNode, nodeContract, type CanvasDocument, type CanvasNode, type SessionNode } from './canvasDoc';
 import { canvasText } from './i18n';
 import { invalidateOutputs } from './invalidateOutputs';
 import { normalizeContract, validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
@@ -396,7 +396,7 @@ function setMediaPrompt(node: SessionNode, fieldId: string, value: string, media
  *  costs that one value rather than the whole plan. Outputs are never reached from here. */
 function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust, media?: CanvasPlanMedia): void {
   if (node.kind === 'session' && mediaKindOf(node.agentKind)) { setMediaPrompt(node, fieldId, value, media, adjust); return; }
-  const fields: ReadonlyArray<{ id: string; label: string; value: string }> | undefined = node.kind === 'form' ? node.fields : node.contract?.inputs;
+  const fields: ReadonlyArray<{ id: string; label: string; value: string }> | undefined = node.kind === 'form' ? node.fields : nodeContract(node)?.inputs;
   const field = fields && namedField(fields, fieldId, 'in:');
   if (!field) {
     adjust(`没有填写「${titleOf(node)}」的「${fieldId}」：它没有这个输入`, `Left “${fieldId}” on “${titleOf(node)}” unfilled: it has no such input`);
