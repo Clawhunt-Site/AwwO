@@ -367,6 +367,7 @@ func (a *App) Handler() http.Handler {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))
 	}
 	m.HandleFunc("PATCH /api/v1/admin/tenants/{id}", a.admin(a.adminTenant))
+	m.HandleFunc("PATCH /api/v1/admin/deletions/{id}", a.admin(a.adminDecideDeletion))
 	a.registerUsageRoutes(m)
 	return a.observeHTTP(m, a.security(m))
 }

@@ -233,6 +233,136 @@ func TestPostgresAccountDeletionRequest(t *testing.T) {
 	}
 }
 
+func TestPostgresAdminDecidesDeletionRequest(t *testing.T) {
+	h := newHarness(t, "")
+	asker, _, _ := h.register(t, "decide-me@example.test")
+	admin, _, adminID := h.register(t, "operator@example.test")
+	if _, e := h.db.Exec(t.Context(), "UPDATE users SET platform_role='admin' WHERE id=$1", adminID); e != nil {
+		t.Fatal(e)
+	}
+	first := h.request(t, asker, "POST", "/auth/deletion-request", map[string]string{"reason": "please"}, 201)["request"].(map[string]any)
+	path := "/admin/deletions/" + first["id"].(string)
+	requireCode(t, h.request(t, asker, "PATCH", path, map[string]string{"status": "handled"}, 403), "forbidden")
+	for _, bad := range []map[string]string{
+		{"status": "pending"},
+		{"status": "withdrawn"},
+		{"status": "declined"},
+		{"status": "declined", "note": "   "},
+		{"status": "declined", "note": "a\u202eb"},
+		{"status": "handled", "note": strings.Repeat("x", maxDeletionReason+1)},
+	} {
+		requireCode(t, h.request(t, admin, "PATCH", path, bad, 400), "invalid_input")
+	}
+	declined := h.request(t, admin, "PATCH", path, map[string]string{"status": "declined", "note": "  The workspace still has a paid plan.  "}, 200)
+	if declined["status"] != "declined" || declined["decisionNote"] != "The workspace still has a paid plan." || declined["decidedBy"] != adminID || declined["decidedAt"] == nil {
+		t.Fatal("decline not recorded", declined)
+	}
+	// A decided request is final, and an unknown one is not found.
+	requireCode(t, h.request(t, admin, "PATCH", path, map[string]string{"status": "handled"}, 409), "deletion_already_decided")
+	requireCode(t, h.request(t, admin, "PATCH", "/admin/deletions/missing-request", map[string]string{"status": "handled"}, 404), "not_found")
+	// The person who asked sees the outcome and the reason, never who decided it, and may ask again.
+	seen := h.request(t, asker, "GET", "/auth/deletion-request", nil, 200)["request"].(map[string]any)
+	if seen["status"] != "declined" || seen["decisionNote"] != "The workspace still has a paid plan." || seen["decidedAt"] == nil {
+		t.Fatal("the asker does not see the outcome", seen)
+	}
+	if _, leaked := seen["decidedBy"]; leaked {
+		t.Fatal("the asker sees who decided", seen)
+	}
+	requireCode(t, h.request(t, asker, "DELETE", "/auth/deletion-request", nil, 404), "not_found")
+	again := h.request(t, asker, "POST", "/auth/deletion-request", map[string]string{"reason": "again"}, 201)["request"].(map[string]any)
+	againPath := "/admin/deletions/" + again["id"].(string)
+	// "Handled" only once the account is gone: an account that still exists is never told its deletion was handled.
+	requireCode(t, h.request(t, admin, "PATCH", againPath, map[string]string{"status": "handled"}, 409), "deletion_account_exists")
+	// A request withdrawn meanwhile says so; it is not "already decided".
+	h.request(t, asker, "DELETE", "/auth/deletion-request", nil, 200)
+	requireCode(t, h.request(t, admin, "PATCH", againPath, map[string]string{"status": "declined", "note": "late"}, 409), "deletion_withdrawn")
+	// An operator never decides their own request.
+	own := h.request(t, admin, "POST", "/auth/deletion-request", map[string]string{"reason": ""}, 201)["request"].(map[string]any)
+	requireCode(t, h.request(t, admin, "PATCH", "/admin/deletions/"+own["id"].(string), map[string]string{"status": "declined", "note": "no"}, 409), "deletion_own_request")
+	// The operator deleted an account (its request keeps the record, without the account), then marks it handled: a
+	// decline would be a reason nobody can read any more.
+	gone := randomID()
+	if _, e := h.db.Exec(t.Context(), "INSERT INTO account_deletion_requests(id,user_id,email,name) VALUES($1,NULL,'gone@example.test','Gone')", gone); e != nil {
+		t.Fatal(e)
+	}
+	requireCode(t, h.request(t, admin, "PATCH", "/admin/deletions/"+gone, map[string]string{"status": "declined", "note": "too late"}, 409), "deletion_account_gone")
+	handled := h.request(t, admin, "PATCH", "/admin/deletions/"+gone, map[string]string{"status": "handled"}, 200)
+	if handled["status"] != "handled" || handled["decisionNote"] != "" || handled["decidedBy"] != adminID {
+		t.Fatal("handled not recorded", handled)
+	}
+	var audits int
+	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM audit_events WHERE actor_id=$1 AND action IN ('account.deletion_declined','account.deletion_handled')", adminID).Scan(&audits); e != nil || audits != 2 {
+		t.Fatal("decisions not audited once each", audits, e)
+	}
+	listed := h.request(t, admin, "GET", "/admin/deletions", nil, 200)["items"].([]any)
+	byID := map[string]map[string]any{}
+	for _, item := range listed {
+		byID[item.(map[string]any)["id"].(string)] = item.(map[string]any)
+	}
+	if len(listed) != 4 || byID[gone]["status"] != "handled" || byID[first["id"].(string)]["decisionNote"] != "The workspace still has a paid plan." || byID[own["id"].(string)]["status"] != "pending" {
+		t.Fatal("admin list lacks the outcomes", listed)
+	}
+	// The database holds a decision's shape too: known statuses only, a decided time with a decision, a declined reason.
+	for _, sql := range []string{
+		"UPDATE account_deletion_requests SET status='lost' WHERE id=$1",
+		"UPDATE account_deletion_requests SET status='handled' WHERE id=$1",
+		"UPDATE account_deletion_requests SET status='declined', decided_at=now(), decision_note='' WHERE id=$1",
+	} {
+		if _, e := h.db.Exec(t.Context(), sql, own["id"]); e == nil {
+			t.Fatal("stored against the checks:", sql)
+		}
+	}
+}
+
+func TestPostgresDeletionDecisionMigrationKeepsLiveRows(t *testing.T) {
+	db := migrationTestDatabase(t)
+	ctx := t.Context()
+	if e := Migrate(ctx, db); e != nil {
+		t.Fatal(e)
+	}
+	// Back to the table as 037 left it in production, with rows in it: its inline check and no decision columns.
+	for _, sql := range []string{
+		"ALTER TABLE account_deletion_requests DROP CONSTRAINT account_deletion_requests_status_check",
+		"ALTER TABLE account_deletion_requests DROP CONSTRAINT account_deletion_requests_decided_check",
+		"ALTER TABLE account_deletion_requests DROP CONSTRAINT account_deletion_requests_declined_note_check",
+		"ALTER TABLE account_deletion_requests DROP COLUMN decided_at, DROP COLUMN decided_by, DROP COLUMN decision_note",
+		"ALTER TABLE account_deletion_requests ADD CHECK (status IN ('pending', 'withdrawn'))",
+		"INSERT INTO account_deletion_requests(id,user_id,email,status) VALUES ('live-1',NULL,'a@example.test','pending'),('live-2',NULL,'b@example.test','withdrawn')",
+	} {
+		if _, e := db.Exec(ctx, sql); e != nil {
+			t.Fatal(sql, e)
+		}
+	}
+	var name string
+	if e := db.QueryRow(ctx, "SELECT conname FROM pg_constraint WHERE conrelid='account_deletion_requests'::regclass AND contype='c'").Scan(&name); e != nil || name != "account_deletion_requests_status_check" {
+		t.Fatal("037's inline check is not named as 038 expects", name, e)
+	}
+	sql, _ := migrations.ReadFile("migrations/038_deletion_decisions.sql")
+	for run := 0; run < 2; run++ { // it can run again unchanged
+		tx, e := db.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = tx.Exec(ctx, string(sql)); e != nil {
+			tx.Rollback(ctx)
+			t.Fatal("038 on 037's table, run", run+1, e)
+		}
+		if e = tx.Commit(ctx); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var rows, checks int
+	if e := db.QueryRow(ctx, "SELECT count(*) FROM account_deletion_requests WHERE decision_note='' AND decided_at IS NULL").Scan(&rows); e != nil || rows != 2 {
+		t.Fatal("the live rows did not keep their shape", rows, e)
+	}
+	if e := db.QueryRow(ctx, "SELECT count(*) FROM pg_constraint WHERE conrelid='account_deletion_requests'::regclass AND contype='c'").Scan(&checks); e != nil || checks != 3 {
+		t.Fatal("the checks after 038", checks, e)
+	}
+	if _, e := db.Exec(ctx, "UPDATE account_deletion_requests SET status='declined', decided_at=now(), decision_note='kept' WHERE id='live-1'"); e != nil {
+		t.Fatal("a live pending row cannot be declined", e)
+	}
+}
+
 func TestPostgresAccountExport(t *testing.T) {
 	h := newHarness(t, "")
 	owner, tid, uid := h.register(t, "export-owner@example.test")

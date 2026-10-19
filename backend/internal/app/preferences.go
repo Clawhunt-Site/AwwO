@@ -198,7 +198,11 @@ func (a *App) plannerPersonalization(ctx context.Context, uid string) string {
 	return b.String()
 }
 
-const deletionRequestJSON = `jsonb_build_object('id',id,'status',status,'reason',reason,'createdAt',created_at,'withdrawnAt',withdrawn_at)`
+// What the person who asked sees of a request: its outcome and the operator's note, never who decided it.
+const deletionRequestJSON = `jsonb_build_object('id',id,'status',status,'reason',reason,'createdAt',created_at,'withdrawnAt',withdrawn_at,'decidedAt',decided_at,'decisionNote',decision_note)`
+
+// What the operator sees in the 删除申请 tab (pagination.go's "deletions").
+const adminDeletionJSON = `jsonb_build_object('id',id,'userId',user_id,'email',email,'name',name,'reason',reason,'status',status,'createdAt',created_at,'withdrawnAt',withdrawn_at,'decidedAt',decided_at,'decidedBy',decided_by,'decisionNote',decision_note)`
 
 func (a *App) deletionRequest(w http.ResponseWriter, r *http.Request) {
 	item, err := oneJSON(r.Context(), a.db, "SELECT "+deletionRequestJSON+" FROM account_deletion_requests WHERE user_id=$1 ORDER BY created_at DESC, id DESC LIMIT 1", currentUser(r).ID)
@@ -309,6 +313,73 @@ func (a *App) withdrawDeletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"request": item})
+}
+
+// adminDecideDeletion records the operator's outcome of a pending request: handled, once the operator has deleted the
+// account (its user_id is then empty, so "handled" is never shown to an account that still exists), or declined while
+// the account still exists, with a reason the person who asked is shown. It changes nothing but the request: deleting
+// an account stays the operator's own step. A decided request is final, and an operator never decides their own request.
+func (a *App) adminDecideDeletion(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Status string `json:"status"`
+		Note   string `json:"note"`
+	}
+	if !a.decode(w, r, &body) {
+		return
+	}
+	body.Note = strings.TrimSpace(strings.ReplaceAll(body.Note, "\r\n", "\n"))
+	if (body.Status != "handled" && body.Status != "declined") || !settingText(body.Note, maxDeletionReason) || (body.Status == "declined" && body.Note == "") {
+		fail(w, 400, "invalid_input", "Choose handled or declined; a decline needs a reason of at most 1000 characters")
+		return
+	}
+	id, admin := r.PathValue("id"), currentUser(r).ID
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	// The row is locked first, so a withdrawal or another operator's decision either went before (and is named) or waits.
+	var status string
+	var owner *string
+	err = tx.QueryRow(r.Context(), "SELECT status,user_id FROM account_deletion_requests WHERE id=$1 FOR UPDATE", id).Scan(&status, &owner)
+	switch {
+	case noRows(err):
+		fail(w, 404, "not_found", "Deletion request not found")
+		return
+	case err != nil:
+		a.dbError(w, err)
+		return
+	case status == "withdrawn":
+		fail(w, 409, "deletion_withdrawn", "The person who asked withdrew this request")
+		return
+	case status != "pending":
+		fail(w, 409, "deletion_already_decided", "This request is no longer pending")
+		return
+	case owner != nil && *owner == admin:
+		fail(w, 409, "deletion_own_request", "Another operator must decide your own request")
+		return
+	case body.Status == "handled" && owner != nil:
+		fail(w, 409, "deletion_account_exists", "Delete the account first, then mark the request handled")
+		return
+	case body.Status == "declined" && owner == nil:
+		fail(w, 409, "deletion_account_gone", "The account is already deleted: mark the request handled")
+		return
+	}
+	item, err := oneJSON(r.Context(), tx, "UPDATE account_deletion_requests SET status=$2,decided_at=now(),decided_by=$3,decision_note=$4 WHERE id=$1 RETURNING "+adminDeletionJSON, id, body.Status, admin, body.Note)
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	if err = audit(r.Context(), tx, admin, "", "account.deletion_"+body.Status, id); err != nil {
+		a.dbError(w, err)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		a.dbError(w, err)
+		return
+	}
+	writeJSON(w, 200, item)
 }
 
 // exportAccount streams what this account can read: its profile, settings, colour scheme, workspaces, and every

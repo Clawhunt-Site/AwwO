@@ -93,7 +93,7 @@ func (a *App) adminList(kind string) http.HandlerFunc {
 			"runs":      {"runs r", runJSON, "r.id"},
 			"audit":     {"audit_events a", "jsonb_build_object('id',id,'actorId',actor_id,'tenantId',tenant_id,'action',action,'resourceId',resource_id,'createdAt',created_at)", "a.id"},
 			"interests": {upgradeInterestSource, upgradeInterestJSON, "x.id"},
-			"deletions": {"account_deletion_requests d", "jsonb_build_object('id',id,'userId',user_id,'email',email,'name',name,'reason',reason,'status',status,'createdAt',created_at,'withdrawnAt',withdrawn_at)", "d.id"},
+			"deletions": {"account_deletion_requests d", adminDeletionJSON, "d.id"},
 		}[kind]
 		// The immutable ordering pair prevents duplicate/omitted rows with equal
 		// timestamps. The fixed boundary is an upper limit on created_at; an older

@@ -141,6 +141,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 37, "migrations/037_account_settings.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 38, "migrations/038_deletion_decisions.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
