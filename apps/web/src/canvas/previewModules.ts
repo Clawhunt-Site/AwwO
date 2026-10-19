@@ -9,10 +9,11 @@
  *
  * and the preview gives every file it imports, and every file those import, AwwO's pinned copy of that release as a
  * data: URL in the same import map. A copy is the npm file byte for byte as the builds ship it (previewModules.generated.ts
- * pins its size and sha256: build/three.module.js without the two shaders three.js took from Shadertoy, which
- * scripts/three-shadertoy.mjs cuts out) except that its relative imports name the canonical CDN URL of the file they
- * mean, which the import map then supplies too: a data: module cannot resolve a relative path; and that it ends with a
- * comment naming it by its own canonical URL (moduleSourceUrl). Anything else the page imports is left as it wrote it.
+ * pins its size and sha256: three.module.js, three.core.js and GeometryUtils.js without the code three.js took from
+ * Shadertoy, Stack Overflow and OpenProcessing, which scripts/three-cuts.mjs cuts out) except that its relative
+ * imports name the canonical CDN URL of the file they mean, which the import map then supplies too: a data: module
+ * cannot resolve a relative path; and that it ends with a comment naming it by its own canonical URL
+ * (moduleSourceUrl). Anything else the page imports is left as it wrote it.
  */
 import { THREE_MODULE_FILES, type GeneratedModuleFile } from './previewModules.generated';
 import { isClassicScript, isImportMap, isModuleScript, readImportMap, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_VERSION } from './previewImportMap';

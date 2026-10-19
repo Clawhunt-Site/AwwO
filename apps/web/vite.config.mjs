@@ -9,7 +9,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { assetFileNames } from './scripts/asset-names.mjs';
 import { familyLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
-import { withoutShadertoyShaders } from './scripts/three-shadertoy.mjs';
+import { withoutCutCode } from './scripts/three-cuts.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
 // Native fusion of the vendored Paperclip board UI (server/ui) into apps/web's
@@ -282,11 +282,11 @@ export default defineConfig({
     // They are inlined as data: URLs, so as in the hosted build every script chunk holding one of them starts with
     // its family's license, and the build fails when one would ship without it (scripts/font-licences.mjs).
     inlinedFontLicences(fileURLToPath(new URL('./src/canvas/fonts', import.meta.url)), familyLicences(PREVIEW_FONTS)),
-    // three.js without the two shaders it took from Shadertoy (CC BY-NC-SA unless their author says otherwise), as in
-    // the hosted build (scripts/three-shadertoy.mjs).
-    withoutShadertoyShaders()],
+    // three.js without the code it took from Shadertoy, Stack Exchange sites and OpenProcessing (CC BY-NC-SA and CC
+    // BY-SA terms), as in the hosted build (scripts/three-cuts.mjs).
+    withoutCutCode()],
   // A worker's bundle is built with these plugins only, besides Vite's own.
-  worker: { plugins: () => [withoutShadertoyShaders()] },
+  worker: { plugins: () => [withoutCutCode()] },
   define: {
     // Bare-identifier define (most reliable replacement target — unlike
     // `import.meta.env.X`, it is substituted even inside casts/optional chains).

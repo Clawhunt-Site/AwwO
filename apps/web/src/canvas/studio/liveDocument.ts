@@ -242,7 +242,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
     }
   }
   // A library AwwO supplies (previewLibraries.ts, e.g. three.js r128) runs from its pinned copy, the CDN file as the
-  // builds ship it (r128 without the dithering shader it took from Shadertoy, which scripts/three-shadertoy.mjs cuts
+  // builds ship it (r128 without the code it took from Shadertoy and Stack Exchange, which scripts/three-cuts.mjs cuts
   // out): no network needed, and the additions a generated page calls although its release lacks them (r128 has
   // no CapsuleGeometry) come with it. If the copy cannot be loaded the page keeps its CDN script, which the CSP allows.
   // three.js as ES modules (previewModules.ts) comes the same way, through the page's import map.

@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
-import { withoutShadertoyShaders } from './scripts/three-shadertoy.mjs';
+import { withoutCutCode } from './scripts/three-cuts.mjs';
 
 // Mirror the embedding wiring from vite.config.mjs so tests can import the real
 // Paperclip board modules (server/ui via the `@` alias) and see the same
@@ -16,8 +16,9 @@ const boardMdxEditorStyleCss = boardRequire.resolve('@mdxeditor/editor/style.css
 
 export default defineConfig({
   // A test that imports one of three.js's files as ?raw text, as a running preview does, gets it as the builds ship it,
-  // without the shaders from Shadertoy (scripts/three-shadertoy.mjs); a code import of three goes to Node as it is.
-  plugins: [withoutShadertoyShaders()],
+  // without the code it took from Shadertoy, Stack Exchange sites and OpenProcessing (scripts/three-cuts.mjs); a code
+  // import of three goes to Node as it is.
+  plugins: [withoutCutCode()],
   define: {
     __PAPERCLIP_API_BASE__: JSON.stringify(process.env.VITE_PAPERCLIP_API_BASE || '/paperclip-api'),
   },

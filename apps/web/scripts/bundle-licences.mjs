@@ -409,7 +409,7 @@ the repository); from third-party files kept in the repository, which its
 THIRD_PARTY_NOTICES.md lists with their licenses; and from code and files of the npm
 packages below. Building the app minifies their code, which drops the license comments
 in it, and serves some of their files as they are: pdf.js's worker, character maps and
-two fonts, and the three.js modules a running preview loads (without two shaders, see
+two fonts, and the three.js modules a running preview loads (without some code, see
 below). For each package, at the version the app's lockfile pins, this file carries its
 license and notice files, from its top directory and from each directory between it and
 a file the app uses (and pdf.js's wasm/ directory, for the loaders its worker embeds),
@@ -431,13 +431,15 @@ under the GNU LGPL 2.1 or later and DigitalGlitch.js's shader under CC BY 3.0; F
 in Lucide's icons, Modernizr in React DOM, jQuery in extend, UZIP.js in fflate and
 Node.js in vfile. Each is copied as it was written, with LF line ends (MathGeoLib's
 notice converted from Latin-1). Not covered: credits that name a paper, a book, an
-article or code published without a license, and code under share-alike or
-non-commercial Creative Commons terms, which a license text alone does not settle: in
-three.js, two Stack Overflow answers and GeometryUtils' two Hilbert curves, from
-sketches on OpenProcessing (CC BY-SA). Not shipped: the two shaders three.js took from
-Shadertoy, whose default license is CC BY-NC-SA, its renderer's dithering (in r128 too)
-and N8's bicubic filtering of the transmission buffer, which the build cuts out of
-every copy of three.js the app ships.
+article or code published without a license. Not shipped: the code three.js took from
+where it is under non-commercial or share-alike Creative Commons terms, which the build
+cuts out of every copy of three.js the app ships: from Shadertoy (CC BY-NC-SA unless an
+author says otherwise), its renderer's dithering (in r128 too) and N8's bicubic
+filtering of the transmission buffer; from three Stack Exchange answers (CC BY-SA),
+generateUUID(), the cubic a CatmullRomCurve3 follows and the spacing of its knots (in
+r128 too) and r128's DataUtils.toHalfFloat(), each replaced by AwwO's own code that does
+the same (toHalfFloat() for every number in the half's range); and from work on
+OpenProcessing (CC BY-SA), GeometryUtils' two Hilbert curves, which now throw.
 `;
 
 /** The whole document for these packages. */

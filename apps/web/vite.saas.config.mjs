@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { assetFileNames } from './scripts/asset-names.mjs';
 import { bundleLicences } from './scripts/bundle-licences.mjs';
 import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
-import { withoutShadertoyShaders } from './scripts/three-shadertoy.mjs';
+import { withoutCutCode } from './scripts/three-cuts.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -48,11 +48,11 @@ export default defineConfig({
   // The license texts of the npm code the bundle ships, in one file at the root of the site, from the committed
   // src/saas/bundleLicences.txt; the build fails when the bundle needs a text that file lacks (scripts/bundle-licences.mjs).
   bundleLicences(root),
-  // three.js without the two shaders it took from Shadertoy (CC BY-NC-SA unless their author says otherwise), as in the
-  // native build (vite.config.mjs) and both test configs (scripts/three-shadertoy.mjs).
-  withoutShadertoyShaders()],
+  // three.js without the code it took from Shadertoy, Stack Exchange sites and OpenProcessing (CC BY-NC-SA and CC BY-SA
+  // terms), as in the native build (vite.config.mjs) and both test configs (scripts/three-cuts.mjs).
+  withoutCutCode()],
   // A worker's bundle is built with these plugins only, besides Vite's own (bundleLicences refuses workers today).
-  worker: { plugins: () => [withoutShadertoyShaders()] },
+  worker: { plugins: () => [withoutCutCode()] },
   // The product version the 设置 → 关于 page shows, from this package.
   define: { 'import.meta.env.VITE_AWWO_SAAS': JSON.stringify('1'), 'import.meta.env.VITE_AWWO_VERSION': JSON.stringify(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version) },
   server: { host: process.env.VITE_AWWO_WEB_HOST || '127.0.0.1', port: Number(process.env.VITE_AWWO_WEB_PORT || 5189), strictPort: true,

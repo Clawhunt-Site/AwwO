@@ -152,10 +152,11 @@ The workspace sandbox image (`deploy/saas/workspace/Dockerfile`) installs
 Corporation; its NOTICE says it contains code derived from Puppeteer, also
 Apache-2.0) and `three` `0.186.1` (MIT, Copyright © 2010-2026 three.js
 authors), of which the image keeps only its LICENSE and the 89 files AwwO's
-running preview supplies, as the web app ships them (build/three.module.js
-without the two shaders three.js took from Shadertoy, see the web app's entry
-below), which `awwo-check-page` serves to the pages it checks, with the
-dependency tree pinned in
+running preview supplies, as the web app ships them (build/three.module.js,
+build/three.core.js and examples/jsm/utils/GeometryUtils.js without the code
+three.js took from Shadertoy, Stack Overflow and OpenProcessing, see the web
+app's entry below), which `awwo-check-page` serves to the pages it checks,
+with the dependency tree pinned in
 `deploy/saas/workspace/tools/package-lock.json`: 180 packages, among them the
 `playwright-core` `1.58.2` that `rea-agents` pins for itself, and `frida`
 `17.23.2` (LGPL-2.0 WITH WxWindows-exception-3.1), an optional dependency
@@ -266,14 +267,20 @@ for vfile's URL helpers. Not covered: credits that name a paper, a book, an
 article or code published without a license (in three.js, Eric Lengyel's
 tangent and oblique clipping code, Ken Perlin's improved noise, Christer
 Ericson's book, zz85's path flow demo and a few shaders' blog posts among
-them), and code under share-alike or non-commercial Creative Commons terms,
-which a license text alone does not settle: in three.js, two Stack Overflow
-answers and GeometryUtils' two Hilbert curves, from sketches on OpenProcessing
-(CC BY-SA). Two shaders three.js took from Shadertoy, whose default license is
-CC BY-NC-SA, do not ship at all: the builds cut its renderer's dithering (in
-r128 too) and N8's bicubic texture filtering for transmission out of every
-copy of three.js they ship, each function kept as a stand-in that compiles
-(`apps/web/scripts/three-shadertoy.mjs`). The text leaves out, and
+them). Code three.js took from where it is under non-commercial or
+share-alike Creative Commons terms does not ship at all: the builds cut it out
+of every copy of three.js they ship (`apps/web/scripts/three-cuts.mjs`), each
+function kept under its name. From Shadertoy (CC BY-NC-SA unless an author
+says otherwise): its renderer's dithering (in r128 too) and N8's bicubic
+texture filtering for transmission, each now a stand-in that compiles. From
+three Stack Exchange answers (CC BY-SA): generateUUID(), the cubic a
+CatmullRomCurve3 follows and the spacing of its knots (in r128 too), and
+r128's DataUtils.toHalfFloat(), each now AwwO's own code that does the same
+(toHalfFloat() for every number in the half's range).
+From work on OpenProcessing (CC BY-SA): GeometryUtils' two Hilbert curves,
+which now throw. The builds also stop at any file of three.js they take in
+that credits Stack Exchange or OpenProcessing, but for three links read as
+references only. The text leaves out, and
 names, two license files of such directories whose files the bundle does not
 hold: pdf.js's Liberation Sans license and three.js's SculptGL license; either
 comes back as soon as any other file of its directory ships. The text is

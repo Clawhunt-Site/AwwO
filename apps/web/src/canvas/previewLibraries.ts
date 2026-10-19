@@ -1,9 +1,9 @@
 /**
  * Script libraries a RUNNING HTML preview can use although its sandbox reaches no network. When a page loads one
  * of these exact CDN files, the preview inlines AwwO's own pinned copy of the same release instead, so the preview
- * CSP stays inline-only and no host is ever allowed. A copy is the npm release byte for byte, but for three.js r128's
- * dithering shader, which three.js took from Shadertoy and the builds cut out (scripts/three-shadertoy.mjs); its size
- * and sha256 are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
+ * CSP stays inline-only and no host is ever allowed. A copy is the npm release byte for byte, but for the code three.js
+ * r128 took from Shadertoy and Stack Exchange, which the builds cut out (scripts/three-cuts.mjs); its size and sha256
+ * are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
  */
 import { FIGURE_KIT_BYTES, FIGURE_KIT_SHA256, FIGURE_KIT_URL } from './figureKit/figureKit';
 import { previewFontFaces, previewFontNeeds, PREVIEW_FONTS_KEY, type PreviewFont } from './previewFonts';
@@ -68,11 +68,12 @@ export const PREVIEW_LIBRARIES: readonly PreviewLibrary[] = [{
   ],
   // npm three@0.128.0 build/three.min.js (package alias three-r128), which cdnjs serves byte for byte as r128
   // (SRI sha512-dLxUelApnYxpLt6K2iomGngnHO83iUvZytA3YjDUCjT0HDOHKXnVYdf3hU4JjM8uEhxf9nD1/ey98U3t2vZ0qQ==), as the
-  // builds ship it: its dithering, from Shadertoy, cut out (scripts/three-shadertoy.mjs). A page that names the CDN file
-  // with that SRI still runs it: the preview inlines a supplied library and keeps no attribute of its script element
-  // but the type (htmlDeliverable.ts).
-  bytes: 603199,
-  sha256: '729a268bc6ff30a251cb964211d7d662b98c59ed2e91f9dddff486637a3e279b',
+  // builds ship it: its dithering, from Shadertoy, its generateUUID() and Catmull-Rom code, from Stack Overflow, and
+  // its DataUtils.toHalfFloat(), from Game Development Stack Exchange, cut out (scripts/three-cuts.mjs; the functions
+  // are AwwO's own code). A page that names the CDN file with that SRI still runs it: the preview inlines a supplied
+  // library and keeps no attribute of its script element but the type (htmlDeliverable.ts).
+  bytes: 604160,
+  sha256: 'c1f9a7fb7e1dba58ce1dad3b78d923c103c54c0a8fed2b698c869f357732eb2d',
   // A separate chunk, fetched only when a running page needs it.
   load: () => import('three-r128/build/three.min.js?raw').then(module => module.default),
   // Any mention counts: pages often reach the library through an alias (`const T = THREE`, then `new T.CapsuleGeometry`),
