@@ -76,6 +76,32 @@ Failures:
 
 A caller that disconnects stops its render.
 
+## Edits (the canvas's edit node)
+
+An edit joins clips, sounds and pictures into one film by an `awwo.timeline/1` document (`edit-timeline.mjs` is its
+one definition: every field, default and limit). Only the API calls it, for a canvas run's edit node
+(`backend/internal/app/edits.go`); it sends the job's files to the worker, because the worker cannot read the API's
+media directory. A job holds the worker like a render does, so a render waits while an edit runs, and the other way.
+
+| Route | Answer |
+|---|---|
+| `POST /internal/edits` | JSON `{editId, timeline, files: [{name, size, sha256}]}` (at most 4 MiB): the timeline is checked against the file names before any byte arrives → 201 `{editId, files, expiresInSeconds}`; 400 `INVALID_EDIT` + `field`; 429 `WORKER_BUSY` |
+| `PUT /internal/edits/{id}/files/{index}` | `application/octet-stream`, the file's bytes, streamed to disk → 204; 400 `EDIT_FILE_MISMATCH` (size or sha256; the file may be sent again), 409 when already received or the job was stopped |
+| `POST /internal/edits/{id}/render` | probes every file, places the timeline on whole frames, renders → 200 `{editId, report, outputs: [{name, kind, contentType, size, sha256}]}`; 409 `EDIT_FILES_MISSING` + `missing`; 400 `INVALID_EDIT` (a duration the timeline gets wrong, named with the value expected); 422 `EDIT_FAILED` + `detail`; a caller that disconnects stops it |
+| `GET /internal/edits/{id}/outputs/{name}` | one output file |
+| `DELETE /internal/edits/{id}` | stops and removes the job (204); a job left without a request for `AWWO_EDIT_IDLE_MS` is removed too |
+
+How it renders (`edit-run.mjs`, argument lists in `edit-ffmpeg.mjs`): cards through the page renderer at the film's
+size; every picture piece (an item's own frames, and each transition as its own piece through `xfade`) encoded once
+from its source at the film's settings (a clip's picture stream as the probe measured it; a picture, PNG, JPEG, WebP or
+a GIF's first frame, decoded once and held) and checked for its frame count, then joined by stream copy; sounds trimmed,
+levelled (per file, with `mix.levels`), faded, delayed to the sample and mixed per track in batches of 48; music and
+sfx ducked under the dialogue's own windows and muted inside silences; two-pass `loudnorm` to the film's loudness and
+true peak; the MP4 checked for its frame count and its size (with the manifest's `limits.maxFilmBytes`, the largest
+film the API stores, the picture's peak rate is capped to fit, counting a one-second buffer for every piece, and a film
+over it all the same fails `film_too_large`); stills every `stillsEverySeconds`, the `.srt`, and `report.json`.
+Children run at a lower CPU priority than the worker. Outputs: `<name>.mp4`, `<name>.srt`, `still-NNN.jpg`, `report.json`.
+
 ## Configuration
 
 | Variable | Default | |
@@ -89,6 +115,10 @@ A caller that disconnects stops its render.
 | `AWWO_RENDER_MAX_SECONDS` | `20` | Longest render, 0.5–60 (the API allows 20) |
 | `AWWO_RENDER_TIMEOUT_MS` | `360000` | Whole-render limit, 5,000–1,800,000 (the API waits 8 minutes) |
 | `AWWO_RENDER_CHROME_SANDBOX` | `1` | `0` turns Chromium's own sandbox off, only for hosts that cannot provide it |
+| `AWWO_EDIT_MAX_SECONDS` | `1200` | Longest film an edit makes, 1–3600 |
+| `AWWO_EDIT_MAX_INPUT_BYTES` | 6 GiB | The files one edit may bring, 1 MiB–64 GiB |
+| `AWWO_EDIT_TIMEOUT_MS` | `3600000` | Whole-edit limit, 60,000–14,400,000 (the API's render step waits `AWWO_EDIT_TIMEOUT`, 75 minutes) |
+| `AWWO_EDIT_IDLE_MS` | `600000` | How long a job may sit without a request before it is removed, 1,000–3,600,000 |
 
 A malformed value stops the worker at startup. Limits: 1920×1920, 60 fps, 1,800 frames, 6 MiB of HTML.
 

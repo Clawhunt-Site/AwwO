@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test --test-concurrency=1 *.test.mjs",
-    "check": "node --check server.mjs && node --check render.mjs && node --check config.mjs && node --check network.mjs && node --check virtual-time.mjs && node --check ffmpeg.mjs"
+    "check": "node --check server.mjs && node --check render.mjs && node --check config.mjs && node --check network.mjs && node --check virtual-time.mjs && node --check ffmpeg.mjs && node --check edit-timeline.mjs && node --check edit-ffmpeg.mjs && node --check edit-run.mjs && node --check edit-jobs.mjs"
   },
   "dependencies": {
     "playwright-core": "1.64.1"

@@ -16,6 +16,9 @@ export const LIMITS = Object.freeze({
   maxBodyBytes: 8 * 1024 * 1024,
 });
 
+const MIB = 1024 * 1024;
+const GIB = 1024 * MIB;
+
 export const OUTPUT_KINDS = Object.freeze(['mp4', 'gif', 'contact']);
 const RENDER_ID = /^[A-Za-z0-9_-]{8,80}$/;
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -70,6 +73,12 @@ export function loadConfig(env = process.env) {
     tmp: path.resolve(env.AWWO_RENDER_TMP || os.tmpdir()),
     maxSeconds: decimalSetting(env.AWWO_RENDER_MAX_SECONDS, 20, LIMITS.minSeconds, LIMITS.maxSecondsCeiling, 'AWWO_RENDER_MAX_SECONDS'),
     timeoutMs: integerSetting(env.AWWO_RENDER_TIMEOUT_MS, 360_000, 5_000, 1_800_000, 'AWWO_RENDER_TIMEOUT_MS'),
+    // Edits (edit-timeline.mjs): the longest film, the files one job may bring, its time limit, and how long a job
+    // may sit without a request before it is removed.
+    editMaxSeconds: decimalSetting(env.AWWO_EDIT_MAX_SECONDS, 1200, 1, 3600, 'AWWO_EDIT_MAX_SECONDS'),
+    editMaxInputBytes: integerSetting(env.AWWO_EDIT_MAX_INPUT_BYTES, 6 * GIB, MIB, 64 * GIB, 'AWWO_EDIT_MAX_INPUT_BYTES'),
+    editTimeoutMs: integerSetting(env.AWWO_EDIT_TIMEOUT_MS, 3_600_000, 60_000, 14_400_000, 'AWWO_EDIT_TIMEOUT_MS'),
+    editIdleMs: integerSetting(env.AWWO_EDIT_IDLE_MS, 600_000, 1_000, 3_600_000, 'AWWO_EDIT_IDLE_MS'),
   };
   config.ready = token.length >= 32 && chrome !== '';
   return Object.freeze(config);

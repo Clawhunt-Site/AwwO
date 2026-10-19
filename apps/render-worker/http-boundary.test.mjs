@@ -45,7 +45,8 @@ test('health reports readiness and limits without a token', async (t) => {
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     ready: true, service: 'awwo-render', version: 1, chrome: true, ffmpeg: true, sandbox: true,
-    limits: { maxSeconds: 20, maxFps: 60, maxWidth: 1920, maxHeight: 1920, maxFrames: 1800, maxHtmlBytes: 6291456 }, busy: false,
+    limits: { maxSeconds: 20, maxFps: 60, maxWidth: 1920, maxHeight: 1920, maxFrames: 1800, maxHtmlBytes: 6291456,
+      edit: { maxSeconds: 1200, maxInputBytes: 6 * 1024 ** 3, maxFiles: 300 } }, busy: false,
   });
   const missing = await start(loadConfig({ AWWO_RENDER_TOKEN: TOKEN, AWWO_RENDER_CHROME: `${process.execPath}.missing`, AWWO_RENDER_FFMPEG: 'no-such-ffmpeg-awwo' }));
   t.after(() => missing.app.close());
