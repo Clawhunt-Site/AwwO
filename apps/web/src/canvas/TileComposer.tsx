@@ -25,7 +25,8 @@ import type { NodeModelChoice } from './NodeModelPicker';
 
 /**
  * What an image, video or 3D node's generator does with attached files: its kind, how many reference pictures the
- * node's model takes (the first picture attached is the one), and the models of that kind that take one.
+ * node's model takes (the first picture attached is the one), and the models of that kind that take one. A video node
+ * also says how many voices wired into its `audio` input its model lip-syncs to, and the video models that take any.
  */
 export interface MediaComposerInfo {
   kind: MediaKind;
@@ -33,6 +34,10 @@ export interface MediaComposerInfo {
   referenceModels: string[];
   /** Every picture is a subject reference, a single one included (never the video's first frame). */
   subjects?: boolean;
+  /** A video node: how many voices its model takes as voice references (0: none). */
+  audioReferences?: number;
+  /** A video node: the video models that take voice references. */
+  audioReferenceModels?: string[];
 }
 
 export function mediaComposerInfo(node: { kind: string; agentKind?: string; model?: string }, choices: ReadonlyArray<NodeModelChoice> | undefined): MediaComposerInfo | undefined {
@@ -46,6 +51,9 @@ export function mediaComposerInfo(node: { kind: string; agentKind?: string; mode
     references: current?.references ?? 0,
     referenceModels: all.filter(choice => (choice.references ?? 0) > 0).map(choice => choice.label),
     ...(current?.subjectReferences && (current.references ?? 0) > 0 ? { subjects: true } : {}),
+    // Only a video node has an `audio` input to say this of.
+    ...(kind === 'video' ? { audioReferences: current?.audioReferences ?? 0,
+      audioReferenceModels: all.filter(choice => (choice.audioReferences ?? 0) > 0).map(choice => choice.label) } : {}),
   };
 }
 
@@ -84,8 +92,10 @@ export interface TileComposerProps {
 /** The notice under a media node's attachments: which picture is used, or why none is. */
 function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: MediaComposerInfo): string {
   if (media.references > 0) {
-    const key = media.kind === 'model3d' ? 'attach.mediaRef3d' : media.kind === 'video' ? (media.subjects ? 'attach.mediaRefSubjects' : 'attach.mediaRefVideo') : 'attach.mediaRefImage';
-    return t(key, { count: media.references });
+    const voices = media.kind === 'video' ? media.audioReferences ?? 0 : 0;
+    const subjects = voices > 0 ? 'attach.mediaRefSubjectsVoices' : 'attach.mediaRefSubjects';
+    const key = media.kind === 'model3d' ? 'attach.mediaRef3d' : media.kind === 'video' ? (media.subjects ? subjects : 'attach.mediaRefVideo') : 'attach.mediaRefImage';
+    return t(key, { count: media.references, voices });
   }
   if (media.referenceModels.length) return t('attach.mediaNoRefs', { models: media.referenceModels.join('、') });
   return t('attach.mediaNote');

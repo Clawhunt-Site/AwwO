@@ -82,6 +82,33 @@ describe('media nodes in the document', () => {
     }
   });
 
+  it('lets a video node take a voice for each speaker in its own input, and never a voice where a picture goes', () => {
+    const node = (kind: 'image' | 'video' | 'model3d' | 'audio', id: string, y = 0): SessionNode => ({ ...createSessionNode(kind, { x: 0, y }), id });
+    const nodes = [node('audio', 'mara'), node('audio', 'kade', 600), node('audio', 'host', 1200), node('video', 'shot'), node('image', 'hero'),
+      node('model3d', 'model'), node('video', 'other')];
+    const wire = (from: string, to: string, dataType: CanvasEdge['dataType'] = 'audio'): CanvasEdge =>
+      ({ id: `${from}-${to}`, fromNode: from, fromPort: 'result', toNode: to, toPort: 'audio', dataType });
+    expect(portsFor(nodes[3]).find(port => port.id === 'audio')).toEqual({ id: 'audio', side: 'input', dataType: 'audio', multi: true });
+    let edges: CanvasEdge[] = [];
+    for (const from of ['mara', 'kade', 'host']) {
+      expect(canConnect(nodes, edges, { nodeId: from, portId: 'result' }, { nodeId: 'shot', portId: 'audio' }), from).toBe(true);
+      edges = [...edges, wire(from, 'shot')];
+    }
+    expect(reconcileEdges(nodes, edges).map(edge => edge.fromNode)).toEqual(['mara', 'kade', 'host']);
+    const can = (from: string, to: string, toPort: string) => canConnect(nodes, [], { nodeId: from, portId: 'result' }, { nodeId: to, portId: toPort });
+    // A voice is not a picture, and a picture, a clip or a 3D model is not a voice.
+    expect(can('mara', 'shot', 'reference')).toBe(false);
+    for (const from of ['hero', 'other', 'model']) expect(can(from, 'shot', 'audio'), from).toBe(false);
+    // Only a video node has the input.
+    for (const target of ['hero', 'model', 'kade']) {
+      expect(portsFor(nodes.find(item => item.id === target)!).some(port => port.id === 'audio'), target).toBe(false);
+      expect(can('mara', target, 'audio'), target).toBe(false);
+    }
+    // A saved canvas keeps the voices, typed as their source, and drops a picture wired there.
+    const document = sanitizeDocument({ version: 2, nodes, edges: [...edges, wire('hero', 'shot', 'image')], waypoints: [], view: null });
+    expect(document.edges.map(edge => `${edge.fromNode}>${edge.toPort}:${edge.dataType}`)).toEqual(['mara>audio:audio', 'kade>audio:audio', 'host>audio:audio']);
+  });
+
   it('keeps video nodes and their well-formed parameters, and types their result port', () => {
     const document = sanitizeDocument({ version: 2, nodes: [
       { ...createSessionNode('video', { x: 0, y: 0 }), id: 'v', model: 'rh.kling-v3-pro', mediaParams: { duration: '10', loud: true, 'bad key': 1, deep: { x: 1 }, nan: Number.NaN } },
@@ -177,6 +204,25 @@ describe('media node configuration', () => {
     expect(screen.queryByRole('group', { name: 'Kuaishou' })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Video · Standard' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Kling 3.0 Pro' })).not.toBeInTheDocument();
+  });
+
+  it('shows a yes-or-no setting the catalogue adds as a checkbox, off by default and saved only once set', async () => {
+    const multimodal = parseMediaCatalogue({ ...rawCatalogue, models: [{ id: 'rh.seedance-2-multimodal', name: 'Seedance 2.0 Multimodal',
+      label: ['视频 · 多图参考', 'Video · From references'], vendor: 'media', kind: 'video', mode: 'multimodal-to-video', prompt: { minLength: 1, maxLength: 2000 },
+      references: 9, referenceMode: 'subjects', audioReferences: 3,
+      params: [{ name: 'realPersonMode', type: 'boolean', default: false, label: ['真人模式', 'Real people'] }] }] });
+    expect(multimodal.models[0]).toMatchObject({ references: 9, subjectReferences: true, audioReferences: 3 });
+    const node: SessionNode = { ...createSessionNode('video', { x: 0, y: 0 }), id: 'node-g', model: 'rh.seedance-2-multimodal' };
+    const p = props({ node, media: { status: 'ready', catalogue: multimodal } });
+    const view = render(<InspectorPanel {...p} />);
+    const real = screen.getByRole('checkbox', { name: '真人模式' });
+    expect(real).not.toBeChecked();
+    fireEvent.click(real);
+    fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));
+    await waitFor(() => expect(p.onInitialize).toHaveBeenCalledTimes(1));
+    expect(p.onInitialize).toHaveBeenCalledWith(expect.objectContaining({ id: 'node-g', model: 'rh.seedance-2-multimodal', mediaParams: { realPersonMode: true } }));
+    view.rerender(<LocaleProvider locale="en"><InspectorPanel {...p} /></LocaleProvider>);
+    expect(screen.getByRole('checkbox', { name: 'Real people' })).toBeInTheDocument();
   });
 });
 

@@ -40,6 +40,9 @@ export interface MediaModel {
   references: number;
   /** Every picture the model starts from is a subject reference, a single one included (never its first frame). */
   subjectReferences?: boolean;
+  /** How many voices a video can lip-sync to (0: none): the sounds wired into its node's `audio` input, which its words
+   *  call @Audio 1, @Audio 2. */
+  audioReferences: number;
 }
 
 export interface MediaCatalogue {
@@ -53,6 +56,8 @@ export interface MediaCatalogue {
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
 // The most pictures a model may start from: the server's own ceiling (X-tasy's video models take up to 10).
 const MAX_MEDIA_REFERENCES = 10;
+// The most voices a video may lip-sync to: the server's own ceiling (RunningHub's multimodal video takes 3).
+const MAX_AUDIO_REFERENCES = 3;
 const MODEL_ID = /^(?:rh|tripo|xt)\.[a-z0-9][a-z0-9-]{0,62}$/;
 const MEDIA_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'model3d', 'audio']);
 const PARAM_TYPES: ReadonlySet<string> = new Set(['enum', 'integer', 'number', 'boolean', 'text']);
@@ -126,8 +131,10 @@ function parseModel(raw: unknown): MediaModel | null {
   }
   const shown: [string, string] = label(r.label) ? [r.label[0], r.label[1]] : [r.name, r.name];
   const references = Number.isInteger(r.references) && (r.references as number) > 0 && (r.references as number) <= MAX_MEDIA_REFERENCES ? r.references as number : 0;
+  const audioReferences = Number.isInteger(r.audioReferences) && (r.audioReferences as number) > 0 && (r.audioReferences as number) <= MAX_AUDIO_REFERENCES
+    ? r.audioReferences as number : 0;
   return { id: r.id, name: r.name, label: shown, vendor: r.vendor, kind: r.kind as MediaKind, prompt: { minLength: prompt.minLength, maxLength: prompt.maxLength }, params, references,
-    ...(references > 0 && r.referenceMode === 'subjects' ? { subjectReferences: true } : {}) };
+    ...(references > 0 && r.referenceMode === 'subjects' ? { subjectReferences: true } : {}), audioReferences };
 }
 
 export function parseMediaCatalogue(raw: unknown): MediaCatalogue {

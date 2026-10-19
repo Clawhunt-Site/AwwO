@@ -107,13 +107,20 @@ describe('a media node composer', () => {
     expect(screen.getByText(canvasText('zh', 'attach.mediaRefSubjects', { count: 9 }))).toBeInTheDocument();
     expect(screen.getByText(/主体参考，最多 9 张，只附一张也一样.*@Image 1/)).toBeInTheDocument();
     expect(screen.queryByText(/第一帧/)).toBeNull();
+    // A model that takes voices too (M-1c): an attached MP3 or WAV is one of them, and the note says so.
+    rerender(composer({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true, audioReferences: 3, audioReferenceModels: ['视频 · 多图参考'] }));
+    expect(screen.getByText(canvasText('zh', 'attach.mediaRefSubjectsVoices', { count: 9, voices: 3 }))).toBeInTheDocument();
+    expect(screen.getByText(/附带的 MP3 或 WAV 作为声音参考（最多 3 段.*@Audio 1/)).toBeInTheDocument();
+    // A video model that takes no voices keeps its note: an attached sound is not used there.
+    rerender(composer({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true, audioReferences: 0, audioReferenceModels: ['视频 · 多图参考'] }));
+    expect(screen.getByText(canvasText('zh', 'attach.mediaRefSubjects', { count: 9 }))).toBeInTheDocument();
   });
 
   it('marks a model whose every picture is a subject reference, from its choice and from the catalogue', () => {
-    const choices = [{ key: 'rh.seedance-2-multimodal', label: '视频 · 多图参考', available: true, references: 9, subjectReferences: true },
+    const choices = [{ key: 'rh.seedance-2-multimodal', label: '视频 · 多图参考', available: true, references: 9, subjectReferences: true, audioReferences: 3 },
       { key: 'xt.omni-video', label: '视频 · 全能', available: true, references: 9 }];
     expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'rh.seedance-2-multimodal' }, choices))
-      .toEqual({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考', '视频 · 全能'], subjects: true });
+      .toEqual({ kind: 'video', references: 9, referenceModels: ['视频 · 多图参考', '视频 · 全能'], subjects: true, audioReferences: 3, audioReferenceModels: ['视频 · 多图参考'] });
     expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'xt.omni-video' }, choices)?.subjects).toBeUndefined();
     const model = (id: string, references: unknown, referenceMode?: unknown) => ({ id, name: 'x', label: ['视频', 'Video'], vendor: 'media', kind: 'video',
       prompt: { minLength: 1, maxLength: 10 }, params: [], references, referenceMode });
@@ -137,11 +144,36 @@ describe('a media node composer', () => {
     expect(catalogue.models.map(m => m.references)).toEqual([1, 0, 9, 10, 0, 0]);
   });
 
+  it('reads how many voices a model lip-syncs to from the catalogue, 0 unless a whole number up to the server ceiling of 3', () => {
+    const model = (id: string, audioReferences: unknown) => ({ id, name: 'x', label: ['视频', 'Video'], vendor: '媒体', kind: 'video', prompt: { minLength: 1, maxLength: 10 },
+      params: [], references: 9, audioReferences });
+    const catalogue = parseMediaCatalogue({ configured: true, available: true, models: [model('rh.seedance-2-multimodal', 3), model('rh.a', 1), model('rh.b', 4),
+      model('rh.c', '2'), model('rh.d', 2.5), model('rh.e', -1), model('rh.f', 0), model('rh.g', undefined)] });
+    expect(catalogue.models.map(m => m.audioReferences)).toEqual([3, 1, 0, 0, 0, 0, 0, 0]);
+    // A count the web cannot read costs only that count: the model and its pictures stay.
+    expect(catalogue.models.map(m => m.references)).toEqual([9, 9, 9, 9, 9, 9, 9, 9]);
+  });
+
+  it('says how many voices a video node’s model lip-syncs to, and which video models take any, only on a video node', () => {
+    const choices = [{ key: 'rh.seedance-2-multimodal', label: '视频 · 多图参考', available: true, references: 9, subjectReferences: true, audioReferences: 3 },
+      { key: 'xt.omni-video', label: '视频 · 全能', available: true, references: 9, audioReferences: 0 }];
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'xt.omni-video' }, choices))
+      .toMatchObject({ audioReferences: 0, audioReferenceModels: ['视频 · 多图参考'] });
+    expect(mediaComposerInfo({ kind: 'session', agentKind: 'video', model: 'xt.omni-video' }, undefined))
+      .toEqual({ kind: 'video', references: 0, referenceModels: [], audioReferences: 0, audioReferenceModels: [] });
+    // Only a video node has an audio input to say it of.
+    for (const agentKind of ['image', 'model3d', 'audio']) {
+      const info = mediaComposerInfo({ kind: 'session', agentKind, model: 'rh.seedance-2-multimodal' }, choices);
+      expect(info, agentKind).not.toHaveProperty('audioReferences');
+      expect(info, agentKind).not.toHaveProperty('audioReferenceModels');
+    }
+  });
+
   it('gives 3D and video nodes a reference input, as image nodes have, and text nodes none', () => {
     const ids = (agentKind: string) => portsFor({ kind: 'session', agentKind } as never).filter(p => p.side === 'input').map(p => p.id);
     expect(ids('model3d')).toEqual(['context', 'reference']);
     expect(ids('image')).toEqual(['context', 'reference']);
-    expect(ids('video')).toEqual(['context', 'reference']);
+    expect(ids('video')).toEqual(['context', 'reference', 'audio']);
     expect(ids('llm')).not.toContain('reference');
   });
 });

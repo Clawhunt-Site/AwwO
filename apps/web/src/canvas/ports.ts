@@ -42,6 +42,7 @@ export interface PortSpec {
    *
    * `reference` stays single on an image or 3D session (the one picture it edits or builds from) and is multi on a
    * video session, which keeps the look of every subject wired in: a character, a ship, a place (2026-10-17).
+   * A video session's `audio` is multi too: one voice wired in for each speaker it lip-syncs (2026-10-19).
    */
   multi?: boolean;
 }
@@ -68,7 +69,8 @@ const EDIT_PORTS: ReadonlyArray<PortSpec> = [
  * - contract session:   input 'in:<id>' / output 'out:<id>' with each field's declared type
  * - session llm/coding: input 'context' (text, MULTI)                       → output 'result' (text)
  * - session image:      input 'context' (text, MULTI) + 'reference' (image) → output 'result' (image)
- * - session video:      input 'context' (text, MULTI) + 'reference' (image, MULTI) → output 'result' (video)
+ * - session video:      input 'context' (text, MULTI) + 'reference' (image, MULTI)
+ *                       + 'audio' (audio, MULTI)                            → output 'result' (video)
  * - session model3d:    input 'context' (text, MULTI) + 'reference' (image) → output 'result' (file)
  * - session audio:      input 'context' (text, MULTI)                       → output 'result' (audio)
  * - edit:               input 'timeline' (text) + 'clips' (video, MULTI) + 'sounds' (audio, MULTI)
@@ -100,6 +102,10 @@ export function portsFor(node: CanvasNode): PortSpec[] {
   if (node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d') {
     ports.push({ id: 'reference', side: 'input', dataType: 'image', ...(node.agentKind === 'video' ? { multi: true } : {}) });
   }
+  // A sound wired into a video node's `audio` is one of its voice references where its model takes them: the video's
+  // words call them @Audio 1, @Audio 2 in canvas order, and the speaker's lips move to the voice. A run refuses one where
+  // the model takes none.
+  if (node.agentKind === 'video') ports.push({ id: 'audio', side: 'input', dataType: 'audio', multi: true });
   ports.push({ id: 'result', side: 'output', dataType: node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'audio' ? node.agentKind
     : node.agentKind === 'model3d' ? 'file' : 'text' });
   return ports;

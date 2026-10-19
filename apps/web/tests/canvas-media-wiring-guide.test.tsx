@@ -10,7 +10,7 @@ import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { resetAllSessions } from '../src/canvas/sessions';
 import type { MediaComposerInfo } from '../src/canvas/TileComposer';
 
-function media(kind: 'image' | 'video' | 'model3d', over: Partial<SessionNode> = {}): SessionNode {
+function media(kind: 'image' | 'video' | 'model3d' | 'audio', over: Partial<SessionNode> = {}): SessionNode {
   return { ...createSessionNode(kind, { x: 0, y: 0 }), id: `${kind}-node`, title: kind, w: 400, h: 420, ...over };
 }
 function wiring(wires: Record<string, number> = {}): WiringApi {
@@ -101,6 +101,52 @@ describe('media port guides', () => {
     }
   });
 
+  it('names a video node’s voice input and says what the voices wired in do', () => {
+    const lipSync: MediaComposerInfo = { kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true, audioReferences: 3, audioReferenceModels: ['视频 · 多图参考'] };
+    render(<TilePorts node={media('video')} wiring={wiring({ audio: 2 })} media={lipSync} />);
+    const voice = screen.getByRole('button', { name: '输入端口 声音参考（音频），已连 2 条' });
+    expect(voice.dataset.portId).toBe('audio');
+    expect(voice.getAttribute('title')).toBeNull();
+    fireEvent.focus(voice);
+    expect(screen.getByRole('tooltip').textContent).toContain('声音参考 · 音频 · 可多路输入 · 已连 2 条');
+    expect(screen.getByRole('tooltip').textContent).toContain(canvasText('zh', 'media.guideVoiceReferences', { count: 3 }));
+  });
+
+  it('says whether a video node’s model lip-syncs to the voices wired in, and which models would', () => {
+    const video = media('video');
+    const audio = portsFor(video).find(p => p.id === 'audio')!;
+    const voice = (locale: 'zh' | 'en', info?: MediaComposerInfo) => mediaPortGuide((key, values) => canvasText(locale, key, values), locale, video, audio, info);
+    const lipSync: MediaComposerInfo = { kind: 'video', references: 9, referenceModels: ['视频 · 多图参考'], subjects: true, audioReferences: 3, audioReferenceModels: ['视频 · 多图参考'] };
+    for (const locale of ['zh', 'en'] as const) {
+      const takes = voice(locale, lipSync);
+      expect(takes).toBe(canvasText(locale, 'media.guideVoiceReferences', { count: 3 }));
+      expect(takes).toContain('@Audio 1');
+      expect(takes).toContain('3');
+      expect(voice(locale)).toBe(canvasText(locale, 'media.guideVoice'));
+    }
+    expect(voice('zh', lipSync)).toContain('画面里说话的人按声音对口型');
+    expect(voice('en', lipSync)).toContain('the speaker’s lips move to the voice');
+    // A run refuses a voice with no picture beside it, and RunningHub reads voices of 2–15 s, 15 s in all: the guide says so first.
+    expect(voice('zh', lipSync)).toContain('用声音时至少要有一张图片，接到「参考图」或附在消息里都可以');
+    expect(voice('zh', lipSync)).toContain('更多或更长时运行会被拒绝');
+    expect(voice('zh', lipSync)).toContain('每段 2–15 秒，合计不超过 15 秒');
+    expect(voice('en', lipSync)).toContain('A voice needs at least one picture beside it, wired into Reference picture or attached to the message.');
+    expect(voice('en', lipSync)).toContain('a run refuses more or longer ones');
+    expect(voice('en', lipSync)).toContain('each 2 to 15 seconds and 15 seconds in all');
+    // An audio node's result says where a voice goes.
+    const result = portsFor(media('audio')).find(p => p.id === 'result')!;
+    expect(mediaPortGuide((key, values) => canvasText('en', key, values), 'en', media('audio'), result)).toContain('a video node’s Voice reference');
+    expect(mediaPortGuide((key, values) => canvasText('zh', key, values), 'zh', media('audio'), result)).toContain('视频节点的「声音参考」');
+    // A model that takes none: a run refuses the voice, and the guide names the models that take one.
+    expect(voice('zh', { kind: 'video', references: 9, referenceModels: [], audioReferences: 0, audioReferenceModels: ['视频 · 多图参考', '视频 · 高清'] }))
+      .toBe('接声音进来：上游音频节点的结果。这个节点的模型不接声音参考，运行画布时会拒绝接在这里的声音；要用声音参考，请换成：视频 · 多图参考、视频 · 高清。');
+    expect(voice('en', { kind: 'video', references: 9, referenceModels: [], audioReferences: 0, audioReferenceModels: ['Video · From references', 'Video · HD'] }))
+      .toContain('a canvas run refuses a voice wired here; for voice references, switch to Video · From references, Video · HD.');
+    for (const locale of ['zh', 'en'] as const) {
+      expect(voice(locale, { kind: 'video', references: 9, referenceModels: [], audioReferences: 0, audioReferenceModels: [] })).toBe(canvasText(locale, 'media.guideVoiceNone'));
+    }
+  });
+
   it('leaves every other port as it was, and shows no guide where nothing can be wired', () => {
     const text = { ...createSessionNode('coding', { x: 0, y: 0 }), id: 'writer', w: 400, h: 420 } as SessionNode;
     render(<TilePorts node={text} wiring={wiring()} />);
@@ -117,6 +163,11 @@ describe('media port guides', () => {
     fireEvent.mouseEnter(screen.getByRole('button', { name: /Input port Reference picture/ }));
     expect(screen.getByRole('tooltip').textContent).toContain('Reference picture · Image · one connection');
     expect(screen.getByRole('tooltip').textContent).toContain('Models that take a reference picture start from it');
+    cleanup();
+    render(<LocaleProvider locale="en"><TilePorts node={media('video')} wiring={wiring()} /></LocaleProvider>);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Input port Voice reference (Audio), not connected' }));
+    expect(screen.getByRole('tooltip').textContent).toContain('Voice reference · Audio · Multiple inputs allowed');
+    expect(screen.getByRole('tooltip').textContent).toContain('Models that take voice references move the speaker’s lips to the voice');
   });
 });
 

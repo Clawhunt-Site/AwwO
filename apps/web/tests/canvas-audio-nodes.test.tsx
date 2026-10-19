@@ -84,12 +84,17 @@ describe('audio nodes on the canvas', () => {
     expect(document.edges).toEqual([expect.objectContaining({ fromNode: 'vo', toNode: 'page', dataType: 'audio' })]);
   });
 
-  it('feeds a page like a video does, softly, and nothing that is not text', () => {
+  it('feeds a page like a video does, softly, and a video node’s voices, but no picture input', () => {
     const vo = voice('vo');
     const target = page('page');
     const hero = { ...createSessionNode('image', { x: 0, y: 0 }), id: 'hero' };
+    const shot = { ...createSessionNode('video', { x: 700, y: 0 }), id: 'shot' };
     expect(canConnect([vo, target], [], { nodeId: 'vo', portId: 'result' }, { nodeId: 'page', portId: 'context' })).toBe(true);
     expect(isSoftMediaFeed(vo, target, { fromPort: 'result', toPort: 'context' })).toBe(true);
+    // A voice wired into a video is that video's own input, as a wired picture is, never a soft feed.
+    expect(canConnect([vo, shot], [], { nodeId: 'vo', portId: 'result' }, { nodeId: 'shot', portId: 'audio' })).toBe(true);
+    expect(isSoftMediaFeed(vo, shot, { fromPort: 'result', toPort: 'audio' })).toBe(false);
+    expect(canConnect([vo, shot], [], { nodeId: 'vo', portId: 'result' }, { nodeId: 'shot', portId: 'reference' })).toBe(false);
     expect(canConnect([vo, hero], [], { nodeId: 'vo', portId: 'result' }, { nodeId: 'hero', portId: 'reference' })).toBe(false);
     expect(canConnect([vo, hero], [], { nodeId: 'hero', portId: 'result' }, { nodeId: 'vo', portId: 'reference' })).toBe(false);
   });

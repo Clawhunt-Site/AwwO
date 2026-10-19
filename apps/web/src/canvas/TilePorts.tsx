@@ -216,7 +216,8 @@ export interface TilePortsProps {
   /** Omitted → handles still render (structure is never hidden) but are inert. */
   wiring?: WiringApi;
   /** An image, video or 3D node's generator (from `mediaComposerInfo`): whether its model uses the reference picture
-   *  wired in, which the reference port's guide says. Omitted → the guide says it in general terms. */
+   *  wired in, and a video's model the voices wired in, which those ports' guides say. Omitted → the guides say it in
+   *  general terms. */
   media?: MediaComposerInfo;
   /** The canvas view's scale. A port guide is text to read, so it keeps its on-screen size at any zoom (the handles,
    *  part of the graph, zoom with it). Omitted → 1. */
@@ -237,9 +238,10 @@ const EDIT_PORT_GUIDE: Readonly<Record<string, CanvasTextKey>> = {
  * What a media node's port takes or gives, in a sentence or two: shown beside the port while it is hovered or
  * focused, so the wiring is learnt where it is done. The facts are the ones `portsFor` and the run engine hold:
  * `context` takes any number of text wires, which a canvas run puts after the node's own prompt; `reference` takes
- * one picture, used only where the node's model takes one (image edit, image-to-3D); `result` carries the files to
- * an input of the same type. An edit node's ports say what its timeline and media take and where its film goes. Null
- * for every other node and port: those keep their plain label.
+ * one picture, used only where the node's model takes one (image edit, image-to-3D); a video node's `audio` takes
+ * any number of sounds, its voice references where its model takes them (a run refuses them where it does not);
+ * `result` carries the files to an input of the same type. An edit node's ports say what its timeline and media take
+ * and where its film goes. Null for every other node and port: those keep their plain label.
  */
 export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, port: PortSpec, media?: MediaComposerInfo): string | null {
   if (node.kind === 'edit') return Object.hasOwn(EDIT_PORT_GUIDE, port.id) ? t(EDIT_PORT_GUIDE[port.id]) : null;
@@ -256,6 +258,13 @@ export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, p
     return media.referenceModels.length
       ? t('media.guideReferenceUnused', { models: media.referenceModels.join(locale === 'en' ? ', ' : '、') })
       : t('media.guideReferenceNone');
+  }
+  if (port.side === 'input' && port.id === 'audio') {
+    if (!media) return t('media.guideVoice');
+    const voices = media.audioReferences ?? 0;
+    if (voices > 0) return t('media.guideVoiceReferences', { count: voices });
+    const models = media.audioReferenceModels ?? [];
+    return models.length ? t('media.guideVoiceUnused', { models: models.join(locale === 'en' ? ', ' : '、') }) : t('media.guideVoiceNone');
   }
   if (port.side === 'output' && port.id === 'result') {
     return t(kind === 'video' ? 'media.guideResultVideo' : kind === 'model3d' ? 'media.guideResultModel3d' : kind === 'audio' ? 'media.guideResultAudio' : 'media.guideResultImage');
@@ -294,7 +303,7 @@ export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
         const typeLabel = t(TYPE_LABEL[p.dataType]);
         const portLabel = hasContract ? p.label?.trim() || t('ports.unnamed', { side: sideLabel })
           : editPorts && Object.hasOwn(EDIT_PORT_LABEL, p.id) ? t(EDIT_PORT_LABEL[p.id])
-          : p.id === 'reference' ? t('ports.reference')
+          : p.id === 'reference' ? t('ports.reference') : mediaPorts && p.id === 'audio' ? t('ports.voice')
             : mediaPorts && p.id === 'context' ? t('media.portContext')
               : mediaPorts && p.id === 'result' ? t('media.portResult') : p.id;
         const portKey = `${p.side}:${p.id}`;

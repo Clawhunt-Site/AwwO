@@ -179,3 +179,23 @@ it.each([
   const r = await canvasFetch('/gateway-api/conversations/tenant-a/agents/a/messages', { method: 'POST', body: JSON.stringify({ message: 'hello', issueId: 'session-a' }) });
   const text = await r.text(); expect(text).toContain(expected); expect(text).toContain('"status":"failed"');
 });
+
+it('says a refused voice is the voice, not a picture, and that nothing was made or charged (M-1c)', () => {
+  const zh = runErrorText('media_voice_unavailable', 'zh')!;
+  const en = runErrorText('media_voice_unavailable', 'en')!;
+  expect(zh).toContain('声音参考用不了');
+  expect(zh).toContain('没有扣积分');
+  expect(zh).toContain('至少要有一张参考图');
+  expect(en).toContain('The voice reference cannot be used');
+  expect(en).toContain('nothing was generated or charged');
+  expect(en).toContain('MP3 or WAV');
+  for (const text of [zh, en]) expect(text).not.toBe(runErrorText('media_reference_unavailable', text === zh ? 'zh' : 'en'));
+});
+
+it('tells the reader to turn on Real people when RunningHub refuses a photorealistic person (code 1505)', () => {
+  expect(runErrorText('media_real_person_rejected', 'zh')).toContain('「真人模式」');
+  expect(runErrorText('media_real_person_rejected', 'zh')).toContain('1505');
+  expect(runErrorText('media_real_person_rejected', 'en')).toContain('turn on Real people');
+  expect(runErrorText('media_real_person_rejected', 'en')).toContain('1505');
+  expect(runErrorText('media_voice_unavailable', 'en')).toContain('at most 3, each 2 to 15 seconds (15 seconds in all)');
+});

@@ -60,11 +60,13 @@ describe('ports: typed port derivation', () => {
     ]);
   });
 
-  it('gives a video session a picture reference input that takes several wires, one per subject it keeps', () => {
+  it('gives a video session a picture reference input that takes several wires, one per subject it keeps, and one for its voices', () => {
     const ports = portsFor(createSessionNode('video', { x: 0, y: 0 }));
     expect(ports.filter((p) => p.side === 'input')).toEqual([
       { id: 'context', side: 'input', dataType: 'text', multi: true },
       { id: 'reference', side: 'input', dataType: 'image', multi: true },
+      // One voice for each speaker the video lip-syncs.
+      { id: 'audio', side: 'input', dataType: 'audio', multi: true },
     ]);
   });
 

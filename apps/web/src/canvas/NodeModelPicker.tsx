@@ -34,6 +34,8 @@ export interface NodeModelChoice {
   references?: number;
   /** A media model whose every reference picture is a subject reference, a single one included. */
   subjectReferences?: boolean;
+  /** A video model: how many voices wired into its node's `audio` input it lip-syncs to (0 or absent: none). */
+  audioReferences?: number;
   /** A chat model: its id, whatever runtime the choice runs it on. */
   model?: string;
 }
