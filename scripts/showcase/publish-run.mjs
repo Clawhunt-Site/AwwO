@@ -68,10 +68,13 @@ if (ranText !== canonicalCanvasText(createOfficialDocument(workflow)))
 // shares the folder of the run it retried).
 const STORED = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z(?:-retry\d+)?\.json$/, '')}-files`);
 // The runtime the agents ran on: a canvas's nodes may each name one (a flagship's work in sandbox computers), and the
-// ledger names the one each model call ran on; the record names it only when they all agree.
-const agentNodes = raw.graph.document.nodes.filter(node => node.kind === 'session');
+// ledger names the one each model call ran on; the record names it only when they all agree. A media node is no agent:
+// what it names is its media provider's runtime (PALLWARD's pictures and 3D models beside its sandbox agents).
+const agentNodes = frozen.slice(0, workflow.nodes.length).filter(node => node.kind === 'session');
+const mediaKeys = new Set([...MEDIA_IDS.keys(), ...MEDIA_IDS.values()]);
 const ranOn = new Set(agentNodes.map(node => node.runtime || raw.runtime));
-const ledgerRuntimes = new Set(Object.values(raw.invocations || {}).flatMap(value => (value?.items || []).map(item => item.runtime)).filter(Boolean));
+const ledgerRuntimes = new Set(Object.entries(raw.invocations || {}).filter(([id]) => !mediaKeys.has(id))
+  .flatMap(([, value]) => (value?.items || []).map(item => item.runtime)).filter(Boolean));
 if (ranOn.size !== 1 || [...ledgerRuntimes].some(runtime => !ranOn.has(runtime)))
   throw new Error(`${raw.caseId}: the agents ran on ${[...ranOn].join(', ')} and the ledger names ${[...ledgerRuntimes].join(', ')}; one runtime is published`);
 const runtime = [...ranOn][0];
@@ -141,6 +144,9 @@ const nodes = workflow.nodes.map((spec, index) => {
 // A case's delivery is the last page its canvas makes (PALLWARD's second fix pass, after the first).
 const artifact = workflow.nodes.findLast(node => node.outputType === 'html');
 const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
+// The day the case's page was delivered, which its dialog names: the end of its delivery node's run (a canvas that ran
+// again delivered on the day of its last run, PALLWARD's a day after its first), else the run's start.
+const deliveredAt = artifact ? raw.runs[frozen[workflow.nodes.indexOf(artifact)]?.id]?.updatedAt : undefined;
 // Each media node as the run stored it: its state and the files it made, by the `<node id>/<file>` path the canvas handed
 // the page. They are not agents, so they stay out of `nodes` (a copy pins agents only).
 const media = mediaSpecs.map((spec, index) => {
@@ -176,7 +182,7 @@ if (retries.length) {
 const record = {
   caseId: raw.caseId,
   edition: notes.edition,
-  runtime, model: notes.model || raw.model, capturedOn: raw.startedAt.slice(0, 10),
+  runtime, model: notes.model || raw.model, capturedOn: new Date(deliveredAt || raw.startedAt).toISOString().slice(0, 10),
   seconds: seconds(raw.graph.createdAt, raw.graph.updatedAt), ...(retries.length ? { runs: retries.length + 1, activeSeconds } : {}),
   completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
   limits: { contextWindow: notes.limits.contextWindow, maxOutputTokens: notes.limits.maxOutputTokens, modelCallsPerNode: notes.limits.modelCallsPerNode,
@@ -210,7 +216,10 @@ function writeStaticMedia(manifestFile) {
   try {
     fs.mkdirSync(caseDir, { recursive: true });
     for (const item of media) for (const reference of item.files) {
-      const preview = item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(reference);
+      // A 3D model's rendered picture, and a picture the page does not name (PALLWARD's concepts, which its models were made
+      // from), are shown only in the dialog's media strip: small.
+      const preview = (item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(reference))
+        || (item.kind === 'image' && reference === item.files[0] && !artifactOutput?.includes(reference));
       if (!artifactOutput?.includes(reference) && !preview) continue;
       const [specId, name] = [reference.slice(0, reference.indexOf('/')), reference.slice(reference.indexOf('/') + 1)];
       const nodeId = [...MEDIA_IDS].find(([, to]) => to === specId)?.[0];
@@ -252,9 +261,10 @@ function writeStaticMedia(manifestFile) {
 /**
  * A GLB without its provider's marks: the 3D model nodes' files name the service that made them (asset.generator, and
  * material, mesh and node names), and a published file is downloadable by anyone. The JSON chunk's generator becomes
- * AwwO and every named object is renamed by its kind and index (the delivered pages load the model's scene and name no
- * object in it); the binary chunk, the geometry and the textures, is kept byte for byte. A mark this cannot take out
- * (in the binary chunk, say a texture's metadata) stops the publish.
+ * AwwO and every object whose name holds a mark is renamed by its kind and index; every other name stays, since a page
+ * may look its model's bones and clips up by name (PALLWARD's rigs find 'Hips' or 'R_Hand' and play 'idle' or 'slash',
+ * and put one file's clips on another's skeleton by bone name). The binary chunk, the geometry and the textures, is
+ * kept byte for byte. A mark this cannot take out (in the binary chunk, say a texture's metadata) stops the publish.
  */
 function neutralGlb(bytes, reference) {
   // Names of the generation providers behind AwwO's media nodes, which users never see (the site names its models
@@ -268,8 +278,11 @@ function neutralGlb(bytes, reference) {
   const rest = bytes.subarray(20 + word(12));
   if (marks.test(rest.toString('latin1'))) throw new Error(`${reference}: its binary chunk names a provider`);
   doc.asset = { ...doc.asset, generator: 'AwwO' };
+  // Tripo's marks sit in mesh, mesh-node and material names (tripo_mesh_<id>, tripo_node_<id>, tripo_material_<id>), and
+  // an untextured model repeats its mesh's in the mesh's extras.
   for (const [kind, values] of Object.entries(doc)) if (Array.isArray(values)) values.forEach((value, index) => {
-    if (value && typeof value === 'object' && typeof value.name === 'string') value.name = `${singular(kind)}_${index}`;
+    if (value && typeof value === 'object' && typeof value.name === 'string' && marks.test(value.name)) value.name = `${singular(kind)}_${index}`;
+    if (value?.extras && typeof value.extras === 'object' && typeof value.extras.name === 'string' && marks.test(value.extras.name)) value.extras.name = `${singular(kind)}_${index}`;
   });
   const text = JSON.stringify(doc);
   if (marks.test(text)) throw new Error(`${reference}: its JSON chunk still names a provider`);

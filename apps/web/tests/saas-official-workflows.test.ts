@@ -5,7 +5,7 @@ import { mediaKindOf, parseMediaCatalogue, replacementMediaModel } from '../src/
 import { findCycle, preflightGraph, preflightGraphIssue, runGraph } from '../src/canvas/runGraph';
 import { normalizeContract } from '../src/canvas/nodeContracts';
 import { createOfficialDocument, type OfficialWorkflow } from '../src/saas/examples/officialWorkflows';
-import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 
 // createOfficialDocument mints the canvas a member copies from every production case compiled from tasks
 // (productionWorkflows.ts), the knowledge base's included. Every case is English, so there is one canvas whatever
@@ -17,7 +17,7 @@ const WITH_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-model', media:
   model: 'tripo.p1', params: { texture: true, pbr: true, textureQuality: 'detailed', faceLimit: 12000 }, column: 0, row: 4, feeds: ['page'] }] };
 // A flagship canvas (an assembly node and agents that work in sandbox computers, dozens of model calls each) has its
 // own tests, saas-flagship-workflows.test.ts.
-const CASES = Object.values(PRODUCTION_WORKFLOWS).filter(item => !(PUBLISHED_FLAGSHIPS as readonly string[]).includes(item.id));
+const CASES = Object.values(PRODUCTION_WORKFLOWS).filter(item => ![...PUBLISHED_FLAGSHIPS, ...PUBLISHED_EPICS].includes(item.id as never));
 // The same copy on three.js r186 with a rigged, animated model: only an r186 page (one that loads GLBs) fed by an
 // animated 3D node is told where its clips are.
 const WITH_ANIMATED_MODEL: OfficialWorkflow = { ...gt, id: 'aurora-gt-with-animated-model', stack: 'r186', media: [...gt.media!, {

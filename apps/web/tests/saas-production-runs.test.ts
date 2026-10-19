@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { PRODUCTION_RUN_SUMMARY, formatDuration, loadProductionMedia, type ProductionMediaFile, type ProductionRunRecord } from '../src/saas/productionRuns';
-import { PRODUCTION_WORKFLOWS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
@@ -21,13 +21,16 @@ it('publishes exactly the generated files a media case’s page names as static 
     if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
     expect(record.media?.map(item => [item.id, item.title, item.kind]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title, item.kind]));
     const page = record.nodes.find(node => node.id === record.artifactNodeId)?.output ?? '';
-    // What the page names, and a 3D model's preview picture, which the dialog shows beside the agents.
-    const published = record.media!.flatMap(item => item.files.filter(file => page.includes(file) || (item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(file))));
+    // What the page names, and what the dialog shows beside the agents: a 3D model's preview picture, and the picture of an
+    // image node the page does not name (PALLWARD's concepts).
+    const strip = (item: NonNullable<ProductionRunRecord['media']>[number], file: string) =>
+      (item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(file)) || (item.kind === 'image' && file === item.files[0] && !page.includes(file));
+    const published = record.media!.flatMap(item => item.files.filter(file => page.includes(file) || strip(item, file)));
     expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(published.sort());
     const folder = path.join(WEB, 'showcase', 'media', record.caseId);
     for (const [reference, file] of Object.entries(files ?? {})) {
-      const kind = record.media!.find(item => item.files.includes(reference))!.kind;
-      const type = kind === 'video' ? 'video/mp4' : /\.glb$/i.test(reference) ? 'model/gltf-binary' : kind === 'model3d' ? 'image/webp' : 'image/jpeg';
+      const item = record.media!.find(value => value.files.includes(reference))!, kind = item.kind;
+      const type = kind === 'video' ? 'video/mp4' : /\.glb$/i.test(reference) ? 'model/gltf-binary' : strip(item, reference) ? 'image/webp' : 'image/jpeg';
       expect(file.type, reference).toBe(type);
       // Served beside the case footage, named by its content.
       expect(file.src, reference).toBe(`/showcase/media/${record.caseId}/${file.sha256.slice(0, 16)}.${{ 'video/mp4': 'mp4', 'model/gltf-binary': 'glb', 'image/webp': 'webp', 'image/jpeg': 'jpg' }[type]}`);
@@ -42,6 +45,37 @@ it('publishes exactly the generated files a media case’s page names as static 
   }
   // No folder is left for a case without media.
   for (const name of readdirSync(path.join(WEB, 'showcase', 'media'))) expect(MEDIA[`../src/saas/production-runs/${name}.media.json`], name).toBeDefined();
+});
+
+it('publishes each 3D model without its provider’s marks, keeping the bone and clip names its page looks up', () => {
+  const marks = /tripo|x-?tasy|runninghub|bytedance|dreamina|jimeng|kuaishou|midjourney|pixverse|shengshu/i;
+  let rigged = 0;
+  for (const record of RECORDS) {
+    const workflow = PRODUCTION_WORKFLOWS[record.caseId];
+    for (const [reference, file] of Object.entries(MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`] ?? {})) {
+      if (file.type !== 'model/gltf-binary') continue;
+      const bytes = readFileSync(path.join(WEB, ...file.src.split('/').filter(Boolean)));
+      expect(bytes.toString('latin1', 0, 4), reference).toBe('glTF');
+      const text = bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12));
+      expect(text, `${record.caseId}/${reference}`).not.toMatch(marks);
+      const gltf = JSON.parse(text) as { asset?: { generator?: string }; nodes?: { name?: string }[]; skins?: { joints: number[] }[]; animations?: { name?: string }[] };
+      expect(gltf.asset?.generator, reference).toBe('AwwO');
+      // A rigged model (its media node asks for a rig) keeps its joints' and clips' names: PALLWARD's page finds a biped's
+      // 'Hip' or 'R_Hand' and plays 'idle' or 'slash' by name, and puts one file's clips on another's skeleton by bone
+      // name. (Tripo names a biped's joints so; a quadruped's or hexapod's it names node_<n> and bone_<n> itself.)
+      const spec = workflow.media?.find(item => item.id === reference.slice(0, reference.indexOf('/')));
+      const rig = (spec?.params as { rig?: unknown } | undefined)?.rig;
+      if (!rig || !gltf.skins?.length) continue;
+      rigged += 1;
+      const joints = new Set(gltf.skins.flatMap(skin => skin.joints.map(index => gltf.nodes?.[index]?.name ?? '')));
+      expect(joints.has(''), reference).toBe(false);
+      if (rig === 'biped') for (const bone of ['Hip', 'Spine02', 'Head', 'R_Hand', 'L_Hand', 'R_Index1', 'R_Pinky1', 'L_Forearm'])
+        expect(joints.has(bone), `${reference}: ${bone}`).toBe(true);
+      expect(gltf.animations?.length, reference).toBeGreaterThan(0);
+      expect(gltf.animations!.some(clip => !clip.name || /^animation_\d+$/.test(clip.name)), reference).toBe(false);
+    }
+  }
+  expect(rigged).toBeGreaterThanOrEqual(PUBLISHED_EPICS.length);
 });
 
 it('loads a media case’s files as data: URLs from the site, all or none: a file it cannot fetch, a short one or a stalled one fails the load', async () => {
@@ -68,11 +102,20 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
   for (const [reference, url] of Object.entries(files)) expect(url.startsWith(`data:${manifest[reference].type};base64,`), reference).toBe(true);
   await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'missing' }).fetchFile)).rejects.toThrow('production_media_unavailable');
   await expect(loadProductionMedia(record.caseId, serve({ src: second[1].src, as: 'short' }).fetchFile)).rejects.toThrow('production_media_unavailable');
-  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50)).rejects.toThrow('production_media_unavailable');
+  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50, undefined, Infinity)).rejects.toThrow('production_media_unavailable');
   // A manifest chunk that never arrives ends at the same deadline, and nothing is fetched for it.
   const idle = serve();
   await expect(loadProductionMedia(record.caseId, idle.fetchFile, 50, () => new Promise(() => {}))).rejects.toThrow('production_media_unavailable');
   expect(idle.seen).toEqual([]);
+  // The files get the time their bytes take at a slow link's speed on top of the deadline: a file 200 ms late fails a
+  // 50 ms deadline alone, and arrives when the case's bytes are given five seconds more.
+  const total = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
+  const late = (fetchFile: typeof fetch) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+    await new Promise(resolve => setTimeout(resolve, 200));
+    return fetchFile(input, init);
+  }) as typeof fetch;
+  await expect(loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, Infinity)).rejects.toThrow('production_media_unavailable');
+  expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, total / 5)).sort()).toEqual(Object.keys(manifest).sort());
   expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
 });
 
@@ -158,6 +201,15 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
       expect(record.nodes.filter(node => node.kind === 'assemble').map(node => node.id), record.caseId).toEqual(workflow.nodes.filter(node => node.assemble).map(node => node.id));
       expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 32000, modelCallsPerNode: 64 });
       expect(record.limits!.concurrency, record.caseId).toBe(9);
+      continue;
+    }
+    if ((PUBLISHED_EPICS as readonly string[]).includes(record.caseId)) {
+      // An epic's agents work in sandbox computers too, on Claude Opus 5.5 with its 64,000 output tokens a call and its own
+      // thinking; its twenty builders ran at most eight side by side (the sandbox worker's slots).
+      expect(record.runtime, record.caseId).toBe('sandbox');
+      expect(record.nodes.filter(node => node.kind !== 'assemble').every(node => node.sandbox), record.caseId).toBe(true);
+      expect(record.nodes.filter(node => node.kind === 'assemble').map(node => node.id), record.caseId).toEqual(workflow.nodes.filter(node => node.assemble).map(node => node.id));
+      expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 64000, modelCallsPerNode: 64, concurrency: 8, thinking: true });
       continue;
     }
     // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.

@@ -148,17 +148,30 @@ function asDataUrl(blob: Blob): Promise<string> {
  * data. All or nothing: a file that cannot be fetched, is not the size published, or is not here within the deadline
  * rejects the whole load (production_media_unavailable), so a case's page is never shown without the files it uses;
  * its dialog offers to try again. The deadline also covers the manifest's own chunk, so a stalled chunk ends in that
- * offer too rather than in a dialog that never stops loading.
+ * offer too rather than in a dialog that never stops loading. Once the manifest is here, the files get the deadline
+ * again plus the time their bytes take at 128 KiB/s (PALLWARD's 88 files are 22.6 MB: 120 s alone needed 1.5 Mbit/s,
+ * now about 0.6 do, and a dead connection is given up after about 5 minutes).
  */
 export async function loadProductionMedia(id: string, fetchFile: typeof fetch = (input, init) => fetch(input, init),
-  deadlineMs = 120_000, loadManifest: typeof loadProductionMediaManifest = loadProductionMediaManifest): Promise<Readonly<Record<string, string>>> {
+  deadlineMs = 120_000, loadManifest: typeof loadProductionMediaManifest = loadProductionMediaManifest,
+  slowBytesPerSecond = 128 * 1024): Promise<Readonly<Record<string, string>>> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => { controller.abort(); reject(new Error('production_media_unavailable')); }, deadlineMs);
-  });
+  let expire: (error: Error) => void = () => {};
+  const deadline = new Promise<never>((_, reject) => { expire = reject; });
+  const arm = (ms: number) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { controller.abort(); expire(new Error('production_media_unavailable')); }, ms);
+  };
+  arm(deadlineMs);
   try {
-    const entries = await Promise.race([loadManifest(id).then(manifest => Promise.all(Object.entries(manifest).map(async ([path, file]) => {
+    const entries = await Promise.race([loadManifest(id).then(manifest => {
+      // A manifest that came after the deadline starts nothing.
+      if (controller.signal.aborted) throw new Error('production_media_unavailable');
+      const bytes = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
+      arm(deadlineMs + Math.ceil((bytes / slowBytesPerSecond) * 1000));
+      return manifest;
+    }).then(manifest => Promise.all(Object.entries(manifest).map(async ([path, file]) => {
       const response = await fetchFile(file.src, { credentials: 'omit', signal: controller.signal });
       if (!response.ok) throw new Error('production_media_unavailable');
       const bytes = await response.arrayBuffer();

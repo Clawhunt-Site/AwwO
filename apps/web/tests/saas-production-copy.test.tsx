@@ -42,7 +42,7 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(20);
+  expect(CASES).toHaveLength(21);
   expect(RECORDED).toHaveLength(15);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
@@ -89,7 +89,7 @@ it('shows every agent what it received: each wired input resolves to its upstrea
 
 it('copies a media case on the very canvas that ran: agents with their recordings, media nodes fresh, the page they feed made on the first run', () => {
   const media = CASES.filter(id => WORKFLOWS[id].media?.length);
-  expect(media.sort()).toEqual(['aurora-gt', 'car-plant', 'neon-circuit', 'neon-city', 'shanhai-vn']);
+  expect(media.sort()).toEqual(['aurora-gt', 'car-plant', 'neon-circuit', 'neon-city', 'pallward', 'shanhai-vn']);
   for (const id of media) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     expect(canonicalCanvasText(copy)).toBe(canonicalCanvasText(createOfficialDocument(workflow)));
@@ -101,7 +101,9 @@ it('copies a media case on the very canvas that ran: agents with their recording
       const recorded = spec && record.nodes.find(value => value.id === spec.id)!;
       // A 3D model reaches the page through a module the page pastes, so that page names the run's files as well.
       const names = spec?.outputType === 'html' && files.some(file => recorded!.output?.includes(file));
-      if (!spec || fed.has(spec.id) || names) { expect(session.lastOutput, `${id}/${session.title}`).toBeUndefined(); return; }
+      // An assembly that delivers a file (PALLWARD's page and its first pass's page) makes it again on the first run.
+      const file = node.kind === 'assemble' && node.contract.outputs.some(field => field.type === 'file');
+      if (!spec || fed.has(spec.id) || names || file) { expect(session.lastOutput, `${id}/${session.title}`).toBeUndefined(); return; }
       expect(session.lastOutput?.source, `${id}/${spec.id}`).toBe('case');
       expect(parseContractOutput(session.contract!, session.lastOutput!.text).values.result, `${id}/${spec.id}`).toBe(recorded!.output);
     });

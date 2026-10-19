@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { EPIC_WORKFLOWS } from '../src/saas/epicWorkflows';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_EPICS } from '../src/saas/productionWorkflows';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { createOfficialCopyDocument } from '../src/saas/examples/OfficialCopySetup';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
@@ -83,8 +83,8 @@ const agentsOf = (document: ReturnType<typeof createOfficialDocument>) =>
 const mediaOf = (document: ReturnType<typeof createOfficialDocument>) =>
   document.nodes.filter((node): node is SessionNode => node.kind === 'session' && mediaKindOf(node.agentKind) !== null);
 
-it('is not listed as a case before a run of it is published', () => {
-  for (const item of EPICS) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBeUndefined();
+it('is listed as a case exactly when a run of it is published', () => {
+  for (const item of EPICS) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBe((PUBLISHED_EPICS as readonly string[]).includes(item.id) ? item : undefined);
   expect(Object.keys(EPIC_WORKFLOWS)).toEqual(['pallward']);
 });
 

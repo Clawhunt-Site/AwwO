@@ -28,7 +28,7 @@ import type { OfficialWorkflow, OfficialWorkflowNode } from './examples/official
  *   no number has to be dropped, where the design capped both at 24,000.
  * - The art node is given the sound effect list and the asset table in its task, since it reads only the Game spec.
  * - The page registers its ready listener before it boots (boot emits ready synchronously).
- * Not yet in PRODUCTION_WORKFLOWS: a case is listed only with a published run. */
+ * Listed in PRODUCTION_WORKFLOWS (PUBLISHED_EPICS) since its run was published. */
 
 // The world: premise, lore, factions and every name the game uses (the bible), for the design room and the look.
 const PALLWARD_WORLD = `World (original; every name, place, creature, item and interface word is this game's own; tagline "Every flame must end."):

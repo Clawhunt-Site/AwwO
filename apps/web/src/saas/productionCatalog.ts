@@ -44,6 +44,17 @@ export const RECORDER_ROLE = 'Recorder';
 const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
+  // The epic case (epicWorkflows.ts): a game written by twenty agents in sandbox computers from three design specs and
+  // the pictures and 3D models its canvas made, assembled with no model and tested and fixed in two passes.
+  {
+    id: 'pallward', kind: 'game', recording: true, footage: 'pallward-real',
+    title: 'PALLWARD',
+    brief: 'An original open-world action game in one web page: a moor of graves and candles below a castle, combat with stamina, poise and rests at wakestones, foes and two bosses, and 33 3D models the canvas made, its nine characters rigged and animated; written by twenty agents in sandbox computers and testing itself.',
+    stages: [['Game spec', 'Tech spec', 'Art direction'], [MEDIA], [MEDIA], [MEDIA], [MEDIA],
+      ['Kernel', 'Renderer', 'Assets', 'Bodies', 'Terrain', 'Landmarks', 'Castle', 'Controls', 'Camera', 'Rigs', 'Combat rules', 'Fighter', 'Bearer', 'Foes', 'Bosses', 'World state', 'Effects', 'Sound', 'HUD', 'Menus'],
+      [ASSEMBLY_ROLE], ['Test'], [ASSEMBLY_ROLE], ['Second test'], [REVIEW]],
+    deliverable: 'An open-world action game in the browser',
+  },
   // The flagship cases (flagshipWorkflows.ts): large systems written in a clean room by agents that work in sandbox
   // computers, assembled with no model and tested in a real browser.
   {

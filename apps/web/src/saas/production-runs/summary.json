@@ -123,6 +123,19 @@
       "total": 4
     }
   },
+  "pallward": {
+    "completed": 28,
+    "total": 28,
+    "seconds": 130588,
+    "delivered": true,
+    "capturedOn": "2026-10-18",
+    "model": "Claude Opus 5.5 (Rigs and animation: Claude Opus 4.8)",
+    "runtime": "sandbox",
+    "media": {
+      "completed": 43,
+      "total": 43
+    }
+  },
   "papercraft-puzzle": {
     "completed": 7,
     "total": 7,
