@@ -201,6 +201,9 @@ describe('removing and deleting in the home’s 最近的成果', () => {
       return refuse ? inUse() : new Response(null, { status: 204 });
     }));
     const onDeleted = vi.fn();
+    // What this browser keeps of each canvas (its cached document): a deleted canvas's goes, after the server's delete.
+    localStorage.setItem('awwo.saas:user-1:tenant-a:c0:superclaw.canvas.v2', '{"nodes":[]}');
+    localStorage.setItem('awwo.saas:user-1:tenant-a:c1:superclaw.canvas.v2', '{"nodes":[]}');
     render(show(delivered(2), { onDeleted }));
     openMenu('画布 0');
     fireEvent.click(screen.getByRole('button', { name: '删除画布…' }));
@@ -214,11 +217,14 @@ describe('removing and deleting in the home’s 最近的成果', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('正在执行');
     expect(onDeleted).not.toHaveBeenCalled();
     expect(names()).toEqual(['画布 0', '画布 1']);
+    expect(localStorage.getItem('awwo.saas:user-1:tenant-a:c0:superclaw.canvas.v2')).not.toBeNull();
     refuse = false;
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(names()).toEqual(['画布 1']);
     expect(onDeleted).toHaveBeenCalledWith(['c0']);
+    expect(localStorage.getItem('awwo.saas:user-1:tenant-a:c0:superclaw.canvas.v2')).toBeNull();
+    expect(localStorage.getItem('awwo.saas:user-1:tenant-a:c1:superclaw.canvas.v2')).not.toBeNull();
     expect(calls).toEqual([['DELETE', '/api/v1/tenants/tenant-a/canvases/c0'], ['DELETE', '/api/v1/tenants/tenant-a/canvases/c0']]);
     expect(screen.getByRole('status')).toHaveTextContent('画布已删除');
   });

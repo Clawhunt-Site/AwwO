@@ -6,6 +6,7 @@ import { api, tenantPath, saasErrorMessage, type CanvasListItem, type CanvasReco
 import { ListPager, usePagedList } from './ListPager';
 import { useSaaSPreferences } from './preferences';
 import { CANVAS_SEARCH_MAX_LENGTH, readCanvasListView, saveCanvasListView } from './canvasListView';
+import { forgetCanvasStorage } from '../canvas/canvasStorage';
 
 const updatedAt = (canvas: CanvasListItem) => Date.parse(canvas.updatedAt) || 0;
 /** Most recently touched first; canvases touched at the same time keep the server's order. */
@@ -134,11 +135,11 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
           <p>{readOnly ? t('请工作区成员创建画布后，刷新列表查看。', 'Ask a workspace member to create a canvas, then refresh this list.') : listing.pageNumber > 1 ? t('返回上一页，或新建一张画布。', 'Go to the previous page or create a canvas.') : t('在上方写下目标，AwwO 会新建画布并规划分工；也可以新建空白画布，从左侧添加模型，或从右侧 Bot 清单选择协作者。', 'Describe a goal above and AwwO creates a canvas and plans the work. Or start a blank canvas: add a model from the left, or choose a collaborator from the Bot list on the right.')}</p>
         </section>}</div>}
     </div>
-    {editing && !readOnly && <CanvasAction key={`${tenant.id}:${editing.canvas.id}:${editing.action}`} tenantId={tenant.id} {...editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); listing.refresh(); }}/>}
+    {editing && !readOnly && <CanvasAction key={`${tenant.id}:${editing.canvas.id}:${editing.action}`} tenantId={tenant.id} userId={userId} {...editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); listing.refresh(); }}/>}
   </section>;
 }
 
-function CanvasAction({ tenantId, canvas, action, onClose, onSaved }: { tenantId: string; canvas: CanvasListItem; action: 'rename' | 'delete'; onClose: () => void; onSaved: () => void }) {
+function CanvasAction({ tenantId, userId, canvas, action, onClose, onSaved }: { tenantId: string; userId?: string; canvas: CanvasListItem; action: 'rename' | 'delete'; onClose: () => void; onSaved: () => void }) {
   const { locale, t } = useSaaSPreferences();
   const [name, setName] = useState(canvas.name);
   const [current, setCurrent] = useState<CanvasRecord | null>(null);
@@ -164,6 +165,8 @@ function CanvasAction({ tenantId, canvas, action, onClose, onSaved }: { tenantId
       setBusy(true); setError(null);
       try {
         await api(path, action === 'delete' ? { method: 'DELETE' } : { method: 'PUT', body: JSON.stringify({ name: name.trim(), document: current!.document, version: current!.version }) });
+        // Once the server has deleted it, nothing of the canvas stays in this browser (drafts included: none can be saved now).
+        if (action === 'delete' && userId) void forgetCanvasStorage(userId, tenantId, canvas.id);
         if (alive.current) onSaved();
       } catch (cause) { if (alive.current) setError(cause); }
       finally { if (alive.current) setBusy(false); }

@@ -8,6 +8,7 @@
 import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Clapperboard, FileText, Image as ImageIcon } from 'lucide-react';
 import { caseRunLabel, sanitizeDocument } from '../canvas/canvasDoc';
+import { forgetCanvasStorage } from '../canvas/canvasStorage';
 import { canvasResult, type StepDelivery } from '../canvas/canvasResultModel';
 import { htmlPreviewDocument } from '../canvas/htmlDeliverable';
 import { ActionMenu } from './ActionMenu';
@@ -201,7 +202,7 @@ function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: G
       : <p className="saas-results-empty">{removedHere > 0 ? t('这里的成果都移除了，画布还在上面的「继续工作」里。', 'Every result here was removed; the canvases are still under Continue working above.')
         : tenant.role === 'reader' ? t('还没有交付。成员运行画布后，成果会出现在这里。', 'Nothing delivered yet. When a member runs a canvas, its result appears here.')
         : t('还没有交付。运行一张画布后，它交付的东西会出现在这里。', 'Nothing delivered yet. Run a canvas and what it delivers appears here.')}</p>}
-    {confirming && canDelete && <DeleteCanvasesDialog key={confirming.map(canvas => canvas.id).join(' ')} tenantId={tenant.id} canvases={confirming}
+    {confirming && canDelete && <DeleteCanvasesDialog key={confirming.map(canvas => canvas.id).join(' ')} tenantId={tenant.id} userId={userId} canvases={confirming}
       onDeleted={deletedCanvases} onClose={() => setConfirming(null)} />}
   </section>;
 }
@@ -210,8 +211,8 @@ type Refusal = { canvas: CanvasRecord; error: unknown };
 
 /** Deletes one or several canvases, one request each: a canvas the server refuses (an active run) stays
  *  listed with its reason, and the ones deleted are reported at once. */
-function DeleteCanvasesDialog({ tenantId, canvases, onDeleted, onClose }: {
-  tenantId: string; canvases: ReadonlyArray<CanvasRecord>; onDeleted: (canvasIds: ReadonlyArray<string>) => void; onClose: () => void;
+function DeleteCanvasesDialog({ tenantId, userId, canvases, onDeleted, onClose }: {
+  tenantId: string; userId?: string; canvases: ReadonlyArray<CanvasRecord>; onDeleted: (canvasIds: ReadonlyArray<string>) => void; onClose: () => void;
 }) {
   const { locale, t } = useSaaSPreferences();
   const titleId = useId();
@@ -237,6 +238,8 @@ function DeleteCanvasesDialog({ tenantId, canvases, onDeleted, onClose }: {
       try {
         await api(tenantPath(tenantId, `/canvases/${encodeURIComponent(canvas.id)}`), { method: 'DELETE' });
         deleted.push(canvas.id);
+        // A deleted canvas leaves nothing in this browser either.
+        if (userId) void forgetCanvasStorage(userId, tenantId, canvas.id);
       } catch (error) { refused.push({ canvas, error }); }
       if (!alive.current) return;
     }

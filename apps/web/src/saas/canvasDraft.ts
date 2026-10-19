@@ -1,5 +1,6 @@
 import { sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import type { canvasStorage } from '../canvas/canvasStorage';
+import { bytesHash } from '../canvas/canvasStore';
 import { CANVAS_BASELINE_KEY, compressedCanvasBaseline, isCanvasStorageQuotaError, matchesCompressedCanvasBaseline } from './canvasBaselineCompression';
 export { CANVAS_BASELINE_KEY, isCanvasStorageQuotaError } from './canvasBaselineCompression';
 
@@ -14,6 +15,8 @@ export type CanvasDraft = {
   dirty: true;
   updatedAt: number;
   document: CanvasDocument;
+  /** An earlier release's cache kept for export: its base is not known, so it is never restored. */
+  legacyCache?: true;
 };
 export type SavedCanvasDraft = { key: string; raw: string; draft: CanvasDraft | null };
 type KeptDraftIdentity = { key: string; revision: string; baseVersion: number } | { key: string; raw: string };
@@ -97,6 +100,40 @@ export function persistCanvasDraft(storage: ScopedStorage, writerId: string, bas
     storage.setItem(key, raw);
   }
   return draft;
+}
+
+/** An earlier release's document cache the canvas store does not take in (a tab of this release wrote the canvas's own
+ * since): that tab's unsynced edits may be only there (its draft write failed on a full localStorage), so it is kept as
+ * a draft offered for export, unless it holds nothing more than its own sync proof, this store's cache or a draft that
+ * tab wrote (which carries its true base). Export only (`legacyCache`): the version it was based on is not known, since
+ * that release's tabs share one version key, and restoring it could overwrite newer cloud edits. Keyed by its bytes, so
+ * the same cache is kept once; unreadable bytes hold no edit anyone can restore and are not kept. */
+export function preserveLegacyCanvasCache(prefix: string, raw: string, legacy: Pick<Storage, 'getItem' | 'key' | 'length'>,
+  current: string | null): { key: string; value: string } | null {
+  const document = readableDocument(raw);
+  if (!document) return null;
+  const proof = { getItem: (name: string) => legacy.getItem(prefix + name) } as unknown as ScopedStorage;
+  if (isKnownSyncedCache(proof, document)) return null;
+  const canonical = canonicalCanvasDocumentJSON(document);
+  const same = (bytes: string | null) => { const other = bytes === null ? null : readableDocument(bytes); return other !== null && canonicalCanvasDocumentJSON(other) === canonical; };
+  if (same(current)) return null;
+  for (let index = 0; index < legacy.length; index++) {
+    const key = legacy.key(index);
+    if (!key?.startsWith(prefix + CANVAS_DRAFT_PREFIX)) continue;
+    try { const draft = JSON.parse(legacy.getItem(key) ?? 'null'); if (draft?.document && same(JSON.stringify(draft.document))) return null; }
+    catch { /* A damaged draft is no match. */ }
+  }
+  const writerId = `legacy-cache-${bytesHash(raw).replace(':', '-')}`;
+  const version = Number(legacy.getItem(prefix + 'awwo.cloud.version'));
+  const draft: CanvasDraft = { schemaVersion: 1, writerId, revision: crypto.randomUUID(), baseVersion: Number.isSafeInteger(version) && version >= 1 ? version : 1,
+    dirty: true, updatedAt: Date.now(), document, legacyCache: true };
+  return { key: `${prefix}${CANVAS_DRAFT_PREFIX}${writerId}`, value: JSON.stringify(draft) };
+}
+function readableDocument(raw: string): CanvasDocument | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges) ? sanitizeDocument(parsed) : null;
+  } catch { return null; }
 }
 
 export function readCanvasDrafts(storage: ScopedStorage): SavedCanvasDraft[] {
