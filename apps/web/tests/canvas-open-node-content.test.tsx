@@ -1,6 +1,8 @@
 // An opened node shows what it was asked, what it made and how its last run ended, at a size its content can use
 // (owner request 2026-10-15: opened components did not show their context in full, in either mode).
 import type { ReactElement } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionTile } from '../src/canvas/SessionTile';
@@ -19,6 +21,18 @@ beforeEach(() => { cleanup(); resetAllSessions(); });
 
 const agent = (extra: Partial<SessionNode> = {}): SessionNode => ({ ...createAgentTemplate('general', { x: 0, y: 0 }, 'zh'), id: 'n', title: '关卡设计', ...extra });
 const simple = (ui: ReactElement) => render(<CanvasUiModeProvider mode="simple">{ui}</CanvasUiModeProvider>);
+/** A stylesheet without its comments, every run of white space one space. */
+const flat = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ');
+/** The declarations of the stylesheet rule whose selector is exactly `selector` (comments dropped, spaces collapsed). */
+function declarations(css: string, selector: string): Record<string, string> {
+  for (const block of css.replace(/\/\*[\s\S]*?\*\//g, '').split('}')) {
+    const [head, body] = block.split('{');
+    if (body === undefined || head.trim() !== selector) continue;
+    return Object.fromEntries(body.split(';').map(part => part.trim()).filter(Boolean)
+      .map(part => [part.slice(0, part.indexOf(':')).trim(), part.slice(part.indexOf(':') + 1).trim().replace(/\s+/g, ' ')]));
+  }
+  throw new Error(`no rule for ${selector}`);
+}
 
 describe('a delivery that is code reads as code', () => {
   it.each([
@@ -180,6 +194,70 @@ describe('an opened node says what it was asked', () => {
       expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('is-short');
     } finally {
       // Element.prototype's own getter is found again once the override is gone.
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  // Seen 2026-10-19 in Chrome at 1366 × 657 and 1280 × 720, in every look: in a short column with no conversation yet, a
+  // draft of three lines or more pushed the model and 用户须知, then the box, out of the node. The conversation kept its
+  // share of the column and the empty conversation its 56 px. jsdom lays nothing out, so the rules found in Chrome are
+  // read from the stylesheet, and the node's own markup is matched against their selectors.
+  it('keeps a short column’s composer in the node with no conversation yet: the empty conversation gives way, then the task card', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+    const conversation = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-rework-note > .awwo-rework-note-body))';
+    const empty = '.canvas-root .awwo-node .awwo-node-chat.is-short .awwo-node-panel--conversation > .awwo-node-empty';
+    const note = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty) > .awwo-rework-note';
+    // Never shorter than its content, so the task card above gives way before the composer does. It grows as before:
+    // no flex-grow here, so beside the opened inputs it keeps their 0.
+    expect(declarations(css, conversation)).toEqual({ 'flex-basis': 'auto', 'flex-shrink': '0' });
+    // The empty conversation's content counts for nothing in that, and it gives way down to its padding.
+    expect(declarations(css, empty)).toEqual({ 'min-height': '0', container: 'awwo-node-empty / size' });
+    // Where less than 20 px of it would show (the old 56 px left 20), its content is not drawn: no sliver, and nothing
+    // that overflows, so it is no scroller for Tab to stop on (visibility: hidden would leave both). A starter prompt
+    // with the keyboard's focus stays.
+    expect(flat(css)).toContain('@container awwo-node-empty (height < 20px) { .canvas-root .awwo-node-chat.is-short .awwo-node-empty:not(:has(:focus-visible)) > * { display: none; } }');
+    // A rework note above the empty conversation keeps its toggle (32 px and its border), open or closed.
+    expect(declarations(css, note)).toEqual({ 'min-height': '34px' });
+
+    let column = 408;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    try {
+      const tile = (node: SessionNode) => <CanvasUiModeProvider mode="simple"><div className="canvas-root">
+        <SessionTile node={node} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} /></div></CanvasUiModeProvider>;
+      const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
+      const { rerender, unmount } = render(tile(brief));
+      expect(panel().matches(conversation)).toBe(true);
+      expect(document.querySelector('.awwo-node-empty')!.matches(empty)).toBe(true);
+      // With a conversation the replies give way instead, as before: neither rule applies.
+      act(() => { appendTurn(brief.id, { role: 'user', text: '把关卡写成表格' }); });
+      rerender(tile(brief));
+      expect(document.querySelector('.awwo-node-empty')).toBeNull();
+      expect(panel().matches(conversation)).toBe(false);
+      unmount();
+      resetAllSessions();
+      // A closed rework note counts with its one line; beside an open one the conversation keeps its share of the column.
+      // The empty conversation gives way either way, and the note keeps its toggle; beside replies it gives way as before.
+      const reworkedNode = agent({ taskFrame: { version: 1, source: 'manual', constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'], acceptanceCriteria: [] } });
+      const reworked = render(tile(reworkedNode));
+      const findings = screen.getByTestId('rework-findings-n');
+      expect(findings.matches(note)).toBe(true);
+      expect(panel().matches(conversation)).toBe(true);
+      fireEvent.click(within(findings).getByRole('button', { expanded: false }));
+      expect(findings.querySelector('.awwo-rework-note-body')).toBeTruthy();
+      expect(panel().matches(conversation)).toBe(false);
+      expect(document.querySelector('.awwo-node-empty')!.matches(empty)).toBe(true);
+      expect(findings.matches(note)).toBe(true);
+      act(() => { appendTurn(reworkedNode.id, { role: 'agent', text: '已按验收意见补上检查记录。' }); });
+      reworked.rerender(tile(reworkedNode));
+      expect(screen.getByTestId('rework-findings-n').matches(note)).toBe(false);
+      reworked.unmount();
+      resetAllSessions();
+      // A column tall enough to read in is laid out as before.
+      column = SHORT_COLUMN_PX;
+      render(tile(brief));
+      expect(panel().matches(conversation)).toBe(false);
+      expect(document.querySelector('.awwo-node-empty')!.matches(empty)).toBe(false);
+    } finally {
       delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
     }
   });

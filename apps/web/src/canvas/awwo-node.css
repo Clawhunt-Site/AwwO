@@ -194,6 +194,20 @@
 .canvas-root .awwo-node-chat.is-short .canvas-composer-accessory { margin-top: 4px; }
 .canvas-root .awwo-node-chat.is-short .awwo-node-brief.is-compact { min-height: 32px; padding-block: 6px; }
 .canvas-root .awwo-node-chat.is-short .awwo-node-brief.is-compact .awwo-node-brief-counts { display: none; }
+/* With no conversation yet, a box that grows as one types pushed the row under it (the model, 用户须知) and then the
+   box out of the node (2026-10-19: three lines at 1280 × 720, in every look): the conversation kept its share of the
+   column and the empty conversation its 56 px. Here the conversation is never shorter than its composer and the empty
+   conversation's padding, so the empty conversation gives way first, then the task card and a failure note above it
+   (which scroll in what is left). The empty conversation's content counts for nothing in that (size containment);
+   where less than 20 px of it would show it is not drawn at all (no sliver, and no scroller to tab to), unless a
+   starter prompt in it has the keyboard's focus. A closed rework note counts with its one line. An open one would
+   count in full and push the composer out again, so beside it the conversation keeps its share of the column, and the
+   note keeps its toggle (a short column used to crush it out of reach under the empty conversation). Beside replies
+   nothing here applies: the replies give way. */
+.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-rework-note > .awwo-rework-note-body)) { flex-basis: auto; flex-shrink: 0; }
+.canvas-root .awwo-node .awwo-node-chat.is-short .awwo-node-panel--conversation > .awwo-node-empty { min-height: 0; container: awwo-node-empty / size; }
+@container awwo-node-empty (height < 20px) { .canvas-root .awwo-node-chat.is-short .awwo-node-empty:not(:has(:focus-visible)) > * { display: none; } }
+.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty) > .awwo-rework-note { min-height: 34px; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 /* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
    page most of it, a document half), never less than the drawer's own 320 px. */
