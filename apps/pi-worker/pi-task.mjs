@@ -23,6 +23,14 @@ function emit(event) {
   });
 }
 
+// The payload hook that tells the model's chat template not to think, after any hook the agent itself sets.
+function thinkingOff(next) {
+  return async (params, model) => {
+    const base = (next ? await next(params, model) : undefined) ?? params;
+    return { ...base, chat_template_kwargs: { ...base.chat_template_kwargs, enable_thinking: false } };
+  };
+}
+
 async function cancel() {
   cancelled = true;
   controller.abort();
@@ -136,9 +144,13 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     // Pi's provider adapter retries only transport errors and HTTP 408/409/429/5xx
     // before a response stream begins. One bounded Gate retry covers cold egress
     // failures without replaying an answer already streamed to the caller.
+    // Pi's runs are thinking-off (thinkingLevel above), but Pi sends a chat template no switch for a model it does not
+    // know to reason: a Qwen-style default model thinks unless told (AWWO_PI_DISABLE_THINKING, config.mjs).
+    const withoutThinking = modelConfig.disableThinking === true && api === 'openai-completions';
     activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, {
       ...options, maxRetries: modelConfig.provider === 'llmgate' ? 1 : 0,
       maxRetryDelayMs: 2_000, fetch: observer.fetch,
+      ...(withoutThinking ? { onPayload: thinkingOff(options?.onPayload) } : {}),
     });
     if (activeSession.agent.state.tools.length !== 0) throw new Error('Unexpected tools enabled');
     if (cancelled) { await cancel(); return await terminal({ type: 'cancelled' }); }

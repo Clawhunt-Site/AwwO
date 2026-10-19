@@ -151,6 +151,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       input: [...(modelConfig.input ?? ['text'])],
+      ...(modelConfig.disableThinking === true ? { disableThinking: true } : {}),
       ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}),
         ...(modelConfig.promptCache === true ? { promptCache: true } : {}),
         ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}) } : {}),

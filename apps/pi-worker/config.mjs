@@ -121,6 +121,19 @@ function thinkingSetting(env) {
   return Object.freeze({ budget, models });
 }
 
+// AWWO_PI_DISABLE_THINKING: the default profile's thinking switch, as AWWO_OPENAI_AGENTS_DISABLE_THINKING is the Agents
+// workers'. 'true' tells a Qwen-style default model's chat template not to think (chat_template_kwargs.enable_thinking
+// =false) on this worker's runs: the canvas planner plans on the default model when the operator's planner model may not
+// take a plan, and on 2026-10-19 its thinking spent all 16,384 output tokens of 9 plans. /internal/computer-model calls
+// keep their own per-call thinking option. The switch is for the model: turn it off when AWWO_PI_MODEL stops being a
+// Qwen-style one. Unset, empty and 'false' leave requests as they were; any other value, or a default model that is not
+// a Chat Completions model on the LLM Gate, stops startup.
+export function parseDisableThinking(value) {
+  if (value === undefined || value === '' || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error('AWWO_PI_DISABLE_THINKING must be true or false');
+}
+
 function loadProfiles(serialized, env, defaultProfile, missing) {
   if (serialized === undefined || serialized === '') return Object.freeze([defaultProfile]);
   // Configuration errors must not fall back to an unintended provider. Error
@@ -190,7 +203,14 @@ export function loadConfig(env = process.env) {
   let defaultInput;
   try { defaultInput = profileInput(env.AWWO_PI_INPUT === undefined || env.AWWO_PI_INPUT.trim() === '' ? undefined : env.AWWO_PI_INPUT.split(',').map((kind) => kind.trim())); }
   catch { throw new Error('AWWO_PI_INPUT must be text or text,image'); }
-  const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens, input: defaultInput }), missing);
+  const disableThinking = parseDisableThinking(env.AWWO_PI_DISABLE_THINKING);
+  // The LLM Gate (named, or by its URL, as the computer-model calls tell it) hands chat_template_kwargs to the model's
+  // server; OpenAI refuses an unknown body field, Anthropic's protocol has no chat template, Ollama has a switch of its own.
+  if (disableThinking && (providerProtocol(provider) !== 'chat_completions' || (provider !== 'llmgate' && baseURL !== DEFAULTS.llmgate))) {
+    throw new Error('AWWO_PI_DISABLE_THINKING needs a Chat Completions default model on the LLM Gate');
+  }
+  const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens, input: defaultInput,
+    ...(disableThinking ? { disableThinking: true } : {}) }), missing);
   let catalog;
   const thinking = thinkingSetting(env);
   try {

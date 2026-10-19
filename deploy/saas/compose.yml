@@ -54,6 +54,8 @@ services:
       # empty: none. Every Pi request is tool-free, so never name a model users pick for their own nodes.
       AWWO_PI_BEDROCK_THINKING_BUDGET: ${AWWO_PI_BEDROCK_THINKING_BUDGET:-}
       AWWO_PI_BEDROCK_THINKING_MODELS: ${AWWO_PI_BEDROCK_THINKING_MODELS:-}
+      # true: the default (Qwen-style) model's runs ask its chat template not to think; empty: as before.
+      AWWO_PI_DISABLE_THINKING: ${AWWO_PI_DISABLE_THINKING:-}
       AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
       # A canvas plan is one long structured JSON answer, so the output cap is the binding limit,

@@ -310,6 +310,36 @@ test('Gate Pi retries a pre-stream 503 once and completes without duplicate outp
   await assert.rejects(access(handle.directory));
 });
 
+test('the default model\'s thinking switch is the operator\'s, only for a chat template that takes it, and never in health', () => {
+  const gate = { ...ENV, AWWO_PI_PROVIDER: 'llmgate' };
+  for (const value of [undefined, '', 'false']) assert.equal(loadConfig({ ...gate, AWWO_PI_DISABLE_THINKING: value }).models[0].disableThinking, undefined);
+  const config = loadConfig({ ...gate, AWWO_PI_DISABLE_THINKING: 'true', REVIEW_KEY: 'review-key',
+    AWWO_PI_MODELS_JSON: JSON.stringify([{ id: 'reviewer', provider: 'openai', model: 'review-model', apiKeyEnv: 'REVIEW_KEY' }]) });
+  assert.equal(config.models[0].disableThinking, true);
+  assert.equal(config.models[1].disableThinking, undefined, 'the default profile only');
+  // The Gate by its URL, as the legacy 'openai' label reaches it.
+  assert.equal(loadConfig({ ...ENV, AWWO_PI_BASE_URL: 'https://api.clawhunt.site/v1', AWWO_PI_DISABLE_THINKING: 'true' }).models[0].disableThinking, true);
+  assert.equal(JSON.stringify(publicHealth(config)).includes('hinking'), false);
+  for (const value of ['yes', 'TRUE', '1']) assert.throws(() => loadConfig({ ...gate, AWWO_PI_DISABLE_THINKING: value }), /AWWO_PI_DISABLE_THINKING must be true or false/);
+  // OpenAI refuses an unknown body field, Anthropic's protocol has no chat template, and Ollama has its own switch.
+  for (const provider of ['openai', 'anthropic', 'ollama']) {
+    assert.throws(() => loadConfig({ ...ENV, AWWO_PI_PROVIDER: provider, AWWO_PI_DISABLE_THINKING: 'true' }), /needs a Chat Completions default model on the LLM Gate/, provider);
+  }
+  assert.throws(() => loadConfig({ ...ENV, AWWO_PI_PROVIDER: 'anthropic', AWWO_PI_BASE_URL: 'https://api.clawhunt.site/v1', AWWO_PI_DISABLE_THINKING: 'true' }), /on the LLM Gate/);
+});
+
+// Two runs, each a fresh child that loads the Pi SDK: room for a cold module load.
+test('a default model whose thinking is switched off is told so by its run\'s call, and one without the switch is not', { timeout: 40000 }, async (t) => {
+  const model = await provider(t);
+  for (const [value, expected] of [['true', { enable_thinking: false }], ['false', undefined]]) {
+    const { handle, events } = await run(t, configuration(model.baseURL, { AWWO_PI_PROVIDER: 'llmgate', AWWO_PI_DISABLE_THINKING: value }));
+    await handle.done;
+    assert.deepEqual(businessEvent(events.at(-1)), { type: 'completed', text: 'Hello from Pi' });
+    assert.deepEqual(model.requests.at(-1).body.chat_template_kwargs, expected, value);
+  }
+  assert.equal(model.requests.length, 2);
+});
+
 test('selected profile context limits apply before starting Pi and do not silently use default capacity', { timeout: 20000 }, async (t) => {
   const model = await provider(t);
   const profiles = [

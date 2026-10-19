@@ -89,6 +89,7 @@ SaaS 属性面板编辑名称、人格、runtime、模型后点击“保存并�
 | AWWO_PI_PROVIDER / MODEL / BASE_URL / API_KEY | 默认模型连接（完整名称都有 AWWO_PI_ 前缀） |
 | AWWO_PI_MODELS_JSON / 其中 apiKeyEnv 引用变量 | 可选额外模型目录与独立秘密；JSON 只存秘密引用，每环境分别配置 |
 | AWWO_PI_CONTEXT_WINDOW / AWWO_PI_MAX_TOKENS | 真实模型上下文与输出预算，默认 32768 / 4096；按 Pi health 的 limits 做保守输入检查 |
+| AWWO_PI_DISABLE_THINKING | `true` 时默认模型（LLM Gate 上的 Qwen 类模型）的运行带 `chat_template_kwargs.enable_thinking=false`；规划在运营方规划模型不可用时落到默认模型，开着思考会把输出额度全用在思考上。留空或 `false` 不改请求；默认模型换成别的类型时要关掉 |
 | AWWO_PI_TIMEOUT_MS / MAX_CONCURRENCY / MAX_OUTPUT_BYTES | 运行时间、并发与输出限制（完整名称都有 AWWO_PI_ 前缀） |
 | AWWO_BOOTSTRAP_ADMIN_EMAIL / PASSWORD | 受控创建平台管理员 |
 | AWWO_SESSION_TTL / AWWO_RUN_TIMEOUT | 登录有效期与 Go 运行超时 |
