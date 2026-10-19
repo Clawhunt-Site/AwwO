@@ -9,6 +9,11 @@ export function adminPage(kind: AdminKind, cursor: string | null, signal?: Abort
   return api<AdminPage>(`/admin/${kind}?${query}`, { signal });
 }
 
+/** The operator's outcome of a pending deletion request (backend adminDecideDeletion); answers the updated row. */
+export function decideDeletion(id: string, status: 'handled' | 'declined', note: string) {
+  return api<AdminRow>(`/admin/deletions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status, note }) });
+}
+
 // The server's opaque cursor holds the first page's insertion boundary.
 // A failed/cancelled traversal must never download a partial export as complete.
 export async function collectAdminExport(kind: AdminKind, signal: AbortSignal, onProgress: (count: number) => void) {

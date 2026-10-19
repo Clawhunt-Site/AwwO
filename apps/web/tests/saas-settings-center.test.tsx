@@ -20,7 +20,9 @@ const models = { 'team-a': [{ id: 'opus', label: 'Claude Opus', runtime: 'pi' },
 
 /** A small in-memory server: the settings with their version, a deletion request, each workspace's models. */
 function server(initial: Partial<AccountPreferences> = {}) {
-  const state = { preferences: { ...emptyAccountPreferences(), ...initial } as AccountPreferences, version: initial ? 1 : 0, request: null as null | Record<string, unknown>, conflictNext: false };
+  const state = { preferences: { ...emptyAccountPreferences(), ...initial } as AccountPreferences, version: initial ? 1 : 0, request: null as null | Record<string, unknown>, conflictNext: false,
+    /** An operator's decision that lands just before the next withdrawal. */
+    decidedMeanwhile: null as null | Record<string, unknown> };
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
     const method = init.method || 'GET';
     if (url.endsWith('/auth/preferences') && method === 'GET') return json({ preferences: state.preferences, version: state.version });
@@ -36,6 +38,7 @@ function server(initial: Partial<AccountPreferences> = {}) {
     if (url.endsWith('/auth/deletion-request')) {
       if (method === 'GET') return json({ request: state.request });
       if (method === 'POST') { state.request = { id: 'del-1', status: 'pending', reason: JSON.parse(String(init.body)).reason, createdAt: '2026-10-18T06:00:00Z' }; return json({ request: state.request }, 201); }
+      if (method === 'DELETE' && state.decidedMeanwhile) { state.request = state.decidedMeanwhile; return json({ error: { code: 'not_found', message: 'No pending deletion request' } }, 404); }
       if (method === 'DELETE') { state.request = { ...state.request, status: 'withdrawn', withdrawnAt: '2026-10-18T06:05:00Z' }; return json({ request: state.request }); }
     }
     const runtime = /\/tenants\/([^/]+)\/execution\/runtime/.exec(url) || /\/tenants\/([^/]+)\/[^?]*runtime/.exec(url);
@@ -231,6 +234,100 @@ it('lists deletion requests for the operator, with an account already gone marke
   const gone = screen.getByText('bo@example.test').closest('tr')!;
   expect(within(gone).getAllByRole('cell').map(cell => cell.textContent).slice(0, 4)).toEqual(['Bo（账号已删除）', 'bo@example.test', '—', '已撤回']);
   expect(screen.getByText(/提交不会删除任何东西/)).toBeVisible();
+});
+
+it('lets the operator decline a pending request with a reason, or mark it handled, and shows the outcome', async () => {
+  const rows = [
+    { id: 'd-1', userId: 'user-1', email: 'ada@example.test', name: 'Ada', reason: '不再需要', status: 'pending', createdAt: '2026-10-18T06:00:00Z', decidedAt: null, decisionNote: '' },
+    // The operator already deleted Cy's account by hand: its request keeps the record, without the account.
+    { id: 'd-2', userId: null, email: 'cy@example.test', name: 'Cy', reason: '', status: 'pending', createdAt: '2026-10-18T05:00:00Z', decidedAt: null, decisionNote: '' },
+  ];
+  const patches: Array<{ url: string; body: unknown }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    const decided = /\/admin\/deletions\/([^/?]+)$/.exec(url);
+    if (decided && init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body)); patches.push({ url, body });
+      const row = rows.find(item => item.id === decodeURIComponent(decided[1]))!;
+      if (row.status !== 'pending') return json({ error: { code: 'deletion_already_decided', message: 'no longer pending' } }, 409);
+      Object.assign(row, { status: body.status, decidedAt: '2026-10-18T14:10:00Z', decisionNote: body.note.trim() });
+      return json(row);
+    }
+    return json(url.includes('/admin/deletions') ? { items: rows.map(row => ({ ...row })), nextCursor: null } : { items: [], nextCursor: null });
+  }));
+  const admin = { ...identity, user: { ...identity.user, platformRole: 'admin' } } as Identity;
+  render(<SaaSPreferencesProvider><AdminPanel identity={admin} /></SaaSPreferencesProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: '删除申请' }));
+  const first = (await screen.findByText('ada@example.test')).closest('tr')!;
+  // Ada's account still exists, so her request cannot be marked handled yet.
+  expect(within(first).getByRole('button', { name: '标记已处理' })).toBeDisabled();
+  expect(within(first).getByRole('button', { name: '标记已处理' })).toHaveAttribute('title', '先人工删除这个账号，才能标记已处理');
+  fireEvent.click(within(first).getByRole('button', { name: '拒绝…' }));
+  const dialog = await screen.findByRole('dialog', { name: '拒绝这条删除申请？' });
+  const confirm = within(dialog).getByRole('button', { name: '确认拒绝' });
+  expect(confirm).toBeDisabled();
+  fireEvent.change(within(dialog).getByRole('textbox', { name: '拒绝理由（必填）' }), { target: { value: '工作区仍有付费套餐' } });
+  fireEvent.click(confirm);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(patches).toEqual([{ url: '/api/v1/admin/deletions/d-1', body: { status: 'declined', note: '工作区仍有付费套餐' } }]);
+  const declined = (await screen.findByText('ada@example.test')).closest('tr')!;
+  await waitFor(() => expect(within(declined).getByText('已拒绝')).toBeVisible());
+  expect(within(declined).queryByRole('button', { name: '拒绝…' })).toBeNull();
+  expect(declined).toHaveTextContent('工作区仍有付费套餐');
+  const second = screen.getByText('cy@example.test').closest('tr')!;
+  expect(second).toHaveTextContent('Cy（账号已删除）');
+  // Cy's account is gone, so a decline would be a reason nobody can read.
+  expect(within(second).getByRole('button', { name: '拒绝…' })).toBeDisabled();
+  expect(within(second).getByRole('button', { name: '拒绝…' })).toHaveAttribute('title', '账号已删除，只能标记已处理');
+  fireEvent.click(within(second).getByRole('button', { name: '标记已处理' }));
+  const mark = await screen.findByRole('dialog', { name: '标记为已处理？' });
+  expect(within(mark).getByText(/不再删除任何东西/)).toBeVisible();
+  fireEvent.click(within(mark).getByRole('button', { name: '确认已处理' }));
+  await waitFor(() => expect(within(screen.getByText('cy@example.test').closest('tr')!).getByText('已处理')).toBeVisible());
+  expect(patches[1]).toEqual({ url: '/api/v1/admin/deletions/d-2', body: { status: 'handled', note: '' } });
+});
+
+it.each([
+  ['deletion_already_decided', '这条删除申请已经处理过了，列表已刷新。'],
+  ['deletion_withdrawn', '对方已经撤回了这条删除申请，列表已刷新。'],
+])('says why a request changed meanwhile (%s) and reads the list again', async (code, text) => {
+  const fetch = vi.fn(async (url: string, init: RequestInit = {}) => init.method === 'PATCH'
+    ? json({ error: { code, message: 'no longer pending' } }, 409)
+    : json(url.includes('/admin/deletions') ? { items: [{ id: 'd-1', userId: 'user-1', email: 'ada@example.test', name: 'Ada', reason: '', status: 'pending', createdAt: '2026-10-18T06:00:00Z', decidedAt: null, decisionNote: '' }], nextCursor: null } : { items: [], nextCursor: null }));
+  vi.stubGlobal('fetch', fetch);
+  const lists = () => fetch.mock.calls.filter(([url, init]) => String(url).includes('/admin/deletions') && !(init as RequestInit | undefined)?.method).length;
+  const admin = { ...identity, user: { ...identity.user, platformRole: 'admin' } } as Identity;
+  render(<SaaSPreferencesProvider><AdminPanel identity={admin} /></SaaSPreferencesProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: '删除申请' }));
+  fireEvent.click(within((await screen.findByText('ada@example.test')).closest('tr')!).getByRole('button', { name: '拒绝…' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '原因' } });
+  const before = lists();
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认拒绝' }));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent(text);
+  await waitFor(() => expect(lists()).toBeGreaterThan(before));
+});
+
+it('shows the account a decline with its reason and lets it ask again', async () => {
+  const { state } = server();
+  state.request = { id: 'del-1', status: 'declined', reason: '不再需要', createdAt: '2026-10-18T06:00:00Z', decidedAt: '2026-10-18T14:10:00Z', decisionNote: '工作区仍有付费套餐' };
+  open('data');
+  expect(await screen.findByText('删除申请未通过')).toBeVisible();
+  expect(screen.getByText('运营人员的说明：工作区仍有付费套餐')).toBeVisible();
+  expect(screen.getByText('如有需要，可以重新提交申请。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '撤回申请' })).toBeNull();
+  expect(screen.getByRole('button', { name: '申请删除账号' })).toBeVisible();
+});
+
+it('shows the decline when an operator decided the request just before it was withdrawn', async () => {
+  const { state } = server();
+  state.request = { id: 'del-1', status: 'pending', reason: '不再需要', createdAt: '2026-10-18T06:00:00Z' };
+  state.decidedMeanwhile = { ...state.request, status: 'declined', decidedAt: '2026-10-18T14:10:00Z', decisionNote: '工作区仍有付费套餐' };
+  open('data');
+  fireEvent.click(await screen.findByRole('button', { name: '撤回申请' }));
+  expect(await screen.findByText('删除申请未通过')).toBeVisible();
+  expect(screen.getByText('运营人员的说明：工作区仍有付费套餐')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '撤回申请' })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('opens the centre from the workspace menu', async () => {

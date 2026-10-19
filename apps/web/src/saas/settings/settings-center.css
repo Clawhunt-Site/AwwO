@@ -222,6 +222,8 @@
 }
 .saas-settings-pending p {
   margin: 0;
+  /* A reason or an operator's note keeps its line breaks. */
+  white-space: pre-wrap;
 }
 .saas-settings-actions {
   margin-bottom: 16px;
