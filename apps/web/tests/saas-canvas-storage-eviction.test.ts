@@ -90,7 +90,7 @@ it('forgets, in both storages, the copies of canvases the server says are gone, 
   local.storage.setItem(`awwo.saas:user-b:tenant-a:${legacy}:superclaw.canvas.v2`, '{"someone else":true}');
   local.storage.setItem(`${W}canvas-z:superclaw.canvas.v2`, '{"no API id":true}');
   serve({});
-  const forgotten = await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], true);
+  const forgotten = await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], null);
   expect(forgotten.sort()).toEqual([legacy, moved, read, drafted].sort());
   expect(heads.sort()).toEqual([legacy, moved, read, drafted].sort());
   expect(lists).toEqual([]);
@@ -108,14 +108,14 @@ it('forgets, in both storages, the copies of canvases the server says are gone, 
   expect(local.storage.getItem(`awwo.saas:user-b:tenant-a:${legacy}:superclaw.canvas.v2`)).toBe('{"someone else":true}');
   expect(local.storage.getItem(`${W}canvas-z:superclaw.canvas.v2`)).toBe('{"no API id":true}');
   // Once a page.
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], null)).toEqual([]);
   expect(heads).toHaveLength(4);
   // Next time, what is left (drafts, recent tombstones) is asked about no more, and a canvas of drafts alone is not read.
   const loads: string[] = [];
   const load = backend.backend.load;
   backend.backend.load = prefix => { loads.push(prefix); return load(prefix); };
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [listed], null)).toEqual([]);
   expect(heads).toHaveLength(4);
   expect(loads.sort()).toEqual([editor(moved), reader(read), editor(drafted), editor(removed)].sort());
 });
@@ -124,11 +124,11 @@ it('keeps a canvas the server still has, and stops at the first answer that is n
   const [there, unsure, after] = [8, 9, 10].map(id);
   for (const canvas of [there, unsure, after]) local.storage.setItem(`${editor(canvas)}superclaw.canvas.v2`, '{}');
   serve({ [there]: 200, [unsure]: 503 });
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([there, unsure]);
   expect(localKeys()).toHaveLength(3);
   // Asked again on a later opening of the page, not in this one.
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([there, unsure]);
 });
 
@@ -138,7 +138,7 @@ it('leaves a canvas a tab has open, without asking about it', async () => {
   local.storage.setItem(`${editor(open)}awwo.canvas.card-frames.v1`, '{}');
   await otherTab().open(editor(open));
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([]);
   expect(backend.value(`${editor(open)}superclaw.canvas.v2`)).toBe('{"open":true}');
   expect(local.storage.getItem(`${editor(open)}awwo.canvas.card-frames.v1`)).toBe('{}');
@@ -155,7 +155,7 @@ it('decides what to remove on what it reads alone with a canvas: what was writte
       { k: `${editor(late)}awwo.canvas.planning.v1`, v: '{"late":true}', c: 9, p: 'tab', t: Date.now() }]);
     if (canvas === opened) await tab.open(editor(opened));
   });
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([late]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([late]);
   expect(heads.sort()).toEqual([late, opened].sort());
   expect(backend.value(`${editor(late)}awwo.cloud.draft.v1:late`)).toBe('{"late":true}');
   expect(backend.value(`${editor(late)}awwo.canvas.planning.v1`)).toBeNull();
@@ -172,13 +172,13 @@ it('reads at most a bounded number of canvases a sweep, from a random start, so 
   const load = backend.backend.load;
   backend.backend.load = prefix => { loads.push(prefix); return load(prefix); };
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(loads).toHaveLength(MAX_CANVAS_READS);
   expect(heads).toEqual([]);
   // A later visit that starts at the last canvas found.
   vi.spyOn(Math, 'random').mockReturnValue(0.999);
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([deleted]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([deleted]);
   expect(heads).toEqual([deleted]);
   expect(backend.value(`${editor(deleted)}superclaw.canvas.v2`)).toBeNull();
 });
@@ -188,7 +188,7 @@ it('drops the expired tombstones of canvases forgotten long ago, without asking'
   stored(`${editor(old)}superclaw.canvas.v2`, null, 0);
   stored(`${editor(recent)}superclaw.canvas.v2`, null);
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([]);
   expect(backend.records.has(`${editor(old)}superclaw.canvas.v2`)).toBe(false);
   expect(backend.records.has(`${editor(recent)}superclaw.canvas.v2`)).toBe(true);
@@ -201,13 +201,13 @@ it('leaves everything when the store cannot say what it keeps, and stops at a ca
   serve({});
   const keys = backend.backend.keys;
   backend.backend.keys = async () => { throw new Error('IndexedDB did not answer'); };
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   backend.backend.keys = keys;
   // The first canvas (its localStorage copy) cannot be read in IndexedDB: the second is left too, for another visit.
   const load = backend.backend.load;
   backend.backend.load = async prefix => { if (prefix === editor(inLocal)) throw new Error('IndexedDB did not answer'); return load(prefix); };
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([]);
   expect(local.storage.getItem(`${editor(inLocal)}superclaw.canvas.v2`)).toBe('{}');
   expect(backend.value(`${editor(inStore)}superclaw.canvas.v2`)).toBe('{}');
@@ -218,7 +218,7 @@ it('stops at the first forget that fails, leaving the rest for another visit', a
   for (const canvas of [first, second]) stored(`${editor(canvas)}superclaw.canvas.v2`, '{}');
   backend.failWith(new DOMException('The disk is full', 'QuotaExceededError'), 1);
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([first]);
   for (const canvas of [first, second]) expect(backend.value(`${editor(canvas)}superclaw.canvas.v2`)).toBe('{}');
 });
@@ -227,7 +227,7 @@ it('leaves everything where tabs cannot share the store (an open canvas would no
   local.storage.setItem(`${editor(id(18))}superclaw.canvas.v2`, '{}');
   delete (navigator.locks as { query?: unknown }).query;
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toEqual([]);
   expect(heads).toEqual([]);
   expect(local.storage.getItem(`${editor(id(18))}superclaw.canvas.v2`)).toBe('{}');
 });
@@ -235,65 +235,93 @@ it('leaves everything where tabs cannot share the store (an open canvas would no
 it('asks about at most a bounded number of canvases a sweep', async () => {
   for (let n = 20; n < 20 + MAX_CANVAS_CHECKS + 5; n++) local.storage.setItem(`${editor(id(n))}superclaw.canvas.v2`, '{}');
   serve({});
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], true)).toHaveLength(MAX_CANVAS_CHECKS);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [], null)).toHaveLength(MAX_CANVAS_CHECKS);
   expect(heads).toHaveLength(MAX_CANVAS_CHECKS);
   expect(localKeys()).toHaveLength(5);
 });
 
-it('reads the whole list when the first page is not all of it, at most once a day', async () => {
-  const [first, later, gone, goneToo] = [60, 61, 62, 63].map(id);
+// The list pages below: pages[0] is the first page, which the canvas list has read already; the sweep reads on from the
+// cursor it ended with ('1').
+it('reads the rest of a list longer than its first page on every visit, on from that page\'s cursor', async () => {
+  const [first, later, gone, goneToo, goneThree] = [60, 61, 62, 63, 64].map(id);
   for (const canvas of [later, gone]) local.storage.setItem(`${editor(canvas)}superclaw.canvas.v2`, '{}');
+  // The earlier release's record of a daily read is removed: nothing reads it any more.
+  local.storage.setItem(`${W}awwo.canvas-store.swept.v1`, String(Date.now()));
   serve({}, [{ items: [{ id: first }], nextCursor: '1' }, { items: [{ id: later }], nextCursor: null }]);
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], false)).toEqual([gone]);
-  expect(lists).toHaveLength(2);
-  expect(lists.every(url => url.includes('view=summary') && url.includes('limit=200'))).toBe(true);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], '1')).toEqual([gone]);
+  expect(lists).toHaveLength(1);
+  expect(lists[0]).toMatch(/view=summary/);
+  expect(lists[0]).toMatch(/limit=200/);
+  expect(lists[0]).toMatch(/cursor=1/);
   expect(heads).toEqual([gone]);
   expect(local.storage.getItem(`${editor(later)}superclaw.canvas.v2`)).toBe('{}');
-  expect(Number(local.storage.getItem(W + CANVAS_STORAGE_SWEPT_KEY))).toBeGreaterThan(0);
-  // Within a day, a long list is not read again.
+  expect(local.storage.getItem(`${W}awwo.canvas-store.swept.v1`)).toBeNull();
+  // A list read whole in one more read keeps no record, and the next visit reads it again: a canvas deleted since goes.
+  expect(local.storage.getItem(W + CANVAS_STORAGE_SWEPT_KEY)).toBeNull();
   local.storage.setItem(`${editor(goneToo)}superclaw.canvas.v2`, '{}');
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], false)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], '1')).toEqual([goneToo]);
   expect(lists).toHaveLength(2);
-  expect(heads).toEqual([gone]);
-  // A whole list on its first page needs no reading, whenever.
+  // A whole list on its first page needs no reading.
+  local.storage.setItem(`${editor(goneThree)}superclaw.canvas.v2`, '{}');
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first, later], true)).toEqual([goneToo]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first, later], null)).toEqual([goneThree]);
   expect(lists).toHaveLength(2);
 });
 
-it('forgets nothing from a longer list it cannot read whole, and reads it no more that day', async () => {
+it('reads a list longer than its first page and one more read whole at most once a day', async () => {
+  const [first, second, third, gone, goneToo] = [80, 81, 82, 83, 84].map(id);
+  for (const canvas of [third, gone]) local.storage.setItem(`${editor(canvas)}superclaw.canvas.v2`, '{}');
+  serve({}, [{ items: [{ id: first }], nextCursor: '1' }, { items: [{ id: second }], nextCursor: '2' }, { items: [{ id: third }], nextCursor: null }]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], '1')).toEqual([gone]);
+  expect(lists).toHaveLength(2);
+  expect(heads).toEqual([gone]);
+  expect(local.storage.getItem(`${editor(third)}superclaw.canvas.v2`)).toBe('{}');
+  expect(Number(local.storage.getItem(W + CANVAS_STORAGE_SWEPT_KEY))).toBeGreaterThan(0);
+  // Within a day: its one read past the first page, then nothing (the pages after it may hold any canvas).
+  local.storage.setItem(`${editor(goneToo)}superclaw.canvas.v2`, '{}');
+  resetCanvasStorageEvictionForTests();
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [first], '1')).toEqual([]);
+  expect(lists).toHaveLength(3);
+  expect(heads).toEqual([gone]);
+  expect(local.storage.getItem(`${editor(goneToo)}superclaw.canvas.v2`)).toBe('{}');
+});
+
+it('forgets nothing from a list it cannot read on, failing or past ten pages of 200, and reads the latter no further that day', async () => {
   local.storage.setItem(`${editor(id(70))}superclaw.canvas.v2`, '{}');
   vi.stubGlobal('fetch', vi.fn(async (url: string) => { lists.push(url); return new Response('{}', { status: 503 }); }));
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], false)).toEqual([]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], '1')).toEqual([]);
   expect(local.storage.getItem(`${editor(id(70))}superclaw.canvas.v2`)).toBe('{}');
   expect(lists).toHaveLength(1);
+  // A failed first read records nothing: the next visit tries again.
   resetCanvasStorageEvictionForTests();
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], false)).toEqual([]);
-  expect(lists).toHaveLength(1);
-  // Nor one past ten pages of 200.
-  local.storage.removeItem(W + CANVAS_STORAGE_SWEPT_KEY);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], '1')).toEqual([]);
+  expect(lists).toHaveLength(2);
+  // Past ten pages of 200: not swept; the next visit makes its one read past the first page and stops.
   resetCanvasStorageEvictionForTests();
-  serve({}, Array.from({ length: 12 }, (_, page) => ({ items: [{ id: id(100 + page) }], nextCursor: String(page + 1) })));
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], false)).toEqual([]);
-  expect(lists).toHaveLength(11);
+  serve({}, Array.from({ length: 13 }, (_, page) => ({ items: [{ id: id(100 + page) }], nextCursor: String(page + 1) })));
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], '1')).toEqual([]);
+  expect(lists).toHaveLength(12);
+  resetCanvasStorageEvictionForTests();
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(71)], '1')).toEqual([]);
+  expect(lists).toHaveLength(13);
   expect(heads).toEqual([]);
   expect(local.storage.getItem(`${editor(id(70))}superclaw.canvas.v2`)).toBe('{}');
 });
 
-it('reads a longer list again when its last read is dated ahead of this clock (the clock set back since)', async () => {
+it('reads a long list whole again when its last whole read is dated ahead of this clock (the clock set back since)', async () => {
   local.storage.setItem(`${editor(id(76))}superclaw.canvas.v2`, '{}');
   local.storage.setItem(W + CANVAS_STORAGE_SWEPT_KEY, String(Date.now() + 10 * 24 * 3600 * 1000));
-  serve({}, [{ items: [{ id: id(77) }], nextCursor: null }]);
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(77)], false)).toEqual([id(76)]);
-  expect(lists).toHaveLength(1);
+  serve({}, [{ items: [], nextCursor: '1' }, { items: [{ id: id(78) }], nextCursor: '2' }, { items: [{ id: id(79) }], nextCursor: null }]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(77)], '1')).toEqual([id(76)]);
+  expect(lists).toHaveLength(2);
 });
 
-it('does not read a longer list when this browser cannot keep when it last did', async () => {
+it('does not read a long list past one more read when this browser cannot keep when it last did', async () => {
   local.storage.setItem(`${editor(id(72))}superclaw.canvas.v2`, '{}');
   local.storage.setItem = () => { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); };
-  serve({}, [{ items: [], nextCursor: null }]);
-  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(73)], false)).toEqual([]);
-  expect(lists).toEqual([]);
+  serve({}, [{ items: [], nextCursor: '1' }, { items: [{ id: id(74) }], nextCursor: '2' }, { items: [], nextCursor: null }]);
+  expect(await forgetDeletedCanvasStorage('user-a', 'tenant-a', [id(73)], '1')).toEqual([]);
+  expect(lists).toHaveLength(1);
   expect(heads).toEqual([]);
 });

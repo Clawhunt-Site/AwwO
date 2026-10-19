@@ -65,7 +65,7 @@ it('forgets, once the page is idle, the copies of a canvas the list no longer ha
   expect(local.storage.getItem(`${W}${listed}:superclaw.canvas.v2`)).toBe('{"listed":true}');
 });
 
-it('reads the rest of a longer list before it forgets anything, and keeps a canvas on a later page', async () => {
+it('reads the rest of a longer list on from its first page\'s cursor before it forgets anything, and keeps a canvas on a later page', async () => {
   const [first, later, deleted] = [3, 4, 5].map(id);
   local.storage.setItem(`${W}${later}:superclaw.canvas.v2`, '{"on page two":true}');
   local.storage.setItem(`${W}${deleted}:superclaw.canvas.v2`, '{"deleted":true}');
@@ -76,7 +76,7 @@ it('reads the rest of a longer list before it forgets anything, and keeps a canv
   await act(async () => { idle[0](); });
   await waitFor(() => expect(local.storage.getItem(`${W}${deleted}:superclaw.canvas.v2`)).toBeNull());
   expect(local.storage.getItem(`${W}${later}:superclaw.canvas.v2`)).toBe('{"on page two":true}');
-  expect(requests.filter(line => line.includes('limit=200'))).toHaveLength(2);
+  expect(requests.filter(line => line.includes('limit=200'))).toEqual(['GET /api/v1/tenants/tenant-a/canvases?view=summary&limit=200&cursor=1']);
   expect(requests.filter(line => line.startsWith('HEAD'))).toEqual([`HEAD /api/v1/tenants/tenant-a/canvases/${deleted}`]);
 });
 

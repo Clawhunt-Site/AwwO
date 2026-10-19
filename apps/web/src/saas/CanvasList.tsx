@@ -80,18 +80,18 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
   // Once the first page is read and the page is idle: what this browser keeps of canvases not in the workspace's list is
   // checked, and forgotten where the server says the canvas is gone (canvasStorageEviction.ts).
   const firstListPage = listing.pageNumber === 1 ? listing.page ?? null : null;
-  const hasMore = Boolean(listing.next);
   useEffect(() => {
     if (!userId || !firstListPage) return;
     const listed = firstListPage.items.map(canvas => canvas.id);
-    const run = () => { void forgetDeletedCanvasStorage(userId, tenant.id, listed, !hasMore).catch(() => {}); };
+    const rest = firstListPage.nextCursor ?? null;
+    const run = () => { void forgetDeletedCanvasStorage(userId, tenant.id, listed, rest).catch(() => {}); };
     if (typeof requestIdleCallback === 'function') {
       const handle = requestIdleCallback(run, { timeout: 10000 });
       return () => { if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle); };
     }
     const timer = setTimeout(run, 2000);
     return () => clearTimeout(timer);
-  }, [userId, tenant.id, firstListPage, hasMore]);
+  }, [userId, tenant.id, firstListPage]);
   const needle = query.trim().toLocaleLowerCase();
   const matches = needle ? items.filter(canvas => canvas.name.toLocaleLowerCase().includes(needle)) : items;
   const limit = recentLimit ?? Infinity;

@@ -1,7 +1,7 @@
 import { canvasOfStorageKey, canvasStoragePrefix, canvasStore, canvasStoreUsable, workspaceStoragePrefix } from '../canvas/canvasStorage';
 import { api, SaaSApiError, tenantPath } from './api';
 import { CANVAS_DRAFT_PREFIX } from './canvasDraft';
-import { listPage } from './listPage';
+import { listPage, type ListPage } from './listPage';
 
 // What this browser still keeps of canvases a workspace no longer has: the editor's and the reader's copies of a canvas
 // deleted elsewhere (another device, a teammate), or deleted before the list's delete forgot its copies. Earlier
@@ -15,10 +15,13 @@ export const MAX_CANVAS_CHECKS = 20;
 /** Canvases read per sweep (each alone with it): the tombstones a month of deleted canvases leaves are read again on
  * every visit until they expire, so a sweep reads at most this many, from a random start (the rest on later visits). */
 export const MAX_CANVAS_READS = 50;
-/** Pages of 200 read for a list longer than its first page; a longer one is not swept. */
+/** Pages of 200 read past the list's first page; a longer list is not swept. */
 const MAX_LIST_PAGES = 10;
-/** Under the workspace prefix (no canvas key): when the whole list was last read for this, at most once a day. */
-export const CANVAS_STORAGE_SWEPT_KEY = 'awwo.canvas-store.swept.v1';
+/** Under the workspace prefix (no canvas key): when a list longer than its first page and one more read was last read
+ * whole for this, at most once a day. */
+export const CANVAS_STORAGE_SWEPT_KEY = 'awwo.canvas-store.swept.v2';
+/** The earlier release's record, which held every longer list's daily read: removed. */
+const EARLIER_SWEPT_KEY = 'awwo.canvas-store.swept.v1';
 const DAY_MS = 24 * 3600 * 1000;
 /** Account and workspace pairs this page has swept (once a page). */
 const swept = new Set<string>();
@@ -31,17 +34,24 @@ function localKeys(within: string): string[] {
   } catch { return []; }
 }
 
-/** The whole list's canvas ids, or null when it cannot be read in MAX_LIST_PAGES. */
-async function wholeList(tenantId: string): Promise<Set<string> | null> {
+/** The ids of the list past its first page, read on from that page's cursor (valid across views and page sizes): one
+ * read of 200 on every visit, all of it for a workspace of up to 250 canvases; a list longer still is read on at most
+ * once a day. Null when it is not read whole now. */
+async function restOfList(tenantId: string, cursor: string, within: string): Promise<Set<string> | null> {
   const ids = new Set<string>();
-  let cursor: string | null = null;
-  for (let page = 0; page < MAX_LIST_PAGES; page++) {
-    const result: { items: Array<{ id: string }>; nextCursor?: string | null } = await listPage<{ id: string }>(tenantPath(tenantId, '/canvases?view=summary'), cursor, undefined, 200);
+  let next: string | null = cursor;
+  for (let page = 0; page < MAX_LIST_PAGES && next; page++) {
+    if (page === 1) {
+      if (readRecently(within)) return null;
+      // Recorded before the read, whatever it gives; where it cannot be recorded, it would be read on every visit.
+      rememberRead(within);
+      if (!readRecently(within)) return null;
+    }
+    const result: ListPage<{ id: string }> = await listPage<{ id: string }>(tenantPath(tenantId, '/canvases?view=summary'), next, undefined, 200);
     for (const item of result.items) ids.add(item.id);
-    if (!result.nextCursor) return ids;
-    cursor = result.nextCursor;
+    next = result.nextCursor ?? null;
   }
-  return null;
+  return next ? null : ids;
 }
 
 function readRecently(within: string): boolean {
@@ -65,20 +75,21 @@ async function idleCopies(prefixes: readonly string[], forgets: (key: string) =>
 }
 
 /** Forget the copies of the account's canvases in the workspace that the server answers 404 for, among those not in the
- * list (`firstPage`, its ids; `complete`: the list has no further page, else the whole list is read first, at most once
- * a day). Returns the canvases forgotten. */
-export async function forgetDeletedCanvasStorage(userId: string, tenantId: string, firstPage: Iterable<string>, complete: boolean): Promise<string[]> {
+ * list (`firstPage`, its ids; `nextCursor`, the cursor after it, null when the list has no further page: the rest is
+ * read first, see restOfList). Returns the canvases forgotten. */
+export async function forgetDeletedCanvasStorage(userId: string, tenantId: string, firstPage: Iterable<string>, nextCursor: string | null): Promise<string[]> {
   const pair = JSON.stringify([userId, tenantId]);
   if (swept.has(pair)) return [];
   swept.add(pair);
   // Only where tabs share the store: there a canvas open in a tab holds its lock, and nothing is removed under it.
   if (!(await canvasStoreUsable())) return [];
   const within = workspaceStoragePrefix(userId, tenantId);
+  try { localStorage.removeItem(within + EARLIER_SWEPT_KEY); } catch { /* Left: nothing reads it. */ }
   // A store that cannot say what it keeps is left alone.
   const stored = await canvasStore().storedKeys(within).catch(() => null);
   if (!stored) return [];
   const keys = [...localKeys(within), ...stored];
-  let known = new Set(firstPage);
+  const known = new Set(firstPage);
   const unlisted = () => {
     const ids = new Set<string>();
     for (const key of keys) {
@@ -89,14 +100,10 @@ export async function forgetDeletedCanvasStorage(userId: string, tenantId: strin
   };
   let candidates = unlisted();
   if (!candidates.size) return [];
-  if (!complete) {
-    if (readRecently(within)) return [];
-    // Recorded before the read, whatever it gives; where it cannot be recorded, the list would be read on every opening.
-    rememberRead(within);
-    if (!readRecently(within)) return [];
-    const all = await wholeList(tenantId).catch(() => null);
-    if (!all) return [];
-    known = all;
+  if (nextCursor) {
+    const rest = await restOfList(tenantId, nextCursor, within).catch(() => null);
+    if (!rest) return [];
+    for (const id of rest) known.add(id);
     candidates = unlisted();
   }
   const forgotten: string[] = [];
