@@ -587,6 +587,12 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 				return
 			}
 			if len(ev.Arguments) == 0 {
+				// A tool's card carries the arguments of the very call it approves (the broker pairs it with that call:
+				// apps/openmaus-worker/runtime.ts cardCall). One without them is refused, never allowed as if it had none.
+				if ev.Kind == "approval" {
+					a.finish(tid, rid, "failed", "", "invalid_computer_approval")
+					return
+				}
 				ev.Arguments = json.RawMessage(`{}`)
 			}
 			var args map[string]any

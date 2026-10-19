@@ -251,6 +251,48 @@ func checkComputerAutoAnswers(t *testing.T, wait time.Duration) {
 	}
 }
 
+// A tool's card carries the arguments of the call it approves (the broker pairs it with that call, 2026-10-18). A card
+// that comes without them is refused, even for a workspace tool the deployment allows: never allowed as if it had none.
+func TestPostgresComputerRefusesAToolCardWithoutArguments(t *testing.T) {
+	pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { computerPiHealth(w) }))
+	defer pi.Close()
+	var answered atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/health":
+			computerWorkerHealth(w)
+			return
+		case r.Method == "DELETE":
+			w.WriteHeader(202)
+			return
+		case strings.HasSuffix(r.URL.Path, "/respond"):
+			answered.Add(1)
+			writeJSON(w, 200, map[string]bool{"accepted": true})
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"computer_approval\",\"requestId\":\"tool-1\",\"title\":\"awwo_workspace_exec\",\"description\":\"批准后将在隔离工作区执行此工具。\",\"kind\":\"approval\"}\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer worker.Close()
+	h := computerHarness(t, pi.URL, worker.URL)
+	h.a.cfg.ComputerAutoAllowTools, _ = parseComputerAutoAllow("")
+	owner, tid, rid := startComputerTestRun(t, h, "computer-unpaired@example.test", "computer-unpaired-card")
+	if detail := awaitComputerStatus(t, h, owner, "/tenants/"+tid+"/computer-runs/"+rid, "failed"); detail["error"] != "invalid_computer_approval" {
+		t.Fatal("a tool card without arguments recorded as", detail["error"])
+	}
+	var stored int
+	if e := h.db.QueryRow(t.Context(), "SELECT count(*) FROM computer_approvals WHERE tenant_id=$1 AND run_id=$2", tid, rid).Scan(&stored); e != nil || stored != 0 {
+		t.Fatal("the card was stored", stored, e)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := answered.Load(); n != 0 {
+		t.Fatal("the card was answered", n)
+	}
+}
+
 // The owner's 2026-10-11 choice is the default: unset answers a question at once; a wait is opt-in and bounded.
 func TestComputerQuestionWaitSetting(t *testing.T) {
 	for raw, want := range map[string]time.Duration{"": 0, " ": 0, "0": 0, "120": 2 * time.Minute, "900": 15 * time.Minute} {

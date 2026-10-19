@@ -42,7 +42,7 @@ npm --prefix apps/openmaus-worker start
 
 SSE 包括 `computer_message`、`computer_approval`、`computer_artifact`，以及单个终态 `completed/failed/cancelled`。审批使用上游原生 Ask gate，批准前不执行工具；`arguments` 保留模型发起的完整 JSON 参数。可显示的 title/description 截断不修改实际工具参数。artifact 的 `name` 为 basename，`path` 保存原始相对路径，内容为 base64，`sha256` 来自实际沙箱字节。
 
-工具审批卡只与它审批的那一次调用配对（`runtime.ts` 的 `cardCall`）：broker 按顺序记下核心每次声明了工具的模型请求所得答案中的每个工具调用（模型的调用 id、工具名，以及能取到的参数：512 KiB 以内的 JSON 对象；不声明工具的辅助请求，其答案不记）；核心逐个处理调用，每处理一个就留下带该调用 id 的活动记录（被核心拒绝的调用当即留下，有卡片的调用在卡片答复后才留下），所以一张打开的卡片属于第一个既无活动、也未配卡的调用（核心未提供的工具名在任何卡片之前就被拒绝，且可能不留活动，不计在内）。该调用不是卡片上的工具、另有调用与它同一 id，或其参数未能取到，任务即以 `APPROVAL_CALL_UNMATCHED` / `APPROVAL_ARGUMENTS_UNAVAILABLE` 停止，绝不显示或批准另一次调用的参数。工具执行时，核心传来的工具名和参数必须与一张已批准卡片的调用完全相同，每次批准只执行一次，核心没有接受（或答复失败）的批准不执行任何调用；否则不执行并以 `TOOL_CALL_NOT_ALLOWED` 停止任务。
+工具审批卡只与它审批的那一次调用配对（`runtime.ts` 的 `cardCall`）：broker 按顺序记下核心每次声明了工具的模型请求所得答案中的每个工具调用（模型的调用 id、工具名，以及能取到的参数：512 KiB 以内的 JSON 对象；不声明工具的辅助请求，其答案不记）；核心逐个处理调用，每处理一个就留下带该调用 id 的活动记录（被核心拒绝的调用当即留下，有卡片的调用在卡片答复后才留下），所以一张打开的卡片属于第一个既无活动、也未配卡的调用（核心未提供的工具名在任何卡片之前就被拒绝，且可能不留活动，不计在内）。该调用不是卡片上的工具、另有调用与它同一 id，或其参数未能取到，任务即以 `APPROVAL_CALL_UNMATCHED` / `APPROVAL_ARGUMENTS_UNAVAILABLE` 停止，绝不显示或批准另一次调用的参数。工具执行时，核心传来的工具名和参数必须与一张已批准卡片的调用完全相同，每次批准只执行一次，核心没有接受（或答复失败）的批准不执行任何调用；否则不执行并以 `TOOL_CALL_NOT_ALLOWED` 停止任务。工具审批事件一定带 `arguments`；API 收到没有 `arguments` 的工具审批即以 `invalid_computer_approval` 结束任务，不会当作空参数自动批准。
 
 模型代理接收非流式 Chat Completions JSON（worker 设置 `stream:false`），允许文本/null 内容、function tool calls、tool results 以及 Responses encrypted `reasoning_details` 回传。模型名固定为 `awwo-model`；由 AwwO backend 选择真实模型。真正的提供商 key 不进入核心，核心只持有本次 run 的本地 relay 凭证。代理跳转被拒绝；调用次数包括失败尝试。
 
