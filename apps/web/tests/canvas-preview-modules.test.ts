@@ -6,7 +6,7 @@ import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
 import { namesRelativeMedia } from '../src/canvas/ArtifactPreview';
 import { loadPreviewLibraries, previewScriptNeeds, THREE_MODULES_LIBRARY } from '../src/canvas/previewLibraries';
 import { moduleSpecifiers } from '../../../scripts/preview-modules.mjs';
-import { pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, scriptSpecifiers, THREE_MODULES_BASE, THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
+import { moduleSourceUrl, pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, scriptSpecifiers, THREE_MODULES_BASE, THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
 import { THREE_MODULE_FILES, THREE_MODULES_VERSION } from '../src/canvas/previewModules.generated';
 import { THREE_MODULES_VERSION as RELEASE_VERSION } from '../src/canvas/previewImportMap';
 import { assetScript, buildLiveDocument } from '../src/canvas/studio/liveDocument';
@@ -95,9 +95,12 @@ describe('three.js as ES modules, supplied through the page import map', () => {
       const reachable = file === 'build/three.module.js' ? entries.three : entries[THREE_MODULES_BASE + file] ?? Object.entries(entries).find(([key]) => key.endsWith(file.replace('examples/jsm/', '')))?.[1];
       expect(reachable, file).toBeDefined();
     }
-    // The bytes before rewriting are the pinned file's.
+    // The bytes before rewriting are the pinned file's, named by its canonical URL: a stack trace or console message
+    // from it names that, not the whole data: URL.
     const raw = await THREE_MODULE_FILES['build/three.core.js'].load();
-    expect(decode(entries[`${THREE_MODULES_BASE}build/three.core.js`])).toBe(raw);
+    expect(decode(entries[`${THREE_MODULES_BASE}build/three.core.js`])).toBe(raw + moduleSourceUrl('build/three.core.js'));
+    expect(moduleSourceUrl('build/three.core.js')).toBe(`\n//# sourceURL=${THREE_MODULES_BASE}build/three.core.js\n`);
+    expect(bloom.endsWith(`\n//# sourceURL=${THREE_MODULES_BASE}examples/jsm/postprocessing/UnrealBloomPass.js\n`)).toBe(true);
   });
 
   it('runs the page in the interactive preview with its import map completed and data: modules allowed', async () => {
@@ -196,7 +199,7 @@ describe('three.js as ES modules, supplied through the page import map', () => {
     expect(needs.blocked).toEqual([]);
     expect(needs.modules!.files).toContain('build/three.core.js');
     const entries = JSON.parse((await loadPreviewLibraries(needs)).get(PREVIEW_IMPORT_MAP_KEY)!) as Record<string, string>;
-    expect(decode(entries.three)).toBe(await THREE_MODULE_FILES['build/three.core.js'].load());
+    expect(decode(entries.three)).toBe(await THREE_MODULE_FILES['build/three.core.js'].load() + moduleSourceUrl('build/three.core.js'));
   });
 
   it('keeps a module the page names "__proto__"', async () => {

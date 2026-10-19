@@ -117,9 +117,29 @@ describe('live page document', () => {
     expect(page).not.toContain('href="style.css"');
     expect(page).toContain(dataUrl(strToU8('PNG'), 'image/png'));
     expect(page).toContain('data:text/javascript;base64,');
+    // The module inlined as a data: URL is named by its canvas path, so a stack trace or console message from it names
+    // that rather than carrying the whole URL.
+    const lib = /"data:text\/javascript;base64,([A-Za-z0-9+/=]+)"/.exec(page)![1];
+    expect(Buffer.from(lib, 'base64').toString('utf8')).toBe('export const v = 1;\n//# sourceURL=site/lib.js\n');
     expect(page).toContain('src="../../etc/passwd"');
     expect(joinPath('site/index.html', '../../etc/passwd')).toBeNull();
     expect(joinPath('site/index.html', './img/a%20b.png')).toBe('site/img/a b.png');
+  });
+
+  it('names an inlined module by its canvas path percent-encoded, one token of the comment and unique per file', async () => {
+    const files: Record<string, string> = {
+      'site/app.js': 'import { a } from "./产品 页.js"; import { b } from "./模型 (2)!.js"; console.log(a, b);',
+      'site/产品 页.js': 'export const a = 1;',
+      'site/模型 (2)!.js': 'export const b = 2;',
+    };
+    const resolve = async (path: string) => files[path] ? { bytes: strToU8(files[path]), name: path } : null;
+    const page = await buildLiveDocument('<html><head><script type="module" src="app.js"></script></head><body></body></html>', { path: 'site/index.html', resolve });
+    const modules = [...page.matchAll(/"data:text\/javascript;base64,([A-Za-z0-9+/=]+)"/g)].map(match => Buffer.from(match[1], 'base64').toString('utf8'));
+    expect(modules).toEqual([
+      'export const a = 1;\n//# sourceURL=site/%E4%BA%A7%E5%93%81%20%E9%A1%B5.js\n',
+      'export const b = 2;\n//# sourceURL=site/%E6%A8%A1%E5%9E%8B%20%282%29%21.js\n',
+    ]);
+    for (const text of modules) expect(text.slice(text.lastIndexOf('sourceURL=') + 10).trim()).toMatch(/^[A-Za-z0-9._~%/-]+$/);
   });
 
   it('runs three.js r128 from AwwO\'s pinned copy, adding the CapsuleGeometry a game calls', async () => {

@@ -11,8 +11,8 @@
  * data: URL in the same import map. A copy is the npm file byte for byte as the builds ship it (previewModules.generated.ts
  * pins its size and sha256: build/three.module.js without the two shaders three.js took from Shadertoy, which
  * scripts/three-shadertoy.mjs cuts out) except that its relative imports name the canonical CDN URL of the file they
- * mean, which the import map then supplies too: a data: module cannot resolve a relative path. Anything else the page
- * imports is left as it wrote it.
+ * mean, which the import map then supplies too: a data: module cannot resolve a relative path; and that it ends with a
+ * comment naming it by its own canonical URL (moduleSourceUrl). Anything else the page imports is left as it wrote it.
  */
 import { THREE_MODULE_FILES, type GeneratedModuleFile } from './previewModules.generated';
 import { isClassicScript, isImportMap, isModuleScript, readImportMap, resolveSpecifier, THREE_MODULES_BASE, THREE_MODULES_VERSION } from './previewImportMap';
@@ -166,7 +166,14 @@ function base64(text: string): string {
   return btoa(binary);
 }
 
-/** A pinned file as the data: URL a preview's import map gives it: its relative imports name canonical URLs. */
+/** The comment that names an inlined file by its canonical URL. A module loaded from a data: URL is otherwise named by
+ * that URL, so every stack trace and console message from it carried the whole file: PALLWARD's page, which warns tens
+ * of thousands of times while it measures its clips, ran a hundred times slower in the homepage dialog with the DevTools
+ * protocol attached (DevTools, Playwright), and its tab ran out of memory. */
+export const moduleSourceUrl = (file: string) => `\n//# sourceURL=${THREE_MODULES_BASE}${file}\n`;
+
+/** A pinned file as the data: URL a preview's import map gives it: its relative imports name canonical URLs, and it is
+ * named by its own (moduleSourceUrl). */
 export function moduleDataUrl(file: string): Promise<string> {
   let pending = loaded.get(file);
   if (!pending) {
@@ -179,7 +186,7 @@ export function moduleDataUrl(file: string): Promise<string> {
         const target = THREE_MODULES_BASE + dependency.file;
         source = source.split(`'${dependency.specifier}'`).join(`'${target}'`).split(`"${dependency.specifier}"`).join(`"${target}"`);
       }
-      return `data:text/javascript;base64,${base64(source)}`;
+      return `data:text/javascript;base64,${base64(source + moduleSourceUrl(file))}`;
     });
     loaded.set(file, pending);
     pending.catch(() => { if (loaded.get(file) === pending) loaded.delete(file); });

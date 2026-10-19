@@ -116,7 +116,10 @@ async function inlineModule(source: string, modulePath: string, resolve: AssetRe
     const text = asset ? decodeText(asset.bytes) : null;
     if (!asset || text === null || asset.bytes.length > budget.left) continue;
     budget.left -= asset.bytes.length;
-    const inlined = await inlineModule(text, path!, resolve, budget, depth + 1, found);
+    // Named by its canvas path, not by the data: URL (as the pinned three.js files are, previewModules.ts moduleSourceUrl);
+    // each segment percent-encoded, so the name is one token of the comment and two files never share one.
+    const name = path!.split('/').map(segment => encodeURIComponent(segment).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join('/');
+    const inlined = `${await inlineModule(text, path!, resolve, budget, depth + 1, found)}\n//# sourceURL=${name}\n`;
     result = result.split(`'${specifier}'`).join(`'${dataUrl(new TextEncoder().encode(inlined), 'text/javascript')}'`)
       .split(`"${specifier}"`).join(`"${dataUrl(new TextEncoder().encode(inlined), 'text/javascript')}"`);
   }
