@@ -134,11 +134,12 @@ func (p *deletionPlan) checkRequest(ctx context.Context, tx pgx.Tx, d Deletion) 
 	return nil
 }
 
-// Anything still running in a workspace, by anyone: runs, graphs, renders, web reads, managed dispatches, model calls,
-// TypeSafe evaluations.
+// Anything still running in a workspace, by anyone: runs, graphs, renders, edits, web reads, managed dispatches, model
+// calls, TypeSafe evaluations.
 const workspaceBusySQL = `(EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=t.id AND r.status IN ('queued','running'))
 	OR EXISTS(SELECT 1 FROM graph_runs g WHERE g.tenant_id=t.id AND g.status IN ('queued','running'))
 	OR EXISTS(SELECT 1 FROM render_jobs j WHERE j.tenant_id=t.id AND j.status IN ('queued','running'))
+	OR EXISTS(SELECT 1 FROM edit_jobs e WHERE e.tenant_id=t.id AND e.status IN ('queued','running'))
 	OR EXISTS(SELECT 1 FROM web_reads w WHERE w.tenant_id=t.id AND ` + webReadStarted + `)
 	OR EXISTS(SELECT 1 FROM openmaus_dispatches o WHERE o.tenant_id=t.id AND ` + dispatchSending + `)
 	OR EXISTS(SELECT 1 FROM model_invocations i WHERE i.tenant_id=t.id AND i.status='running')

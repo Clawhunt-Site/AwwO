@@ -360,7 +360,7 @@ func (a *App) sweepMediaTenant(ctx context.Context, root, tid string, old func(o
 		return
 	}
 	referenced := map[string]bool{}
-	rows, err := a.db.Query(ctx, "SELECT storage_path FROM artifacts WHERE tenant_id=$1 AND storage_path IS NOT NULL UNION ALL SELECT id FROM runs WHERE tenant_id=$1 AND status IN ('queued','running') UNION ALL SELECT id FROM render_jobs WHERE tenant_id=$1 AND status IN ('queued','running')", tid)
+	rows, err := a.db.Query(ctx, "SELECT storage_path FROM artifacts WHERE tenant_id=$1 AND storage_path IS NOT NULL UNION ALL SELECT id FROM runs WHERE tenant_id=$1 AND status IN ('queued','running') UNION ALL SELECT id FROM render_jobs WHERE tenant_id=$1 AND status IN ('queued','running') UNION ALL SELECT id FROM edit_jobs WHERE tenant_id=$1 AND status IN ('queued','running')", tid)
 	if err != nil {
 		return
 	}

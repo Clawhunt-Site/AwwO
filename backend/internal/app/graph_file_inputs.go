@@ -62,7 +62,7 @@ func readGraphInputFiles(ctx context.Context, tx graphInputReader, tid, gid, nid
 		// A 3D node's result is typed file and an edge keeps its source's type, so its wire into a page arrives here as
 		// a file edge. Its output is an awwo.media record, never one stored file: like a picture or a clip it reaches
 		// the input as the file list graphPrompt writes (mediaDeliveryText, or mediaMissingText when nothing was made).
-		if graphMediaNode(src) {
+		if graphMediaSource(src) {
 			continue
 		}
 		var output, state string

@@ -53,6 +53,8 @@ type graphNode struct {
 	// An assemble node's page frame and, when it also delivers a file, that file's name (graph_assemble.go).
 	Template string `json:"template,omitempty"`
 	FileName string `json:"fileName,omitempty"`
+	// An edit node's own awwo.timeline/1 document, used when no timeline is wired into it (edits.go).
+	Timeline string `json:"timeline,omitempty"`
 	// A media node in a canvas run generates from the draft of its active conversation (graph_media.go). Read raw:
 	// a shape this host does not expect leaves the draft empty instead of failing the whole graph.
 	ActiveThreadID json.RawMessage `json:"activeThreadId,omitempty"`
@@ -116,7 +118,7 @@ func edgeTypesFit(src graphNode, fromPort, st, dt string) bool {
 	if st == dt {
 		return true
 	}
-	return dt == "text" && fromPort == "result" && graphMediaNode(src) && (st == mediaKindImage || st == mediaKindVideo || st == mediaKindAudio || st == "file")
+	return dt == "text" && fromPort == "result" && graphMediaSource(src) && (st == mediaKindImage || st == mediaKindVideo || st == mediaKindAudio || st == "file")
 }
 
 // softMediaEdge reports whether e is edgeTypesFit's one cross-type case: an image, video or 3D node's result feeding a
@@ -133,7 +135,7 @@ func softMediaEdge(d graphDocument, e graphEdge) bool {
 			dst = &d.Nodes[i]
 		}
 	}
-	if src == nil || dst == nil || !graphMediaNode(*src) || e.FromPort != "result" {
+	if src == nil || dst == nil || !graphMediaSource(*src) || e.FromPort != "result" {
 		return false
 	}
 	st, sok := nodePort(*src, e.FromPort, false)
@@ -143,6 +145,9 @@ func softMediaEdge(d graphDocument, e graphEdge) bool {
 func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if n.Kind == "form" {
 		return "text", !input && id == "data"
+	}
+	if n.Kind == "edit" {
+		return editPort(id, input)
 	}
 	if n.Contract != nil {
 		fields, prefix := n.Contract.Outputs, "out:"
@@ -196,7 +201,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 	in := map[string]bool{}
 	indeg := map[string]int{}
 	for _, n := range d.Nodes {
-		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session" && n.Kind != "assemble") {
+		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session" && n.Kind != "assemble" && n.Kind != "edit") {
 			return d, nil, errors.New("Invalid or duplicate graph node")
 		}
 		if n.Kind == "assemble" {
@@ -269,6 +274,11 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 						return d, nil, err
 					}
 				}
+			}
+		}
+		if n.Kind == "edit" {
+			if err := validateEditNode(n, incoming[n.ID+"\x00timeline"]); err != nil {
+				return d, nil, err
 			}
 		}
 		if n.Kind == "session" {
@@ -961,7 +971,7 @@ func graphPrompt(n graphNode, d graphDocument, outputs map[string]string) (strin
 				return "", err
 			}
 			out = v[strings.TrimPrefix(e.FromPort, "out:")]
-		} else if graphMediaNode(src) {
+		} else if graphMediaSource(src) {
 			// No record of stored files means the generation made nothing (only a soft edge gets here then:
 			// the scheduler holds a node back for any other failed upstream).
 			if listed := mediaDeliveryText(src, out); listed != out {

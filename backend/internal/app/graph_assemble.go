@@ -250,7 +250,7 @@ func assembleInputValues(n graphNode, d graphDocument, outputs map[string]string
 					return nil, err
 				}
 				out = vals[strings.TrimPrefix(e.FromPort, "out:")]
-			} else if graphMediaNode(src) {
+			} else if graphMediaSource(src) {
 				if listed := mediaDeliveryText(src, out); listed != out {
 					out = listed
 				} else {

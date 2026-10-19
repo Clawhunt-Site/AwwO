@@ -120,9 +120,9 @@ func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode
 	}
 	for _, e := range deps {
 		src := nodes[e.FromNode]
-		// A media node's delivery is its files' record: it means nothing among another generation's words (a voice-over
-		// would read it aloud); its pictures reach a generation through the reference input only.
-		if graphMediaNode(src) {
+		// A media node's (or an edit's) delivery is its files' record: it means nothing among another generation's words
+		// (a voice-over would read it aloud); its pictures reach a generation through the reference input only.
+		if graphMediaSource(src) {
 			continue
 		}
 		out := stripReasoningPreamble(outputs[e.FromNode])
@@ -175,6 +175,16 @@ func mediaDeliveryText(n graphNode, output string) string {
 		Type  string      `json:"type"`
 		Kind  string      `json:"kind"`
 		Items []mediaItem `json:"items"`
+		// An edit node's film comes with its subtitles, report and stills (edit_outputs.go editRecord).
+		Edit *struct {
+			Seconds float64 `json:"seconds"`
+			Files   []struct {
+				Name        string `json:"name"`
+				ContentType string `json:"contentType"`
+				Size        int64  `json:"size"`
+				Role        string `json:"role"`
+			} `json:"files"`
+		} `json:"edit"`
 	}
 	if json.Unmarshal([]byte(strings.TrimSpace(output)), &record) != nil || record.Type != mediaOutputType || len(record.Items) == 0 {
 		return output
@@ -209,6 +219,21 @@ func mediaDeliveryText(n graphNode, output string) string {
 		}
 		lines = append(lines, fmt.Sprintf("- %s/%s（%s，%d 字节%s）", n.ID, item.Name, item.ContentType, item.Size, extra))
 	}
+	if record.Edit != nil {
+		lines = append(lines, fmt.Sprintf("这是剪辑好的成片（%.1f 秒）。剪辑还留下了这些文件：", record.Edit.Seconds))
+		stills := 0
+		for _, file := range record.Edit.Files {
+			if file.Role == "still" {
+				if stills++; stills > maxListedStills {
+					continue
+				}
+			}
+			lines = append(lines, fmt.Sprintf("- %s/%s（%s，%d 字节；%s）", n.ID, file.Name, file.ContentType, file.Size, editRoleShown[file.Role]))
+		}
+		if stills > maxListedStills {
+			lines = append(lines, fmt.Sprintf("- ……还有 %d 张成片抽帧（同样命名，序号接着往下）", stills-maxListedStills))
+		}
+	}
 	lines = append(lines, "网页可以用上面的相对路径引用这些文件，AwwO 的预览会换成真实文件；不要编造其他文件名。")
 	if animated {
 		line := "带动画的 GLB 用 THREE.AnimationMixer 按上面的动画名播放它的动画（gltf.animations）。"
@@ -222,6 +247,12 @@ func mediaDeliveryText(n graphNode, output string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// maxListedStills is how many of an edit's stills a downstream prompt lists by name; the rest are counted.
+const maxListedStills = 24
+
+// editRoleShown names what an edit's other files are, in a downstream prompt.
+var editRoleShown = map[string]string{"subtitles": "字幕（SRT）", "report": "剪辑报告（JSON：时长、响度、各轨数量、警告）", "still": "成片抽帧"}
 
 // mediaKindShown names a media node's kind in a downstream prompt.
 var mediaKindShown = map[string]string{mediaKindImage: "图片", mediaKindVideo: "视频", mediaKindModel3D: "3D 模型", mediaKindAudio: "音频"}
@@ -250,6 +281,9 @@ func mediaMissingText(n graphNode) string {
 		title = n.ID
 	}
 	kind := mediaKindShown[n.AgentKind]
+	if n.Kind == "edit" {
+		kind = mediaKindShown[mediaKindVideo]
+	}
 	if kind == "" {
 		kind = "媒体"
 	}

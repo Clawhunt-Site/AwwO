@@ -24,6 +24,7 @@ import (
 type App struct {
 	workspaceLeases sync.Map // hashed ephemeral bearer -> one admitted coding run
 	computerLeases  sync.Map // hashed task token; never a provider credential
+	editWaits       sync.Map // tenant/graph/node of an edit node waiting for its workspace's other edit -> when it looks again
 	exports         accountExports
 
 	obs         *observability
@@ -165,6 +166,9 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}
 	if _, e = tx.Exec(ctx, "UPDATE run_turns SET status='interrupted',error='API restarted before completion',updated_at=now() WHERE status IN ('queued','running')"); e != nil {
+		return e
+	}
+	if e = interruptEdits(ctx, tx); e != nil {
 		return e
 	}
 	if e = interruptRenders(ctx, tx); e != nil {

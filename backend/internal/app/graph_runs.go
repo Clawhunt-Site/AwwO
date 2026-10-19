@@ -122,6 +122,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_graph", e.Error())
 		return
 	}
+	// An edit node renders on the render worker: without one the run is refused before anything paid runs upstream.
+	if a.cfg.RenderURL == "" && scopeHasEdit(d, scope) {
+		fail(w, 409, "edit_unavailable", "Edit nodes need the render worker, which this server does not run")
+		return
+	}
 	// Several graphs may run on one canvas at once, each executing its own nodes; the canvas row lock taken above
 	// serializes admissions, so two graphs can never both claim a node.
 	busy, e := graphAdmissionConflict(r.Context(), tx, tid, cid, scope, b.Collaboration != nil)
@@ -517,6 +522,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			if !ok {
 				continue
 			}
+			if n.Kind == "edit" && s.State == "running" {
+				a.settleGraphEdit(ctx, tid, id, n)
+				continue
+			}
 			if s.State == "running" {
 				var rs, out, code string
 				var generation bool
@@ -608,6 +617,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			}
 			if n.Kind == "form" {
 				a.setGraphNode(ctx, tid, id, n.ID, "done", formOutput(n), "")
+				continue
+			}
+			if n.Kind == "edit" {
+				// No model: the render worker joins its files (edits.go); the node runs until its job ends.
+				if err := a.admitGraphEdit(ctx, tid, id, canvasID, n, d, outputs); err != nil && !errors.Is(err, errEditWaiting) {
+					a.setGraphNode(ctx, tid, id, n.ID, "failed", "", editAdmissionDetail(err))
+				}
 				continue
 			}
 			if n.Kind == "assemble" {
@@ -934,6 +950,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
+	var edits []string
 	var cancelledNodes int64
 	if status == "queued" || status == "running" {
 		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, id)
@@ -966,6 +983,10 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if edits, e = cancelGraphEdits(r.Context(), tx, tid, id); e != nil {
+			a.dbError(w, e)
+			return
+		}
 		status, e = reconcileCancelledGraph(r.Context(), tx, tid, id)
 		if e != nil {
 			a.dbError(w, e)
@@ -987,6 +1008,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 	for _, rid := range ids {
 		a.notifyRunEvent(rid)
 	}
+	a.stopEdits(edits)
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")
 	}
@@ -1068,6 +1090,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
+	var edits []string
 	var cancelledNodes int64
 	if gid != "" && (status == "queued" || status == "running") {
 		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, gid)
@@ -1100,6 +1123,10 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if edits, e = cancelGraphEdits(r.Context(), tx, tid, gid); e != nil {
+			a.dbError(w, e)
+			return
+		}
 		status, e = reconcileCancelledGraph(r.Context(), tx, tid, gid)
 		if e != nil {
 			a.dbError(w, e)
@@ -1121,6 +1148,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		a.notifyRunEvent(id)
 	}
+	a.stopEdits(edits)
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")
 	}

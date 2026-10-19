@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// capabilitySettings configures the web reader (webread_import.go) and the motion renderer (renders.go). Both are
-// off unless configured: the reader needs AWWO_WEB_READER=on, the renderer its worker's URL and token.
+// capabilitySettings configures the web reader (webread_import.go), the motion renderer (renders.go) and edits
+// (edits.go, on the same render worker). All are off unless configured: the reader needs AWWO_WEB_READER=on, the
+// renderer and edits the worker's URL and token.
 type capabilitySettings struct {
 	WebReaderEnabled   bool
 	WebReadsPerDay     int
@@ -20,6 +21,11 @@ type capabilitySettings struct {
 	RendersPerDay      int
 	RendersSitePerDay  int
 	RenderTimeout      time.Duration
+	// An edit may wait EditQueueWait for the worker (a render or another edit holds it) and render for EditTimeout.
+	EditsPerDay      int
+	EditsTotalPerDay int
+	EditTimeout      time.Duration
+	EditQueueWait    time.Duration
 }
 
 func positiveEnvInt(key string, fallback, max int) (int, error) {
@@ -64,7 +70,31 @@ func (c *Config) capabilityFromEnv() error {
 		}
 		c.RenderTimeout = v
 	}
+	if c.EditsPerDay, err = positiveEnvInt("AWWO_EDITS_PER_DAY", 40, 10000); err != nil {
+		return err
+	}
+	if c.EditsTotalPerDay, err = positiveEnvInt("AWWO_EDITS_SITE_PER_DAY", 400, 1000000); err != nil {
+		return err
+	}
+	// The worker's own limit is an hour (AWWO_EDIT_TIMEOUT_MS); the API waits longer, for the uploads and the outputs.
+	if c.EditTimeout, err = envDuration("AWWO_EDIT_TIMEOUT", 75*time.Minute, time.Minute, 4*time.Hour); err != nil {
+		return err
+	}
+	c.EditQueueWait = 45 * time.Minute
 	return nil
+}
+
+// envDuration reads a duration setting within [min, max]; absent, it is fallback.
+func envDuration(key string, fallback, min, max time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil || v < min || v > max {
+		return 0, errors.New(key + " must be a duration between " + min.String() + " and " + max.String())
+	}
+	return v, nil
 }
 
 func (c Config) validateCapabilities() error {
