@@ -25,8 +25,8 @@ var (
 	ErrInput    = errors.New("invalid operator command arguments")
 	ErrDatabase = errors.New("operator database operation failed; no credentials or database error details are exposed")
 	ErrIdentity = errors.New("the account does not match the expected immutable identity")
-	ErrConflict = errors.New("operation identity or account state changed; no role change applied")
-	ErrOperator = errors.New("applying a role change requires an OS root operator")
+	ErrConflict = errors.New("operation identity or account state changed; nothing was applied")
+	ErrOperator = errors.New("applying a change requires an OS root operator")
 )
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -147,6 +147,11 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 func (s *Store) Close() { s.db.Close() }
 
 func (s *Store) begin(ctx context.Context, write bool) (pgx.Tx, error) {
+	return s.beginWith(ctx, write, "5s")
+}
+
+// beginWith sets the statement timeout for this transaction only (set_config's is_local), passed as a parameter.
+func (s *Store) beginWith(ctx context.Context, write bool, statementTimeout string) (pgx.Tx, error) {
 	opts := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
 	if write {
 		opts = pgx.TxOptions{IsoLevel: pgx.ReadCommitted, AccessMode: pgx.ReadWrite}
@@ -155,7 +160,7 @@ func (s *Store) begin(ctx context.Context, write bool) (pgx.Tx, error) {
 	if err != nil {
 		return nil, ErrDatabase
 	}
-	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='2s'"); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT set_config('statement_timeout',$1,true), set_config('lock_timeout','2s',true)", statementTimeout); err != nil {
 		tx.Rollback(ctx)
 		return nil, ErrDatabase
 	}
@@ -361,8 +366,9 @@ func readRecord(ctx context.Context, tx pgx.Tx, query string, args ...any) (*rec
 	return r, nil
 }
 
+// existing also finds an account deletion's operation, whose record is no role change's, so reusing it is a conflict.
 func existing(ctx context.Context, tx pgx.Tx, operation string) (*record, error) {
-	return readRecord(ctx, tx, "SELECT id,action,resource_id,metadata FROM audit_events WHERE action IN ('admin.operator_grant','admin.operator_rollback') AND metadata->>'operationId'=$1 ORDER BY id DESC LIMIT 1", operation)
+	return readRecord(ctx, tx, "SELECT id,action,resource_id,metadata FROM audit_events WHERE action IN ('admin.operator_grant','admin.operator_rollback','"+deletionAction+"') AND metadata->>'operationId'=$1 ORDER BY id DESC LIMIT 1", operation)
 }
 
 func latest(ctx context.Context, tx pgx.Tx, userID string) (int64, error) {

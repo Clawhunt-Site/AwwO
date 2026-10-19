@@ -145,6 +145,207 @@ isolated temporary schemas, and explicitly skip when it is absent. They must
 never point at a production database. The standard SaaS CI `go test ./...` also
 includes these cases.
 
+### Deleting an account
+
+The privacy clause has an operator handle each deletion request by hand: the 删除申请 tab lists the requests people
+make in 设置 → 数据管理, and one sent by email is handled the same way. `awwo-control delete-account`
+(`internal/operator/deletion.go`, with its checks in `deletion_plan.go` and its writes in `deletion_apply.go`) deletes one
+account by its id in one transaction and leaves its request pending.
+Once the account is gone, mark the request handled in the tab (`PATCH /admin/deletions/{id}` refuses `handled` while
+the account exists, migration 038).
+
+1. **Find the account and its request.** Take the request's `userId` from the tab, or
+   `./awwo-control inspect --email STORED_EMAIL`. Name the request with `--request-id`: it must be the account's
+   pending one. A request sent by email has no id. The command then still refuses:
+   - while the account has a pending request in the app (`deletion_request_not_named:<id>`). Name it, so that it gets
+     marked handled;
+   - when the account's latest request was withdrawn or declined (`deletion_request_withdrawn:<id>`,
+     `deletion_request_declined:<id>`). The person changed their mind, or was told no: ask them to request again in
+     设置 → 数据管理, and name that request.
+
+     When they cannot sign in any more (a ClawHunt account they lost), name that latest request with
+     `--supersede-request <id>` instead: the operator states that the request by email supersedes it, and the receipt
+     and the record show which. Any other request given there is refused (`deletion_request_not_superseded:<id>`).
+2. **End the paid plan at ClawHunt first.** ClawHunt bills the subscription and `user_plans` only mirrors it, so the
+   tool cannot cancel one. Cancel it at ClawHunt with immediate effect (not at the period's end), then wait until AwwO's
+   mirror shows it. The background plan sync reads every live plan at least hourly. The person's next sign-in, or a
+   billing page they open, reads it at once. While the mirror shows a status ClawHunt counts as live (`active`,
+   `trialing`, `past_due`, `incomplete`, `unpaid`, `paused`), the tool refuses with `paid_plan_live`. It also refuses
+   for a day after the person opened a checkout or the billing portal from AwwO (`plan_checkout_open`), since a payment
+   started there may still complete.
+3. **Preview.** Without `--apply` nothing is written:
+
+   ```sh
+   ./awwo-control delete-account --user-id ACCOUNT_ID --expected-email STORED_EMAIL --request-id REQUEST_ID \
+     --operation-id DELETE_ACCOUNT_0001 --reason 'Deletion request REQUEST_ID'
+   ```
+
+   The receipt has:
+   - `blockers`;
+   - `workspaces`: every workspace the person belongs to or has work in, with its `name`, their `role`, the
+     `outcome`, the `ownerAfter`, the other members, the canvases, and the person's runs, graph rows and invitations
+     there;
+   - `account`: plan status, sessions, identity links, keys, deletion requests and the latest one;
+   - `rows`: the rows the command itself changes. Cascades are not counted.
+4. **Decide each workspace the person alone owns** (`workspace_undecided:<id>`):
+   - Hand it to one of its members with `--transfer-workspaces WORKSPACE=MEMBER_ID[,...]`. A workspace without other
+     members cannot be handed over.
+   - Or delete it, with everything in it, with `--delete-workspaces WORKSPACE[,...]`.
+
+   A handed-over workspace runs on its new owner's plan and workspace allowance from then on, and its paid calls spend
+   their credits. The new owner's membership is dated at the handover. A plan's workspaces are ranked by that date, so
+   the workspace taken over counts as their newest and pushes none of their own out of their plan. For it, the preview
+   shows:
+   - the new owner's role before;
+   - whether they are a platform administrator (a workspace one owns has no model limits);
+   - how many workspaces they would own once every handover in the command is made;
+   - `requiresPlan`, for a workspace that runs only while its owner's plan covers it.
+
+   No route renames a workspace, and the workspace an account was created with is named after the person ("<name> ·
+   AwwO" at a first ClawHunt sign-in) or by them at sign-up. Handing it over is therefore refused
+   (`workspace_needs_new_name:<id>`) until it gets a name with `--rename-workspaces WORKSPACE=NEW_NAME[,...]`. Giving its
+   own name again keeps it, and is not a rename, if the name passes the rules below and does not end in " · AwwO" as a
+   first ClawHunt sign-in's does (it is the person's name then). The same refusal applies to any workspace named "<name> · AwwO" after the person's
+   present name, and to a new name that is exactly that.
+
+   The receipt marks that workspace `firstOfPerson`. It is found by its date: sign-up creates the account and that
+   workspace at the same moment, so it is still found after the person changes their name. A new name must be plain
+   text of at most 200 bytes, as the API's own limit, which is about 66 Chinese characters:
+   - letters, combining marks, digits, punctuation, symbols and spaces only, so no format, private-use or unassigned
+     character and no line or paragraph separator;
+   - no comma, filler or blank Braille cell;
+   - a letter, digit, punctuation mark or symbol first.
+
+   Any handed-over workspace may be renamed this way. The receipt shows the names; the stored record keeps neither the
+   names nor the new ones, only that a workspace was renamed.
+
+   The tool tells nobody: agree it with the members first.
+5. **Apply** as OS root: the same arguments plus `--apply`. After an uncertain result, run the same command again. The
+   same operation ID with the same arguments (in any order) returns the first receipt from the record, with
+   `replayed: true` and without the workspace names, which the record does not keep. The same operation ID with other
+   arguments is a conflict.
+6. **Mark the request handled** in the 删除申请 tab. A request by email has no row there: answer the email.
+7. **Check ClawHunt once more, a day later.** A checkout or billing portal the person opened while the command ran
+   still got its page: the API asks ClawHunt for the page before it records the plan watch, and only logs that record's
+   failure once the account is gone. Such a page can be paid until its checkout session expires (by Stripe's default,
+   a day after it was opened), so look at ClawHunt after that for a subscription started from it, and cancel it there.
+
+It also refuses, and changes nothing:
+- while the person has anything running: a run, a graph, a render, a web import, a managed dispatch, a paid model call
+  or a TypeSafe evaluation (`active_work`);
+- while a workspace to hand over or delete has anything running, by anyone (`workspace_busy:<id>`);
+- for a platform administrator (`platform_admin`): this command does not delete an administrator's account;
+- when the named request is not the account's pending one (`deletion_request_not_found`,
+  `deletion_request_other_account`, `deletion_request_not_pending`);
+- when a named workspace is not one the person alone owns (`workspace_not_solely_owned:<id>`,
+  `workspace_not_found:<id>`);
+- when a new owner is not a member of that workspace (`transfer_target_not_member:<id>`);
+- when a workspace that stays has no owner to take the person's graph rows (`workspace_without_owner:<id>`). The API
+  never leaves a workspace without an owner, so only a database edited by hand needs its owner restored first.
+
+Runs, graphs, renders and model calls count while they are queued or running; an API restart settles them. Three kinds
+of work can stay unsettled, so the tool counts each only for a bounded time:
+- a web import, while it was started at most two minutes ago. A restart settles one, but one whose last save was lost
+  stays started, and the API itself stops counting it after two minutes;
+- a managed dispatch, while it is sending within a minute of its last update. Nothing settles it: its send times out
+  after 12 s, and the API calls one sending for longer than 15 s `unknown`;
+- a TypeSafe evaluation, while its audit row says `started`, for two minutes. Evaluations time out after at most 25 s.
+
+A preview lists every reason at once. Up to 50 workspaces can be decided in one command.
+
+The command takes its locks in the API's own order:
+1. the workspaces it hands over or deletes, as an admission does;
+2. the account's deletion requests (and the named one), since a withdrawal updates its request and then writes an
+   audit row naming the account;
+3. the account;
+4. the account's plan mirror and plan watch, which a plan sync or a checkout update without touching the account;
+5. each new owner's membership.
+
+While it runs:
+- no new row that references the account through a foreign key can be written;
+- nothing can be admitted in those workspaces;
+- a withdrawal, a plan change, a checkout's plan watch or a member's removal that got there first makes the command
+  wait, and the command then reads it again and refuses;
+- one that comes after the command took its locks waits for the command and then runs on what it left: a withdrawal,
+  a plan change or a checkout's plan watch finds the account gone. A checkout's page is out by then, though (step 7).
+
+Rows that already exist can still be updated where the update leaves their key alone (a session's expiry, a run's
+status). A row the person writes that names them only as plain text is not held back either: a web import started in
+that moment, in a workspace that stays, fails harmlessly once the account is gone.
+
+A lock the command cannot get within 2 s fails it without a change. When PostgreSQL resolves a deadlock by aborting the
+command, nothing was applied either; run it again. Statements may run for 60 s, the command for two minutes.
+
+What happens (the owner, 2026-10-19: shared work is kept, without the person's name):
+
+- **Workspaces that stay** (other people's, and those handed over):
+  - The person's runs keep their prompts, outputs, messages and events, with no actor (`actor_id` NULL, as runs from
+    before migration 007 have).
+  - Their graph runs and graph cancellation records require an actor, so they become that workspace's owner's. The API
+    never shows that id and reads it only while a graph runs.
+  - Their invitations, sent and accepted, are deleted: one passed to another sender could come back to life.
+  - Their membership goes.
+- **A deleted workspace** goes with its canvases, runs, file rows, agents, knowledge, skills, memory notes, usage
+  ledger, and everyone's memberships and invitations.
+  - Its audit rows stay, without the workspace.
+  - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
+    there loses those days from their streak.
+  - Migration 021's trigger refuses every delete of a knowledge source origin. It is switched off for that one statement
+    and back to its state inside the transaction, so no other session sees it off. This runs at the end, after the
+    account row is gone. From that statement to the commit, the switch locks the origins table against every
+    workspace's writers, and a knowledge import elsewhere waits that long. The wait covers the rest of the workspace's
+    knowledge and the deletion of its row, whose check reads the audit log, which has no index by workspace. The
+    database role must own the table, as the API's does. Under another role the command fails without a change.
+  - Its stored files go with the API's hourly media sweep once no artifact names them.
+- **Audit rows stay, with no actor**, so the record of the request (`account.deletion_requested`) survives. Rows that
+  name the person's id as their resource stay too (`member.added` and similar), and so do the metadata of operator
+  grants and rollbacks for the account, which hold its email and ClawHunt subject.
+
+  The command adds `admin.operator_account_deleted`. It has no actor and carries the receipt, the reason, the
+  operator's OS user and the email the operator gave: like the deletion request, it records whose account was
+  deleted, on request. It also adds `admin.operator_workspace_transferred` in each handed-over workspace's own log.
+- **The users row goes**, and with it, by cascade:
+  - its sessions (the person is signed out at once);
+  - its ClawHunt identity link;
+  - its keys, appearance and settings;
+  - its plan mirror and plan watches;
+  - its upgrade interest;
+  - its check-ins. In a workspace that stays, a check-in the person made today takes its bonus away from that
+    workspace for the rest of the day, and another member may check in again.
+
+  Its deletion requests keep their email, name and reason, without the account (migration 037).
+- **Kept as plain text**, naming no account any more. Ids are random, so no later account gets the same one:
+  - the person's id in knowledge revisions, proposals, events and origins;
+  - computer sessions, managed dispatches, renders and web reads;
+  - the authors of skills and memory notes;
+  - `decided_by` of requests the person decided;
+  - the billing ledger (`billed_user_id` of model calls and generations). Clearing it would count paid calls against a
+    workspace's free allowances.
+
+  `TestPostgresDeletionSchemaReferencesArePinned` fails when a migration adds any of these that the tool and this list
+  do not cover:
+  - a reference to users or workspaces;
+  - a reference without an ON DELETE action;
+  - a trigger or a rule;
+  - a workspace table without a key to its workspace;
+  - a column named like a person's id (`actor_id`, `user_id`, `*_by`, `owner`, `author`, `member` and the like) without
+    a foreign key.
+
+  It cannot see a user id kept under another name, or inside JSON.
+- **A later ClawHunt sign-in creates a new account.** The identity link (migration 018) went with the account. The same
+  ClawHunt account signing in again finds neither the link nor the email, so it gets a new AwwO account with a new id
+  and a new workspace, under that day's new-account rules (`AWWO_NEW_ACCOUNTS_PER_IP_PER_DAY`,
+  `AWWO_REQUIRE_VERIFIED_EMAIL`). It sees none of the old account's workspaces, plan or deletion request.
+- **Not covered:**
+  - database backups, which keep the account until they expire (the host's copies and the backup bucket's `pg/`; see
+    `docs/awwo-saas-deploy.md`);
+  - canvas copies kept in a browser or the Mac app;
+  - what ClawHunt itself keeps.
+
+`TestPostgresOperatorDeletesASharedAccountAndTheRequestIsHandled` (`internal/app`) builds such an account through the
+API and deletes it, then marks the request handled. `TestPostgresDeletedClawHuntAccountSignsInAsANewAccount` waits out a
+live plan, then signs the person in again.
+
 Member management supports existing registered accounts and single-use invitation links. Workspace admins and owners can list/create/revoke `/tenants/{tenantId}/invites`; only owners can create or revoke an admin invitation. Creation accepts `{role,expiresInHours?}` with role `reader|member|admin`, default 72 hours and an integer range of 1–168 hours. The response includes `{id,role,expiresAt,inviteUrl,token}`. The token is shown once, only its SHA-256 digest is stored, and listing exposes metadata without the token or hash. The browser link uses `/?invite=TOKEN`; the user must sign in, preview `GET /invites/{token}`, and explicitly accept with `POST /invites/{token}/accept`. No invitation email is sent.
 
 Invitation preview returns `{tenantId,tenantName,role,expiresAt,status}`. Status is `active`, `expired`, `revoked`, `accepted`, `unavailable` (issuer lost permission), or `suspended`. Acceptance returns `{tenantId,role}` and preserves an existing member's actual role. Concurrent consumption is serialized by a tenant row lock; only one account can claim a token. A repeat by that same account returns its current membership without granting it again, including after the consumed invitation's expiry. A removed member cannot rejoin using a consumed token. Unconsumed expired/revoked links return 410, consumed links claimed by another account return 409, and suspended workspaces or issuers without current granting permission return 403. Acceptance, issuer membership changes, revocation and suspension share the tenant lock; key changes are audited. Revocation of a consumed token returns 409; repeated revocation of an unused token returns 204.

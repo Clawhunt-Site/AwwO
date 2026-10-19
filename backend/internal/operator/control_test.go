@@ -59,9 +59,10 @@ func TestGrantRequiresExactExistingIdentityAndExplicitExpectedRole(t *testing.T)
 }
 
 type harness struct {
-	db    *pgxpool.Pool
-	store *operator.Store
-	ctx   context.Context
+	db     *pgxpool.Pool
+	store  *operator.Store
+	ctx    context.Context
+	schema string // also its connections' application_name
 }
 
 func database(t *testing.T) *harness {
@@ -100,6 +101,7 @@ func database(t *testing.T) *harness {
 		}
 	})
 	config.ConnConfig.RuntimeParams["search_path"] = schema
+	config.ConnConfig.RuntimeParams["application_name"] = schema
 	db, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +111,7 @@ func database(t *testing.T) *harness {
 	if err = app.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{db: db, store: operator.New(db), ctx: ctx}
+	h := &harness{db: db, store: operator.New(db), ctx: ctx, schema: schema}
 	for _, id := range []string{"person", "other"} {
 		g := grantFor(id)
 		h.exec(t, "INSERT INTO users(id,email,name,password_hash) VALUES($1,$2,'Verified account','synthetic-password-hash')", id, g.Email)
