@@ -14,7 +14,7 @@ from agents import set_trace_processors
 from botocore.exceptions import ClientError, EventStreamError
 
 from bedrock_bridge import (
-    BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bridge_base_url, bridge_failure, default_client,
+    BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure, default_client,
     to_converse_input, valid_auth, with_claude_prompt_cache,
 )
 from bedrock_catalog import (
@@ -184,6 +184,29 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(platform_health(True, ("llmgate", "bedrock")), {"platformOnly": True, "platformProviders": ["llmgate", "bedrock"]})
         self.assertEqual(platform_health(False, ("llmgate", "bedrock")), {})
 
+    def test_a_fallback_target_is_the_same_model_through_its_other_profile(self):
+        good = {"id": "bedrock.test", "name": "Test", "vendor": "test", "target": "global.anthropic.claude-x", "contextWindow": 32768,
+                "maxTokens": 4096, "input": ["text"], "tools": True, "runtime": "openai-agents", "verified": ""}
+        catalog = lambda entry: {"version": 1, "regions": ["us-east-1"], "models": [entry]}  # noqa: E731
+        for target, fallback in (("global.anthropic.claude-x", "us.anthropic.claude-x"), ("us.anthropic.claude-x", "global.anthropic.claude-x"),
+                                 ("eu.meta.llama-y:0", "global.meta.llama-y:0")):
+            with self.subTest(target=target):
+                self.assertEqual(parse_catalog(catalog({**good, "target": target, "fallbackTarget": fallback}))[0]["fallbackTarget"], fallback)
+        for fallback in ("us.anthropic.claude-y", "global.anthropic.claude-x", "anthropic.claude-x", "us.anthropic.claude-x https://x", "", None,
+                         ["us.anthropic.claude-x"]):
+            with self.subTest(fallback=fallback), self.assertRaises(ValueError):
+                parse_catalog(catalog({**good, "fallbackTarget": fallback}))
+        with self.assertRaises(ValueError):
+            parse_catalog(catalog({**good, "target": "anthropic.claude-x", "fallbackTarget": "us.anthropic.claude-x"}))
+        with self.assertRaises(ValueError):
+            parse_catalog(catalog({**good, "fallbackTarget": "us.anthropic.claude-x", "extra": 1}))
+        self.assertNotIn("fallbackTarget", parse_catalog(catalog(good))[0])
+        claude = [entry for entry in read_catalog() if entry["vendor"] == "anthropic"]
+        self.assertGreaterEqual(len(claude), 7)
+        for entry in claude:
+            self.assertEqual(entry["fallbackTarget"], entry["target"].replace("global.", "us.", 1), entry["id"])
+        self.assertTrue(all(entry["vendor"] == "anthropic" or "fallbackTarget" not in entry for entry in read_catalog()))
+
 
 class ConfigTests(unittest.TestCase):
     def test_catalog_profiles_and_health(self):
@@ -192,6 +215,9 @@ class ConfigTests(unittest.TestCase):
         claude = resolve_model_config(config, "bedrock.claude-opus-5-5")
         self.assertEqual((claude.provider, claude.model, claude.region, claude.base_url, claude.protocol, claude.api_key),
                          ("bedrock", "global.anthropic.claude-opus-5-5", "us-east-1", bridge_base_url("us-east-1"), "chat_completions", ""))
+        # The catalog's fallbackTarget reaches the profile; a model without one has none.
+        self.assertEqual(claude.fallback_model, "us.anthropic.claude-opus-5-5")
+        self.assertEqual(resolve_model_config(config, "bedrock.kimi-k3").fallback_model, "")
         health = public_health(config)
         entry = next(model for model in health["models"] if model["id"] == "bedrock.claude-opus-5-5")
         self.assertEqual(entry["name"], "Claude Opus 5.5")
@@ -515,6 +541,214 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             ChunkMapper("m").map({"throttlingException": {"message": "slow"}})
         self.assertEqual(_error_body(throttled.exception)["error"]["status"], 429)
         self.assertEqual(_error_body(bridge_failure(OSError("reset")))["error"]["status"], 502)
+
+
+OPUS = "global.anthropic.claude-opus-5-5"
+OPUS_US = "us.anthropic.claude-opus-5-5"
+
+
+def aws_error(code, status):
+    return ClientError({"Error": {"Code": code, "Message": "arn:aws:iam::563688183799:user/machine/x is refused"},
+                        "ResponseMetadata": {"HTTPStatusCode": status}}, "ConverseStream")
+
+
+class ScriptedClient:
+    """A boto3 client whose converse_stream calls play `steps` in order: an exception to raise, or a stream's events
+    (with an optional EventStreamError at `fail_after`)."""
+
+    def __init__(self, steps):
+        self.steps = list(steps)
+        self.calls = []
+        self.streams = []
+
+    def converse_stream(self, **kwargs):
+        self.calls.append(kwargs)
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        stream = FakeStream(step["events"], step.get("fail_after"), step.get("fail_code", "modelStreamErrorException"))
+        self.streams.append(stream)
+        return {"stream": stream}
+
+
+class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
+    """The model's other inference profile (fallback_model), asked once when its profile refuses the call before
+    anything streamed: as createBedrockFetch's fallbackModel in apps/bedrock-bridge.ts."""
+
+    async def call(self, steps, **options):
+        client = ScriptedClient(steps)
+        facts = []
+        settings = {"fallback_model": OPUS_US, "report": facts.append, **options}
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, client_factory=lambda *args: client, **settings)
+        body = {"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]}
+        async with httpx2.AsyncClient(transport=transport) as http:
+            response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
+        frames = [line[6:] for line in response.text.split("\n") if line.startswith("data: ")]
+        return response.status_code, frames, client, facts
+
+    def answered(self, status, frames):
+        self.assertEqual(status, 200)
+        self.assertEqual(frames[-1], "[DONE]")
+        chunks = [json.loads(frame) for frame in frames[:-1]]
+        self.assertTrue(all(chunk["model"] == OPUS for chunk in chunks), "the chunks name the model the caller asked for")
+        return "".join(choice["delta"].get("content") or "" for chunk in chunks for choice in chunk["choices"])
+
+    async def test_a_capacity_or_quota_refusal_turns_to_the_other_profile_once(self):
+        for code, status in (("ServiceUnavailableException", 503), ("ThrottlingException", 429), ("InternalServerException", 500),
+                             ("ModelNotReadyException", 503), ("ServiceQuotaExceededException", 429)):
+            with self.subTest(code):
+                status_code, frames, client, facts = await self.call([aws_error(code, status), {"events": text_turn("OK")}])
+                self.assertEqual(self.answered(status_code, frames), "OK")
+                self.assertEqual([call["modelId"] for call in client.calls], [OPUS, OPUS_US])
+                self.assertEqual(client.calls[1], {**client.calls[0], "modelId": OPUS_US}, "the same request, only the profile differs")
+                self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": code}])
+
+    async def test_an_exception_that_opens_the_stream_is_the_profiles_refusal(self):
+        # As botocore raises it from the stream, and as the stream's first member.
+        status, frames, client, facts = await self.call([{"events": text_turn("no"), "fail_after": 0, "fail_code": "throttlingException"},
+                                                         {"events": text_turn("OK")}])
+        self.assertEqual(self.answered(status, frames), "OK")
+        self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"}])
+        self.assertTrue(client.streams[0].closed, "the refused stream is closed")
+        status, frames, client, facts = await self.call([{"events": [{"serviceUnavailableException": {"message": "busy"}}]}, {"events": text_turn("OK")}])
+        self.assertEqual(self.answered(status, frames), "OK")
+        self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "serviceUnavailableException"}])
+        # An answer that opens normally is relayed as without a fallback, on the one profile.
+        status, frames, client, facts = await self.call([{"events": text_turn("OK")}])
+        self.assertEqual(self.answered(status, frames), "OK")
+        self.assertEqual([call["modelId"] for call in client.calls], [OPUS])
+        self.assertEqual(facts, [])
+        # Once anything streamed, a refusal is the call's failure: nothing is asked again.
+        status, frames, client, facts = await self.call([{"events": text_turn("late"), "fail_after": 1, "fail_code": "throttlingException"}])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(frames[-1])["error"]["status"], 429)
+        self.assertEqual([call["modelId"] for call in client.calls], [OPUS])
+        self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ThrottlingException", "status": 429, "stage": "stream", "upstream": True}])
+        # Another first exception is relayed as the stream's error, as it always was.
+        status, frames, client, facts = await self.call([{"events": [{"validationException": {"message": "bad"}}]}])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(frames[-1])["error"], {"message": "The Bedrock stream reported an error", "type": "validationException",
+                                                           "code": "validationException", "status": 400})
+        self.assertEqual(len(client.calls), 1)
+
+    async def test_no_fallback_without_one_for_other_failures_or_a_second_time(self):
+        status, frames, client, facts = await self.call([aws_error("ServiceUnavailableException", 503)], fallback_model="")
+        self.assertEqual(status, 503)
+        self.assertEqual(len(client.calls), 1)
+        for code, code_status in (("AccessDeniedException", 403), ("ValidationException", 400), ("ModelTimeoutException", 408),
+                                  ("ResourceNotFoundException", 404), ("ModelErrorException", 502)):
+            with self.subTest(code):
+                status, frames, client, facts = await self.call([aws_error(code, code_status)])
+                self.assertEqual(status, code_status)
+                self.assertEqual(len(client.calls), 1)
+                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": code, "status": code_status, "stage": "request", "upstream": True}])
+        # Both profiles refuse: the fallback's refusal is the call's, with no account details, and nothing more is asked.
+        status, frames, client, facts = await self.call([aws_error("ThrottlingException", 429), aws_error("ServiceUnavailableException", 503)])
+        self.assertEqual(status, 503)
+        self.assertNotIn("arn", json.dumps(frames))
+        self.assertEqual([call["modelId"] for call in client.calls], [OPUS, OPUS_US])
+        self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"},
+                                 {"event": "failed", "model": OPUS_US, "error": "ServiceUnavailableException", "status": 503, "stage": "request", "upstream": True}])
+        # The fallback's own stream is relayed as it comes, even an exception that opens it.
+        status, frames, client, facts = await self.call([aws_error("ThrottlingException", 429), {"events": [{"throttlingException": {"message": "also"}}]}])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(frames[-1])["error"]["status"], 429)
+        self.assertEqual(facts[-1], {"event": "failed", "model": OPUS_US, "error": "throttlingException", "status": 429, "stage": "stream", "upstream": True})
+
+    async def test_a_failing_reporter_never_fails_a_call_and_settings_are_checked(self):
+        def broken(fact):
+            raise RuntimeError("log down")
+        status, frames, client, facts = await self.call([aws_error("ServiceUnavailableException", 503), {"events": text_turn("OK")}], report=broken)
+        self.assertEqual(self.answered(status, frames), "OK")
+        for fallback in (OPUS, "us.anthropic claude", "x" * 129, None):
+            with self.subTest(fallback=fallback), self.assertRaisesRegex(ValueError, "fallback model"):
+                BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, fallback_model=fallback)
+        with self.assertRaisesRegex(ValueError, "reporter"):
+            BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, report="log")
+
+    async def test_the_bridges_own_refusal_is_not_awss(self):
+        status, frames, client, facts = await self.call([{"events": [{"messageStart": {"role": "assistant"}},
+                                                                     {"contentBlockDelta": {"delta": {"text": "cut"}}}]}])
+        self.assertEqual(status, 200)
+        self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "api_error", "status": 502, "stage": "stream", "upstream": False}])
+
+    async def test_a_call_cancelled_while_it_is_sent_reads_nothing_more(self):
+        sent, release = threading.Event(), threading.Event()
+
+        class Blocking:
+            """A first stream whose first event never comes until it is closed."""
+            def __init__(self):
+                self.closed = threading.Event()
+
+            def __iter__(self):  # lazy, as botocore's EventStream: the wait is the first next()
+                self.closed.wait(10)
+                yield from ()
+
+            def close(self):
+                self.closed.set()
+
+        stream = Blocking()
+
+        class SlowClient:
+            calls = 0
+
+            def converse_stream(self, **kwargs):
+                SlowClient.calls += 1
+                sent.set()
+                release.wait(10)
+                return {"stream": stream}
+
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, client_factory=lambda *args: SlowClient(),
+                                             fallback_model=OPUS_US, report=lambda fact: None)
+        request = httpx2.Request("POST", f"{bridge_base_url('us-east-1')}/chat/completions",
+                                 json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+        task = asyncio.create_task(transport.handle_async_request(request))
+        await asyncio.get_running_loop().run_in_executor(None, sent.wait, 5)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        started = asyncio.get_running_loop().time()
+        release.set()
+        closed = await asyncio.get_running_loop().run_in_executor(None, stream.closed.wait, 5)
+        self.assertTrue(closed, "the stream of a cancelled call is closed")
+        self.assertLess(asyncio.get_running_loop().time() - started, 2, "closed at once, not after its first event")
+        self.assertEqual(SlowClient.calls, 1, "a cancelled call never turns to the other profile")
+
+    def test_facts_become_one_closed_log_line_each(self):
+        line = bedrock_fact_line("awwo-openai-agents-python-worker", "run_1", {"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"})
+        self.assertEqual(json.loads(line), {"service": "awwo-openai-agents-python-worker", "runId": "run_1", "event": "bedrock_profile_fallback",
+                                            "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"})
+        failed = {"event": "failed", "model": OPUS, "error": "ThrottlingException", "status": 429, "stage": "request", "upstream": True, "message": "secret"}
+        self.assertEqual(json.loads(bedrock_fact_line("s", None, failed)), {"service": "s", "event": "bedrock_call_failed", "model": OPUS,
+                                                                            "error": "ThrottlingException", "status": 429, "stage": "request", "upstream": True})
+        self.assertNotIn("runId", json.loads(bedrock_fact_line("s", "run id", failed)))
+        for fact in (None, "fallback", [], {"event": "other"}, {"event": "fallback", "from": OPUS, "to": OPUS_US},
+                     {"event": "fallback", "from": OPUS, "to": 'us.x "y"', "after": "x"}, {**failed, "status": 99}, {**failed, "status": 600},
+                     {**failed, "status": True}, {**failed, "status": 429.5}, {**failed, "stage": "later"}, {**failed, "error": "line\nbreak"},
+                     {k: v for k, v in failed.items() if k != "upstream"}, {**failed, "upstream": "yes"}):
+            with self.subTest(fact=fact):
+                self.assertIsNone(bedrock_fact_line("s", "run_1", fact))
+
+
+class FallbackRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_run_whose_profile_refuses_completes_on_the_other_and_logs_it(self):
+        set_trace_processors([])
+        client = ScriptedClient([aws_error("ServiceUnavailableException", 503), {"events": text_turn("来自 US 的回答")}])
+        import runner
+        original = runner.BedrockConverseTransport
+        runner.BedrockConverseTransport = lambda **kwargs: original(**kwargs, client_factory=lambda *args: client)
+        self.addCleanup(setattr, runner, "BedrockConverseTransport", original)
+        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY)
+        request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
+        with mock.patch("sys.stderr") as stderr:
+            events = [event async for event in stream_run(request, config, asyncio.Event())]
+        self.assertEqual(events[-1]["type"], "completed")
+        self.assertEqual(events[-1]["text"], "来自 US 的回答")
+        self.assertEqual([call["modelId"] for call in client.calls], [OPUS, OPUS_US])
+        written = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertEqual([json.loads(line) for line in written.splitlines() if line], [{
+            "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_profile_fallback",
+            "from": OPUS, "to": OPUS_US, "after": "ServiceUnavailableException"}])
 
 
 if __name__ == "__main__":

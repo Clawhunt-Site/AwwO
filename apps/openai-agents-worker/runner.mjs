@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, resolveModelConfig, validateRequest } from './config.mjs';
 import { failureEvent, RuntimeError, sanitizeErrorDiagnostic } from './errors.mjs';
-import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
+import { bedrockFactLine, createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./agent-task.mjs', import.meta.url);
 // The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
@@ -125,6 +125,13 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
   let toolPending = false;
   let toolSequence = 0;
   child.on('message', (event) => {
+    if (event?.type === 'bedrock_fact') {
+      // A Bedrock call's fallback to its model's other profile, or its failure by AWS error type: for this worker's log
+      // only, rebuilt from closed labels (bedrockFactLine), never relayed.
+      const line = bedrockFactLine('awwo-openai-agents-worker', request.runId, event.fact);
+      if (line) console.error(line);
+      return;
+    }
     if (event?.type === 'workspace_call') {
       if (!sandbox || cancellation || terminalEvent || !validWorkspaceCall(event) || toolPending || event.sequence !== toolSequence + 1) { stop('cancelled'); return; }
       toolSequence = event.sequence;
@@ -213,7 +220,8 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
       apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       disableThinking: modelConfig.disableThinking === true,
-      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.promptCache === true ? { promptCache: true } : {}) } : {}),
+      ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.promptCache === true ? { promptCache: true } : {}),
+        ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}) } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };

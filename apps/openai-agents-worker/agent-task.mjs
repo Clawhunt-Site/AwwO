@@ -25,9 +25,10 @@ process.on('message', async message => {
       // Bedrock is served through the Converse bridge, which answers the pinned
       // Chat Completions URL itself; the OpenAI SDK key is only a placeholder.
       // Loaded only for Bedrock runs, so other children never load the AWS SDK.
-      const [{ BEDROCK_BRIDGE_API_KEY, createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
-      modelFetch = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk,
-        ...(modelConfig.promptCache === true ? { promptCache: true } : {}) });
+      const [{ BEDROCK_BRIDGE_API_KEY, childBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
+      // This child has no output of its own: the parent logs the call's content-free facts. (Its parent sends no
+      // thinking budget: the Agents runtime never asks one.)
+      modelFetch = childBedrockFetch(modelConfig, modelConfig.bedrockAuth, sdk, fact => { void emit({ type: 'bedrock_fact', fact }); });
       modelConfig = { ...modelConfig, apiKey: BEDROCK_BRIDGE_API_KEY, bedrockAuth: undefined };
       observer = createProviderObserver(modelConfig.protocol, { acceptedAtNs: message.acceptedAtNs, fetchImpl: modelFetch });
     }

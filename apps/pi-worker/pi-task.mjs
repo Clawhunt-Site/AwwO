@@ -43,10 +43,9 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
       // Bedrock is served through the Converse bridge, which answers Pi's OpenAI-compatible
       // request itself; the key Pi attaches is only a placeholder the bridge ignores. Loaded
       // only for Bedrock runs, so other children never pay for the TypeScript module.
-      const [{ BEDROCK_BRIDGE_API_KEY, createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
-      const fetchImpl = createBedrockFetch({ region: modelConfig.region, model: modelConfig.model, auth: modelConfig.bedrockAuth, sdk,
-        ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}),
-        ...(modelConfig.promptCache === true ? { promptCache: true } : {}) });
+      const [{ BEDROCK_BRIDGE_API_KEY, childBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
+      // This child has no output of its own: the parent logs the call's content-free facts.
+      const fetchImpl = childBedrockFetch(modelConfig, modelConfig.bedrockAuth, sdk, (fact) => { void emit({ type: 'bedrock_fact', fact }); });
       observer = createProviderObserver('chat_completions', { acceptedAtNs, fetchImpl });
       bridgeKey = BEDROCK_BRIDGE_API_KEY;
     }

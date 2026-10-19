@@ -14,33 +14,37 @@ const LABEL = /^[A-Za-z0-9_.:-]{1,64}$/;
 const label = (value) => (typeof value === 'string' && LABEL.test(value) ? value : 'unknown');
 
 async function loadBridge() {
-  const [{ createBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
-  return { createBedrockFetch, sdk };
+  const [{ childBedrockFetch }, sdk] = await Promise.all([import('../bedrock-bridge.ts'), import('@aws-sdk/client-bedrock-runtime')]);
+  return { childBedrockFetch, sdk };
 }
 
 /** The call: `{ ok: true, raw }` with the gathered answer, or `{ ok: false, reason }`. `load` is for tests (a fake SDK). */
 export async function bedrockCall(message, { load = loadBridge } = {}) {
+  // The bridge's content-free facts (a fallback to the model's other profile, a failure's error type), sent back with
+  // the answer for the parent's log; an answer without any carries none.
+  const facts = [];
+  const answer = (value) => (facts.length ? { ...value, facts } : value);
   let upstream;
   try {
-    const { createBedrockFetch, sdk } = await load();
-    const bridge = createBedrockFetch({ region: message.region, model: message.model, auth: message.auth, sdk,
-      ...(message.promptCache === true ? { promptCache: true } : {}) });
+    const { childBedrockFetch, sdk } = await load();
+    // A managed call never has a thinking budget: its parent sends none.
+    const bridge = childBedrockFetch(message, message.auth, sdk, (fact) => { if (facts.length < 4) facts.push(fact); });
     upstream = await bridge(message.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: message.body });
   } catch (error) {
-    return { ok: false, reason: `bridge-error:${label(error?.name)}` };
+    return answer({ ok: false, reason: `bridge-error:${label(error?.name)}` });
   }
   if (!upstream.ok || !upstream.body) {
     // The bridge's error body names the AWS exception (or its own refusal) by type; its message is never relayed.
     let type = 'unknown';
     try { type = label((await upstream.json())?.error?.type); } catch { await upstream.body?.cancel().catch(() => {}); }
-    return { ok: false, reason: `bedrock:${upstream.status}:${type}` };
+    return answer({ ok: false, reason: `bedrock:${upstream.status}:${type}` });
   }
   try {
-    return { ok: true, raw: await gatherChatStream(upstream.body) };
+    return answer({ ok: true, raw: await gatherChatStream(upstream.body) });
   } catch (error) {
     // What broke the stream, by kind (gatherChatStream's detail): an AWS failure after it began (`stream:error:429:…`),
     // the bridge's own refusal of what the model sent (`stream:error:api_error`), or a stream that ended or read wrong.
-    return { ok: false, reason: `stream:${typeof error?.detail === 'string' ? label(error.detail) : 'shape'}` };
+    return answer({ ok: false, reason: `stream:${typeof error?.detail === 'string' ? label(error.detail) : 'shape'}` });
   }
 }
 

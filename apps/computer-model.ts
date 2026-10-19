@@ -6,8 +6,9 @@ type ObjectValue = Record<string, any>;
 type Message = { role: string; content: string | null; tool_calls?: ObjectValue[]; tool_call_id?: string; reasoning_details?: ObjectValue[] };
 type Completion = { messages: Message[]; tools: ObjectValue[] };
 type Profile = { model: string; apiKey: string; baseURL: string; protocol: string; provider: string; maxTokens: number; contextWindow: number; reasoningEfforts?: string[]; defaultReasoningEffort?: string;
-  /** Bedrock profiles only: the region the bridge calls and the operator's prompt-cache switch. */
-  region?: string; promptCache?: boolean };
+  /** Bedrock profiles only: the region the bridge calls, the operator's prompt-cache switch, and the model's other
+   *  inference profile the bridge asks once when this one refuses the call (the catalog's fallbackTarget). */
+  region?: string; promptCache?: boolean; fallbackModel?: string };
 type Entry = { handle: { cancel(): void }; cancelRequested: boolean; released: Promise<void> };
 /** A worker's way to a Bedrock model for managed execution: one call, sent through the Converse bridge
  *  (bedrock-bridge.ts) and gathered into one Chat Completions answer (gatherChatStream). It rejects with an Error whose

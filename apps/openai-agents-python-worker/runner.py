@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 import time
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import AsyncIterator
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Timeout
 
-from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport
+from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport, bedrock_fact_line
 from config import MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
 from errors import RuntimeError, classify_error
 from provider_observation import ProviderObservation
@@ -257,9 +258,16 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         # OpenAI-compatible request and the observation hooks see the bridged stream.
         bridge = None
         if profile.provider == "bedrock":
+            def report(fact: dict) -> None:
+                # A fallback to the model's other profile, or a failure by AWS error type: content-free, for the log only.
+                line = bedrock_fact_line("awwo-openai-agents-python-worker", request.run_id, fact)
+                if line:
+                    print(line, file=sys.stderr, flush=True)
+
             bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
-                                              read_timeout=config.timeout_ms / 1000, prompt_cache=profile.prompt_cache)
+                                              read_timeout=config.timeout_ms / 1000, prompt_cache=profile.prompt_cache,
+                                              fallback_model=profile.fallback_model, report=report)
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
         }, **({"transport": bridge} if bridge else {}))

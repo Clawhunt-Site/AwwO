@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockOrigin, bridgeFailure, chatUsage,
-  createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
-  validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockSdk,
+  BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockFactLine, bedrockOrigin, bridgeFailure, chatUsage,
+  childBedrockFetch, createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
+  validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockCallFact, type BedrockSdk,
 } from './bedrock-bridge.ts';
 
 const MODEL = 'global.anthropic.claude-opus-5-5';
@@ -441,6 +441,197 @@ test('cancellation aborts the provider request and the stream', async () => {
   already.abort();
   const before = fakeSdk([], { fail: Object.assign(new Error('aborted'), { name: 'AbortError' }) });
   await assert.rejects(createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: before.sdk })(ENDPOINT, post(request(), { signal: already.signal })));
+});
+
+// The model's other inference profile (the catalog's fallbackTarget), asked once when its profile refuses the call.
+const FALLBACK = 'us.anthropic.claude-opus-5-5';
+const ANSWER = [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { text: 'OK' } } }, { messageStop: { stopReason: 'end_turn' } }, { metadata: { usage: { inputTokens: 3, outputTokens: 1 } } }];
+const awsError = (name: string, status: number) => Object.assign(new Error(`arn:aws:iam::563688183799:user/machine/x is refused (${name})`), { name, $metadata: { httpStatusCode: status } });
+type Step = { fail?: unknown; events?: unknown[] | (() => AsyncIterable<unknown>) };
+
+/** An SDK whose sends play `steps` in order, recording each send's input and how many streams were closed early. */
+function scriptedSdk(steps: Step[]) {
+  const clients: Record<string, unknown>[] = [];
+  const inputs: Record<string, unknown>[] = [];
+  let closedEarly = 0;
+  class ConverseStreamCommand { input: Record<string, unknown>; constructor(input: Record<string, unknown>) { this.input = input; } }
+  class BedrockRuntimeClient {
+    constructor(config: Record<string, unknown>) { clients.push(config); }
+    async send(command: ConverseStreamCommand) {
+      inputs.push(command.input);
+      const step = steps.shift();
+      if (!step) throw new Error('an unexpected send');
+      if (step.fail) throw step.fail;
+      const events = step.events ?? [];
+      const source = (typeof events === 'function' ? events() : (async function* () { yield* events; })())[Symbol.asyncIterator]();
+      const stream = { [Symbol.asyncIterator]: () => ({ next: () => source.next(), return: async () => { closedEarly += 1; return { done: true, value: undefined }; } }) };
+      return { stream: stream as unknown as AsyncIterable<Record<string, unknown>> };
+    }
+    destroy() {}
+  }
+  return { sdk: { BedrockRuntimeClient, ConverseStreamCommand } as unknown as BedrockSdk, clients, inputs, closedEarly: () => closedEarly };
+}
+const fallbackFetch = (steps: Step[], options: { fallbackModel?: string; report?: (fact: BedrockCallFact) => void } = { fallbackModel: FALLBACK }) => {
+  const script = scriptedSdk(steps);
+  const facts: BedrockCallFact[] = [];
+  const fetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: script.sdk, report: fact => facts.push(fact), ...options });
+  return { ...script, facts, call: (init: RequestInit = {}) => fetch(ENDPOINT, post(request(), init)) };
+};
+const answered = async (response: Response) => {
+  assert.equal(response.status, 200);
+  const data = frames(await response.text());
+  assert.equal(data.at(-1), '[DONE]');
+  const chunks = data.slice(0, -1).map(frame => JSON.parse(frame));
+  assert.ok(chunks.every(chunk => chunk.model === MODEL), 'the chunks name the model the caller asked for');
+  return chunks.map(chunk => chunk.choices[0]?.delta ?? chunk.usage);
+};
+const ANSWERED = [{ role: 'assistant', content: '' }, { content: 'OK' }, {}, { prompt_tokens: 3, completion_tokens: 1 }];
+
+test('a profile refusing the call for capacity or quota turns it to the model\'s other profile, once, on the same client', async () => {
+  for (const [name, status] of [['ServiceUnavailableException', 503], ['ThrottlingException', 429], ['InternalServerException', 500],
+    ['ModelNotReadyException', 503], ['ServiceQuotaExceededException', 429]] as const) {
+    const run = fallbackFetch([{ fail: awsError(name, status) }, { events: ANSWER }]);
+    assert.deepEqual(await answered(await run.call()), ANSWERED, name);
+    assert.equal(run.clients.length, 1, 'one client; the SDK itself still never retries');
+    assert.equal(run.clients[0].maxAttempts, 1);
+    assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
+    assert.deepEqual(run.inputs[1], { ...run.inputs[0], modelId: FALLBACK }, 'the same request, only the profile differs');
+    assert.deepEqual(run.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: name }]);
+  }
+});
+
+test('an exception that opens the stream is the profile\'s refusal; any other first event stays where it was', async () => {
+  // The exception as the stream's first member, and as the SDK throws it from the stream.
+  const member = fallbackFetch([{ events: [{ throttlingException: { message: 'Too many tokens per day' } }] }, { events: ANSWER }]);
+  assert.deepEqual(await answered(await member.call()), ANSWERED);
+  assert.deepEqual(member.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'throttlingException' }]);
+  assert.equal(member.closedEarly(), 1, 'the refused stream is closed');
+  const thrown = fallbackFetch([{ events: async function* () { throw awsError('ServiceUnavailableException', 503); } }, { events: ANSWER }]);
+  assert.deepEqual(await answered(await thrown.call()), ANSWERED);
+  assert.deepEqual(thrown.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'ServiceUnavailableException' }]);
+
+  // An answer that opens normally is relayed exactly as without a fallback, on the one profile.
+  const normal = fallbackFetch([{ events: ANSWER }]);
+  assert.deepEqual(await answered(await normal.call()), ANSWERED);
+  assert.deepEqual(normal.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(normal.facts, []);
+  // Once anything streamed, a refusal is the call's failure: nothing is asked again.
+  const late = fallbackFetch([{ events: [{ messageStart: { role: 'assistant' } }, { throttlingException: { message: 'later' } }] }]);
+  const lateFrames = frames(await (await late.call()).text());
+  assert.equal(JSON.parse(lateFrames.at(-1)!).error.status, 429);
+  assert.deepEqual(late.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(late.facts, [{ event: 'failed', model: MODEL, error: 'throttlingException', status: 429, stage: 'stream', upstream: true }]);
+  // Another first exception is relayed as the stream's error, as it always was.
+  const invalid = fallbackFetch([{ events: [{ validationException: { message: 'bad input' } }] }]);
+  const invalidResponse = await invalid.call();
+  assert.equal(invalidResponse.status, 200);
+  assert.deepEqual(JSON.parse(frames(await invalidResponse.text()).at(-1)!), { error: { message: 'The Bedrock stream reported an error', type: 'validationException', code: 'validationException', status: 400 } });
+  assert.deepEqual(invalid.inputs.map(input => input.modelId), [MODEL]);
+});
+
+test('no fallback without a fallback model, for any other failure, or a second time', async () => {
+  const single = fallbackFetch([{ fail: awsError('ServiceUnavailableException', 503) }], {});
+  assert.equal((await single.call()).status, 503);
+  assert.deepEqual(single.inputs.map(input => input.modelId), [MODEL]);
+  for (const [name, status] of [['AccessDeniedException', 403], ['ValidationException', 400], ['ModelTimeoutException', 408], ['ResourceNotFoundException', 404], ['ModelErrorException', 502]] as const) {
+    const run = fallbackFetch([{ fail: awsError(name, status) }]);
+    const response = await run.call();
+    assert.equal(response.status, status, name);
+    assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL], name);
+    assert.deepEqual(run.facts, [{ event: 'failed', model: MODEL, error: name, status, stage: 'request', upstream: true }]);
+  }
+  // Both profiles refuse: the call fails with the fallback's refusal, its message never relayed, and nothing more is asked.
+  const both = fallbackFetch([{ fail: awsError('ThrottlingException', 429) }, { fail: awsError('ServiceUnavailableException', 503) }]);
+  const bothResponse = await both.call();
+  assert.equal(bothResponse.status, 503);
+  const bothText = await bothResponse.text();
+  assert.doesNotMatch(bothText, /arn|563688183799/);
+  assert.deepEqual(both.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
+  assert.deepEqual(both.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'ThrottlingException' },
+    { event: 'failed', model: FALLBACK, error: 'ServiceUnavailableException', status: 503, stage: 'request', upstream: true }]);
+  // The fallback's own stream is relayed as it comes, even an exception that opens it.
+  const second = fallbackFetch([{ fail: awsError('ThrottlingException', 429) }, { events: [{ throttlingException: { message: 'also' } }] }]);
+  const secondFrames = frames(await (await second.call()).text());
+  assert.equal(JSON.parse(secondFrames.at(-1)!).error.status, 429);
+  assert.deepEqual(second.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
+  assert.deepEqual(second.facts.at(-1), { event: 'failed', model: FALLBACK, error: 'throttlingException', status: 429, stage: 'stream', upstream: true });
+});
+
+test('a failure the bridge itself makes is reported as not AWS\'s, and a child\'s bridge carries its parent\'s settings', async () => {
+  const facts: BedrockCallFact[] = [];
+  const script = scriptedSdk([]);
+  const refused = await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: script.sdk, report: fact => facts.push(fact) })(ENDPOINT, post(request({ reasoning_effort: 'high' })));
+  assert.equal(refused.status, 400);
+  assert.deepEqual(facts, [{ event: 'failed', model: MODEL, error: 'invalid_request_error', status: 400, stage: 'request', upstream: false }]);
+  const cut = fallbackFetch([{ events: [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { text: 'cut' } } }] }]);
+  await (await cut.call()).text();
+  assert.deepEqual(cut.facts, [{ event: 'failed', model: MODEL, error: 'api_error', status: 502, stage: 'stream', upstream: false }]);
+
+  // childBedrockFetch: the settings a parent sends, over the same bridge.
+  const child = scriptedSdk([{ fail: awsError('ServiceUnavailableException', 503) }, { events: ANSWER }]);
+  const told: BedrockCallFact[] = [];
+  const fetch = childBedrockFetch({ region: REGION, model: MODEL, fallbackModel: FALLBACK, promptCache: true, thinkingBudget: 2048 }, BEARER, child.sdk, fact => told.push(fact));
+  const turn = request({ max_tokens: 16000, messages: [{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi' }, { role: 'user', content: 'Again' }] });
+  const answer = await fetch(ENDPOINT, post(turn));
+  assert.equal(answer.status, 200);
+  await answer.text();
+  assert.deepEqual(child.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
+  assert.deepEqual(child.inputs[1], { ...child.inputs[0], modelId: FALLBACK });
+  assert.ok(JSON.stringify(child.inputs[0]).includes('cachePoint'), 'the prompt cache it was sent');
+  assert.ok(JSON.stringify(child.inputs[0]).includes('2048'), 'the thinking budget it was sent');
+  assert.deepEqual(told, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'ServiceUnavailableException' }]);
+  // Settings it was not sent are not applied, and a child that cannot report its calls is refused.
+  const bare = scriptedSdk([{ fail: awsError('ServiceUnavailableException', 503) }]);
+  assert.equal((await childBedrockFetch({ region: REGION, model: MODEL }, BEARER, bare.sdk, () => {})(ENDPOINT, post(request()))).status, 503);
+  assert.deepEqual(bare.inputs.map(input => input.modelId), [MODEL]);
+  assert.equal(JSON.stringify(bare.inputs[0]).includes('cachePoint'), false);
+  assert.throws(() => childBedrockFetch({ region: REGION, model: MODEL }, BEARER, bare.sdk, undefined as never), /reports its calls/);
+});
+
+test('a cancelled call never turns to the other profile, and a failing reporter never fails a call', async () => {
+  const already = new AbortController();
+  already.abort();
+  const before = fallbackFetch([{ fail: Object.assign(new Error('aborted'), { name: 'AbortError' }) }]);
+  await assert.rejects(before.call({ signal: already.signal }));
+  assert.equal(before.inputs.length, 1);
+  // Cancelled while the first event was awaited: the call ends as cancelled, never as a fallback.
+  let release: () => void = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const controller = new AbortController();
+  const waiting = fallbackFetch([{ events: async function* () { await gate; throw awsError('ServiceUnavailableException', 503); } }]);
+  const pending = waiting.call({ signal: controller.signal });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  controller.abort(new DOMException('Cancelled', 'AbortError'));
+  release();
+  await assert.rejects(pending, /Cancelled|Abort/);
+  assert.equal(waiting.inputs.length, 1);
+  assert.deepEqual(waiting.facts, []);
+
+  const throwing = fallbackFetch([{ fail: awsError('ServiceUnavailableException', 503) }, { events: ANSWER }], { fallbackModel: FALLBACK, report: () => { throw new Error('log down'); } });
+  assert.deepEqual(await answered(await throwing.call()), ANSWERED);
+  const { sdk } = scriptedSdk([]);
+  for (const fallbackModel of [MODEL, '', 'us.anthropic claude', 'x'.repeat(129)]) {
+    assert.throws(() => createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, fallbackModel }), /Invalid Bedrock fallback model/, fallbackModel);
+  }
+  assert.throws(() => createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, report: 'log' as never }), /Invalid Bedrock call reporter/);
+});
+
+test('a call\'s facts become one closed log line each, and nothing else does', () => {
+  const runId = 'run_123-abc';
+  assert.deepEqual(JSON.parse(bedrockFactLine('awwo-pi-worker', runId, { event: 'fallback', from: MODEL, to: FALLBACK, after: 'ServiceUnavailableException' })!),
+    { service: 'awwo-pi-worker', runId, event: 'bedrock_profile_fallback', from: MODEL, to: FALLBACK, after: 'ServiceUnavailableException' });
+  assert.deepEqual(JSON.parse(bedrockFactLine('awwo-pi-worker', undefined, { event: 'failed', model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', error: 'ThrottlingException', status: 429, stage: 'request', upstream: true, message: 'secret text' })!),
+    { service: 'awwo-pi-worker', event: 'bedrock_call_failed', model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', error: 'ThrottlingException', status: 429, stage: 'request', upstream: true });
+  // A run id that is not one is left out; anything off the closed shapes is no line at all.
+  assert.equal(JSON.parse(bedrockFactLine('s', 'run id with spaces', { event: 'failed', model: MODEL, error: 'x', status: 500, stage: 'stream', upstream: false })!).runId, undefined);
+  for (const fact of [undefined, 'fallback', [], { event: 'other' }, { event: 'fallback', from: MODEL, to: FALLBACK }, { event: 'fallback', from: MODEL, to: 'us.x "y"', after: 'x' },
+    { event: 'failed', model: MODEL, error: 'x', status: 99, stage: 'request' }, { event: 'failed', model: MODEL, error: 'x', status: 600, stage: 'request' },
+    { event: 'failed', model: MODEL, error: 'x', status: 429.5, stage: 'request' }, { event: 'failed', model: MODEL, error: 'x', status: 429, stage: 'later' },
+    { event: 'failed', model: MODEL, error: 'line\nbreak', status: 429, stage: 'request', upstream: true },
+    // Whether AWS said it is part of the fact: a fact without it is no line.
+    { event: 'failed', model: MODEL, error: 'x', status: 429, stage: 'request' }, { event: 'failed', model: MODEL, error: 'x', status: 429, stage: 'request', upstream: 'yes' }]) {
+    assert.equal(bedrockFactLine('s', runId, fact), undefined, JSON.stringify(fact));
+  }
 });
 
 test('an operator thinking budget turns on Claude thinking only for tool-free requests with room for it', () => {

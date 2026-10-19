@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { createBedrockFetch } from '../bedrock-bridge.ts';
+import { childBedrockFetch } from '../bedrock-bridge.ts';
 import { bedrockCall } from './bedrock-call.mjs';
 import { bedrockComputerCall } from './runner.mjs';
 
@@ -40,6 +40,28 @@ test('a managed-execution Bedrock call runs in a child that gets the resolved cr
   assert.deepEqual(raw.execArgv, []);
   assert.deepEqual(raw.message, { region: 'us-east-1', model: model.model, auth: credentials, promptCache: true,
     url: 'https://bedrock-runtime.us-east-1.amazonaws.com/awwo-bedrock-converse/v1/chat/completions', body: JSON.stringify(body) });
+});
+
+test('a managed call hands its child the model\'s other profile, and logs the child\'s facts, closed labels only', async t => {
+  const echo = await fixture(t, `process.once('message', m => process.send({ ok: true, raw: { message: m } }, () => process.exit(0)));`);
+  const fallbackModel = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+  const raw = await bedrockComputerCall({ ...model, fallbackModel }, body, undefined, { auth, childURL: echo });
+  assert.equal(raw.message.fallbackModel, fallbackModel);
+  assert.equal('fallbackModel' in (await bedrockComputerCall(model, body, undefined, { auth, childURL: echo })).message, false);
+  // The child's facts go to this worker's log as rebuilt lines; one off the closed shapes is dropped.
+  const facts = [{ event: 'fallback', from: model.model, to: fallbackModel, after: 'ServiceUnavailableException' },
+    { event: 'failed', model: fallbackModel, error: 'ThrottlingException', status: 429, stage: 'request', upstream: true },
+    { event: 'failed', model: fallbackModel, error: 'Too many tokens per day, arn:aws:iam::0:user/x', status: 429, stage: 'request', upstream: true }];
+  const reporting = await fixture(t, `process.once('message', () => process.send({ ok: false, reason: 'bedrock:429:ThrottlingException', facts: ${JSON.stringify(facts)} }, () => process.exit(0)));`);
+  const logged = [];
+  const error = console.error;
+  console.error = line => logged.push(String(line));
+  try {
+    await assert.rejects(bedrockComputerCall({ ...model, fallbackModel }, body, undefined, { auth, childURL: reporting }), failure => failure.reason === 'bedrock:429:ThrottlingException');
+  } finally { console.error = error; }
+  assert.deepEqual(logged.map(line => JSON.parse(line)), [
+    { service: 'awwo-pi-worker', event: 'bedrock_profile_fallback', from: model.model, to: fallbackModel, after: 'ServiceUnavailableException' },
+    { service: 'awwo-pi-worker', event: 'bedrock_call_failed', model: fallbackModel, error: 'ThrottlingException', status: 429, stage: 'request', upstream: true }]);
 });
 
 test('a child that answers a failure, or ends without an answer, is a failed call that says why', async t => {
@@ -89,7 +111,7 @@ function fakeSdk(turn, { fail } = {}) {
   return { BedrockRuntimeClient, ConverseStreamCommand };
 }
 const message = { region: model.region, model: model.model, auth: credentials, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body) };
-const load = sdk => async () => ({ createBedrockFetch, sdk });
+const load = sdk => async () => ({ childBedrockFetch, sdk });
 
 test('the call gathers the answer, and names an AWS refusal, a bridge refusal or a broken stream by kind only', async () => {
   const answered = await bedrockCall(message, { load: load(fakeSdk(async function* () {
@@ -104,23 +126,54 @@ test('the call gathers the answer, and names an AWS refusal, a bridge refusal or
   assert.equal(answered.raw.usage.prompt_tokens, 3);
   const denial = Object.assign(new Error('User: arn:aws:sts::000000000000:assumed-role/x is not authorized to perform bedrock:InvokeModelWithResponseStream'),
     { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } });
+  // A failed call names its failure by kind, and sends back the bridge's fact of it (closed labels) for the parent's log.
+  // upstream: AWS reported the failure; the bridge's own refusals (a request or a stream it cannot take) are not AWS's.
+  const failed = (error, status, stage, upstream) => [{ event: 'failed', model: model.model, error, status, stage, upstream }];
   const denied = await bedrockCall(message, { load: load(fakeSdk(null, { fail: denial })) });
-  assert.deepEqual(denied, { ok: false, reason: 'bedrock:403:AccessDeniedException' });
+  assert.deepEqual(denied, { ok: false, reason: 'bedrock:403:AccessDeniedException', facts: failed('AccessDeniedException', 403, 'request', true) });
   assert.doesNotMatch(JSON.stringify(denied), /arn:aws|not authorized/);
   const refused = await bedrockCall({ ...message, body: JSON.stringify({ ...body, seed: 1 }) }, { load: load(fakeSdk(async function* () {})) });
-  assert.deepEqual(refused, { ok: false, reason: 'bedrock:400:invalid_request_error' });
+  assert.deepEqual(refused, { ok: false, reason: 'bedrock:400:invalid_request_error', facts: failed('invalid_request_error', 400, 'request', false) });
   const broken = await bedrockCall(message, { load: load(fakeSdk(async function* () {
     yield { messageStart: { role: 'assistant' } };
     yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } };
   })) });
   // The bridge ends a stream that stopped early with its own error frame, which names no AWS status.
-  assert.deepEqual(broken, { ok: false, reason: 'stream:error:api_error' });
+  assert.deepEqual(broken, { ok: false, reason: 'stream:error:api_error', facts: failed('api_error', 502, 'stream', false) });
   const throttled = await bedrockCall(message, { load: load(fakeSdk(async function* () {
     yield { messageStart: { role: 'assistant' } };
     yield { throttlingException: { message: 'Too many requests from arn:aws:iam::000000000000:user/x' } };
   })) });
-  assert.deepEqual(throttled, { ok: false, reason: 'stream:error:429:throttlingException' });
+  assert.deepEqual(throttled, { ok: false, reason: 'stream:error:429:throttlingException', facts: failed('throttlingException', 429, 'stream', true) });
   assert.doesNotMatch(JSON.stringify(throttled), /arn:aws/);
   const unloadable = await bedrockCall(message, { load: async () => { throw new TypeError('no SDK'); } });
   assert.deepEqual(unloadable, { ok: false, reason: 'bridge-error:TypeError' });
+});
+
+test('a managed call its model\'s profile refuses is asked of the model\'s other profile, and says so', async () => {
+  const fallbackModel = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+  const asked = [];
+  class ConverseStreamCommand { constructor(input) { this.input = input; } }
+  class BedrockRuntimeClient {
+    async send(command) {
+      asked.push(command.input.modelId);
+      if (asked.length === 1) throw Object.assign(new Error('Bedrock is unable to process your request.'), { name: 'ServiceUnavailableException', $metadata: { httpStatusCode: 503 } });
+      return { stream: (async function* () {
+        yield { messageStart: { role: 'assistant' } };
+        yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'OK' } } };
+        yield { messageStop: { stopReason: 'end_turn' } };
+      })() };
+    }
+    destroy() {}
+  }
+  const answered = await bedrockCall({ ...message, fallbackModel }, { load: load({ BedrockRuntimeClient, ConverseStreamCommand }) });
+  assert.equal(answered.ok, true);
+  assert.equal(answered.raw.choices[0].message.content, 'OK');
+  assert.deepEqual(asked, [model.model, fallbackModel]);
+  assert.deepEqual(answered.facts, [{ event: 'fallback', from: model.model, to: fallbackModel, after: 'ServiceUnavailableException' }]);
+  // Without a fallback model the refusal is the call's answer, as before.
+  asked.length = 0;
+  const single = await bedrockCall(message, { load: load({ BedrockRuntimeClient, ConverseStreamCommand }) });
+  assert.equal(single.reason, 'bedrock:503:ServiceUnavailableException');
+  assert.deepEqual(asked, [model.model]);
 });

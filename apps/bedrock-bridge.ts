@@ -573,6 +573,51 @@ async function bodyText(body: unknown): Promise<string> {
   return reject('Unsupported request body');
 }
 
+/** AWS errors that say a profile cannot serve the call at this moment (its capacity, its quotas, a transient fault). The
+ *  model's other inference profile has capacity and quotas of its own and may still serve it. Named as bridgeFailure
+ *  types them: the SDK's exception names, and the stream's exception members. */
+const PROFILE_REFUSALS: ReadonlySet<string> = new Set([
+  'ThrottlingException', 'ServiceUnavailableException', 'InternalServerException', 'ModelNotReadyException', 'ServiceQuotaExceededException',
+  'throttlingException', 'serviceUnavailableException', 'internalServerException',
+]);
+
+/** The stream's exception member as the chunk mapper would throw it; undefined for any other event. */
+function streamException(event: unknown): BedrockBridgeError | undefined {
+  if (!plain(event)) return undefined;
+  const keys = Object.keys(event).filter(key => event[key] !== undefined);
+  return keys.length === 1 && Object.hasOwn(STREAM_EXCEPTIONS, keys[0])
+    ? new BedrockBridgeError(STREAM_EXCEPTIONS[keys[0]], keys[0], 'The Bedrock stream reported an error', true) : undefined;
+}
+
+/** Content-free facts about one bridged call, for the worker's log (bedrockFactLine): a switch to the model's other
+ *  profile, or a failed call's error type, where it failed, and `upstream`: true for AWS's answer or the way to it (the
+ *  connection, the credentials), false for the bridge's own refusal (a request or content it cannot relay). Model ids
+ *  and error names only. */
+export type BedrockCallFact =
+  | { event: 'fallback'; from: string; to: string; after: string }
+  | { event: 'failed'; model: string; error: string; status: number; stage: 'request' | 'stream'; upstream: boolean };
+
+const FACT_LABEL = /^[A-Za-z0-9_.:-]{1,128}$/;
+const factLabel = (value: unknown): value is string => typeof value === 'string' && FACT_LABEL.test(value);
+
+/**
+ * One JSON log line for a fact a Bedrock child reported over IPC (BedrockCallFact), or undefined for anything else. Only
+ * closed labels and a status cross, rebuilt rather than passed through: never a prompt, an answer or provider text.
+ */
+export function bedrockFactLine(service: string, runId: unknown, fact: unknown): string | undefined {
+  if (!plain(fact)) return undefined;
+  const run = typeof runId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(runId) ? { runId } : {};
+  if (fact.event === 'fallback' && factLabel(fact.from) && factLabel(fact.to) && factLabel(fact.after)) {
+    return JSON.stringify({ service, ...run, event: 'bedrock_profile_fallback', from: fact.from, to: fact.to, after: fact.after });
+  }
+  if (fact.event === 'failed' && factLabel(fact.model) && factLabel(fact.error) && Number.isInteger(fact.status)
+    && (fact.status as number) >= 100 && (fact.status as number) <= 599 && (fact.stage === 'request' || fact.stage === 'stream')
+    && typeof fact.upstream === 'boolean') {
+    return JSON.stringify({ service, ...run, event: 'bedrock_call_failed', model: fact.model, error: fact.error, status: fact.status, stage: fact.stage, upstream: fact.upstream });
+  }
+  return undefined;
+}
+
 export type BedrockFetchOptions = {
   region: string;
   model: string;
@@ -584,20 +629,51 @@ export type BedrockFetchOptions = {
   thinkingBudget?: number;
   /** Claude only: operator-enabled explicit prompt caching (withClaudePromptCache). Absent or false means none. */
   promptCache?: boolean;
+  /** The same model through its other inference profile (the catalog's fallbackTarget): asked once, on the same client,
+   *  when `model` refuses the call for capacity or quota (PROFILE_REFUSALS) before anything streamed. Absent: one
+   *  profile, exactly as before. */
+  fallbackModel?: string;
+  /** Told each content-free fact of a call (BedrockCallFact). A reporter that throws never fails the call. */
+  report?: (fact: BedrockCallFact) => void;
 };
+
+type StreamHead = IteratorResult<Record<string, unknown>> | { error: unknown };
+
+/** What a worker sends its Bedrock child over IPC for the bridge, besides the credentials. */
+export type BedrockChildSettings = { region: string; model: string; thinkingBudget?: number; promptCache?: boolean; fallbackModel?: string };
+
+/**
+ * A Bedrock child's bridge, from the settings its parent sent: the operator's thinking budget and prompt cache, the
+ * model's other profile, and `report`, which the child passes the call's facts to for its parent's log (a child has no
+ * output of its own). One place for every child (the Pi worker's runs and managed calls, the Agents worker's runs).
+ */
+export function childBedrockFetch(settings: BedrockChildSettings, auth: BedrockAuth, sdk: BedrockSdk, report: (fact: BedrockCallFact) => void) {
+  if (typeof report !== 'function') throw new Error('A Bedrock child reports its calls');
+  return createBedrockFetch({ region: settings.region, model: settings.model, auth, sdk, report,
+    ...(settings.thinkingBudget ? { thinkingBudget: settings.thinkingBudget } : {}),
+    ...(settings.promptCache === true ? { promptCache: true } : {}),
+    ...(typeof settings.fallbackModel === 'string' && settings.fallbackModel ? { fallbackModel: settings.fallbackModel } : {}) });
+}
 
 /**
  * A `fetch` that serves `POST <bridge base URL>/chat/completions` from Bedrock ConverseStream.
  * Any other URL or method is refused before a network call is made.
  */
-export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget, promptCache = false }: BedrockFetchOptions) {
+export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget, promptCache = false, fallbackModel, report }: BedrockFetchOptions) {
   const endpoint = `${bedrockBridgeBaseURL(region)}/chat/completions`;
   if (!validBedrockAuth(auth)) throw new Error('Invalid Bedrock credentials');
   if (thinkingBudget !== undefined && !validThinkingBudget(thinkingBudget)) throw new Error('Invalid Bedrock thinking budget');
   if (typeof promptCache !== 'boolean') throw new Error('Invalid Bedrock prompt cache setting');
+  if (fallbackModel !== undefined && (!factLabel(fallbackModel) || fallbackModel === model)) throw new Error('Invalid Bedrock fallback model');
+  if (report !== undefined && typeof report !== 'function') throw new Error('Invalid Bedrock call reporter');
   for (const key of ['credentials', 'token', 'endpoint', 'region', 'authSchemePreference']) {
     if (Object.hasOwn(clientOptions, key)) throw new Error('Bedrock client options cannot override the endpoint or credentials');
   }
+  const tell = (fact: BedrockCallFact) => { try { report?.(fact); } catch { /* a log line is never worth a call */ } };
+  const failed = (error: BedrockBridgeError, modelId: string, stage: 'request' | 'stream') => {
+    tell({ event: 'failed', model: modelId, error: error.type, status: error.status, stage, upstream: error.upstream });
+    return error;
+  };
   return async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url !== endpoint || (init.method ?? 'GET').toUpperCase() !== 'POST') {
@@ -614,11 +690,12 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
       if (promptCache) command = withClaudePromptCache(command);
       singleToolCall = (body as Json).parallel_tool_calls === false;
-    } catch (error) { return jsonError(bridgeFailure(error)); }
+    } catch (error) { return jsonError(failed(bridgeFailure(error), model, 'request')); }
 
     const abort = new AbortController();
     const forward = () => abort.abort(init.signal?.reason);
     if (init.signal?.aborted) forward(); else init.signal?.addEventListener('abort', forward, { once: true });
+    const aborted = () => abort.signal.reason ?? new DOMException('Aborted', 'AbortError');
     const client = new sdk.BedrockRuntimeClient({
       // The SDK's own HTTP/2 handler settings (one stream per session) with a longer idle limit; a test or an explicit
       // request handler in clientOptions replaces them.
@@ -626,26 +703,53 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       ...clientOptions,
       region,
       endpoint: bedrockOrigin(region),
-      // One admitted model call is one provider request: the SDK never retries.
+      // One admitted model call is one provider request, or two when the model's profile refuses it before anything
+      // streamed and its other profile is asked (fallbackModel): the SDK itself never retries.
       maxAttempts: 1,
       ...('bearerToken' in auth
         ? { token: { token: auth.bearerToken }, authSchemePreference: ['httpBearerAuth'] }
         : { credentials: { ...auth.credentials, ...(auth.credentials.expiration ? { expiration: new Date(auth.credentials.expiration) } : {}) } }),
     });
     const release = () => { init.signal?.removeEventListener('abort', forward); client.destroy?.(); };
-    let stream: AsyncIterable<Record<string, unknown>>;
-    try {
-      const output = await client.send(new sdk.ConverseStreamCommand(command), { abortSignal: abort.signal });
+    // Opens the stream on one profile. With a fallback to turn to, its first event is read here as well: an exception
+    // that opens the stream is that profile's refusal, met before anything reached the caller. Any other first event
+    // (or failure) stays at the head of the stream, to be relayed as it always was.
+    const open = async (modelId: string, readAhead: boolean): Promise<{ iterator: AsyncIterator<Record<string, unknown>>; head?: StreamHead }> => {
+      const output = await client.send(new sdk.ConverseStreamCommand(modelId === model ? command : { ...command, modelId }), { abortSignal: abort.signal });
       if (!output?.stream || typeof output.stream[Symbol.asyncIterator] !== 'function') throw new BedrockBridgeError(502, 'api_error', 'Bedrock returned no stream');
-      stream = output.stream;
+      const iterator = (output.stream as AsyncIterable<Record<string, unknown>>)[Symbol.asyncIterator]();
+      if (!readAhead) return { iterator };
+      let head: StreamHead;
+      try { head = await iterator.next(); } catch (error) { head = { error }; }
+      if (abort.signal.aborted) throw aborted();
+      const refusal = 'error' in head ? bridgeFailure(head.error) : head.done ? undefined : streamException(head.value);
+      if (refusal && PROFILE_REFUSALS.has(refusal.type)) {
+        await iterator.return?.().catch(() => undefined);
+        throw refusal;
+      }
+      return { iterator, head };
+    };
+    let active = model;
+    let opened: { iterator: AsyncIterator<Record<string, unknown>>; head?: StreamHead };
+    try {
+      try { opened = await open(model, fallbackModel !== undefined); }
+      catch (error) {
+        const refusal = bridgeFailure(error);
+        if (fallbackModel === undefined || abort.signal.aborted || !PROFILE_REFUSALS.has(refusal.type)) throw error;
+        tell({ event: 'fallback', from: model, to: fallbackModel, after: refusal.type });
+        active = fallbackModel;
+        opened = await open(fallbackModel, false);
+      }
     } catch (error) {
       release();
-      if (abort.signal.aborted) throw abort.signal.reason ?? new DOMException('Aborted', 'AbortError');
-      return jsonError(bridgeFailure(error));
+      if (abort.signal.aborted) throw aborted();
+      return jsonError(failed(bridgeFailure(error), active, 'request'));
     }
 
+    // The chunks name the model the caller asked for, whichever of its profiles answers.
     const mapper = createChunkMapper(model, { singleToolCall });
-    const iterator = stream[Symbol.asyncIterator]();
+    const { iterator } = opened;
+    let head = opened.head;
     const body = new ReadableStream<Uint8Array>({
       async pull(controller) {
         try {
@@ -653,7 +757,13 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
           // events that map to no chunk (block stops, reasoning signatures) are consumed
           // here until one does, or the stream ends.
           for (;;) {
-            const next = await iterator.next();
+            let next: IteratorResult<Record<string, unknown>>;
+            if (head) {
+              const first = head;
+              head = undefined;
+              if ('error' in first) throw first.error;
+              next = first;
+            } else next = await iterator.next();
             if (next.done) {
               mapper.finish();
               controller.enqueue(sse('[DONE]'));
@@ -667,9 +777,9 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
           }
         } catch (error) {
           release();
-          if (abort.signal.aborted) { controller.error(abort.signal.reason ?? new DOMException('Aborted', 'AbortError')); return; }
+          if (abort.signal.aborted) { controller.error(aborted()); return; }
           // A failure after the stream began is an SSE error frame, which the OpenAI SDKs raise.
-          controller.enqueue(sse(errorBody(bridgeFailure(error))));
+          controller.enqueue(sse(errorBody(failed(bridgeFailure(error), active, 'stream'))));
           controller.close();
         }
       },

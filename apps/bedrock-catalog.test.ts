@@ -69,9 +69,33 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   assert.equal(agents.length + pi.length, entries.length, 'every catalog model is offered exactly once by default');
   const claude = agents.find(profile => profile.id === 'bedrock.claude-opus-5-5')!;
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', provider: 'bedrock', model: 'global.anthropic.claude-opus-5-5', name: 'Claude Opus 5.5', vendor: 'anthropic',
-    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'] });
+    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'],
+    fallbackModel: 'us.anthropic.claude-opus-5-5' });
+  // A model without a fallback profile has none.
+  assert.equal('fallbackModel' in agents.find(profile => profile.id === 'bedrock.kimi-k3')!, false);
   // A model the catalog lists as text-only stays so.
   assert.deepEqual(agents.find(profile => profile.id === 'bedrock.deepseek-v3-2')!.input, ['text']);
+});
+
+test('a fallback target is the same model through its other inference profile, and every Claude model has one', () => {
+  const profile = (target: string, fallbackTarget: unknown) => entry({ target, fallbackTarget });
+  // Both directions (global. <-> us.) and any other pair of profile kinds of one model.
+  for (const [target, fallback] of [['global.anthropic.claude-x', 'us.anthropic.claude-x'], ['us.anthropic.claude-x', 'global.anthropic.claude-x'], ['eu.meta.llama-y:0', 'global.meta.llama-y:0']]) {
+    assert.equal(parseBedrockCatalog(catalogOf(profile(target, fallback)))[0].fallbackTarget, fallback);
+  }
+  // Never another model, the same profile, an in-region id on either side, or anything but a target string.
+  for (const [target, fallback] of [['global.anthropic.claude-x', 'us.anthropic.claude-y'], ['global.anthropic.claude-x', 'global.anthropic.claude-x'],
+    ['global.anthropic.claude-x', 'anthropic.claude-x'], ['anthropic.claude-x', 'us.anthropic.claude-x'], ['global.anthropic.claude-x', 'us.anthropic.claude-x https://x'],
+    ['global.anthropic.claude-x', ''], ['global.anthropic.claude-x', null], ['global.anthropic.claude-x', ['us.anthropic.claude-x']]] as const) {
+    assert.throws(() => parseBedrockCatalog(catalogOf(profile(target, fallback))), /catalog is invalid/, `${target} -> ${fallback}`);
+  }
+  // Optional: an entry without one is as before, and other unknown fields are still refused.
+  assert.equal('fallbackTarget' in parseBedrockCatalog(catalogOf(entry()))[0], false);
+  assert.throws(() => parseBedrockCatalog(catalogOf({ ...entry({ target: 'global.a.b' }), fallbackTarget: 'us.a.b', extra: true })), /catalog is invalid/);
+  const claude = readBedrockCatalog().filter(item => item.vendor === 'anthropic');
+  assert.ok(claude.length >= 7);
+  for (const item of claude) assert.equal(item.fallbackTarget, item.target.replace(/^global\./, 'us.'), item.id);
+  assert.ok(readBedrockCatalog().every(item => item.vendor === 'anthropic' || item.fallbackTarget === undefined), 'only Claude has a second profile the workers may call');
 });
 
 test('an explicit model list selects in catalog order and refuses unknown or tool-less Agents models', () => {

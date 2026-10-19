@@ -42,7 +42,20 @@ test('the runner hands the prompt-cache setting to a Bedrock child, and only to 
     await handle.done;
     return JSON.parse(events.find(event => event.type === 'completed').text);
   };
-  assert.deepEqual(await runOnce('bedrock.claude-haiku-4-5'), { provider: 'bedrock', model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', region: 'us-east-1',
-    apiKey: '', thinkingBudget: null, promptCache: true });
-  assert.equal((await runOnce('bedrock.claude-sonnet-4-6')).promptCache, null);
+  const logged = [];
+  const error = console.error;
+  console.error = line => logged.push(String(line));
+  try {
+    assert.deepEqual(await runOnce('bedrock.claude-haiku-4-5'), { provider: 'bedrock', model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', region: 'us-east-1',
+      apiKey: '', thinkingBudget: null, promptCache: true, fallbackModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' });
+    assert.equal((await runOnce('bedrock.claude-sonnet-4-6')).promptCache, null);
+    // A model without a second profile gets none.
+    assert.equal((await runOnce('bedrock.deepseek-r1')).fallbackModel, null);
+  } finally { console.error = error; }
+  // The child's content-free facts reach this worker's log, one closed line each, with the run's id.
+  assert.deepEqual(logged.map(line => JSON.parse(line)).map(({ from, to }) => [from, to]), [
+    ['global.anthropic.claude-haiku-4-5-20251001-v1:0', 'us.anthropic.claude-haiku-4-5-20251001-v1:0'],
+    ['global.anthropic.claude-sonnet-4-6', 'us.anthropic.claude-sonnet-4-6']]);
+  assert.deepEqual(JSON.parse(logged[0]), { service: 'awwo-pi-worker', runId: 'run-1', event: 'bedrock_profile_fallback',
+    from: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', to: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', after: 'ThrottlingException' });
 });

@@ -65,6 +65,9 @@ class ModelProfile:
     prompt_cache: bool = False
     # What the model takes: ("text",), or ("text", "image") for one that sees a run's pictures (vision).
     input: tuple = ("text",)
+    # Bedrock catalog models only: the same model's other inference profile (the catalog's fallbackTarget), which the
+    # bridge asks once when this one refuses a call before anything streamed. Empty: none.
+    fallback_model: str = ""
 
     def to_health(self) -> dict:
         return {
@@ -154,12 +157,12 @@ BEDROCK_PROFILE_FIELDS = {"id", "provider", "model", "region", "apiKeyEnv", "con
 
 
 def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int,
-                     input_kinds: tuple = ("text",)) -> ModelProfile:
+                     input_kinds: tuple = ("text",), fallback_target: str = "") -> ModelProfile:
     # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint;
     # it never advertises effort (the bridge refuses it).
     return ModelProfile(id=entry_id, provider="bedrock", model=target, base_url=bridge_base_url(region), api_key=api_key,
                         protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region,
-                        input=input_kinds)
+                        input=input_kinds, fallback_model=fallback_target)
 
 
 def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: ModelProfile, missing: list) -> ModelProfile:
@@ -331,7 +334,7 @@ def load_config(env: dict | None = None) -> Config:
     except CatalogError as e:
         raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
     catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"],
-                                        tuple(entry["input"])),
+                                        tuple(entry["input"]), entry.get("fallbackTarget", "")),
                        prompt_cache=entry["id"] in cached)
                for entry in selected]
     if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:

@@ -45,6 +45,7 @@ flowchart LR
 | `id` | AwwO 选择器，`bedrock.` 开头，画布节点保存的就是它 |
 | `name` / `vendor` | 显示名与厂商；网页按显示名归入品牌组 |
 | `target` | Converse `modelId`：只通过推理配置文件提供的模型用 `global.`/`us.` 配置文件，否则用区域内模型 ID |
+| `fallbackTarget` | 可选，目前只有 Claude：同一模型的另一个推理配置文件（`global.` ↔ `us.`）。目标在输出任何内容之前因容量或额度拒绝调用时，桥用它重发一次（见下文 2026-10-19） |
 | `contextWindow` / `maxTokens` | AwwO 的保守预算（worker 把 contextWindow 当字节预算），不是厂商上限 |
 | `input` | `text`，可含 `image`（仅展示；桥目前只发文本） |
 | `tools` | 观察到流式工具调用或文档写明 ConverseStream 支持工具；没有工具能力的模型只放 Pi。Pixtral Large 与 Llama 只在非流式 Converse 接受工具（ConverseStream 回答 “This model doesn't support tool use in streaming mode”），所以放 Pi |
@@ -238,3 +239,12 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 - **改动**：代码上限放宽到 1,800,000 ms（与 JS worker 相同）；现网 env 改为 1,500,000（25 分钟），比 API 的 30 分钟运行时限早结束，留出收尾与计费的时间。OpenAI 客户端的超时跟随这个时限（连接超时仍是 5 s）；SDK 的超时异常 `APITimeoutError` 记为 `DEADLINE_EXCEEDED`（API 显示为 `run_timeout`），连接阶段的除外（见下）。
 - **代价**：一个完不成的节点最长占 25 分钟。超时的节点不再自动重试（运营方 10-18「超时不再重试」，`graph_retry.go`）：此前 21 天的 17 次 `run_timeout` 都用满了时限（600 s 以上），R-1 重跑过其中 5 次，重跑只会再等一遍、再计一次费。连接阶段的 5 s 超时没有到达模型服务，记为 `MODEL_UNAVAILABLE`（API 显示为 `provider_unavailable`），仍可自动重试，很快结束的不计费。被截断、没有输出的调用按隐藏推理估算计费，上限 65,536 token（`plans.go` 的 `maxHiddenTokens`，与目录的 `MAX_OUTPUT_TOKENS` 相同），按每秒 120 token 约 9 分钟就到上限，所以时限变长不会让单次估算更高。
 - **回滚**：旧代码不接受 1,500,000（启动即失败），回滚代码时 env 必须一起改回 600000；发布脚本两者一起切换、一起回滚。
+
+## 2026-10-19：Claude 的 global 与 US 推理配置文件互为备选
+
+- **起因**（运营方 10-19「线上如果claude global区域的无法访问就用us区域的，互相作为备选」）：当天上午 CloudTrail 记下 worker 的 IAM 用户 `machine/awwo-tokyo-runtime` 调 `global.anthropic.claude-haiku-4-5-20251001-v1:0` 有 17 次 `ServiceUnavailableException`（02:07–02:18Z 11 次，03:51、04:39、05:26Z 各有几次），对应 17 个失败的规划与助手运行；02:31–02:32Z `global.anthropic.claude-opus-5-5` 有 3 次 `ThrottlingException: Too many tokens per day`。同一时刻账号里的另一个 Bedrock API Key（开发用的 Claude Code，CloudTrail 用户名 `MantleApiKey-…`）在 global Opus 5.5 上也被这样拒绝，换到 `us.` 后正常：global 的每日 token 额度是全账号共用的，US 配置文件另有自己的额度。
+- **IAM**：`awwo-tokyo-runtime-bedrock-profiles` 与 `awwo-tokyo-runtime-bedrock-via-profile` 两个托管策略升到 v4（v3 留作回滚）：加上目录里 Claude 模型的 `us.anthropic.*` 推理配置文件，以及这些模型在 us-east-2、us-west-2 的基础模型（`us.` 配置文件路由到 us-east-1/us-east-2/us-west-2，us-east-1 原本就有）。主机 IP 条件与"只能经本账号推理配置文件调用"的条件不变。改后从主机用 worker 的凭证逐个实测：6 个 Claude 模型的 `us.` 与 `global.` 都能调用（Sonnet 5.5 仍是 Marketplace 付款问题）；测试时 `global.anthropic.claude-sonnet-5` 正好答 `ServiceUnavailableException`，`us.` 正常。
+- **行为**：目录的 `fallbackTarget` 经 worker 档案（`fallbackModel` / `fallback_model`）交给桥。桥在第一个配置文件拒绝调用时（请求本身被拒，或流的第一个事件就是异常），若异常是 `ThrottlingException`、`ServiceUnavailableException`、`InternalServerException`、`ModelNotReadyException` 或 `ServiceQuotaExceededException`，在同一个客户端上把同一请求发给另一个配置文件，只发一次。流已经输出过内容、其他错误（权限、参数、模型超时等）、或备选也失败时，都不再重试，调用照旧失败。没有 `fallbackTarget` 的模型完全按原来的方式调用（不预读第一个事件）。返回给调用方的 chunk 仍写原来的模型 ID；`model_invocations.provider_model` 记的仍是目录的 `target`。
+- **日志**：每次换用备选写一行 `bedrock_profile_fallback`（from、to、after），每次失败的 Bedrock 调用写一行 `bedrock_call_failed`（model、error、status、stage = request 或 stream、upstream = true 表示 AWS 的回答或通往它的路上出的错（含网络、凭证），false 表示桥自己拒绝：请求或内容无法转换），只有模型 ID、错误名和状态码，不含提示词、回答或 AWS 消息。Pi 与 JS worker 由子进程经 IPC 报给父进程再写（子进程本身没有输出），Python worker 直接写 stderr。此前 Pi worker 的规划运行失败时日志里看不到 AWS 异常名，这次一并补上。
+- **计费**：用户按目录 id 计点数，换用 US 不改变用户的费用；AWS 按 US 配置文件的价格向账号收费，可能与 global 不同。被拒绝的那次请求没有处理任何 token（Bedrock 按 token 计费）。
+- **回滚**：去掉目录里的 `fallbackTarget` 或回滚 worker 发布即可停用；IAM 可把两个策略的默认版本设回 v3。

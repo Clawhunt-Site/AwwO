@@ -324,3 +324,23 @@ test('the prompt cache reaches only the Claude models it names, through the runn
   assert.equal('promptCache' in (await runOnce(on, 'bedrock.glm-5')), false);
   assert.equal('promptCache' in (await runOnce(off, 'bedrock.claude-opus-5-5')), false);
 });
+
+test('the runner hands a Claude child its model\'s other profile, and logs the child\'s content-free facts', { timeout: 15_000 }, async () => {
+  const c = withCatalog({ AWWO_BEDROCK_API_KEY: BEDROCK_KEY });
+  const taskURL = new URL('./bedrock-ipc-fixture.mjs', import.meta.url);
+  const logged = [];
+  const runOnce = async (model) => {
+    const events = [];
+    const handle = await startIsolatedRun({ config: c, request: request({ model }), onEvent: event => events.push(event) }, { taskURL, bedrockAuth: async key => ({ bearerToken: key }) });
+    await handle.done;
+    return JSON.parse(events.at(-1).text);
+  };
+  const error = console.error;
+  console.error = line => logged.push(String(line));
+  try {
+    assert.equal((await runOnce('bedrock.claude-opus-5-5')).fallbackModel, 'us.anthropic.claude-opus-5-5');
+    assert.equal('fallbackModel' in (await runOnce('bedrock.glm-5')), false);
+  } finally { console.error = error; }
+  assert.deepEqual(logged.map(line => JSON.parse(line)), [{ service: 'awwo-openai-agents-worker', runId: request({}).runId, event: 'bedrock_profile_fallback',
+    from: 'global.anthropic.claude-opus-5-5', to: 'us.anthropic.claude-opus-5-5', after: 'ServiceUnavailableException' }]);
+});

@@ -23,9 +23,19 @@ MAX_OUTPUT_TOKENS = 65_536
 CATALOG_PATHS = (Path(__file__).resolve().parent / "bedrock-models.json", Path(__file__).resolve().parent.parent / "bedrock-models.json")
 PLATFORM_PROVIDERS = ("llmgate", "bedrock")
 ENTRY_FIELDS = ("id", "name", "vendor", "target", "contextWindow", "maxTokens", "input", "tools", "runtime", "verified")
+# fallbackTarget: the same model through its other inference profile (global. <-> us.), which the bridge asks once when
+# the target refuses a call before anything streamed (BedrockConverseTransport's fallback_model).
+OPTIONAL_FIELDS = ("fallbackTarget",)
 CATALOG_ID = re.compile(r"bedrock\.[a-z0-9][a-z0-9-]{0,62}")
 TARGET = re.compile(r"(?:(?:global|us|eu|apac|jp|au|ca)\.)?[a-z0-9-]+\.[A-Za-z0-9.:-]{1,120}")
+PROFILE_PREFIX = re.compile(r"(global|us|eu|apac|jp|au|ca)\.")
 VENDOR = re.compile(r"[a-z][a-z0-9-]{0,31}")
+
+
+def other_profile_of_model(target: str, fallback: str) -> bool:
+    """True when both targets are inference profiles, of different kinds, of one model (as apps/bedrock-catalog.ts)."""
+    a, b = PROFILE_PREFIX.match(target), PROFILE_PREFIX.match(fallback)
+    return bool(a and b and a.group(1) != b.group(1) and target[a.end():] == fallback[b.end():])
 
 
 class CatalogError(ValueError):
@@ -56,11 +66,13 @@ def parse_catalog_file(value) -> tuple:
         fail()
     ids, targets, entries = set(), set(), []
     for e in value["models"]:
-        if not isinstance(e, dict) or set(e) != set(ENTRY_FIELDS):
+        if not isinstance(e, dict) or not set(ENTRY_FIELDS) <= set(e) or not set(e) <= set(ENTRY_FIELDS + OPTIONAL_FIELDS):
             fail()
         if (not isinstance(e["id"], str) or not CATALOG_ID.fullmatch(e["id"]) or e["id"] in ids
                 or not _valid_name(e["name"]) or not isinstance(e["vendor"], str) or not VENDOR.fullmatch(e["vendor"])
                 or not isinstance(e["target"], str) or not TARGET.fullmatch(e["target"]) or e["target"] in targets
+                or ("fallbackTarget" in e and (not isinstance(e["fallbackTarget"], str) or not TARGET.fullmatch(e["fallbackTarget"])
+                                               or not other_profile_of_model(e["target"], e["fallbackTarget"])))
                 or not _integer(e["contextWindow"], 4096, 2_000_000) or not _integer(e["maxTokens"], 128, MAX_OUTPUT_TOKENS)
                 or e["maxTokens"] + 256 >= e["contextWindow"]
                 or not isinstance(e["input"], list) or not e["input"] or any(kind not in ("text", "image") for kind in e["input"]) or "text" not in e["input"]

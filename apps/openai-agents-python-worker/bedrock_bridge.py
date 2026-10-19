@@ -507,6 +507,48 @@ class ChunkMapper:
             raise BridgeError(502, "api_error", "The Bedrock stream ended before the response was complete")
 
 
+# AWS errors that say a profile cannot serve the call at this moment (its capacity, its quotas, a transient fault). The
+# model's other inference profile has capacity and quotas of its own and may still serve it. Named as bridge_failure
+# names them: the SDK's exception names and the stream's exception members (PROFILE_REFUSALS in apps/bedrock-bridge.ts).
+PROFILE_REFUSALS = frozenset({
+    "ThrottlingException", "ServiceUnavailableException", "InternalServerException", "ModelNotReadyException",
+    "ServiceQuotaExceededException", "throttlingException", "serviceUnavailableException", "internalServerException",
+})
+FACT_LABEL = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+
+
+def _stream_exception(event: Any) -> BridgeError | None:
+    """The stream's exception member as ChunkMapper.map would raise it; None for any other event."""
+    if not isinstance(event, dict):
+        return None
+    keys = [key for key, value in event.items() if value is not None]
+    if len(keys) == 1 and keys[0] in STREAM_EXCEPTIONS:
+        return BridgeError(STREAM_EXCEPTIONS[keys[0]], keys[0], "The Bedrock stream reported an error", upstream=True)
+    return None
+
+
+def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
+    """One JSON log line for a call's content-free fact (a fallback to the model's other profile, a failure by AWS error
+    type), or None for anything else, as bedrockFactLine in apps/bedrock-bridge.ts: closed labels and a status only."""
+    if not isinstance(fact, dict):
+        return None
+
+    def label(value: Any) -> bool:
+        return isinstance(value, str) and FACT_LABEL.fullmatch(value) is not None
+
+    run = {"runId": run_id} if isinstance(run_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", run_id) else {}
+    if fact.get("event") == "fallback" and label(fact.get("from")) and label(fact.get("to")) and label(fact.get("after")):
+        return json.dumps({"service": service, **run, "event": "bedrock_profile_fallback", "from": fact["from"], "to": fact["to"],
+                           "after": fact["after"]})
+    status = fact.get("status")
+    if (fact.get("event") == "failed" and label(fact.get("model")) and label(fact.get("error"))
+            and isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 and fact.get("stage") in ("request", "stream")
+            and isinstance(fact.get("upstream"), bool)):
+        return json.dumps({"service": service, **run, "event": "bedrock_call_failed", "model": fact["model"], "error": fact["error"],
+                           "status": status, "stage": fact["stage"], "upstream": fact["upstream"]})
+    return None
+
+
 def bridge_failure(error: BaseException) -> BridgeError:
     """Status and type only: SDK messages can carry account IDs and role ARNs."""
     if isinstance(error, BridgeError):
@@ -604,10 +646,13 @@ def _error_body(error: BridgeError) -> dict:
 
 
 class _ConverseStream(AsyncByteStream):
-    def __init__(self, queue: asyncio.Queue, mapper: ChunkMapper, cancel: Callable[[], None]):
+    def __init__(self, queue: asyncio.Queue, mapper: ChunkMapper, cancel: Callable[[], None],
+                 failed: Callable[[BridgeError], BridgeError] = lambda error: error):
         self.queue = queue
         self.mapper = mapper
         self.cancel = cancel
+        # Told each failure the stream relays (BedrockConverseTransport._failed), and hands it back.
+        self.failed = failed
 
     async def __aiter__(self):
         try:
@@ -618,19 +663,19 @@ class _ConverseStream(AsyncByteStream):
                         for payload in self.mapper.map(value):
                             yield _sse(payload)
                     except BridgeError as error:
-                        yield _sse(_error_body(error))
+                        yield _sse(_error_body(self.failed(error)))
                         return
                 elif kind == "end":
                     try:
                         self.mapper.finish()
                     except BridgeError as error:
-                        yield _sse(_error_body(error))
+                        yield _sse(_error_body(self.failed(error)))
                         return
                     yield _sse("[DONE]")
                     return
                 else:
                     # A failure after the stream began is an SSE error frame, which the OpenAI SDK raises.
-                    yield _sse(_error_body(bridge_failure(value)))
+                    yield _sse(_error_body(self.failed(bridge_failure(value))))
                     return
         finally:
             self.cancel()
@@ -643,11 +688,16 @@ class BedrockConverseTransport(AsyncBaseTransport):
     """Serves ``POST <bridge base URL>/chat/completions`` from Bedrock ConverseStream."""
 
     def __init__(self, *, region: str, model: str, auth: dict, read_timeout: float = 120.0,
-                 client_factory: Callable[[str, dict, float], Any] = default_client, prompt_cache: bool = False):
+                 client_factory: Callable[[str, dict, float], Any] = default_client, prompt_cache: bool = False,
+                 fallback_model: str = "", report: Callable[[dict], None] | None = None):
         if not valid_auth(auth):
             raise ValueError("Invalid Bedrock credentials")
         if not isinstance(prompt_cache, bool):
             raise ValueError("Invalid Bedrock prompt cache setting")
+        if not isinstance(fallback_model, str) or (fallback_model and (not FACT_LABEL.fullmatch(fallback_model) or fallback_model == model)):
+            raise ValueError("Invalid Bedrock fallback model")
+        if report is not None and not callable(report):
+            raise ValueError("Invalid Bedrock call reporter")
         self.endpoint = bridge_base_url(region) + "/chat/completions"
         self.region = region
         self.model = model
@@ -656,10 +706,30 @@ class BedrockConverseTransport(AsyncBaseTransport):
         self.client_factory = client_factory
         # Claude only, operator-enabled (AWWO_BEDROCK_PROMPT_CACHE_MODELS): see with_claude_prompt_cache.
         self.prompt_cache = prompt_cache
+        # The same model through its other inference profile (the catalog's fallbackTarget): asked once, on the same
+        # client, when `model` refuses the call for capacity or quota (PROFILE_REFUSALS) before anything streamed.
+        # Empty: one profile, exactly as before.
+        self.fallback_model = fallback_model
+        # Told each content-free fact of a call (bedrock_fact_line); a reporter that raises never fails the call.
+        self.report = report
 
     @staticmethod
     def _json_error(error: BridgeError) -> Response:
         return Response(error.status, json=_error_body(error))
+
+    def _tell(self, fact: dict) -> None:
+        if self.report is None:
+            return
+        try:
+            self.report(fact)
+        except Exception:  # noqa: BLE001 - a log line is never worth a call
+            pass
+
+    def _failed(self, error: BridgeError, model: str, stage: str) -> BridgeError:
+        # upstream: AWS's answer or the way to it (the connection, the credentials); otherwise the bridge's own refusal
+        # (a request or content it cannot relay).
+        self._tell({"event": "failed", "model": model, "error": error.kind, "status": error.status, "stage": stage, "upstream": error.upstream})
+        return error
 
     async def handle_async_request(self, request: Request) -> Response:
         if str(request.url) != self.endpoint or request.method != "POST":
@@ -677,7 +747,7 @@ class BedrockConverseTransport(AsyncBaseTransport):
                 command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False
         except BridgeError as error:
-            return self._json_error(error)
+            return self._json_error(self._failed(error, self.model, "request"))
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
@@ -699,17 +769,54 @@ class BedrockConverseTransport(AsyncBaseTransport):
                 except Exception:  # noqa: BLE001 - best effort teardown
                     pass
 
+        def open_stream(client, model_id: str, read_ahead: bool):
+            response = client.converse_stream(**(command if model_id == self.model else {**command, "modelId": model_id}))
+            stream = response["stream"]
+            holder["stream"] = stream
+            events = iter(stream)
+            # A call cancelled while it was sent reads nothing more: the worker closes its stream at once.
+            if not read_ahead or stop.is_set():
+                return events, None
+            # With a fallback to turn to, the first event is read here as well: an exception that opens the stream is
+            # that profile's refusal, met before anything reached the caller. Any other first event (or failure) stays
+            # at the head of the stream, to be relayed as it always was.
+            try:
+                head = ("event", next(events))
+            except StopIteration:
+                head = ("end", None)
+            except Exception as error:  # noqa: BLE001 - relayed or refused below, as the stream would
+                head = ("error", error)
+            refusal = (bridge_failure(head[1]) if head[0] == "error"
+                       else _stream_exception(head[1]) if head[0] == "event" else None)
+            if refusal is not None and refusal.kind in PROFILE_REFUSALS and not stop.is_set():
+                try:
+                    stream.close()
+                except Exception:  # noqa: BLE001 - best effort teardown
+                    pass
+                raise refusal
+            return events, head
+
         def worker():
             try:
                 client = self.client_factory(self.region, self.auth, self.read_timeout)
-                response = client.converse_stream(**command)
-                stream = response["stream"]
-                holder["stream"] = stream
+                try:
+                    events, head = open_stream(client, self.model, bool(self.fallback_model))
+                except Exception as error:  # noqa: BLE001 - a profile's refusal turns to the model's other profile
+                    refusal = bridge_failure(error)
+                    if not self.fallback_model or stop.is_set() or refusal.kind not in PROFILE_REFUSALS:
+                        raise
+                    self._tell({"event": "fallback", "from": self.model, "to": self.fallback_model, "after": refusal.kind})
+                    holder["active"] = self.fallback_model
+                    events, head = open_stream(client, self.fallback_model, False)
                 if stop.is_set():
                     cancel()
                     return
                 put(("open", None))
-                for event in stream:
+                if head is not None:
+                    put(head)
+                    if head[0] != "event":
+                        return
+                for event in events:
                     if stop.is_set():
                         return
                     put(("event", event))
@@ -723,7 +830,11 @@ class BedrockConverseTransport(AsyncBaseTransport):
         except asyncio.CancelledError:
             cancel()
             raise
+        # The profile that answered (or refused last): written by the worker thread before what it put.
+        active = holder.get("active", self.model)
         if kind == "error":
-            return self._json_error(bridge_failure(value))
+            return self._json_error(self._failed(bridge_failure(value), active, "request"))
+        # The chunks name the model the caller asked for, whichever of its profiles answers.
         return Response(200, headers={"content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache"},
-                              stream=_ConverseStream(queue, ChunkMapper(self.model, single_tool_call=single_tool_call), cancel))
+                        stream=_ConverseStream(queue, ChunkMapper(self.model, single_tool_call=single_tool_call), cancel,
+                                               failed=lambda error: self._failed(error, active, "stream")))

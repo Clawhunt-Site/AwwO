@@ -36,22 +36,23 @@ def main() -> int:
             break
     problems = 0
     for entry in json.loads(CATALOG.read_text(encoding="utf-8"))["models"]:
-        target = entry["target"]
-        base = next((target[len(p):] for p in PREFIXES if target.startswith(p)), target)
-        model = models.get(base)
-        if model is None:
-            issue = "model is not listed in this region"
-        elif (model.get("modelLifecycle") or {}).get("status") != "ACTIVE":
-            issue = f"model lifecycle is {(model.get('modelLifecycle') or {}).get('status')}"
-        elif target != base and target not in profiles:
-            issue = "inference profile is not listed"
-        elif target == base and "ON_DEMAND" not in (model.get("inferenceTypesSupported") or []):
-            issue = "model needs an inference profile; use its global./us. id"
-        else:
-            issue = ""
-        if issue:
-            problems += 1
-        print(f"{'!!' if issue else 'ok'} {entry['id']:30} {target:52} {issue}")
+        # The target, and the profile the bridge falls back to (fallbackTarget) where the entry has one.
+        for target in [entry["target"]] + ([entry["fallbackTarget"]] if entry.get("fallbackTarget") else []):
+            base = next((target[len(p):] for p in PREFIXES if target.startswith(p)), target)
+            model = models.get(base)
+            if model is None:
+                issue = "model is not listed in this region"
+            elif (model.get("modelLifecycle") or {}).get("status") != "ACTIVE":
+                issue = f"model lifecycle is {(model.get('modelLifecycle') or {}).get('status')}"
+            elif target != base and target not in profiles:
+                issue = "inference profile is not listed"
+            elif target == base and "ON_DEMAND" not in (model.get("inferenceTypesSupported") or []):
+                issue = "model needs an inference profile; use its global./us. id"
+            else:
+                issue = ""
+            if issue:
+                problems += 1
+            print(f"{'!!' if issue else 'ok'} {entry['id']:30} {target:52} {issue}")
     print(f"{problems} catalog entr{'y needs' if problems == 1 else 'ies need'} attention in {args.region}")
     return 1 if problems else 0
 

@@ -18,6 +18,9 @@ import { BEDROCK_REGIONS, bedrockBridgeBaseURL, validBedrockRegion } from './bed
 export type BedrockRuntime = 'pi' | 'openai-agents';
 export type BedrockCatalogEntry = Readonly<{
   id: string; name: string; vendor: string; target: string;
+  // The same model through its other inference profile (global. <-> us.), tried once when the target refuses a call
+  // before anything streamed (createBedrockFetch's fallbackModel). Absent: the target alone.
+  fallbackTarget?: string;
   contextWindow: number; maxTokens: number; input: readonly string[];
   tools: boolean; runtime: BedrockRuntime; verified: string;
 }>;
@@ -26,10 +29,13 @@ export type BedrockProfile = Readonly<{
   region: string; baseURL: string; apiKey: string; contextWindow: number; maxTokens: number;
   // What the model takes: 'text', and 'image' for one that sees pictures (only where a worker claims imageInput).
   input?: readonly string[];
+  // The catalog entry's fallbackTarget, for the bridge.
+  fallbackModel?: string;
 }>;
 
 export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock']);
 const ENTRY_FIELDS = ['id', 'name', 'vendor', 'target', 'contextWindow', 'maxTokens', 'input', 'tools', 'runtime', 'verified'];
+const OPTIONAL_FIELDS = ['fallbackTarget'];
 /** A model's output limit per call. Claude Opus 5.5 always thinks first (adaptive thinking: Bedrock refuses a request that
  *  turns it off) and can spend a whole 32,000-token call on thinking alone, ending it with nothing to show; Bedrock takes
  *  64,000 for it. */
@@ -39,7 +45,15 @@ const CATALOG_ID = /^bedrock\.[a-z0-9][a-z0-9-]{0,62}$/;
 const TARGET = /^(?:(?:global|us|eu|apac|jp|au|ca)\.)?[a-z0-9-]+\.[A-Za-z0-9.:-]{1,120}$/;
 const VENDOR = /^[a-z][a-z0-9-]{0,31}$/;
 const BEARER = /^[\x21-\x7e]{16,8192}$/;
+const PROFILE_PREFIX = /^(global|us|eu|apac|jp|au|ca)\./;
 const integer = (value: unknown, min: number, max: number): value is number => Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max;
+
+/** True when both targets are inference profiles, of different kinds, of one model: a fallback that can only ever
+ *  reach the model its entry is priced and named as. */
+export function otherProfileOfModel(target: string, fallback: string): boolean {
+  const a = PROFILE_PREFIX.exec(target), b = PROFILE_PREFIX.exec(fallback);
+  return !!a && !!b && a[1] !== b[1] && target.slice(a[0].length) === fallback.slice(b[0].length);
+}
 
 function validName(name: unknown): name is string {
   if (typeof name !== 'string' || /[\p{Cc}\p{Cf}]/u.test(name) || [...name].length < 1 || [...name].length > 80) return false;
@@ -66,10 +80,11 @@ export function parseBedrockCatalogFile(value: unknown): BedrockCatalog {
   const entries = (catalog.models as unknown[]).map(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return fail();
     const e = item as Record<string, unknown>;
-    if (Object.keys(e).length !== ENTRY_FIELDS.length || ENTRY_FIELDS.some(key => !Object.hasOwn(e, key))) return fail();
+    if (ENTRY_FIELDS.some(key => !Object.hasOwn(e, key)) || Object.keys(e).some(key => !ENTRY_FIELDS.includes(key) && !OPTIONAL_FIELDS.includes(key))) return fail();
     if (typeof e.id !== 'string' || !CATALOG_ID.test(e.id) || ids.has(e.id)
       || !validName(e.name) || typeof e.vendor !== 'string' || !VENDOR.test(e.vendor)
       || typeof e.target !== 'string' || !TARGET.test(e.target) || targets.has(e.target)
+      || (Object.hasOwn(e, 'fallbackTarget') && (typeof e.fallbackTarget !== 'string' || !TARGET.test(e.fallbackTarget) || !otherProfileOfModel(e.target, e.fallbackTarget)))
       || !integer(e.contextWindow, 4096, 2_000_000) || !integer(e.maxTokens, 128, MAX_OUTPUT_TOKENS)
       || (e.maxTokens as number) + 256 >= (e.contextWindow as number)
       || !Array.isArray(e.input) || !e.input.length || e.input.some(kind => kind !== 'text' && kind !== 'image') || !e.input.includes('text')
@@ -80,6 +95,7 @@ export function parseBedrockCatalogFile(value: unknown): BedrockCatalog {
     ids.add(e.id);
     targets.add(e.target);
     return Object.freeze({ id: e.id, name: e.name as string, vendor: e.vendor, target: e.target,
+      ...(typeof e.fallbackTarget === 'string' ? { fallbackTarget: e.fallbackTarget } : {}),
       contextWindow: e.contextWindow as number, maxTokens: e.maxTokens as number, input: Object.freeze([...(e.input as string[])]),
       tools: e.tools, runtime: e.runtime as BedrockRuntime, verified: e.verified });
   });
@@ -143,10 +159,10 @@ export function bedrockApiKey(env: Record<string, string | undefined>, name = 'A
   return key;
 }
 
-export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens'> & { input?: readonly string[] }, region: string, apiKey: string): BedrockProfile {
+export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens' | 'fallbackTarget'> & { input?: readonly string[] }, region: string, apiKey: string): BedrockProfile {
   return Object.freeze({ id: entry.id, provider: 'bedrock', model: entry.target, name: entry.name, vendor: entry.vendor,
     region, baseURL: bedrockBridgeBaseURL(region), apiKey, contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
-    input: Object.freeze([...(entry.input ?? ['text'])]) });
+    input: Object.freeze([...(entry.input ?? ['text'])]), ...(entry.fallbackTarget ? { fallbackModel: entry.fallbackTarget } : {}) });
 }
 
 /** Profiles the built-in catalog contributes to one worker, or none when the catalog is off. */

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveModelConfig } from './config.mjs';
-import { createBedrockAuthResolver } from '../bedrock-bridge.ts';
+import { bedrockFactLine, createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
 export const BEDROCK_CALL_URL = new URL('./bedrock-call.mjs', import.meta.url);
@@ -90,6 +90,13 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       : { type: 'cancelled' };
 
   child.on('message', (event) => {
+    if (event?.type === 'bedrock_fact') {
+      // A Bedrock call's fallback to its model's other profile, or its failure by AWS error type: for this worker's log
+      // only, rebuilt from closed labels (bedrockFactLine), never relayed.
+      const line = bedrockFactLine('awwo-pi-worker', request.runId, event.fact);
+      if (line) console.error(line);
+      return;
+    }
     if (terminalEvent || !event || typeof event !== 'object') return;
     if (event.type === 'text_delta' && typeof event.delta === 'string') {
       if (cancellation) return;
@@ -145,7 +152,8 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       input: [...(modelConfig.input ?? ['text'])],
       ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}),
-        ...(modelConfig.promptCache === true ? { promptCache: true } : {}) } : {}),
+        ...(modelConfig.promptCache === true ? { promptCache: true } : {}),
+        ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}) } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };
@@ -184,12 +192,18 @@ export async function bedrockComputerCall(model, body, signal, { auth = resolveB
     });
     signal?.addEventListener('abort', onAbort, { once: true });
     child.once('message', (answer) => settle(() => {
+      // The call's content-free facts (a fallback to the model's other profile, a failure's AWS error type) go to the log.
+      for (const fact of Array.isArray(answer?.facts) ? answer.facts.slice(0, 4) : []) {
+        const line = bedrockFactLine('awwo-pi-worker', undefined, fact);
+        if (line) console.error(line);
+      }
       if (answer?.ok === true && answer.raw && typeof answer.raw === 'object' && !Array.isArray(answer.raw)) resolve(answer.raw);
       else reject(failure(typeof answer?.reason === 'string' ? answer.reason.slice(0, 120) : 'unknown'));
     }));
     child.once('error', () => settle(() => reject(failure('child-error'))));
     void closed.then((how) => settle(() => reject(failure(`child-exit:${how}`))));
     child.send({ region: model.region, model: model.model, auth: credentials, promptCache: model.promptCache === true,
+      ...(model.fallbackModel ? { fallbackModel: model.fallbackModel } : {}),
       url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: JSON.stringify(body) },
     (error) => { if (error) settle(() => { child.kill('SIGKILL'); reject(failure('child-send')); }); });
   });
