@@ -24,6 +24,8 @@ export interface ProductionRunNode {
   readonly kind?: 'assemble';
   /** The file an assemble node made, as the run stored it. */
   readonly file?: { readonly name: string; readonly bytes: number };
+  /** An assemble node with no inputs: its file is its template alone (a tool file, such as Errand's recorder). */
+  readonly fromTemplate?: true;
   /** The node worked in its own sandbox computer: real files, commands and checks. */
   readonly sandbox?: true;
   /** How many model calls the node made, when more than one. */

@@ -39,6 +39,8 @@ const REVIEW = 'Review', BACKEND = 'Backend';
 export const MEDIA_ROLE = 'Media';
 /** A flagship's assembly: a stage member that makes the page from the modules with no model, so not an agent. */
 export const ASSEMBLY_ROLE = 'Assembly';
+/** A flagship's recorder: a stage member that writes a tool file from its template with no model, so not an agent. */
+export const RECORDER_ROLE = 'Recorder';
 const MEDIA = MEDIA_ROLE;
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
@@ -57,6 +59,13 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     brief: 'A self-training workbench in one web page: build small neural networks, train them in the browser and watch them learn, on nine datasets from point sets to digits and text, with seven optimizers, live loss and decision boundaries and a table of every run; its engine written in a clean room from evidence about an open-source library, and testing itself.',
     stages: [['Reader'], ['Spec'], ['Kernel', 'Interface', 'Tensors', 'Layers', 'Optimizers', 'Datasets', 'Training', 'Visuals', 'Lab screens'], [ASSEMBLY_ROLE], ['Test'], [REVIEW]],
     deliverable: 'A neural-network training workbench in the browser',
+  },
+  {
+    id: 'errand-agent', kind: 'product', recording: true, footage: 'errand-real',
+    title: 'Errand',
+    brief: 'An open-source agent workspace in one web page: watch an AI agent work on its own computer, its plan, its messages and every command, file and screenshot, in three real sessions recorded in sandbox computers during the run and replayed on a timeline; take the computer over at any moment, or run the agent live on your own model; designed in a clean room from evidence about an open-source agent workspace, and testing itself.',
+    stages: [['Reader', RECORDER_ROLE], ['Spec', 'Site session', 'Data session', 'Search session'], ['Kernel', 'Interface', 'Virtual computer', 'Thread', 'Computer', 'Replay', 'Live agent', 'Library'], [ASSEMBLY_ROLE], ['Test'], [REVIEW]],
+    deliverable: 'An AI agent workspace in the browser',
   },
   {
     id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',

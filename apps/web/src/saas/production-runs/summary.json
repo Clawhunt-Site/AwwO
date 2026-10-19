@@ -61,6 +61,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "errand-agent": {
+    "completed": 17,
+    "total": 17,
+    "seconds": 4296,
+    "delivered": true,
+    "capturedOn": "2026-10-18",
+    "model": "Claude Opus 4.8",
+    "runtime": "sandbox"
+  },
   "glider-adventure": {
     "completed": 6,
     "total": 6,

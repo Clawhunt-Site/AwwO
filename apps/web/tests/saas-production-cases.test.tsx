@@ -215,6 +215,30 @@ it('shows Backprop as it went: thirteen agents over 25 runs, and the four revisi
   expect(within(made).getByText('backprop.html, 139 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
 });
 
+it('shows Errand as it went: fifteen agents over 4 runs, its recorder and assembly with no model', async () => {
+  view();
+  fireEvent.click(screen.getByRole('button', { name: 'Errand' }));
+  const dialog = screen.getByRole('dialog', { name: 'Errand' });
+  // The reader, the spec, three session agents, eight builders, the tester and the review; the recorder writes its file
+  // from its template and the assembly makes the page, neither with a model.
+  expect(within(dialog).getByText('15 agents · 6 stages')).toBeVisible();
+  expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/errand-real.mp4');
+  const made = await within(dialog).findByRole('region', { name: '15 agents, 6 stages, 57 min 53 s in 4 runs' });
+  expect(within(made).getByText('17/17 nodes done')).toBeVisible();
+  const receipt = [...made.querySelectorAll('details')].find(element => element.querySelector('summary')?.textContent === 'Run receipt')!.textContent!;
+  expect(receipt).toContain('up to 64 model calls per node with thinking off');
+  expect(receipt).toContain('4 runs took 57 min 53 s, 71 min 36 s from the first start to the last finish');
+  expect(receipt).toContain('API ad66eeba38e64b384dbe66e85590c18dd584745d · runtime 6a6d831b71ace0e76521f0f1f4e5b99f87c4da61');
+  const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
+  fireEvent.click(within(rail).getByRole('button', { name: /^Session recorder/ }));
+  expect(within(made).getByText('Written with no model')).toBeVisible();
+  expect(within(made).getByText('rec.py, 12 KB: written from its template, byte for byte, with no model.')).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Kernel/ }));
+  expect(within(made).getByText('Worked in its own sandbox computer · 18 model calls · 12,311 output tokens')).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Assembly/ }));
+  expect(within(made).getByText('errand.html, 385 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
+});
+
 it('copies an illustrated case’s real canvas through the workspace’s copy flow, closing the case first', async () => {
   const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
   render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);

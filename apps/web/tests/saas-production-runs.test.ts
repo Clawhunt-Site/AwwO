@@ -189,7 +189,8 @@ it('carries no private identifiers or machine paths into a public record', () =>
     for (const value of strings) {
       expect(value, record.caseId).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
       expect(value, record.caseId).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/]/);
-      expect(value, record.caseId).not.toMatch(/(?:^|[^A-Za-z0-9.])(?:\/Users\/|\/home\/|~\/|\\\\[A-Za-z])/);
+      // /home/errand is the home of the computer inside Errand's own page (its kernel's), not a machine's.
+      expect(value, record.caseId).not.toMatch(/(?:^|[^A-Za-z0-9.])(?:\/Users\/|\/home\/(?!errand\b)|~\/|\\\\[A-Za-z])/);
     }
     expect(text, record.caseId).not.toMatch(/\bcv-[a-z0-9]{8}-/);              // canvas node identifiers
     expect(text, record.caseId).not.toMatch(/"(?:tenantId|canvasId|sessionId|runId|operationId)"/);

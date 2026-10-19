@@ -130,7 +130,9 @@ const nodes = workflow.nodes.map((spec, index) => {
   }
   const took = seconds(first?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt);
   return { id: spec.id, title: spec.title, column: spec.column, row: spec.row, status: state.state,
-    ...(document.kind === 'assemble' ? { kind: 'assemble' } : {}), ...(document.runtime === 'sandbox' ? { sandbox: true } : {}),
+    ...(document.kind === 'assemble' ? { kind: 'assemble' } : {}),
+    ...(document.kind === 'assemble' && !(document.contract?.inputs ?? []).length ? { fromTemplate: true } : {}),
+    ...(document.runtime === 'sandbox' ? { sandbox: true } : {}),
     ...(took !== undefined ? { seconds: took } : {}),
     outputType: spec.outputType ?? 'markdown', ...(output !== undefined ? { output } : {}), ...(report !== undefined ? { report } : {}),
     ...(file ? { file } : {}), ...(items.length > 1 ? { calls: items.length } : {}),

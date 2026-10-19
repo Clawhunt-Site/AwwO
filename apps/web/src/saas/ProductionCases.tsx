@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { ASSEMBLY_ROLE, MEDIA_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, type ProductionCase } from './productionCatalog';
+import { ASSEMBLY_ROLE, MEDIA_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, RECORDER_ROLE, type ProductionCase } from './productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import { LazyBoundary } from './LazyBoundary';
@@ -91,7 +91,7 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
   // Layout timing: the dialog must close while it is still in the document, before the page behind it can take focus.
   useLayoutEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
   // Media nodes and a flagship's assembly run no agent.
-  const agents = item.stages.reduce((sum, stage) => sum + stage.filter(role => role !== MEDIA_ROLE && role !== ASSEMBLY_ROLE).length, 0);
+  const agents = item.stages.reduce((sum, stage) => sum + stage.filter(role => role !== MEDIA_ROLE && role !== ASSEMBLY_ROLE && role !== RECORDER_ROLE).length, 0);
   return <dialog ref={dialog} className="saas-native-dialog production-dialog" lang="en" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); onClose(); }}
     // Close only when both the press and the release land on the backdrop, outside the box: the dialog's own scrollbar

@@ -96,6 +96,9 @@ function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; fil
 
 function NodeOutput({ node }: { node: ProductionRunNode }) {
   if (node.status !== 'done') return node.detail ? <p className="production-made-detail">{node.detail}</p> : null;
+  if (node.kind === 'assemble' && node.fromTemplate) return <p className="production-made-file">{node.file
+    ? `${node.file.name}, ${Math.round(node.file.bytes / 1024).toLocaleString()} KB: written from its template, byte for byte, with no model.`
+    : 'Written from its template, byte for byte, with no model.'}</p>;
   if (node.kind === 'assemble') return <p className="production-made-file">{node.file
     ? `${node.file.name}, ${Math.round(node.file.bytes / 1024).toLocaleString()} KB: the modules pasted into its template, byte for byte, with no model.`
     : 'The modules pasted into its template, byte for byte, with no model.'}</p>;
@@ -106,7 +109,7 @@ function NodeOutput({ node }: { node: ProductionRunNode }) {
 
 /** Where a node worked: the sandbox computer's files, commands and checks, and how many model calls that took. */
 function NodeWork({ node }: { node: ProductionRunNode }) {
-  if (node.kind === 'assemble') return <p className="production-made-work">Assembled with no model</p>;
+  if (node.kind === 'assemble') return <p className="production-made-work">{node.fromTemplate ? 'Written with no model' : 'Assembled with no model'}</p>;
   if (!node.sandbox) return null;
   return <p className="production-made-work">{`Worked in its own sandbox computer${node.calls ? ` · ${node.calls} model calls` : ''}${node.tokens?.output ? ` · ${node.tokens.output.toLocaleString()} output tokens` : ''}`}</p>;
 }
