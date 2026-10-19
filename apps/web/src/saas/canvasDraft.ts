@@ -17,7 +17,12 @@ export type CanvasDraft = {
   document: CanvasDocument;
   /** An earlier release's cache kept for export: its base is not known, so it is never restored. */
   legacyCache?: true;
+  /** Written while its page had a save out, built on the same base: that save's document (its hash). If the page closed
+   * before the reply and the server stored the save, the cloud is one version on and holds exactly that document, which
+   * this draft, a later state of the same page, builds on. */
+  sending?: CanvasDraftSending;
 };
+export type CanvasDraftSending = { baseVersion: number; hash: string };
 export type SavedCanvasDraft = { key: string; raw: string; draft: CanvasDraft | null };
 type KeptDraftIdentity = { key: string; revision: string; baseVersion: number } | { key: string; raw: string };
 const MAX_KEPT_CORRUPT_RAW_LENGTH = 64 * 1024;
@@ -86,9 +91,26 @@ export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocum
   catch { return false; }
 }
 
+/** A document's identity as the server stores it (object key order aside); `canonical` when the caller has it already. */
+export function canvasDocumentHash(document: unknown, canonical = canonicalCanvasDocumentJSON(document)): string { return bytesHash(canonical); }
+
+/** The cloud version a draft can be restored onto: its base, or, when its page has closed (`closed`: no other tab has
+ * the canvas open), the cloud's version if the cloud holds exactly the save that page had out when it wrote the draft
+ * (see CanvasDraft.sending). Null when the cloud has moved on. `cloudHash` lets a caller hash a big cloud document once. */
+export function restorableCanvasDraftBase(draft: CanvasDraft, cloud: { version: number; document: unknown }, closed: boolean,
+  cloudHash: () => string = () => canvasDocumentHash(cloud.document)): number | null {
+  if (draft.legacyCache) return null;
+  if (draft.baseVersion === cloud.version) return cloud.version;
+  const sending = draft.sending;
+  return closed && sending && sending.baseVersion === draft.baseVersion && cloud.version === draft.baseVersion + 1 && sending.hash === cloudHash()
+    ? cloud.version : null;
+}
+
 /** Each editor owns a separate key. A second tab cannot overwrite the first tab's unsaved work. */
-export function persistCanvasDraft(storage: ScopedStorage, writerId: string, baseVersion: number, document: CanvasDocument): CanvasDraft {
-  const draft: CanvasDraft = { schemaVersion: 1, writerId, revision: crypto.randomUUID(), baseVersion, dirty: true, updatedAt: Date.now(), document };
+export function persistCanvasDraft(storage: ScopedStorage, writerId: string, baseVersion: number, document: CanvasDocument,
+  sending?: CanvasDraftSending | null): CanvasDraft {
+  const draft: CanvasDraft = { schemaVersion: 1, writerId, revision: crypto.randomUUID(), baseVersion, dirty: true, updatedAt: Date.now(), document,
+    ...(sending && sending.baseVersion === baseVersion ? { sending } : {}) };
   const key = `${CANVAS_DRAFT_PREFIX}${writerId}`;
   const raw = JSON.stringify(draft);
   try { storage.setItem(key, raw); }
@@ -144,6 +166,8 @@ export function readCanvasDrafts(storage: ScopedStorage): SavedCanvasDraft[] {
       if (draft.schemaVersion !== 1 || draft.dirty !== true || typeof draft.writerId !== 'string' || typeof draft.revision !== 'string'
         || !Number.isInteger(draft.baseVersion) || draft.baseVersion < 1 || !draft.document || draft.document.version !== 2
         || !Array.isArray(draft.document.nodes) || !Array.isArray(draft.document.edges)) throw new Error('invalid draft');
+      // A damaged record of a save that was out proves nothing; the draft itself stays whole.
+      if (draft.sending !== undefined && !(Number.isInteger(draft.sending?.baseVersion) && typeof draft.sending?.hash === 'string')) delete draft.sending;
       return { key, raw, draft: draft as CanvasDraft };
     } catch { return { key, raw, draft: null }; } // Damaged drafts remain available for raw export, never silently deleted.
   }).sort((a, b) => (b.draft?.updatedAt || 0) - (a.draft?.updatedAt || 0));
@@ -162,7 +186,7 @@ export function acknowledgeCanvasDraft(storage: ScopedStorage, sent: CanvasDraft
   const current = JSON.parse(raw) as CanvasDraft;
   if (current.revision === sent.revision) storage.removeItem(key);
   else if (current.baseVersion === sent.baseVersion) {
-    // Edits made during the request now build on its confirmed version and remain dirty.
-    storage.setItem(key, JSON.stringify({ ...current, baseVersion: savedVersion }));
+    // Edits made during the request now build on its confirmed version and remain dirty; no save is out any more.
+    storage.setItem(key, JSON.stringify({ ...current, baseVersion: savedVersion, sending: undefined }));
   }
 }

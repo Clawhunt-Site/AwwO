@@ -91,6 +91,8 @@ export interface CanvasStore {
   inMemory(prefix: string): boolean;
   /** Whether any scope this page holds is kept in IndexedDB. */
   holdsStoredScopes(): boolean;
+  /** How many other tabs have the scope open; null when the browser cannot say. */
+  otherTabs(prefix: string): Promise<number | null>;
   get(prefix: string, key: string): string | null;
   set(prefix: string, key: string, value: string): void;
   remove(prefix: string, key: string): void;
@@ -122,6 +124,8 @@ type Scope = {
   /** Other tabs' unstored writes, each stored here too if it stays unstored. */
   watched: Map<string, ReturnType<typeof setTimeout>>;
   release: (() => void) | null;
+  /** This page's hold on the scope is held or waiting (it asked and was not refused). */
+  asked?: boolean;
 };
 type Marker = { h: string[]; s: [number, string] | null };
 
@@ -356,8 +360,9 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
     return new Promise<void>(acquired => {
       const late = setTimeout(acquired, 2000);
       const granted = () => { clearTimeout(late); acquired(); };
+      scope.asked = true;
       locks.request(lockName(scope.prefix), { mode: 'shared' }, () => new Promise<void>(release => { scope.release = release; granted(); }))
-        .catch(granted);
+        .catch(() => { scope.asked = false; granted(); });
     });
   }
 
@@ -686,6 +691,17 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
     isOpen(prefix) { return scopes.get(prefix)?.ready === true; },
     inMemory(prefix) { const scope = scopes.get(prefix); return Boolean(scope?.ready && !scope.persist); },
     holdsStoredScopes() { return [...scopes.values()].some(scope => scope.persist && scope.ready); },
+    async otherTabs(prefix) {
+      if (!options.locks?.query) return null;
+      // A tab whose hold still waits (behind a page sweeping the scope) has the canvas open too. This page is among the
+      // holds held or waiting once it has asked (opening asks), whichever it is at the moment of the query.
+      try {
+        const state = await options.locks.query();
+        const mine = scopes.get(prefix)?.asked ? 1 : 0;
+        const shared = (list: LockInfo[] | undefined) => (list ?? []).filter(lock => lock.name === lockName(prefix) && lock.mode !== 'exclusive').length;
+        return Math.max(0, shared(state.held) + shared(state.pending) - mine);
+      } catch { return null; }
+    },
     get(prefix, key) { return readyScope(prefix).entries.get(key)?.v ?? null; },
     set(prefix, key, value) { writeEntry(readyScope(prefix), key, String(value)); },
     remove(prefix, key) { writeEntry(readyScope(prefix), key, null); },
