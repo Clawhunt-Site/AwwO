@@ -167,6 +167,11 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if input && id == "reference" && (n.AgentKind == "image" || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D) {
 		return "image", true
 	}
+	// A video node's voices (M-1c): the audio its words call @Audio n, where its model takes voices (freezeMediaReferences);
+	// a run refuses one wired into a model that takes none (wiredVoicesUsable).
+	if input && id == "audio" && n.AgentKind == mediaKindVideo {
+		return mediaKindAudio, true
+	}
 	if !input && id == "result" {
 		if n.AgentKind == "image" || n.AgentKind == "video" || n.AgentKind == mediaKindAudio {
 			return n.AgentKind, true

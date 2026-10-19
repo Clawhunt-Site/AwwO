@@ -52,6 +52,20 @@ var mediaReferenceTypes = map[string]map[string]bool{
 	mediaProviderRunningHub: {"image/png": true, "image/jpeg": true, "image/webp": true},
 }
 
+// mediaAudioReferenceTypes are the voice types each provider takes (M-1c): RunningHub's multimodal video reads MP3 and
+// WAV (runningHubAudioField).
+var mediaAudioReferenceTypes = map[string]map[string]bool{
+	mediaProviderRunningHub: {"audio/mpeg": true, "audio/wav": true, "audio/x-wav": true},
+}
+
+// errVoiceReferenceUnusable refuses a generation whose voice cannot be used: wired into a video whose model takes none
+// (wiredVoicesUsable), one more than the model takes, of a type, size or length it does not read (media_voice_length.go),
+// without its stored file, or without any picture beside it (RunningHub reads a voice only beside a picture). Leaving
+// the voice out would make a speaking shot without its line. Its own code, so the reader is not told a picture failed
+// (media_reference_unavailable).
+var errVoiceReferenceUnusable = setupError{"media_voice_unavailable",
+	"A voice for this video can be used only by Video · From references: up to 3 MP3 or WAV files of this canvas, each 2 to 15 seconds (15 seconds in all) and up to 10 MB, beside at least one picture"}
+
 // mediaReferenceLimits are the providers whose uploads take less than maxMediaReferenceBytes: a larger picture is left
 // out when the run is admitted, as one of another type is, instead of failing the run at its upload.
 var mediaReferenceLimits = map[string]int64{mediaProviderRunningHub: rhMaxReferenceBytes}
@@ -83,31 +97,57 @@ var errSubjectReferenceUnusable = setupError{"media_reference_unavailable",
 // freezeMediaReferences picks the pictures a generation of model m starts from: the first ones the text names, up
 // to the model's limit, that are this canvas's uploads or generated media of a type the provider takes. Anything
 // else the text names (another canvas's file, a document, a deleted upload, a picture too large) is left out, except
-// for a subject-reference model, which refuses the generation instead (errSubjectReferenceUnusable).
+// for a subject-reference model, which refuses the generation instead (errSubjectReferenceUnusable). Voices the text
+// names to a model that takes them (M-1c) are counted apart, up to its own count of them; one it cannot use, or any
+// when no picture is frozen beside them, refuses the generation (errVoiceReferenceUnusable). The pictures and voices
+// keep the text's order, each kind numbered on its own. To any other model an audio file is not a picture, and is left
+// out as before (a voice WIRED into a video whose model takes none is refused by the canvas run: wiredVoicesUsable).
 func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasID, text string, m *mediaModel) ([]mediaReference, error) {
 	if m == nil || m.References <= 0 || canvasID == "" {
 		return nil, nil
 	}
 	numbered := subjectReferenceModel(m)
-	types := mediaReferenceTypes[m.Provider]
+	types, voiceTypes := mediaReferenceTypes[m.Provider], mediaAudioReferenceTypes[m.Provider]
 	limit := mediaReferenceLimit(m.Provider)
 	refs := []mediaReference{}
+	pictures, voices := 0, 0
+	var spoken float64
 	for _, id := range uploadReferences(text) {
-		if len(refs) >= m.References {
-			break
-		}
 		ref := mediaReference{ArtifactID: id}
 		var rel, contentType *string
 		e := q.QueryRow(ctx, "SELECT name,size,sha256,storage_path,content_type FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 AND (field_id=$4 OR field_id LIKE 'media-%')",
 			tid, canvasID, id, uploadField).Scan(&ref.Name, &ref.Size, &ref.SHA256, &rel, &contentType)
 		if noRows(e) {
-			if numbered {
+			// Past the model's pictures a missing file renumbers none of them, and is left out as before.
+			if numbered && pictures < m.References {
 				return nil, errSubjectReferenceUnusable
 			}
 			continue
 		}
 		if e != nil {
 			return nil, e
+		}
+		if contentType != nil && strings.HasPrefix(*contentType, "audio/") && m.AudioReferences > 0 {
+			// One voice more than the model takes, one of a type, size or length it does not read, or one without its
+			// stored file is refused, never left out: the shot would be made without that line.
+			if voices >= m.AudioReferences || rel == nil || !voiceTypes[*contentType] || ref.Size <= 0 || ref.Size > limit || len(ref.SHA256) != 64 {
+				return nil, errVoiceReferenceUnusable
+			}
+			path, ok := a.mediaFile(tid, *rel)
+			if !ok {
+				return nil, errVoiceReferenceUnusable
+			}
+			seconds, ok := voiceSeconds(path, *contentType)
+			if spoken += seconds; !ok || seconds < minVoiceSeconds+voiceLengthMargin || seconds > maxVoiceSeconds || spoken > maxVoicesSeconds {
+				return nil, errVoiceReferenceUnusable
+			}
+			ref.ContentType, ref.Path = *contentType, *rel
+			refs = append(refs, ref)
+			voices++
+			continue
+		}
+		if pictures >= m.References {
+			continue
 		}
 		if rel == nil || contentType == nil || !types[*contentType] || ref.Size <= 0 || ref.Size > limit || len(ref.SHA256) != 64 {
 			if numbered {
@@ -123,6 +163,10 @@ func (a *App) freezeMediaReferences(ctx context.Context, q querier, tid, canvasI
 		}
 		ref.ContentType, ref.Path = *contentType, *rel
 		refs = append(refs, ref)
+		pictures++
+	}
+	if voices > 0 && pictures == 0 {
+		return nil, errVoiceReferenceUnusable
 	}
 	if len(refs) == 0 {
 		return nil, nil
@@ -248,6 +292,10 @@ func referenceFileName(contentType string) string {
 		return "reference.jpg"
 	case "image/webp":
 		return "reference.webp"
+	case "audio/mpeg":
+		return "reference.mp3"
+	case "audio/wav", "audio/x-wav":
+		return "reference.wav"
 	}
 	return "reference.png"
 }

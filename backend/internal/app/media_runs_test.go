@@ -181,7 +181,8 @@ func (f *fakeRunningHub) serveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	header := r.MultipartForm.File["file"][0]
 	contentType := header.Header.Get("Content-Type")
-	if contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
+	// RunningHub's upload route takes the pictures and, for a voice reference (M-1c), MP3 and WAV (seen 2026-10-19).
+	if contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" && contentType != "audio/mpeg" && contentType != "audio/wav" {
 		w.WriteHeader(415)
 		return
 	}

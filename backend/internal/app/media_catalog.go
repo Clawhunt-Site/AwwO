@@ -85,6 +85,9 @@ type mediaModel struct {
 	// References is how many pictures a generation may start from (0: words only). The first image attached to the
 	// message, or wired into the node's reference input, is uploaded to the provider for that one task (media_refs.go).
 	References int `json:"references,omitempty"`
+	// AudioReferences is how many voices a generation may take as well (0: none): the audio files wired into a video
+	// node's audio input, which its words call @Audio 1, @Audio 2… and whose speaker's lips move to them (M-1c).
+	AudioReferences int `json:"audioReferences,omitempty"`
 	// Provider runs the model: RunningHub for the embedded catalog, Tripo for the 3D models (tripo.go).
 	Provider string `json:"-"`
 	// Version is the provider's own pinned model version, sent with every request (Tripo).
@@ -154,6 +157,11 @@ func validMediaModel(m *mediaModel) error {
 	if m.References < 0 || m.References > maxRunningHubReferences || (m.References > 0) != (reference != "") {
 		return errors.New("references")
 	}
+	// Voices the same way, and only beside pictures: RunningHub takes a voice only with a picture (or a video) given too.
+	voices := runningHubAudioField[m.ID]
+	if m.AudioReferences < 0 || m.AudioReferences > maxRunningHubAudioReferences || (m.AudioReferences > 0) != (voices != "") || (voices != "" && reference == "") {
+		return errors.New("audio references")
+	}
 	if m.Prompt.MinLength < 1 || m.Prompt.MaxLength < m.Prompt.MinLength || m.Prompt.MaxLength > 32768 {
 		return errors.New("prompt")
 	}
@@ -176,6 +184,12 @@ func validMediaModel(m *mediaModel) error {
 			return errors.New("reference field")
 		}
 		fields[reference] = true
+	}
+	if voices != "" {
+		if fields[voices] {
+			return errors.New("audio reference field")
+		}
+		fields[voices] = true
 	}
 	for i := range m.Params {
 		p := &m.Params[i]
@@ -509,6 +523,9 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 			// so a client says so instead of what a model that starts from one picture does.
 			if subjectReferenceModel(m) {
 				entry["referenceMode"] = "subjects"
+			}
+			if m.AudioReferences > 0 {
+				entry["audioReferences"] = m.AudioReferences
 			}
 			models = append(models, entry)
 		}

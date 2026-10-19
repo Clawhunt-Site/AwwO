@@ -9,18 +9,19 @@ import (
 )
 
 // The video made from reference pictures (2026-10-17, M-1a): RunningHub's multimodal route of the same family as
-// rh.seedance-2, offering only what a video node can use. Its reference video and audio slots, its real-person
-// conversion and its last frame (a picture among a video node's results) are not offered and never sent.
+// rh.seedance-2, offering only what a video node can use. Since M-1c (2026-10-19) it also takes up to three voices
+// (audioUrls) and its real-person switch (realPersonMode, off unless a node turns it on: without it RunningHub refuses
+// a photoreal person, code 1505); its reference video slots and its last frame are still not offered and never sent.
 func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 	m, ok := builtinMediaCatalog.model("rh.seedance-2-multimodal")
-	if !ok || m.Kind != mediaKindVideo || m.Mode != "text-to-video" || m.Provider != mediaProviderRunningHub || m.References != 9 ||
+	if !ok || m.Kind != mediaKindVideo || m.Mode != "text-to-video" || m.Provider != mediaProviderRunningHub || m.References != 9 || m.AudioReferences != 3 ||
 		m.Endpoint != "/openapi/v2/rhart-video/sparkvideo-2.0/multimodal-video" || m.Prompt != (mediaPrompt{MinLength: 1, MaxLength: 20480}) ||
-		m.Verified != "2026-10-17" || m.Label != [2]string{"视频 · 多图参考", "Video · From references"} || m.Vendor != mediaVendorShown ||
+		m.Verified != "2026-10-19" || m.Label != [2]string{"视频 · 多图参考", "Video · From references"} || m.Vendor != mediaVendorShown ||
 		m.Docs != "https://www.runninghub.ai/runninghub-api-doc-en/api-494859282.md" {
 		t.Fatalf("reference video model %+v", m)
 	}
-	if runningHubReferenceField[m.ID] != "imageUrls" {
-		t.Fatal("its pictures go in imageUrls", runningHubReferenceField[m.ID])
+	if runningHubReferenceField[m.ID] != "imageUrls" || runningHubAudioField[m.ID] != "audioUrls" {
+		t.Fatal("its pictures go in imageUrls and its voices in audioUrls", runningHubReferenceField[m.ID], runningHubAudioField[m.ID])
 	}
 	params := map[string]mediaParam{}
 	names := []string{}
@@ -28,7 +29,7 @@ func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 		params[p.Name] = p
 		names = append(names, p.Name)
 	}
-	if strings.Join(names, ",") != "resolution,duration,ratio,generateAudio,seed" {
+	if strings.Join(names, ",") != "resolution,duration,ratio,generateAudio,seed,realPersonMode" {
 		t.Fatal("parameters", names)
 	}
 	if p := params["resolution"]; p.Type != "enum" || strings.Join(p.Values, ",") != "480p,720p" || p.Default != "720p" {
@@ -46,8 +47,14 @@ func TestReferenceVideoModelIsInTheCatalogAndClosed(t *testing.T) {
 	if p := params["seed"]; p.Type != "integer" || *p.Min != -1 || *p.Max != 2147483647 || p.Default != float64(-1) {
 		t.Fatalf("seed %+v", p)
 	}
+	if p := params["realPersonMode"]; p.Type != "boolean" || p.Default != false || p.Label != [2]string{"真人模式", "Real people"} {
+		t.Fatalf("realPersonMode %+v", p)
+	}
+	if on, err := m.resolveMediaParams(json.RawMessage(`{"realPersonMode":true}`)); err != nil || on["realPersonMode"] != true {
+		t.Fatal("a node turns real people on", on, err)
+	}
 	for _, raw := range []string{`{"resolution":"4k"}`, `{"duration":"-1"}`, `{"seed":-2}`, `{"seed":2147483648}`, `{"returnLastFrame":true}`,
-		`{"realPersonMode":false}`, `{"videoUrls":[]}`, `{"imageUrls":["https://x.test/a.png"]}`} {
+		`{"realPersonMode":"yes"}`, `{"conversionSlots":["all"]}`, `{"videoUrls":[]}`, `{"imageUrls":["https://x.test/a.png"]}`, `{"audioUrls":[]}`} {
 		if _, err := m.resolveMediaParams(json.RawMessage(raw)); err == nil {
 			t.Fatal("accepted", raw)
 		}
@@ -80,9 +87,9 @@ func TestRunningHubRequestCarriesReferencePictures(t *testing.T) {
 		t.Fatal(err)
 	}
 	refs := []string{"https://files.runninghub.ai/openapi/a.png", "https://files.runninghub.ai/openapi/b.png"}
-	body := runningHubRequest(m, "@Image 1 boards the ship in @Image 2", values, refs)
+	body := runningHubRequest(m, "@Image 1 boards the ship in @Image 2", values, nil, refs)
 	want := map[string]any{"prompt": "@Image 1 boards the ship in @Image 2", "resolution": "720p", "duration": "8", "ratio": "16:9",
-		"generateAudio": true, "seed": float64(-1)}
+		"generateAudio": true, "seed": float64(-1), "realPersonMode": false}
 	urls, _ := body["imageUrls"].([]string)
 	if len(body) != len(want)+1 || len(urls) != 2 || urls[0] != refs[0] || urls[1] != refs[1] {
 		t.Fatalf("body with pictures %v", body)
@@ -101,7 +108,7 @@ func TestRunningHubRequestCarriesReferencePictures(t *testing.T) {
 		t.Fatal("imageUrls on the wire", string(raw))
 	}
 	// Without pictures the field is not sent at all.
-	plain := runningHubRequest(m, "a ship at dawn", values, nil)
+	plain := runningHubRequest(m, "a ship at dawn", values, nil, nil)
 	if _, sent := plain["imageUrls"]; sent || len(plain) != len(want) {
 		t.Fatalf("body without pictures %v", plain)
 	}
@@ -110,11 +117,11 @@ func TestRunningHubRequestCarriesReferencePictures(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		many = append(many, fakeReferenceURL(i+1))
 	}
-	if urls, _ := runningHubRequest(m, "a ship", values, many)["imageUrls"].([]string); len(urls) != 9 || urls[0] != many[0] || urls[8] != many[8] {
+	if urls, _ := runningHubRequest(m, "a ship", values, nil, many)["imageUrls"].([]string); len(urls) != 9 || urls[0] != many[0] || urls[8] != many[8] {
 		t.Fatal("capped at the model's count", urls)
 	}
 	// Nothing frozen replaces the pictures or the words.
-	tampered := runningHubRequest(m, "a ship", map[string]any{"duration": "5", "imageUrls": []string{"https://evil.test/x.png"}, "prompt": "other"}, refs[1:])
+	tampered := runningHubRequest(m, "a ship", map[string]any{"duration": "5", "imageUrls": []string{"https://evil.test/x.png"}, "prompt": "other"}, nil, refs[1:])
 	if urls, _ := tampered["imageUrls"].([]string); len(urls) != 1 || urls[0] != refs[1] || tampered["prompt"] != "a ship" || len(tampered) != 3 {
 		t.Fatalf("body from a tampered plan %v", tampered)
 	}
@@ -122,12 +129,49 @@ func TestRunningHubRequestCarriesReferencePictures(t *testing.T) {
 	for _, id := range []string{"rh.seedance-2", "rh.seedream-v5-pro", "rh.minimax-speech-2-8-hd"} {
 		other, _ := builtinMediaCatalog.model(id)
 		resolved, _ := other.resolveMediaParams(nil)
-		with, without := runningHubRequest(other, "words", resolved, refs), runningHubRequest(other, "words", resolved, nil)
+		with, without := runningHubRequest(other, "words", resolved, nil, refs), runningHubRequest(other, "words", resolved, nil, nil)
 		a, _ := json.Marshal(with)
 		b, _ := json.Marshal(without)
 		if !bytes.Equal(a, b) || bytes.Contains(a, []byte("imageUrls")) {
 			t.Fatal(id, "sends pictures", string(a))
 		}
+	}
+}
+
+// Voices (M-1c) go in audioUrls, each kind in its own order and up to its own count: the refs say which URL is a voice
+// (a URL with no ref is a picture, as before); a model that names no field for voices never sends one.
+func TestRunningHubRequestCarriesVoices(t *testing.T) {
+	m, _ := builtinMediaCatalog.model("rh.seedance-2-multimodal")
+	values, err := m.resolveMediaParams(json.RawMessage(`{"duration":"6","realPersonMode":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	picture := mediaReference{ContentType: "image/png"}
+	voice := mediaReference{ContentType: "audio/mpeg"}
+	refs := []mediaReference{picture, voice, picture, voice, voice, voice}
+	urls := []string{fakeReferenceURL(1), fakeReferenceURL(2), fakeReferenceURL(3), fakeReferenceURL(4), fakeReferenceURL(5), fakeReferenceURL(6)}
+	body := runningHubRequest(m, "@Image 1 says @Audio 1", values, refs, urls)
+	images, _ := body["imageUrls"].([]string)
+	voices, _ := body["audioUrls"].([]string)
+	if len(images) != 2 || images[0] != urls[0] || images[1] != urls[2] || len(voices) != 3 || voices[0] != urls[1] || voices[1] != urls[3] || voices[2] != urls[4] {
+		t.Fatalf("pictures %v and voices %v", images, voices)
+	}
+	if body["realPersonMode"] != true || body["prompt"] != "@Image 1 says @Audio 1" {
+		t.Fatalf("body %v", body)
+	}
+	raw, _ := json.Marshal(body)
+	if !bytes.Contains(raw, []byte(`"audioUrls":["`+urls[1]+`","`+urls[3]+`","`+urls[4]+`"]`)) {
+		t.Fatal("audioUrls on the wire", string(raw))
+	}
+	// Pictures alone send no audioUrls at all.
+	if _, sent := runningHubRequest(m, "a ship", values, []mediaReference{picture}, urls[:1])["audioUrls"]; sent {
+		t.Fatal("audioUrls without a voice")
+	}
+	// A model without a voice field sends none, whatever it is handed.
+	other, _ := builtinMediaCatalog.model("rh.seedance-2")
+	resolved, _ := other.resolveMediaParams(nil)
+	if b, _ := json.Marshal(runningHubRequest(other, "words", resolved, refs, urls)); bytes.Contains(b, []byte("audioUrls")) || bytes.Contains(b, []byte("imageUrls")) {
+		t.Fatal("a text-only model sends references", string(b))
 	}
 }
 
@@ -138,6 +182,9 @@ func TestParseMediaCatalogChecksReferenceFields(t *testing.T) {
 	refs := func(model string, n int, params ...any) func(map[string]any) {
 		return func(m map[string]any) {
 			m["id"], m["kind"], m["mode"], m["endpoint"], m["references"] = model, "video", "text-to-video", "/openapi/v2/test/refs", n
+			if model == id {
+				m["audioReferences"] = 3 // the reference video takes voices too (M-1c)
+			}
 			if params != nil {
 				m["params"] = params
 			}
@@ -156,6 +203,19 @@ func TestParseMediaCatalogChecksReferenceFields(t *testing.T) {
 		"more references than it takes":  refs(id, maxRunningHubReferences+1),
 		"negative references":            refs(id, -1),
 		"a parameter named as the field": refs(id, 9, enum("imageUrls")),
+		"voices on a model without the field": func(m map[string]any) {
+			refs("rh.test-video", 0)(m)
+			m["audioReferences"] = 1
+		},
+		"more voices than it takes": func(m map[string]any) {
+			refs(id, 9)(m)
+			m["audioReferences"] = maxRunningHubAudioReferences + 1
+		},
+		"a voice field and no voices": func(m map[string]any) {
+			refs(id, 9)(m)
+			m["audioReferences"] = 0
+		},
+		"a parameter named as the voices' field": refs(id, 9, enum("audioUrls")),
 	} {
 		if _, err := parseMediaCatalog(mediaCatalogFixture(mutate)); err == nil {
 			t.Error("accepted catalog with", name)
@@ -181,6 +241,9 @@ func TestParseMediaCatalogChecksReferenceFields(t *testing.T) {
 	if !collides(func() { runningHubPromptField[id] = "imageUrls" }, func() { delete(runningHubPromptField, id) }) {
 		t.Error("accepted the words on the pictures' field")
 	}
+	if !collides(func() { runningHubFixed[id] = map[string]any{"audioUrls": []string{}} }, func() { delete(runningHubFixed, id) }) {
+		t.Error("accepted a fixed field on the voices' field")
+	}
 	if _, err := parseMediaCatalog(mediaCatalogFixture(refs(id, 9, enum("ratio")))); err != nil {
 		t.Fatal("the tables were not put back", err)
 	}
@@ -205,7 +268,8 @@ func TestRunningHubUploadsAReference(t *testing.T) {
 	if submits, _ := rh.counts(); submits != 0 {
 		t.Fatal("an upload is not a task", submits)
 	}
-	for _, kind := range []struct{ contentType, name string }{{"image/jpeg", "reference.jpg"}, {"image/webp", "reference.webp"}} {
+	for _, kind := range []struct{ contentType, name string }{{"image/jpeg", "reference.jpg"}, {"image/webp", "reference.webp"},
+		{"audio/mpeg", "reference.mp3"}, {"audio/wav", "reference.wav"}} {
 		before := len(rh.uploaded())
 		if _, err := hub.uploadReference(context.Background(), testReference(testPNG, kind.contentType), testPNG, "run1"); err != nil {
 			t.Fatal(kind.contentType, err)
@@ -334,7 +398,8 @@ func TestPostgresMediaRunUploadsReferencePicturesBeforeItsTask(t *testing.T) {
 		len(urls) != 2 || urls[0] != fakeReferenceURL(1) || urls[1] != fakeReferenceURL(2) {
 		t.Fatalf("the submission follows both uploads and names them in order %+v", sent)
 	}
-	want := map[string]any{"prompt": words, "resolution": "720p", "duration": "6", "ratio": "adaptive", "generateAudio": true, "seed": float64(-1)}
+	want := map[string]any{"prompt": words, "resolution": "720p", "duration": "6", "ratio": "adaptive", "generateAudio": true, "seed": float64(-1),
+		"realPersonMode": false}
 	if len(sent.body) != len(want)+1 {
 		t.Fatalf("submission %+v", sent.body)
 	}

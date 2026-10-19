@@ -678,6 +678,7 @@
         "maxLength": 20480
       },
       "references": 9,
+      "audioReferences": 3,
       "params": [
         {
           "name": "resolution",
@@ -752,10 +753,19 @@
             "随机种子",
             "Seed"
           ]
+        },
+        {
+          "name": "realPersonMode",
+          "type": "boolean",
+          "default": false,
+          "label": [
+            "真人模式",
+            "Real people"
+          ]
         }
       ],
       "docs": "https://www.runninghub.ai/runninghub-api-doc-en/api-494859282.md",
-      "verified": "2026-10-17"
+      "verified": "2026-10-19"
     },
     {
       "id": "rh.veo-3-1-fast",

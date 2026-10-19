@@ -98,7 +98,7 @@ func TestAudioModelsAreInTheCatalogAndClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := runningHubRequest(speech, "(sighs) The rain will not stop.", values, nil)
+	body := runningHubRequest(speech, "(sighs) The rain will not stop.", values, nil, nil)
 	want := map[string]any{"text": "(sighs) The rain will not stop.", "voice_id": "Young_Knight", "emotion": "sad", "speed": 1.25, "pitch": int64(-3),
 		"english_normalization": true, "enable_base64_output": false}
 	if len(body) != len(want) {
@@ -110,21 +110,21 @@ func TestAudioModelsAreInTheCatalogAndClosed(t *testing.T) {
 		}
 	}
 	values, _ = music.resolveMediaParams(nil)
-	body = runningHubRequest(music, "warm strings at dusk", values, nil)
+	body = runningHubRequest(music, "warm strings at dusk", values, nil, nil)
 	if len(body) != 5 || body["prompt"] != "warm strings at dusk" || body["sampleRate"] != "44100" || body["bitrate"] != "256000" || body["format"] != "mp3" ||
 		body["isInstrumental"] != true {
 		t.Fatalf("music body %v", body)
 	}
 	// Nothing frozen replaces the words or a fixed field, and a key the model does not have is not sent.
 	body = runningHubRequest(speech, "Hold the line.", map[string]any{"voice": "Abbess", "text": "something else",
-		"enable_base64_output": true, "voice_id": "Elegant_Man", "unknown": 1}, nil)
+		"enable_base64_output": true, "voice_id": "Elegant_Man", "unknown": 1}, nil, nil)
 	if body["text"] != "Hold the line." || body["enable_base64_output"] != false || body["voice_id"] != "Abbess" || body["unknown"] != nil || len(body) != 3 {
 		t.Fatalf("speech body from a tampered plan %v", body)
 	}
 	// An image model's request is as before: the prompt and its parameters under their own names.
 	image, _ := builtinMediaCatalog.model("rh.seedream-v5-pro")
 	values, _ = image.resolveMediaParams(nil)
-	if body = runningHubRequest(image, "a cat", values, nil); len(body) != 3 || body["prompt"] != "a cat" || body["resolution"] != "2k" || body["outputFormat"] != "jpeg" {
+	if body = runningHubRequest(image, "a cat", values, nil, nil); len(body) != 3 || body["prompt"] != "a cat" || body["resolution"] != "2k" || body["outputFormat"] != "jpeg" {
 		t.Fatalf("image body %v", body)
 	}
 	// A choice outside the closed lists is refused, never sent.

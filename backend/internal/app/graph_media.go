@@ -27,11 +27,32 @@ func graphMediaNode(n graphNode) bool {
 	return n.Kind == "session" && (n.AgentKind == mediaKindImage || n.AgentKind == mediaKindVideo || n.AgentKind == mediaKindModel3D || n.AgentKind == mediaKindAudio)
 }
 
-// frozenMediaNode reports whether the graph admitted node nid as a generation (its snapshot holds a media plan).
-func (a *App) frozenMediaNode(ctx context.Context, tid, gid, nid string) (bool, error) {
+// frozenMediaNode reports whether the graph admitted node nid as a generation (its snapshot holds a media plan), and the
+// model that plan froze: the bound agent's, which the document's own copy of it need not be.
+func (a *App) frozenMediaNode(ctx context.Context, tid, gid, nid string) (bool, string, error) {
 	var media bool
-	err := a.db.QueryRow(ctx, "SELECT COALESCE(execution_snapshot ? 'media',false) FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, nid).Scan(&media)
-	return media, err
+	var model string
+	err := a.db.QueryRow(ctx, "SELECT COALESCE(execution_snapshot ? 'media',false),COALESCE(execution_snapshot->'media'->>'model','') FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3",
+		tid, gid, nid).Scan(&media, &model)
+	return media, model, err
+}
+
+// wiredVoicesUsable refuses a canvas run's video node with a voice wired into its audio input when the model the run
+// froze for it takes none, or when that wire's node delivered no voice (an audio node bound to a text agent answers in
+// words) (M-1c): the speaking shot would be made without its line, so the node fails before anything is paid for. (An
+// audio file attached to the node's message is left out instead, as any file the model does not read is:
+// freezeMediaReferences.) An unknown model is admission's to refuse.
+func wiredVoicesUsable(n graphNode, d graphDocument, model string, outputs map[string]string) error {
+	m, ok := builtinMediaCatalog.model(model)
+	if !ok {
+		return nil
+	}
+	for _, e := range d.Edges {
+		if e.ToNode == n.ID && e.ToPort == "audio" && (m.AudioReferences <= 0 || wiredReferenceLines([]graphEdge{e}, outputs) == "") {
+			return errors.New(errVoiceReferenceUnusable.code)
+		}
+	}
+	return nil
 }
 
 // graphMediaDraft is the prompt a media node's next Send would generate from: the draft of its active conversation,
@@ -76,9 +97,10 @@ func lastMediaPrompt(ctx context.Context, q querier, tid, sid string) string {
 }
 
 // graphMediaPrompt is what a media node generates from in a canvas run: the pictures wired into its reference input
-// (as file lines, in canvas order), its own prompt (its draft, or else its latest own Send), then each upstream
-// delivery into its context input in canvas order, separated by blank lines. Upstream deliveries never contribute a
-// file line. The model's length limits and which pictures it takes are applied at admission (admitGraphMedia).
+// and the voices wired into a video node's audio input (as file lines, in canvas order), its own prompt (its draft, or
+// else its latest own Send), then each upstream delivery into its context input in canvas order, separated by blank
+// lines. Upstream deliveries never contribute a file line. The model's length limits and which pictures and voices it
+// takes are applied at admission (admitGraphMedia).
 func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode, d graphDocument, outputs map[string]string) (string, error) {
 	nodes := map[string]graphNode{}
 	for _, v := range d.Nodes {
@@ -89,7 +111,7 @@ func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode
 		switch {
 		case e.ToNode == n.ID && e.ToPort == "context":
 			deps = append(deps, e)
-		case e.ToNode == n.ID && e.ToPort == "reference":
+		case e.ToNode == n.ID && (e.ToPort == "reference" || e.ToPort == "audio"):
 			refs = append(refs, e)
 		}
 	}
@@ -140,8 +162,9 @@ func (a *App) graphMediaPrompt(ctx context.Context, tid, sid string, n graphNode
 	return strings.Join(parts, "\n\n"), nil
 }
 
-// wiredReferenceLines are the file lines of the pictures upstream image nodes delivered into a reference input,
-// read from their awwo.media records (any other delivery has no picture to offer and adds nothing).
+// wiredReferenceLines are the file lines of the pictures upstream image nodes delivered into a reference input, and of
+// the voices audio nodes delivered into an audio input, read from their awwo.media records (any other delivery has no
+// such file to offer and adds nothing).
 func wiredReferenceLines(edges []graphEdge, outputs map[string]string) string {
 	lines := []string{}
 	for _, e := range edges {
@@ -152,8 +175,13 @@ func wiredReferenceLines(edges []graphEdge, outputs map[string]string) string {
 		if json.Unmarshal([]byte(strings.TrimSpace(outputs[e.FromNode])), &record) != nil || record.Type != mediaOutputType {
 			continue
 		}
+		// A picture comes by the reference input, a voice by the audio input: each only by its own.
+		kind := "image/"
+		if e.ToPort == "audio" {
+			kind = "audio/"
+		}
 		for _, item := range record.Items {
-			if strings.HasPrefix(item.ContentType, "image/") && uploadRefPattern.MatchString(artifactRefPrefix+item.ArtifactID) {
+			if strings.HasPrefix(item.ContentType, kind) && uploadRefPattern.MatchString(artifactRefPrefix+item.ArtifactID) {
 				lines = append(lines, mediaReferenceLines([]mediaReference{{ArtifactID: item.ArtifactID, Name: item.Name}}))
 			}
 		}

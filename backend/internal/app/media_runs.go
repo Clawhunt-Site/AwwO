@@ -584,7 +584,7 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	case mediaProviderJimeng:
 		body = jimengRequest(m, text, plan.Params, id, references)
 	default:
-		body = runningHubRequest(m, text, plan.Params, references)
+		body = runningHubRequest(m, text, plan.Params, plan.References, references)
 	}
 	// One admitted run is one provider task: a submission that may or may not have reached the
 	// provider is never retried, because a retry could pay for the same generation twice. Nor is it

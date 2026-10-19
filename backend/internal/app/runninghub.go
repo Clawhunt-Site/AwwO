@@ -116,11 +116,17 @@ func runningHubWireName(id, name string) string {
 // check refuses references on it, and refuses a parameter or a fixed field on this one.
 var runningHubReferenceField = map[string]string{"rh.seedance-2-multimodal": "imageUrls"}
 
+// runningHubAudioField names the request field a RunningHub model's voices go in (M-1c), the same way: the URLs their
+// uploads answered, in the order the run froze them. Only a model that takes pictures takes voices (RunningHub reads a
+// voice only beside a picture or a video).
+var runningHubAudioField = map[string]string{"rh.seedance-2-multimodal": "audioUrls"}
+
 // runningHubRequest is the body of one RunningHub task: the resolved values of the model's own parameters under their
-// request names, then its fixed fields, its reference pictures' URLs (in order, up to the model's count, only for a
-// model that names a field for them) and the words under its prompt field, which nothing frozen can replace (a
-// snapshot from another catalog version included).
-func runningHubRequest(m *mediaModel, prompt string, params map[string]any, references []string) map[string]any {
+// request names, then its fixed fields, its reference pictures' and voices' URLs (each kind in order, up to the model's
+// count of it, only for a model that names a field for it; refs says which URL is which, a URL without one is a
+// picture) and the words under its prompt field, which nothing frozen can replace (a snapshot from another catalog
+// version included).
+func runningHubRequest(m *mediaModel, prompt string, params map[string]any, refs []mediaReference, references []string) map[string]any {
 	body := map[string]any{}
 	for i := range m.Params {
 		if value, ok := params[m.Params[i].Name]; ok {
@@ -130,8 +136,19 @@ func runningHubRequest(m *mediaModel, prompt string, params map[string]any, refe
 	for field, value := range runningHubFixed[m.ID] {
 		body[field] = value
 	}
-	if field := runningHubReferenceField[m.ID]; field != "" && len(references) > 0 && m.References > 0 {
-		body[field] = slices.Clone(references[:min(len(references), m.References)])
+	pictures, voices := []string{}, []string{}
+	for i, url := range references {
+		if i < len(refs) && strings.HasPrefix(refs[i].ContentType, "audio/") {
+			voices = append(voices, url)
+		} else {
+			pictures = append(pictures, url)
+		}
+	}
+	if field := runningHubReferenceField[m.ID]; field != "" && len(pictures) > 0 && m.References > 0 {
+		body[field] = slices.Clone(pictures[:min(len(pictures), m.References)])
+	}
+	if field := runningHubAudioField[m.ID]; field != "" && len(voices) > 0 && m.AudioReferences > 0 {
+		body[field] = slices.Clone(voices[:min(len(voices), m.AudioReferences)])
 	}
 	body[runningHubPromptFieldOf(m.ID)] = prompt
 	return body
@@ -147,6 +164,9 @@ const (
 	rhMaxReferenceURL = 2048
 	// maxRunningHubReferences is the most pictures a RunningHub model takes (the multimodal video's imageUrls: 9).
 	maxRunningHubReferences = 9
+	// maxRunningHubAudioReferences is the most voices one takes (the multimodal video's audioUrls: 3, each 2–15 s and
+	// together at most 15 s, which admission checks before RunningHub does: media_voice_length.go).
+	maxRunningHubAudioReferences = 3
 )
 
 // uploadReference stores one reference picture with RunningHub (JPEG, PNG or WebP, up to 10 MB) under a neutral name
@@ -154,7 +174,8 @@ const (
 // anything else a closed code (never RunningHub's message). A request that never got an answer, a busy answer and a
 // server error are transient, so the caller tries again (nothing was created); every other refusal is final.
 func (h *runningHub) uploadReference(ctx context.Context, ref mediaReference, data []byte, _ string) (string, error) {
-	if !mediaReferenceTypes[mediaProviderRunningHub][ref.ContentType] || len(data) == 0 || len(data) > rhMaxReferenceBytes {
+	if !(mediaReferenceTypes[mediaProviderRunningHub][ref.ContentType] || mediaAudioReferenceTypes[mediaProviderRunningHub][ref.ContentType]) ||
+		len(data) == 0 || len(data) > rhMaxReferenceBytes {
 		return "", &rhError{Code: "media_reference_unavailable"}
 	}
 	if ctx.Err() != nil {
@@ -579,8 +600,12 @@ func rhCodeError(code string) error {
 		return &rhError{Code: "media_provider_balance"}
 	case "415", "421", "1003", "1010", "1011":
 		return &rhError{Code: "media_provider_busy", Transient: true}
-	case "433", "1501", "1505":
+	case "433", "1501":
 		return &rhError{Code: "media_content_rejected"}
+	case "1505":
+		// A photorealistic person, which Video · From references takes with its real-person switch on (M-1c): its own
+		// code, so the reader is told so.
+		return &rhError{Code: "media_real_person_rejected"}
 	case "301", "1001", "1007", "1008", "1013":
 		return &rhError{Code: "media_params_invalid"}
 	case "1006", "1504":

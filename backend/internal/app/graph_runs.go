@@ -637,14 +637,16 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			}
 			var prompt string
 			var err error
-			media := false
+			media, model := false, ""
 			if graphMediaNode(n) {
-				if media, err = a.frozenMediaNode(ctx, tid, id, n.ID); err != nil {
+				if media, model, err = a.frozenMediaNode(ctx, tid, id, n.ID); err != nil {
 					continue
 				}
 			}
 			if media {
-				prompt, err = a.graphMediaPrompt(ctx, tid, s.SessionID, n, d, outputs)
+				if err = wiredVoicesUsable(n, d, model, outputs); err == nil {
+					prompt, err = a.graphMediaPrompt(ctx, tid, s.SessionID, n, d, outputs)
+				}
 			} else {
 				prompt, err = graphPrompt(n, d, outputs)
 			}
