@@ -61,6 +61,11 @@ def classify_error(error: BaseException) -> dict:
         return failure_event("MODEL_UNAVAILABLE")
     if isinstance(status, int) and status >= 400:
         return failure_event("MODEL_REQUEST_REJECTED")
-    if name == "APIConnectionTimeoutError":
+    # The Python SDK's timeout is APITimeoutError (the Node SDK's name is APIConnectionTimeoutError). One raised while
+    # connecting (5 s) never reached the model service, which is unavailable: the run's deadline is the other kind, and
+    # a node whose run timed out is not run again (graph_retry.go), while an outage may be.
+    if name in ("APIConnectionTimeoutError", "APITimeoutError"):
+        if type(error.__cause__).__name__ == "ConnectTimeout":
+            return failure_event("MODEL_UNAVAILABLE")
         return failure_event("DEADLINE_EXCEEDED")
     return failure_event("MODEL_ERROR")

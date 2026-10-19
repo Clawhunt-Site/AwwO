@@ -355,7 +355,9 @@ def load_config(env: dict | None = None) -> Config:
         api_key=api_key, base_url=base_url, protocol=protocol,
         environment=environment,
         enabled_tools=tuple(enabled_tools),
-        timeout_ms=_integer(env, "AWWO_OPENAI_AGENTS_TIMEOUT_MS", 120_000, 100, 600_000),
+        # A run's whole deadline. Claude Opus 5.5 thinks before its first word and may write 64,000 tokens, so a 600 s
+        # cap cut long tasks short (2026-10-18): up to 30 minutes, the JS worker's bound, under the API's own deadline.
+        timeout_ms=_integer(env, "AWWO_OPENAI_AGENTS_TIMEOUT_MS", 120_000, 100, 1_800_000),
         max_concurrency=_integer(env, "AWWO_OPENAI_AGENTS_MAX_CONCURRENCY", 4, 1, 32),
         max_output_bytes=_integer(env, "AWWO_OPENAI_AGENTS_MAX_OUTPUT_BYTES", 1_048_576, 1024, 8_388_608),
         context_window=context_window, max_tokens=max_tokens,

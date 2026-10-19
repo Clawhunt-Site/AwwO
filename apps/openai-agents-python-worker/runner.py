@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator
 
 from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, RunConfig, Runner
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Timeout
 
 from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport
 from config import MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
@@ -263,7 +263,10 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
         }, **({"transport": bridge} if bridge else {}))
-        client = AsyncOpenAI(base_url=profile.base_url, api_key=BRIDGE_API_KEY if bridge else profile.api_key, max_retries=0, http_client=http_client)
+        # The SDK's own 600 s default would cut a call short of the run's deadline (the Bedrock bridge keeps its own read
+        # timeout, set from the same deadline above).
+        client = AsyncOpenAI(base_url=profile.base_url, api_key=BRIDGE_API_KEY if bridge else profile.api_key, max_retries=0, http_client=http_client,
+                             timeout=Timeout(config.timeout_ms / 1000, connect=5.0))
         tools = _build_tools(request, config)
         agent = Agent(
             name="awwo",

@@ -39,6 +39,49 @@ def catalog_config(**overrides):
     return load_config({**GATE, "AWWO_BEDROCK_CATALOG": "builtin-all", **overrides})
 
 
+class DeadlineTests(unittest.TestCase):
+    def test_a_run_may_be_given_up_to_thirty_minutes(self):
+        # 2 minutes by default; production gives 25 (the old cap, 10, cut Claude Opus 5.5's long tasks short).
+        self.assertEqual(catalog_config().timeout_ms, 120_000)
+        for value in ("1500000", "1800000"):
+            self.assertEqual(catalog_config(AWWO_OPENAI_AGENTS_TIMEOUT_MS=value).timeout_ms, int(value))
+        with self.assertRaises(ConfigError):
+            catalog_config(AWWO_OPENAI_AGENTS_TIMEOUT_MS="1800001")
+
+    def test_the_python_sdks_timeout_is_the_runs_deadline(self):
+        from openai import APITimeoutError
+        request = httpx2.Request("POST", "https://gate.example/v1/chat/completions")
+        self.assertEqual(classify_error(APITimeoutError(request=request))["code"], "DEADLINE_EXCEEDED")
+        # The SDK raises its timeout from the transport's own exception: a read past the deadline is the deadline, while
+        # one that could not connect (5 s) never reached the model service, which a retry may find again.
+        for cause, code in ((httpx2.ReadTimeout("read", request=request), "DEADLINE_EXCEEDED"),
+                            (httpx2.ConnectTimeout("connect", request=request), "MODEL_UNAVAILABLE")):
+            try:
+                raise APITimeoutError(request=request) from cause
+            except APITimeoutError as error:
+                self.assertEqual(classify_error(error)["code"], code, type(cause).__name__)
+
+
+class ConnectTimeoutRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_run_that_cannot_connect_reads_as_the_service_unavailable_through_the_real_sdk(self):
+        # The SDK raises its APITimeoutError from the transport's ConnectTimeout (openai 3.x, `from err`): the run never
+        # reached the model service, which a canvas node is run again after, unlike the run's own deadline (2026-10-18).
+        import runner
+
+        def refuse(request):
+            raise httpx2.ConnectTimeout("connect timed out", request=request)
+        original = runner.DefaultAsyncHttpxClient
+
+        def client(**kwargs):
+            kwargs.setdefault("transport", httpx2.MockTransport(refuse))
+            return original(**kwargs)
+        runner.DefaultAsyncHttpxClient = client
+        self.addCleanup(setattr, runner, "DefaultAsyncHttpxClient", original)
+        # The Gate's own URL: the mock transport answers before any connection is tried.
+        events = [event async for event in stream_run(RunRequest("r1", "t1", "s1", "Say hello", []), load_config(GATE), asyncio.Event())]
+        self.assertEqual((events[-1]["type"], events[-1].get("code")), ("failed", "MODEL_UNAVAILABLE"), events[-1])
+
+
 class VectorParityTests(unittest.TestCase):
     """The Python bridge must match the TypeScript bridge on the shared vectors."""
 
@@ -303,6 +346,27 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.record["auth"], {"bearer_token": BEDROCK_KEY})
         self.assertEqual(self.record["read_timeout"], 120.0)
         self.assertEqual(self.record["thread"], "awwo-bedrock-converse", "boto3 never blocks the event loop")
+
+    async def test_a_long_deadline_reaches_the_bridge_and_the_client_and_opus_may_write_64000_tokens(self):
+        # Production gives a run 25 minutes, since Claude Opus 5.5 thinks before its first word (2026-10-18: a node cut
+        # at 600 s with nothing written): Bedrock's read and the OpenAI client's own timeout follow the run's deadline,
+        # never the SDK's 600 s default, and the call may write the model's 64,000 tokens.
+        import runner
+        seen = {}
+        original = runner.AsyncOpenAI
+
+        def client(**kwargs):
+            seen.update(kwargs)
+            return original(**kwargs)
+        runner.AsyncOpenAI = client
+        self.addCleanup(setattr, runner, "AsyncOpenAI", original)
+        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="1500000")
+        request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
+        events = [event async for event in stream_run(request, config, asyncio.Event())]
+        self.assertEqual(events[-1]["type"], "completed", events[-1])
+        self.assertEqual(self.record["read_timeout"], 1500.0)
+        self.assertEqual((seen["timeout"].read, seen["timeout"].connect), (1500.0, 5.0))
+        self.assertEqual(self.record["input"]["inferenceConfig"]["maxTokens"], 64000)
 
     async def test_tool_call_result_is_the_output(self):
         self.events = [{"messageStart": {"role": "assistant"}},

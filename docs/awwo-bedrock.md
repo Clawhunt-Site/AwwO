@@ -231,3 +231,10 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
   - 同时（11:46Z）从实例角色的 `awwo-bedrock-cross-region-profiles` 删去 6 个 Fable 资源（91 → 85）。
 - **前沿模型被拒**：约 12:09Z 起，Claude Opus 5.5、Opus 5、Sonnet 5、Opus 4.8，Grok 4.7、4.6 返回 `AccessDeniedException: … is not available for this account … contact AWS Sales`。这发生在控制面仍是最宽松的 `provider_data_share` 的时候：14:4xZ 在 us-east-1 对 40 个已核验模型各发一次 8-token 调用，33 个应答，被拒的正是这 6 个（Kimi K3 是探针的 maxTokens 低于它的下限）；Opus 5.5 在 eu-west-1（未设置）也被拒得一模一样；`GetFoundationModelAvailability` 对 Opus 5.5、Sonnet 5 仍报 `AUTHORIZED` / `AVAILABLE`。AWS 文档列出的需要留存的模型只有 Fable 5 / 5.1 与 GPT-5.4 至 GPT-6 系列。结论：**拒绝来自账号层面的模型访问，与零留存无关**，改回留存设置不会恢复。设为 `none` 后立即复测，应答的仍是同样的 33 个。
 - **请 AWS 确认**（接上面的列表）：⑦ 本账号自 2026-10-07 12:09Z 起调用 Opus 5.5 等前沿模型返回 “not available for this account”，而可用性接口仍报已授权，原因是什么、怎样恢复；⑧ 零留存下 40 个已核验模型是否都可调用（14:51Z 设置后复测 33 个应答，与设置前相同）。
+
+## 2026-10-18：Python worker 单次运行时限 25 分钟
+
+- **起因**：一位活动用户的画布节点（Claude Opus 5.5）在 600 s 时以 `run_timeout` 失败，第一段文字还没出来就到了 Python worker 自己的时限（`AWWO_OPENAI_AGENTS_TIMEOUT_MS=600000`；代码上限当时也是 600 s）。同日 7b495004 让 Opus 5.5 每次调用可写 64,000 个输出 token，思考久的调用更需要时间。
+- **改动**：代码上限放宽到 1,800,000 ms（与 JS worker 相同）；现网 env 改为 1,500,000（25 分钟），比 API 的 30 分钟运行时限早结束，留出收尾与计费的时间。OpenAI 客户端的超时跟随这个时限（连接超时仍是 5 s）；SDK 的超时异常 `APITimeoutError` 记为 `DEADLINE_EXCEEDED`（API 显示为 `run_timeout`），连接阶段的除外（见下）。
+- **代价**：一个完不成的节点最长占 25 分钟。超时的节点不再自动重试（运营方 10-18「超时不再重试」，`graph_retry.go`）：此前 21 天的 17 次 `run_timeout` 都用满了时限（600 s 以上），R-1 重跑过其中 5 次，重跑只会再等一遍、再计一次费。连接阶段的 5 s 超时没有到达模型服务，记为 `MODEL_UNAVAILABLE`（API 显示为 `provider_unavailable`），仍可自动重试，很快结束的不计费。被截断、没有输出的调用按隐藏推理估算计费，上限 65,536 token（`plans.go` 的 `maxHiddenTokens`，与目录的 `MAX_OUTPUT_TOKENS` 相同），按每秒 120 token 约 9 分钟就到上限，所以时限变长不会让单次估算更高。
+- **回滚**：旧代码不接受 1,500,000（启动即失败），回滚代码时 env 必须一起改回 600000；发布脚本两者一起切换、一起回滚。
