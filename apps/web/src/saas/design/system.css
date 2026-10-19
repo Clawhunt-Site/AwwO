@@ -668,10 +668,11 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .work-mode-tutorial .wmt-secondary { border-radius: var(--saas-radius-pill); }
 /* The tour's next step, the account's way to ClawHunt and the "tutorial unavailable" notice: the main
    action is an ink pill there too. */
-.first-run-tour .first-run-tour-next, a.saas-buy-link:not(.saas-primary), dialog.saas-tutorial-unavailable button {
+/* (Not the "AwwO was updated" notice, which can sit in that dialog: StaleBuildNotice.tsx.) */
+.first-run-tour .first-run-tour-next, a.saas-buy-link:not(.saas-primary), dialog.saas-tutorial-unavailable button:where(:not(.saas-stale-build *)) {
   border-radius: var(--saas-radius-pill); background: var(--saas-primary); color: var(--saas-on-primary);
 }
-:is(.first-run-tour .first-run-tour-next, a.saas-buy-link:not(.saas-primary), dialog.saas-tutorial-unavailable button):hover { background: var(--saas-primary-hover); }
+:is(.first-run-tour .first-run-tour-next, a.saas-buy-link:not(.saas-primary), dialog.saas-tutorial-unavailable button:where(:not(.saas-stale-build *))):hover { background: var(--saas-primary-hover); }
 .first-run-tour .first-run-tour-back { border-radius: 50%; }
 
 /* ── Cases (component styles live beside their components; these align them) ─────────────────── */

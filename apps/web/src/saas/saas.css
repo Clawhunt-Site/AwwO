@@ -13,6 +13,8 @@ body:has(.saas-canvas-shell) { overflow: hidden; }
 .saas-session-ended p { margin:0; }
 /* A page opened before a release (StaleBuildNotice): at the bottom, so it never covers the session notice. */
 .saas-stale-build { position:fixed; z-index:600; bottom:16px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:10px 16px; box-sizing:border-box; width:max-content; max-width:min(640px, calc(100vw - 24px)); padding:10px 12px 10px 18px; border:1px solid var(--saas-border); border-radius:14px; background:var(--saas-card); color:var(--saas-text); box-shadow:0 16px 48px #0002; font-size:14px; line-height:1.5; }
+/* Inside an open modal dialog the notice is a popover (StaleBuildNotice.tsx): the same box, without the browser's popover inset, margin and overflow. */
+.saas-stale-build[popover] { top:auto; right:auto; margin:0; overflow:visible; }
 .saas-stale-build p { flex:1 1 280px; margin:0; }
 .saas-stale-build-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .saas-sso-layout .saas-card strong { overflow-wrap:anywhere; }

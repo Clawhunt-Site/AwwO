@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { useLayoutEffect, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Tenant } from '../src/saas/api';
+import { localeHtmlLang } from '../src/locale';
 
 // A tab opened before a website release runs its own build; when a part of it does not load and the site serves another
 // build by now, the page saves its canvas, then offers the reload, and never reloads by itself.
@@ -281,4 +283,179 @@ it('speaks the interface language', async () => {
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('AwwO 在这个页面打开后更新过，页面的一部分没能加载。 重新加载即可使用新版本。'));
   expect(button('重新加载')).toBeVisible();
   expect(button('暂不')).toBeVisible();
+});
+
+// While a modal dialog is open the rest of the page is inert, so the notice moves into the dialog opened last, as a
+// popover above the dialog's content, and comes back to the page when that dialog closes.
+/** A dialog as showModal() leaves it in a browser: open, and :modal while open (jsdom's stub only sets the attribute). */
+const modalDialog = (before?: Element) => {
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = '<p>A case</p>';
+  document.body.insertBefore(dialog, before ?? null);
+  const matches = dialog.matches.bind(dialog);
+  vi.spyOn(dialog, 'matches').mockImplementation(selector => selector === ':modal' ? dialog.hasAttribute('open') : matches(selector));
+  dialog.setAttribute('open', '');
+  stops.push(() => dialog.remove());
+  return dialog;
+};
+/** Popovers as a browser shows them: `shown` lists each node shown, in order. jsdom hides a [popover] that is not open
+ * but cannot open one, so a shown one gets the display it would have. */
+const popovers = (fails = false) => {
+  const shown: Element[] = [];
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value(this: HTMLElement) {
+    if (fails) throw new DOMException('Not supported', 'NotSupportedError');
+    shown.push(this);
+    this.style.display = 'flex';
+  } });
+  stops.push(() => { delete (HTMLElement.prototype as { showPopover?: unknown }).showPopover; });
+  return shown;
+};
+
+it('moves into an open modal dialog, as a popover above it, so its buttons can be used', async () => {
+  const shown = popovers();
+  const dialog = modalDialog();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`${LEAD} Reload to use the new version.`));
+  const notice = screen.getByRole('alert');
+  expect(dialog.contains(notice)).toBe(true);
+  expect(notice).toHaveAttribute('popover', 'manual');
+  expect(shown).toEqual([notice]);
+  fireEvent.click(button('Reload')!);
+  await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+});
+
+it('comes back to the page when the dialog closes, still offering what it offered', async () => {
+  const shown = popovers();
+  const dialog = modalDialog();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(button('Reload')).toBeVisible());
+  act(() => { dialog.removeAttribute('open'); });
+  await waitFor(() => expect(dialog.contains(screen.getByRole('alert'))).toBe(false));
+  const notice = screen.getByRole('alert');
+  expect(notice).not.toHaveAttribute('popover');
+  expect(notice).toHaveTextContent(`${LEAD} Reload to use the new version.`);
+  expect(button('Reload')).toBeVisible();
+  expect(shown).toHaveLength(1);
+  // A dialog opened afterwards takes it in again, shown anew.
+  const next = modalDialog();
+  await waitFor(() => expect(next.contains(screen.getByRole('alert'))).toBe(true));
+  expect(shown).toHaveLength(2);
+  expect(shown[1]).toBe(screen.getByRole('alert'));
+});
+
+it('goes into the dialog opened last, whatever their order on the page, and back when it closes', async () => {
+  popovers();
+  const first = modalDialog();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(first.contains(screen.getByRole('alert'))).toBe(true));
+  const second = modalDialog(first);
+  await waitFor(() => expect(second.contains(screen.getByRole('alert'))).toBe(true));
+  act(() => { second.removeAttribute('open'); });
+  await waitFor(() => expect(first.contains(screen.getByRole('alert'))).toBe(true));
+  act(() => { first.remove(); });
+  await waitFor(() => expect(screen.getByRole('alert').closest('dialog')).toBeNull());
+});
+
+it('is "Not now" inside the dialog too, and stays a plain box there where popovers do not work', async () => {
+  popovers(true);
+  const dialog = modalDialog();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(dialog.contains(screen.getByRole('alert'))).toBe(true));
+  expect(button('Not now')).toBeVisible();
+  const notice = screen.getByRole('alert');
+  // showPopover() threw, so the browser's popover rules would keep it hidden: it is an ordinary box instead.
+  expect(notice).not.toHaveAttribute('popover');
+  fireEvent.click(button('Not now')!);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(reload).not.toHaveBeenCalled();
+});
+
+it('stays the page’s own box while only a non-modal dialog is open', async () => {
+  const shown = popovers();
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.appendChild(dialog);
+  stops.push(() => dialog.remove());
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(button('Reload')).toBeVisible());
+  expect(dialog.contains(screen.getByRole('alert'))).toBe(false);
+  expect(screen.getByRole('alert')).not.toHaveAttribute('popover');
+  expect(shown).toEqual([]);
+});
+
+it('goes into the dialog that holds the focus when several were open before it came up', async () => {
+  popovers();
+  const lower = modalDialog();
+  // Opened later, over the first, though earlier on the page: only the dialog on top can hold the focus.
+  const upper = modalDialog(lower);
+  const field = document.createElement('button');
+  field.textContent = 'In the upper dialog';
+  upper.appendChild(field);
+  field.focus();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(upper.contains(screen.getByRole('alert'))).toBe(true));
+});
+
+it('is shown again above its dialog when that dialog reopens in one step', async () => {
+  const shown = popovers();
+  const dialog = modalDialog();
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(dialog.contains(screen.getByRole('alert'))).toBe(true));
+  expect(shown).toHaveLength(1);
+  // As the forced tutorial does when the browser closes it anyway: closed and opened again before the page notices.
+  act(() => { dialog.removeAttribute('open'); dialog.setAttribute('open', ''); });
+  await waitFor(() => expect(shown).toHaveLength(2));
+  expect(shown[1]).toBe(screen.getByRole('alert'));
+  expect(dialog.contains(screen.getByRole('alert'))).toBe(true);
+});
+
+it('comes back to the page when the component that owns its dialog goes', async () => {
+  popovers();
+  function OwnDialog() {
+    const ref = useRef<HTMLDialogElement>(null);
+    useLayoutEffect(() => {
+      const dialog = ref.current!;
+      const matches = dialog.matches.bind(dialog);
+      vi.spyOn(dialog, 'matches').mockImplementation(selector => selector === ':modal' ? dialog.hasAttribute('open') : matches(selector));
+      dialog.showModal();
+      return () => dialog.close();
+    }, []);
+    return <dialog ref={ref} lang="en"><p>A case</p></dialog>;
+  }
+  watch();
+  const tree = (open: boolean) => <m.prefs.SaaSPreferencesProvider><m.notice.StaleBuildNotice />{open && <OwnDialog />}</m.prefs.SaaSPreferencesProvider>;
+  const { rerender } = render(tree(true));
+  loadFails();
+  await waitFor(() => expect(screen.getByRole('alert').closest('dialog')).not.toBeNull());
+  rerender(tree(false));
+  await waitFor(() => expect(screen.getByRole('alert').closest('dialog')).toBeNull());
+  expect(screen.getByRole('alert')).toBeVisible();
+  expect(button('Reload')).toBeVisible();
+});
+
+it('keeps the interface language inside a dialog in another one', async () => {
+  localStorage.setItem('superclaw_locale', 'zh');
+  popovers();
+  const dialog = modalDialog();
+  dialog.lang = 'en';
+  watch();
+  show();
+  loadFails();
+  await waitFor(() => expect(dialog.contains(screen.getByRole('alert'))).toBe(true));
+  expect(screen.getByRole('alert')).toHaveAttribute('lang', localeHtmlLang('zh'));
+  expect(screen.getByRole('alert')).toHaveTextContent('AwwO 在这个页面打开后更新过');
 });
