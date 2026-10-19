@@ -80,6 +80,13 @@ type App struct {
 	// queued (renders.go). Made on first use.
 	renderSlotOnce sync.Once
 	renderSlot     chan struct{}
+	// canvasSaves bounds the canvas creates and saves validated and stored at once: each holds up to
+	// maxCanvasBodyBytes of document several times over while it is validated and stored (resources.go). Made on
+	// first use.
+	canvasSavesOnce sync.Once
+	canvasSaves     chan struct{}
+	// canvasSaveWaiters counts the saves waiting for a turn, each holding its decoded body (at most maxCanvasSaveWaiters).
+	canvasSaveWaiters atomic.Int32
 }
 type rateEntry struct {
 	start time.Time
@@ -531,12 +538,17 @@ func (a *App) clientIP(r *http.Request) string {
 	return peer.String()
 }
 func (a *App) decode(w http.ResponseWriter, r *http.Request, b any) bool {
+	return a.decodeWithin(w, r, b, a.cfg.MaxBodyBytes)
+}
+
+// decodeWithin decodes one JSON object of at most limit bytes.
+func (a *App) decodeWithin(w http.ResponseWriter, r *http.Request, b any, limit int64) bool {
 	media, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if e != nil || media != "application/json" {
 		fail(w, 415, "unsupported_media_type", "Use application/json")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, a.cfg.MaxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if e = dec.Decode(b); e != nil {

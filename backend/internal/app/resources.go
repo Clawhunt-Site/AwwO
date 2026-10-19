@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -211,6 +213,77 @@ func (a *App) getCanvas(w http.ResponseWriter, r *http.Request) {
 	v, e := oneJSON(r.Context(), a.db, "SELECT "+canvasJSON+" FROM canvases WHERE tenant_id=$1 AND id=$2", r.PathValue("tenantId"), r.PathValue("id"))
 	a.replyOne(w, v, e, 200)
 }
+
+// maxCanvasBodyBytes bounds a canvas create or save. A canvas document is the one request body that grows with the work in
+// it: every node's conversations and outputs (the largest, a 69-node game, was 1.9 MB, 90% of the general 2 MiB limit).
+const maxCanvasBodyBytes int64 = 8 << 20
+
+// maxCanvasSaves is how many canvas creates and saves the API validates and stores at once; the others wait their turn
+// with their body read. A slot is held from the end of the body to the start of the reply: a client sending its body
+// or reading its reply slowly holds its own request (the server's ReadTimeout ends a slow body), never a slot.
+const maxCanvasSaves = 8
+
+// canvasSaveWait bounds the wait for a slot, well inside requestDeadline, so a save that gets one still has time to be
+// validated and stored; a variable so tests can shorten it.
+var canvasSaveWait = 10 * time.Second
+
+// maxCanvasSaveWaiters bounds the saves waiting for a slot, each holding its decoded body (up to maxCanvasBodyBytes):
+// past it a save is answered busy at once.
+const maxCanvasSaveWaiters = 32
+
+func (a *App) decodeCanvas(w http.ResponseWriter, r *http.Request, b any) bool {
+	return a.decodeWithin(w, r, b, max(a.cfg.MaxBodyBytes, maxCanvasBodyBytes))
+}
+
+// canvasSave waits up to canvasSaveWait for one of the maxCanvasSaves slots. With one, it returns the writer to answer
+// with, which gives the slot back as the reply starts, and release, which gives it back in any case (once). Without
+// one (busy, or the request's deadline came first) it has answered 503 canvas_save_busy, so no save ends with an
+// empty reply.
+func (a *App) canvasSave(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, func(), bool) {
+	a.canvasSavesOnce.Do(func() { a.canvasSaves = make(chan struct{}, maxCanvasSaves) })
+	defer a.canvasSaveWaiters.Add(-1)
+	if a.canvasSaveWaiters.Add(1) > maxCanvasSaveWaiters {
+		canvasSaveBusy(w)
+		return w, nil, false
+	}
+	wait := time.NewTimer(canvasSaveWait)
+	defer wait.Stop()
+	select {
+	case a.canvasSaves <- struct{}{}:
+	case <-wait.C:
+		canvasSaveBusy(w)
+		return w, nil, false
+	case <-r.Context().Done():
+		canvasSaveBusy(w)
+		return w, nil, false
+	}
+	var once sync.Once
+	release := func() { once.Do(func() { <-a.canvasSaves }) }
+	return &canvasSaveWriter{ResponseWriter: w, release: release}, release, true
+}
+
+func canvasSaveBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "2")
+	fail(w, 503, "canvas_save_busy", "Canvas saves are busy; try again shortly")
+}
+
+// canvasSaveWriter gives a canvas save's slot back as its reply starts: the work the slot bounds is done by then.
+type canvasSaveWriter struct {
+	http.ResponseWriter
+	release func()
+}
+
+func (s *canvasSaveWriter) WriteHeader(status int) {
+	s.release()
+	s.ResponseWriter.WriteHeader(status)
+}
+
+func (s *canvasSaveWriter) Write(b []byte) (int, error) {
+	s.release()
+	return s.ResponseWriter.Write(b)
+}
+
+func (s *canvasSaveWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 func validDocument(v json.RawMessage) bool {
 	var o map[string]json.RawMessage
 	return len(v) > 0 && json.Unmarshal(v, &o) == nil && o != nil
@@ -220,9 +293,14 @@ func (a *App) createCanvas(w http.ResponseWriter, r *http.Request) {
 		Name     string          `json:"name"`
 		Document json.RawMessage `json:"document"`
 	}
-	if !a.decode(w, r, &b) {
+	if !a.decodeCanvas(w, r, &b) {
 		return
 	}
+	w, release, ok := a.canvasSave(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	if !cleanName(b.Name) || !validDocument(b.Document) {
 		fail(w, 400, "invalid_input", "Name and JSON document object required")
 		return
@@ -245,9 +323,14 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		Document json.RawMessage `json:"document"`
 		Version  int64           `json:"version"`
 	}
-	if !a.decode(w, r, &b) {
+	if !a.decodeCanvas(w, r, &b) {
 		return
 	}
+	w, release, ok := a.canvasSave(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	if !cleanName(b.Name) || !validDocument(b.Document) || b.Version < 1 {
 		fail(w, 400, "invalid_input", "Name, document and current version required")
 		return

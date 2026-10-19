@@ -10,6 +10,16 @@ import (
 	"unicode/utf8"
 )
 
+// maxListPageBytes bounds the items of one list page: canvas documents (the full view) reach maxCanvasBodyBytes each,
+// and the reply is built in memory.
+const maxListPageBytes = 8 << 20
+
+// pageEnds says whether a list page is full before an item of next bytes: at the item limit, or past maxListPageBytes.
+// A page always holds at least one item, so the cursor moves on.
+func pageEnds(count, size, next, limit int) bool {
+	return count == limit || (count > 0 && size+next > maxListPageBytes)
+}
+
 type tenantPageSource struct {
 	table, projection, tenant, timestamp, id, predicate string
 	filters                                             []string
@@ -129,6 +139,7 @@ func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 	defer rows.Close()
 	items := []json.RawMessage{}
 	more := false
+	size := 0
 	for rows.Next() {
 		var item json.RawMessage
 		var at time.Time
@@ -137,11 +148,12 @@ func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 			a.dbError(w, err)
 			return
 		}
-		if len(items) == limit {
+		if pageEnds(len(items), size, len(item), limit) {
 			more = true
 			break
 		}
 		items = append(items, item)
+		size += len(item)
 		c.LastTime, c.LastID = at, id
 	}
 	if err = rows.Err(); err != nil {
