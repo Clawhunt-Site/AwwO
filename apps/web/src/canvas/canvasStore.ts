@@ -34,6 +34,8 @@ export interface CanvasStoreBackend {
   write(records: readonly StoreRecord[], options?: { commit?: boolean }): Promise<void>;
   /** Drop older versions under `prefix`, and the given expired tombstones. */
   prune(prefix: string, expired: readonly StoreRecord[]): Promise<void>;
+  /** Every key with a version stored under `prefix` (tombstones included), read without any value. */
+  keys(prefix: string): Promise<string[]>;
 }
 
 /** How a localStorage key of an earlier release comes in: `move` (a large copy only that release writes, its drafts:
@@ -93,6 +95,9 @@ export interface CanvasStore {
   holdsStoredScopes(): boolean;
   /** How many other tabs have the scope open; null when the browser cannot say. */
   otherTabs(prefix: string): Promise<number | null>;
+  /** The keys kept under `within` (in IndexedDB and in this page's scopes), removed ones included: which scopes there
+   * are, without reading a value. */
+  storedKeys(within: string): Promise<string[]>;
   get(prefix: string, key: string): string | null;
   set(prefix: string, key: string, value: string): void;
   remove(prefix: string, key: string): void;
@@ -101,6 +106,10 @@ export interface CanvasStore {
   moveLegacy(prefix: string, keys: readonly string[], adopt: (name: string) => Adoption | null): Promise<void>;
   /** Remove every key under the prefix, here, in IndexedDB and in the other tabs (a deleted canvas). */
   forget(prefix: string): Promise<void>;
+  /** For a scope no tab holds (its canvas open nowhere, this page included), alone with it: remove the keys `forgets`
+   * picks, from IndexedDB (tombstones, told to the other tabs) and localStorage, and drop its expired tombstones. The
+   * keys left holding a value in either, or null when a tab holds the scope (nothing done). */
+  forgetIdle(prefix: string, forgets: (key: string) => boolean): Promise<string[] | null>;
   flush(): Promise<void>;
   /** Told of writes IndexedDB refuses; a listener added while a refusal stands is told at once. */
   onFailure(listener: StoreFailureListener): () => void;
@@ -702,6 +711,13 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
         return Math.max(0, shared(state.held) + shared(state.pending) - mine);
       } catch { return null; }
     },
+    async storedKeys(within) {
+      const found = new Set<string>();
+      for (const scope of scopes.values()) for (const key of scope.entries.keys()) if (key.startsWith(within) && !key.endsWith(MOVED)) found.add(key);
+      const db = await database();
+      if (db) for (const key of await db.keys(within)) if (key.startsWith(within) && !key.endsWith(MOVED)) found.add(key);
+      return [...found];
+    },
     get(prefix, key) { return readyScope(prefix).entries.get(key)?.v ?? null; },
     set(prefix, key, value) { writeEntry(readyScope(prefix), key, String(value)); },
     remove(prefix, key) { writeEntry(readyScope(prefix), key, null); },
@@ -739,6 +755,38 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
       const list = stampAbove(new Map(stored.map(record => [record.k, record])), live.map(record => ({ k: record.k, v: null })), FORGET_LEAD);
       await db.write(list);
       announce(prefix, list);
+    },
+
+    async forgetIdle(prefix, forgets) {
+      if (scopes.has(prefix) || !options.locks) return null;
+      const db = await database();
+      // Alone with the canvas: a tab that has it open holds it, and one that opens it now waits a moment for this lock.
+      // What is removed is decided on what is read here, while alone with it.
+      return options.locks.request(lockName(prefix), { mode: 'exclusive', ifAvailable: true }, async lock => {
+        if (!lock) return null;
+        const left = new Set<string>();
+        if (legacy) {
+          for (const key of legacyKeys(legacy, prefix)) {
+            if (!forgets(key)) { left.add(key); continue; }
+            try { legacy.removeItem(key); } catch { left.add(key); }
+          }
+        }
+        if (!db) return [...left];
+        const stored = await db.load(prefix);
+        const live = stored.filter(record => record.v !== null && record.k.startsWith(prefix));
+        const removed = live.filter(record => forgets(record.k));
+        if (removed.length) {
+          // As forget's: above any write a tab opening the canvas meanwhile may make.
+          const list = stampAbove(new Map(stored.map(record => [record.k, record])), removed.map(record => ({ k: record.k, v: null })), FORGET_LEAD);
+          await db.write(list);
+          announce(prefix, list);
+        }
+        for (const record of live) if (!forgets(record.k) && !record.k.endsWith(MOVED)) left.add(record.k);
+        // A canvas no page opens any more never has these dropped by its opening.
+        const expired = stored.filter(record => record.v === null && record.t < now() - TOMBSTONE_MS);
+        if (expired.length) await db.prune(prefix, expired).catch(() => {});
+        return [...left];
+      });
     },
 
     flush,

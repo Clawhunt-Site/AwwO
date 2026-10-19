@@ -109,6 +109,14 @@ export async function openCanvasStoreDatabase(timeoutMs = 10000): Promise<Canvas
       if (options?.commit) tx.commit?.();
       return finished(tx);
     }) : Promise.resolve(),
+    keys: prefix => use(async handle => {
+      const { tx, records } = store(handle, 'readonly');
+      const request = records.getAllKeys(scopeRange(prefix));
+      await finished(tx);
+      const found = new Set<string>();
+      for (const key of request.result as unknown[]) if (Array.isArray(key) && typeof key[0] === 'string' && key[0].startsWith(prefix)) found.add(key[0]);
+      return [...found];
+    }),
     prune: (prefix, expired) => use(async handle => {
       // Keys only: which versions are older needs no value.
       const { tx: readTx, records: readRecords } = store(handle, 'readonly');

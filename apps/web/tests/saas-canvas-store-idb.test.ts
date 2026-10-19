@@ -45,6 +45,17 @@ describe('canvas store IndexedDB backend', () => {
     expect((await db.load(P)).map(row => row.v)).toEqual(['third']);
   });
 
+  it('lists the keys under a prefix, removed ones too, once each and without their values', async () => {
+    const db = await backend();
+    const other = 'awwo.saas:user-a:tenant-a:canvas-2:superclaw.canvas.v2';
+    await db.write([record(DOC, 'one', 1), record(P + 'awwo.cloud.version', '3', 1), record(other, 'other', 1)]);
+    await db.write([record(DOC, null, 2)]);
+    await db.write([record('awwo.saas:user-a:tenant-b:canvas-1:superclaw.canvas.v2', 'elsewhere', 1)]);
+    expect((await db.keys(P)).sort()).toEqual([P + 'awwo.cloud.version', DOC].sort());
+    expect((await db.keys('awwo.saas:user-a:tenant-a:')).sort()).toEqual([P + 'awwo.cloud.version', DOC, other].sort());
+    expect(await db.keys('awwo.saas:user-z:')).toEqual([]);
+  });
+
   it('deletes a key\'s older versions as it writes a newer one', async () => {
     const db = await backend();
     await db.write([record(DOC, 'one', 1)]);

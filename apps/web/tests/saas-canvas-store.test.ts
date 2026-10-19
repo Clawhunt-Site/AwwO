@@ -886,6 +886,106 @@ describe('canvas store', () => {
     expect(shared.backend.value(DOC)).toBeNull();
   });
 
+  it('forgets, alone with a canvas no tab has open, the keys it is asked to, in IndexedDB and localStorage, and tells the tabs', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    const LEGACY_DRAFT = P + `${CANVAS_DRAFT_PREFIX}legacy`;
+    const FRAMES = P + CARD_FRAMES_KEY;
+    const now = Date.now();
+    await shared.backend.backend.write([{ k: DOC, v: 'doc', c: 2, p: 'q', t: now }, { k: DOC + MOVED, v: '{"h":["x"],"s":null}', c: 2, p: 'q', t: now },
+      { k: DRAFT, v: 'draft', c: 2, p: 'q', t: now }, { k: DRAFT + MOVED, v: '{"h":["y"],"s":null}', c: 2, p: 'q', t: now },
+      { k: VERSION, v: null, c: 2, p: 'q', t: 0 }, { k: 'awwo.saas:user-a:tenant-a:canvas-b:superclaw.canvas.v2', v: 'b', c: 2, p: 'q', t: now }]);
+    storage.setItem(FRAMES, 'frames'); storage.setItem(LEGACY_DRAFT, 'legacy draft');
+    storage.setItem('awwo.saas:user-a:tenant-a:canvas-b:superclaw.canvas.v2', 'b in localStorage');
+    const a = tab(shared, { legacy: storage });
+    const keepsDrafts = (key: string) => !key.startsWith(P + CANVAS_DRAFT_PREFIX);
+    expect((await a.store.forgetIdle(P, keepsDrafts))?.sort()).toEqual([DRAFT, LEGACY_DRAFT].sort());
+    expect(shared.backend.value(DOC)).toBeNull();
+    expect(shared.backend.value(DOC + MOVED)).toBeNull();
+    expect(shared.backend.value(DRAFT)).toBe('draft');
+    expect(shared.backend.value(DRAFT + MOVED)).toBe('{"h":["y"],"s":null}');
+    // Its expired tombstone is gone too; another canvas is untouched.
+    expect(shared.backend.records.has(VERSION)).toBe(false);
+    expect(shared.backend.value('awwo.saas:user-a:tenant-a:canvas-b:superclaw.canvas.v2')).toBe('b');
+    expect(storage.getItem(FRAMES)).toBeNull();
+    expect(storage.getItem(LEGACY_DRAFT)).toBe('legacy draft');
+    expect(storage.getItem('awwo.saas:user-a:tenant-a:canvas-b:superclaw.canvas.v2')).toBe('b in localStorage');
+    // Told on the canvas's channel, as forget does: a tab that opened it meanwhile drops the copy too.
+    const told = shared.hub.sent.filter(({ name }) => name === CANVAS_STORE_CHANNEL + P).flatMap(({ data }) => (data as { records: StoreRecord[] }).records);
+    expect(told.map(record => [record.k, record.v])).toEqual([[DOC, null], [DOC + MOVED, null]]);
+    expect(shared.locks.held).toEqual([]);
+  });
+
+  it('removes nothing when asked to forget nothing, and says what holds a value: only expired tombstones go', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    storage.setItem(P + CARD_FRAMES_KEY, 'frames');
+    await shared.backend.backend.write([{ k: DOC, v: 'doc', c: 1, p: 'q', t: 0 }, { k: DOC + MOVED, v: '{"h":[],"s":null}', c: 1, p: 'q', t: 0 },
+      { k: VERSION, v: null, c: 1, p: 'q', t: 0 }, { k: PLAN, v: null, c: 1, p: 'q', t: Date.now() }]);
+    const writes = shared.backend.writes.length;
+    const a = tab(shared, { legacy: storage });
+    expect((await a.store.forgetIdle(P, () => false))?.sort()).toEqual([P + CARD_FRAMES_KEY, DOC].sort());
+    expect(shared.backend.writes).toHaveLength(writes);
+    expect(shared.backend.value(DOC)).toBe('doc');
+    expect(storage.getItem(P + CARD_FRAMES_KEY)).toBe('frames');
+    // A recent tombstone stays: a late write of a page that had the canvas open must not bring its key back.
+    expect(shared.backend.records.has(VERSION)).toBe(false);
+    expect(shared.backend.records.has(PLAN)).toBe(true);
+  });
+
+  it('leaves a canvas a tab has open (this page included) or another page is alone with, and cannot tell without Web Locks', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    storage.setItem(P + CARD_FRAMES_KEY, 'frames');
+    const b = tab(shared, { legacy: storage });
+    await b.store.open(P);
+    b.store.set(P, DOC, 'open in b'); await b.store.flush();
+    const a = tab(shared, { legacy: storage });
+    expect(await a.store.forgetIdle(P, () => true)).toBeNull();
+    expect(await b.store.forgetIdle(P, () => true)).toBeNull();
+    expect(shared.backend.value(DOC)).toBe('open in b');
+    expect(storage.getItem(P + CARD_FRAMES_KEY)).toBe('frames');
+    // Open in this page's memory only (a read-only view): no lock tells, the page does.
+    const memory = 'awwo.saas:user-a:tenant-a:canvas-m:';
+    await shared.backend.backend.write([{ k: memory + 'superclaw.canvas.v2', v: 'm', c: 1, p: 'q', t: Date.now() }]);
+    a.store.openMemory(memory);
+    expect(await a.store.forgetIdle(memory, () => true)).toBeNull();
+    expect(shared.backend.value(memory + 'superclaw.canvas.v2')).toBe('m');
+    // Another page alone with a canvas (taking in its localStorage copies): left until it is done.
+    const other = 'awwo.saas:user-a:tenant-a:canvas-y:';
+    await shared.backend.backend.write([{ k: other + 'superclaw.canvas.v2', v: 'y', c: 1, p: 'q', t: Date.now() }]);
+    let release!: () => void;
+    const sweeping = shared.locks.locks.request(CANVAS_STORE_CHANNEL + other, { mode: 'exclusive' }, () => new Promise<void>(resolve => { release = resolve; }));
+    expect(await a.store.forgetIdle(other, () => true)).toBeNull();
+    release(); await sweeping;
+    expect(await tab(shared, { locks: null }).store.forgetIdle(other, () => true)).toBeNull();
+    expect(shared.backend.value(other + 'superclaw.canvas.v2')).toBe('y');
+    expect(await a.store.forgetIdle(other, () => true)).toEqual([]);
+    expect(shared.backend.value(other + 'superclaw.canvas.v2')).toBeNull();
+  });
+
+  it('outranks, as forget does, the writes of a tab that has the canvas open without its lock (refused)', async () => {
+    const shared = world();
+    const refusing = { request: () => Promise.reject(new DOMException('No locks here', 'SecurityError')), query: async () => ({ held: [], pending: [] }) };
+    const b = tab(shared, { locks: refusing as unknown as LockManager, flushDelay: 60_000 });
+    await b.store.open(P);
+    b.store.set(P, DOC, 'stored'); await b.store.flush();
+    for (let index = 0; index < 100; index++) b.store.set(P, DOC, `pending ${index}`);
+    const a = tab(shared);
+    expect(await a.store.forgetIdle(P, () => true)).toEqual([]);
+    await settle(); await b.store.flush();
+    expect(b.store.get(P, DOC)).toBeNull();
+    expect(shared.backend.value(DOC)).toBeNull();
+  });
+
+  it('fails, and lets the canvas go, when IndexedDB cannot be read alone with it', async () => {
+    const shared = world();
+    const failing = { ...shared.backend.backend, load: async () => { throw new Error('IndexedDB did not answer'); } };
+    const a = tab(shared, { backend: async () => failing });
+    await expect(a.store.forgetIdle(P, () => true)).rejects.toThrow('IndexedDB did not answer');
+    expect(shared.locks.held).toEqual([]);
+  });
+
   it('drops tombstones older than thirty days a while after a scope opens', async () => {
     const shared = world();
     await shared.backend.backend.write([{ k: DOC, v: null, c: 3, p: 'q', t: 0 }, { k: P + 'fresh', v: null, c: 3, p: 'q', t: Date.now() }]);

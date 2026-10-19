@@ -13,13 +13,31 @@ export function canvasStoragePrefix(userId: string, tenantId: string, canvasId: 
   return `awwo.saas:${scopeOf(userId, tenantId, canvasId)}:`;
 }
 export function canvasStorageKey(key: string): string { return scope ? `awwo.saas:${scope}:${key}` : key; }
+/** Every key of one account's canvases in one workspace starts with this (and so do the workspace's own few facts). */
+export function workspaceStoragePrefix(userId: string, tenantId: string): string {
+  return `awwo.saas:${[userId, tenantId].map(encodeURIComponent).join(':')}:`;
+}
+/** A canvas id as the API makes them ("a" and 32 base64url characters), alone or as a reader's copy. */
+const STORED_CANVAS = /^(a[A-Za-z0-9_-]{32})(\/read-only)?$/;
+/** The canvas a key under `within` (a workspaceStoragePrefix) belongs to, a reader's copy counting as its canvas's; null
+ * for a key of no canvas (the workspace's facts sit under the same prefix). */
+export function canvasOfStorageKey(key: string, within: string): string | null {
+  if (!key.startsWith(within)) return null;
+  const rest = key.slice(within.length);
+  const end = rest.indexOf(':');
+  if (end <= 0 || end === rest.length - 1) return null;
+  let segment: string;
+  try { segment = decodeURIComponent(rest.slice(0, end)); } catch { return null; }
+  return STORED_CANVAS.exec(segment)?.[1] ?? null;
+}
 /** A key for one signed-in account's browser preference, or null outside a SaaS account scope. */
 export function userStorageKey(key: string): string | null {
   const user = scope.split(':')[0];
   return user ? `awwo.saas:${user}:${key}` : null;
 }
 /** The same account and workspace namespace without the canvas, for small facts that describe how
- * this workspace behaves rather than one canvas (such as how long its plans take). */
+ * this workspace behaves rather than one canvas (such as how long its plans take). A fact's name never starts with a
+ * canvas id and a colon: that is how the deleted-canvas sweep tells a canvas's keys from these (canvasOfStorageKey). */
 export function workspaceStorage(): Pick<Storage, 'getItem' | 'setItem'> {
   const captured = scope.split(':').slice(0, 2).join(':');
   const keyOf = (key: string) => captured ? `awwo.saas:${captured}:${key}` : key;

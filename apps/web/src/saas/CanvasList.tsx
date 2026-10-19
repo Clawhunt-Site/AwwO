@@ -7,6 +7,7 @@ import { ListPager, usePagedList } from './ListPager';
 import { useSaaSPreferences } from './preferences';
 import { CANVAS_SEARCH_MAX_LENGTH, readCanvasListView, saveCanvasListView } from './canvasListView';
 import { forgetCanvasStorage } from '../canvas/canvasStorage';
+import { forgetDeletedCanvasStorage } from './canvasStorageEviction';
 
 const updatedAt = (canvas: CanvasListItem) => Date.parse(canvas.updatedAt) || 0;
 /** Most recently touched first; canvases touched at the same time keep the server's order. */
@@ -76,6 +77,21 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
   firstPage.current = onFirstPage;
   // With onFirstPage the list reads the full view, so its items carry their documents.
   useEffect(() => { if (listing.page && listing.pageNumber === 1) firstPage.current?.(listing.page.items as CanvasRecord[]); }, [listing.page, listing.pageNumber]);
+  // Once the first page is read and the page is idle: what this browser keeps of canvases not in the workspace's list is
+  // checked, and forgotten where the server says the canvas is gone (canvasStorageEviction.ts).
+  const firstListPage = listing.pageNumber === 1 ? listing.page ?? null : null;
+  const hasMore = Boolean(listing.next);
+  useEffect(() => {
+    if (!userId || !firstListPage) return;
+    const listed = firstListPage.items.map(canvas => canvas.id);
+    const run = () => { void forgetDeletedCanvasStorage(userId, tenant.id, listed, !hasMore).catch(() => {}); };
+    if (typeof requestIdleCallback === 'function') {
+      const handle = requestIdleCallback(run, { timeout: 10000 });
+      return () => { if (typeof cancelIdleCallback === 'function') cancelIdleCallback(handle); };
+    }
+    const timer = setTimeout(run, 2000);
+    return () => clearTimeout(timer);
+  }, [userId, tenant.id, firstListPage, hasMore]);
   const needle = query.trim().toLocaleLowerCase();
   const matches = needle ? items.filter(canvas => canvas.name.toLocaleLowerCase().includes(needle)) : items;
   const limit = recentLimit ?? Infinity;

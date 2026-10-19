@@ -53,3 +53,20 @@ it('cannot say without Web Locks or when the browser does not answer', async () 
   expect(await (await opened(null)).otherTabs(P)).toBeNull();
   expect(await (await opened(locksWith({}, { failQuery: true }))).otherTabs(P)).toBeNull();
 });
+
+// Which scopes the store keeps.
+const kept = (backend: ReturnType<typeof memoryBackend>, key: string, value: string | null) =>
+  backend.records.set(key, { k: key, v: value, c: 1, p: 'earlier-page', t: 1 });
+const storeOn = (backend: ReturnType<typeof memoryBackend>) =>
+  createCanvasStore({ backend: async () => backend.backend, channel: channelHub().channel, locks: locksWith({}), flushDelay: 60_000, peerWait: 50, watchPage: false });
+
+it('lists the keys it keeps under a prefix, removed ones too, from IndexedDB and from the scopes this page has open', async () => {
+  const backend = memoryBackend();
+  const W = 'awwo.saas:user-a:tenant-a:';
+  kept(backend, `${W}canvas-b:superclaw.canvas.v2`, null);
+  kept(backend, 'awwo.saas:user-a:tenant-b:canvas-c:superclaw.canvas.v2', '{}');
+  const store = storeOn(backend);
+  await store.open(P);
+  store.set(P, P + 'superclaw.canvas.v2', '{"only in this page so far":true}');
+  expect((await store.storedKeys(W)).sort()).toEqual([P + 'superclaw.canvas.v2', `${W}canvas-b:superclaw.canvas.v2`].sort());
+});

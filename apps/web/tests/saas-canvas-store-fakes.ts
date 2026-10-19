@@ -35,6 +35,10 @@ export function memoryBackend() {
         if (record.k.startsWith(prefix) && current && current.c === record.c && current.p === record.p) records.delete(record.k);
       }
     },
+    async keys(prefix) {
+      await tick();
+      return [...records.keys()].filter(key => key.startsWith(prefix));
+    },
   };
   return {
     backend, records, writes, commits,
