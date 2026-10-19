@@ -55,6 +55,7 @@ import { AssembleTileBody } from './AssembleTileBody';
 import type { AssembleInputView } from './assembleNode';
 import { ReworkFindingsNote } from './ReworkFindingsNote';
 import { NodeBrief, NodeFailure } from './NodeBrief';
+import { useShortColumn } from './useShortColumn';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
 import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, updateNodeDraft, sessionStoreKey } from './nodeThreads';
@@ -437,10 +438,21 @@ export const SessionTile = memo(function SessionTile({
   // A copied case node not yet set up has said and run nothing: open, it leads with what it was asked and received.
   const [inputOpen, setInputOpen] = useState(node.kind === 'session' && node.lastOutput?.source === 'case' && !node.binding);
   const [templateOpen, setTemplateOpen] = useState(false);
+  // The node's own work: a run of it, or a reply streaming in (`busy` below adds a lock the canvas holds for all nodes).
+  const active = session.streaming || run?.state === 'running' || run?.state === 'waiting';
+  // Opened inputs take the conversation's room only until the node starts or ends some work: what a run or a message
+  // brings is read in the conversation, which keeps the column beside the inputs until they are opened again (review
+  // 2026-10-18: a run's reply vanished as it finished). Before paint, so the end of a run never shows the inputs a frame.
+  const [inputsTakeColumn, setInputsTakeColumn] = useState(true);
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
+    if (wasActive.current !== active) setInputsTakeColumn(false);
+    wasActive.current = active;
+  }, [active]);
   // Asked to show the inputs (a run still needs some filled in): the drawer opens on their values.
   useEffect(() => {
     if (!inputRequest) return;
-    setTemplateOpen(false); setInputSchemaOpen(false); setInputOpen(true);
+    setTemplateOpen(false); setInputSchemaOpen(false); setInputOpen(true); setInputsTakeColumn(true);
   }, [inputRequest]);
   // Opened from the template guide's 编辑: the input drawer starts on its field structure, the deliverables drawer on
   // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before.
@@ -751,7 +763,11 @@ export const SessionTile = memo(function SessionTile({
   const expanded = !compact && (Boolean(configurationPanel) || lod === 'open' || lod === 'focus');
   // A menu opened in one layout does not follow the card into another (opening or collapsing the node).
   useEffect(() => { setMenuOpen(false); }, [compact, expanded]);
-  const busy = interactionLocked || session.streaming || run?.state === 'running' || run?.state === 'waiting';
+  // An opened node's chat column too short to read in draws its message box and task card compact.
+  const chatRef = useRef<HTMLDivElement>(null);
+  const shortColumn = useShortColumn(chatRef, expanded);
+  const busy = interactionLocked || active;
+  const toggleInputs = () => { if (!inputOpen) setInputsTakeColumn(true); setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); };
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
   const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
@@ -781,7 +797,7 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
-  const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); };
+  const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
   const editDeliverableForm = () => {
     setTemplateOpen(false);
     setDeliverablesEditorOpen(true);
@@ -948,16 +964,16 @@ export const SessionTile = memo(function SessionTile({
                   disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || threadTitle(thread.title, t)}>
                   <MessageSquare size={13} /><span>{threadTitle(thread.title, t)}</span>
                 </button>)}</div>
-                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{t('tile.input')}</button>
+                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={toggleInputs}><ArrowDownToLine size={14} />{t('tile.input')}</button>
               </nav> : null}
-              <div className="awwo-node-chat">
+              <div ref={chatRef} className={`awwo-node-chat${shortColumn ? ' is-short' : ''}${expanded && inputOpen && inputsTakeColumn && !active ? ' has-inputs' : ''}`}>
                 {expanded ? <div className="awwo-chat-heading">
                   {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
                   <span title={threadTitle(currentThread?.title, t)}>{threadTitle(currentThread?.title, t)}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
                   {/* What the node receives: always in developer mode, where its fields are added, and in the simple view once it has inputs to fill. */}
-                  {!sessionsOpen && (!simple || (node.kind === 'session' && (node.contract?.inputs.length ?? 0) > 0)) ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={() => { setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); }}><ArrowDownToLine size={14} />{simple ? <span>{t('tile.input')}</span> : null}</button> : null}
+                  {!sessionsOpen && (!simple || (node.kind === 'session' && (node.contract?.inputs.length ?? 0) > 0)) ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={toggleInputs}><ArrowDownToLine size={14} />{simple ? <span>{t('tile.input')}</span> : null}</button> : null}
                 </div> : null}
                 {expanded && sessionNode && run?.state === 'failed' ? <NodeFailure detail={runDetail ?? ''}
                   onRerun={onRunNode && !viewOnly && !busy && (sessionNode.binding || initializeOnSend) ? () => onRunNode(nodeId) : undefined}

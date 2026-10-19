@@ -182,6 +182,17 @@
 .canvas-root .awwo-node .canvas-composer-send { position: absolute; right: 7px; bottom: 7px; padding: 5px; min-height: 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--awwo-ink); color: var(--awwo-card); }
 .canvas-root .awwo-node .canvas-composer-send span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .canvas-root .awwo-node .canvas-composer-blocked, .canvas-root .awwo-node .canvas-composer-notice, .canvas-root .awwo-node .canvas-composer-disclaimer { font-size: 10px; line-height: 1.4; }
+/* A chat column too short to read in (useShortColumn.ts: under 440 px, a laptop's window beside the assistant) keeps
+   its reading room: the message box is one line that grows as one types, its "+" inside it like the send button, and
+   the one-line task card drops its counts. A media node's prompt box keeps its size, and so does the terminal look's
+   (its ">" prompt sits where the "+" would go); the block padding alone changes, so a centred column stays centred. */
+.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer { padding-block: 6px 8px; }
+.canvas-root:not([data-node-layout='terminal']) .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-input { min-height: 44px; max-height: 120px; padding: 10px 40px 10px 12px; field-sizing: content; }
+.canvas-root:not([data-node-layout='terminal']) .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-row:has(> .canvas-composer-attach) .canvas-composer-input { padding-left: 40px; }
+.canvas-root:not([data-node-layout='terminal']) .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-attach { position: absolute; left: 7px; bottom: 7px; z-index: 1; width: 26px; height: 26px; margin: 0; border-color: transparent; background: transparent; }
+.canvas-root .awwo-node-chat.is-short .canvas-composer-accessory { margin-top: 4px; }
+.canvas-root .awwo-node-chat.is-short .awwo-node-brief.is-compact { min-height: 32px; padding-block: 6px; }
+.canvas-root .awwo-node-chat.is-short .awwo-node-brief.is-compact .awwo-node-brief-counts { display: none; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 /* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
    page most of it, a document half), never less than the drawer's own 320 px. */
@@ -232,6 +243,19 @@
 .canvas-root .awwo-input-drawer { flex: 0 1 auto; max-height: 52%; padding: 10px 12px; border-block: 1px solid var(--awwo-line); background: var(--awwo-soft); }
 /* Opened inputs keep room to read in a short node (a laptop stage beside the assistant), never only their header. */
 .canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer { min-height: min(160px, 35%); }
+/* With its inputs open the node is being set up (review 2026-10-18: a failure note's buttons and the message box were
+   cut): the inputs take the column (at least min(120 px, 25%) of it once the rest is drawn), the conversation gives way
+   to them while its message box stays, and a failure note keeps one row with its buttons, its full text in its tooltip.
+   SessionTile sets has-inputs only until the node runs or is sent a message, whose result is read in the conversation. */
+.canvas-root .awwo-node-chat.has-inputs .awwo-input-drawer { flex: 1 1 auto; max-height: none; }
+.canvas-root .awwo-node.canvas-tile--focus .awwo-node-chat.has-inputs .awwo-input-drawer { min-height: min(120px, 25%); }
+.canvas-root .awwo-node-chat.has-inputs .awwo-input-drawer + .awwo-node-panel--conversation { flex: 0 0 auto; }
+.canvas-root .awwo-node.canvas-tile--focus .awwo-node-chat.has-inputs .awwo-input-drawer + .awwo-node-panel--conversation { min-height: 0; }
+.canvas-root .awwo-node-chat.has-inputs .awwo-input-drawer + .awwo-node-panel--conversation > :is(.canvas-transcript, .awwo-node-empty) { display: none; }
+.canvas-root .awwo-node-chat.has-inputs .awwo-node-failure { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; max-height: none; padding-block: 6px; }
+.canvas-root .awwo-node-chat.has-inputs .awwo-node-failure p { flex: 1 1 220px; min-width: 0; align-items: center; }
+.canvas-root .awwo-node-chat.has-inputs .awwo-node-failure p svg { margin-top: 0; }
+.canvas-root .awwo-node-chat.has-inputs .awwo-node-failure p > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A copied case node (productionCopy.ts) with nothing said or run yet opens on what it was asked and
    received: the inputs fill the column, and the empty conversation's hint waits until they close. */
 .canvas-root .awwo-node-workbench.is-case-intro .awwo-input-drawer { flex: 1 1 auto; max-height: none; }

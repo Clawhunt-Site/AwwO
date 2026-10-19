@@ -10,7 +10,10 @@ import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { looksLikeCode } from '../src/canvas/codeLike';
 import { DeliverableMarkdown } from '../src/canvas/DeliverableMarkdown';
 import { FOCUSED_SESSION_MIN_SIZE, openContentOf, openFrameFor, presentationNodes } from '../src/canvas/nodePresentation';
-import { appendTurn, resetAllSessions } from '../src/canvas/sessions';
+import { appendTurn, resetAllSessions, setStreaming } from '../src/canvas/sessions';
+import type { RunNodeStatus } from '../src/canvas/runGraph';
+import { NodeFailure } from '../src/canvas/NodeBrief';
+import { SHORT_COLUMN_PX } from '../src/canvas/useShortColumn';
 
 beforeEach(() => { cleanup(); resetAllSessions(); });
 
@@ -160,6 +163,76 @@ describe('an opened node says what it was asked', () => {
     fireEvent.click(within(region).getByRole('button', { name: '展开' }));
     expect(region).not.toHaveClass('is-compact');
     expect(within(region).getAllByRole('listitem')).toHaveLength(5);
+  });
+
+  // Customer report 2026-10-18, follow-up: on a laptop's window the conversation still kept a line or two. A chat column
+  // under SHORT_COLUMN_PX draws its message box and task card compact (awwo-node.css `.is-short`).
+  it('marks a chat column too short to read in, and only an opened node’s', () => {
+    // jsdom lays nothing out (every clientHeight is 0): the chat column is given a height, everything else keeps 0.
+    let column = 408;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    try {
+      const { unmount } = simple(<SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} />);
+      expect(document.querySelector('.awwo-node-chat')).toHaveClass('is-short');
+      unmount();
+      column = SHORT_COLUMN_PX;
+      simple(<SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} />);
+      expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('is-short');
+    } finally {
+      // Element.prototype's own getter is found again once the override is gone.
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  it('gives its opened inputs the column: the conversation steps aside and its message box stays', () => {
+    simple(<SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} />);
+    act(() => { appendTurn(brief.id, { role: 'agent', text: '三段关卡已写好。' }); });
+    const column = document.querySelector('.awwo-node-chat');
+    expect(column).not.toHaveClass('has-inputs');
+    fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    expect(column).toHaveClass('has-inputs');
+    expect(screen.getByRole('region', { name: '输入表单' })).toBeTruthy();
+    expect(screen.getByTestId('composer-input')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+    expect(column).not.toHaveClass('has-inputs');
+  });
+
+  // Review 2026-10-18: what a run or a message brings with the inputs open is read in the conversation, which keeps the
+  // column once the work ends, until the inputs are opened again. A lock the canvas holds for all its nodes changes nothing.
+  it('gives the conversation the column for a run or a message, and keeps it there once they end', () => {
+    const tile = (run: RunNodeStatus | null, locked = false) => <CanvasUiModeProvider mode="simple"><SessionTile node={brief} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} run={run} interactionLocked={locked} /></CanvasUiModeProvider>;
+    const { rerender } = render(tile(null));
+    fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    const column = document.querySelector('.awwo-node-chat');
+    expect(column).toHaveClass('has-inputs');
+    rerender(tile(null, true));
+    expect(column).toHaveClass('has-inputs');
+    rerender(tile({ state: 'running' }));
+    expect(column).not.toHaveClass('has-inputs');
+    rerender(tile({ state: 'done' }));
+    expect(column).not.toHaveClass('has-inputs');
+    expect(screen.getByRole('region', { name: '输入表单' })).toBeTruthy();
+    // Opened again, the inputs take the column again, until a reply streams in.
+    fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+    fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    expect(column).toHaveClass('has-inputs');
+    act(() => { setStreaming(brief.id, true); });
+    expect(column).not.toHaveClass('has-inputs');
+    act(() => { setStreaming(brief.id, false); });
+    expect(column).not.toHaveClass('has-inputs');
+    // Opened while a run goes on, the inputs leave the column to what the run brings when it ends, too.
+    fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+    rerender(tile({ state: 'running' }));
+    fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    expect(column).not.toHaveClass('has-inputs');
+    rerender(tile({ state: 'done' }));
+    expect(column).not.toHaveClass('has-inputs');
+    expect(screen.getByRole('region', { name: '输入表单' })).toBeTruthy();
+  });
+
+  it('keeps a failed run’s whole reason in its note’s tooltip, for the one-row note beside the inputs', () => {
+    render(<NodeFailure detail="运行超时，请缩小任务范围后重试。" onRerun={vi.fn()} />);
+    expect(screen.getByRole('status').querySelector('span')).toHaveAttribute('title', '运行超时，请缩小任务范围后重试。');
   });
 
   it('offers the rest of a task the clamp hides: more lines than it shows, or text that overflows a narrow column', () => {

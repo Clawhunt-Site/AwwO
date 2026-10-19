@@ -128,6 +128,8 @@ html:root .canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent { color: var(--nv-fg); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent::before { content: ''; top: calc((var(--nv-size) * var(--nv-leading) - 7px) / 2); left: 5px;
     width: 7px; height: 7px; border-radius: 50%; background: currentColor; color: var(--nv-fg); }
+/* A long reply opens with its reader row (ReplyReader.tsx, 28 px tall with its margin): the dot marks the first line under it. */
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--agent:has(> .canvas-transcript-reader-row)::before { top: calc(28px + (var(--nv-size) * var(--nv-leading) - 7px) / 2); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn--system::before { content: '⎿'; content: '⎿' / ''; color: var(--nv-muted); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn.is-error::before { color: #d14343; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-turn.is-pending { padding-left: 0; }

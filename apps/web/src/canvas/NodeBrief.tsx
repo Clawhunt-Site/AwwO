@@ -89,7 +89,7 @@ export function NodeFailure({ detail, onRerun, onAskAssistant }: NodeFailureProp
   const { t } = useCanvasI18n();
   // A note that is there each time the node opens, said politely: an alert would be announced again on every open.
   return <div className="awwo-node-failure">
-    <p role="status"><TriangleAlert size={14} aria-hidden="true" /><span><strong>{t('brief.failedTitle')}</strong>{detail || t('brief.failedNoReason')}</span></p>
+    <p role="status"><TriangleAlert size={14} aria-hidden="true" /><span title={detail || undefined}><strong>{t('brief.failedTitle')}</strong>{detail || t('brief.failedNoReason')}</span></p>
     {onRerun || onAskAssistant ? <div className="awwo-node-failure-actions">
       {onRerun ? <button type="button" onClick={onRerun}>{t('brief.failedRerun')}</button> : null}
       {onAskAssistant ? <button type="button" className="is-primary" onClick={onAskAssistant}>{t('brief.failedAskAssistant')}</button> : null}

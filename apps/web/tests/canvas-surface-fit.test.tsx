@@ -149,8 +149,10 @@ describe('CanvasSurface fits the real stage', () => {
   });
 
   it('saves a requested Fit All even when the stage changes before that save lands', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: null }));
     const stage = { w: 1200, h: 800 };
     stubStage(stage);
@@ -171,8 +173,10 @@ describe('CanvasSurface fits the real stage', () => {
   });
 
   it('refits the overview, and an open node, when the stage resizes, but never a camera the operator took', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: null }));
     const stage = { w: 1200, h: 800 };
     stubStage(stage);
@@ -260,8 +264,10 @@ describe('CanvasSurface fits the real stage', () => {
 
 describe('CanvasSurface camera ownership', () => {
   it('hands the camera to the operator on a zoom that leaves its position where it was', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: null }));
     const stage = { w: 1200, h: 800 };
     stubStage(stage);
@@ -285,8 +291,10 @@ describe('CanvasSurface camera ownership', () => {
 
 describe('CanvasSurface keeps a saved view only while it fits', () => {
   it('treats a saved view that still shows the whole graph as fitted, so a smaller stage refits it', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     const saved = 'translate(-800px, -600px) scale(1)';
     localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: { x: -800, y: -600, scale: 1 } }));
     const stage = { w: 1200, h: 800 };
@@ -1543,8 +1551,10 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
   });
 
   it('takes a hand resize of the open frame as a view choice: the saved node keeps its size and the stage no longer refits it', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     const stage = { w: 1600, h: 1000 };
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(seed()));
     const before = seed().nodes[0] as ReturnType<typeof createSessionNode>;
@@ -1618,8 +1628,10 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
   });
 
   it('returns to the operator’s camera when the node closes after a refit', async () => {
-    let deliverResize = () => {};
-    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliverResize = callback; } observe() {} unobserve() {} disconnect() {} });
+    // Every observer hears the resize, as the file's other tests do: an opened node observes its chat column too (useShortColumn).
+    const observers: Array<() => void> = [];
+    const deliverResize = () => observers.forEach(deliver => deliver());
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} });
     const stage = { w: 1600, h: 1000 };
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), view: { x: 40, y: 30, scale: 0.8 } }));
     stubStage(stage);
