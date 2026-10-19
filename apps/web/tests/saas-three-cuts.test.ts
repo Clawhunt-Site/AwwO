@@ -304,10 +304,11 @@ describe('the code three.js took from Shadertoy, Stack Exchange sites and OpenPr
 
   it('stop a real hosted build that would take in another file of three.js or an add-on with code from Stack Overflow, or inline what they cut as a base64 URL', async () => {
     // three's own source file of the dithering chunk, small enough for Vite to inline: the load hook leaves it alone
-    // (none of the files it cuts), and the check of the output stops it as a file of three's sources.
+    // (none of the files it cuts), and the check of the output stops it as a file of three's sources. The messages
+    // name a file by its absolute path, which may hold spaces (the owner's checkout is under "Bobo's Coding cache").
     const chunk = 'three/src/renderers/shaders/ShaderChunk/dithering_pars_fragment.glsl.js';
     await expect(hostedBuild(`import u from '${chunk}?url&inline';\nglobalThis.awwoInlined = u;\n`))
-      .rejects.toThrow(/holds \S*node_modules\/three\/src\/renderers\/shaders\/ShaderChunk\/dithering_pars_fragment\.glsl\.js\S*: of three\.js the builds take in only/);
+      .rejects.toThrow(/holds .*node_modules\/three\/src\/renderers\/shaders\/ShaderChunk\/dithering_pars_fragment\.glsl\.js\S*: of three\.js the builds take in only/);
     // A file of no package that holds the dithering's code, inlined: only the check of the output, base64 decoded,
     // stands between it and the bundle.
     const note = path.join(scratch, 'dithering-note.txt');
@@ -319,7 +320,7 @@ describe('the code three.js took from Shadertoy, Stack Exchange sites and OpenPr
     await expect(hostedBuild("import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';\nglobalThis.awwoLoader = EXRLoader;\n"))
       .rejects.toThrow(/EXRLoader\.js credits stackoverflow\.com\/questions\/5678432/);
     await expect(hostedBuild("import u from 'three/examples/jsm/math/MeshSurfaceSampler.js?url';\nglobalThis.awwoUrl = u;\n"))
-      .rejects.toThrow(/from \S*node_modules\/three\/examples\/jsm\/math\/MeshSurfaceSampler\.js, credits stackoverflow\.com\/a\/4322940/);
+      .rejects.toThrow(/from .*node_modules\/three\/examples\/jsm\/math\/MeshSurfaceSampler\.js, credits stackoverflow\.com\/a\/4322940/);
     await expect(hostedBuild("import u from 'three/examples/jsm/math/MeshSurfaceSampler.js?url&inline';\nglobalThis.awwoUrl = u;\n"))
       .rejects.toThrow(/MeshSurfaceSampler\.js\?url&inline credits stackoverflow\.com\/a\/4322940/);
   }, 300_000);
