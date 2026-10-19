@@ -19,7 +19,7 @@ import (
 // code the design names as never retried stays out of it.
 func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	want := []string{"media_failed", "media_motion_failed", "media_provider_busy", "media_provider_unavailable", "media_result_unavailable",
-		"provider_rate_limited", "provider_unavailable", "run_timeout", "runtime_failed", "runtime_rejected", "runtime_session_busy",
+		"provider_rate_limited", "provider_unavailable", "runtime_failed", "runtime_rejected", "runtime_session_busy",
 		"runtime_stream_ended", "runtime_unavailable", "workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
 	if got := slices.Sorted(maps.Keys(graphRetryableCodes)); !slices.Equal(got, want) {
 		t.Fatalf("retryable codes %v", got)
@@ -30,7 +30,8 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 			t.Fatal("listed code not retried", code)
 		}
 	}
-	for _, code := range []string{"output_limit", "context_limit", "output_contract_invalid", "model_refused", "provider_auth_failed",
+	// A run that timed out used its whole deadline; a retry would repeat it at full cost (owner, 2026-10-18).
+	for _, code := range []string{"run_timeout", "output_limit", "context_limit", "output_contract_invalid", "model_refused", "provider_auth_failed",
 		"media_content_rejected", "media_params_invalid", "media_provider_balance", "workspace_step_limit", "accounting_commit_failed",
 		"execution_interrupted", "interrupted", "cancelled", "media_timeout", "quota_exceeded", "plan_required", "invalid_runtime_event",
 		"workspace_runtime_rejected", ""} {
@@ -47,7 +48,7 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	never := func() bool { t.Helper(); t.Fatal("asked a question this code does not depend on"); return false }
 	no := func() bool { return false }
 	unsent := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable", "workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
-	silent := []string{"provider_rate_limited", "provider_unavailable", "run_timeout", "runtime_failed", "runtime_stream_ended"}
+	silent := []string{"provider_rate_limited", "provider_unavailable", "runtime_failed", "runtime_stream_ended"}
 	for _, code := range unsent {
 		if !graphRetryable(code, never, never) {
 			t.Fatal("a run that never reached a model not retried", code)
@@ -582,8 +583,8 @@ func TestPostgresGraphNodeRetriesOnlyRunsThatProducedNothing(t *testing.T) {
 	}
 }
 
-// Failures the request or the model decided are never retried, and with AWWO_GRAPH_NODE_RETRIES=0 nothing is: the
-// node fails at once as it always did, with no attempt recorded.
+// Failures the request or the model decided, and a run that timed out, are never retried, and with
+// AWWO_GRAPH_NODE_RETRIES=0 nothing is: the node fails at once as it always did, with no attempt recorded.
 func TestPostgresGraphNodeRetriesSkipPermanentFailuresAndCanBeTurnedOff(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -593,6 +594,8 @@ func TestPostgresGraphNodeRetriesSkipPermanentFailuresAndCanBeTurnedOff(t *testi
 	}{
 		{"output_limit", 2, piReply{failed: "MODEL_OUTPUT_LIMIT"}, "output_limit"},
 		{"model_refused", 2, piReply{failed: "MODEL_REFUSAL"}, "model_refused"},
+		// A run that timed out used its whole deadline (owner, 2026-10-18: 「超时不再重试」).
+		{"run_timeout", 2, piReply{failed: "DEADLINE_EXCEEDED"}, "run_timeout"},
 		{"retries_off", 0, piReply{status: 503}, "runtime_rejected"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

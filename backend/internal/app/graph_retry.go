@@ -24,8 +24,12 @@ import (
 //
 // Never retried: what the request or the model itself decided (output and context limits, an invalid contract, a
 // refusal, a rejected credential, refused content or parameters, an empty provider balance, a workspace step limit),
-// accounting failures, a cancelled run or graph, and an interrupted run, whose provider outcome is uncertain (its
-// executor was lost, and the executor settles those without replay). A refusal at admission (quota, plan) is not a
+// accounting failures, a cancelled run or graph, an interrupted run, whose provider outcome is uncertain (its
+// executor was lost, and the executor settles those without replay), and a run that timed out (owner, 2026-10-18:
+// 「超时不再重试」). A run_timeout is a run's own deadline: all 17 of the 21 days to 2026-10-18 lasted 600 s or more,
+// so a retry repeats that wait and its charge. A connection that times out first is the Python worker's
+// MODEL_UNAVAILABLE (provider_unavailable, below); the JS worker still reports undici's 10 s connect timeout as a
+// deadline, which none of those runs was. A refusal at admission (quota, plan) is not a
 // run's failure and settles the node as before. No retry pays twice for work already done: a code that can end a run
 // after output (runtime_failed is the catch-all for unmapped worker codes) retries only a run that produced nothing
 // (graphRunSilent), and a generation runs again only when its provider provably charged nothing (mediaRunUnbilled).
@@ -58,7 +62,6 @@ var graphRetryableCodes = map[string]graphRetryClass{
 	"provider_unavailable":       retryIfSilent,
 	"provider_rate_limited":      retryIfSilent,
 	"runtime_failed":             retryIfSilent,
-	"run_timeout":                retryIfSilent,
 	"media_provider_unavailable": retryIfUnbilled,
 	"media_provider_busy":        retryIfUnbilled,
 	"media_result_unavailable":   retryIfUnbilled,
