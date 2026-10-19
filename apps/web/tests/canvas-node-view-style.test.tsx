@@ -13,6 +13,7 @@ import {
 } from '../src/canvas/nodeViewStyle';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { resetAllSessions } from '../src/canvas/sessions';
+import { TileComposer } from '../src/canvas/TileComposer';
 
 const custom = (knobs: Partial<NodeViewPreference['custom']> = {}): NodeViewPreference => ({ version: 1, style: 'custom', custom: { ...PRESET_KNOBS.default, ...knobs } });
 
@@ -311,6 +312,48 @@ describe('the picker', () => {
     await upload(exportNodeViewPreference({ version: 1, style: 'codex', custom: { ...PRESET_KNOBS.workbuddy } }));
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
     expect(parseNodeViewPreference(localStorage.getItem(nodeViewStorageKey()))).toEqual({ version: 1, style: 'custom', custom: PRESET_KNOBS.workbuddy });
+  });
+});
+
+/** The declarations of the stylesheet rule whose selector is exactly `selector` (comments dropped, spaces collapsed). */
+function declarations(css: string, selector: string): Record<string, string> {
+  for (const block of css.replace(/\/\*[\s\S]*?\*\//g, '').split('}')) {
+    const [head, body] = block.split('{');
+    if (body === undefined || head.trim() !== selector) continue;
+    return Object.fromEntries(body.split(';').map(part => part.trim()).filter(Boolean)
+      .map(part => [part.slice(0, part.indexOf(':')).trim(), part.slice(part.indexOf(':') + 1).trim().replace(/\s+/g, ' ')]));
+  }
+  throw new Error(`no rule for ${selector}`);
+}
+
+describe('the terminal look', () => {
+  const scope = ".canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form))";
+  const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+
+  it('starts the message box’s first line with the ">" prompt, clear of the "+" on the row above it', () => {
+    // jsdom has no layout; the rules found in Chrome are checked (2026-10-19: drawn at the row's top, the prompt sat on
+    // the "+", which has its own row above the box where files can be attached, 33 px above the box's first line).
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/node-view-styles.css'), 'utf8');
+    const rule = (part: string) => declarations(css, `${scope} ${part}`);
+    // A one-column grid, the "+" over the box; no gap, so a row without the "+" starts with the box.
+    expect(rule('.canvas-composer-row')).toMatchObject({ display: 'grid', 'grid-template': "'attach' auto 'input' auto / minmax(0, 1fr)", gap: '0' });
+    expect(rule('.canvas-composer-row > .canvas-composer-attach')).toMatchObject({ 'grid-area': 'attach' });
+    expect(rule('.canvas-composer-input')).toMatchObject({ 'grid-area': 'input', 'padding-left': '30px' });
+    // The prompt is placed in the box's own area, so it moves with the box whether or not the "+" is drawn.
+    expect(rule('.canvas-composer-row::before')).toMatchObject({ content: "'>' / ''", position: 'absolute', 'grid-area': 'input', top: '9px', left: '12px', 'pointer-events': 'none' });
+  });
+
+  it('keeps the "+" and the box as children of the row itself, which those rules place', () => {
+    const shown = (container: HTMLElement) => [...container.querySelector('.canvas-composer-row')!.children]
+      .filter(child => !(child as HTMLElement).hidden).map(child => [...child.classList].find(name => name.startsWith('canvas-composer-')));
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const cloud = render(<TileComposer streaming={false} onSend={vi.fn()} />);
+    expect(shown(cloud.container)).toEqual(['canvas-composer-attach', 'canvas-composer-input', 'canvas-composer-send']);
+    cloud.unmount();
+    // A canvas that is not a cloud canvas takes no files: no "+", and the box starts the row.
+    clearSaaSCanvas();
+    const local = render(<TileComposer streaming={false} onSend={vi.fn()} />);
+    expect(shown(local.container)).toEqual(['canvas-composer-input', 'canvas-composer-send']);
   });
 });
 

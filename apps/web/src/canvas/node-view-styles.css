@@ -140,9 +140,14 @@ html:root .canvas-root:is([data-node-style='codex'], [data-node-style='workbuddy
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-transcript-presence-label { color: var(--nv-ink); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-working-timer::before { content: '('; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .awwo-working-timer::after { content: ')'; }
-.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { position: relative; border-radius: var(--nv-composer-radius); }
-.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row::before { content: '>'; content: '>' / ''; position: absolute; top: 9px; left: 12px; color: var(--nv-muted); font-family: var(--nv-mono); font-size: var(--nv-size); pointer-events: none; }
-.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input { padding-left: 30px; font-family: var(--nv-mono); }
+/* The ">" prompt starts the box's first line. Where files can be attached, the "+" has its own row above the box, so the
+   prompt is placed in the box's grid area, not at the row's top, where it covered the "+". No gap: without a "+" the
+   box starts the row, as before. */
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row { position: relative; display: grid; grid-template: 'attach' auto 'input' auto / minmax(0, 1fr); gap: 0;
+    border-radius: var(--nv-composer-radius); }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row > .canvas-composer-attach { grid-area: attach; justify-self: start; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-row::before { content: '>'; content: '>' / ''; position: absolute; grid-area: input; top: 9px; left: 12px; color: var(--nv-muted); font-family: var(--nv-mono); font-size: var(--nv-size); pointer-events: none; }
+.canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .canvas-composer-input { grid-area: input; padding-left: 30px; font-family: var(--nv-mono); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details { width: 100%; border: 0; border-radius: 0; }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-toggle { padding-left: 22px; font-family: var(--nv-mono); }
 .canvas-root[data-node-layout='terminal'] .awwo-node:is(.canvas-tile--open, .canvas-tile--focus):not(:where(.canvas-tile--form)) .saas-team-run-details .saas-team-run-chevron { display: none; }
