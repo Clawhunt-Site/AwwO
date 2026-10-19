@@ -79,6 +79,13 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     deliverable: 'An AI agent workspace in the browser',
   },
   {
+    id: 'roost-team', kind: 'product', recording: true, footage: 'roost-real',
+    title: 'Roost',
+    brief: 'An open-source home for a team of AI bots in one web page: named bots with their own roles share one computer and a group chat with you, ask before they act, run on routines and learn skills you show them; one real team session recorded in sandbox computers during the run replays on a timeline with a lane for each bot, three bots in four turns gathering a community garden’s forecast from the US weather service, building its weekly bulletin, reviewing it and fixing it; take the shared computer over, or run the team live on your own model; designed in a clean room from evidence about an open-source multi-agent app, and testing itself.',
+    stages: [['Reader', RECORDER_ROLE], ['Spec', 'Wren'], ['Kernel', 'Interface', 'Shared computer', 'Chat', 'Bots', 'Computer', 'Skills', 'Replay', 'Live team', 'Bram'], ['Ivy'], ['Bram'], [ASSEMBLY_ROLE], ['Test'], [REVIEW]],
+    deliverable: 'An AI bot team in the browser',
+  },
+  {
     id: 'neon-city', kind: 'interactive', recording: true, footage: 'neon-real',
     title: 'Neon City',
     brief: 'A cinematic full-screen interactive brand page: a future city whose lights never go out on a rainy night.',

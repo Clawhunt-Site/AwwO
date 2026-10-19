@@ -181,6 +181,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "roost-team": {
+    "completed": 19,
+    "total": 19,
+    "seconds": 8948,
+    "delivered": true,
+    "capturedOn": "2026-10-19",
+    "model": "Claude Opus 4.8",
+    "runtime": "sandbox"
+  },
   "shanhai-vn": {
     "completed": 3,
     "total": 3,

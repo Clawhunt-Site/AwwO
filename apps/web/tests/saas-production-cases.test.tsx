@@ -239,6 +239,31 @@ it('shows Errand as it went: fifteen agents over 4 runs, its recorder and assemb
   expect(within(made).getByText('errand.html, 385 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
 });
 
+it('shows Roost as it went: seventeen agents over 6 runs, its recorder and assembly with no model', async () => {
+  view();
+  fireEvent.click(screen.getByRole('button', { name: 'Roost' }));
+  const dialog = screen.getByRole('dialog', { name: 'Roost' });
+  // The reader, the spec, four bot turns, nine builders, the tester and the review; the recorder writes its file from
+  // its template and the assembly makes the page, neither with a model.
+  expect(within(dialog).getByText('17 agents · 8 stages')).toBeVisible();
+  expect(dialog.querySelector('video')).toHaveAttribute('src', '/showcase/roost-real.mp4');
+  const made = await within(dialog).findByRole('region', { name: '17 agents, 8 stages, 74 min 11 s in 6 runs' });
+  expect(within(made).getByText('19/19 nodes done')).toBeVisible();
+  const receipt = [...made.querySelectorAll('details')].find(element => element.querySelector('summary')?.textContent === 'Run receipt')!.textContent!;
+  expect(receipt).toContain('up to 64 model calls per node with thinking off');
+  expect(receipt).toContain('6 runs took 74 min 11 s, 149 min 8 s from the first start to the last finish');
+  expect(receipt).toContain('API 7c2348a3093e · runtime 6a6d831b71ac (Read the app, Turn recorder, Clean-room spec');
+  expect(receipt).toContain('; then API 7c2348a3093e · runtime 2b10ed38faa9 (Interface, Assembly, Test and fix, Review)');
+  const rail = within(made).getByRole('list', { name: 'Every agent, stage by stage' });
+  fireEvent.click(within(rail).getByRole('button', { name: /^Turn recorder/ }));
+  expect(within(made).getByText('Written with no model')).toBeVisible();
+  expect(within(made).getByText('rec.py, 13 KB: written from its template, byte for byte, with no model.')).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Kernel/ }));
+  expect(within(made).getByText('Worked in its own sandbox computer · 39 model calls · 27,175 output tokens')).toBeVisible();
+  fireEvent.click(within(rail).getByRole('button', { name: /^Assembly/ }));
+  expect(within(made).getByText('roost.html, 705 KB: the modules pasted into its template, byte for byte, with no model.')).toBeVisible();
+});
+
 it('copies an illustrated case’s real canvas through the workspace’s copy flow, closing the case first', async () => {
   const onReuse = vi.fn<(workflow: OfficialWorkflow) => void>();
   render(<SaaSPreferencesProvider><ProductionCases onReuse={onReuse} /></SaaSPreferencesProvider>);

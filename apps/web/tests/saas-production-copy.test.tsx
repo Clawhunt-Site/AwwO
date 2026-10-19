@@ -42,8 +42,8 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(21);
-  expect(RECORDED).toHaveLength(15);
+  expect(CASES).toHaveLength(22);
+  expect(RECORDED).toHaveLength(16);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
@@ -51,8 +51,9 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
     copy.nodes.forEach((node, index) => {
       const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id)!;
       const session = node as SessionNode;
-      // A flagship's assembly makes its page file again on the copy's first run, with no model.
-      if (node.kind === 'assemble') { expect(session.lastOutput, `${id}/${recorded.id}`).toBeUndefined(); return; }
+      // A flagship's assembly makes its page file again on the copy's first run, with no model, and an agent that hands
+      // a file on (a team's turn) runs again then: its file is in the case's workspace.
+      if (node.kind === 'assemble' || workflow.nodes[index].handoff) { expect(session.lastOutput, `${id}/${recorded.id}`).toBeUndefined(); return; }
       // A node with a report beside its result (a flagship's tester) carries both, as one object.
       const text = recorded.report === undefined ? recorded.output : JSON.stringify({ result: recorded.output, report: recorded.report });
       expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text,
@@ -70,8 +71,9 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
 it('shows every agent what it received: each wired input resolves to its upstream recording, marked as one', () => {
   for (const id of RECORDED) {
     const copy = copyOf(id), byId = new Map(copy.nodes.map(node => [node.id, node as SessionNode]));
-    // What an assembly makes again on the copy's first run reaches the node it feeds then.
-    const remade = new Set(copy.nodes.filter(node => node.kind === 'assemble').map(node => node.id));
+    // What an assembly makes again on the copy's first run reaches the node it feeds then, and so does what a team's turn
+    // makes again then (it hands a file on).
+    const remade = new Set(copy.nodes.filter((node, index) => node.kind === 'assemble' || WORKFLOWS[id].nodes[index]?.handoff).map(node => node.id));
     for (const node of copy.nodes as SessionNode[]) {
       const incoming = copy.edges.filter(edge => edge.toNode === node.id);
       if (incoming.some(edge => remade.has(edge.fromNode))) continue;

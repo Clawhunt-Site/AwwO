@@ -234,15 +234,29 @@ it('changes the canvas digest when any task or wire changes, but not with the fr
 it('carries no private identifiers or machine paths into a public record', () => {
   for (const record of RECORDS) {
     const text = JSON.stringify(record);
-    // Every string as it is, not JSON-escaped, so a backslash path is caught too.
+    // Every string as it is, not JSON-escaped, so a backslash path is caught too. A recorded turn or session script
+    // (Roost's and Errand's) is checked as the data it adds, whose strings are the recorded commands, outputs and files:
+    // the script's own JSON escapes (a regex's \b in a recorded command, written \\b) are not paths.
     const strings: string[] = [];
-    const walk = (value: unknown): void => { if (typeof value === 'string') strings.push(value); else if (value && typeof value === 'object') Object.values(value).forEach(walk); };
+    const added = (script: string) => {
+      let data: unknown = null;
+      const library = { add: (value: unknown) => { data = value; } };
+      new Function('window', script)({ Roost: { library }, Errand: { library } });
+      return data;
+    };
+    const walk = (value: unknown): void => {
+      if (typeof value === 'string') {
+        if (/^window\.(Roost|Errand)&&window\.\1\.library\.add\(/.test(value)) walk(added(value)); else strings.push(value);
+      } else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+    };
     walk(record);
     for (const value of strings) {
       expect(value, record.caseId).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
       expect(value, record.caseId).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/]/);
-      // /home/errand is the home of the computer inside Errand's own page (its kernel's), not a machine's.
-      expect(value, record.caseId).not.toMatch(/(?:^|[^A-Za-z0-9.])(?:\/Users\/|\/home\/(?!errand\b)|~\/|\\\\[A-Za-z])/);
+      // /home/errand and /home/roost are the homes of the computers inside Errand's and Roost's own pages (their
+      // kernels'), not a machine's. A network path is two backslashes, a host, a backslash and a share (\\host\share):
+      // two backslashes and a letter alone are also code's escaped escapes ('\\u2019' in a module's string).
+      expect(value, record.caseId).not.toMatch(/(?:^|[^A-Za-z0-9.])(?:\/Users\/|\/home\/(?!errand\b|roost\b)|~\/|\\\\[A-Za-z][\w.-]*\\[\w$.-])/);
     }
     expect(text, record.caseId).not.toMatch(/\bcv-[a-z0-9]{8}-/);              // canvas node identifiers
     expect(text, record.caseId).not.toMatch(/"(?:tenantId|canvasId|sessionId|runId|operationId)"/);

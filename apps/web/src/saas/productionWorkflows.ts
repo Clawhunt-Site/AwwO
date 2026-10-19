@@ -772,7 +772,7 @@ const KNOWLEDGE: OfficialWorkflow = {
 };
 
 /** The flagship canvases (flagshipWorkflows.ts) published as cases: each has a run record in production-runs/. */
-export const PUBLISHED_FLAGSHIPS = ['umber-photo', 'backprop-lab', 'errand-agent'] as const;
+export const PUBLISHED_FLAGSHIPS = ['umber-photo', 'backprop-lab', 'errand-agent', 'roost-team'] as const;
 
 /** The epic canvases (epicWorkflows.ts) published as cases, likewise each with its run record. */
 export const PUBLISHED_EPICS = ['pallward'] as const;

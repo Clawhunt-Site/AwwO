@@ -54,6 +54,9 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
     // An assemble node that also delivers a file is made afresh on the copy's first run: the file it delivered is
     // stored in the case's workspace, and the copy's run makes it again in a moment, without a model.
     if (node.kind === 'assemble' && node.contract.outputs.some(field => field.type === 'file')) return node;
+    // So is an agent that hands a file on (a flagship team's turn: the team's project as one file): its file is stored in
+    // the case's workspace too, and the turn after it needs that file, so the copy's first run makes both again.
+    if (node.kind !== 'assemble' && node.contract?.outputs.some(field => field.type === 'file')) return node;
     const text = recorded.output?.trim() ? recordedText(node, recorded) : null;
     // The copy dialog counts every delivered node as carried, so a delivery the canvas cannot hold stops the copy.
     if (text === null) throw new Error(`The run record of ${record.caseId} has a delivery of ${recorded.id} its canvas cannot hold.`);
