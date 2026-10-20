@@ -22,7 +22,7 @@
 // one zoom tier: hiding the handles when zoomed out would hide the only affordance for reading
 // and repairing that structure.
 
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
 import type { MediaComposerInfo } from './TileComposer';
@@ -188,23 +188,30 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
     [rootRef, emit],
   );
 
+  // A tile draws its ports' wire counts while it renders, so the count is a new function whenever a wire comes or goes
+  // (every tile then renders again). The key is what each wire joins: a dependency the body does not read (it reads the
+  // latest wires), which has to stay.
+  const wiresKey = edges.map((e) => `${e.fromNode}\u0001${e.fromPort}\u0001${e.toNode}\u0001${e.toPort}`).join('\u0002');
   const wireCount = useCallback(
     (nodeId: string, portId: string, side: PortSide) =>
       side === 'input'
         ? edgesRef.current.filter((e) => e.toNode === nodeId && e.toPort === portId).length
         : edgesRef.current.filter((e) => e.fromNode === nodeId && e.fromPort === portId).length,
-    [],
+    [wiresKey],
   );
 
-  return {
+  // The same object while nothing in it changed: every tile is memoised on its props, this one included, so a new
+  // object per render would re-render every tile on the canvas each time it renders.
+  const interactive = Boolean(onConnect);
+  return useMemo(() => ({
     pendingPort,
     wireDrag,
-    interactive: Boolean(onConnect),
+    interactive,
     wireCount,
     clearPending,
     onPortPointerDown,
     onPortClick,
-  };
+  }), [pendingPort, wireDrag, interactive, wireCount, clearPending, onPortPointerDown, onPortClick]);
 }
 
 const TYPE_LABEL: Record<DataType, CanvasTextKey> = {

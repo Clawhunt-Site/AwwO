@@ -6,16 +6,33 @@
 // write pending, was counted by React as an update loop. What keeps that from coming back:
 //   1. the reports of tiles that settle together are written together, in one machine write (and before anything that
 //      takes no edit for a while or compares whole documents: a run, a node setup, a plan);
+//   2. a tile re-renders only when something it shows changed (its props keep their identity);
+import { createElement, memo, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { updateNodeDraft } from '../src/canvas/nodeThreads';
+import { edgeId } from '../src/canvas/ports';
 import { CANVAS_RUN_JOURNAL_KEY } from '../src/canvas/runJournal';
 import { forgetNode } from '../src/canvas/sessionTransport';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
+import { useWiring } from '../src/canvas/TilePorts';
+
+const counts = vi.hoisted(() => ({ tiles: new Map<string, number>() }));
+
+vi.mock('../src/canvas/SessionTile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/canvas/SessionTile')>();
+  const Real = actual.SessionTile;
+  // The same memo the tile has: a render counted here is one the real tile's memo let through.
+  const Counted = memo((props: ComponentProps<typeof Real>) => {
+    counts.tiles.set(props.node.id, (counts.tiles.get(props.node.id) ?? 0) + 1);
+    return createElement(Real, props);
+  });
+  return { ...actual, SessionTile: Counted };
+});
 
 class SilentResizeObserver {
   observe() {}
@@ -23,6 +40,7 @@ class SilentResizeObserver {
   disconnect() {}
 }
 
+const mod = { ctrlKey: true, bubbles: true, cancelable: true } as const;
 const quiet = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
 const stored = () => JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
 const reply = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body });
@@ -73,6 +91,7 @@ beforeEach(() => {
   cleanup();
   resetAllSessions();
   localStorage.clear();
+  counts.tiles.clear();
   vi.stubGlobal('ResizeObserver', SilentResizeObserver);
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(reply(503, {}))));
 });
@@ -205,5 +224,126 @@ describe('a tile’s last line while it waits to be written', () => {
     expect(line()).toBe('old');
     localStorage.removeItem(CANVAS_RUN_JOURNAL_KEY);
     await waitFor(() => expect(line()).toBe(LAST), { timeout: 2000 });
+  });
+});
+
+describe('a tile re-renders only when what it shows changed', () => {
+  // 甲 feeds 乙's brief; 丙 stands alone.
+  function threeWired(first: Partial<SessionNode> = {}) {
+    const contract = { version: 1 as const, inputs: [{ id: 'brief', label: 'Brief', type: 'markdown' as const, required: true, value: '' }],
+      outputs: [{ id: 'result', label: 'Result', type: 'markdown' as const, required: true, value: '' }] };
+    const a = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'a', title: '甲', contract,
+      lastOutput: { text: '甲的交付', at: 1, source: 'run' as const }, ...first };
+    const b = { ...createSessionNode('llm', { x: 500, y: 0 }), id: 'b', title: '乙', contract };
+    const c = { ...createSessionNode('llm', { x: 1000, y: 0 }), id: 'c', title: '丙', contract };
+    const from = { nodeId: 'a', portId: 'out:result' };
+    const to = { nodeId: 'b', portId: 'in:brief' };
+    seed([a, b, c], [{ id: edgeId(from, to), fromNode: 'a', fromPort: from.portId, toNode: 'b', toPort: to.portId, dataType: 'text' }]);
+  }
+  const renders = () => Object.fromEntries(['a', 'b', 'c'].map(id => [id, counts.tiles.get(id) ?? 0]));
+
+  it('leaves every tile alone when only the canvas around them changes', async () => {
+    threeWired();
+    render(<CanvasSurface />);
+    await quiet(600);
+    counts.tiles.clear();
+    // The command palette opens and closes over the board: the canvas renders, its tiles do not.
+    fireEvent.keyDown(document, { key: 'p', code: 'KeyP', ...mod });
+    await waitFor(() => expect(document.querySelector('.canvas-cmdbar-overlay')).toBeTruthy());
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape', bubbles: true });
+    await waitFor(() => expect(document.querySelector('.canvas-cmdbar-overlay')).toBeNull());
+    await quiet(100);
+    expect(renders()).toEqual({ a: 0, b: 0, c: 0 });
+  });
+
+  it('re-renders only the pressed tile when a press selects it', async () => {
+    threeWired();
+    render(<CanvasSurface />);
+    await quiet(600);
+    counts.tiles.clear();
+    fireEvent.pointerDown(screen.getByTestId('canvas-tile-c'), { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
+    await quiet(100);
+    expect(renders().a).toBe(0);
+    expect(renders().b).toBe(0);
+    expect(renders().c).toBeGreaterThan(0);
+  });
+
+  it('re-renders only the dragged tile while it moves, not the tile it feeds', async () => {
+    threeWired();
+    render(<CanvasSurface />);
+    await quiet(600);
+    fireEvent.pointerDown(screen.getByTestId('canvas-tile-a'), { button: 0, clientX: 0, clientY: 0 });
+    counts.tiles.clear();
+    for (let step = 1; step <= 8; step += 1) fireEvent.pointerMove(window, { clientX: step * 10, clientY: step * 4 });
+    fireEvent.pointerUp(window, { clientX: 80, clientY: 32 });
+    await waitFor(() => expect((stored().nodes.find(node => node.id === 'a') as SessionNode).x).toBe(80));
+    expect(renders().a).toBeGreaterThan(0);
+    expect(renders().b).toBe(0);
+    expect(renders().c).toBe(0);
+  });
+
+  it('shows a tile what a changed delivery now gives it', async () => {
+    // 甲's delivery drawer stays open while its value is edited (the reader left it open): opening it again would queue a
+    // re-open of 甲 for the next frame (toggleDeliverables), which could land after the next open below.
+    threeWired({ deliverablesOpen: true });
+    render(<CanvasSurface />);
+    await quiet(600);
+    const tile = (id: string) => within(screen.getByTestId(`canvas-tile-${id}`));
+    const open = async (id: string, title: string) => {
+      fireEvent.click(screen.getByRole('button', { name: `打开 ${title}`, exact: true }));
+      await waitFor(() => expect(screen.getByTestId(`canvas-tile-${id}`).dataset.lod).toBe('focus'));
+    };
+    const close = async (id: string) => {
+      fireEvent.keyDown(document, { key: 'Escape', code: 'Escape', bubbles: true });
+      await waitFor(() => expect(screen.getByTestId(`canvas-tile-${id}`).dataset.lod).not.toBe('focus'));
+    };
+    const inputs = (id: string) => {
+      const toggle = tile(id).getByRole('button', { name: '输入', exact: true });
+      if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+    };
+    // 乙's inputs read 甲's delivery.
+    await open('b', '乙');
+    inputs('b');
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-b').textContent).toContain('甲的交付'));
+    await close('b');
+    // 甲's delivery is published again by hand: its node changes (not where it sits).
+    await open('a', '甲');
+    fireEvent.click(tile('a').getByText('编辑输出表单'));
+    fireEvent.change(tile('a').getByLabelText('Result的值'), { target: { value: '甲的新交付' } });
+    fireEvent.click(tile('a').getByRole('button', { name: '发布输出' }));
+    await waitFor(() => expect((stored().nodes.find(node => node.id === 'a') as SessionNode).lastOutput?.source).toBe('manual'));
+    await close('a');
+    // 乙 reads the new one.
+    await open('b', '乙');
+    inputs('b');
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-b').textContent).toContain('甲的新交付'));
+    expect(screen.getByTestId('canvas-tile-b').textContent).not.toContain('甲的交付');
+  });
+
+  it('redraws both ends of a wire that is removed', async () => {
+    threeWired();
+    render(<CanvasSurface />);
+    await quiet(600);
+    const port = (node: string, id: string) => document.querySelector(`[data-node-id="${node}"][data-port-id="${id}"]`)!;
+    expect(port('a', 'out:result').classList.contains('is-connected')).toBe(true);
+    expect(port('b', 'in:brief').classList.contains('is-connected')).toBe(true);
+    fireEvent.doubleClick(screen.getByTestId(`canvas-wire-hit-${edgeId({ nodeId: 'a', portId: 'out:result' }, { nodeId: 'b', portId: 'in:brief' })}`));
+    await waitFor(() => expect(port('a', 'out:result').classList.contains('is-connected')).toBe(false));
+    expect(port('b', 'in:brief').classList.contains('is-connected')).toBe(false);
+  });
+});
+
+describe('useWiring', () => {
+  it('hands its tiles the same object until something in it changes', () => {
+    const rootRef = { current: null };
+    const props = { nodes: [], edges: [], onConnect: () => {}, rootRef, view: { x: 0, y: 0, scale: 1 } } as Parameters<typeof useWiring>[0];
+    const { result, rerender } = renderHook((current: Parameters<typeof useWiring>[0]) => useWiring(current), { initialProps: props });
+    const first = result.current;
+    rerender({ ...props, view: { x: 10, y: 0, scale: 1 } });
+    expect(result.current).toBe(first);
+    rerender({ ...props, onConnect: undefined });
+    expect(result.current).not.toBe(first);
+    expect(result.current.interactive).toBe(false);
   });
 });

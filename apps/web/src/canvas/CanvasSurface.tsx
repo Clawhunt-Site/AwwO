@@ -254,6 +254,18 @@ function sansCamera(json: string | null): string | null {
   } catch { return json; }
 }
 
+/** Whether two versions of a node read the same as a wire's source: prepareNodeConversation and assembleInputViews read
+ *  nothing of where it sits or how large it is drawn, so a card being dragged is the same source on every frame. */
+function sameAsSource(a: CanvasNode | undefined, b: CanvasNode | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const left = a as unknown as Record<string, unknown>, right = b as unknown as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (key !== 'x' && key !== 'y' && key !== 'w' && key !== 'h' && left[key] !== right[key]) return false;
+  }
+  return true;
+}
+
 /** Where a node sits, how large it is drawn and the next message being typed into it are not part of what a run executes. */
 function nodeSubstance(node: CanvasNode): string {
   const { x: _x, y: _y, w: _w, h: _h, ...rest } = node as CanvasNode & { deliverablesOpen?: boolean };
@@ -501,6 +513,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // port vanished (an image agent switched to LLM) must not linger in the document, in the run
   // engine's dependency graph, or on screen.
   const edges = useMemo(() => reconcileEdges(nodes, doc.edges), [nodes, doc.edges]);
+  // Read by callbacks that must keep their identity (the tiles are memoised on them) and by what the displays read.
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
 
   // ---- history (undo / redo) ------------------------------------------------------------------
   //
@@ -843,8 +858,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const focusedOpenFrame = focusedFit?.frame;
   const focusNarrow = focusedFit ? focusedFit.narrow : narrowFocusWidth(size.w);
   const focusExact = Boolean(focusedFit?.resized);
-  const renderNodes = useMemo(() => presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact),
-    [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact]);
+  // A node drawn as it was keeps the object it was drawn with: each one is a tile's geometry, and tiles are memoised on
+  // their props, so a fresh copy of every card for any one node's edit would re-render the whole canvas.
+  const drawnNodes = useRef(new globalThis.Map<string, { node: CanvasNode; drawn: CanvasNode }>());
+  const renderNodes = useMemo(() => {
+    const drawn = presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact);
+    const kept = new globalThis.Map<string, { node: CanvasNode; drawn: CanvasNode }>();
+    const stable = drawn.map((next, index) => {
+      const held = drawnNodes.current.get(next.id);
+      const same = held && held.node === nodes[index] && held.drawn.w === next.w && held.drawn.h === next.h ? held.drawn : next;
+      kept.set(next.id, { node: nodes[index], drawn: same });
+      return same;
+    });
+    drawnNodes.current = kept;
+    return stable;
+  }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -1117,17 +1145,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setFocusedId(null);
   }, [restoreFocusCamera]);
 
+  // Every tile takes these (a double-click, its open button, Configure): they read the selection and the open node of the
+  // latest render instead of closing over them, so they keep their identity when a press changes the selection and the
+  // memoised tiles are not all re-rendered for it.
   const toggleFocus = useCallback(
     (nodeId?: string) => {
-      const target = nodeId ?? selection[0] ?? null;
-      if (focusedId && (!nodeId || nodeId === focusedId)) {
+      const target = nodeId ?? selectionRef.current[0] ?? null;
+      const open = focusedRef.current;
+      if (open && (!nodeId || nodeId === open)) {
         unfocus();
         return;
       }
-      if (target) focusNode(target);
+      if (target) focusNodeRef.current(target);
     },
-    [focusedId, selection, focusNode, unfocus],
+    [unfocus],
   );
+  const openNode = useCallback((nodeId: string) => focusNodeRef.current(nodeId), []);
 
   const cycle = useCallback(
     (dir: 1 | -1) => {
@@ -1997,7 +2030,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   /**
    * Every node downstream of `roots`, plus the roots themselves — the set a change at `roots`
    * can still affect. Running this is "carry my edit forward" without re-running the work above
-   * it, which is the loop the product exists for.
+   * it, which is the loop the product exists for. It reads the wires of the latest render, so that it keeps its identity
+   * (saveNode, which every tile takes, is built on it).
    */
   const downstreamClosure = useCallback(
     (roots: ReadonlyArray<string>): string[] => {
@@ -2005,7 +2039,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       let grew = true;
       while (grew) {
         grew = false;
-        for (const e of edges) {
+        for (const e of edgesRef.current) {
           // Scoped runs follow same-turn dependencies. Feedback belongs to the bounded
           // review scheduler and must not expand a Workflow run after switching modes.
           if (e.kind === 'feedback') continue;
@@ -2017,7 +2051,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       return [...out];
     },
-    [edges],
+    [],
   );
 
   /** Re-run exactly one node, reusing every upstream's stored output. */
@@ -2510,8 +2544,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     [patchDoc],
   );
   const tileOnConfigure = useCallback(
-    (id: string) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNode(id, { configure: true }); } },
-    [focusNode],
+    (id: string) => { if (!inspectorCloseLocked.current) { setInspectorId(id); focusNodeRef.current(id, { configure: true }); } },
+    [],
   );
   const tileDelete = useCallback(
     (id: string) => deleteNodes([id]),
@@ -2540,8 +2574,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ? `${node.id}\u0001${node.title}\u0001${node.lastOutput?.at ?? ''}\u0001${node.lastOutput?.text.length ?? 0}` : node.id).join('\u0002');
   const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey]);
   // What the 预览展示 windows read, keyed so a moved card hands them nothing new (they are memoised and run pages).
-  const edgesRef = useRef(edges);
-  edgesRef.current = edges;
   const edgesKey = edges.map(edge => `${edge.id}\u0001${edge.kind ?? ''}`).join('\u0002');
   const executionKey = doc.execution ? JSON.stringify(doc.execution) : '';
   const displayGroups = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: edgesRef.current, execution: docRef.current.execution }),
@@ -3900,6 +3932,37 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const media = mediaKindOf(node.agentKind);
     return media ? mediaModelChoices[media] : chatModelChoices;
   };
+  // What a tile's inputs read now (prepareNodeConversation, assembleInputViews) comes from the node, the wires into it
+  // and the nodes they come from, and nothing else, so it is kept from render to render while those are as they were.
+  // Prepared afresh, every tile got a new object on every render, which defeated the tiles' memo (the whole canvas
+  // re-rendered on each camera frame, each edit and each tile's settled history) and read every upstream delivery again.
+  const tileInputs = useRef(new globalThis.Map<string, { node: CanvasNode; wires: string; sources: ReadonlyArray<CanvasNode | undefined>; value: unknown }>());
+  const runEdges = useMemo(() => edges.filter(edge => edge.kind !== 'feedback'), [edges]);
+  const wiresInto = useMemo(() => {
+    const into = new globalThis.Map<string, CanvasEdge[]>();
+    for (const edge of runEdges) {
+      const list = into.get(edge.toNode);
+      if (list) list.push(edge); else into.set(edge.toNode, [edge]);
+    }
+    return into;
+  }, [runEdges]);
+  // The nodes as each reader finds them: prepareNodeConversation keeps the last node of an id, assembleInputViews the first.
+  const lastNodeById = useMemo(() => new globalThis.Map(nodes.map(node => [node.id, node])), [nodes]);
+  const firstNodeById = useMemo(() => new globalThis.Map([...nodes].reverse().map(node => [node.id, node])), [nodes]);
+  useEffect(() => { for (const id of tileInputs.current.keys()) if (!lastNodeById.has(id)) tileInputs.current.delete(id); }, [lastNodeById]);
+  function inputsFor(node: SessionNode): ReturnType<typeof prepareNodeConversation>;
+  function inputsFor(node: CanvasNode & { kind: 'assemble' }): ReturnType<typeof assembleInputViews>;
+  function inputsFor(node: CanvasNode): unknown {
+    const wires = wiresInto.get(node.id) ?? [];
+    const sources = wires.map(edge => node.kind === 'session' ? (edge.fromNode === node.id ? node : lastNodeById.get(edge.fromNode)) : firstNodeById.get(edge.fromNode));
+    const key = wires.map(edge => JSON.stringify(edge)).join('\n');
+    const held = tileInputs.current.get(node.id);
+    if (held && held.node === node && held.wires === key && held.sources.length === sources.length
+      && held.sources.every((source, index) => sameAsSource(source, sources[index]))) return held.value;
+    const value = node.kind === 'session' ? prepareNodeConversation(node, nodes, runEdges) : node.kind === 'assemble' ? assembleInputViews(node, nodes, edges) : undefined;
+    tileInputs.current.set(node.id, { node, wires: key, sources, value });
+    return value;
+  }
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
@@ -4038,8 +4101,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             run={runs[node.id] ?? null}
             gatewayBase={gatewayApiBase()}
             onSend={tileOnSend}
-            conversationContext={node.kind === 'session' ? prepareNodeConversation(node, nodes, edges.filter(edge => edge.kind !== 'feedback')) : undefined}
-            assembleInputs={node.kind === 'assemble' ? assembleInputViews(node, nodes, edges) : undefined}
+            conversationContext={node.kind === 'session' ? inputsFor(node) : undefined}
+            assembleInputs={node.kind === 'assemble' ? inputsFor(node) : undefined}
             onIssueId={tileOnIssueId}
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
@@ -4049,7 +4112,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onResizeNode={readOnly || exclusiveNow || initializing || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}
             onSelect={selectNode}
             onToggleFocus={toggleFocus}
-            onFitNode={focusNode}
+            onFitNode={openNode}
             onConfigure={simple ? undefined : tileOnConfigure}
             configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
             onUpdateNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked ? undefined : saveNode}
