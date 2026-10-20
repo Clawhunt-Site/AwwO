@@ -67,7 +67,7 @@ Go 指标包含 HTTP 请求数 / 延迟 / in-flight、SSE 握手、run 排队、
 
 Worker 指标包括 `awwo_worker_invocations_total`、`awwo_worker_duration_seconds`、`awwo_worker_provider_duration_seconds`、`awwo_worker_provider_ttft_seconds`、`awwo_worker_first_delta_seconds`、active / capacity 和进程内存。Worker 不重复输出账本费用；Go 账本负责计价权威值。
 
-Go 在 metrics 启用时启动 24h / 30d 账本快照：启动后刷新一次，再每分钟刷新；两个窗口来自同一只读 Repeatable Read 事务和同一 cutoff，并原子替换内存视图。单窗口最多 2048 组，查询时间受限；任一窗口失败保留整份旧快照。scrape 不执行聚合 SQL，暴露快照时间和 age；首次尚无成功快照时不制造全零窗口。日常计数可能因进程重启与快照刷新时机不同，精确查询使用 usage API。
+Go 在 metrics 启用时启动 24h / 30d 账本快照：启动后刷新一次，再每分钟刷新；两个窗口来自同一只读 Repeatable Read 事务和同一 cutoff，并原子替换内存视图。cutoff 在该事务里读数据库时钟（`completed_at` 也由数据库时钟写入），不用 API 进程的时钟。单窗口最多 2048 组，查询时间受限；任一窗口失败保留整份旧快照。scrape 不执行聚合 SQL，暴露快照时间（即 cutoff，数据库时钟）和 age（API 进程自己的时钟，从读取 cutoff 时起算）；首次尚无成功快照时不制造全零窗口。日常计数可能因进程重启与快照刷新时机不同，精确查询使用 usage API。
 
 OTLP 仅发送固定 span 名和有限运行元数据。禁止导出 prompt、system instructions、消息正文、输出、工具参数/结果、Authorization、provider 错误正文与原始业务 ID。外部浏览器传入的 traceparent / baggage / tracestate 不作为可信父级；异步 Go run 建立独立生命周期并关联本地请求 span，内部 worker 传播限于受信的私有调用。
 

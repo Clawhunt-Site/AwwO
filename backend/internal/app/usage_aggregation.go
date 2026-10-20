@@ -13,8 +13,11 @@ import (
 // One immutable snapshot contains BOTH windows. Scrapes never touch PostgreSQL
 // and cannot observe a mixture of the old and new aggregation batches.
 type usageWindowSnapshot struct {
+	// At is where both windows end, on the database's clock, which stamps completed_at.
 	At   time.Time
 	Rows []usageWindowRow
+	// taken is when this process read At, on its own clock: the snapshot's age is measured from it.
+	taken time.Time
 }
 type usageWindowRow struct {
 	Window, Runtime, Model, Outcome string
@@ -47,7 +50,7 @@ func (c *usageWindowCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	for _, w := range []string{"24h", "30d"} {
 		ch <- prometheus.MustNewConstMetric(c.timestamp, prometheus.GaugeValue, float64(s.At.Unix()), w)
-		ch <- prometheus.MustNewConstMetric(c.age, prometheus.GaugeValue, time.Since(s.At).Seconds(), w)
+		ch <- prometheus.MustNewConstMetric(c.age, prometheus.GaugeValue, time.Since(s.taken).Seconds(), w)
 	}
 	type totals struct {
 		tokens [5]*float64
@@ -138,7 +141,13 @@ func (a *App) readUsageWindowSnapshot(parent context.Context) (*usageWindowSnaps
 	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout='2500ms'"); err != nil {
 		return nil, err
 	}
-	snapshot := &usageWindowSnapshot{At: time.Now().UTC()}
+	// The windows end at the database's clock: this process's clock can differ from it by a second or more, and a
+	// call that has just completed would fall outside a window cut at time.Now() while the database's clock runs ahead.
+	snapshot := &usageWindowSnapshot{}
+	if err = tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&snapshot.At); err != nil {
+		return nil, err
+	}
+	snapshot.At, snapshot.taken = snapshot.At.UTC(), time.Now()
 	// GROUP BY happens in SQL under a statement deadline. The result and the
 	// in-memory representation have an independent hard cap.
 	for _, window := range []struct {
