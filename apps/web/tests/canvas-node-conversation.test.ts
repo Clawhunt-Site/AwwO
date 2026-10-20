@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { createSessionNode, type CanvasEdge, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { createEditNode, createSessionNode, type CanvasEdge, type CanvasNode, type EditNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { LocaleProvider } from '../src/canvas/i18n';
+import { mediaMissingText } from '../src/canvas/mediaOutput';
 import { validateContractFields } from '../src/canvas/nodeContracts';
 import { prepareNodeConversation } from '../src/canvas/nodeConversation';
+import { buildNodeMessage } from '../src/canvas/runGraph';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import * as gateway from '../src/canvasAgentChat';
@@ -140,6 +143,96 @@ describe('node conversation input context', () => {
     expect(prepareNodeConversation(sink, [upstream, sink], [{ ...edge(), fromPort: 'out:removed' }]).error).toBeTruthy();
     const numeric = { ...sink, contract: { ...sink.contract!, inputs: [{ ...sink.contract!.inputs[0], type: 'number' as const }] } };
     expect(prepareNodeConversation(numeric, [upstream, numeric], [edge()]).error).toBeTruthy();
+  });
+});
+
+describe('an input wired from a media node that has made no file', () => {
+  const RECORD = JSON.stringify({ type: 'awwo.media', version: 1, kind: 'image', model: 'xt.seedream-5-pro',
+    items: [{ artifactId: 'aAAAAAAAAAAA', name: 'image-1.png', contentType: 'image/png', size: 2048 }] });
+  function media(id: string, kind: 'image' | 'video' | 'model3d' | 'audio' = 'image', lastOutput?: SessionNode['lastOutput']): SessionNode {
+    return { ...createSessionNode(kind, { x: 0, y: 0 }), id, title: `Media ${id}`, ...(lastOutput !== undefined ? { lastOutput } : {}) };
+  }
+  // A page whose brief is filled in here and whose key art is wired from a media node (a soft feed: ports.ts).
+  function page(): SessionNode {
+    const node = agent('sink', '# Local brief');
+    return { ...node, contract: { ...node.contract!, inputs: [...node.contract!.inputs, { id: 'art', label: 'Key art', type: 'markdown', required: true, value: '' }] } };
+  }
+  const wire = (from: string, dataType: CanvasEdge['dataType'] = 'image'): CanvasEdge =>
+    ({ id: `${from}->art`, fromNode: from, fromPort: 'result', toNode: 'sink', toPort: 'in:art', dataType });
+
+  it('hands the agent its note as before, and marks the input for the form', () => {
+    const hero = media('hero'), sink = page();
+    const context = prepareNodeConversation(sink, [hero, sink], [wire('hero')]);
+    expect(context.error).toBeUndefined();
+    // What the agent reads does not change: the input's value is the note, in the same message, word for word.
+    expect(context.inputs?.find(input => input.id === 'art')?.value).toBe(mediaMissingText(hero));
+    expect(context.messagePrefix).toBe(buildNodeMessage(sink, [{ fromTitle: 'Media hero', toPort: 'in:art', output: mediaMissingText(hero) }]));
+    expect(context.sources).toEqual({ art: 'Media hero' });
+    expect(context.mediaMissing).toEqual({ art: 'image' });
+    expect(context.recorded).toEqual({});
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', { text: '  ', source: 'run' as const, at: 1 }],
+    ['partial', { text: RECORD, source: 'run' as const, at: 1, partial: true }],
+    ['not a media record', { text: 'A picture of the hero', source: 'run' as const, at: 1 }],
+  ])('marks an input whose media output is %s', (_label, lastOutput) => {
+    const hero = media('hero', 'image', lastOutput), sink = page();
+    expect(prepareNodeConversation(sink, [hero, sink], [wire('hero')]).mediaMissing).toEqual({ art: 'image' });
+  });
+
+  it('names what each media upstream makes, an edit node a video', () => {
+    for (const kind of ['video', 'model3d', 'audio'] as const) {
+      const sink = page();
+      expect(prepareNodeConversation(sink, [media('m', kind), sink], [wire('m', kind === 'model3d' ? 'file' : kind)]).mediaMissing, kind).toEqual({ art: kind });
+    }
+    const film: EditNode = { ...createEditNode({ x: 0, y: 0 }, 'en'), id: 'cut', title: 'Final cut' };
+    const sink = page();
+    const context = prepareNodeConversation(sink, [film, sink], [wire('cut', 'video')]);
+    expect(context.mediaMissing).toEqual({ art: 'video' });
+    expect(context.inputs?.find(input => input.id === 'art')?.value).toBe(mediaMissingText(film));
+  });
+
+  it('does not mark an input whose picture was made', () => {
+    const sink = page();
+    const context = prepareNodeConversation(sink, [media('hero', 'image', { text: RECORD, source: 'run', at: 1 }), sink], [wire('hero')]);
+    expect(context.mediaMissing).toEqual({});
+    expect(context.inputs?.find(input => input.id === 'art')?.value).toContain('- hero/image-1.png');
+  });
+
+  it('keeps the mark when another value does not fit, and gives none while another upstream is not ready', () => {
+    const hero = media('hero'), sink = page();
+    sink.contract!.inputs[0].value = '';
+    const unfit = prepareNodeConversation(sink, [hero, sink], [wire('hero')]);
+    expect(unfit.error).toContain('需求正文');
+    expect(unfit.mediaMissing).toEqual({ art: 'image' });
+    expect(unfit.inputs?.find(input => input.id === 'art')?.value).toBe(mediaMissingText(hero));
+    // Until every other upstream has delivered, the form shows no values and every wired input waits.
+    const other = page();
+    const waiting = prepareNodeConversation(other, [hero, { ...source(), lastOutput: null }, other], [wire('hero'), edge()]);
+    expect(waiting.inputs).toBeUndefined();
+    expect(waiting.mediaMissing).toBeUndefined();
+    expect(waiting.sources).toEqual({ art: 'Media hero', brief: 'Agent source' });
+  });
+
+  it('shows the note in the page’s language on the opened node, and sends the agent its own', () => {
+    const hero = media('hero'), sink = page();
+    const messages: string[] = [];
+    const conversationContext = prepareNodeConversation(sink, [hero, sink], [wire('hero')]);
+    render(createElement(LocaleProvider, { locale: 'en', children: createElement(SessionTile, {
+      node: sink, conversationContext, scale: 1, focused: true, onSend: (_node, text) => { messages.push(text); },
+    }) }));
+    fireEvent.click(screen.getByRole('button', { name: 'Input' }));
+    const form = screen.getByRole('region', { name: 'Input form' });
+    expect(screen.getByText('No image file from “Media hero” yet. If it makes none, this node goes on without it. Disconnect the wire to enter a value manually.')).toBeVisible();
+    expect(screen.getByLabelText('Key art value')).toHaveValue('');
+    expect(form.textContent).not.toContain('没有可以引用的路径');
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Make the page' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+    expect(messages).toHaveLength(1);
+    expect(messages[0].startsWith(`${conversationContext.messagePrefix}\n\n`)).toBe(true);
+    expect(messages[0]).toContain(mediaMissingText(hero));
   });
 });
 

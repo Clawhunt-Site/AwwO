@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { ContractFields } from '../src/canvas/ContractFields';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
+import { mediaMissingText } from '../src/canvas/mediaOutput';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { parseContractOutput } from '../src/canvas/nodeContracts';
 import { prepareNodeConversation } from '../src/canvas/nodeConversation';
+import { isSoftMediaFeed } from '../src/canvas/ports';
 import { prepareRunDocument } from '../src/canvas/runRecoveryDocument';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { SessionTile } from '../src/canvas/SessionTile';
@@ -204,6 +206,46 @@ it('opens a team turn whose recorder is made on the first run with its input wai
   expect(within(form).getByText(canvasText('en', 'contract.sourceWaiting', { source: 'Turn recorder' }))).toBeVisible();
   expect(within(form).queryByRole('alert')).toBeNull();
   expect(form.textContent).not.toMatch(/\p{Script=Han}/u);
+});
+
+it('opens a media case’s page before its media are made with a note on each media input in the page’s language, while its agent still reads its own', () => {
+  // Every media case: each node a fresh media node feeds takes the agent's note (mediaMissingText), marked by kind, as the
+  // canvas prepares it (session nodes, without feedback wires).
+  for (const id of CASES.filter(id => WORKFLOWS[id].media?.length)) {
+    const copy = copyOf(id), byId = new Map(copy.nodes.map(node => [node.id, node]));
+    const edges = copy.edges.filter(edge => edge.kind !== 'feedback');
+    const fed = copy.nodes.filter(node => node.kind === 'session' && edges.some(edge => edge.toNode === node.id && isSoftMediaFeed(byId.get(edge.fromNode)!, node, edge)));
+    expect(fed.length, id).toBeGreaterThan(0);
+    for (const page of fed as SessionNode[]) {
+      const wires = edges.filter(edge => edge.toNode === page.id && isSoftMediaFeed(byId.get(edge.fromNode)!, page, edge));
+      const context = prepareNodeConversation(page, copy.nodes, edges);
+      expect(context.error, `${id}/${page.title}`).toBeUndefined();
+      expect(context.mediaMissing, `${id}/${page.title}`).toEqual(Object.fromEntries(wires.map(edge =>
+        [edge.toPort.slice('in:'.length), (byId.get(edge.fromNode) as SessionNode).agentKind])));
+      for (const edge of wires) expect(context.messagePrefix).toContain(mediaMissingText(byId.get(edge.fromNode)!));
+    }
+  }
+  resetAllSessions();
+  const copy = copyOf('neon-city');
+  const page = copy.nodes.find(node => node.title === 'Full-screen brand page') as SessionNode;
+  const media = copy.nodes.filter(node => copy.edges.some(edge => edge.fromNode === node.id && edge.toNode === page.id)) as SessionNode[];
+  expect(media.map(node => [node.title, node.agentKind, node.lastOutput])).toEqual([['Opening shot', 'video', undefined],
+    ['Rooftop garden', 'image', undefined], ['Underground night market', 'image', undefined], ['Dawn', 'image', undefined]]);
+  const context = prepareNodeConversation(page, copy.nodes, copy.edges);
+  for (const locale of ['en', 'zh'] as const) {
+    render(<LocaleProvider locale={locale}><SessionTile node={page} scale={1} focused onToggleFocus={vi.fn()} conversationContext={context} /></LocaleProvider>);
+    fireEvent.click(screen.getByRole('button', { name: canvasText(locale, 'tile.input') }));
+    const form = screen.getByRole('region', { name: canvasText(locale, 'tile.inputForm') });
+    for (const node of media) {
+      const kind = canvasText(locale, node.agentKind === 'video' ? 'media.kindVideo' : 'media.kindImage');
+      expect(within(form).getByText(canvasText(locale, 'contract.sourceMediaMissing', { source: node.title, kind }))).toBeVisible();
+      expect(within(form).getByLabelText(canvasText(locale, 'contract.value', { name: `${node.title} (generated files)` }))).toHaveValue('');
+    }
+    expect(within(form).queryByRole('alert')).toBeNull();
+    expect(form.textContent).not.toContain('没有可以引用的路径');
+    if (locale === 'en') expect(form.textContent).not.toMatch(/\p{Script=Han}/u);
+    cleanup();
+  }
 });
 
 it('marks a recording on the collapsed card and opens a node on what it was asked, received and delivered', () => {

@@ -1,5 +1,5 @@
 import type { CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
-import { mediaDeliveryText, mediaMissingText, parseMediaOutput } from './mediaOutput';
+import { mediaDeliveryText, mediaMissingText, mediaSourceKind, parseMediaOutput, type MediaOutputKind } from './mediaOutput';
 import { parseContractOutput, type ContractField } from './nodeContracts';
 import { canFeed, isMediaSourceNode, isSoftMediaFeed, portsFor } from './ports';
 import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runGraph';
@@ -7,13 +7,17 @@ import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runG
 export interface NodeConversationContext {
   messagePrefix: string;
   error?: string;
-  /** Display values, copied from the contract and overlaid with connected outputs, once every connected upstream has a
-   *  usable output; with `error` set, some value does not fit its field. */
+  /** The values the node's inputs take, copied from the contract and overlaid with connected outputs, once every
+   *  connected upstream has a usable output (or, wired as a soft media feed, has made no file: `mediaMissing`); with
+   *  `error` set, some value does not fit its field. */
   inputs?: ContractField[];
   /** Connected field ids mapped to upstream titles (or its saved id if the node was removed or has no title). */
   sources?: Record<string, string>;
   /** Connected field ids whose value is an upstream node's case recording, not a run of this workspace. */
   recorded?: Record<string, true>;
+  /** Connected field ids whose upstream image, video, 3D or audio node (or edit) has made no file, with the kind it makes:
+   *  the value is the note the agent reads (mediaMissingText), which the inputs form does not show as a value. */
+  mediaMissing?: Record<string, MediaOutputKind>;
 }
 
 export function prepareNodeConversation(
@@ -38,6 +42,7 @@ export function prepareNodeConversation(
   if (doubled) return { messagePrefix: '', sources, error: `输入「${doubled.label || doubled.id}」只能连接一个来源。` };
   const upstream: UpstreamInput[] = [];
   const recorded: Record<string, true> = Object.create(null);
+  const mediaMissing: Record<string, MediaOutputKind> = Object.create(null);
   for (const edge of incoming) {
     const source = byId.get(edge.fromNode);
     const input = portsFor(node).find((port) => port.side === 'input' && port.id === edge.toPort);
@@ -47,8 +52,11 @@ export function prepareNodeConversation(
     }
     if ((!source.lastOutput || !source.lastOutput.text.trim() || source.lastOutput.partial || !parseMediaOutput(source.lastOutput.text))
       && isSoftMediaFeed(source, node, edge)) {
-      // A picture, clip or model that was not made: the input says so and the node goes on without it.
+      // A picture, clip or model that was not made: the input says so and the node goes on without it. That note is the
+      // agent's; the form says it in the page's language (a soft feed's source is a media node or an edit: it has a kind).
       upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: mediaMissingText(source) });
+      const kind = mediaSourceKind(source);
+      if (kind) mediaMissing[edge.toPort.slice('in:'.length)] = kind;
       continue;
     }
     if (!source.lastOutput || !source.lastOutput.text.trim() || source.lastOutput.partial) {
@@ -69,10 +77,10 @@ export function prepareNodeConversation(
     return { ...field, value: connected ? connected.output : field.value };
   });
   try {
-    return { messagePrefix: buildNodeMessage(node, upstream), inputs, sources, recorded };
+    return { messagePrefix: buildNodeMessage(node, upstream), inputs, sources, recorded, mediaMissing };
   } catch (error) {
     // Every upstream delivered, but a value does not fit its field (a field left out, a type the wire allows but the
     // value does not meet, a local value missing): the form shows what arrived and says what does not fit.
-    return { messagePrefix: '', inputs, sources, recorded, error: error instanceof Error ? error.message : '节点输入尚未就绪。' };
+    return { messagePrefix: '', inputs, sources, recorded, mediaMissing, error: error instanceof Error ? error.message : '节点输入尚未就绪。' };
   }
 }

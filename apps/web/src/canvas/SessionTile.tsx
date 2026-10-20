@@ -993,7 +993,7 @@ export const SessionTile = memo(function SessionTile({
                   modelLabel={modelLabel} compact={inputOpen || !emptyConversation} onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'edit') : undefined} /> : null}
                 {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
                   <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
-                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} mediaMissing={preparedConversation.mediaMissing} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
                   {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} /> : null}

@@ -177,6 +177,12 @@ export function mediaDeliveryText(node: { id: string; title?: string }, text: st
 }
 
 
+/** What a node delivering an awwo.media record makes: an image, video, 3D or audio node its own kind, an edit node a film (a video). */
+export function mediaSourceKind(node: { agentKind?: string; kind?: string }): MediaOutputKind | null {
+  if (node.kind === 'edit') return 'video';
+  return node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' || node.agentKind === 'audio' ? node.agentKind : null;
+}
+
 /**
  * What a downstream input reads from a media node that made no file this time (it failed, was refused or cancelled, or
  * never ran): the node goes on without it, told that no path exists. The same text the API builds (mediaMissingText in
@@ -184,10 +190,8 @@ export function mediaDeliveryText(node: { id: string; title?: string }, text: st
  */
 export function mediaMissingText(node: { id: string; title?: string; agentKind?: string; kind?: string }): string {
   const title = node.title?.trim() || node.id;
-  // An edit node makes a film: a video.
-  const kind = node.kind === 'edit' ? KIND_WORDS.video
-    : node.agentKind === 'image' || node.agentKind === 'video' || node.agentKind === 'model3d' || node.agentKind === 'audio' ? KIND_WORDS[node.agentKind] : '媒体';
-  return `「${title}」这次没有生成出${kind}文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。`;
+  const kind = mediaSourceKind(node);
+  return `「${title}」这次没有生成出${kind ? KIND_WORDS[kind] : '媒体'}文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。`;
 }
 
 /** A media node's delivery as a downstream input reads it: the files it stored, or the note that it made none. */

@@ -3,6 +3,7 @@ import { Bold, Eye, Heading2, Link2, List, Pencil, Plus, Trash2 } from 'lucide-r
 import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
+import type { MediaOutputKind } from './mediaOutput';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
 import { canvasUploadsAvailable } from '../saas/canvasBridge';
 
@@ -14,6 +15,9 @@ const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
   { value: 'boolean', label: 'contract.boolean' },
   { value: 'file', label: 'contract.file' },
 ];
+const MEDIA_KINDS: Record<MediaOutputKind, CanvasTextKey> = {
+  image: 'media.kindImage', video: 'media.kindVideo', model3d: 'media.kindModel3d', audio: 'media.kindAudio',
+};
 
 export interface ContractFieldsProps {
   fields: ContractField[];
@@ -21,6 +25,9 @@ export interface ContractFieldsProps {
   sources?: Record<string, string>;
   /** Fields whose resolved value is an upstream case recording (nodeConversation.ts). */
   recorded?: Record<string, true>;
+  /** Wired fields whose media upstream has made no file, by what it makes (nodeConversation.ts): their resolved value is
+   *  the agent's note, so the field shows no value and says so in the page's language. */
+  mediaMissing?: Record<string, MediaOutputKind>;
   onChange: (fields: ContractField[]) => void;
   readOnly?: boolean;
   /** Task entry starts with values; contract customization remains available on demand. */
@@ -108,7 +115,7 @@ function FileFieldValue({ field, name, readOnly, onChange, placeholder, describe
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, recorded, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, structureEditable = true, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, recorded, mediaMissing, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, structureEditable = true, label }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
   const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly && structureEditable);
@@ -132,7 +139,13 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
     {fields.map((field, index) => {
       const name = field.label || t('contract.defaultField', { count: index + 1 });
       const source = sources?.[field.id];
-      const displayed = resolvedFields?.find(item => item.id === field.id) ?? (source ? { ...field, value: '' } : field);
+      const resolved = resolvedFields?.find(item => item.id === field.id);
+      const missing = source ? mediaMissing?.[field.id] : undefined;
+      const displayed = missing ? { ...field, value: '' } : resolved ?? (source ? { ...field, value: '' } : field);
+      // Without its file a field holds the agent's note, so the node goes on without it; a field that refuses the note
+      // (an HTML input) is named by the alert, and its hint then promises nothing.
+      const mediaNote = source && missing ? t(resolved && validateContractFields([resolved]).length ? 'contract.sourceMediaMissingUnfit' : 'contract.sourceMediaMissing',
+        { source, kind: t(MEDIA_KINDS[missing]) }) : '';
       const valueReadOnly = readOnly || Boolean(source);
       const helpId = field.help ? `${instanceId}-field-${index}-help` : undefined;
       // The assistant finds fields by name, so an empty name or one another field already has is said (not refused:
@@ -159,7 +172,7 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
         <label className="awwo-field-required"><input type="checkbox" aria-label={locale === 'zh' ? `${name}${t('contract.required')}` : `${name} ${t('contract.required')}`} checked={field.required}
           disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label></> : <div className="awwo-field-value-label"><strong>{name}</strong>{field.required && <span>{t('contract.required')}</span>}</div>}
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}
-        {source && <p className="awwo-field-hint">{t(resolvedFields ? (recorded?.[field.id] ? 'contract.sourceCase' : 'contract.sourceResolved') : 'contract.sourceWaiting', { source })}</p>}
+        {source && <p className="awwo-field-hint">{mediaNote || t(resolvedFields ? (recorded?.[field.id] ? 'contract.sourceCase' : 'contract.sourceResolved') : 'contract.sourceWaiting', { source })}</p>}
         {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })} />
           : field.type === 'boolean' ? <select className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             onChange={(event) => patch(field.id, { value: event.target.value })}>

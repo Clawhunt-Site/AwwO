@@ -82,6 +82,65 @@ describe('node contract field editor', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/^“Notes” is required\.$/);
   });
 
+  it.each([
+    ['en', 'No image file from “Hero” yet. If it makes none, this node goes on without it. Disconnect the wire to enter a value manually.', 'Key art value', 'Preview Key art'],
+    ['zh', '“Hero”还没有生成出图像文件：若最终没有生成，本节点照常进行，不用它；断开连线后可手动填写。', 'Key art的值', '预览Key art'],
+  ] as const)('says in %s that a wired media node made no file, instead of showing the note its agent reads', (locale, note, value, preview) => {
+    // prepareNodeConversation's values: the picture's wire carries the agent's note (mediaMissingText), marked as such. A
+    // value typed in before the field was wired stays stored, and is not shown either.
+    const agentNote = '「Hero」这次没有生成出图片文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。';
+    const art = field({ id: 'art', label: 'Key art', value: '# Typed before the wire' });
+    const { container } = render(<LocaleProvider locale={locale}><ContractFields valuesFirst fields={[art]} resolvedFields={[{ ...art, value: agentNote }]}
+      sources={{ art: 'Hero' }} mediaMissing={{ art: 'image' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(note)).toBeVisible();
+    expect(note).toBe(canvasText(locale, 'contract.sourceMediaMissing', { source: 'Hero', kind: canvasText(locale, 'media.kindImage') }));
+    expect(screen.queryByText(canvasText(locale, 'contract.sourceResolved', { source: 'Hero' }))).toBeNull();
+    expect(screen.getByLabelText(value)).toHaveValue('');
+    expect(screen.getByLabelText(value)).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: preview }));
+    expect(screen.getByText(canvasText(locale, 'contract.noContent'))).toBeVisible();
+    expect(container.textContent).not.toContain('没有可以引用的路径');
+    if (locale === 'en') expect(container.textContent).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it('says nothing of media on a field that is not wired, and keeps its value', () => {
+    const local = field({ id: 'art', label: 'Key art', value: '# Our own art direction' });
+    render(<LocaleProvider locale="en"><ContractFields valuesFirst fields={[local]} resolvedFields={[local]} mediaMissing={{ art: 'image' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByLabelText('Key art value')).toHaveValue('# Our own art direction');
+    expect(screen.queryByText(/^No image file/)).toBeNull();
+  });
+
+  it('names what the media upstream makes', () => {
+    const fields = (['video', 'model3d', 'audio'] as const).map(kind => field({ id: kind, label: kind, value: '' }));
+    render(<LocaleProvider locale="en"><ContractFields valuesFirst fields={fields} resolvedFields={fields.map(item => ({ ...item, value: 'note' }))}
+      sources={{ video: 'Clip', model3d: 'Ship', audio: 'Theme' }} mediaMissing={{ video: 'video', model3d: 'model3d', audio: 'audio' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(/^No video file from “Clip” yet\. If it makes none/)).toBeVisible();
+    expect(screen.getByText(/^No 3D model file from “Ship” yet\. If it makes none/)).toBeVisible();
+    expect(screen.getByText(/^No audio file from “Theme” yet\. If it makes none/)).toBeVisible();
+  });
+
+  it.each([
+    ['en', 'No image file from “Hero” yet. Disconnect the wire to enter a value manually.', /^“Key art” must be a complete HTML document/],
+    ['zh', '“Hero”还没有生成出图像文件；断开连线后可手动填写。', /^「Key art」需要包含 html、head 和 body/],
+  ] as const)('promises nothing in %s on an HTML input, which refuses the note, and lets the alert say why', (locale, note, alert) => {
+    const page = field({ id: 'art', label: 'Key art', type: 'html', value: '' });
+    render(<LocaleProvider locale={locale}><ContractFields valuesFirst fields={[page]} resolvedFields={[{ ...page, value: '「Hero」这次没有生成出图片文件…' }]}
+      sources={{ art: 'Hero' }} mediaMissing={{ art: 'image' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(note)).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(alert);
+  });
+
+  it('keeps its promise on a media input when another field is what is missing', () => {
+    // The page's own brief is emptied: the alert names it, and the picture's input still does not hold the page back.
+    const brief = field({ id: 'brief', label: 'Brief', value: '' });
+    const art = field({ id: 'art', label: 'Key art', value: '' });
+    render(<LocaleProvider locale="en"><ContractFields valuesFirst fields={[brief, art]} resolvedFields={[brief, { ...art, value: '「Hero」这次没有生成出图片文件…' }]}
+      sources={{ art: 'Hero' }} mediaMissing={{ art: 'image' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(canvasText('en', 'contract.sourceMediaMissing', { source: 'Hero', kind: 'image' }))).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(/^“Brief” is required\.$/);
+  });
+
   it('says what a value lacks in the reader’s language', () => {
     render(<LocaleProvider locale="en"><Editor initial={[field({ label: 'Count', type: 'number', value: 'many' })]} /></LocaleProvider>);
     expect(screen.getByRole('alert')).toHaveTextContent(/^“Count” must be a valid number\.$/);

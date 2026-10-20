@@ -43,6 +43,14 @@ describe('soft media feed', () => {
     expect(mediaInputText(hero, RECORD)).toContain('- hero/image-1.png');
     expect(mediaInputText(hero, '')).toBe(MISSING);
     expect(mediaInputText(hero, undefined)).toBe(MISSING);
+    // The note names what the node makes, as graph_media.go's mediaKindShown does; an edit node makes a film.
+    const note = (kind: string) => `「片段」这次没有生成出${kind}文件，没有可以引用的路径：网页里不要引用它的任何文件，也不要编造文件名，用不依赖它的设计完成。`;
+    expect(mediaMissingText({ id: 'm', title: '片段', agentKind: 'video' })).toBe(note('视频'));
+    expect(mediaMissingText({ id: 'm', title: '片段', agentKind: 'model3d' })).toBe(note('3D 模型'));
+    expect(mediaMissingText({ id: 'm', title: '片段', agentKind: 'audio' })).toBe(note('音频'));
+    expect(mediaMissingText({ id: 'm', title: '片段', kind: 'edit' })).toBe(note('视频'));
+    expect(mediaMissingText({ id: 'm', title: '片段', agentKind: 'llm' })).toBe(note('媒体'));
+    expect(mediaMissingText({ id: '片段', title: ' ', agentKind: 'image' })).toBe(note('图片'));
   });
 
   it('makes the page without a picture whose generation failed, and fails only the picture', async () => {
@@ -78,10 +86,13 @@ describe('soft media feed', () => {
     for (const hero of [picture('hero'), picture('hero', { text: '', at: 1 }), picture('hero', { text: RECORD, at: 1, partial: true })]) {
       const prepared = prepareNodeConversation(target, [hero, target], [wire('hero', 'page', 'in:art')]);
       expect(prepared.error).toBeUndefined();
+      // The agent reads the note; the inputs form, told the picture is missing, says so in the page's language instead.
       expect(prepared.inputs?.find(field => field.id === 'art')?.value).toBe(MISSING);
       expect(prepared.messagePrefix).toContain(MISSING);
+      expect(prepared.mediaMissing).toEqual({ art: 'image' });
     }
     const made = prepareNodeConversation(target, [picture('hero', { text: RECORD, at: 1 }), target], [wire('hero', 'page', 'in:art')]);
     expect(made.inputs?.find(field => field.id === 'art')?.value).toContain('- hero/image-1.png');
+    expect(made.mediaMissing).toEqual({});
   });
 });
