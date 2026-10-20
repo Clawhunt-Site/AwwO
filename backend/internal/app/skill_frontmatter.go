@@ -8,8 +8,8 @@ import (
 )
 
 // Reading a SKILL.md-style file (skills.go): a `---` frontmatter block of `key: value` lines, then the body. A
-// built-in skill's frontmatter is strict; a file a member uploads is written for other agents too, so it is read
-// as the YAML those agents write.
+// built-in skill's frontmatter is strict; a file a member uploads or the registry imports (skill_registry.go) is
+// written for other agents too, so it is read as the YAML those agents write.
 
 var skillFrontmatterKeys = map[string]bool{"name": true, "title": true, "title_zh": true, "description": true, "description_zh": true, "category": true, "applies": true, "version": true, "attribution": true}
 

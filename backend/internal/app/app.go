@@ -57,6 +57,8 @@ type App struct {
 	billingCalls inviteReadLimiter
 	// routeLimiter bounds each account's assistant router model calls (assistant_route.go).
 	routeLimiter assistantRouteLimiter
+	// registry holds the skill registry's caches and limits (skill_registry_client.go).
+	registry *skillRegistry
 	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
 	signupClock func() time.Time
 	// promptClock is the clock of the date a model call's system prompt names (model_identity.go); nil is time.Now.
@@ -106,6 +108,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 	a.typesafe = newTypeSafeService(a.persistTypeSafeAudit)
 	a.typesafe.authorize = a.verifyTypeSafeAccess
 	a.mailSlots = make(chan struct{}, 8)
+	a.registry = newSkillRegistry()
 	a.obs = newObservability(a)
 	return a
 }
@@ -304,6 +307,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runtime", a.tenant(a.runtime, 1))
 	a.registerKnowledgeRoutes(m)
 	a.registerSkillRoutes(m)
+	a.registerSkillRegistryRoutes(m)
 	a.registerMemoryRoutes(m)
 	a.registerRenderRoutes(m)
 	a.registerCapabilityRoutes(m)

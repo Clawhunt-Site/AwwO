@@ -3,7 +3,8 @@ package app
 import "net/http"
 
 // capabilities tells the web app which of the optional abilities this server offers a workspace and how much of
-// today's allowance is left, so it can show (or hide) skills, memory, web import and video rendering honestly.
+// today's allowance is left, so it can show (or hide) skills, the skill registry, memory, web import and video
+// rendering honestly.
 func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 	tid := r.PathValue("tenantId")
 	reads, renders, edits := 0, 0, 0
@@ -25,9 +26,10 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	editsPerDay, _, _, _ := a.editLimits()
 	writeJSON(w, 200, map[string]any{
-		"skills":    map[string]any{"enabled": true, "maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes},
-		"memory":    map[string]any{"enabled": true, "maxRunItems": maxMemoryRunItems, "maxRunBytes": maxMemoryRunBytes, "maxPerScope": maxMemoryPerScope},
-		"webReader": map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": a.cfg.WebReadsPerDay, "usedToday": reads},
+		"skills":        map[string]any{"enabled": true, "maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes},
+		"skillRegistry": map[string]any{"enabled": a.cfg.SkillRegistryEnabled, "source": "skills.sh"},
+		"memory":        map[string]any{"enabled": true, "maxRunItems": maxMemoryRunItems, "maxRunBytes": maxMemoryRunBytes, "maxPerScope": maxMemoryPerScope},
+		"webReader":     map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": a.cfg.WebReadsPerDay, "usedToday": reads},
 		"render": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": a.cfg.RendersPerDay, "usedToday": renders,
 			"limits": map[string]any{"maxSeconds": maxRenderSeconds, "maxFps": 60, "maxWidth": 1920, "maxHeight": 1920, "maxFrames": maxRenderFrames, "maxHtmlBytes": maxRenderHTMLBytes}},
 		// Edit nodes (edits.go) render on the same worker.

@@ -9,18 +9,19 @@ import (
 	"time"
 )
 
-// capabilitySettings configures the web reader (webread_import.go), the motion renderer (renders.go) and edits
-// (edits.go, on the same render worker). All are off unless configured: the reader needs AWWO_WEB_READER=on, the
-// renderer and edits the worker's URL and token.
+// capabilitySettings configures the web reader (webread_import.go), the skill registry (skill_registry.go), the
+// motion renderer (renders.go) and edits (edits.go, on the same render worker). All are off unless configured: the
+// reader needs AWWO_WEB_READER=on, the registry AWWO_SKILL_REGISTRY=on, the renderer and edits the worker's URL and token.
 type capabilitySettings struct {
-	WebReaderEnabled   bool
-	WebReadsPerDay     int
-	WebReadsSitePerDay int
-	RenderURL          string
-	RenderToken        string
-	RendersPerDay      int
-	RendersSitePerDay  int
-	RenderTimeout      time.Duration
+	WebReaderEnabled     bool
+	WebReadsPerDay       int
+	WebReadsSitePerDay   int
+	SkillRegistryEnabled bool
+	RenderURL            string
+	RenderToken          string
+	RendersPerDay        int
+	RendersSitePerDay    int
+	RenderTimeout        time.Duration
 	// An edit may wait EditQueueWait for the worker (a render or another edit holds it) and render for EditTimeout.
 	EditsPerDay      int
 	EditsTotalPerDay int
@@ -47,6 +48,13 @@ func (c *Config) capabilityFromEnv() error {
 		c.WebReaderEnabled = true
 	default:
 		return errors.New("AWWO_WEB_READER must be on or off")
+	}
+	switch os.Getenv("AWWO_SKILL_REGISTRY") {
+	case "", "off":
+	case "on":
+		c.SkillRegistryEnabled = true
+	default:
+		return errors.New("AWWO_SKILL_REGISTRY must be on or off")
 	}
 	var err error
 	if c.WebReadsPerDay, err = positiveEnvInt("AWWO_WEB_READS_PER_DAY", 30, 10000); err != nil {

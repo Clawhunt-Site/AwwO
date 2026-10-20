@@ -85,6 +85,27 @@
 .awwo-library-markdown h1 { font-size: 15px; }
 .awwo-library-markdown p, .awwo-library-markdown ul, .awwo-library-markdown ol { margin: 6px 0; }
 .awwo-library-markdown pre { white-space: pre-wrap; font-size: 11px; }
+/* Finding a skill on skills.sh (SkillRegistry.tsx). Its notes mix amber with the ink, so they read on light and dark themes. */
+.awwo-registry { --registry-note: color-mix(in srgb, #c08a1e 72%, var(--library-ink)); }
+.awwo-library button.awwo-registry-back { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; min-height: 28px; padding: 3px 9px; font-size: 12px; }
+.awwo-library-meta a { display: inline-flex; align-items: center; gap: 2px; color: var(--library-accent); }
+.awwo-registry-facts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.awwo-registry-facts > li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.awwo-registry-facts > li > svg { flex-shrink: 0; }
+.awwo-registry-facts > li.is-note { flex-wrap: nowrap; align-items: flex-start; color: var(--registry-note); }
+.awwo-registry-facts > li.is-note > svg { margin-top: 3px; }
+.awwo-registry-audit.is-pass > svg { color: var(--library-accent); }
+.awwo-registry-audit.is-warn > svg { color: var(--registry-note); }
+.awwo-registry-audit.is-fail { color: var(--saas-danger, #c14040); }
+.awwo-registry-audit-summary { flex-basis: 100%; padding-left: 20px; color: var(--library-muted); font-size: 11px; }
+.awwo-registry-warning { color: var(--registry-note); font-size: 12px; overflow-wrap: anywhere; }
+.awwo-registry-form { display: flex; flex-direction: column; gap: 10px; }
+.awwo-registry-form > label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.awwo-registry-license { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #c08a1e 45%, var(--library-border)); border-radius: 8px; }
+.awwo-library .awwo-registry-license .awwo-library-check { align-items: flex-start; }
+.awwo-registry-license .awwo-library-check input { margin-top: 4px; }
+.awwo-registry-text summary { color: var(--library-muted); font-size: 12px; cursor: pointer; }
+.awwo-registry-text[open] summary { margin-bottom: 6px; }
 @media (max-width: 900px) {
   .awwo-library-body.has-editor { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
   .awwo-library-editor, .awwo-library-detail { border-left: 0; border-top: 1px solid var(--library-border); overflow: visible; }

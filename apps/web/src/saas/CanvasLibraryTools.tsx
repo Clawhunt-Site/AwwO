@@ -13,6 +13,8 @@ interface Props { tenantId: string; canvasId: string; readOnly?: boolean }
 export function CanvasLibraryTools({ tenantId, canvasId, readOnly = false }: Props) {
   const { t } = useSaaSPreferences();
   const [open, setOpen] = useState<'memory' | 'skills' | null>(null);
+  // While the skill library imports from skills.sh, Escape leaves it open: the import finishes and says so.
+  const [skillsBusy, setSkillsBusy] = useState(false);
   const close = () => setOpen(null);
   const memoryName = t('记忆', 'Memory');
   const skillsName = t('技能库', 'Skills');
@@ -24,8 +26,8 @@ export function CanvasLibraryTools({ tenantId, canvasId, readOnly = false }: Pro
     {open === 'memory' && <WorkbenchOverlay label={t('记忆工作台', 'Memory workbench')} onClose={close}>
       <MemoryWorkbench key={`${tenantId}/${canvasId}`} tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} onClose={close} />
     </WorkbenchOverlay>}
-    {open === 'skills' && <WorkbenchOverlay label={t('技能库', 'Skill library')} onClose={close}>
-      <SkillLibrary key={tenantId} tenantId={tenantId} readOnly={readOnly} onClose={close} />
+    {open === 'skills' && <WorkbenchOverlay label={t('技能库', 'Skill library')} onClose={close} busy={skillsBusy}>
+      <SkillLibrary key={tenantId} tenantId={tenantId} readOnly={readOnly} onClose={close} onBusyChange={setSkillsBusy} />
     </WorkbenchOverlay>}
   </>;
 }

@@ -112,6 +112,11 @@ func newClient(opt Options) *http.Client {
 	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// Client is the HTTP client Fetch reads with, for a caller that asks a fixed public API itself (the skill registry,
+// app/skill_registry.go): public addresses only, checked as each connection is made, no proxy, no cookies, TLS 1.2 or
+// newer, and no redirect followed. The caller bounds each request with its context.
+func Client(opt Options) *http.Client { return newClient(opt.withDefaults()) }
+
 func get(ctx context.Context, client *http.Client, target *url.URL, opt Options, accept string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {

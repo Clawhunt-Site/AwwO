@@ -4,6 +4,8 @@ import { api, tenantPath } from './api';
  *  `enabled: false`, so the interface never offers something the server would refuse. */
 export interface WorkspaceCapabilities {
   skills: { enabled: boolean; maxNodeSkills: number; maxNodeSkillBytes: number };
+  /** Finding skills on skills.sh and importing them into the library; absent from servers older than it. */
+  skillRegistry?: { enabled: boolean; source: string };
   memory: { enabled: boolean; maxRunItems: number; maxRunBytes: number; maxPerScope: number };
   webReader: { enabled: boolean; perDay: number; usedToday: number };
   render: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFps: number; maxWidth: number; maxHeight: number; maxFrames: number; maxHtmlBytes: number } };

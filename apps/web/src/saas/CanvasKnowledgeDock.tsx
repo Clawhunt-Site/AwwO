@@ -25,7 +25,10 @@ const boundedApi = <T,>(path: string, init: RequestInit = {}) => api<T>(path, { 
 // Free width the tool labels leave before the run controls, below which they give way to icons.
 const LABEL_ROOM = 24;
 
-export function WorkbenchOverlay({ label, onClose, children }: {label:string;onClose:()=>void;children:ReactNode}) {
+/** busy keeps the workbench open while what runs inside it must not be cut short (an import): Escape and the dialog's
+ *  cancel do nothing, and a dialog the browser closes itself (a second Escape with no click between) opens again. Its
+ *  tabIndex keeps the keyboard's focus in it when a member clicks its text, so its own Escape handling applies. */
+export function WorkbenchOverlay({ label, onClose, busy = false, children }: {label:string;onClose:()=>void;busy?:boolean;children:ReactNode}) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -33,7 +36,13 @@ export function WorkbenchOverlay({ label, onClose, children }: {label:string;onC
     if (element && !element.open) element.showModal();
     return () => { if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  return <dialog ref={dialog} className="awwo-knowledge-overlay" aria-label={label} onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); onClose(); } }}>{children}</dialog>;
+  const closed = () => {
+    const element = dialog.current;
+    if (!element?.isConnected || element.open) return;
+    if (busy) element.showModal(); else onClose();
+  };
+  return <dialog ref={dialog} tabIndex={-1} className="awwo-knowledge-overlay" aria-label={label} aria-busy={busy || undefined} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
+    onClose={closed} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); if (!busy) onClose(); } }}>{children}</dialog>;
 }
 
 function delay(signal: AbortSignal): Promise<void> {

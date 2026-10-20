@@ -247,11 +247,13 @@ func (s skillRecord) summary() skillRecord {
 	return s
 }
 
-const workspaceSkillColumns = "id,name,title,description,category,applies,body,content_hash,version"
+// A workspace skill's attribution is set only by the server, when it imports the skill from the registry
+// (skill_registry.go); a written or uploaded skill has none.
+const workspaceSkillColumns = "id,name,title,description,category,applies,body,content_hash,version,COALESCE(attribution,'')"
 
 func scanWorkspaceSkill(row pgx.Row) (skillRecord, error) {
 	var s skillRecord
-	if err := row.Scan(&s.ID, &s.Name, &s.Title, &s.Description, &s.Category, &s.Applies, &s.Body, &s.ContentHash, &s.Version); err != nil {
+	if err := row.Scan(&s.ID, &s.Name, &s.Title, &s.Description, &s.Category, &s.Applies, &s.Body, &s.ContentHash, &s.Version, &s.Attribution); err != nil {
 		return skillRecord{}, err
 	}
 	s.Ref, s.Source, s.Bytes = skillRefWorkspace+s.ID, skillSourceWorkspace, len(s.Body)
@@ -413,25 +415,35 @@ func (a *App) createSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.skillMutation(w, r, "skill.created", func(tx pgx.Tx, tid, actor string) (skillRecord, int, error) {
-		var live int
-		var clash bool
-		if err := tx.QueryRow(r.Context(), "SELECT count(*),COALESCE(bool_or(name=$2),false) FROM tenant_skills WHERE tenant_id=$1 AND NOT archived", tid, s.Name).Scan(&live, &clash); err != nil {
-			return s, 0, err
-		}
-		if clash {
-			return s, 0, skillError{409, "skill_name_conflict", "This workspace already has a skill with that name"}
-		}
-		if live >= maxWorkspaceSkills {
-			return s, 0, skillError{409, "skill_limit", "A workspace keeps at most 100 skills; archive one first"}
-		}
-		s.ID, s.Version = randomID(), 1
-		s.Ref = skillRefWorkspace + s.ID
-		if _, err := tx.Exec(r.Context(), "INSERT INTO tenant_skills(id,tenant_id,name,title,description,category,applies,body,content_hash,version,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$10)",
-			s.ID, tid, s.Name, s.Title, s.Description, s.Category, s.Applies, s.Body, s.ContentHash, actor); err != nil {
-			return s, 0, err
-		}
-		return s, 201, insertSkillRevision(r.Context(), tx, tid, actor, s)
+		return insertWorkspaceSkill(r.Context(), tx, tid, actor, s)
 	})
+}
+
+// insertWorkspaceSkill saves a new workspace skill (written, uploaded or imported from the registry) and its first
+// revision, within the workspace's name and count limits.
+func insertWorkspaceSkill(ctx context.Context, tx pgx.Tx, tid, actor string, s skillRecord) (skillRecord, int, error) {
+	var live int
+	var clash bool
+	if err := tx.QueryRow(ctx, "SELECT count(*),COALESCE(bool_or(name=$2),false) FROM tenant_skills WHERE tenant_id=$1 AND NOT archived", tid, s.Name).Scan(&live, &clash); err != nil {
+		return s, 0, err
+	}
+	if clash {
+		return s, 0, skillError{409, "skill_name_conflict", "This workspace already has a skill with that name"}
+	}
+	if live >= maxWorkspaceSkills {
+		return s, 0, skillError{409, "skill_limit", "A workspace keeps at most 100 skills; archive one first"}
+	}
+	s.ID, s.Version = randomID(), 1
+	s.Ref = skillRefWorkspace + s.ID
+	var attribution any
+	if s.Attribution != "" {
+		attribution = s.Attribution
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO tenant_skills(id,tenant_id,name,title,description,category,applies,body,content_hash,version,created_by,updated_by,attribution) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$10,$11)",
+		s.ID, tid, s.Name, s.Title, s.Description, s.Category, s.Applies, s.Body, s.ContentHash, actor, attribution); err != nil {
+		return s, 0, err
+	}
+	return s, 201, insertSkillRevision(ctx, tx, tid, actor, s)
 }
 
 func (a *App) updateSkill(w http.ResponseWriter, r *http.Request) {
@@ -467,7 +479,8 @@ func (a *App) updateSkill(w http.ResponseWriter, r *http.Request) {
 				return s, 0, skillError{409, "skill_name_conflict", "This workspace already has a skill with that name"}
 			}
 		}
-		s.ID, s.Ref, s.Version = current.ID, current.Ref, current.Version+1
+		// An edited import is still derived from its source, so it keeps its attribution.
+		s.ID, s.Ref, s.Version, s.Attribution = current.ID, current.Ref, current.Version+1, current.Attribution
 		if _, err := tx.Exec(r.Context(), "UPDATE tenant_skills SET name=$3,title=$4,description=$5,category=$6,applies=$7,body=$8,content_hash=$9,version=$10,updated_by=$11,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2",
 			tid, s.ID, s.Name, s.Title, s.Description, s.Category, s.Applies, s.Body, s.ContentHash, s.Version, actor); err != nil {
 			return s, 0, err
