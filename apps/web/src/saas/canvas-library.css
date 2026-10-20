@@ -54,6 +54,8 @@
 .awwo-library-list > li > small { color: var(--library-muted); font-size: 11px; }
 .awwo-library-list.is-compact > li { padding: 0; }
 .awwo-library-pick { display: grid !important; justify-items: start; gap: 2px; width: 100%; padding: 9px 12px !important; border: 0 !important; text-align: left; }
+/* The library's buttons centre their content; a pick's grid track would sit in the middle when its text is short. */
+.awwo-library button.awwo-library-pick { justify-content: start; }
 .awwo-library-pick span { color: var(--library-muted); font-size: 12px; }
 .awwo-library-pick small { color: var(--library-muted); font-size: 10px; overflow-wrap: anywhere; }
 .awwo-library-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
