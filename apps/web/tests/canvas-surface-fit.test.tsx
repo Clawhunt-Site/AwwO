@@ -1596,6 +1596,8 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     }
     const camera = world.style.transform;
     const size = [tile.style.width, tile.style.height];
+    const share = () => tile.style.getPropertyValue('--awwo-drawer-width');
+    expect(share()).toBe('52%');
     fireEvent.click(within(drawer).getByText('编辑输出表单'));
     const field = within(drawer).getByLabelText('Result的值');
     field.focus();
@@ -1615,6 +1617,8 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(document.activeElement).toBe(field);
     fireEvent.change(field, { target: { value: '## 关卡规格（第二版）' } });
     expect(field).toHaveValue('## 关卡规格（第二版）');
+    // Nor does the drawer narrow under the keystroke.
+    expect(share()).toBe('52%');
     expect(world.style.transform).toBe(camera);
     expect([tile.style.width, tile.style.height]).toEqual(size);
     // Published where the reader is, nothing opened again: the drawer opens by itself for the new delivery.
@@ -1626,6 +1630,7 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(screen.getByTestId('canvas-tile-s1')).toBe(tile);
     expect(within(drawer).getByRole('heading', { name: '关卡规格（第二版）' })).toBeTruthy();
     expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toBe('52%');
     expect(world.style.transform).toBe(camera);
     expect([tile.style.width, tile.style.height]).toEqual(size);
   });

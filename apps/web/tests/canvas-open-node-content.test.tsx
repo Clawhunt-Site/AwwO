@@ -746,6 +746,107 @@ describe('an opened node that has delivered', () => {
     expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
   });
 
+  /** What the opened tile gives its drawer: what it says it mostly shows, and the drawer's share of its width. */
+  const share = () => {
+    const tile = screen.getByTestId('canvas-tile-n');
+    return [tile.dataset.content, tile.style.getPropertyValue('--awwo-drawer-width')];
+  };
+
+  it('keeps the share of its width a delivery an edit of the form took back had, while the edit lasts', () => {
+    // A drawer the reader opened by hand, so that it is still there once something else takes a delivery back.
+    const host = hosted(talked({ deliverablesOpen: true }));
+    expect(share()).toEqual(['delivery', '52%']);
+    openForm();
+    type('## 第');
+    expect(share()).toEqual(['delivery', '52%']);
+    type('## 第二版');
+    expect(share()).toEqual(['delivery', '52%']);
+    // The publication ends the edit: its delivery has its own share, and once something else takes that back (an output
+    // upstream replaced) the drawer has a conversation's.
+    publish();
+    expect(share()).toEqual(['delivery', '52%']);
+    host.put({ ...host.saved, lastOutput: null });
+    expect(share()).toEqual(['chat', '38%']);
+  });
+
+  it('keeps that share through an edit of the inputs and the same form read back from elsewhere', () => {
+    const inputs = [{ id: 'brief', label: '任务要求', type: 'text' as const, required: false, value: '' }];
+    const host = hosted(talked({ contract: { ...contract(), inputs } }));
+    openForm();
+    type('## 第二版');
+    fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+    fireEvent.change(screen.getByLabelText('任务要求的值'), { target: { value: '三段关卡' } });
+    expect(host.saved.contract!.inputs[0].value).toBe('三段关卡');
+    expect(share()).toEqual(['delivery', '52%']);
+    // Another tab's save or a setup adopted from the server: the same node, its keys in another order.
+    const saved = host.saved;
+    host.put({ ...saved, contract: { ...saved.contract!, outputs: saved.contract!.outputs.map(({ value, ...field }) => ({ value, ...field })) } });
+    expect(share()).toEqual(['delivery', '52%']);
+  });
+
+  it('gives that share back once the node starts work or closes, or the form or the conversation changes under the edit', () => {
+    const working = hosted(talked());
+    openForm();
+    type('## 第二版');
+    working.show({ run: { state: 'running' } });
+    expect(share()).toEqual(['chat', '38%']);
+    working.show({ run: { state: 'done' } });
+    expect(share()).toEqual(['chat', '38%']);
+    working.unmount();
+    const closing = hosted(talked());
+    openForm();
+    type('## 第二版');
+    closing.show({ focused: false, compact: true });
+    closing.show({});
+    expect(share()).toEqual(['chat', '38%']);
+    closing.unmount();
+    // A new conversation, after an edit of the form's structure alone: the form reads the same in it.
+    const talking = hosted(talked());
+    openForm();
+    fireEvent.click(screen.getByLabelText('交付结果必填'));
+    expect(talking.saved.contract!.outputs[0].required).toBe(false);
+    talking.put(createNodeThread(talking.saved));
+    expect(share()).toEqual(['chat', '38%']);
+    talking.unmount();
+    // An undo: the earlier form again, its delivery not back (restoreDoc takes it back again).
+    const from = talked();
+    const undone = hosted(from);
+    openForm();
+    type('## 第二版');
+    undone.put({ ...from, lastOutput: null });
+    expect(share()).toEqual(['chat', '38%']);
+  });
+
+  it('holds no share for an edit that took no delivery back or did not land, and gives a page its own', () => {
+    const empty = hosted(agent({ contract: contract(), deliverablesOpen: true }));
+    openForm();
+    type('## 第一版');
+    expect(share()).toEqual(['chat', '38%']);
+    empty.unmount();
+    // A case recording stays through an edit of the form; something else taking it back later finds no share held.
+    const recorded = hosted(delivered({ contract: contract(), deliverablesOpen: true, lastOutput: { text: '{"result":"## 实录"}', source: 'case', at: 1 } }));
+    openForm();
+    type('## 第二版');
+    expect(recorded.saved.lastOutput).toMatchObject({ source: 'case' });
+    recorded.put({ ...recorded.saved, lastOutput: null });
+    expect(share()).toEqual(['chat', '38%']);
+    recorded.unmount();
+    // An edit the canvas refused (a run of another lane, say) leaves the delivery, and holds no share either.
+    const refused = hosted(talked({ deliverablesOpen: true }));
+    refused.refusing = true;
+    openForm();
+    type('## 第二版');
+    expect(refused.saved.lastOutput).toMatchObject({ source: 'run' });
+    refused.put({ ...refused.saved, lastOutput: null });
+    expect(share()).toEqual(['chat', '38%']);
+    refused.unmount();
+    // A delivered node the edit makes a page (a webpage requirement, an html field) takes a page's share.
+    hosted(talked());
+    fireEvent.click(drawerOf().getByText('添加交付要求'));
+    fireEvent.click(drawerOf().getByRole('button', { name: '添加到交付' }));
+    expect(share()).toEqual(['page', '62%']);
+  });
+
   it('gives a page most of its width, and leaves a picture, clip or model where its own view shows it', () => {
     const { unmount } = render(<SessionTile node={delivered({ contract: { version: 1, inputs: [], outputs: [{ id: 'result', label: '页面', type: 'html', required: true, value: '' }] } })} scale={1} focused />);
     const tile = screen.getByTestId('canvas-tile-n');

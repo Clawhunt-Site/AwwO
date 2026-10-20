@@ -87,6 +87,11 @@ function threadTitle(title: string | undefined, t: CanvasTranslate): string {
 /** The share of an opened node's width its delivery drawer takes, by what the node mostly shows (openContentOf). */
 const DRAWER_WIDTH: Record<OpenContent, string> = { page: '62%', media: '48%', delivery: '52%', chat: '38%' };
 
+/** What a node's output form holds, field by field: the same for the node this page edited and for one read back from
+ *  elsewhere (the server's store orders an object's keys its own way). */
+const outputFormKey = (node: SessionNode) => JSON.stringify((node.contract?.outputs ?? [])
+  .map(field => [field.id, field.label, field.type, field.required, field.value, field.help ?? '', field.placeholder ?? '']));
+
 /** What an image, video or 3D node that has not generated yet asks for (its empty state's title). */
 const MEDIA_EMPTY_TITLE: Record<MediaKind, CanvasTextKey> = {
   image: 'media.emptyImage', video: 'media.emptyVideo', model3d: 'media.emptyModel3d', audio: 'media.emptyAudio',
@@ -467,11 +472,14 @@ export const SessionTile = memo(function SessionTile({
   // (deliverablesShown).
   const drawerShown = deliverablesShown(node, deliveryBeside);
   const [deliverablesOpen, setDeliverablesOpen] = useState(drawerShown);
-  // Whether the drawer's form has been changed (updateDeliverables) since the node last showed a delivery: an edit of it
-  // takes that delivery back until the form is published again (invalidateOutputs).
-  const [formEdited, setFormEdited] = useState(false);
-  const editing = formEdited && node.kind === 'session' && !node.lastOutput;
-  useLayoutEffect(() => { if (formEdited && !editing) setFormEdited(false); }, [formEdited, editing]);
+  // An edit of the drawer's form in progress (updateDeliverables) since the node last showed a delivery, which an edit of
+  // it takes back until the form is published again (invalidateOutputs): the output form it left, its conversation, and
+  // whether the node showed a delivery when it began, whose share of the width it keeps (below). It ends when a delivery
+  // is back, when the form or the conversation changes under it (an undo, a new conversation, an edit the canvas refused),
+  // and when the node closes or starts work (below).
+  const [formEdit, setFormEdit] = useState<{ form: string; thread: string; share: boolean } | null>(null);
+  const editing = formEdit && node.kind === 'session' && !node.lastOutput && currentThread?.id === formEdit.thread
+    && outputFormKey(node) === formEdit.form ? formEdit : null;
   // Before paint: a drawer that should not show on this stage must not flash open for a frame. Nor does an edit of its
   // form close it: a drawer that opened by itself for the delivery the edit took back would close under the reader's
   // keystroke, its form editor with it. It stays open as the reader has it, and nothing is recorded, so the drawer's own
@@ -779,6 +787,12 @@ export const SessionTile = memo(function SessionTile({
   const chatRef = useRef<HTMLDivElement>(null);
   const shortColumn = useShortColumn(chatRef, expanded);
   const busy = interactionLocked || active;
+  useLayoutEffect(() => { if (formEdit && (!expanded || active || !editing)) setFormEdit(null); }, [formEdit, expanded, active, editing]);
+  // A delivery that edit took back keeps the share of the node's width its drawer had (DRAWER_WIDTH) while the edit
+  // lasts, so the form does not narrow under the reader's keystroke, as the canvas keeps the delivery's room in the node's
+  // frame (CanvasSurface openFit.content).
+  const shownContent = openContentOf(node);
+  const drawerContent = editing?.share && shownContent === 'chat' ? 'delivery' : shownContent;
   const toggleInputs = () => { if (!inputOpen) setInputsTakeColumn(true); setInputOpen(!inputOpen); setInputSchemaOpen(false); setTemplateOpen(false); };
   const readOnly = viewOnly || busy || !onUpdateNode;
   const contract = sessionNode?.contract ?? emptyContract();
@@ -809,10 +823,12 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
-  // What the drawer's form changes (an edit of NodeDeliverables' fields, or the publication that ends them) keeps the
-  // drawer open while it has taken the delivery back (above).
+  // What the drawer's form changes (an edit of NodeDeliverables' fields, or the publication that ends them) starts or
+  // carries the edit in progress, which keeps the drawer open while it has taken the delivery back (above).
   const updateDeliverables = (next: CanvasNode) => {
-    if (next.kind === 'session') setFormEdited(true);
+    if (next.kind === 'session' && currentThread) {
+      setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery' });
+    }
     onUpdateNode?.(next);
   };
   const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
@@ -854,8 +870,8 @@ export const SessionTile = memo(function SessionTile({
       } is-${dot}${settledMark ? ` is-just-${settledMark}` : ''}${compact ? ' is-compact' : ''}${previewing ? ' has-preview' : ''}`}
       style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h,
         // An opened node gives its delivery the share of its width that delivery needs (a page most of it).
-        ...(expanded ? { '--awwo-drawer-width': DRAWER_WIDTH[openContentOf(node)] } as CSSProperties : {}) }}
-      data-content={expanded ? openContentOf(node) : undefined}
+        ...(expanded ? { '--awwo-drawer-width': DRAWER_WIDTH[drawerContent] } as CSSProperties : {}) }}
+      data-content={expanded ? drawerContent : undefined}
       data-testid={`canvas-tile-${nodeId}`}
       data-lod={lod}
       data-zoom={zoomedOut ? 'far' : undefined}
