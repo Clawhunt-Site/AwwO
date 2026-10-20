@@ -259,6 +259,41 @@
    whose composer fits), nor in a media node (its prompt box can be taller than the column). */
 .canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat.is-short .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns:not(.awwo-input-drawer + *, :has(> .awwo-rework-note)) { flex-basis: max(min(160px, 45%), min(340px, calc(100% - 200px))); flex-shrink: 0; min-height: auto; overflow: clip; }
 .canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat.is-short .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns:not(.awwo-input-drawer + *, :has(> .awwo-rework-note)) > .canvas-transcript { contain: size; }
+/* Inputs left open across a run (the drawer stays open beside the conversation once a run or a reply starts or ends
+   with it open, no longer taking the column: SessionTile's inputsTakeColumn; and opened while one is going, which does
+   not give them the column either) kept their floor, min(160 px, 35%), beside the conversation's, min(160 px, 45%), and
+   with the heading and the floors of the task card and a failure note that is more than a short column holds: the
+   composer ran past the node with no draft at all (2026-10-21, in Chrome on built apps, the developer view: 69 px with a
+   failure note in the 334 px column of 1280 × 720, 15 px without one after a message; 35 px in the 456 px column of
+   1366 × 768, whose composer is taller than the conversation's floor). Here the conversation never cuts its composer:
+   its floor is its basis, never shrunk, and it is never shorter than its content, in which the replies count for
+   nothing (as below a failure note, above). And the drawer keeps its floor wherever the column holds every part at its
+   floor: the heading's min-height (37 px here, 40 px in the hosted look), a failure note's 44 px and the task card's
+   32 px (64 px in a tall column, 44 px expanded), each 10 px below what is above it, the conversation's floor and the
+   drawer's own. A column that holds its composer holds them all, so it lays out as before. Where the column cannot hold
+   them, the drawer gives way, down to its own padding: what a run brings is read in the conversation (review 2026-10-18).
+   Its fields scroll in what is left, and 输入 in the heading (or in the conversation list, while that is open) closes it;
+   where there is none (the simple view of a node without inputs), its own close button stays in the keyboard's order,
+   if then only partly in view. The drawer's floor is a step: min(160 px, 35%) while what the other floors leave it is at
+   least that, nothing once that falls short by more than a thousandth of it; there the drawer gives way with the failure
+   note and the task card, each in proportion to its content, until they reach their floors, so a drawer with little in
+   it (a node without inputs: 143 px) can lose some 20 to 40 px across that ramp (under a quarter of a pixel of column),
+   the note or the card taking them. Nothing limits it to the shortfall: the step also lets it make room for a composer
+   taller than the conversation's floor. The step counts the conversation at its floor and the heading at its
+   min-height, so such a composer (a long draft in a short column, the hosted look's 163.5 px one in a tall column) or a
+   heading wrapped onto a second row (beside the conversation list or the deliverables) can still leave the composer cut
+   where the column holds every floor but not them. A rework note keeps the conversation's own rules (counted in full,
+   an open one's findings would push the composer out), the drawer giving way all the same; a media node is left out
+   (its prompt box can be taller than the column). */
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs) > .awwo-input-drawer + .awwo-node-panel--conversation.has-turns:not(:has(> .awwo-rework-note)) { flex-basis: min(160px, 45%); flex-shrink: 0; min-height: auto; overflow: clip; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs) > .awwo-input-drawer + .awwo-node-panel--conversation.has-turns:not(:has(> .awwo-rework-note)) > .canvas-transcript { contain: size; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-heading: 37px; --awwo-floor-failure: 0px; --awwo-floor-brief: 0px; min-height: max(0px, min(min(160px, 35%), calc(min(160px, 35%) + (100% - var(--awwo-floor-heading) - var(--awwo-floor-failure) - var(--awwo-floor-brief) - min(160px, 45%) - min(160px, 35%)) * 1000))); }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs):has(> .awwo-node-failure) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-failure: 54px; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs):has(> .awwo-node-brief.is-compact) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-brief: 74px; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs):has(> .awwo-node-brief.is-compact) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-brief: 42px; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs):has(> .awwo-node-brief.is-open) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-brief: 54px; }
+/* The hosted look's heading is 40 px (saas/design/canvas.css). */
+.saas-canvas-shell .canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat:not(.has-inputs) > .awwo-input-drawer:has(+ .awwo-node-panel--conversation.has-turns) { --awwo-floor-heading: 40px; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 /* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
    page most of it, a document half), never less than the drawer's own 320 px. */
@@ -307,7 +342,8 @@
 :is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-header { flex-wrap: wrap; }
 :is(.canvas-root, .awwo-results) .awwo-deliverables .awwo-field-name { flex-basis: 100%; }
 .canvas-root .awwo-input-drawer { flex: 0 1 auto; max-height: 52%; padding: 10px 12px; border-block: 1px solid var(--awwo-line); background: var(--awwo-soft); }
-/* Opened inputs keep room to read in a short node (a laptop stage beside the assistant), never only their header. */
+/* Opened inputs keep room to read in a short node (a laptop stage beside the assistant), never only their header
+   (but left open across a run beside replies they give way where the column cannot hold every floor: above). */
 .canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer { min-height: min(160px, 35%); }
 /* With its inputs open the node is being set up (review 2026-10-18: a failure note's buttons and the message box were
    cut): the inputs take the column (at least min(120 px, 25%) of it once the rest is drawn), the conversation gives way

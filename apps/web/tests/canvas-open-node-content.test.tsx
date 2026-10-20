@@ -69,12 +69,12 @@ function specificity(selector: string): [number, number, number] {
   }
   const total: [number, number, number] = [0, 0, 0];
   for (let i = 0; i < selector.length;) {
-    const rest = selector.slice(i), call = /^:([\w-]+)\(/.exec(rest);
+    const rest = selector.slice(i), call = /^:([\w-]+)\(/.exec(rest), name = call?.[1].toLowerCase();
     if (call) {
       let end = i + call[0].length;
       for (let depth = 1; depth; end++) depth += selector[end] === '(' ? 1 : selector[end] === ')' ? -1 : 0;
-      if (!['not', 'is', 'has', 'where'].includes(call[1])) total[1]++;
-      else if (call[1] !== 'where') {
+      if (!['not', 'is', 'has', 'where'].includes(name!)) total[1]++;
+      else if (name !== 'where') {
         const args: string[] = [];
         for (let k = 0, depth = 0, from = 0, inner = selector.slice(i + call[0].length, end - 1); k <= inner.length; k++) {
           if (k === inner.length || (inner[k] === ',' && depth === 0)) { args.push(inner.slice(from, k).trim().replace(/^[>+~]\s*/, '')); from = k + 1; }
@@ -86,11 +86,184 @@ function specificity(selector: string): [number, number, number] {
       i = end;
       continue;
     }
-    const token = /^(#[\w-]+)|^(::?(?:before|after|first-line|first-letter)\b|::[\w-]+|[a-zA-Z][\w-]*)|^(\.[\w-]+|\[[^\]]*\]|:[\w-]+)/.exec(rest);
+    const token = /^(#[\w-]+)|^(::?(?:before|after|first-line|first-letter)\b|::[\w-]+|[a-z][\w-]*)|^(\.[\w-]+|\[[^\]]*\]|:[\w-]+)/i.exec(rest);
     if (token) total[token[1] ? 0 : token[2] ? 2 : 1]++;
     i += token ? token[0].length : 1;
   }
   return total;
+}
+/** Every style rule of the stylesheets, in order, one entry per selector of a list: its selector (spaces collapsed) and
+ *  its own declarations, in order, each with its `!important` (comments dropped). A nested rule's selector is resolved as
+ *  CSS Nesting does, `&` and an implicit descendant both becoming `:is(<the parent's selectors>)`. A conditional group
+ *  rule (@media, @container, @supports) counts as if its condition held, and @layer and @scope blocks are read as plain
+ *  groups (their precedence and scoping are not modelled; these sheets have none); @keyframes and the like hold no style
+ *  rule. Declarations that are not a rule's leading ones (after a nested rule, or inside a nested group) are ranked as
+ *  `:is(<the rule's selectors>)`, at least as high as the nested declarations rule CSS Nesting makes of them: these
+ *  checks' own rules are top-level ones, so ranking another rule too high can only fail the test, never pass it falsely. */
+type Declaration = { property: string; value: string; important: boolean };
+function styleRules(...sheets: string[]): { selector: string; declarations: Record<string, string>; ordered: Declaration[] }[] {
+  const rules: { selector: string; declarations: Record<string, string>; ordered: Declaration[] }[] = [];
+  const split = (list: string) => {
+    const parts: string[] = [];
+    for (let k = 0, level = 0, from = 0; k <= list.length; k++) {
+      if (k === list.length || (list[k] === ',' && level === 0)) { parts.push(list.slice(from, k).trim()); from = k + 1; }
+      else level += list[k] === '(' ? 1 : list[k] === ')' ? -1 : 0;
+    }
+    return parts.filter(Boolean);
+  };
+  // A rule's body in source order (review 2026-10-21: a nested rule read before its parent's declarations hid a later
+  // `&` override): its leading declarations are the rule itself, each nested rule follows in its place, and the
+  // declarations after one come after it.
+  const body = (text: string, own: string[] | null, leading: boolean) => {
+    let pending: string[] = [], segment = 0;
+    const flush = () => {
+      const ordered = pending.map(part => part.trim()).filter(part => part.includes(':')).map(part => {
+        const raw = part.slice(part.indexOf(':') + 1).trim().replace(/\s+/g, ' '), important = /!\s*important$/i.test(raw);
+        // A property's name is read in any case, as browsers read it (review 2026-10-21), a custom property's as written.
+        const name = part.slice(0, part.indexOf(':')).trim();
+        return { property: name.startsWith('--') ? name : name.toLowerCase(), value: raw, important };
+      });
+      pending = [];
+      if (own && ordered.length) {
+        const declarations = Object.fromEntries(ordered.map(item => [item.property, item.value]));
+        const selectors = leading && segment === 0 ? own : [own.length === 1 ? own[0] : `:is(${own.join(', ')})`];
+        for (const selector of selectors) rules.push({ selector, declarations, ordered });
+      }
+      segment++;
+    };
+    for (let i = 0, depth = 0, start = 0, open = 0; i <= text.length; i++) {
+      const ch = text[i];
+      if (depth === 0 && (ch === ';' || i === text.length)) { pending.push(text.slice(start, i)); start = i + 1; }
+      else if (ch === '{' && depth++ === 0) open = i;
+      else if (ch === '}' && --depth === 0) {
+        const head = text.slice(start, open).trim().replace(/\s+/g, ' ');
+        start = i + 1;
+        flush();
+        if (/^@(media|container|supports|layer|scope)\b/i.test(head)) { body(text.slice(open + 1, i), own, own === null); continue; }
+        if (head.startsWith('@')) continue;
+        body(text.slice(open + 1, i), split(head).map(selector => own === null ? selector
+          : selector.includes('&') ? selector.replace(/&/g, `:is(${own.join(', ')})`) : `:is(${own.join(', ')}) ${selector}`), true);
+      }
+    }
+    flush();
+  };
+  for (const sheet of sheets) body(sheet.replace(/\/\*[\s\S]*?\*\//g, ''), null, true);
+  return rules;
+}
+const STATE = /^:(hover|focus-within|focus-visible|focus|active|placeholder-shown|empty|disabled|enabled|checked|indeterminate|open|popover-open|target|valid|invalid|user-valid|user-invalid|read-only|read-write)(?![\w-])/i;
+const PSEUDO_ELEMENT = /^(::[\w-]+|:(before|after|first-line|first-letter)(?![\w-]))/i;
+/** The index of the `)` that closes the `(` at `open` (an unbalanced one fails the test). */
+function closing(text: string, open: number): number {
+  for (let i = open + 1, depth = 1; i < text.length; i++) {
+    depth += text[i] === '(' ? 1 : text[i] === ')' ? -1 : 0;
+    if (depth === 0) return i;
+  }
+  throw new Error(`unbalanced parentheses: ${text}`);
+}
+/** A selector list's selectors (split at the commas outside parentheses). */
+function listOf(list: string): string[] {
+  const parts: string[] = [];
+  for (let k = 0, level = 0, from = 0; k <= list.length; k++) {
+    if (k === list.length || (list[k] === ',' && level === 0)) { parts.push(list.slice(from, k).trim()); from = k + 1; }
+    else level += list[k] === '(' ? 1 : list[k] === ')' ? -1 : 0;
+  }
+  return parts;
+}
+/** The selector as jsdom can match it at its widest, under `negated` :not()s (review 2026-10-21), or null where it cannot
+ *  match an element: a state that a page can be in (an interaction one, :hover, :focus, :focus-within, :focus-visible,
+ *  :active; a form control's or an element's, :placeholder-shown, :empty, :disabled, :checked, :open and the like: STATE)
+ *  is taken to hold where it is not negated (a standalone one becomes `*`) and not to hold where it is (`:not(*)`),
+ *  whatever state jsdom's page is in (its composer holds a draft and can hold the focus), so that a rule matches if it
+ *  could in some state; a pseudo-element arm of a forgiving :is() or :where() list matches nothing (`:not(*)`), as
+ *  Selectors 4 drops it, and one in :not() or :has() makes the whole selector invalid, as in Chrome. Pseudo-class and
+ *  pseudo-element names are read in any case, as browsers read them (review 2026-10-21). The scanner reads neither
+ *  strings nor escapes nor `:nth-child(… of S)` (none in these sheets): a quoted parenthesis fails the test. */
+function widen(selector: string, negated: boolean): string | null {
+  let out = '';
+  for (let i = 0; i < selector.length;) {
+    const rest = selector.slice(i), call = /^:([\w-]+)\(/.exec(rest);
+    if (call) {
+      const open = i + call[0].length - 1, close = closing(selector, open), name = call[1].toLowerCase();
+      if (['is', 'where', 'not', 'has'].includes(name)) {
+        const arms = listOf(selector.slice(open + 1, close)).map(arm => widen(arm, name === 'not' ? !negated : negated));
+        if ((name === 'not' || name === 'has') && arms.includes(null)) return null;
+        out += `:${name}(${arms.map(arm => arm ?? ':not(*)').join(', ')})`;
+      } else out += selector.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    const state = STATE.exec(rest);
+    if (state) {
+      if (negated) out += ':not(*)';
+      else if (/[\s>+~(,]/.test(out.at(-1) ?? ' ') && /[\s>+~),]/.test(selector[i + state[0].length] ?? ' ')) out += '*';
+      i += state[0].length;
+      continue;
+    }
+    if (PSEUDO_ELEMENT.test(rest)) return null;
+    out += selector[i];
+    i++;
+  }
+  return out;
+}
+/** The selector as jsdom can match it at its widest (widen()), or null where it can only target a pseudo-element.
+ *  Widening can only add rules to the cascade, so it can only fail the test. */
+const matchable = (selector: string) => widen(selector, false);
+/** The declaration of one of `properties` that the cascade gives `element`, as `selector → property: value`: among the
+ *  declarations of the rules whose selector it matches (at its widest, matchable()), an `!important` one before any other
+ *  (the hosted look's sheet marks some), then the most specific, then the last in order, a rule's own in their order
+ *  (review 2026-10-21: duplicates, shorthands and longhands kept as written). Any selector jsdom cannot read fails the test. */
+function cascadeWinner(rules: ReturnType<typeof styleRules>, element: Element, properties: string[]): string | null {
+  let best: { won: string; rank: number[] } | null = null;
+  rules.forEach((rule, index) => {
+    const wanted = rule.ordered.map((item, at) => ({ item, at })).filter(({ item }) => properties.includes(item.property));
+    if (!wanted.length) return;
+    const widest = matchable(rule.selector);
+    if (widest === null || !element.matches(widest)) return;
+    const [ids, classes, types] = specificity(rule.selector);
+    for (const { item, at } of wanted) {
+      const rank = [item.important ? 1 : 0, ids, classes, types, index, at];
+      if (!best || rank.reduce((cmp, value, k) => cmp || value - best!.rank[k], 0) >= 0) best = { won: `${rule.selector} → ${item.property}: ${item.value}`, rank };
+    }
+  });
+  return best?.won ?? null;
+}
+/** The px value of a CSS length made of min(), max(), calc(), + - *, px lengths, percentages (of `whole`) and plain
+ *  numbers, each `var(--name)` replaced by `vars[name]` first: enough to read a floor the stylesheet computes. */
+function cssLength(expression: string, whole: number, vars: Record<string, string> = {}): number {
+  const text = expression.replace(/var\((--[\w-]+)\)/g, (_, name: string) => {
+    if (!(name in vars)) throw new Error(`no value for ${name}`);
+    return vars[name];
+  });
+  let i = 0;
+  const space = () => { while (text[i] === ' ') i++; };
+  const value = (): number => {
+    space();
+    const call = /^(min|max|calc)?\(/.exec(text.slice(i));
+    if (call) {
+      i += call[0].length;
+      const args = [sum()];
+      for (space(); text[i] === ','; space()) { i++; args.push(sum()); }
+      if (text[i++] !== ')') throw new Error(`no ) at ${i - 1} in ${text}`);
+      if (call[1] === 'min') return Math.min(...args);
+      if (call[1] === 'max') return Math.max(...args);
+      if (args.length !== 1) throw new Error(`a list where one value goes in ${text}`);
+      return args[0];
+    }
+    const number = /^(\d*\.?\d+)(px|%)?/.exec(text.slice(i));
+    if (!number) throw new Error(`unread ${text.slice(i, i + 12)} in ${text}`);
+    i += number[0].length;
+    return number[2] === '%' ? Number(number[1]) / 100 * whole : Number(number[1]);
+  };
+  const product = (): number => { let v = value(); for (space(); text[i] === '*'; space()) { i++; v *= value(); } return v; };
+  const sum = (): number => {
+    let v = product();
+    for (space(); text[i] === '+' || text[i] === '-'; space()) { const plus = text[i++] === '+'; const w = product(); v = plus ? v + w : v - w; }
+    return v;
+  };
+  const result = sum();
+  space();
+  if (i !== text.length) throw new Error(`unread ${text.slice(i)} in ${text}`);
+  return result;
 }
 /** The text of the first stylesheet block whose head is exactly `head`, its nested blocks included (comments dropped,
  *  spaces collapsed). */
@@ -741,8 +914,9 @@ describe('an opened node says what it was asked', () => {
     const kept = declarations(css, floor)['min-height'];
     expect(kept).toBe('max(min(160px, 45%), min(340px, calc(100% - 200px)))');
     const panelRule = selectorOf(css, { 'flex-basis': kept, 'flex-shrink': '0', 'min-height': 'auto', overflow: 'clip' });
-    const repliesRule = selectorOf(css, { contain: 'size' });
-    expect(repliesRule.endsWith(' > .canvas-transcript')).toBe(true);
+    // Its replies' rule is the panel rule's (beside inputs left open across a run, another panel's replies declare the same).
+    const repliesRule = `${panelRule} > .canvas-transcript`;
+    expect(declarations(css, repliesRule)).toEqual({ contain: 'size' });
     // It wins over the rules that size the panel otherwise (review 2026-10-20: matched but less specific, it would be dead).
     for (const other of ['.canvas-root .awwo-node-panel', '.canvas-root .awwo-node-panel--conversation', floor]) {
       expect(Object.keys(declarations(css, other)).length).toBeGreaterThan(0);
@@ -842,6 +1016,318 @@ describe('an opened node says what it was asked', () => {
         expect(document.querySelector('.awwo-node')).toHaveAttribute('data-content', content);
         expect(Boolean(document.querySelector('.awwo-node-failure'))).toBe(true);
         expect(matched()).toEqual([applies, applies]);
+        developer.unmount();
+        resetAllSessions();
+      }
+    } finally {
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  // Seen 2026-10-21 in Chrome on built apps at 1366 × 657, 1280 × 720 and 1366 × 768: inputs left open across a run (the
+  // drawer beside the replies, no longer taking the column) kept their floor, min(160 px, 35%), beside the conversation's,
+  // and with the heading and the floors of the task card and a failure note that is more than the column holds: the
+  // composer ran past the node with no draft at all (69 px below a failure note at 1280 × 720). The conversation never
+  // cuts its composer there, and the drawer gives way where the column cannot hold every floor. jsdom lays nothing out:
+  // the rules are found in the stylesheets, their constants checked against the floors they stand for, the drawer's floor
+  // computed for columns of every height, and the node's own markup matched against their selectors.
+  it('keeps the composer whole beside inputs left open across a run: the drawer gives way where the column cannot hold every floor', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+    const cards = readFileSync(resolve(process.cwd(), 'src/canvas/node-brief.css'), 'utf8');
+    const hosted = flat(readFileSync(resolve(process.cwd(), 'src/saas/design/canvas.css'), 'utf8'));
+    const px = (length: string) => {
+      const found = /^(\d+(?:\.\d+)?)px$/.exec(length);
+      if (!found) throw new Error(`not a px length: ${length}`);
+      return Number(found[1]);
+    };
+    const top = (margin: string) => px(margin.split(' ')[0]);
+    // The floors the drawer's step counts, each read where it is declared: the drawer's and the conversation's beside it,
+    // the heading's (here and in the hosted look), a failure note's and the task card's (compact, in a short column, and
+    // expanded), each with the gap above it.
+    const drawerFloor = declarations(css, '.canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer')['min-height'];
+    const beside = '.canvas-root .awwo-node.canvas-tile--focus .awwo-input-drawer + .awwo-node-panel--conversation.has-turns';
+    const conversationFloor = declarations(css, beside)['min-height'];
+    expect([drawerFloor, conversationFloor]).toEqual(['min(160px, 35%)', 'min(160px, 45%)']);
+    const failureCard = declarations(cards, '.canvas-root .awwo-node-failure'), taskCard = declarations(cards, '.canvas-root .awwo-node-brief');
+    const floors = {
+      heading: px(declarations(css, '.canvas-root .awwo-chat-heading')['min-height']),
+      hostedHeading: px(/\.canvas-root \.awwo-chat-heading \{ min-height: (\d+px);/.exec(hosted)?.[1] ?? 'none'),
+      failure: px(failureCard['min-height']) + top(failureCard.margin),
+      compact: px(declarations(cards, '.canvas-root .awwo-node-brief.is-compact')['min-height']) + top(taskCard.margin),
+      shortCompact: px(declarations(css, '.canvas-root .awwo-node-chat.is-short .awwo-node-brief.is-compact')['min-height']) + top(taskCard.margin),
+      open: px(taskCard['min-height']) + top(taskCard.margin),
+    };
+    expect(floors).toEqual({ heading: 37, hostedHeading: 40, failure: 54, compact: 74, shortCompact: 42, open: 54 });
+
+    // The rules, each found by what it declares: the conversation's (its floor its basis, never shrunk, its content its
+    // minimum, clipped without being a scroller) and its replies' (counting for nothing), the drawer's step, and the
+    // rules that set what the step counts, each the drawer's rule with one more condition on the column.
+    const panelRule = selectorOf(css, { 'flex-basis': conversationFloor, 'flex-shrink': '0', 'min-height': 'auto', overflow: 'clip' });
+    const repliesRule = `${panelRule} > .canvas-transcript`;
+    expect(declarations(css, repliesRule)).toEqual({ contain: 'size' });
+    const step = `max(0px, min(${drawerFloor}, calc(${drawerFloor} + (100% - var(--awwo-floor-heading) - var(--awwo-floor-failure) - var(--awwo-floor-brief) - ${conversationFloor} - ${drawerFloor}) * 1000)))`;
+    const drawerRule = selectorOf(css, { '--awwo-floor-heading': `${floors.heading}px`, '--awwo-floor-failure': '0px', '--awwo-floor-brief': '0px', 'min-height': step });
+    const counted = {
+      failure: selectorOf(css, { '--awwo-floor-failure': `${floors.failure}px` }),
+      compact: selectorOf(css, { '--awwo-floor-brief': `${floors.compact}px` }),
+      shortCompact: selectorOf(css, { '--awwo-floor-brief': `${floors.shortCompact}px` }),
+      open: selectorOf(css, { '--awwo-floor-brief': `${floors.open}px` }),
+      hosted: selectorOf(css, { '--awwo-floor-heading': `${floors.hostedHeading}px` }),
+    };
+    const columnPart = '.awwo-node-chat:not(.has-inputs) > ';
+    expect(drawerRule).toContain(columnPart);
+    expect(counted).toEqual({
+      failure: drawerRule.replace(columnPart, '.awwo-node-chat:not(.has-inputs):has(> .awwo-node-failure) > '),
+      compact: drawerRule.replace(columnPart, '.awwo-node-chat:not(.has-inputs):has(> .awwo-node-brief.is-compact) > '),
+      shortCompact: drawerRule.replace(columnPart, '.awwo-node-chat.is-short:not(.has-inputs):has(> .awwo-node-brief.is-compact) > '),
+      open: drawerRule.replace(columnPart, '.awwo-node-chat:not(.has-inputs):has(> .awwo-node-brief.is-open) > '),
+      hosted: `.saas-canvas-shell ${drawerRule}`,
+    });
+    // What the cascade gives the drawer, the conversation and its replies, among the stylesheets that style them (the
+    // hosted look's last, so that a rule of it as specific as one of these would win): each rule wins what it declares
+    // where the node's markup matches it (matched but less specific, or overridden later, a rule would be dead; review
+    // 2026-10-21).
+    // The reader keeps source order (review 2026-10-21): a nested `&` rule after its parent's declarations wins them, and
+    // declarations after a nested rule come after it.
+    const nested = styleRules('.p { flex-shrink: 0; & { flex-shrink: 1; } .q { color: red; } flex-basis: 1px; } .p { order: 2; }');
+    expect(nested.map(rule => `${rule.selector} ${JSON.stringify(rule.declarations)}`)).toEqual(['.p {"flex-shrink":"0"}', ':is(.p) {"flex-shrink":"1"}',
+      ':is(.p) .q {"color":"red"}', '.p {"flex-basis":"1px"}', '.p {"order":"2"}']);
+    const probe = document.createElement('div');
+    probe.className = 'p';
+    expect(cascadeWinner(nested, probe, ['flex-shrink'])).toBe(':is(.p) → flex-shrink: 1');
+    // And keeps what the cascade reads (review 2026-10-21): an important declaration over a later one of the same rule,
+    // shorthands and longhands in their order, a forgiving list's arm that matches beside a pseudo-element one, and a
+    // rule under an interaction state (jsdom never has one) counted as matching, one under its negation as well.
+    const read = (sheet: string, properties: string[]) => cascadeWinner(styleRules(sheet), probe, properties);
+    expect(read('.p { overflow: auto !important; overflow: clip; }', ['overflow'])).toBe('.p → overflow: auto !important');
+    expect(read('.p { flex-shrink: 1; flex: 0 1 auto; flex-shrink: 0; }', ['flex', 'flex-shrink'])).toBe('.p → flex-shrink: 0');
+    expect(read('.p { overflow: clip; } :is(.p, ::before) { overflow: auto; }', ['overflow'])).toBe(':is(.p, ::before) → overflow: auto');
+    expect(read('.p { overflow: clip; } .p::before { overflow: auto; }', ['overflow'])).toBe('.p → overflow: clip');
+    expect(read('.p.p { overflow: clip; } .p.p:hover { overflow: auto; }', ['overflow'])).toBe('.p.p:hover → overflow: auto');
+    expect(read('.p.p { overflow: clip; } .p.p:not(:focus-within) { overflow: auto; }', ['overflow'])).toBe('.p.p:not(:focus-within) → overflow: auto');
+    // A state under a negation inside a list stays negated, and a forgiving list nested in another keeps its matching arm.
+    expect(read('.p.p { overflow: clip; } .p.p:not(:is(:hover, :focus-within)) { overflow: auto; }', ['overflow'])).toBe('.p.p:not(:is(:hover, :focus-within)) → overflow: auto');
+    expect(read('.p.p { overflow: clip; } .p:is(.p:not(:not(:hover))) { overflow: auto; }', ['overflow'])).toBe('.p:is(.p:not(:not(:hover))) → overflow: auto');
+    expect(read('.p { overflow: clip; } :is(.p, ::before) { & { overflow: auto; } }', ['overflow'])).toBe(':is(:is(.p, ::before)) → overflow: auto');
+    expect(read('.p { overflow: clip; } .p:not(::before) { overflow: auto; }', ['overflow'])).toBe('.p → overflow: clip');
+    expect(() => read('.p:is(.q { overflow: auto; }', ['overflow'])).toThrow();
+    // An element's own state is widened the same way (the test's composer always holds a draft, review 2026-10-21).
+    expect(read('.p.p { overflow: clip; } .p.p:placeholder-shown { overflow: auto; }', ['overflow'])).toBe('.p.p:placeholder-shown → overflow: auto');
+    // In any case, as browsers read pseudo-classes (review 2026-10-21), and ranked by the arguments of :IS() as of :is().
+    expect(read('.p.p { overflow: clip; } .p:IS(.p:PLACEHOLDER-SHOWN) { overflow: auto; }', ['overflow'])).toBe('.p:IS(.p:PLACEHOLDER-SHOWN) → overflow: auto');
+    expect(read('.p:IS(.p.p) { overflow: auto; } .p:is(.p, .p) { overflow: clip; }', ['overflow'])).toBe('.p:IS(.p.p) → overflow: auto');
+    expect(read('.p.p { overflow: clip; } .p.p:NOT(:HOVER) { overflow: auto; }', ['overflow'])).toBe('.p.p:NOT(:HOVER) → overflow: auto');
+    expect(read('.p { overflow: clip; } .p:BEFORE { overflow: auto; }', ['overflow'])).toBe('.p → overflow: clip');
+    // Property names and conditional group rules in any case too.
+    expect(read('.p.p { overflow: clip; } .p.p { OVERFLOW: auto; }', ['overflow'])).toBe('.p.p → overflow: auto');
+    expect(read('.p.p { overflow: clip; } @MEDIA (min-width: 1px) { .p.p { overflow: auto; } }', ['overflow'])).toBe('.p.p → overflow: auto');
+    const sheets = styleRules(readFileSync(resolve(process.cwd(), 'src/canvas/canvas.css'), 'utf8'), css, cards,
+      readFileSync(resolve(process.cwd(), 'src/canvas/node-view-styles.css'), 'utf8'), readFileSync(resolve(process.cwd(), 'src/saas/design/canvas.css'), 'utf8'));
+    // The hosted look's heading rule is found as the cascade reads it.
+    expect(sheets.some(rule => rule.selector === ':is(html:root .saas-canvas-shell) .canvas-root .awwo-chat-heading' && rule.declarations['min-height'] === `${floors.hostedHeading}px`)).toBe(true);
+    const PROPERTIES = { basis: ['flex', 'flex-basis'], shrink: ['flex', 'flex-shrink'], minimum: ['min-height', 'min-block-size'], overflow: ['overflow', 'overflow-y', 'overflow-block'],
+      overflowX: ['overflow', 'overflow-x', 'overflow-inline'] };
+    /** The winning rule of each property: the conversation's flex basis, shrink, minimum and overflow, its replies'
+     *  containment, the drawer's minimum and the floors its step counts. */
+    const effective = () => {
+      const [drawerNode, panelNode, repliesNode] = [document.querySelector('.awwo-node-chat > .awwo-input-drawer'),
+        document.querySelector('.awwo-node-panel--conversation'), document.querySelector('.awwo-node-panel--conversation > .canvas-transcript')];
+      const of = (element: Element | null, properties: string[]) => element ? cascadeWinner(sheets, element, properties) : null;
+      return { basis: of(panelNode, PROPERTIES.basis), shrink: of(panelNode, PROPERTIES.shrink), minimum: of(panelNode, PROPERTIES.minimum),
+        overflow: of(panelNode, PROPERTIES.overflow), overflowX: of(panelNode, PROPERTIES.overflowX), contain: of(repliesNode, ['contain']),
+        // A size the replies would keep inside their containment (review 2026-10-21) counts in the conversation's minimum.
+        intrinsic: of(repliesNode, ['contain-intrinsic-size', 'contain-intrinsic-height', 'contain-intrinsic-block-size', 'content-visibility']),
+        drawer: of(drawerNode, PROPERTIES.minimum), drawerShrink: of(drawerNode, PROPERTIES.shrink),
+        heading: of(drawerNode, ['--awwo-floor-heading']), failure: of(drawerNode, ['--awwo-floor-failure']), brief: of(drawerNode, ['--awwo-floor-brief']) };
+    };
+    const won = (selector: string, declaration: string) => `${selector} → ${declaration}`;
+    const ours = (heading: string, failure: string, brief: string) => ({ basis: won(panelRule, `flex-basis: ${conversationFloor}`), shrink: won(panelRule, 'flex-shrink: 0'),
+      minimum: won(panelRule, 'min-height: auto'), overflow: won(panelRule, 'overflow: clip'), overflowX: won(panelRule, 'overflow: clip'), contain: won(repliesRule, 'contain: size'), intrinsic: null,
+      // The drawer gives way by its own shrinking (review 2026-10-21): that stays its base rule's.
+      drawer: won(drawerRule, `min-height: ${step}`), drawerShrink: won('.canvas-root .awwo-input-drawer', 'flex: 0 1 auto'), heading, failure, brief });
+    const counts = {
+      none: { heading: won(drawerRule, `--awwo-floor-heading: ${floors.heading}px`), failure: won(drawerRule, '--awwo-floor-failure: 0px'), brief: won(drawerRule, '--awwo-floor-brief: 0px') },
+      hostedHeading: won(counted.hosted, `--awwo-floor-heading: ${floors.hostedHeading}px`), failure: won(counted.failure, `--awwo-floor-failure: ${floors.failure}px`),
+      compact: won(counted.compact, `--awwo-floor-brief: ${floors.compact}px`), shortCompact: won(counted.shortCompact, `--awwo-floor-brief: ${floors.shortCompact}px`),
+      open: won(counted.open, `--awwo-floor-brief: ${floors.open}px`),
+    };
+
+    // The drawer's floor for columns of every height (whole px and halves, 200 to 900), in every state the step counts:
+    // its own floor wherever the column holds every floor (so a column that holds its composer lays out as before), and
+    // nothing once what the other floors leave it falls short of its floor by more than a thousandth of it. The columns
+    // measured: 334 px (1280 × 720 beside the assistant), 345 (1366 × 657), 428 (1440 × 740), 456 (1366 × 768).
+    const floorAt = (height: number, heading: number, failure: number, brief: number) => cssLength(step, height,
+      { '--awwo-floor-heading': `${heading}px`, '--awwo-floor-failure': `${failure}px`, '--awwo-floor-brief': `${brief}px` });
+    for (const heading of [floors.heading, floors.hostedHeading]) for (const failure of [0, floors.failure]) for (const brief of [floors.compact, floors.shortCompact, floors.open]) {
+      for (let height = 200; height <= 900; height += 0.5) {
+        const own = Math.min(160, 0.35 * height), held = heading + failure + brief + Math.min(160, 0.45 * height) + own;
+        const floor = floorAt(height, heading, failure, brief);
+        if (held <= height) expect(floor).toBeCloseTo(own, 9);
+        else if (held - height > own / 1000) expect(floor).toBe(0);
+      }
+    }
+    const at = (heights: number[], failure: number, brief: number) => heights.map(height => Math.round(floorAt(height, floors.hostedHeading, failure, brief) * 1000) / 1000);
+    expect(at([334, 345, 428], floors.failure, floors.shortCompact)).toEqual([0, 0, 0]);
+    expect(at([334, 345, 428], 0, floors.shortCompact)).toEqual([0, 0, 149.8]);
+    expect(at([456, 488, 768], floors.failure, floors.compact)).toEqual([0, 160, 160]);
+
+    let column = 408;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    try {
+      type Extra = { run?: RunNodeStatus | null; focused?: boolean };
+      // The column as seen: the note's two buttons, the model picker and 用户须知 under the box, a ten-line draft in it;
+      // in the hosted look's shell or not.
+      const tile = (node: SessionNode, extra: Extra = {}, shell = false) => {
+        const root = <div className="canvas-root">
+          <SessionTile node={node} scale={1} focused modelChoices={choices} onChangeModel={vi.fn()} onRunNode={vi.fn()} onAskAssistant={vi.fn()}
+            onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div>;
+        return <CanvasUiModeProvider mode="simple">{shell ? <div className="saas-canvas-shell">{root}</div> : root}</CanvasUiModeProvider>;
+      };
+      const tenLines = Array.from({ length: 10 }, (_, i) => `第${i + 1}行：把这一段的语气改得更口语一些`).join('\n');
+      const drafted = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: tenLines, createdAt: 1 }] });
+      const failed = { run: { state: 'failed', detail: 'run_timeout' } as RunNodeStatus };
+      const running = { run: { state: 'running' } as RunNodeStatus };
+      const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
+      const drawer = () => document.querySelector('.awwo-node-chat > .awwo-input-drawer');
+      const replies = () => document.querySelector('.awwo-node-panel--conversation > .canvas-transcript');
+      /** Which rules the node's markup matches: the conversation's, its replies', the drawer's, then those that set
+       *  what the drawer's step counts. */
+      const matched = () => [panel().matches(panelRule), Boolean(replies()?.matches(repliesRule)), Boolean(drawer()?.matches(drawerRule)),
+        ...Object.entries(counted).filter(([, rule]) => drawer()?.matches(rule)).map(([name]) => name)];
+      const none = [false, false, false];
+      // Where none of them matches, none of them wins anything either.
+      const mine = [panelRule, repliesRule, drawerRule, ...Object.values(counted)];
+      const ourWins = () => Object.values(effective()).filter((winner): winner is string => winner !== null && mine.includes(winner.slice(0, winner.indexOf(' → '))));
+      const converse = (id: string) => act(() => { appendTurn(id, { role: 'user', text: '把关卡写成表格' }); appendTurn(id, { role: 'agent', text: '| 段 | 检查点 |\n| --- | --- |\n| 屋顶街 | 1 |' }); });
+      const leaveOpenAcrossRun = (rerender: (ui: ReactElement) => void, node: SessionNode, end: Extra, shell = false) => {
+        fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+        expect(document.querySelector('.awwo-node-chat')).toHaveClass('has-inputs');
+        expect(matched()).toEqual(none);
+        expect(ourWins()).toEqual([]);
+        rerender(tile(node, running, shell));
+        rerender(tile(node, end, shell));
+        expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('has-inputs');
+        expect(drawer()).toBeTruthy();
+      };
+
+      // Replies, then the inputs opened and the node run, which fails: the drawer stays open beside the replies, and
+      // every rule matches, the failure note and the short column's one-line task card counted, with the column as seen.
+      converse(brief.id);
+      const view = render(tile(drafted(brief)));
+      leaveOpenAcrossRun(view.rerender, drafted(brief), failed);
+      expect(panel()).toHaveClass('has-turns');
+      expect(document.querySelector('.awwo-input-drawer + .awwo-node-panel--conversation')).toBe(panel());
+      expect(within(document.querySelector<HTMLElement>('.awwo-node-failure')!).getAllByRole('button').map(button => button.textContent)).toEqual(['重新运行', '让助手调整']);
+      expect([Boolean(panel().querySelector('.canvas-composer .awwo-node-model-picker')), Boolean(panel().querySelector('.canvas-composer .awwo-composer-notes-button'))]).toEqual([true, true]);
+      expect(screen.getByTestId<HTMLTextAreaElement>('composer-input').value).toBe(tenLines);
+      expect(document.querySelector('.awwo-node-brief')).toHaveClass('is-compact');
+      expect(matched()).toEqual([true, true, true, 'failure', 'compact', 'shortCompact']);
+      expect(effective()).toEqual(ours(counts.none.heading, counts.failure, counts.shortCompact));
+      // Without a failure note (the run done), the same but for the note.
+      view.rerender(tile(drafted(brief), { run: { state: 'done' } }));
+      expect(document.querySelector('.awwo-node-failure')).toBeNull();
+      expect(matched()).toEqual([true, true, true, 'compact', 'shortCompact']);
+      expect(effective()).toEqual(ours(counts.none.heading, counts.none.failure, counts.shortCompact));
+      view.rerender(tile(drafted(brief), failed));
+      // The task card expanded counts its expanded floor.
+      fireEvent.click(within(screen.getByRole('region', { name: '「关卡设计」的任务' })).getByRole('button', { name: '展开' }));
+      expect(document.querySelector('.awwo-node-brief')).toHaveClass('is-open');
+      expect(matched()).toEqual([true, true, true, 'failure', 'open']);
+      expect(effective()).toEqual(ours(counts.none.heading, counts.failure, counts.open));
+      fireEvent.click(within(screen.getByRole('region', { name: '「关卡设计」的任务' })).getByRole('button', { name: '收起' }));
+      // Opened again the inputs take the column (their own rules), and closed there is no drawer to give way: none matches.
+      fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      expect(document.querySelector('.awwo-node-chat')).toHaveClass('has-inputs');
+      expect(matched()).toEqual(none);
+      expect(ourWins()).toEqual([]);
+      fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+      expect(drawer()).toBeNull();
+      expect(matched()).toEqual(none);
+      expect(ourWins()).toEqual([]);
+      // Opened while a run is going, the inputs do not take the column either (review 2026-10-21): the same rules, the
+      // run's reply in the conversation beside them, no failure note while it runs.
+      view.rerender(tile(drafted(brief), running));
+      fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      expect(drawer()).toBeTruthy();
+      expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('has-inputs');
+      expect(matched()).toEqual([true, true, true, 'compact', 'shortCompact']);
+      expect(effective()).toEqual(ours(counts.none.heading, counts.none.failure, counts.shortCompact));
+      fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+      view.rerender(tile(drafted(brief)));
+      // Left open across a run again, then the node drawn open without the focus (the floors are the focused node's).
+      leaveOpenAcrossRun(view.rerender, drafted(brief), failed);
+      expect(matched()).toEqual([true, true, true, 'failure', 'compact', 'shortCompact']);
+      view.rerender(tile(drafted(brief), { ...failed, focused: false }));
+      expect(document.querySelector('.awwo-node')).not.toHaveClass('canvas-tile--focus');
+      expect(matched()).toEqual(none);
+      expect(ourWins()).toEqual([]);
+      view.unmount();
+
+      // In the hosted look's shell the heading's floor is its own.
+      const inShell = render(tile(drafted(brief), {}, true));
+      leaveOpenAcrossRun(inShell.rerender, drafted(brief), failed, true);
+      expect(matched()).toEqual([true, true, true, 'failure', 'compact', 'shortCompact', 'hosted']);
+      expect(effective()).toEqual(ours(counts.hostedHeading, counts.failure, counts.shortCompact));
+      // The cascade reads the hosted look's nested rules: there its heading's min-height is the one counted.
+      expect(cascadeWinner(sheets, document.querySelector('.awwo-chat-heading')!, ['min-height']))
+        .toBe(`:is(html:root .saas-canvas-shell) .canvas-root .awwo-chat-heading → min-height: ${floors.hostedHeading}px`);
+      // And two levels deep (the default look's rules, under its root rule): its composer's padding.
+      expect(cascadeWinner(sheets, document.querySelector('.awwo-node-panel--conversation > .canvas-composer')!, ['padding']))
+        .toBe(":is(:is(html:root .saas-canvas-shell) .canvas-root:is([data-node-style='default'], :not([data-node-style]))) .awwo-node .canvas-composer → padding: 6px 14px 14px");
+      inShell.unmount();
+      // A tall column counts the compact task card's own floor.
+      column = SHORT_COLUMN_PX;
+      const tall = render(tile(drafted(brief)));
+      leaveOpenAcrossRun(tall.rerender, drafted(brief), failed);
+      expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('is-short');
+      expect(matched()).toEqual([true, true, true, 'failure', 'compact']);
+      expect(effective()).toEqual(ours(counts.none.heading, counts.failure, counts.compact));
+      tall.unmount();
+      column = 408;
+      resetAllSessions();
+
+      // No conversation yet: nothing to read beside the drawer, the empty conversation's own rules apply, not these.
+      const fresh = render(tile(drafted(brief)));
+      leaveOpenAcrossRun(fresh.rerender, drafted(brief), failed);
+      expect(panel()).not.toHaveClass('has-turns');
+      expect(matched()).toEqual(none);
+      expect(ourWins()).toEqual([]);
+      fresh.unmount();
+      resetAllSessions();
+
+      // A rework note beside the replies keeps the conversation's own rules (counted in full, an open one's findings would
+      // push the composer out), and the drawer gives way all the same, the note closed or open.
+      const reworkedNode = agent({ taskFrame: { ...brief.taskFrame!, constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'] } });
+      converse(reworkedNode.id);
+      const reworked = render(tile(drafted(reworkedNode)));
+      leaveOpenAcrossRun(reworked.rerender, drafted(reworkedNode), failed);
+      expect(matched()).toEqual([false, false, true, 'failure', 'compact', 'shortCompact']);
+      expect(ourWins().sort()).toEqual([ours('', '', '').drawer, counts.none.heading, counts.failure, counts.shortCompact].sort());
+      fireEvent.click(within(screen.getByTestId('rework-findings-n')).getByRole('button', { expanded: false }));
+      expect(document.querySelector('.awwo-rework-note-body')).toBeTruthy();
+      expect(matched()).toEqual([false, false, true, 'failure', 'compact', 'shortCompact']);
+      expect(ourWins().sort()).toEqual([ours('', '', '').drawer, counts.none.heading, counts.failure, counts.shortCompact].sort());
+      reworked.unmount();
+      resetAllSessions();
+
+      // A media node's prompt box can be taller than the column: it is left as before, where an agent's column matches,
+      // also one that has delivered (a document or a page), all in the developer view.
+      const page = { version: 1 as const, inputs: [], outputs: [{ id: 'page', label: '页面', type: 'html' as const, required: true, value: '' }] };
+      const delivered = { text: '## 规格', source: 'run' as const, at: 1 };
+      for (const [node, content] of [[{ ...createSessionNode('image', { x: 0, y: 0 }), id: 'img', title: '海报图' }, 'media'], [agent(), 'chat'],
+        [agent({ lastOutput: delivered }), 'delivery'], [agent({ contract: page, lastOutput: delivered }), 'page']] as const) {
+        converse(node.id);
+        const developerTile = (extra: Extra) => <div className="canvas-root"><SessionTile node={drafted(node)} scale={1} focused modelChoices={choices} onChangeModel={vi.fn()} onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div>;
+        const developer = render(developerTile({}));
+        fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+        developer.rerender(developerTile(running));
+        developer.rerender(developerTile(failed));
+        expect(document.querySelector('.awwo-node')).toHaveAttribute('data-content', content);
+        expect([Boolean(drawer()), document.querySelector('.awwo-node-chat')?.classList.contains('has-inputs')]).toEqual([true, false]);
+        expect(matched().slice(0, 3)).toEqual(content === 'media' ? none : [true, true, true]);
+        if (content === 'media') expect(ourWins()).toEqual([]);
+        else expect(effective()).toEqual(ours(counts.none.heading, counts.failure, counts.shortCompact));
         developer.unmount();
         resetAllSessions();
       }
