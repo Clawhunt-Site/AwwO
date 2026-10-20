@@ -78,7 +78,8 @@ describe('a message about the last run’s failure', () => {
     const box = await send('画布的最后一个节点运行失败了');
     const log = within(sidebar().getByRole('log', { name: '画布对话' }));
     await waitFor(() => expect(log.getByText('「3D游戏前端实现」上次运行失败：交回的结果不符合这个组件的交付格式（模型没按要求的字段给出）。'
-      + '重新运行通常就能好；如果反复出现，可以换一个模型。现在重新运行失败的节点和它们后面的 1 个节点，完成后结果会更新在画布和成果里。')).toBeVisible());
+      // What the rerun spends is said too: the failed node and the review it feeds.
+      + '重新运行通常就能好；如果反复出现，可以换一个模型。现在重新运行失败的节点和它们后面的 1 个节点，完成后结果会更新在画布和成果里。至少会用 2 次调用。')).toBeVisible());
     await waitFor(() => expect(posted).toHaveLength(2));
     expect(posted[1].scope).toEqual(['frontend', 'review']);
     expect(box).toHaveValue('');

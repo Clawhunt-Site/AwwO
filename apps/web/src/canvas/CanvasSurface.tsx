@@ -35,9 +35,9 @@ import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from '
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
 import { StageActivity, showsStageLine, type StageActivityState } from './StageActivity';
-import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, nodesLeft, runCost, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
-import { runErrorText } from '../saas/canvasErrors';
+import { isPremiumRefusal, isQuotaRefusal, modelSwitchHelps, refusalReason, upgradeHelps } from './runRefusals';
 import { announceRouteUsageChanged, fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
 import { recordCanvasEvent, type CanvasUiEvent } from '../saas/uiEvents';
 import { assistantCostNote } from './assistantCost';
@@ -101,7 +101,7 @@ import {
 } from './canvasDoc';
 import { boundsOfNodes, canConnect, edgeId, portsFor, reconcileEdges, type PortRef, type DataType } from './ports';
 import { nextIn, orderNodes, type WorldRect } from './spatialOrder';
-import { preflightGraphIssue, runGraph, validateNodeOutput, type RunNodeStatus } from './runGraph';
+import { preflightGraphIssue, runGraph, serializeFormOutput, validateNodeOutput, type RunNodeStatus } from './runGraph';
 import { createGatewayExecutor, cancelConversationRunViaGateway } from './runTransport';
 import { settleExecutionResult, settleRecoveredJournal } from './runSettlement';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, clearRunJournal, patchRunJournalNode, reconcileRunJournal, journalSummary, type CanvasRunJournal } from './runJournal';
@@ -139,13 +139,6 @@ import { clampDisplaySize, createDisplayNode, displayBounds, MAX_DISPLAYS, place
 import { displayText } from './displayCopy';
 /** A document with no 预览展示 windows (displayNodes.ts): one shared empty list, so memoised readers see no change. */
 const NO_DISPLAYS: ReadonlyArray<DisplayNode> = [];
-/** A node failure refused by the free premium allowance reads as that error's own copy, in either language. */
-const refusalTexts = (codes: ReadonlyArray<string>) => codes
-  .flatMap(code => (['zh', 'en'] as const).map(language => runErrorText(code, language) ?? '')).filter(Boolean);
-const PREMIUM_REFUSALS = refusalTexts(['premium_quota_exceeded', 'premium_capacity_exceeded']);
-/** And one refused because the workspace's own run allowance is full (today's calls, or runs at once). */
-const QUOTA_REFUSALS = refusalTexts(['quota_exceeded']);
-
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
 /** Cap on remembered steps. Documents are small, but an unbounded stack is a leak. */
@@ -1913,9 +1906,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       nodes: runNodes,
       edges: reviewPolicy ? runEdges : runEdges.filter(edge => edge.kind !== 'feedback'),
       scope,
-      // An out-of-scope upstream contributes what it produced earlier rather than running again.
+      // An out-of-scope upstream contributes what it produced earlier rather than running again. A form contributes its
+      // fields as they are now, as a cloud run's does (graph_runs.go formOutput), so the nodes left can run from a form
+      // that never ran.
       storedOutput: (nodeId: string) => {
-        const output = docRef.current.nodes.find((n) => n.id === nodeId)?.lastOutput;
+        const node = docRef.current.nodes.find((n) => n.id === nodeId);
+        if (node?.kind === 'form') return serializeFormOutput(node);
+        const output = node?.lastOutput;
         return output && !output.partial ? output.text : null;
       },
       execAgent: exec,
@@ -3405,17 +3402,27 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const assistantCanPlan = !planningUnavailableReason && plannerProvider !== 'jev' && plannerStatus?.available !== false;
   const suggested: NextSteps | null = readOnly || initializing || bindingLocked ? null : canvasNextSteps({
     nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope),
-    // A refusal's text is the run error's own copy (canvasErrors), in whichever language the run was read in.
-    isPremiumRefusal: detail => PREMIUM_REFUSALS.some(text => detail.includes(text)),
-    isQuotaRefusal: detail => QUOTA_REFUSALS.some(text => detail.includes(text)),
+    // A refusal's detail is the run error's own copy (canvasErrors), in whichever language the run was read in, or its
+    // code (runRefusals.ts).
+    isPremiumRefusal, isQuotaRefusal, upgradeHelps, modelSwitchHelps,
     // Only the hosted workspace puts a node's task requirements into its prompt, which is how a rework carries the
     // review's findings.
     reworkAvailable: Boolean(cloudScope),
     canPlan: assistantCanPlan,
+    // A hosted canvas runs on the server, which generates its media nodes and renders its edits.
+    cloudRuns: Boolean(cloudScope),
+    timelineLabel: t('edit.portTimeline'),
   });
-  // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none).
+  // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none): at least its
+  // calls, and a generation for each image, video and 3D node it runs.
   const countsCalls = Boolean(cloudScope);
-  const withCalls = (label: string, calls: number) => countsCalls ? t('assistant.nextWithCalls', { label, calls }) : label;
+  const withCost = (label: string, { calls, generations }: { calls: number; generations?: number }) => !countsCalls ? label
+    : generations ? t(calls ? 'assistant.nextWithCost' : 'assistant.nextWithGenerations', { label, calls, generations })
+    : calls ? t('assistant.nextWithCalls', { label, calls }) : label;
+  // The same, as a sentence after a reply that starts a run from the conversation.
+  const runCostText = ({ calls, generations }: { calls: number; generations?: number }) => !countsCalls ? ''
+    : generations ? t(calls ? 'assistant.runCost' : 'assistant.runGenerations', { calls, generations })
+    : calls ? t('assistant.runCalls', { calls }) : '';
   const listSeparator = locale === 'zh' ? '、' : ', ';
   const titleOf = (id: string) => nodes.find(node => node.id === id)?.title ?? '';
   const configureNode = (id: string) => { if (!inspectorCloseLocked.current) { focusNode(id, { configure: true }); setInspectorId(id); } };
@@ -3482,19 +3489,20 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         onSelect: () => { if (cloudScope) void recordUpgradeInterest(cloudScope.tenant.id).catch(() => {}); } };
       case 'switch-model': return { id: `switch-${step.nodeId}`, primary, label: t('assistant.nextSwitchModel'), onSelect: () => configureNode(step.nodeId) };
       case 'open-failed': return { id: `open-${step.nodeId}`, primary, label: t('assistant.nextOpenFailed'), onSelect: () => focusNode(step.nodeId) };
-      case 'rerun-failed': return { id: 'rerun-failed', primary, label: t('assistant.nextRerunFailed'), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
+      case 'rerun-failed': return { id: 'rerun-failed', primary, label: withCost(t('assistant.nextRerunFailed'), step), onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
       // The inputs are filled in where they are: the node opens on its input drawer (Configure has no input fields).
+      // An edit's timeline is written in its settings.
       case 'fill-inputs': return { id: `fill-${step.nodeId}`, primary, label: t('assistant.nextFillShort'), ariaLabel: t('assistant.nextFill', { node: titleOf(step.nodeId) }),
-        onSelect: () => openNodeInputs(step.nodeId) };
+        onSelect: () => nodes.find(node => node.id === step.nodeId)?.kind === 'edit' ? configureNode(step.nodeId) : openNodeInputs(step.nodeId) };
       case 'assistant-fix': return { id: 'assistant-fix', primary, label: t('assistant.nextAssistantFix'), onSelect: () => askAssistant(fixRequest(step.nodeIds)) };
       case 'assistant-fill': return { id: 'assistant-fill', primary, label: t('assistant.nextAssistantFill'), onSelect: () => askAssistant(fillRequest(step.nodeIds)) };
-      case 'run-all': return { id: 'run-all', primary, label: withCalls(t('assistant.nextRunAll'), step.calls), onSelect: () => void startRun() };
+      case 'run-all': return { id: 'run-all', primary, label: withCost(t('assistant.nextRunAll'), step), onSelect: () => void startRun() };
       // One node, alone: an out-of-scope upstream would contribute what it produced earlier, and a first node has none.
-      case 'try-first': return { id: `try-${step.nodeId}`, primary, label: withCalls(t('assistant.nextTryFirst', { node: titleOf(step.nodeId) }), step.calls),
+      case 'try-first': return { id: `try-${step.nodeId}`, primary, label: withCost(t('assistant.nextTryFirst', { node: titleOf(step.nodeId) }), step),
         onSelect: () => void startRun([step.nodeId]) };
-      case 'run-rest': return { id: 'run-rest', primary, label: withCalls(t('assistant.nextRunRest', { count: step.nodeIds.length }), step.calls),
+      case 'run-rest': return { id: 'run-rest', primary, label: withCost(t('assistant.nextRunRest', { count: step.nodeIds.length }), step),
         onSelect: () => void startRun(downstreamClosure(step.nodeIds)) };
-      case 'rework': return { id: `rework-${step.nodeId}`, primary, label: withCalls(t('assistant.nextRework', { node: titleOf(step.nodeId) }), step.calls),
+      case 'rework': return { id: `rework-${step.nodeId}`, primary, label: withCost(t('assistant.nextRework', { node: titleOf(step.nodeId) }), step),
         onSelect: () => reworkFromReview(step.nodeId, step.reviewerId) };
       case 'open-review': return { id: `review-${step.nodeId}`, primary, label: t('assistant.nextOpenReview'),
         onSelect: () => { toggleDeliverables(step.nodeId, true); focusNode(step.nodeId); setTimelineOpen(false); countPress('review.open_report'); } };
@@ -3503,7 +3511,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   const nextLead = (situation: NextSteps['situation'], tryFirst: boolean): string => {
     switch (situation.kind) {
-      case 'quota': return t('assistant.nextLeadQuota', { node: situation.nodeTitle });
+      // In the refusal's own words where it has them (a generation, an edit, the plan's credits), which say what lifts it.
+      case 'quota': {
+        const refused = nodes.find(node => node.id === situation.nodeId);
+        const reason = refusalReason(runs[situation.nodeId]?.detail, t, locale, Boolean(cloudScope && refused?.kind === 'session' && mediaKindOf(refused.agentKind)));
+        return reason ? t('assistant.nextLeadRefused', { node: situation.nodeTitle, reason }) : t('assistant.nextLeadQuota', { node: situation.nodeTitle });
+      }
       case 'premium': return t('assistant.nextLeadPremium', { node: situation.nodeTitle });
       case 'failed': return situation.count > 1 ? t('assistant.nextLeadFailedMany', { node: situation.nodeTitle, count: situation.count })
         : t('assistant.nextLeadFailed', { node: situation.nodeTitle });
@@ -3514,7 +3527,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           : t('assistant.nextLeadRejectedBare', { node: situation.nodeTitle, verdict });
       }
       case 'fresh': return t(tryFirst ? 'assistant.nextLeadFreshTry' : 'assistant.nextLeadFresh');
-      case 'partial': return t('assistant.nextLeadPartial', { count: situation.count });
+      // A copied case has its text deliveries but none of its files: how many of the nodes left generate theirs is said,
+      // since each takes a generation from today's allowance or the plan's credits.
+      case 'partial': return situation.media ? t('assistant.nextLeadPartialMedia', { count: situation.count, media: situation.media })
+        : t('assistant.nextLeadPartial', { count: situation.count });
       case 'complete': return situation.approvedBy ? t('assistant.nextLeadCompleteApproved', { node: situation.approvedBy }) : t('assistant.nextLeadComplete');
     }
   };
@@ -3529,7 +3545,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       items: fillSteps.map((step, index) => ({ id: step.nodeId, title: t('assistant.nextItemNode', { node: titleOf(step.nodeId) }),
         detail: step.fields.join(listSeparator), action: nextAction(step, index === 0) })),
       footnote: suggested.situation.kind === 'inputs' && countsCalls
-        ? t('assistant.nextAfterInputsCalls', { calls: suggested.situation.calls }) : t('assistant.nextAfterInputs'),
+        ? t(suggested.situation.generations ? 'assistant.nextAfterInputsCost' : 'assistant.nextAfterInputsCalls',
+          { calls: suggested.situation.calls, generations: suggested.situation.generations ?? 0 }) : t('assistant.nextAfterInputs'),
     } : {}),
     ...(countsCalls ? { note: t('assistant.nextFree') } : {}),
   } : undefined;
@@ -3589,7 +3606,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (rerun?.kind === 'rerun-failed') {
         scope = downstreamClosure(rerun.nodeIds);
         const after = scope.length - rerun.nodeIds.length;
-        content += after > 0 ? t('assistant.repairRerun', { count: after }) : t('assistant.repairRerunAlone');
+        content += (after > 0 ? t('assistant.repairRerun', { count: after }) : t('assistant.repairRerunAlone')) + runCostText(rerun);
       } else {
         const action = assistantNextSteps?.actions[0]?.label;
         if (action) content += t('assistant.answerSuggest', { action });
@@ -3608,7 +3625,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // cannot run anything. What a run would refuse (inputs nobody filled in) is said instead, with the checklist under it.
   const runLocally = (prompt: string): boolean => {
     const kind = runRequestKind(prompt);
-    if (!kind || !nodes.some(node => node.kind === 'session' && !mediaKindOf(node.agentKind))) return false;
+    // A canvas of Agents: on this device every session node is one, in the cloud the image, video and 3D nodes are not.
+    if (!kind || !nodes.some(node => node.kind === 'session' && (!cloudScope || !mediaKindOf(node.agentKind)))) return false;
     let content: string;
     let scope: string[] | undefined;
     let start = false;
@@ -3618,7 +3636,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     else {
       const rest = kind === 'rest' ? suggested?.steps.find(step => step.kind === 'run-rest') : undefined;
       const failed = kind === 'rest' ? suggested?.steps.find(step => step.kind === 'rerun-failed') : undefined;
-      const all = suggested?.steps.find(step => step.kind === 'run-all');
       if (rest?.kind === 'run-rest') {
         scope = downstreamClosure(rest.nodeIds);
         content = t('assistant.runStartingRest', { count: rest.nodeIds.length });
@@ -3626,12 +3643,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         // What is left after a failure is the failed nodes and what they feed.
         scope = downstreamClosure(failed.nodeIds);
         content = t('assistant.runStartingFailed', { count: failed.nodeIds.length });
-      } else if (kind === 'rest') content = t('assistant.runNothingLeft');
-      else content = t('assistant.runStarting');
-      const calls = rest?.kind === 'run-rest' ? rest.calls : kind === 'all' && all?.kind === 'run-all' ? all.calls : undefined;
-      if (countsCalls && calls) content += t('assistant.runCalls', { calls });
+      // Nothing to start: the card's advice where it has some (a review to act on, inputs, what is left), else every node
+      // has its result, or what is left cannot run on this device (a hosted canvas only waits while it is set up).
+      } else if (kind === 'rest') {
+        content = suggested && suggested.situation.kind !== 'complete' ? localAnswer()
+          : !nodesLeft(nodes) ? t('assistant.runNothingLeft')
+          : !cloudScope && !initializing && !bindingLocked ? t('assistant.runCannotHere') : localAnswer();
+      } else content = t('assistant.runStarting');
       // 「继续运行」 with every node done runs nothing: running it all again is 「重新运行」.
       start = kind === 'all' || scope !== undefined;
+      // What it spends is counted over what it starts (the whole canvas, or the nodes left and what they feed).
+      if (start) content += runCostText(runCost(nodes, scope, Boolean(cloudScope)));
     }
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     setPlanningError('');

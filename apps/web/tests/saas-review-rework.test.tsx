@@ -92,6 +92,21 @@ describe('a review that did not pass, on a hosted canvas', () => {
     expect(box).toHaveValue('');
     expect(vi.mocked(fetch).mock.calls.slice(requests).filter(([url]) => /plan|runs/.test(String(url)))).toEqual([]);
   });
+
+  it('answers “continue” with the review’s advice, not that nothing is left to run (review of the Next card fix)', async () => {
+    seed();
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+    fireEvent.click(toggle());
+    const box = sidebar().getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(box, { target: { value: '继续运行' } });
+    const sendButton = () => sidebar().getByRole('button', { name: '修改画布' });
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    fireEvent.click(sendButton());
+    const log = within(sidebar().getByRole('log', { name: '画布对话' }));
+    await waitFor(() => expect(log.getByText(new RegExp(`^${LEAD}建议下一步：按验收意见返工「心理咨询小程序前端开发」`))).toBeVisible());
+    expect(log.queryByText(/所有节点都已经有结果了/)).toBeNull();
+    expect(submitted).toBeNull();
+  });
 });
 
 // The presses the operator asked to count (2026-10-12): which of 「看下一步」, 「查看验收报告」 and the page's own answers

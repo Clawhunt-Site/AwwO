@@ -6,6 +6,7 @@ import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import { mediaMissingText } from '../src/canvas/mediaOutput';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { parseContractOutput } from '../src/canvas/nodeContracts';
+import { nextSteps, type NextStep } from '../src/canvas/nextSteps';
 import { prepareNodeConversation } from '../src/canvas/nodeConversation';
 import { isSoftMediaFeed } from '../src/canvas/ports';
 import { prepareRunDocument } from '../src/canvas/runRecoveryDocument';
@@ -122,6 +123,38 @@ it('copies a media case on the very canvas that ran: agents with their recording
     const copy = copyOf(id), workflow = WORKFLOWS[id];
     for (const target of nodes) expect((copy.nodes[workflow.nodes.findIndex(node => node.id === target)] as SessionNode).lastOutput, `${id}/${target}`).toBeUndefined();
   }
+});
+
+it('has the assistant count everything a case’s copy still has to make, and run all of it', () => {
+  const advice = (id: string) => { const copy = copyOf(id); return { copy, next: nextSteps({ nodes: copy.nodes, edges: copy.edges, runs: {}, running: false,
+    canRun: true, resultsAvailable: true, upgradeAvailable: true, isPremiumRefusal: () => false, reworkAvailable: true, canPlan: true, cloudRuns: true })! }; };
+  for (const id of CASES) {
+    const { copy, next } = advice(id);
+    // Every node without a result: a media case's media nodes and the steps that read their files, an assembly that
+    // makes a file (a flagship's page, Roost's turn recorder) and a turn that hands a file on.
+    const left = copy.nodes.filter(node => node.kind !== 'form' && !node.lastOutput).map(node => node.id);
+    const media = WORKFLOWS[id].media?.length ?? 0;
+    if (!left.length) { expect(next.situation, id).toMatchObject({ kind: 'complete' }); continue; }
+    expect(next.situation, id).toEqual({ kind: 'partial', count: left.length, ...(media ? { media } : {}) });
+    expect(next.steps[0], id).toMatchObject({ kind: 'run-rest', nodeIds: left, ...(media ? { generations: media } : {}) });
+  }
+  // The flagships' copies, whose assemblies make their files on the first run: the card called the first three done, and
+  // counted four of Roost's six.
+  expect(['umber-photo', 'backprop-lab', 'errand-agent', 'roost-team'].map(id => advice(id).next.situation)).toEqual([
+    { kind: 'partial', count: 1 }, { kind: 'partial', count: 1 }, { kind: 'partial', count: 2 }, { kind: 'partial', count: 6 }]);
+  // PALLWARD's copy, seen live on 2026-10-20: the card said 3 nodes (its text Agents) had no result yet and offered to run
+  // them alone, for at least 3 calls, though their upstream pictures and models did not exist.
+  const { copy, next } = advice('pallward');
+  const nodes = new Map(copy.nodes.map(node => [node.id, node]));
+  const generates = (nodeId: string) => { const node = nodes.get(nodeId)!; return node.kind === 'session' ? node.agentKind : node.kind; };
+  const left = (next.steps[0] as Extract<NextStep, { kind: 'run-rest' }>).nodeIds;
+  expect(next.situation).toEqual({ kind: 'partial', count: 48, media: 43 });
+  expect([left.filter(nodeId => generates(nodeId) === 'image').length, left.filter(nodeId => generates(nodeId) === 'model3d').length]).toEqual([10, 33]);
+  expect(left.filter(nodeId => !['image', 'model3d'].includes(generates(nodeId))).map(nodeId => nodes.get(nodeId)!.title))
+    .toEqual(['Asset manifest and stand-ins', 'Assembly', 'Test and fix', 'First pass page', 'Second fix pass']);
+  // The run goes from those 48 through the review they feed: four Agents' calls at the least, and a paid generation for
+  // every picture and model.
+  expect(next.steps).toEqual([{ kind: 'run-rest', nodeIds: left, calls: 4, generations: 43 }, { kind: 'results' }]);
 });
 
 it('keeps a case recording and its model through a save and reload, and grants no model to other outputs', () => {
