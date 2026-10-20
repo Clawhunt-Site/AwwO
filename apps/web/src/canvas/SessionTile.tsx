@@ -839,7 +839,8 @@ export const SessionTile = memo(function SessionTile({
     if (!deliverablesOpen) toggleDeliverables();
   };
   const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
-  // The opened inputs take the column while no run is going (has-inputs): the replies and a rework note's findings wait.
+  // The opened inputs take the column while no run is going (has-inputs): the replies wait, and a rework note's findings
+  // in a short column, or in a taller one where they would push the message box out (ReworkFindingsNote).
   const inputsHaveColumn = expanded && inputOpen && inputsTakeColumn && !active;
   const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
   // An enlarged card shows its deliverable instead of its one-line summary, once it is readable on screen. Only the
@@ -1029,7 +1030,7 @@ export const SessionTile = memo(function SessionTile({
                   <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} mediaMissing={preparedConversation.mediaMissing} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
-                  {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} waiting={shortColumn && inputsHaveColumn} /> : null}
+                  {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} waiting={shortColumn && inputsHaveColumn} column={inputsHaveColumn ? chatRef : undefined} /> : null}
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract}

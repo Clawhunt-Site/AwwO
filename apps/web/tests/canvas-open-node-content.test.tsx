@@ -18,6 +18,7 @@ import { appendTurn, resetAllSessions, setStreaming } from '../src/canvas/sessio
 import type { RunNodeStatus } from '../src/canvas/runGraph';
 import { NodeFailure } from '../src/canvas/NodeBrief';
 import { SHORT_COLUMN_PX } from '../src/canvas/useShortColumn';
+import { DEFAULT_NODE_VIEW, nodeViewStorageKey, saveNodeViewPreference } from '../src/canvas/nodeViewStyle';
 
 beforeEach(() => { cleanup(); resetAllSessions(); });
 
@@ -488,6 +489,185 @@ describe('an opened node says what it was asked', () => {
       }
     } finally {
       delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  // Seen 2026-10-20 in Chrome on production's build: a column just over 440 px is not short, and beside its opened inputs
+  // an open rework note counted its findings in full there too (1366 × 768, a 456 px column: findings 150 to 154 px, the
+  // composer's bottom 130 px below the node's body in every look, and typing scrolled the whole column; 1366 × 800,
+  // 1536 × 864 and 1440 × 900 cut it by 104, 40 and 4 px). Waiting in every such column would also close them where the
+  // column holds them (1920 × 1080), so they wait only where they would push the composer out: measured (a layout effect)
+  // whenever they are drawn there, and drawn again to be measured on a change of size while they wait. jsdom lays nothing
+  // out: the chat column is given a height, and the composer the bottom edge Chrome gave it with the findings drawn and
+  // without (the column's own scroll height is no measure: its panel reaches 57 px below the composer there).
+  it('lets an open rework note’s findings wait beside the opened inputs in a taller column only where they would push the composer out', async () => {
+    let column = 456; // the chat column's height, in the node's CSS px
+    let zoom = 1; // the canvas's
+    let reach = 586; // the composer's bottom edge from the column's top while the findings are drawn
+    let rest: number | undefined; // and while they are not (at the column's bottom unless given)
+    let measuredDrawn = 0; // how often the composer was measured with the findings drawn
+    const drawn = () => Boolean(document.querySelector('.awwo-rework-note-body'));
+    // Boxes as the screen has them: the column starts below the stage's top (its node's heading and the canvas above it),
+    // so a box's bottom is not its height; the composer is 160 px tall, measured from the column's top like the column.
+    const rect = (top: number, bottom: number) => ({ x: 0, y: top, top, left: 0, right: 300, bottom, width: 300, height: bottom - top, toJSON() { return this; } }) as DOMRect;
+    const columnTop = () => 140 * zoom + 40;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    const boxes = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('awwo-node-chat')) return rect(columnTop(), columnTop() + column * zoom);
+      if (!this.classList.contains('canvas-composer')) return rect(0, 0);
+      if (drawn()) measuredDrawn++;
+      const bottom = columnTop() + (drawn() ? reach : rest ?? column) * zoom;
+      return rect(bottom - 160 * zoom, bottom);
+    });
+    // A ResizeObserver that reports when told to, to the observers watching the element that changed size.
+    const observers = new Set<{ callback: ResizeObserverCallback; watched: Set<Element> }>();
+    vi.stubGlobal('ResizeObserver', class {
+      callback: ResizeObserverCallback;
+      watched = new Set<Element>();
+      constructor(callback: ResizeObserverCallback) { this.callback = callback; observers.add(this); }
+      observe(element: Element) { this.watched.add(element); }
+      unobserve(element: Element) { this.watched.delete(element); }
+      disconnect() { observers.delete(this); }
+    });
+    const resized = (element: Element) => act(() => { for (const observer of [...observers]) if (observer.watched.has(element)) observer.callback([], observer as unknown as ResizeObserver); });
+    // jsdom has no document.fonts: one that reports a font finished loading when told to.
+    const fonts = new EventTarget();
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    try {
+      const reworked = (findings: string) => agent({ taskFrame: { ...brief.taskFrame!, constraints: [`【验收返工·交付验收】${findings}`] } });
+      const reworkedNode = reworked('交付结果没有列出检查过的文件，见[检查记录](https://example.com/log)。');
+      const tile = (node = reworkedNode, extra: { run?: RunNodeStatus | null } = {}) => <CanvasUiModeProvider mode="simple"><div className="canvas-root">
+        <SessionTile node={node} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div></CanvasUiModeProvider>;
+      const view = render(tile());
+      const chat = () => document.querySelector('.awwo-node-chat')!;
+      const toggle = () => screen.getByTestId('rework-findings-n').querySelector<HTMLButtonElement>('.awwo-rework-note-toggle')!;
+      const noteState = () => [toggle().getAttribute('aria-expanded'), toggle().querySelector('small')!.textContent, drawn(), toggle().getAttribute('aria-disabled')];
+      const shown = ['true', '收起', true, null], closed = ['false', '查看', false, null], waits = ['false', '关闭输入后查看', false, 'true'];
+      const openInputs = () => fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      const closeInputs = () => fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+      expect(chat()).not.toHaveClass('is-short');
+      // Closed beside the opened inputs, the note is pressed as before (nothing is known of its findings until they are
+      // drawn), even where something else already cuts the composer (a closed note never waits here, in a taller column;
+      // only its drawn findings can make it wait). Pressed where they would push the composer 130 px out, they wait at
+      // once, measured in the render that drew them; pressed again, the toggle does nothing, and the inputs stay open.
+      openInputs();
+      expect(chat()).toHaveClass('has-inputs');
+      expect(noteState()).toEqual(closed);
+      rest = 470;
+      resized(document.querySelector('.awwo-node-brief')!);
+      expect(noteState()).toEqual(closed);
+      rest = undefined;
+      fireEvent.click(toggle());
+      expect([noteState(), measuredDrawn > 0]).toEqual([waits, true]);
+      fireEvent.click(toggle());
+      expect([Boolean(document.querySelector('.awwo-input-drawer')), ...noteState()]).toEqual([true, ...waits]);
+      // A change of size in the column draws them again to be measured: still too tall, they are taken out again and wait on;
+      // with room (a taller window: 1920 × 1080, the composer 57 px above the column's bottom) they show.
+      const before = measuredDrawn;
+      resized(chat());
+      expect([noteState(), measuredDrawn > before]).toEqual([waits, true]);
+      column = 768; reach = 711;
+      resized(chat());
+      expect(noteState()).toEqual(shown);
+      // The keyboard's focus in them (on their link) stays there through a render of the note while they show (review
+      // round 2: the body is watched for the focus once, not again on every render). The node made smaller again comes
+      // through a render of it (its frame): measured in that render, they wait, and the focus goes to the toggle, which
+      // stays, without scrolling the canvas.
+      const link = () => screen.getByRole('link', { name: '检查记录' });
+      act(() => { link().focus(); });
+      view.rerender(tile());
+      expect(document.activeElement).toBe(link());
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+      column = 456; reach = 586;
+      view.rerender(tile());
+      expect(noteState()).toEqual(waits);
+      expect(document.activeElement).toBe(toggle());
+      expect(focus.mock.contexts.at(-1)).toBe(toggle());
+      expect(focus.mock.calls.at(-1)).toEqual([{ preventScroll: true }]);
+      focus.mockRestore();
+      // While they wait, other findings (an undo restoring shorter ones) change no size that is observed: they are drawn
+      // again and measured, and show where they fit; the longer ones back, they wait again.
+      reach = 440;
+      view.rerender(tile(reworked('缺少检查记录。')));
+      expect(noteState()).toEqual(shown);
+      reach = 586;
+      view.rerender(tile());
+      expect(noteState()).toEqual(waits);
+      // Nor does the opened node's look (its font lives on the canvas root, and renders no tile when it changes), nor a
+      // font that finishes loading: either draws them again to be measured (review round 2).
+      reach = 440;
+      act(() => { saveNodeViewPreference({ ...DEFAULT_NODE_VIEW, style: 'custom', custom: { ...DEFAULT_NODE_VIEW.custom, font: 'mono' } }); });
+      expect(noteState()).toEqual(shown);
+      reach = 586;
+      view.rerender(tile());
+      expect(noteState()).toEqual(waits);
+      reach = 440;
+      act(() => { fonts.dispatchEvent(new Event('loadingdone')); });
+      expect(noteState()).toEqual(shown);
+      reach = 586;
+      view.rerender(tile());
+      expect(noteState()).toEqual(waits);
+      // Beside the empty conversation they show, as before (nothing is measured there); beside the inputs, opened again, they
+      // wait again, and are measured afresh each time the inputs open (here the window was made taller while they were closed).
+      closeInputs();
+      expect(noteState()).toEqual(shown);
+      openInputs();
+      expect(noteState()).toEqual(waits);
+      closeInputs();
+      column = 768; reach = 711;
+      openInputs();
+      expect(noteState()).toEqual(shown);
+      // A column that holds them beside the inputs keeps them, the composer on its very bottom edge too. Drawn, a change of
+      // size in one of the column's parts that is no render of the note (a task card expanded, a font loaded) and pushes the
+      // composer out by a tenth of a pixel makes them wait; the keyboard's focus elsewhere (in the box) stays where it is.
+      closeInputs();
+      column = 456; reach = 456;
+      openInputs();
+      expect(noteState()).toEqual(shown);
+      const box = document.querySelector<HTMLTextAreaElement>('.canvas-composer-input')!;
+      act(() => { box.focus(); });
+      reach = 456.1;
+      resized(document.querySelector('.awwo-node-brief')!);
+      expect(noteState()).toEqual(waits);
+      expect(document.activeElement).toBe(box);
+      // On a zoomed canvas the edges are compared in the node's own pixels: at half size 0.04 px on the screen is 0.08 px.
+      closeInputs();
+      zoom = 0.5; reach = 456.08;
+      openInputs();
+      expect(noteState()).toEqual(waits);
+      closeInputs();
+      zoom = 2; reach = 456.04;
+      openInputs();
+      expect(noteState()).toEqual(shown);
+      // A part of the column drawn later (a failed run's note) is watched for changes of its own size too (review round
+      // 3), once the mutation is reported (a microtask): one that pushes the composer out makes them wait, and with nothing
+      // focused (a click on the stage leaves the focus on the page) the focus stays on the page.
+      zoom = 1; reach = 456;
+      view.rerender(tile(reworkedNode, { run: { state: 'failed' } }));
+      expect(noteState()).toEqual(shown);
+      const failure = document.querySelector('.awwo-node-chat > .awwo-node-failure')!;
+      await act(async () => {});
+      act(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+      expect(document.activeElement).toBe(document.body);
+      reach = 470;
+      resized(failure);
+      expect(noteState()).toEqual(waits);
+      expect(document.activeElement).toBe(document.body);
+      view.rerender(tile());
+      // A short column waits beside the inputs whatever room it has, as before (the previous test): nothing is measured there.
+      closeInputs();
+      zoom = 1; column = 408; reach = 300;
+      resized(chat());
+      expect(chat()).toHaveClass('is-short');
+      openInputs();
+      expect(noteState()).toEqual(waits);
+    } finally {
+      boxes.mockRestore();
+      vi.unstubAllGlobals();
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+      delete (document as { fonts?: unknown }).fonts;
+      act(() => { saveNodeViewPreference(DEFAULT_NODE_VIEW); });
+      localStorage.removeItem(nodeViewStorageKey());
     }
   });
 
