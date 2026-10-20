@@ -7,9 +7,10 @@ import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runG
 export interface NodeConversationContext {
   messagePrefix: string;
   error?: string;
-  /** Validated display values, copied from the contract and overlaid with connected outputs. */
+  /** Display values, copied from the contract and overlaid with connected outputs, once every connected upstream has a
+   *  usable output; with `error` set, some value does not fit its field. */
   inputs?: ContractField[];
-  /** Connected field ids mapped to upstream titles (or its saved id if the node was removed). */
+  /** Connected field ids mapped to upstream titles (or its saved id if the node was removed or has no title). */
   sources?: Record<string, string>;
   /** Connected field ids whose value is an upstream node's case recording, not a run of this workspace. */
   recorded?: Record<string, true>;
@@ -30,8 +31,11 @@ export function prepareNodeConversation(
   // should still be able to explain every connection without exposing unvalidated values.
   for (const edge of incoming) {
     const field = node.contract.inputs.find((candidate) => `in:${candidate.id}` === edge.toPort);
-    if (field) sources[field.id] = byId.get(edge.fromNode)?.title ?? edge.fromNode;
+    if (field) sources[field.id] = byId.get(edge.fromNode)?.title || edge.fromNode;
   }
+  // Two wires into one input (an older or imported document; a run refuses it) give it no one value to show.
+  const doubled = node.contract.inputs.find((field) => incoming.filter((edge) => edge.toPort === `in:${field.id}`).length > 1);
+  if (doubled) return { messagePrefix: '', sources, error: `输入「${doubled.label || doubled.id}」只能连接一个来源。` };
   const upstream: UpstreamInput[] = [];
   const recorded: Record<string, true> = Object.create(null);
   for (const edge of incoming) {
@@ -60,14 +64,15 @@ export function prepareNodeConversation(
     upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: text });
     if (source.lastOutput.source === 'case') recorded[edge.toPort.slice('in:'.length)] = true;
   }
+  const inputs = node.contract.inputs.map((field) => {
+    const connected = upstream.find((input) => input.toPort === `in:${field.id}`);
+    return { ...field, value: connected ? connected.output : field.value };
+  });
   try {
-    const messagePrefix = buildNodeMessage(node, upstream);
-    const inputs = node.contract.inputs.map((field) => {
-      const connected = upstream.find((input) => input.toPort === `in:${field.id}`);
-      return { ...field, value: connected ? connected.output : field.value };
-    });
-    return { messagePrefix, inputs, sources, recorded };
+    return { messagePrefix: buildNodeMessage(node, upstream), inputs, sources, recorded };
   } catch (error) {
-    return { messagePrefix: '', sources, error: error instanceof Error ? error.message : '节点输入尚未就绪。' };
+    // Every upstream delivered, but a value does not fit its field (a field left out, a type the wire allows but the
+    // value does not meet, a local value missing): the form shows what arrived and says what does not fit.
+    return { messagePrefix: '', inputs, sources, recorded, error: error instanceof Error ? error.message : '节点输入尚未就绪。' };
   }
 }

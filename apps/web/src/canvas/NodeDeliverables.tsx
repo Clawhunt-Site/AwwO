@@ -134,7 +134,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
   const locked = readOnly || !onUpdateNode;
-  const parsed = output ? deliveryPresentation(contract, output.text) : null;
+  const parsed = output ? deliveryPresentation(contract, output.text, locale) : null;
   const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id) || parsed.pendingFiles.has(field.id)) : [];
   const outputIdentity = `${node.id}:${threadKey}:${output?.at ?? ''}`;
   // A selection belongs to one publication. New Sessions/results and removed fields fall
@@ -153,14 +153,14 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
   };
   const publishOutput = () => {
     if (locked || !contract.outputs.length) return;
-    const errors = validateContractFields(contract.outputs);
+    const errors = validateContractFields(contract.outputs, locale);
     if (errors.length) { setPublishErrors(errors); return; }
     // Optional empty scalar fields stay absent; Markdown retains its exact source text.
     const values = Object.fromEntries(contract.outputs
       .filter(field => field.value.trim() || field.required || (field.type !== 'number' && field.type !== 'boolean'))
       .map(field => [field.id, field.type === 'number' ? Number(field.value) : field.type === 'boolean' ? field.value === 'true' : field.value]));
     const text = JSON.stringify(values);
-    const validation = parseContractOutput(contract, text);
+    const validation = parseContractOutput(contract, text, locale);
     if (validation.errors.length) { setPublishErrors(validation.errors); return; }
     setPublishErrors([]);
     onUpdateNode?.({ ...node, lastOutput: { text, at: Date.now(), source: 'manual' } });

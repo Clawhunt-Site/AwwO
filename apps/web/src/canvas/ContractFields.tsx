@@ -114,7 +114,9 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, onCh
   const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly && structureEditable);
   const showSchema = !valuesFirst || editingSchema;
   const nextField = useRef(0);
-  const errors = validateContractFields(resolvedFields ?? fields);
+  // A wired value is checked once it arrives, as a run's preflight does: until then its field says it is waiting for
+  // its source, and only what is filled in here can be missing.
+  const errors = validateContractFields(resolvedFields ?? fields.filter(field => !sources?.[field.id]), locale);
   const patch = (id: string, update: Partial<ContractField>) => {
     if (!readOnly) onChange(fields.map((field) => field.id === id ? { ...field, ...update } : field));
   };

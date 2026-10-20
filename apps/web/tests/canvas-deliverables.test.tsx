@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { createAgentTemplate, getAgentTemplateForNode } from '../src/canvas/agentTemplates';
+import { LocaleProvider } from '../src/canvas/i18n';
 import type { ContractField } from '../src/canvas/nodeContracts';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
@@ -316,6 +317,23 @@ describe('node deliverables', () => {
     expect(update.mock.lastCall?.[0].lastOutput.text).toBe('{"summary":"已验证的交付内容"}');
     expect(update.mock.lastCall?.[0].lastOutput.text).not.toContain('例如');
     expect(update.mock.lastCall?.[0].lastOutput.text).not.toContain('描述本次');
+  });
+
+  it('says what stops a publication, and what a result lacks, in the reader’s language', () => {
+    const update = vi.fn();
+    const current = node({ contract: { version: 1, inputs: [], outputs: [
+      field({ label: 'Summary', value: '' }), field({ id: 'count', label: 'Count', type: 'number', value: '' }),
+    ] } });
+    const { rerender } = render(<LocaleProvider locale="en"><NodeDeliverables node={current} readOnly={false} onUpdateNode={update} /></LocaleProvider>);
+    fireEvent.click(screen.getByText('Edit output form'));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish output' }));
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getByText('“Summary” is required. “Count” is required.')).toHaveAttribute('role', 'alert');
+    // A delivered result the form cannot read keeps its raw text and says why in its note's tooltip.
+    const delivered = { ...current, lastOutput: { text: '{"count":"3"}', at: 1, source: 'run' as const } };
+    rerender(<LocaleProvider locale="en"><NodeDeliverables node={delivered} readOnly={false} onUpdateNode={update} /></LocaleProvider>);
+    expect(screen.getByText('Output did not pass form validation'))
+      .toHaveAttribute('title', 'Output “Summary” is required. Output “Count” must be of type number.');
   });
 
   it('does not allow publication or form changes while locked', () => {

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { CANVAS_BACKUP_KEY, CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, sanitizeDocument, saveDocument, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
 import { canConnect, portsFor } from '../src/canvas/ports';
 import { buildNodeMessage, preflightGraph, runGraph, validateNodeOutput, type RunNodeStatus } from '../src/canvas/runGraph';
-import { emptyContract, normalizeContract, parseContractOutput, validateContractFields } from '../src/canvas/nodeContracts';
+import { emptyContract, normalizeContract, parseContractOutput, validateContractFields, type ContractField, type NodeContract } from '../src/canvas/nodeContracts';
+import { deliveryPresentation } from '../src/canvas/fileDeliveryPresentation';
 
 function field(id: string, type: 'text' | 'markdown' | 'html' | 'number' | 'boolean' | 'file' = 'text', value = '', required = true) {
   return { id, label: `字段 ${id}`, type, required, value };
@@ -31,6 +32,7 @@ describe('node contract persistence and ports', () => {
     expect(normalized?.inputs[1]).toEqual(field('other'));
     expect(normalized?.outputs[0]).toMatchObject({ help: '', placeholder: '' });
     expect(validateContractFields([valid])).toEqual(['「字段 brief」为必填项。']);
+    expect(validateContractFields([valid], 'en')).toEqual(['“字段 brief” is required.']);
   });
 
   it('preserves guidance on document save and load without converting examples into input or output values', () => {
@@ -337,5 +339,56 @@ describe('contract execution', () => {
     });
     expect(executed).toEqual(['source']);
     expect(summary.ok).toBe(false);
+  });
+});
+
+describe('validation messages in the reader’s language', () => {
+  const named = (id: string, label: string, type: ContractField['type'], value = ''): ContractField => ({ id, label, type, required: true, value });
+  const inputs = [
+    named('brief', 'Brief', 'markdown'),
+    named('count', 'Count', 'number', 'many'),
+    named('approved', 'Approved', 'boolean', 'yes'),
+    named('page', 'Page', 'html', '<main>Only a fragment</main>'),
+  ];
+  const keyed: NodeContract = { version: 1, inputs: [], outputs: [named('summary', 'Summary', 'text'), named('count', 'Count', 'number')] };
+  const page: NodeContract = { version: 1, inputs: [], outputs: [named('page', 'Page', 'html')] };
+  const MESSAGES = {
+    // The Chinese the canvas has always shown, word for word.
+    zh: {
+      inputs: ['「Brief」为必填项。', '「Count」需要有效数字。', '「Approved」需要 true 或 false。', '「Page」需要包含 html、head 和 body 的完整 HTML 文档。'],
+      notObject: '输出须为以字段 ID 为键的 JSON 对象：Summary、Count。',
+      missing: '输出「Summary」为必填项。',
+      type: '输出「Count」需要 number 类型。',
+    },
+    en: {
+      inputs: ['“Brief” is required.', '“Count” must be a valid number.', '“Approved” must be true or false.', '“Page” must be a complete HTML document with html, head, and body.'],
+      notObject: 'The output must be a JSON object keyed by field ID, one entry for each field: Summary, Count.',
+      missing: 'Output “Summary” is required.',
+      type: 'Output “Count” must be of type number.',
+    },
+  } as const;
+
+  it.each(['zh', 'en'] as const)('names every input and output problem in %s', locale => {
+    const said = MESSAGES[locale];
+    expect(validateContractFields(inputs, locale)).toEqual(said.inputs);
+    expect(parseContractOutput(keyed, 'Prose instead of an object', locale).errors).toEqual([said.notObject]);
+    expect(parseContractOutput(keyed, '[1, 2]', locale).errors).toEqual([said.notObject]);
+    expect(parseContractOutput(keyed, '{"count":"3"}', locale).errors).toEqual([said.missing, said.type]);
+    // A value of the right JSON type is then checked as an input is: in a keyed object, and as a single field's whole text.
+    const three: NodeContract = { ...keyed, outputs: [...keyed.outputs, ...page.outputs] };
+    expect(parseContractOutput(three, '{"summary":"Done","count":3,"page":"<main>Only a fragment</main>"}', locale).errors).toEqual([said.inputs[3]]);
+    expect(parseContractOutput(page, '<main>Only a fragment</main>', locale).errors).toEqual([said.inputs[3]]);
+    // The gates built on the parser say it in the same language.
+    const node: SessionNode = { ...createSessionNode('coding', { x: 0, y: 0 }), contract: keyed };
+    expect(validateNodeOutput(node, '{"count":"3"}', locale)).toEqual([said.missing, said.type]);
+    expect(deliveryPresentation(keyed, '{"count":"3"}', locale).errors).toEqual([said.missing, said.type]);
+  });
+
+  it('keeps the Chinese of the run engine’s own notes when no language is given, and the English free of Chinese', () => {
+    expect(validateContractFields(inputs)).toEqual(MESSAGES.zh.inputs);
+    expect(parseContractOutput(keyed, '{"count":"3"}').errors).toEqual([MESSAGES.zh.missing, MESSAGES.zh.type]);
+    expect(validateNodeOutput({ ...createSessionNode('coding', { x: 0, y: 0 }), contract: keyed }, 'Prose')).toEqual([MESSAGES.zh.notObject]);
+    expect(deliveryPresentation(keyed, 'Prose').errors).toEqual([MESSAGES.zh.notObject]);
+    expect(JSON.stringify(MESSAGES.en)).not.toMatch(/\p{Script=Han}/u);
   });
 });

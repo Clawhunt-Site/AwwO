@@ -15,6 +15,7 @@
 // receives per-node status callbacks to drive badges. Nothing here fakes progress: every state
 // change mirrors a real event.
 
+import type { UiLocale } from '../locale';
 import { nodeContract, type AssembleNode, type CanvasEdge, type CanvasNode, type FormNode, type SessionNode } from './canvasDoc';
 import { assembleTemplate } from './assembleNode';
 import { EDIT_CLOUD_ONLY } from './editNode';
@@ -238,10 +239,10 @@ function resolvedInputs(node: SessionNode, upstream: ReadonlyArray<UpstreamInput
   });
 }
 
-/** The same publication gate for graph runs, cached results, and manual chat selections. */
-export function validateNodeOutput(node: CanvasNode, output: string): string[] {
+/** The same publication gate for graph runs, cached results, and manual chat selections. Errors are in `locale`. */
+export function validateNodeOutput(node: CanvasNode, output: string, locale: UiLocale = 'zh'): string[] {
   const contract = nodeContract(node);
-  return contract ? parseContractOutput(contract, output).errors : [];
+  return contract ? parseContractOutput(contract, output, locale).errors : [];
 }
 
 /** An assemble node's result in a run on this device: no model, its inputs' exact text in its template's slots. A

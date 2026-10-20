@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { ContractFields } from '../src/canvas/ContractFields';
+import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { parseContractOutput } from '../src/canvas/nodeContracts';
 import { prepareNodeConversation } from '../src/canvas/nodeConversation';
@@ -186,6 +187,23 @@ it('names a case recording for what it is, with its model and day, and never as 
   const field = { id: 'from_design', label: '玩法与数值', type: 'markdown' as const, required: true, value: '' };
   render(<ContractFields fields={[field]} resolvedFields={[{ ...field, value: '交付内容' }]} sources={{ from_design: '玩法与数值' }} recorded={{ from_design: true }} label="输入" onChange={() => {}} readOnly />);
   expect(screen.getByText('收到“玩法与数值”的案例实录：真实运行的内容，没有在你的工作区执行；断开连线后可手动填写。')).toBeVisible();
+});
+
+it('opens a team turn whose recorder is made on the first run with its input waiting, not missing, in English', () => {
+  resetAllSessions();
+  // Roost's turn recorder is an assembly that delivers a file, so a copy makes it again on its first run; until then each
+  // bot turn's recorder input has nothing to show.
+  const copy = copyOf('roost-team');
+  const wren = copy.nodes.find(node => node.title === 'Turn 1: Wren gathers the facts') as SessionNode;
+  expect(copy.nodes.find(node => node.title === 'Turn recorder')?.lastOutput).toBeUndefined();
+  const context = prepareNodeConversation(wren, copy.nodes, copy.edges);
+  expect(context.inputs).toBeUndefined();
+  render(<LocaleProvider locale="en"><SessionTile node={wren} scale={1} focused onToggleFocus={vi.fn()} conversationContext={context} /></LocaleProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Input' }));
+  const form = screen.getByRole('region', { name: 'Input form' });
+  expect(within(form).getByText(canvasText('en', 'contract.sourceWaiting', { source: 'Turn recorder' }))).toBeVisible();
+  expect(within(form).queryByRole('alert')).toBeNull();
+  expect(form.textContent).not.toMatch(/\p{Script=Han}/u);
 });
 
 it('marks a recording on the collapsed card and opens a node on what it was asked, received and delivered', () => {

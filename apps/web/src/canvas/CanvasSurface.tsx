@@ -2274,8 +2274,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         activeThreadId(current) !== activeThreadId(next) && hasStreamingConversation([current])) return;
       const published = next.lastOutput?.source === 'manual' && next.lastOutput !== current?.lastOutput;
       if (published) {
-        const errors = validateNodeOutput(next, next.lastOutput!.text);
-        if (errors.length) { setHandoffNote(errors.join('；')); return; }
+        const errors = validateNodeOutput(next, next.lastOutput!.text, locale);
+        if (errors.length) { setHandoffNote(errors.join(locale === 'zh' ? '；' : ' ')); return; }
       }
       patchDoc(prev => {
         const nodes = prev.nodes.map(n => n.id === next.id ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h } : n);
@@ -2291,7 +2291,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       setHandoffNote('');
     },
-    [canEditStructure, patchDoc, downstreamClosure],
+    [canEditStructure, patchDoc, downstreamClosure, locale],
   );
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.

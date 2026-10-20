@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createSessionNode, type CanvasEdge, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { validateContractFields } from '../src/canvas/nodeContracts';
 import { prepareNodeConversation } from '../src/canvas/nodeConversation';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
@@ -92,6 +93,44 @@ describe('node conversation input context', () => {
     const context = prepareNodeConversation(sink, [unavailable, ready, sink], [edge(), { ...edge(), id: 'other-edge', fromNode: 'ready', toPort: 'in:other' }]);
     expect(context.error).toContain('Agent source');
     expect(context.sources).toEqual({ brief: 'Agent source', other: 'Ready Agent' });
+    expect(context.inputs).toBeUndefined();
+  });
+
+  it('shows what every upstream delivered when a value does not fit its field, so the form can name it', () => {
+    // The upstream delivered, without the optional output this input is wired to.
+    const base = source();
+    const upstream = { ...base, contract: { ...base.contract!, outputs: [...base.contract!.outputs, { id: 'extra', label: 'Extra', type: 'text' as const, required: false, value: '' }] } };
+    const sink = agent('sink');
+    const context = prepareNodeConversation(sink, [upstream, sink], [{ ...edge(), fromPort: 'out:extra' }]);
+    expect(context.messagePrefix).toBe('');
+    expect(context.error).toContain('需求正文');
+    expect(context.sources).toEqual({ brief: 'Agent source' });
+    expect(context.inputs?.[0]).toEqual({ ...sink.contract!.inputs[0], value: '' });
+    expect(validateContractFields(context.inputs!, 'en')).toEqual(['“需求正文” is required.']);
+  });
+
+  it('keeps a delivered wired value, and what it came from, beside a local field that is missing', () => {
+    const sink = agent('sink');
+    sink.contract!.inputs.push({ id: 'other', label: 'Other input', type: 'text', required: true, value: '' });
+    const recording = { ...source(), lastOutput: { ...source().lastOutput!, source: 'case' as const } };
+    const context = prepareNodeConversation(sink, [recording, sink], [edge()]);
+    expect(context.error).toContain('Other input');
+    expect(context.inputs?.map(input => input.value)).toEqual(['Connected brief', '']);
+    expect(context.recorded).toEqual({ brief: true });
+    expect(validateContractFields(context.inputs!, 'en')).toEqual(['“Other input” is required.']);
+  });
+
+  it('shows no value for an input with two delivered wires, as for any other broken wiring', () => {
+    const other = { ...source(), id: 'other', title: 'Other Agent' };
+    const context = prepareNodeConversation(agent('sink'), [source(), other, agent('sink')], [edge(), { ...edge(), id: 'second', fromNode: 'other' }]);
+    expect(context.error).toContain('只能连接一个来源');
+    expect(context.inputs).toBeUndefined();
+    expect(context.sources).toEqual({ brief: 'Other Agent' });
+  });
+
+  it('names an untitled upstream by its id, so its wired input is still read as wired', () => {
+    const context = prepareNodeConversation(agent('sink'), [{ ...source(), title: '', lastOutput: null }, agent('sink')], [edge()]);
+    expect(context.sources).toEqual({ brief: 'source' });
     expect(context.inputs).toBeUndefined();
   });
 

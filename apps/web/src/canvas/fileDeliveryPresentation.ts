@@ -1,3 +1,4 @@
+import type { UiLocale } from '../locale';
 import { parseContractOutput, type NodeContract } from './nodeContracts';
 import { deliveryJsonSource } from './deliveryJson';
 
@@ -91,8 +92,8 @@ export function fileSafeDisplaySource(source: string): string {
   }
 }
 
-/** Read a mixed legacy file envelope without weakening execution or publication validation. */
-export function deliveryPresentation(contract: NodeContract, source: string) {
+/** Read a mixed legacy file envelope without weakening execution or publication validation. Errors are in `locale`. */
+export function deliveryPresentation(contract: NodeContract, source: string, locale: UiLocale = 'zh') {
   let parsed: unknown;
   try { parsed = envelope(source); } catch { parsed = undefined; }
   const pendingFiles = new Map<string, PendingFileDelivery>();
@@ -102,6 +103,6 @@ export function deliveryPresentation(contract: NodeContract, source: string) {
     if (file) pendingFiles.set(field.id, file);
   }
   const readableContract = { ...contract, outputs: contract.outputs.filter(field => !pendingFiles.has(field.id)) };
-  const result = readableContract.outputs.length ? parseContractOutput(readableContract, source) : { values: {}, errors: [] };
+  const result = readableContract.outputs.length ? parseContractOutput(readableContract, source, locale) : { values: {}, errors: [] };
   return { ...result, pendingFiles, displaySource: fileSafeDisplaySource(source) };
 }

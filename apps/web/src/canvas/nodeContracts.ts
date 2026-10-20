@@ -1,6 +1,8 @@
+import type { UiLocale } from '../locale';
 import { deliveryJsonSource } from './deliveryJson';
 
 import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
+import { canvasText } from './i18n';
 
 /** Versioned, local input/output forms for an Agent session. File values are references. */
 export type ContractFieldType = 'text' | 'markdown' | 'html' | 'number' | 'boolean' | 'file';
@@ -62,21 +64,27 @@ export function normalizeContract(value: unknown): NodeContract | undefined {
   return inputs && outputs ? { version: 1, inputs, outputs } : undefined;
 }
 
-/** Validate form values without changing their canonical text/Markdown serialization. */
-export function validateContractFields(fields: ReadonlyArray<ContractField>): string[] {
+/** Validate form values without changing their canonical text/Markdown serialization. The messages are in the
+ *  reader's language; the default is the Chinese of the run engine's own notes, which quote them. */
+export function validateContractFields(fields: ReadonlyArray<ContractField>, locale: UiLocale = 'zh'): string[] {
   const errors: string[] = [];
   for (const field of fields) {
     const label = field.label || field.id;
     const value = field.value.trim();
     if (!value) {
-      if (field.required) errors.push(`「${label}」为必填项。`);
+      if (field.required) errors.push(canvasText(locale, 'contract.requiredError', { label }));
       continue;
     }
-    if (field.type === 'number' && !Number.isFinite(Number(value))) errors.push(`「${label}」需要有效数字。`);
-    if (field.type === 'boolean' && value !== 'true' && value !== 'false') errors.push(`「${label}」需要 true 或 false。`);
-    if (field.type === 'html' && !isCompleteHtmlDocument(value)) errors.push(`「${label}」需要包含 html、head 和 body 的完整 HTML 文档。`);
+    if (field.type === 'number' && !Number.isFinite(Number(value))) errors.push(canvasText(locale, 'contract.numberError', { label }));
+    if (field.type === 'boolean' && value !== 'true' && value !== 'false') errors.push(canvasText(locale, 'contract.booleanError', { label }));
+    if (field.type === 'html' && !isCompleteHtmlDocument(value)) errors.push(canvasText(locale, 'contract.htmlError', { label }));
   }
   return errors;
+}
+
+function notKeyedObject(contract: NodeContract, locale: UiLocale): string {
+  const fields = contract.outputs.map((f) => f.label || f.id).join(locale === 'zh' ? '、' : ', ');
+  return canvasText(locale, 'contract.outputJsonError', { fields });
 }
 
 export interface ContractOutputResult {
@@ -85,8 +93,8 @@ export interface ContractOutputResult {
   errors: string[];
 }
 
-/** One text/Markdown/HTML field may be its source; all other schemas use a keyed JSON object. */
-export function parseContractOutput(contract: NodeContract, output: string): ContractOutputResult {
+/** One text/Markdown/HTML field may be its source; all other schemas use a keyed JSON object. Errors are in `locale`. */
+export function parseContractOutput(contract: NodeContract, output: string, locale: UiLocale = 'zh'): ContractOutputResult {
   const values: Record<string, string> = Object.create(null);
   if (!contract.outputs.length) return { values, errors: [] };
   const single = contract.outputs.length === 1 ? contract.outputs[0] : undefined;
@@ -96,7 +104,7 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
     parsed = JSON.parse(deliveryJsonSource(output));
   } catch {
     if (!acceptsText) {
-      return { values, errors: [`输出须为以字段 ID 为键的 JSON 对象：${contract.outputs.map((f) => f.label || f.id).join('、')}。`] };
+      return { values, errors: [notKeyedObject(contract, locale)] };
     }
   }
   const object = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
@@ -107,10 +115,10 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
   if (acceptsText && (!object || !Object.hasOwn(object, single.id))) {
     const value = single.type === 'html' ? htmlDocumentSource(output) : output;
     values[single.id] = value;
-    return { values, errors: validateContractFields([{ ...single, value }]) };
+    return { values, errors: validateContractFields([{ ...single, value }], locale) };
   }
   if (!object) {
-    return { values, errors: [`输出须为以字段 ID 为键的 JSON 对象：${contract.outputs.map((f) => f.label || f.id).join('、')}。`] };
+    return { values, errors: [notKeyedObject(contract, locale)] };
   }
 
   const errors: string[] = [];
@@ -120,18 +128,18 @@ export function parseContractOutput(contract: NodeContract, output: string): Con
     // without weakening required files or the declared types of other fields.
     if (!field.required && field.type === 'file' && (value === null || value === '')) continue;
     if (value === undefined) {
-      if (field.required) errors.push(`输出「${field.label || field.id}」为必填项。`);
+      if (field.required) errors.push(canvasText(locale, 'contract.outputRequiredError', { label: field.label || field.id }));
       continue;
     }
     const expected = field.type === 'number' || field.type === 'boolean' ? field.type : 'string';
     if (typeof value !== expected || (typeof value === 'number' && !Number.isFinite(value))) {
-      errors.push(`输出「${field.label || field.id}」需要 ${field.type} 类型。`);
+      errors.push(canvasText(locale, 'contract.outputTypeError', { label: field.label || field.id, type: field.type }));
       continue;
     }
     const serialized = field.type === 'html' && typeof value === 'string' ? htmlDocumentSource(value)
       : typeof value === 'string' ? value : String(value);
     values[field.id] = serialized;
-    errors.push(...validateContractFields([{ ...field, value: serialized }]));
+    errors.push(...validateContractFields([{ ...field, value: serialized }], locale));
   }
   return { values, errors };
 }

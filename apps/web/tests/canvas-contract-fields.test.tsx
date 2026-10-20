@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ContractFields } from '../src/canvas/ContractFields';
-import { canvasText } from '../src/canvas/i18n';
+import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import type { ContractField } from '../src/canvas/nodeContracts';
 
 afterEach(cleanup);
@@ -57,6 +57,34 @@ describe('node contract field editor', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByText(canvasText('zh', 'contract.sourceResolved', { source: '数据治理' }))).toBeTruthy();
     expect(local.value).toBe('');
+  });
+
+  it('says a required wired input is waiting for its upstream, not missing', () => {
+    render(<ContractFields fields={[field({ value: '' })]} sources={{ brief: '数据治理' }} label="输入" onChange={() => {}} />);
+    expect(screen.getByText(canvasText('zh', 'contract.sourceWaiting', { source: '数据治理' }))).toBeTruthy();
+    expect(screen.getByLabelText('需求的值')).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('still names a missing local input beside a waiting wired one, in the reader’s language', () => {
+    const wired = field({ id: 'recorder', label: 'The recorder', type: 'file', value: '' });
+    const local = field({ id: 'notes', label: 'Notes', type: 'text', value: '' });
+    render(<LocaleProvider locale="en"><ContractFields valuesFirst fields={[wired, local]} sources={{ recorder: 'Turn recorder' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(canvasText('en', 'contract.sourceWaiting', { source: 'Turn recorder' }))).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent(/^“Notes” is required\.$/);
+  });
+
+  it('names a wired value that arrived but does not fit, beside the output it came from', () => {
+    // prepareNodeConversation's values once every upstream delivered: here one left the wired output out.
+    const wired = field({ id: 'notes', label: 'Notes', value: '' });
+    render(<LocaleProvider locale="en"><ContractFields valuesFirst fields={[wired]} resolvedFields={[wired]} sources={{ notes: 'Researcher' }} label="Input" onChange={() => {}} /></LocaleProvider>);
+    expect(screen.getByText(canvasText('en', 'contract.sourceResolved', { source: 'Researcher' }))).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent(/^“Notes” is required\.$/);
+  });
+
+  it('says what a value lacks in the reader’s language', () => {
+    render(<LocaleProvider locale="en"><Editor initial={[field({ label: 'Count', type: 'number', value: 'many' })]} /></LocaleProvider>);
+    expect(screen.getByRole('alert')).toHaveTextContent(/^“Count” must be a valid number\.$/);
   });
 
   it('previews Markdown without replacing the original serialized text', () => {
