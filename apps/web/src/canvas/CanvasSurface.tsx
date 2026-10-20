@@ -834,6 +834,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
   sizeRef.current = size;
+  // A stage that has not measured itself yet has no size, and a stage without one culls nothing (visibleBoxIds): every
+  // tile of a large canvas would mount, and start reading its history, before the camera that decides which of them show.
+  // Tiles mount once the viewport has measured the stage (a stage that measures 0, with nothing laid out, still shows all).
+  const [stageMeasured, setStageMeasured] = useState(false);
+  const onStageResize = useCallback((next: { w: number; h: number }) => { setStageMeasured(true); setSize(next); }, []);
   const rootRef = useRef<HTMLDivElement>(null);
   const [handoffNote, setHandoffNote] = useState('');
   const refusedRevision = useRef<string | null>(null);
@@ -2474,13 +2479,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // SessionTile's header contract assumes this — a culled-and-remounted tile must not lose
   // state, and the sessions store exists exactly for that.
   const visibleIds = useMemo(() => {
-    const ids = new Set(visibleBoxIds(renderNodes, view, size));
+    const ids = new Set(stageMeasured ? visibleBoxIds(renderNodes, view, size) : []);
     // A focused or inspected node is always mounted, even if the operator has panned it off
     // screen — the inspector keeps describing a tile that is still "yours".
     if (focusedId) ids.add(focusedId);
     if (inspectorId) ids.add(inspectorId);
     return ids;
-  }, [renderNodes, view, size, focusedId, inspectorId]);
+  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured]);
   // Stable tile callbacks: SessionTile is memoised, and an inline arrow recreated on every
   // render would defeat it — every keystroke in one tile's composer would re-render the
   // rest of the canvas.
@@ -2604,10 +2609,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const runningKey = [...new Set([...busyNow, ...Object.entries(runs).filter(([, run]) => run.state === 'running').map(([id]) => id)])].sort().join('\u0001');
   const runningIds = useMemo<ReadonlySet<string>>(() => new Set(runningKey ? runningKey.split('\u0001') : []), [runningKey]);
   const visibleDisplayIds = useMemo(() => {
-    const ids = new Set(visibleBoxIds(displays, view, size));
+    const ids = new Set(stageMeasured ? visibleBoxIds(displays, view, size) : []);
     if (selectedDisplayId) ids.add(selectedDisplayId);
     return ids;
-  }, [displays, view, size, selectedDisplayId]);
+  }, [displays, view, size, selectedDisplayId, stageMeasured]);
   const [addMenu, setAddMenu] = useState<{ at: { x: number; y: number }; world: { x: number; y: number } } | null>(null);
   const [barMode, setBarMode] = useState<CommandBarMode | null>(null);
   const [minimapOpen, setMinimapOpen] = useState(true);
@@ -4051,7 +4056,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       <CanvasViewport
         view={view}
         onViewChange={moveCamera}
-        onResize={setSize}
+        onResize={onStageResize}
         onBackgroundPointerDown={(e) => {
           wiring.clearPending();
           // The marquee claims Shift-drags (returning true suppresses the viewport's pan); a
@@ -4075,11 +4080,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
               }
         }
       >
-        <WirePlane nodes={renderNodes} edges={edges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
+        {/* What the board holds appears with its tiles, once the stage has measured itself: wires never float without them. */}
+        {stageMeasured && <WirePlane nodes={renderNodes} edges={edges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
-          preview={wiring.wireDrag} onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />
-        <CollaborationFlow nodes={renderNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />
-        <DisplayLinks displays={displays} boxes={renderNodeById} />
+          preview={wiring.wireDrag} onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}
+        {stageMeasured && <CollaborationFlow nodes={renderNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
+        {stageMeasured && <DisplayLinks displays={displays} boxes={renderNodeById} />}
         {displays.map(display => visibleDisplayIds.has(display.id) && (
           <DisplayTile
             key={display.id}

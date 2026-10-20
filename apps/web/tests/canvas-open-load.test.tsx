@@ -8,6 +8,7 @@
 //      takes no edit for a while or compares whole documents: a run, a node setup, a plan);
 //   2. a tile re-renders only when something it shows changed (its props keep their identity);
 //   3. the canvas's plan revision, a hash of the whole document, is worked out once per document, not per render;
+//   4. an opening canvas mounts only the tiles its first camera shows, so only those read their histories.
 import { createElement, memo, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
@@ -376,5 +377,24 @@ describe('the plan revision', () => {
     fireEvent.pointerUp(window, { clientX: 60, clientY: 0 });
     await waitFor(() => expect((stored().nodes[0] as SessionNode).x).toBe(60));
     expect(vi.mocked(canvasPlanRevision).mock.calls.length).toBeLessThanOrEqual(6);
+  });
+});
+
+describe('the tiles an opening canvas mounts', () => {
+  it('are the ones its first camera shows: a tile far off screen neither mounts nor reads its history', async () => {
+    // A stage that measures itself: 1280 x 720.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() =>
+      ({ x: 0, y: 0, top: 0, left: 0, right: 1280, bottom: 720, width: 1280, height: 720, toJSON: () => ({}) } as DOMRect));
+    // The overview centres the middle node; the other two are a hundred thousand pixels to either side.
+    const nodes = [{ ...bound(0), x: -100000 }, { ...bound(1), x: 0, y: 0 }, { ...bound(2), x: 100000, y: 0 }];
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ version: 2, updatedAt: 1, nodes, edges: [], waypoints: [], view: null }));
+    serveHistories(0);
+    render(<CanvasSurface />);
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-n1')).toBeTruthy());
+    await quiet(400);
+    expect(screen.queryByTestId('canvas-tile-n0')).toBeNull();
+    expect(screen.queryByTestId('canvas-tile-n2')).toBeNull();
+    const read = vi.mocked(fetch).mock.calls.map(([input]) => THREAD.exec(String(input))?.[1]).filter(Boolean);
+    expect(read).toEqual(['1']);
   });
 });
