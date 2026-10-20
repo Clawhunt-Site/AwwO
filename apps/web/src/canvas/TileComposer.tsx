@@ -2,7 +2,8 @@
 //
 // Ported from the previous canvas's chat composer (since-deleted apps/web/src/studio/StudioChatBubble.tsx):
 // Enter sends, Shift+Enter is a newline, the input and the button are disabled while a stream is
-// in flight, and the honest notice is one click away, in 用户须知 beside the model.
+// in flight, and the honest notice is one click away, in 用户须知 beside the model. A box that had
+// the keyboard's focus when it locked gets it back when the work ends (useFocusBackOnUnlock).
 //
 // That notice is not decoration. Talking to an agent here wakes its FULL worker: it may really go
 // do governed work (edit files, open sub-issues, request approvals), and the reply IS that
@@ -15,7 +16,7 @@
 // It is a composite box: files of any type go with the words (the "+" button, a drop or a paste), shown as
 // chips and carried as lines at the end of the message (ComposerAttachments.tsx).
 
-import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
@@ -101,6 +102,73 @@ function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: 
   return t('attach.mediaNote');
 }
 
+/**
+ * Calls `away` when the reader turns from the composer: a press or a focus outside it; a key that takes them elsewhere
+ * (Escape, Tab, or the canvas's camera keys as useCanvasKeys reads them: Ctrl/⌘ with a digit recalls a waypoint, with 0
+ * fits all, with Shift and a digit from 1 to 9 only saves one); a wheel outside its node, which moves the canvas or scrolls something
+ * else (over its own opened node a wheel scrolls it); or the focus gone into a frame, a preview, which gives the page no
+ * focusin. Typing, editing chords and the browser's own keys do not count (AltGr's digits do: the canvas moves its camera
+ * for them). Listens in the capture phase, as a press on a node stops at its tile. Returns the cleanup.
+ */
+function watchReaderAway(composer: HTMLElement, away: () => void): () => void {
+  const node = composer.closest('.canvas-tile') ?? composer;
+  const outside = (event: Event, scope: Element) => !(event.target instanceof Node && scope.contains(event.target));
+  const onPress = (event: Event) => { if (outside(event, composer)) away(); };
+  const onKey = (event: DocumentEventMap['keydown']) => {
+    const camera = (event.ctrlKey || event.metaKey) && ((/^Digit[1-9]$/.test(event.code) && !event.shiftKey) || event.code === 'Digit0' || event.key === '0');
+    if ((camera || event.key === 'Escape' || event.key === 'Tab') && outside(event, composer)) away();
+  };
+  const onWheel = (event: Event) => { if (outside(event, node)) away(); };
+  const onBlur = () => { if (document.activeElement instanceof HTMLIFrameElement) away(); };
+  const options = { capture: true, passive: true };
+  document.addEventListener('pointerdown', onPress, options);
+  document.addEventListener('focusin', onPress, options);
+  document.addEventListener('keydown', onKey, options);
+  document.addEventListener('wheel', onWheel, options);
+  window.addEventListener('blur', onBlur);
+  return () => {
+    document.removeEventListener('pointerdown', onPress, options);
+    document.removeEventListener('focusin', onPress, options);
+    document.removeEventListener('keydown', onKey, options);
+    document.removeEventListener('wheel', onWheel, options);
+    window.removeEventListener('blur', onBlur);
+  };
+}
+
+/** A phone or a tablet, where the box's keyboard would come up over the reply just in. */
+function touchFirst(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+}
+
+/**
+ * The box is disabled while its node works (a reply streaming in, a run of it), and a browser then drops the keyboard's
+ * focus to the page; nothing would bring it back. So a composer that held the focus when it locked gives it to its box
+ * when it unlocks, unless the focus is somewhere by then or the reader turned elsewhere meanwhile (watchReaderAway: the
+ * reply, to copy from it; the canvas; another node; the assistant): a focus the reader moved is never taken from them.
+ * Both ends are read in the commit that changes `locked`: when it locks the browser has not dropped the focus yet, and
+ * when it unlocks the box is enabled already, so no frame comes between (CanvasSurface's `refocus` had that race).
+ * Nothing is moved on a touch-first device (touchFirst).
+ */
+function useFocusBackOnUnlock(composer: RefObject<HTMLElement | null>, box: RefObject<HTMLTextAreaElement | null>, locked: boolean) {
+  const lockedWithFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (locked) { lockedWithFocus.current = Boolean(composer.current?.contains(document.activeElement)); return; }
+    const active = document.activeElement;
+    // Lost: on the page, gone, or left on a control of the composer that is still disabled (as a browser may keep it).
+    const lost = !active || active === document.body || !active.isConnected || (Boolean(composer.current?.contains(active)) && active.matches(':disabled'));
+    // A selection the reader made meanwhile would go with the focus.
+    const selecting = !(document.getSelection()?.isCollapsed ?? true);
+    // The canvas under the node must not move to show the box.
+    if (lockedWithFocus.current && lost && !selecting && !touchFirst()) box.current?.focus({ preventScroll: true });
+    lockedWithFocus.current = false;
+  }, [locked, composer, box]);
+  useLayoutEffect(() => {
+    const element = composer.current;
+    if (!locked || !element) return undefined;
+    return watchReaderAway(element, () => { lockedWithFocus.current = false; });
+  }, [locked, composer]);
+}
+
 export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
@@ -112,10 +180,16 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
   const attach = useComposerAttachments({ value: input, onChange: setInput, nodeId: attachNodeId, disabled });
   const waitReason = attach.busy ? t('attach.waiting') : undefined;
+  const composerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useFocusBackOnUnlock(composerRef, inputRef, disabled);
 
   const send = () => {
     const message = input.trim();
     if (!message || disabled || sendReason || attach.busy) return;
+    // Sent with the button, the conversation goes on in the box: the button, which an empty box disables, keeps no focus
+    // to lose (and Safari gives a pressed button none). Not on a phone or a tablet, whose keyboard would come up.
+    if (document.activeElement !== inputRef.current && !touchFirst()) inputRef.current?.focus({ preventScroll: true });
     const sent = () => { setInput(''); attach.markSent(); };
     if (deferClear) onSend(message, sent);
     else { sent(); onSend(message); }
@@ -130,7 +204,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   };
 
   return (
-    <div className={`canvas-composer${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
+    <div ref={composerRef} className={`canvas-composer${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
       {blocked ? (
         <div className="canvas-composer-blocked" data-testid="composer-blocked">
           {blockedReason || t('composer.unbound')}
@@ -144,6 +218,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
         <div className="canvas-composer-row">
           <AttachButton state={attach} className="canvas-composer-attach" />
           <textarea
+            ref={inputRef}
             className="canvas-composer-input"
             data-testid="composer-input"
             value={attach.body}
