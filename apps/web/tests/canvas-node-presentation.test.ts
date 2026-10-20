@@ -53,6 +53,19 @@ it('reserves drawer space only as a focused minimum without adding it again to s
   expect(presentationNodes([large], null)[0]).toMatchObject({ w: 260, h: 128 });
 });
 
+it('keeps the drawer’s room for a focused node opened without a frame whose tile holds its drawer open', () => {
+  // An edit of the drawer's form took the delivery back (no delivery, nothing recorded) and the tile holds the drawer.
+  const { deliverablesOpen: _recorded, ...base } = session();
+  const held: SessionNode = { ...base, w: 520, h: 380, lastOutput: null };
+  expect(presentationNodes([held], held.id)[0]).toMatchObject({ w: 520, h: 380 });
+  expect(presentationNodes([held], held.id, undefined, undefined, undefined, false, true)[0]).toMatchObject({ w: 840, h: 380 });
+  // An open frame holds the drawer in its share of the frame, a narrow stage lays it over the conversation, and a node
+  // that is not open is drawn as its card.
+  expect(presentationNodes([held], held.id, undefined, undefined, { w: 1100, h: 700 }, false, true)[0]).toMatchObject({ w: 1100, h: 700 });
+  expect(presentationNodes([held], held.id, 334, undefined, undefined, false, true)[0]).toMatchObject({ w: 334, h: 380 });
+  expect(presentationNodes([held], null, undefined, undefined, undefined, false, true)[0]).toMatchObject({ w: 260, h: 128 });
+});
+
 it('projects a narrow focused node to the available mobile stage without changing the saved size', () => {
   const original = { ...session(), w: 940, h: 380, deliverablesOpen: true };
   expect(presentationNodes([original], original.id, 334)[0]).toMatchObject({ w: 334, h: 380 });

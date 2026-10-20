@@ -1591,6 +1591,142 @@ describe('an opened node that has delivered', () => {
     expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
   });
 
+  it('tells the canvas while it holds open a drawer the edit kept, and hands it the reader’s close while still held', () => {
+    const onHoldDeliverables = vi.fn();
+    const onToggleDeliverables = vi.fn();
+    const from = talked();
+    const host = hosted(from, { onHoldDeliverables, onToggleDeliverables });
+    openForm();
+    // While the delivery is there, the drawer's own rule shows the drawer: nothing is held.
+    expect(onHoldDeliverables).not.toHaveBeenCalled();
+    type('## 第');
+    expect(host.saved.lastOutput).toBeNull();
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    type('## 第二版');
+    // An undo and a run: the drawer stays as the reader has it, held.
+    host.put({ ...from, lastOutput: null });
+    host.show({ run: { state: 'running' } });
+    host.show({ run: { state: 'done' } });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    // The reader's close reaches the canvas while it still counts the drawer as held, so it is a shown drawer's close;
+    // the hold ends after it.
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(onToggleDeliverables.mock.calls).toEqual([[from.id, false]]);
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true], [from.id, false]]);
+    expect(onToggleDeliverables.mock.invocationCallOrder[0]).toBeLessThan(onHoldDeliverables.mock.invocationCallOrder[1]);
+  });
+
+  it('keeps the hold through a close during a run, which stays the tile’s own, until a close the canvas hears', () => {
+    const onHoldDeliverables = vi.fn();
+    const onToggleDeliverables = vi.fn();
+    const from = talked();
+    const host = hosted(from, { onHoldDeliverables, onToggleDeliverables });
+    openForm();
+    type('## 第二版');
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    // Closed during a run: the drawer goes and the canvas hears nothing, so it keeps the node's room as it was.
+    host.show({ run: { state: 'running' } });
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(onToggleDeliverables).not.toHaveBeenCalled();
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    // Opened again once the run is over: the open reaches the canvas, which asks its own rule (the canvas records the
+    // drawer open, and its rule then shows it: canvas-surface-fit); this one records nothing, so the drawer stays held.
+    host.show({ run: { state: 'done' } });
+    fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(onToggleDeliverables.mock.calls).toEqual([[from.id, true]]);
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    // Its close reaches the canvas, which records it, and the hold ends.
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    expect(onToggleDeliverables.mock.calls).toEqual([[from.id, true], [from.id, false]]);
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true], [from.id, false]]);
+  });
+
+  it('opens a held drawer closed during a run, and lets the hold go, once the canvas records the drawer open', () => {
+    // What 查看交付物 has the canvas do: an open is asked of the drawer's rule alone, so it is recorded, and the rule then
+    // shows the drawer, which the tile closed to itself during the run.
+    const onHoldDeliverables = vi.fn();
+    const onToggleDeliverables = vi.fn();
+    const from = talked();
+    const host = hosted(from, { onHoldDeliverables, onToggleDeliverables });
+    openForm();
+    type('## 第二版');
+    host.show({ run: { state: 'running' } });
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    host.show({ run: { state: 'done' } });
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    host.put({ ...host.saved, deliverablesOpen: true });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true], [from.id, false]]);
+    expect(onToggleDeliverables).not.toHaveBeenCalled();
+  });
+
+  it('keeps the hold through a publication where the drawer’s rule would hide the drawer, so its close is remembered', () => {
+    const onHoldDeliverables = vi.fn();
+    const onToggleDeliverables = vi.fn();
+    const from = talked();
+    const host = hosted(from, { onHoldDeliverables, onToggleDeliverables });
+    openForm();
+    type('## 第二版');
+    // The stage narrows (the drawer would lie over the conversation, so its rule hides it), and the form is published.
+    host.show({ deliveryBeside: false });
+    publish();
+    expect(host.saved.lastOutput).toMatchObject({ source: 'manual' });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true]]);
+    // The drawer is still open where the rule hides it: its close reaches the canvas as a shown drawer's.
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    expect(onToggleDeliverables.mock.calls).toEqual([[from.id, false]]);
+    expect(onHoldDeliverables.mock.calls).toEqual([[from.id, true], [from.id, false]]);
+  });
+
+  it('holds no drawer its rule shows or a run opened, and lets one go when a delivery is back or the tile goes', () => {
+    // Published: the new delivery's drawer is the rule's again.
+    const published = vi.fn();
+    const first = hosted(talked(), { onHoldDeliverables: published });
+    openForm();
+    type('## 第二版');
+    publish();
+    expect(first.saved.lastOutput).toMatchObject({ source: 'manual' });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(published.mock.calls).toEqual([['n', true], ['n', false]]);
+    first.unmount();
+    // A drawer the reader opened by hand is recorded, so the rule shows it through the edit; closed during the edit, the
+    // close is recorded too, and a closed drawer is not held.
+    const recorded = vi.fn();
+    const second = hosted(talked({ deliverablesOpen: true }), { onHoldDeliverables: recorded });
+    openForm();
+    type('## 第二版');
+    expect(second.saved.lastOutput).toBeNull();
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
+    expect(second.saved.deliverablesOpen).toBe(false);
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(recorded).not.toHaveBeenCalled();
+    second.unmount();
+    // A drawer opened during a run stays the tile's own: it writes nothing and takes no room the canvas gives, also
+    // once the run is over.
+    const local = vi.fn();
+    const third = hosted(agent({ contract: contract() }), { onHoldDeliverables: local, run: { state: 'running' } });
+    fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    third.show({ run: { state: 'done' } });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(local).not.toHaveBeenCalled();
+    third.unmount();
+    // A tile that goes while it holds a drawer lets it go.
+    const gone = vi.fn();
+    const fourth = hosted(talked(), { onHoldDeliverables: gone });
+    openForm();
+    type('## 第二版');
+    expect(gone.mock.calls).toEqual([['n', true]]);
+    fourth.unmount();
+    expect(gone.mock.calls).toEqual([['n', true], ['n', false]]);
+  });
+
   /** What the opened tile gives its drawer: what it says it mostly shows, and the drawer's share of its width. */
   const share = () => {
     const tile = screen.getByTestId('canvas-tile-n');
@@ -1627,6 +1763,37 @@ describe('an opened node that has delivered', () => {
     const saved = host.saved;
     host.put({ ...saved, contract: { ...saved.contract!, outputs: saved.contract!.outputs.map(({ value, ...field }) => ({ value, ...field })) } });
     expect(share()).toEqual(['delivery', '52%']);
+  });
+
+  it('keeps that share through keystrokes the canvas refuses in the middle of the edit', () => {
+    const host = hosted(talked());
+    openForm();
+    type('## 第');
+    expect(share()).toEqual(['delivery', '52%']);
+    // The canvas refuses the next two (a run of another lane reached a node fed by this one, say): the field keeps what
+    // the canvas holds, and the edit goes on.
+    host.refusing = true;
+    type('## 第二');
+    type('## 第二版');
+    expect(host.saved.contract!.outputs[0].value).toBe('## 第');
+    expect(screen.getByLabelText('交付结果的值')).toHaveValue('## 第');
+    expect(share()).toEqual(['delivery', '52%']);
+    host.refusing = false;
+    type('## 第二版');
+    expect(share()).toEqual(['delivery', '52%']);
+    publish();
+    expect(host.saved.lastOutput).toMatchObject({ text: '{"result":"## 第二版"}', source: 'manual' });
+    expect(share()).toEqual(['delivery', '52%']);
+    host.unmount();
+    // Refused, then an undo (the form before the edit, its delivery not back): the edit ends as before.
+    const from = talked();
+    const undone = hosted(from);
+    openForm();
+    type('## 第');
+    undone.refusing = true;
+    type('## 第二');
+    undone.put({ ...from, lastOutput: null });
+    expect(share()).toEqual(['chat', '38%']);
   });
 
   it('gives that share back once the node starts work or closes, or the form or the conversation changes under the edit', () => {

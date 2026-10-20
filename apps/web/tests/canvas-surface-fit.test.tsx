@@ -23,6 +23,7 @@ import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStora
 import { PLANNING_STORAGE_KEY } from '../src/canvas/canvasPlanning';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { resetAllSessions } from '../src/canvas/sessions';
+import { loadRunJournal } from '../src/canvas/runJournal';
 import { RAIL_BOT_KEY, RAIL_MODEL_KEY } from '../src/canvas/railState';
 import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 
@@ -1492,6 +1493,54 @@ describe('CanvasSurface keeps an opened node clear of the inspector (cloud)', ()
     expectBoxOnStage(world, { x: 300, y: 200, w: 1100, h: parseFloat(opened.style.height) }, stage);
   });
 
+  it('keeps the drawer’s room, and the camera, in a node opened beside Configure without a frame while an edit holds the drawer', async () => {
+    // The hosted app at about 900-960 px with Configure open: the stage less its padding and Configure's 388 px leaves
+    // less than a frame's 520 px, so the node opens as wide as its card's minimum and the drawer's (840 px) beside
+    // Configure, the drawer open by itself beside the conversation. Once an edit of the delivered value had taken the
+    // delivery back, the node narrowed to 520 px under the drawer the edit kept open and the camera zoomed in on it,
+    // from 75 % to about 100 % (2026-10-21).
+    const stage = { w: 940, h: 900 };
+    stubStage(stage);
+    const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
+    configureCanvasStorage('user', tenant.id, 'canvas');
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const contract = { version: 1 as const, inputs: [], outputs: [{ id: 'result', label: 'Result', type: 'markdown' as const, required: true, value: '' }] };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 300, y: 200, contract,
+      lastOutput: { text: '{"result":"## 关卡规格"}', source: 'run', at: 1 } }), view: { x: 0, y: 0, scale: 0.8 } }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={async () => ({ agents: [], models: [] })} />);
+    const world = document.querySelector('.canvas-world') as HTMLElement;
+    const card = within(await screen.findByTestId('canvas-tile-s1'));
+    fireEvent.click(card.getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(card.getByRole('button', { name: '配置', exact: true }));
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    await glideDone();
+    for (let landed = '', waits = 0; landed !== world.style.transform; waits += 1) {
+      if (waits === 10) throw new Error(`the opening glide never landed: ${world.style.transform}`);
+      landed = world.style.transform;
+      await glideDone();
+    }
+    expect(document.querySelector('.canvas-root > .canvas-inspector')).not.toBeNull();
+    const tile = screen.getByTestId('canvas-tile-s1');
+    expect(tile.style.width).toBe('840px');
+    const camera = world.style.transform;
+    expect(transformOf(world)[2]).toBeCloseTo(0.75, 3);
+    const drawer = within(tile).getByRole('region', { name: '交付物' });
+    // The delivery the edit takes back is the run's.
+    expect(within(drawer).getByText('来自运行')).toBeTruthy();
+    fireEvent.click(within(drawer).getByText('编辑输出表单'));
+    const field = within(drawer).getByLabelText('Result的值');
+    field.focus();
+    fireEvent.change(field, { target: { value: '## 关卡规格（第二' } });
+    await waitFor(() => expect(within(drawer).queryByText('来自运行')).toBeNull());
+    await settle();
+    await glideDone();
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(document.activeElement).toBe(field);
+    expect(tile.style.width).toBe('840px');
+    expect(world.style.transform).toBe(camera);
+  });
+
   it('gives up part of that clear space before the node would drop below the readable scale', async () => {
     // A 700 px stage: the full 388 px reserve would leave 284 px for a 520 px node (0.55×).
     const stage = { w: 700, h: 1000 };
@@ -1633,6 +1682,145 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(share()).toBe('52%');
     expect(world.style.transform).toBe(camera);
     expect([tile.style.width, tile.style.height]).toEqual(size);
+  });
+
+  const resultForm = { version: 1 as const, inputs: [], outputs: [{ id: 'result', label: 'Result', type: 'markdown' as const, required: true, value: '' }] };
+  /** Opens the delivered node on `stage`, waits out the opening glide, and edits its delivered value in its drawer, which
+   *  takes the delivery back (invalidateOutputs) while the tile holds the drawer open. */
+  const editHeld = async (stage: { w: number; h: number }, over: Partial<ReturnType<typeof createSessionNode>> = {}) => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered({ contract: resultForm, lastOutput: { text: '{"result":"## 关卡规格"}', source: 'run', at: 1 }, ...over })));
+    const { world, tile } = await openOn(stage);
+    for (let landed = '', waits = 0; landed !== world.style.transform; waits += 1) {
+      if (waits === 10) throw new Error(`the opening glide never landed: ${world.style.transform}`);
+      landed = world.style.transform;
+      await glideDone();
+    }
+    const drawer = within(tile).getByRole('region', { name: '交付物' });
+    const before = { camera: world.style.transform, size: [tile.style.width, tile.style.height] };
+    fireEvent.click(within(drawer).getByText('编辑输出表单'));
+    const field = within(drawer).getByLabelText('Result的值');
+    field.focus();
+    fireEvent.change(field, { target: { value: '## 关卡规格（第二' } });
+    await waitFor(() => expect(saved().lastOutput ?? null).toBeNull(), { timeout: 3000 });
+    await settle();
+    await glideDone();
+    return { world, tile, drawer, field, before };
+  };
+
+  /** A bound node, and the gateway its runs reach: each run's message stays open until its `finish` is called, which
+   *  delivers `output`, nothing if it is empty (the real run path: prepare, the message's event stream, settle). */
+  const bound = { runtime: 'claude_local', issueId: 'iss-1', binding: { companyId: 'c1', agentId: 'a1', agentName: '策划' } };
+  const runPeer = () => {
+    const encoder = new TextEncoder();
+    const finishes: Array<(output: string) => void> = [];
+    const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, string> : {};
+      if (method === 'POST' && url.endsWith('/prepare')) return reply({ prepared: true });
+      if (method === 'POST' && url.endsWith('/messages')) {
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const stream = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+        const emit = (frame: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`));
+        emit({ event: 'accepted', issueId: body.issueId || 'issue-s1', runId: 'run-s1', operationId: body.operationId, runVisible: true });
+        finishes.push(output => { if (output) emit({ event: 'delta', text: output }); emit({ event: 'done', status: 'succeeded' }); controller.close(); });
+        return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (method === 'POST' && url.endsWith('/settle')) return reply({ confirmed: true, status: 'succeeded', holdId: 'hold-s1' });
+      if (method === 'GET' && url.endsWith('/messages')) return reply({ complete: true, messages: [] });
+      return reply({}, 503);
+    }));
+    return finishes;
+  };
+  const runNode = (tile: HTMLElement) => {
+    fireEvent.click(within(tile).getByRole('button', { name: '更多节点操作' }));
+    fireEvent.click(within(tile).getByRole('button', { name: '运行节点' }));
+  };
+
+  it('keeps the drawer’s room in a node opened without a frame of its own while the drawer an edit kept open is held', async () => {
+    // A stage too short for a frame (174 px under the focus padding, a frame needs 200): the node opens as wide as its
+    // card's minimum and the drawer's 320 px, 840 px, where the drawer opens by itself beside the conversation. Once the
+    // edit had taken the delivery back, the node narrowed to 520 px and the drawer it kept open lay over the conversation
+    // (2026-10-21).
+    const { world, tile, drawer, field, before } = await editHeld({ w: 1600, h: 280 });
+    expect(before.size).toEqual(['840px', '380px']);
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(document.activeElement).toBe(field);
+    expect([tile.style.width, tile.style.height]).toEqual(before.size);
+    expect(world.style.transform).toBe(before.camera);
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    // Closing it is remembered as closing a drawer that opened by itself is, and the node takes a conversation's width.
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await settle();
+    await glideDone();
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(tile.style.width).toBe('520px');
+  });
+
+  it('remembers the reader’s close of a drawer an edit kept open, so a later delivery leaves it closed', async () => {
+    // The canvas compared the close with its own rule, which already said closed (no delivery, nothing recorded): it
+    // recorded nothing, and the next delivery opened the drawer again (2026-10-21). Here a run of the node delivers.
+    const finishes = runPeer();
+    const { tile, drawer } = await editHeld({ w: 1600, h: 1000 }, bound);
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
+    runNode(tile);
+    await waitFor(() => expect(finishes).toHaveLength(1));
+    await act(async () => { finishes[0]('{"result":"## 关卡规格（第三版）"}'); });
+    await waitFor(() => expect(saved().lastOutput).toMatchObject({ text: '{"result":"## 关卡规格（第三版）"}', source: 'run' }), { timeout: 3000 });
+    await settle();
+    expect(saved().deliverablesOpen).toBe(false);
+    expect(within(screen.getByTestId('canvas-tile-s1')).queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(within(screen.getByTestId('canvas-tile-s1')).getByRole('button', { name: '展开交付物' })).toBeTruthy();
+  });
+
+  it('keeps the room of a held drawer closed during a run, which stays the tile’s own', async () => {
+    // A toggle during a run writes nothing and leaves the node's size as it was (SessionTile); a close of the drawer an
+    // edit kept open shrank a node without a frame of its own from 840 to 520 px mid-run (review, 2026-10-21).
+    const finishes = runPeer();
+    const { tile, drawer } = await editHeld({ w: 1600, h: 280 }, bound);
+    expect(tile.style.width).toBe('840px');
+    runNode(tile);
+    await waitFor(() => expect(finishes).toHaveLength(1));
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    await settle();
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(tile.style.width).toBe('840px');
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    // The run delivers in full beside the conversation, and the drawer opens for it by itself: a close during a run is
+    // not remembered.
+    await act(async () => { finishes[0]('{"result":"## 关卡规格（第三版）"}'); });
+    await waitFor(() => expect(saved().lastOutput).toMatchObject({ source: 'run' }), { timeout: 3000 });
+    await settle();
+    expect(within(screen.getByTestId('canvas-tile-s1')).getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(screen.getByTestId('canvas-tile-s1').style.width).toBe('840px');
+  });
+
+  it('records and shows a held drawer closed during a run when it is opened again', async () => {
+    // The canvas asks an open of the drawer's rule alone: a held drawer counted as shown made an open after a close
+    // during a run (展开交付物, and 查看交付物, which asks the canvas the same way) record nothing (review, 2026-10-21).
+    const finishes = runPeer();
+    const { tile, drawer } = await editHeld({ w: 1600, h: 280 }, bound);
+    runNode(tile);
+    await waitFor(() => expect(finishes).toHaveLength(1));
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    // The run ends without a delivery.
+    await act(async () => { finishes[0](''); });
+    await waitFor(() => expect(loadRunJournal()).toBeNull(), { timeout: 3000 });
+    await settle();
+    expect(saved().lastOutput ?? null).toBeNull();
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(tile.style.width).toBe('840px');
+    fireEvent.click(within(tile).getByRole('button', { name: '展开交付物' }));
+    await waitFor(() => expect(saved().deliverablesOpen).toBe(true));
+    await settle();
+    await glideDone();
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(tile.style.width).toBe('840px');
   });
 
   it('keeps the drawer closed by default on a stage where it would cover the conversation', async () => {

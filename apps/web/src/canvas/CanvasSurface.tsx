@@ -883,11 +883,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const focusedOpenFrame = focusedFit?.frame;
   const focusNarrow = focusedFit ? focusedFit.narrow : narrowFocusWidth(size.w);
   const focusExact = Boolean(focusedFit?.resized);
+  // The delivery drawers tiles hold where the drawer's rule (deliverablesShown) closes them: one an edit of its form kept
+  // open once it took the delivery back (SessionTile onHoldDeliverables). The canvas counts them as shown for a close,
+  // which is remembered as closing a shown drawer is (toggleDeliverables), and a node opened without a frame of its own
+  // keeps the drawer's room (presentationNodes). Never saved.
+  const [heldDrawers, setHeldDrawers] = useState<ReadonlySet<string>>(() => new Set());
+  const heldDrawersRef = useRef(heldDrawers);
+  heldDrawersRef.current = heldDrawers;
+  const holdDeliverables = useCallback((nodeId: string, held: boolean) => setHeldDrawers(previous => {
+    if (previous.has(nodeId) === held) return previous;
+    const next = new Set(previous);
+    if (held) next.add(nodeId); else next.delete(nodeId);
+    return next;
+  }), []);
+  const focusHeld = focusedId !== null && heldDrawers.has(focusedId);
   // A node drawn as it was keeps the object it was drawn with: each one is a tile's geometry, and tiles are memoised on
   // their props, so a fresh copy of every card for any one node's edit would re-render the whole canvas.
   const drawnNodes = useRef(new globalThis.Map<string, { node: CanvasNode; drawn: CanvasNode }>());
   const renderNodes = useMemo(() => {
-    const drawn = presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact);
+    const drawn = presentationNodes(nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact, focusHeld);
     const kept = new globalThis.Map<string, { node: CanvasNode; drawn: CanvasNode }>();
     const stable = drawn.map((next, index) => {
       const held = drawnNodes.current.get(next.id);
@@ -897,7 +911,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
     drawnNodes.current = kept;
     return stable;
-  }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact]);
+  }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact, focusHeld]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
@@ -1044,7 +1058,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const frameless = box.w - pad.x * 2 < FOCUSED_SESSION_MIN_SIZE.w;
       const narrow = narrowFocusWidth(stage.w) || frameless ? narrowFocusWidth(box.w) : undefined;
       const frame = options.frame ?? openFrameFor(target, openRoom(box, besidePanel), options.content);
-      const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame, Boolean(options.frame)).find((n) => n.id === nodeId)!;
+      const node = presentationNodes(docRef.current.nodes, nodeId, narrow, undefined, frame, Boolean(options.frame), heldDrawersRef.current.has(nodeId))
+        .find((n) => n.id === nodeId)!;
       // Cap the focus scale so the whole node — delivery drawer included — fits the stage inside the focus padding.
       const availH = Math.max(120, box.h - pad.top - pad.bottom);
       const inspectorRoom = INSPECTOR_OVERLAY.inset + Math.min(INSPECTOR_OVERLAY.width, box.w - INSPECTOR_OVERLAY.inset * 2) + INSPECTOR_OVERLAY.gap;
@@ -2175,16 +2190,19 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [patchDoc, laneList]);
 
   // The reader's choice is kept against what the node shows now (deliverablesShown), so closing a drawer that opened by
-  // itself is remembered. The drawer takes a share of an opened node's frame, so the node keeps its size and camera;
-  // only a node opened without a frame grows by the drawer and is fitted again.
+  // itself is remembered, and so is closing a drawer its tile holds open (an edit of its form kept it). An open is asked
+  // of the rule alone: a held drawer closed during a run, which the tile kept to itself, opens and is recorded open when
+  // its delivery is asked for (查看交付物). The drawer takes a share of an opened node's frame, so the node keeps its
+  // size and camera; only a node opened without a frame grows by the drawer and is fitted again.
   const toggleDeliverables = useCallback((nodeId: string, open: boolean) => {
     if (!canEditStructure(false, [])) return;
     const target = docRef.current.nodes.find(node => node.id === nodeId);
     const drawn = renderNodesRef.current.find(node => node.id === nodeId);
     const placed = openFitRef.current?.id === nodeId ? openFitRef.current : null;
     const narrow = placed ? placed.narrow : narrowFocusWidth(sizeRef.current.w);
+    const shown = target?.kind === 'session' && deliverablesShown(target, drawerBeside(narrow, drawn?.w ?? target.w));
     if (!target || target.kind !== 'session' || hasStreamingConversation([target])
-      || deliverablesShown(target, drawerBeside(narrow, drawn?.w ?? target.w)) === open) return;
+      || (open ? shown : shown || heldDrawersRef.current.has(nodeId)) === open) return;
     patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId && node.kind === 'session' ? { ...node, deliverablesOpen: open } : node) }),
       { silent: true });
     const fit = openFitRef.current;
@@ -4231,6 +4249,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
             onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
+            onHoldDeliverables={readOnly ? undefined : holdDeliverables}
             interactionLocked={busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked}
             onMove={readOnly || exclusiveNow || initializing ? undefined : moveNode}
             onResizeNode={readOnly || exclusiveNow || initializing || (node.kind === 'session' && focusedId !== node.id) ? undefined : resizeNode}

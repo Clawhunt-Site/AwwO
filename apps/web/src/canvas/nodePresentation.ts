@@ -59,10 +59,13 @@ export function openFrameFor(node: CanvasNode | undefined, available: { w: numbe
  * Use these same nodes for cards, port anchors, wires, minimap, selection and viewport fitting.
  * `cardFrames` are the sizes people enlarged cards to (cardFrames.ts), a view preference too.
  * `openFrame` is the size the focused node opens at (openFrameFor); a node saved larger keeps its size, unless the
- * frame is `exact` (the reader resized the open node by hand, to any size).
+ * frame is `exact` (the reader resized the open node by hand, to any size). `drawerHeld`: the focused node's tile holds
+ * its delivery drawer's place where deliverablesShown closes it (SessionTile onHoldDeliverables): the drawer an edit of
+ * its form kept open, or closed during a run, which leaves the node as wide as it was.
  */
 export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: string | null, narrowFocusWidth?: number,
-  cardFrames?: Readonly<Record<string, { w: number; h: number }>>, openFrame?: { w: number; h: number }, exact = false): CanvasNode[] {
+  cardFrames?: Readonly<Record<string, { w: number; h: number }>>, openFrame?: { w: number; h: number }, exact = false,
+  drawerHeld = false): CanvasNode[] {
   return nodes.map(node => {
     if (node.kind !== 'session') return node;
     const card = cardFrames?.[node.id];
@@ -72,7 +75,7 @@ export function presentationNodes(nodes: ReadonlyArray<CanvasNode>, focusedId: s
         ? Math.min(Math.max(280, narrowFocusWidth), Math.max(node.w, FOCUSED_SESSION_MIN_SIZE.w))
         // Opened at its frame, the drawer takes a share of that width; without one it widens the node by its own width.
         : opened && exact ? opened.w
-        : Math.max(node.w, opened ? opened.w : FOCUSED_SESSION_MIN_SIZE.w + (deliverablesShown(node) ? DELIVERY_DRAWER_WIDTH : 0))
+        : Math.max(node.w, opened ? opened.w : FOCUSED_SESSION_MIN_SIZE.w + (drawerHeld || deliverablesShown(node) ? DELIVERY_DRAWER_WIDTH : 0))
       : card?.w ?? COMPACT_SESSION_SIZE.w;
     const h = node.id !== focusedId ? card?.h ?? COMPACT_SESSION_SIZE.h
       : opened && exact ? opened.h : Math.max(node.h, opened ? opened.h : 0, FOCUSED_SESSION_MIN_SIZE.h);

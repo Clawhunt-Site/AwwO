@@ -324,6 +324,10 @@ export interface SessionTileProps {
   sendUnavailableReason?: string;
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
+  /** Told while this tile holds its delivery drawer where the drawer's rule (deliverablesShown) closes it, as an edit of
+   *  its form does once it has taken the delivery back (open, or closed during a run, which keeps its place), and when it
+   *  no longer does: the canvas counts that drawer as shown for a close and keeps its room. */
+  onHoldDeliverables?: (nodeId: string, held: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
   onSend?: (node: SessionNode, text: string, onAccepted?: () => void, displayText?: string) => void;
   /** Current graph-resolved inputs; absent uses this node's local contract values only. */
@@ -404,6 +408,7 @@ export const SessionTile = memo(function SessionTile({
   readOnly: viewOnly = false,
   sendUnavailableReason,
   onToggleDeliverables,
+  onHoldDeliverables,
   onSend,
   conversationContext,
   freeConversation = false,
@@ -491,20 +496,38 @@ export const SessionTile = memo(function SessionTile({
   // An edit of the drawer's form in progress (updateDeliverables) since the node last showed a delivery, which an edit of
   // it takes back until the form is published again (invalidateOutputs): the output form it left, its conversation, and
   // whether the node showed a delivery when it began, whose share of the width it keeps (below). It ends when a delivery
-  // is back, when the form or the conversation changes under it (an undo, a new conversation, an edit the canvas refused),
-  // and when the node closes or starts work (below).
-  const [formEdit, setFormEdit] = useState<{ form: string; thread: string; share: boolean } | null>(null);
+  // is back, when the form or the conversation changes under it (an undo, a new conversation, a first edit the canvas
+  // refused), and when the node closes or starts work (below). A keystroke the canvas refuses later in the edit leaves it
+  // as it was while the node is still the one that keystroke was made on (`base`: nothing changed it).
+  const [formEdit, setFormEdit] = useState<{ form: string; thread: string; share: boolean; base?: CanvasNode } | null>(null);
   const editing = formEdit && node.kind === 'session' && !node.lastOutput && currentThread?.id === formEdit.thread
-    && outputFormKey(node) === formEdit.form ? formEdit : null;
+    && (outputFormKey(node) === formEdit.form || node === formEdit.base) ? formEdit : null;
+  // Whether the tile holds the drawer where the drawer's rule closes it: the drawer an edit of its form kept open (below),
+  // until a close of it reaches the canvas or the rule shows it again (a delivery back beside the conversation, an open
+  // recorded); where the rule hides a drawer even with a delivery (a narrow stage, a frame too narrow for both), it is
+  // still held after the publication. The canvas counts it as shown for a close (onHoldDeliverables), so its close is
+  // remembered as a shown drawer's is, and a node opened without a frame of its own keeps the drawer's room. A toggle
+  // during a run stays the tile's own (toggleDeliverables): a close then leaves the hold, so the node keeps that room with
+  // its drawer closed, as it keeps a recorded drawer's, until an open of it outside a run is recorded or the rule shows it.
+  const [drawerHeld, setDrawerHeld] = useState(false);
   // Before paint: a drawer that should not show on this stage must not flash open for a frame. Nor does an edit of its
   // form close it: a drawer that opened by itself for the delivery the edit took back would close under the reader's
-  // keystroke, its form editor with it. It stays open as the reader has it, and nothing is recorded, so the drawer's own
-  // rule is unchanged for the publication and after it.
+  // keystroke, its form editor with it. It stays open as the reader has it, held, and nothing is recorded, so the drawer's
+  // own rule is unchanged for the publication and after it.
   useLayoutEffect(() => {
-    if (!drawerShown && editing) return;
+    if (!drawerShown && editing) {
+      if (deliverablesOpen) setDrawerHeld(true);
+      return;
+    }
+    setDrawerHeld(false);
     setDeliverablesOpen(drawerShown);
     if (!drawerShown) setDeliverablesEditorOpen(false);
   }, [drawerShown]);
+  useLayoutEffect(() => {
+    if (!drawerHeld || !onHoldDeliverables) return;
+    onHoldDeliverables(nodeId, true);
+    return () => onHoldDeliverables(nodeId, false);
+  }, [drawerHeld, onHoldDeliverables, nodeId]);
   // The Session list starts collapsed so an opened node leads with its conversation; the chat
   // heading keeps the expand control and the list keeps its collapse control.
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -830,10 +853,11 @@ export const SessionTile = memo(function SessionTile({
   };
   // What the deliverables change, against this render's node: their outputs, or a result published by hand. A change of
   // the drawer's form (an edit of NodeDeliverables' fields, or the publication that ends them) also starts or carries the
-  // edit in progress, which keeps the drawer open while it has taken the delivery back (above).
+  // edit in progress, which keeps the drawer open while it has taken the delivery back (above), with the node it was made
+  // on, for a keystroke the canvas refuses.
   const updateDeliverables = (next: CanvasNode) => {
     if (next.kind === 'session' && currentThread) {
-      setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery' });
+      setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery', base: node });
     }
     if (next.kind !== 'session' || node.kind !== 'session') { onUpdateNode?.(next); return; }
     writeNode(current => ({
@@ -860,6 +884,9 @@ export const SessionTile = memo(function SessionTile({
     // Reading a prior delivery does not alter execution. During a run, keep disclosure
     // local so opening the drawer cannot write the locked document or resize its node.
     if (busy || viewOnlyRef.current) return;
+    // A close the canvas hears ends a hold (the canvas, counting the drawer as shown, records it unless it refuses edits
+    // now); an open reaches it too, and once recorded the drawer's rule shows the drawer and the hold ends with that.
+    if (!next) setDrawerHeld(false);
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
