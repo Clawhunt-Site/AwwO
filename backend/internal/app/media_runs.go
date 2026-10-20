@@ -569,6 +569,14 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 			return
 		}
 		references = ids
+		// A run that waited long for its uploads (referenceUploadSlots) is not sent late: unsent, nothing is charged.
+		if mediaSendTooLate(ctx, a.cfg.MediaTimeout) {
+			if a.mediaStopped(ctx, id, false) {
+				return
+			}
+			a.finish(tid, id, "failed", "", "media_provider_busy")
+			return
+		}
 	}
 	endpoint := m.Endpoint
 	var body map[string]any

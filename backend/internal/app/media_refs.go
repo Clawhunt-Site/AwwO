@@ -222,40 +222,85 @@ func (a *App) uploadMediaReferences(ctx context.Context, hub mediaProvider, tid,
 	if !ok {
 		return nil, &rhError{Code: "media_reference_unavailable"}
 	}
+	// One slot for all of the run's uploads, which go one file at a time (referenceUploadSlots), taken at its first file
+	// to send: a run whose references are all reused needs none.
+	holding := false
+	defer func() {
+		if holding {
+			<-referenceUploadSlots
+		}
+	}()
 	ids := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		if id, ok := a.reusedJimengReference(ctx, hub, tid, ref); ok {
 			ids = append(ids, id)
 			continue
 		}
-		data, err := a.readMediaReference(tid, ref)
-		if err != nil {
-			return nil, err
-		}
-		var id string
-		for try := 1; ; try++ {
-			upload, cancel := context.WithTimeout(ctx, referenceUploadTimeout)
-			id, err = uploader.uploadReference(upload, ref, data, runID)
-			cancel()
-			e, known := asRHError(err)
-			if err == nil || !known || !e.Transient || try >= referenceUploadTries || ctx.Err() != nil {
-				break
-			}
+		if !holding {
 			select {
+			case referenceUploadSlots <- struct{}{}:
+				holding = true
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(time.Duration(try) * 2 * time.Second):
 			}
 		}
+		id, err := a.sendMediaReference(ctx, uploader, tid, runID, ref)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// maxReferenceUploadsInFlight bounds the runs uploading references at once across this API (2026-10-20): an upload holds
+// its file and the upload's body in memory (RunningHub's up to 10 MB, the others' up to 20 MB, each twice), and a canvas
+// run that started 37 videos from references at once took the API past its 512 MiB memory cap (killed by the kernel and
+// restarted at 03:14:18Z).
+const maxReferenceUploadsInFlight = 4
+
+// referenceUploadSlots are those runs' slots: a run waits for one as long as its context lets it, holds it while its
+// references are read and sent one at a time (and while X-tasy prepares one, or Jimeng waits for its own command slots),
+// and frees it when its uploads end. Runs take slots in turn, so the first to come is the first sent.
+var referenceUploadSlots = make(chan struct{}, maxReferenceUploadsInFlight)
+
+// mediaSendTooLate reports a run that should not send its task in the time it has left: one that waited for its uploads
+// until less than half of the media timeout remains, so that a task sent now could outlast the run, be charged and still
+// fail. Such a run ends unsent instead, and so uncharged, as busy (media_provider_busy, which a canvas run tries again).
+func mediaSendTooLate(ctx context.Context, timeout time.Duration) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && time.Until(deadline) < timeout/2
+}
+
+// sendMediaReference reads one frozen reference and sends it, trying a transient failure again (referenceUploadTries)
+// while the run's context lasts. Its run holds a slot of referenceUploadSlots meanwhile (uploadMediaReferences).
+func (a *App) sendMediaReference(ctx context.Context, uploader referenceUploader, tid, runID string, ref mediaReference) (string, error) {
+	data, err := a.readMediaReference(tid, ref)
+	if err != nil {
+		return "", err
+	}
+	var id string
+	for try := 1; ; try++ {
+		upload, cancel := context.WithTimeout(ctx, referenceUploadTimeout)
+		id, err = uploader.uploadReference(upload, ref, data, runID)
+		cancel()
+		e, known := asRHError(err)
+		if err == nil || !known || !e.Transient || try >= referenceUploadTries || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(try) * 2 * time.Second):
+		}
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", err
+	}
+	return id, nil
 }
 
 // reusedJimengReference: a picture Jimeng itself generated for this workspace (the media-N file of a jm.* run) is
@@ -303,6 +348,8 @@ func referenceFileName(contentType string) string {
 // multipartFile is a multipart/form-data body holding one file under field, and its Content-Type header value.
 func multipartFile(field, fileName, contentType string, data []byte) ([]byte, string, error) {
 	var buf bytes.Buffer
+	// Sized once, so a large file is not copied again and again as the body grows.
+	buf.Grow(len(data) + 1024)
 	w := multipart.NewWriter(&buf)
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, field, fileName))
