@@ -208,6 +208,8 @@ const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-
   && typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 900px)').matches);
 /** A view fitted on the stage right of `cover` (computed as if that part were the whole stage), back on the stage. */
 const shiftView = (view: ViewportState, by: number): ViewportState => by ? { ...view, x: view.x + by } : view;
+/** A changed document's planning recovery is read again once the document has not changed for this long. */
+const PLAN_RECOVERY_SETTLE_MS = 300;
 /** An opened node's frame and the camera the app placed for it, from one measurement of the stage (openPlacement). */
 type OpenFit = { id: string; frame?: { w: number; h: number }; view: ViewportState; narrow?: number; content: OpenContent; resized?: boolean };
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
@@ -2845,6 +2847,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [planningRecovery, setPlanningRecovery] = useState<Awaited<ReturnType<typeof readCanvasPlanRecovery>> | null>(null);
   const [recoveryLoaded, setRecoveryLoaded] = useState(!canInitialize);
   const [recoveryChecking, setRecoveryChecking] = useState(false);
+  // The plan revision the planning recovery was last read for: until it has been read for this document, nothing may
+  // resume what was read for another one (a new plan needs no such read: an entry refuses any other prompt or revision).
+  const [recoveryRevision, setRecoveryRevision] = useState<string | null>(null);
+  const recoveryForDocument = !canInitialize || recoveryRevision === planRevision;
   const [recoveryStopping, setRecoveryStopping] = useState(false);
   const recoveryCheckSequence = useRef(0);
   const recoveryReadError = useRef('');
@@ -2871,8 +2877,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const stillCurrent = () => mounted.current && !signal?.aborted && !readOnlyRef.current
       && currentSaaSCanvas() === cloudScope && sequence === recoveryCheckSequence.current;
     setRecoveryChecking(true);
+    // Read (or failed) for this revision, the recovery is not read again on its own until the document changes.
+    const revision = revisionOf(docRef.current);
     try {
-      const recovery = await readCanvasPlanRecovery(docRef.current, signal, revisionOf(docRef.current));
+      const recovery = await readCanvasPlanRecovery(docRef.current, signal, revision);
       if (!stillCurrent()) return;
       setPlanningRecovery(recovery);
       setRecoveryLoaded(true);
@@ -2887,7 +2895,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setRecoveryLoaded(false);
       recoveryReadError.current = planFailureMessage(t, error);
       setPlanningError(recoveryReadError.current);
-    } finally { if (stillCurrent()) setRecoveryChecking(false); }
+    } finally { if (stillCurrent()) { setRecoveryRevision(revision); setRecoveryChecking(false); } }
   }, [canInitialize, cloudScope, t, revisionOf]);
   useEffect(() => {
     if (!canInitialize || readOnly || planningBusy) return;
@@ -2896,7 +2904,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const unsubscribe = subscribeCanvasKnowledge(refresh);
     refresh();
     return () => { controller.abort(); unsubscribe(); };
-  }, [canInitialize, readOnly, planningBusy, planRevision, refreshPlanningRecovery]);
+  }, [canInitialize, readOnly, planningBusy, refreshPlanningRecovery]);
+  // A changed document's recovery is read once the document has stopped changing for a moment, not on every change: a
+  // drag changes it on every frame, and a read started from the effects of that frame's commit set state that React
+  // counted as nested in the next frame, and the next (React error #185 in a long drag on a slow machine).
+  useEffect(() => {
+    if (!canInitialize || readOnly || planningBusy || recoveryChecking || recoveryRevision === planRevision) return;
+    const timer = setTimeout(() => { void refreshPlanningRecovery(); }, PLAN_RECOVERY_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [canInitialize, readOnly, planningBusy, recoveryChecking, recoveryRevision, planRevision, refreshPlanningRecovery]);
   // Measure after the welcome screen becomes a canvas with an assistant sidebar.
   // The previous ResizeObserver size still describes the full-width welcome at this point.
   useLayoutEffect(() => {
@@ -2957,7 +2973,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A message being handled (routed, becoming a task) is the one request in flight; nothing else plans meanwhile.
     if (readOnlyRef.current || pendingRef.current) return '';
     if (!resume && planningUnavailableReason) return planningUnavailableReason;
-    if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking))) return '';
+    if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking || (resume && !recoveryForDocument)))) return '';
     if (resume && !planningRecovery?.operationId) return '';
     if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return '';
     if (planningRequest.current) return '';
@@ -2985,6 +3001,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // The plan is for this document, and one that changes before it lands is refused (plan_stale): the tiles' waiting
     // last lines go in first, as they did when each was written as it came.
     writePreviews();
+    // A resume is for the document its recovery was read for: lines that went in just now made another (read again soon).
+    if (resume && canInitialize && revisionOf(docRef.current) !== recoveryRevision) return;
     const snapshot = docRef.current;
     const revision = revisionOf(snapshot);
     const id = `plan-${Date.now()}-${++planningSequence.current}`;
@@ -3634,7 +3652,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       || (canInitialize && (!recoveryLoaded || recoveryChecking)) || recoveryStopping,
     ...(planningRecovery?.pending && !planningBusy ? { recovery: {
       prompt: planningRecovery.prompt || '', canResume: planningRecovery.matches === true && Boolean(planningRecovery.operationId),
-      busy: !recoveryLoaded || recoveryChecking || recoveryStopping,
+      // Read for another document, it waits as while a read runs (its text still says what that read found).
+      busy: !recoveryLoaded || recoveryChecking || !recoveryForDocument || recoveryStopping,
       onResume: () => { void sendPlanningMessage(planningRecovery.prompt, true); },
       onStop: () => { void cancelPlanning(); },
     } } : {}),
