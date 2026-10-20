@@ -136,61 +136,6 @@ func hiddenTextProblem(s string) string {
 	return ""
 }
 
-// parseSkillMarkdown reads a SKILL.md-style file: a `---` frontmatter block of `key: value` lines, then the body.
-// strict rejects unknown keys (built-ins); an import keeps only the keys it understands.
-func parseSkillMarkdown(raw string, strict bool) (map[string]string, string, error) {
-	raw = strings.ReplaceAll(strings.TrimPrefix(raw, "\ufeff"), "\r\n", "\n")
-	if !strings.HasPrefix(raw, "---\n") {
-		return nil, "", skillInvalid("A skill file starts with a --- frontmatter block")
-	}
-	end := strings.Index(raw[4:], "\n---")
-	if end < 0 {
-		return nil, "", skillInvalid("The skill frontmatter block is not closed with ---")
-	}
-	header, rest := raw[4:4+end], raw[4+end+4:]
-	if i := strings.IndexByte(rest, '\n'); i >= 0 && strings.TrimSpace(rest[:i]) == "" {
-		rest = rest[i+1:]
-	} else if strings.TrimSpace(rest) == "" {
-		rest = ""
-	}
-	known := map[string]bool{"name": true, "title": true, "title_zh": true, "description": true, "description_zh": true, "category": true, "applies": true, "version": true, "attribution": true}
-	meta := map[string]string{}
-	for _, line := range strings.Split(header, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		key = strings.TrimSpace(key)
-		if !ok || key == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			if strict {
-				return nil, "", skillInvalid("Each frontmatter line is one key: value pair")
-			}
-			continue
-		}
-		if !known[key] {
-			if strict {
-				return nil, "", skillInvalid("Unknown skill frontmatter key: " + key)
-			}
-			continue
-		}
-		if _, dup := meta[key]; dup {
-			return nil, "", skillInvalid("Duplicate skill frontmatter key: " + key)
-		}
-		meta[key] = strings.Trim(strings.TrimSpace(value), `"'`)
-	}
-	return meta, strings.TrimRight(rest, "\n") + "\n", nil
-}
-
-func splitSkillList(value string) []string {
-	items := []string{}
-	for _, item := range strings.Split(value, ",") {
-		if item = strings.TrimSpace(item); item != "" && !slices.Contains(items, item) {
-			items = append(items, item)
-		}
-	}
-	return items
-}
-
 // validateSkill applies the rules every skill shares; bodyLimit differs between built-ins and workspace skills.
 func validateSkill(s *skillRecord, bodyLimit int) error {
 	s.Body = strings.ReplaceAll(s.Body, "\r\n", "\n")
@@ -399,7 +344,7 @@ func (b skillInput) record() (skillRecord, error) {
 			return s, err
 		}
 		s.Body = body
-		for field, key := range map[*string]string{&s.Name: "name", &s.Title: "title", &s.Description: "description", &s.Category: "category"} {
+		for field, key := range map[*string]string{&s.Name: "name", &s.Title: "title", &s.Category: "category"} {
 			if *field == "" {
 				*field = meta[key]
 			}
@@ -407,8 +352,12 @@ func (b skillInput) record() (skillRecord, error) {
 		if s.Title == "" {
 			s.Title = s.Name
 		}
+		// What the file says for a field the request left empty, as far as the library can hold it.
+		if s.Description == "" {
+			s.Description = fileSkillDescription(meta["description"])
+		}
 		if s.Applies == nil && meta["applies"] != "" {
-			s.Applies = splitSkillList(meta["applies"])
+			s.Applies = knownSkillTags(splitSkillList(meta["applies"]))
 		}
 	}
 	s.Source = skillSourceWorkspace

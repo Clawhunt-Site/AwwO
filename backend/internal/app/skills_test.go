@@ -222,3 +222,50 @@ func TestPostgresNodeSkillsAreFrozenIntoTheRun(t *testing.T) {
 		t.Fatal(refused)
 	}
 }
+
+func TestFrontmatterReadsTheYAMLOtherAgentsWrite(t *testing.T) {
+	meta, body, err := parseSkillMarkdown("---\nname: \"pdf-tools\"\ndescription: >-\n  Read, merge and split\n  PDF files.\n\ntitle: 'It''s PDF'\napplies:\n  - writing\n  - \"data\"\nmetadata:\n  author: someone\n  version: 2\ncategory: data # comment kept as text\n---\nBody\n", false)
+	if err != nil || body != "Body\n" {
+		t.Fatal(err, body)
+	}
+	if meta["name"] != "pdf-tools" || meta["description"] != "Read, merge and split PDF files." || meta["title"] != "It's PDF" || meta["applies"] != "writing,data" {
+		t.Fatalf("folded values wrong: %#v", meta)
+	}
+	if _, has := meta["metadata"]; has || meta["version"] != "" {
+		t.Fatalf("a nested unknown key leaked: %#v", meta)
+	}
+	meta, _, _ = parseSkillMarkdown("---\ndescription: Use when\n  the user asks\n  about PDFs.\nname: \"say \\\"hi\\\"\"\napplies: [writing, \"data\"]\n---\nx\n", false)
+	if meta["description"] != "Use when the user asks about PDFs." || meta["name"] != `say "hi"` || strings.Join(splitSkillList(meta["applies"]), "|") != "writing|data" {
+		t.Fatalf("continuation, escapes or flow list wrong: %#v", meta)
+	}
+	meta, _, _ = parseSkillMarkdown("---\ndescription: |\n  Line one\n  line two\n---\nx\n", false)
+	if meta["description"] != "Line one line two" {
+		t.Fatalf("literal block not folded to one line: %q", meta["description"])
+	}
+	// A built-in stays strict: one plain pair per line.
+	if _, _, err = parseSkillMarkdown("---\nname: a\ndescription: >\n  folded\n---\nx\n", true); err == nil {
+		t.Fatal("a built-in may not use YAML block scalars")
+	}
+	if meta, _, err = parseSkillMarkdown("---\nname: \"quoted\"\n---\nx\n", true); err != nil || meta["name"] != "quoted" {
+		t.Fatal("a built-in's quotes are trimmed as before", meta, err)
+	}
+}
+
+// A file a member uploads keeps uploading: the YAML other agents write no longer refuses it for tags AwwO does not
+// know, a description longer than the library holds or a quoted line break.
+func TestSkillFileValuesTheLibraryCannotHoldAreAdapted(t *testing.T) {
+	long := strings.Repeat("word ", 300)
+	s, err := skillInput{Markdown: "---\nname: uploaded\ndescription: >\n  " + long + "\napplies:\n  - html\n  - frontend\ntitle: \"Two\\nlines\"\n---\nBody\n"}.record()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(s.Applies, ",") != "html" || len([]rune(s.Description)) > maxSkillDescription || !strings.HasSuffix(s.Description, "…") || s.Title != "Two lines" {
+		t.Fatalf("file values not adapted: %+v", s.summary())
+	}
+	if _, err = (skillInput{Name: "typed", Title: "Typed", Description: long + long + long, Body: "x"}).record(); err == nil {
+		t.Fatal("a description a member typed is refused when too long, not shortened")
+	}
+	if got := fileSkillDescription(strings.Repeat("a", 2000)); len([]rune(got)) != maxSkillDescription {
+		t.Fatalf("a description without spaces is cut at the limit: %d", len([]rune(got)))
+	}
+}
