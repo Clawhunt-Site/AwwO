@@ -12,19 +12,23 @@ import { useSimpleCanvas } from './uiMode';
 // what the Agent is told. Read-only here; the text is the canvas document's own.
 const MARKERS = (['zh', 'en'] as const).map(locale => canvasText(locale, 'assistant.reworkMarker'));
 
-export function ReworkFindingsNote({ node }: { node: SessionNode }) {
+// While the opened inputs take a short column (`waiting`) there is no room for the findings: the note stays closed, as it
+// says, and its toggle asks for the inputs to be closed first (it does not close them itself: that would end an upload
+// in one of their fields). It stays focusable (aria-disabled), and a note left open shows again once the inputs close.
+export function ReworkFindingsNote({ node, waiting = false }: { node: SessionNode; waiting?: boolean }) {
   const { t } = useCanvasI18n();
   const simple = useSimpleCanvas();
   const findings = useMemo(() => reworkFindings(node.taskFrame, MARKERS), [node.taskFrame]);
   const [open, setOpen] = useState(false);
   if (!findings.length) return null;
+  const shown = open && !waiting;
   const title = findings.length === 1 ? t('tile.reworkFrom', { node: findings[0].reviewer }) : t('tile.reworkFromMany', { count: findings.length });
   return <section className="awwo-rework-note" aria-label={t('tile.reworkNote')} data-testid={`rework-findings-${node.id}`}>
-    <button type="button" className="awwo-rework-note-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <button type="button" className="awwo-rework-note-toggle" aria-expanded={shown} aria-disabled={waiting || undefined} onClick={() => { if (!waiting) setOpen(!open); }}>
       <ClipboardCheck size={13} aria-hidden="true" /><span>{title}</span>
-      <small>{t(open ? 'tile.reworkHide' : 'tile.reworkShow')}</small><ChevronRight className="awwo-rework-note-chevron" size={13} aria-hidden="true" />
+      <small>{t(waiting ? 'tile.reworkWaiting' : shown ? 'tile.reworkHide' : 'tile.reworkShow')}</small><ChevronRight className="awwo-rework-note-chevron" size={13} aria-hidden="true" />
     </button>
-    {open ? <div className="awwo-rework-note-body">
+    {shown ? <div className="awwo-rework-note-body">
       {findings.map((item, index) => <article key={`${index}-${item.reviewer}`}>
         {findings.length > 1 ? <strong>{t('tile.reworkFrom', { node: item.reviewer })}</strong> : null}
         <div className="awwo-deliverable-body awwo-markdown-preview"><DeliverableMarkdown>{item.text}</DeliverableMarkdown></div>

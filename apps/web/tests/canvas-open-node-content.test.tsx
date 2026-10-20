@@ -33,6 +33,18 @@ function declarations(css: string, selector: string): Record<string, string> {
   }
   throw new Error(`no rule for ${selector}`);
 }
+/** The text of the first stylesheet block whose head is exactly `head`, its nested blocks included (comments dropped,
+ *  spaces collapsed). */
+function block(css: string, head: string): string {
+  const text = flat(css);
+  const at = text.indexOf(`${head} {`);
+  if (at < 0) throw new Error(`no block for ${head}`);
+  for (let i = at + head.length + 1, depth = 0; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) return text.slice(at, i + 1);
+  }
+  throw new Error(`unclosed block for ${head}`);
+}
 
 describe('a delivery that is code reads as code', () => {
   it.each([
@@ -204,7 +216,7 @@ describe('an opened node says what it was asked', () => {
   // read from the stylesheet, and the node's own markup is matched against their selectors.
   it('keeps a short column’s composer in the node with no conversation yet: the empty conversation gives way, then the task card', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
-    const conversation = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-rework-note > .awwo-rework-note-body))';
+    const conversation = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty)';
     const empty = '.canvas-root .awwo-node .awwo-node-chat.is-short .awwo-node-panel--conversation > .awwo-node-empty';
     const note = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty) > .awwo-rework-note';
     // Never shorter than its content, so the task card above gives way before the composer does. It grows as before:
@@ -235,8 +247,8 @@ describe('an opened node says what it was asked', () => {
       expect(panel().matches(conversation)).toBe(false);
       unmount();
       resetAllSessions();
-      // A closed rework note counts with its one line; beside an open one the conversation keeps its share of the column.
-      // The empty conversation gives way either way, and the note keeps its toggle; beside replies it gives way as before.
+      // A rework note counts with its one line, open (it counts with its toggle then, see the next test) or closed. The
+      // empty conversation gives way either way, and the note keeps its toggle; beside replies it gives way as before.
       const reworkedNode = agent({ taskFrame: { version: 1, source: 'manual', constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'], acceptanceCriteria: [] } });
       const reworked = render(tile(reworkedNode));
       const findings = screen.getByTestId('rework-findings-n');
@@ -244,7 +256,7 @@ describe('an opened node says what it was asked', () => {
       expect(panel().matches(conversation)).toBe(true);
       fireEvent.click(within(findings).getByRole('button', { expanded: false }));
       expect(findings.querySelector('.awwo-rework-note-body')).toBeTruthy();
-      expect(panel().matches(conversation)).toBe(false);
+      expect(panel().matches(conversation)).toBe(true);
       expect(document.querySelector('.awwo-node-empty')!.matches(empty)).toBe(true);
       expect(findings.matches(note)).toBe(true);
       act(() => { appendTurn(reworkedNode.id, { role: 'agent', text: '已按验收意见补上检查记录。' }); });
@@ -257,6 +269,221 @@ describe('an opened node says what it was asked', () => {
       render(tile(brief));
       expect(panel().matches(conversation)).toBe(false);
       expect(document.querySelector('.awwo-node-empty')!.matches(empty)).toBe(false);
+    } finally {
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  // Seen 2026-10-20 in Chrome at 1366 × 657 and 1280 × 720 (the shortest column an opened node gets, 334 px): with the
+  // opened inputs at their floor, a ten-line draft cut the model row by up to 5 px; beside a closed rework note, by up to
+  // 11.5 px; an open note counted in full, so its findings got 9 px and the composer was cut at every draft. Any lower
+  // floor also moved columns that fit (a node without inputs), so the composer is pinned to the node's bottom instead,
+  // only where what it can lie over is the inputs' bottom edge or blank (review 2026-10-20: with a rework note or a
+  // failure note beside the inputs it lay over their fields), and an open note counts with its toggle. jsdom lays nothing
+  // out: the rules are read from the stylesheets, and the node's own markup is matched against their selectors.
+  it('keeps a short column’s composer whole beside the opened inputs or a rework note: pinned to the node’s bottom, an open note counting with its toggle', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+    // A file or a notice in the composer makes it taller than what a pin may lie over: such a composer is pinned only
+    // where it cannot rise past blank space. These are the composer's own classes (TileComposer, ComposerAttachments).
+    const taller = ['awwo-attachment-chip', 'awwo-attachment-notice', 'canvas-composer-notice', 'canvas-composer-blocked'];
+    const sources = ['src/canvas/TileComposer.tsx', 'src/canvas/ComposerAttachments.tsx'].map(file => readFileSync(resolve(process.cwd(), file), 'utf8')).join('\n');
+    for (const name of taller) expect(sources).toMatch(new RegExp(`className=[{\`"']+${name}[\\s"'\`$]`));
+    const plain = `:is(${taller.map(name => `.${name}`).join(', ')})`;
+    const besideInputs = ".canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.has-inputs.is-short:not(:has(> .awwo-node-failure, > .awwo-node-brief.is-open))";
+    const pinnedPanel = `${besideInputs} .awwo-input-drawer + .awwo-node-panel--conversation:not(:has(> .awwo-rework-note, > .canvas-composer ${plain}))`;
+    const paddedInputs = `${besideInputs} .awwo-input-drawer:has(+ .awwo-node-panel--conversation):not(:has(+ .awwo-node-panel--conversation > .awwo-rework-note, + .awwo-node-panel--conversation > .canvas-composer ${plain}))`;
+    const clippedPanel = `.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-node-empty :focus-visible)):is(:not(:has(> .awwo-rework-note)), :not(.awwo-node-failure ~ *, :has(> .awwo-rework-note > .awwo-rework-note-body, > .canvas-composer ${plain})))`;
+    const pinnedComposer = `${clippedPanel} > .canvas-composer`;
+    const openNote = '.canvas-root .awwo-node-chat.is-short:has(> .awwo-node-panel--conversation > .awwo-node-empty) .awwo-node-panel--conversation > .awwo-rework-note:has(> .awwo-rework-note-body)';
+    const hiddenEmpty = '.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-rework-note > .awwo-rework-note-body) > .awwo-node-empty';
+    const bottomComposer = '.canvas-root .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):has(> .awwo-rework-note > .awwo-rework-note-body) > .canvas-composer';
+    const oneLineBrief = '.canvas-root .awwo-node-chat.is-short:not(.has-inputs):has(> .awwo-node-panel--conversation > .awwo-node-empty):has(> .awwo-node-panel--conversation > .awwo-rework-note > .awwo-rework-note-body) > .awwo-node-brief:not(.is-open)';
+    // Pinned: no box moves, so a column that holds its composer lays out as before; one that does not keeps the composer
+    // on the node's bottom edge, over the inputs' bottom edge (a focused field scrolls clear of it, its focus ring too) or
+    // the empty conversation's blank padding. Beside an empty conversation the panel clips without scrolling, so the pin
+    // keeps to the node's body, not the panel.
+    expect(declarations(css, pinnedPanel)).toEqual({ position: 'sticky', bottom: '0' });
+    expect(declarations(css, paddedInputs)).toEqual({ 'scroll-padding-bottom': '18px' });
+    expect(declarations(css, clippedPanel)).toEqual({ overflow: 'clip' });
+    expect(declarations(css, pinnedComposer)).toEqual({ position: 'sticky', bottom: '0' });
+    // An open note beside an empty conversation counts with its toggle and grows, up to its findings, into what the
+    // column leaves; it takes that conversation's place, and the task card keeps only its header row unless expanded.
+    expect(declarations(css, openNote)).toEqual({ flex: '1 1 34px', 'min-height': '34px', 'max-height': 'max-content', overflow: 'clip' });
+    expect(declarations(css, hiddenEmpty)).toEqual({ display: 'none' });
+    expect(declarations(css, bottomComposer)).toEqual({ 'margin-top': 'auto' });
+    expect(declarations(css, oneLineBrief)).toEqual({ 'max-height': '44px' });
+    // Beside the opened inputs the note waits closed (ReworkFindingsNote): its toggle says so, and is drawn as such.
+    expect(declarations(css, ".canvas-root .awwo-rework-note-toggle[aria-disabled='true']")).toEqual({ cursor: 'default' });
+    expect(declarations(css, ".canvas-root .awwo-rework-note-toggle[aria-disabled='true'] .awwo-rework-note-chevron")).toEqual({ opacity: '.4' });
+    // The hosted look draws its composer see-through; a short column's is the node's own colour, so a pinned one hides
+    // what it lies over (every theme paints the node var(--awwo-card)).
+    const look = block(readFileSync(resolve(process.cwd(), 'src/saas/design/canvas.css'), 'utf8'), ".canvas-root:is([data-node-style='default'], :not([data-node-style]))");
+    expect(look).toContain('& .awwo-node .canvas-composer { gap: 6px; padding: 6px 14px 14px; background: transparent; }');
+    expect(look).toContain('& .awwo-node-chat.is-short .canvas-composer { background-color: var(--awwo-card); }');
+
+    let column = 408;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    try {
+      // The hosted canvas's composer: a free conversation, an unbound node binding on its first message, so the box is not
+      // blocked (a node whose required input is empty would block it otherwise).
+      type Extra = { run?: RunNodeStatus | null; readOnly?: boolean; sendUnavailableReason?: string };
+      const tile = (node: SessionNode, extra: Extra = {}) => <CanvasUiModeProvider mode="simple"><div className="canvas-root">
+        <SessionTile node={node} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div></CanvasUiModeProvider>;
+      // A draft that carries a file: the composer shows its chip above the box.
+      const fileLine = '[附件] 参考稿.pdf · awwo-file:aTestFile00001';
+      const withFile = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: `请按参考稿改写\n\n${fileLine}`, createdAt: 1 }] });
+      const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
+      const drawer = () => document.querySelector('.awwo-input-drawer')!;
+      const composer = () => document.querySelector('.canvas-composer')!;
+      const card = () => screen.getByRole('region', { name: '「关卡设计」的任务' });
+      const openInputs = () => fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      const closeInputs = () => fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+      const shows = (name: string) => Boolean(composer().querySelector(`.${name}`));
+      // An upload's own notice needs an upload: that one is put in the box by hand for one match, taken out before React renders.
+      const uploadNotice = (check: () => boolean) => {
+        const notice = Object.assign(document.createElement('p'), { className: 'awwo-attachment-notice' });
+        composer().querySelector('.canvas-composer-box')!.prepend(notice);
+        try { return check(); } finally { notice.remove(); }
+      };
+
+      // No conversation yet: the composer is pinned within its panel, and it can rise no higher than the empty
+      // conversation's top, so a file, a notice or a blocked box change nothing here; not while a starter prompt has the
+      // keyboard's focus (that prompt is drawn in the empty conversation's padding then).
+      const first = render(tile(brief));
+      expect([panel().matches(clippedPanel), composer().matches(pinnedComposer), panel().matches(pinnedPanel)]).toEqual([true, true, false]);
+      first.rerender(tile(brief, { sendUnavailableReason: '这个模型暂不可用' }));
+      expect([shows('canvas-composer-notice'), composer().matches(pinnedComposer)]).toEqual([true, true]);
+      first.rerender(tile(brief, { readOnly: true }));
+      expect([shows('canvas-composer-blocked'), composer().matches(pinnedComposer)]).toEqual([true, true]);
+      first.rerender(tile(brief));
+      expect(uploadNotice(() => composer().matches(pinnedComposer))).toBe(true);
+      const starter = within(document.querySelector<HTMLElement>('.awwo-starter-prompts')!).getAllByRole('button')[0];
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab' });
+      act(() => { starter.focus(); });
+      expect(starter.matches(':focus-visible')).toBe(true);
+      expect([panel().matches(clippedPanel), composer().matches(pinnedComposer)]).toEqual([false, false]);
+      act(() => { starter.blur(); });
+      expect(composer().matches(pinnedComposer)).toBe(true);
+      // With the inputs open, the panel beside them is pinned (and the inputs keep room for a focused field), but not
+      // while the composer is taller (a notice, a blocked box, an upload's notice), the task card is expanded, or a failure
+      // note shares the column: the composer would lie over the inputs' fields.
+      openInputs();
+      expect(document.querySelector('.awwo-node-chat')).toHaveClass('has-inputs');
+      expect([panel().matches(clippedPanel), composer().matches(pinnedComposer), panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([false, false, true, true]);
+      first.rerender(tile(brief, { sendUnavailableReason: '这个模型暂不可用' }));
+      expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([false, false]);
+      first.rerender(tile(brief, { readOnly: true }));
+      expect([shows('canvas-composer-blocked'), panel().matches(pinnedPanel)]).toEqual([true, false]);
+      first.rerender(tile(brief));
+      expect([uploadNotice(() => panel().matches(pinnedPanel)), panel().matches(pinnedPanel)]).toEqual([false, true]);
+      fireEvent.click(within(card()).getByRole('button', { name: '展开' }));
+      expect(card()).toHaveClass('is-open');
+      expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([false, false]);
+      fireEvent.click(within(card()).getByRole('button', { name: '收起' }));
+      expect(panel().matches(pinnedPanel)).toBe(true);
+      first.rerender(tile(brief, { run: { state: 'failed' } }));
+      expect(document.querySelector('.awwo-node-failure')).toBeTruthy();
+      expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([false, false]);
+      closeInputs();
+      // A failure note above an empty conversation leaves the pin within the panel, which it cannot leave.
+      expect(composer().matches(pinnedComposer)).toBe(true);
+      first.rerender(tile(brief));
+      // With a conversation the replies give way, as before: nothing is pinned until the inputs take the column; a file in
+      // an earlier message (its chip in the hidden replies) is not the composer's.
+      act(() => { appendTurn(brief.id, { role: 'user', text: `请按参考稿改写\n\n${fileLine}` }); appendTurn(brief.id, { role: 'agent', text: '三段关卡已写好。' }); });
+      first.rerender(tile(brief));
+      expect(document.querySelector('.canvas-transcript .awwo-attachment-chip')).toBeTruthy();
+      expect([panel().matches(clippedPanel), composer().matches(pinnedComposer), panel().matches(pinnedPanel)]).toEqual([false, false, false]);
+      openInputs();
+      expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([true, true]);
+      first.unmount();
+      resetAllSessions();
+      // A draft with a file: beside an empty conversation alone the composer is pinned; beside the inputs it is not.
+      const filed = render(tile(withFile(brief)));
+      expect([shows('awwo-attachment-chip'), composer().matches(pinnedComposer)]).toEqual([true, true]);
+      openInputs();
+      expect(panel().matches(pinnedPanel)).toBe(false);
+      filed.unmount();
+      resetAllSessions();
+
+      // A rework note: closed, it changes nothing beside an empty conversation (its one line counts, the composer is
+      // pinned within the panel), unless the composer is taller or a failure note is above, either of which could lift
+      // it over the note's toggle; beside the opened inputs nothing is pinned, as the note takes its row from them.
+      const reworkedNode = agent({ taskFrame: { ...brief.taskFrame!, constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'] } });
+      const reworked = render(tile(reworkedNode));
+      const findings = () => screen.getByTestId('rework-findings-n');
+      expect([findings().matches(openNote), composer().matches(pinnedComposer)]).toEqual([false, true]);
+      reworked.rerender(tile(reworkedNode, { sendUnavailableReason: '这个模型暂不可用' }));
+      expect(composer().matches(pinnedComposer)).toBe(false);
+      reworked.rerender(tile(reworkedNode, { run: { state: 'failed' } }));
+      expect([Boolean(document.querySelector('.awwo-node-failure')), composer().matches(pinnedComposer)]).toEqual([true, false]);
+      reworked.rerender(tile(withFile(reworkedNode)));
+      expect([shows('awwo-attachment-chip'), composer().matches(pinnedComposer)]).toEqual([true, false]);
+      reworked.rerender(tile(reworkedNode));
+      expect([uploadNotice(() => composer().matches(pinnedComposer)), composer().matches(pinnedComposer)]).toEqual([false, true]);
+      // What the note's toggle says, and whether its findings are drawn.
+      const toggle = () => findings().querySelector<HTMLButtonElement>('.awwo-rework-note-toggle')!;
+      const noteState = () => [toggle().getAttribute('aria-expanded'), toggle().querySelector('small')!.textContent, Boolean(findings().querySelector('.awwo-rework-note-body'))];
+      openInputs();
+      expect([panel().matches(pinnedPanel), ...noteState(), toggle().getAttribute('aria-disabled')]).toEqual([false, 'false', '关闭输入后查看', false, 'true']);
+      // While the opened inputs take the short column the toggle asks for them to be closed first and does nothing
+      // itself (closing them would end an upload in one of their fields); once they close it opens the note.
+      fireEvent.click(toggle());
+      expect([Boolean(document.querySelector('.awwo-input-drawer')), ...noteState()]).toEqual([true, 'false', '关闭输入后查看', false]);
+      closeInputs();
+      expect([toggle().getAttribute('aria-disabled'), ...noteState()]).toEqual([null, 'false', '查看', false]);
+      fireEvent.click(toggle());
+      expect(noteState()).toEqual(['true', '收起', true]);
+      // Open, it counts with its toggle and takes the empty conversation's place; the composer sits at the bottom of the
+      // panel, unpinned, and the task card keeps only its header row, until it is expanded.
+      expect(findings().matches(openNote)).toBe(true);
+      expect(document.querySelector('.awwo-node-empty')!.matches(hiddenEmpty)).toBe(true);
+      expect([composer().matches(bottomComposer), composer().matches(pinnedComposer), panel().matches(clippedPanel)]).toEqual([true, false, false]);
+      expect(card().matches(oneLineBrief)).toBe(true);
+      fireEvent.click(within(card()).getByRole('button', { name: '展开' }));
+      expect(card().matches(oneLineBrief)).toBe(false);
+      fireEvent.click(within(card()).getByRole('button', { name: '收起' }));
+      // Beside the opened inputs its findings wait (the inputs take the column): the note says it is closed, and nothing
+      // is pinned; the task card's own rules for the inputs apply, not this one. Left open, it shows again once the
+      // inputs close.
+      openInputs();
+      expect([...noteState(), panel().matches(pinnedPanel), card().matches(oneLineBrief), composer().matches(bottomComposer)]).toEqual(['false', '关闭输入后查看', false, false, false, false]);
+      closeInputs();
+      expect(noteState()).toEqual(['true', '收起', true]);
+      // Beside replies the open note gives way with them, as before; its findings wait while the inputs take the column.
+      act(() => { appendTurn(reworkedNode.id, { role: 'agent', text: '已按验收意见补上检查记录。' }); });
+      reworked.rerender(tile(reworkedNode));
+      expect([findings().matches(openNote), ...noteState(), card().matches(oneLineBrief)]).toEqual([false, 'true', '收起', true, false]);
+      openInputs();
+      expect([findings().matches(openNote), ...noteState(), panel().matches(pinnedPanel)]).toEqual([false, 'false', '关闭输入后查看', false, false]);
+      reworked.unmount();
+      resetAllSessions();
+
+      // A column tall enough to read in is laid out as before: nothing here applies.
+      column = SHORT_COLUMN_PX;
+      const tall = render(tile(reworkedNode));
+      expect([panel().matches(clippedPanel), composer().matches(pinnedComposer)]).toEqual([false, false]);
+      fireEvent.click(within(findings()).getByRole('button', { expanded: false }));
+      expect([findings().matches(openNote), document.querySelector('.awwo-node-empty')!.matches(hiddenEmpty), card().matches(oneLineBrief)]).toEqual([false, false, false]);
+      openInputs();
+      expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs), ...noteState()]).toEqual([false, false, 'true', '收起', true]);
+      tall.unmount();
+      resetAllSessions();
+
+      // A media node's prompt box can be taller than the column: its composer is not pinned, beside its inputs or an empty
+      // conversation, where an agent's is (both in the developer view, which offers inputs a media node does not need).
+      column = 408;
+      const developer = (node: SessionNode) => render(<div className="canvas-root"><SessionTile node={node} scale={1} focused onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} /></div>);
+      for (const [node, pinned] of [[{ ...createSessionNode('image', { x: 0, y: 0 }), id: 'img', title: '海报图' }, false], [agent(), true]] as const) {
+        const view = developer(node);
+        expect(document.querySelector('.awwo-node')).toHaveAttribute('data-content', pinned ? 'chat' : 'media');
+        expect(composer().matches(pinnedComposer)).toBe(pinned);
+        openInputs();
+        expect(document.querySelector('.awwo-node-chat')).toHaveClass('has-inputs');
+        expect([panel().matches(pinnedPanel), drawer().matches(paddedInputs)]).toEqual([pinned, pinned]);
+        view.unmount();
+        resetAllSessions();
+      }
     } finally {
       delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
     }

@@ -808,6 +808,8 @@ export const SessionTile = memo(function SessionTile({
     if (!deliverablesOpen) toggleDeliverables();
   };
   const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
+  // The opened inputs take the column while no run is going (has-inputs): the replies and a rework note's findings wait.
+  const inputsHaveColumn = expanded && inputOpen && inputsTakeColumn && !active;
   const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
   // An enlarged card shows its deliverable instead of its one-line summary, once it is readable on screen. Only the
   // card's presented size counts: a node's own w/h is the size it opens at, not how large its card is drawn.
@@ -976,7 +978,7 @@ export const SessionTile = memo(function SessionTile({
                 </button>)}</div>
                 <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={toggleInputs}><ArrowDownToLine size={14} />{t('tile.input')}</button>
               </nav> : null}
-              <div ref={chatRef} className={`awwo-node-chat${shortColumn ? ' is-short' : ''}${expanded && inputOpen && inputsTakeColumn && !active ? ' has-inputs' : ''}`}>
+              <div ref={chatRef} className={`awwo-node-chat${shortColumn ? ' is-short' : ''}${inputsHaveColumn ? ' has-inputs' : ''}`}>
                 {expanded ? <div className="awwo-chat-heading">
                   {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
                   <span title={threadTitle(currentThread?.title, t)}>{threadTitle(currentThread?.title, t)}</span>
@@ -996,7 +998,7 @@ export const SessionTile = memo(function SessionTile({
                   <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} mediaMissing={preparedConversation.mediaMissing} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
                 </section> : null}
                 <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
-                  {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} /> : null}
+                  {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} waiting={shortColumn && inputsHaveColumn} /> : null}
                   {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
                     <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract}

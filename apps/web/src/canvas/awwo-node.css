@@ -200,14 +200,47 @@
    conversation's padding, so the empty conversation gives way first, then the task card and a failure note above it
    (which scroll in what is left). The empty conversation's content counts for nothing in that (size containment);
    where less than 20 px of it would show it is not drawn at all (no sliver, and no scroller to tab to), unless a
-   starter prompt in it has the keyboard's focus. A closed rework note counts with its one line. An open one would
-   count in full and push the composer out again, so beside it the conversation keeps its share of the column, and the
-   note keeps its toggle (a short column used to crush it out of reach under the empty conversation). Beside replies
+   starter prompt in it has the keyboard's focus. A rework note counts with its one line, open or closed (below), and
+   keeps its toggle (a short column used to crush it out of reach under the empty conversation). Beside replies
    nothing here applies: the replies give way. */
-.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-rework-note > .awwo-rework-note-body)) { flex-basis: auto; flex-shrink: 0; }
+.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty) { flex-basis: auto; flex-shrink: 0; }
 .canvas-root .awwo-node .awwo-node-chat.is-short .awwo-node-panel--conversation > .awwo-node-empty { min-height: 0; container: awwo-node-empty / size; }
 @container awwo-node-empty (height < 20px) { .canvas-root .awwo-node-chat.is-short .awwo-node-empty:not(:has(:focus-visible)) > * { display: none; } }
 .canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-node-empty) > .awwo-rework-note { min-height: 34px; }
+/* An open rework note counted in full, so a short column with no conversation yet kept the conversation's share of
+   the column instead, which crushed the findings to 9 px and cut the composer at every draft (2026-10-20, 1366 × 657
+   and 1280 × 720). Beside an empty conversation the open note counts with its toggle and grows into what is left, up
+   to its findings, which scroll in it: it takes that conversation's place (the composer at the bottom), and the task
+   card keeps only its header row unless expanded, so the findings have the room. That holds in any short column, also
+   one that held its composer before: the note was opened to be read. Beside the opened inputs its findings wait until
+   the inputs close, as the replies do (the inputs take the column; ReworkFindingsNote draws the note closed then, its
+   toggle asking for the inputs to be closed first): counted in full there, the note let typing scroll the whole node
+   away, heading and inputs included. */
+.canvas-root .awwo-node-chat.is-short:has(> .awwo-node-panel--conversation > .awwo-node-empty) .awwo-node-panel--conversation > .awwo-rework-note:has(> .awwo-rework-note-body) { flex: 1 1 34px; min-height: 34px; max-height: max-content; overflow: clip; }
+.canvas-root .awwo-node-chat.is-short .awwo-node-panel--conversation:has(> .awwo-rework-note > .awwo-rework-note-body) > .awwo-node-empty { display: none; }
+.canvas-root .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):has(> .awwo-rework-note > .awwo-rework-note-body) > .canvas-composer { margin-top: auto; }
+.canvas-root .awwo-node-chat.is-short:not(.has-inputs):has(> .awwo-node-panel--conversation > .awwo-node-empty):has(> .awwo-node-panel--conversation > .awwo-rework-note > .awwo-rework-note-body) > .awwo-node-brief:not(.is-open) { max-height: 44px; }
+/* Where a short column still cannot hold everything at its floor (2026-10-20, ten lines at 1280 × 720: the opened
+   inputs' min(120 px, 25%), or the task card, a closed rework note and the empty conversation's padding), the composer
+   is pinned to the node's bottom edge, over what is above it: the inputs' bottom edge (13 px at most in the shortest
+   column, 334 px; every field still scrolls into view, and a button or a field shorter than that view, focused from the
+   keyboard, stops at least 18 px above that edge where the inputs scroll that far, so its focus ring clears the
+   composer), or the empty conversation's blank padding. A pin moves no box, so every column that holds its composer
+   lays out as before; a lower floor would also move columns that fit today (a node without inputs: its task card and
+   inputs would share the room otherwise). Beside the inputs the conversation panel is pinned only while its composer
+   holds just its box and the row under it (no file, no notice) and nothing but the heading and the one-line task card
+   shares the column with them (no failure note, no rework note, the card not expanded). Beside an empty conversation
+   the composer is pinned within its panel, which clips without being a scroller (overflow: clip), so the pin keeps to
+   the node's body: it can rise no higher than that conversation's top, or under a closed rework note the panel's, where
+   it is pinned only as such a plain composer and with no failure note above (which keeps it within that conversation's
+   padding); and not while one of the conversation's starter prompts has the keyboard's focus. More would lie over the
+   inputs' fields, a note's toggle or that prompt (review 2026-10-20), so those columns lay out as before. A media
+   node's composer is not pinned: its prompt box can be taller than the column. The hosted look's see-through composer
+   is the node's own colour in a short column (saas/design/canvas.css). */
+.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.has-inputs.is-short:not(:has(> .awwo-node-failure, > .awwo-node-brief.is-open)) .awwo-input-drawer + .awwo-node-panel--conversation:not(:has(> .awwo-rework-note, > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked))) { position: sticky; bottom: 0; }
+.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.has-inputs.is-short:not(:has(> .awwo-node-failure, > .awwo-node-brief.is-open)) .awwo-input-drawer:has(+ .awwo-node-panel--conversation):not(:has(+ .awwo-node-panel--conversation > .awwo-rework-note, + .awwo-node-panel--conversation > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked))) { scroll-padding-bottom: 18px; }
+.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-node-empty :focus-visible)):is(:not(:has(> .awwo-rework-note)), :not(.awwo-node-failure ~ *, :has(> .awwo-rework-note > .awwo-rework-note-body, > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked)))) { overflow: clip; }
+.canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-node-empty :focus-visible)):is(:not(:has(> .awwo-rework-note)), :not(.awwo-node-failure ~ *, :has(> .awwo-rework-note > .awwo-rework-note-body, > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked)))) > .canvas-composer { position: sticky; bottom: 0; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 /* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
    page most of it, a document half), never less than the drawer's own 320 px. */
@@ -288,6 +321,9 @@
 .canvas-root .awwo-rework-note-chevron { flex: none; color: var(--awwo-muted); transition: transform .15s ease; }
 .canvas-root .awwo-rework-note-toggle[aria-expanded="true"] .awwo-rework-note-chevron { transform: rotate(90deg); }
 .canvas-root .awwo-rework-note-toggle:focus-visible { outline: 2px solid var(--awwo-teal); outline-offset: -2px; }
+/* Beside the opened inputs in a short column the note waits closed, its toggle saying so (ReworkFindingsNote). */
+.canvas-root .awwo-rework-note-toggle[aria-disabled='true'] { cursor: default; }
+.canvas-root .awwo-rework-note-toggle[aria-disabled='true'] .awwo-rework-note-chevron { opacity: .4; }
 .canvas-root .awwo-rework-note-body { flex: 1 1 auto; min-height: 0; max-height: 240px; overflow: auto; overscroll-behavior: contain; padding: 0 10px 8px; border-top: 1px solid var(--awwo-line); }
 .canvas-root .awwo-rework-note-body article + article { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--awwo-line); }
 .canvas-root .awwo-rework-note-body .awwo-deliverable-body { padding: 8px 0 0; font-size: 11.5px; }

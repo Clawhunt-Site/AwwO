@@ -525,6 +525,9 @@ html:root .saas-canvas-shell {
     & .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer { padding-block: 4px 8px; }
     & .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-input { min-height: 46px; }
     & .awwo-node:not([data-content='media']) .awwo-node-chat.is-short .canvas-composer-attach { left: 8px; bottom: 8px; width: 30px; height: 30px; }
+    /* A short column pins its composer to the node's bottom where the column cannot hold it all, over what is above it
+       (awwo-node.css): here the composer is the node's own colour, not see-through. */
+    & .awwo-node-chat.is-short .canvas-composer { background-color: var(--awwo-card); }
     & .awwo-node :is(.canvas-composer-notice, .canvas-composer-disclaimer, .canvas-composer-blocked) { padding-inline: 4px; color: var(--saas-subtle); font-size: 11px; line-height: 1.5; }
     & .awwo-node .awwo-node-empty strong { color: var(--saas-text); font-size: 15px; font-weight: 600; letter-spacing: 0; }
     & .awwo-node .awwo-node-empty > span:not(.awwo-node-empty-glyph) { color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.7; }
