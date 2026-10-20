@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { ASSEMBLY_ROLE, MEDIA_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, RECORDER_ROLE, type ProductionCase } from './productionCatalog';
+import { agentCount, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, type ProductionCase } from './productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import { LazyBoundary } from './LazyBoundary';
@@ -48,9 +48,10 @@ function Footage({ stem, active = true, label, eager = false }: { stem: string; 
     {...label ? { 'aria-label': label } : { 'aria-hidden': true }} />;
 }
 
-/** What the cover footage is: a recording of the delivery, or an AI-generated illustration. */
-function Label({ recording, id }: { recording?: boolean; id?: string }) {
-  return <span id={id} className={`production-label${recording ? ' is-real' : ''}`}>{recording ? 'Recorded delivery' : 'Cover: AI illustration'}</span>;
+/** What the cover footage is: a recording of the delivery, an excerpt of the film the run delivered, or an AI-generated
+ * illustration. */
+function Label({ recording, excerpt, id }: { recording?: boolean; excerpt?: boolean; id?: string }) {
+  return <span id={id} className={`production-label${recording ? ' is-real' : ''}`}>{excerpt ? 'Excerpt of the delivered film' : recording ? 'Recorded delivery' : 'Cover: AI illustration'}</span>;
 }
 
 /** Delivered only when the published run delivered it; otherwise it is still the brief's goal. */
@@ -70,7 +71,7 @@ function RunChip({ item }: { item: ProductionCase }) {
 function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: boolean; onOpen: (item: ProductionCase, trigger: HTMLButtonElement) => void }) {
   const id = useId();
   return <li className={`production-card${item.recording ? ' is-real' : ''}`}>
-    <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div>
+    <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} excerpt={item.excerpt} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div>
     <div className="production-card-copy">
       <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={`${id}-label ${id}-brief`}
         onClick={event => onOpen(item, event.currentTarget)}>{item.title}</button></h3>
@@ -83,15 +84,16 @@ function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: bool
   </li>;
 }
 
-function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose: () => void; onReuse?: (workflow: OfficialWorkflow) => void }) {
+function CaseDialog({ item, onClose, onReuse, onCopyRecorded }: { item: ProductionCase; onClose: () => void; onReuse?: (workflow: OfficialWorkflow) => void;
+  onCopyRecorded?: (item: ProductionCase) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const pressedOutside = useRef(false);
   const titleId = useId();
   const still = reducedMotion() || saveData();
   // Layout timing: the dialog must close while it is still in the document, before the page behind it can take focus.
   useLayoutEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
-  // Media nodes and a flagship's assembly run no agent.
-  const agents = item.stages.reduce((sum, stage) => sum + stage.filter(role => role !== MEDIA_ROLE && role !== ASSEMBLY_ROLE && role !== RECORDER_ROLE).length, 0);
+  // Media nodes, a flagship's assembly and a film's edits run no agent.
+  const agents = agentCount(item);
   return <dialog ref={dialog} className="saas-native-dialog production-dialog" lang="en" aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); onClose(); }}
     // Close only when both the press and the release land on the backdrop, outside the box: the dialog's own scrollbar
@@ -103,13 +105,15 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
       if (backdrop) onClose();
     }}>
     <div className="production-dialog-body">
-      <header><div><span className="production-dialog-meta"><Label recording={item.recording} />{PRODUCTION_KIND_LABELS[item.kind]}</span><h2 id={titleId}>{item.title}</h2></div>
+      <header><div><span className="production-dialog-meta"><Label recording={item.recording} excerpt={item.excerpt} />{PRODUCTION_KIND_LABELS[item.kind]}</span><h2 id={titleId}>{item.title}</h2></div>
         <button type="button" className="production-close" onClick={onClose} aria-label="Close"><X size={18} aria-hidden="true" /></button></header>
       <div className="production-dialog-grid">
         <figure className="production-dialog-media">
           <video src={`/showcase/${item.footage}.mp4`} poster={`/showcase/${item.footage}.jpg`} muted loop playsInline autoPlay={!still} controls={still}
-            aria-label={item.recording ? `${item.title}: the delivered interface, recorded` : `${item.title}: AI-generated illustration`} />
-          <figcaption>{item.recording
+            aria-label={item.excerpt ? `${item.title}: an excerpt of the delivered film, without sound` : item.recording ? `${item.title}: the delivered interface, recorded` : `${item.title}: AI-generated illustration`} />
+          <figcaption>{item.excerpt
+            ? `An excerpt, without sound, of the film a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}; the whole film, with its sound, plays below, under “How it was made”.`
+            : item.recording
             ? `Recorded: the page a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}, running as delivered and played by a script; try it yourself below, under “How it was made”.`
             : PRODUCTION_RUN_SUMMARY[item.id]
               ? 'Cover: AI illustration. This footage was made by an AI video model and only shows the direction; what an AwwO run actually delivered is below, under “How it was made”.'
@@ -120,21 +124,23 @@ function CaseDialog({ item, onClose, onReuse }: { item: ProductionCase; onClose:
           <li><span className="production-step">02</span><div><h3>Agent team</h3>
             <p className="production-team-meta">{`${agents} agents · ${item.stages.length} stages`}</p>
             <ol role="list" className="production-stages">{item.stages.map((stage, index) => <li key={index}><b>{String(index + 1).padStart(2, '0')}</b>
-              <div>{stage.map(value => <span key={value}>{value}</span>)}</div>{stage.length > 1 && <small>{`${stage.length} in parallel`}</small>}</li>)}</ol></div></li>
+              <div>{stage.map((value, position) => <span key={`${position}:${value}`}>{value}</span>)}</div>{stage.length > 1 && <small>{`${stage.length} in parallel`}</small>}</li>)}</ol></div></li>
           <li><span className="production-step">03</span><div><h3>Delivery</h3><Deliverable item={item} /></div></li>
         </ol>
       </div>
       <LazyBoundary fallback={<p className="production-made-pending" role="alert">The run record could not be loaded.{' '}
         <button type="button" className="saas-link" onClick={() => void reloadAfterSaving()}>Reload the page</button></p>}>
         <Suspense fallback={<p className="production-made-pending" role="status">Loading the run record…</p>}>
-          <ProductionShowcase item={item} onReuse={onReuse && (workflow => { onClose(); onReuse(workflow); })} />
+          <ProductionShowcase item={item} onReuse={onReuse && (workflow => { onClose(); onReuse(workflow); })}
+            onCopyRecorded={onCopyRecorded && (value => { onClose(); onCopyRecorded(value); })} />
         </Suspense>
       </LazyBoundary>
     </div>
   </dialog>;
 }
 
-export function ProductionCases({ compact = false, onReuse }: { compact?: boolean; onReuse?: (workflow: OfficialWorkflow) => void }) {
+export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { compact?: boolean; onReuse?: (workflow: OfficialWorkflow) => void;
+  onCopyRecorded?: (item: ProductionCase) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState<ProductionCase | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
@@ -144,6 +150,7 @@ export function ProductionCases({ compact = false, onReuse }: { compact?: boolea
   // Say every case ran only when every case has a published run.
   const ran = PRODUCTION_CASES.filter(item => PRODUCTION_RUN_SUMMARY[item.id]).length;
   const illustrated = PRODUCTION_CASES.some(item => !item.recording);
+  const excerpts = PRODUCTION_CASES.some(item => item.excerpt);
   const close = () => setOpen(null);
   // Back to the card that opened the case, once the dialog is gone and the page is no longer inert.
   useEffect(() => { if (!open && trigger.current?.isConnected) trigger.current.focus(); }, [open]);
@@ -157,11 +164,12 @@ export function ProductionCases({ compact = false, onReuse }: { compact?: boolea
           : `Every case is a real AwwO canvas: a one-line brief, a team of agents working in stages, and the deliverable. ${ran} of them have actually run in AwwO; open one to see what each agent handed over. The others show their run once it is published.`}</p>
         <p className="production-legend"><span><span className="production-label is-real">Real run</span>The canvas’s actual AwwO run and what it delivered</span>
           <span><Label recording />The cover is a screen recording of that delivery</span>
+          {excerpts && <span><Label recording excerpt />The cover is a few seconds of the film that run delivered</span>}
           {illustrated && <span><Label />Cover footage made by an AI video model, for illustration only</span>}</p></div>
       {compact && <button type="button" className="production-toggle" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Show fewer' : `See all ${PRODUCTION_CASES.length} cases`}</button>}
     </div>
     <ul role="list" id={listId} className="production-grid">{items.map(item => <CaseCard key={item.id} item={item} active={!open} onOpen={(value, button) => { trigger.current = button; setOpen(value); }} />)}</ul>
-    {open && <CaseDialog item={open} onClose={close} onReuse={onReuse} />}
+    {open && <CaseDialog item={open} onClose={close} onReuse={onReuse} onCopyRecorded={onCopyRecorded} />}
   </section>;
 }

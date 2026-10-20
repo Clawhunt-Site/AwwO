@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases';
-import { PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
+import { EDIT_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -49,7 +49,9 @@ it('tells every case in English as a brief, a staged team and a deliverable, wit
       expect(text.trim(), item.id).not.toBe(''); expect(text, item.id).not.toMatch(CHINESE);
     }
     expect(item.stages.length).toBeGreaterThanOrEqual(3);
-    expect(item.stages.at(-1), item.id).toEqual(['Review']);
+    // A film case ends in the edit that joins its film; every other canvas in a review.
+    expect(item.stages.at(-1), item.id).toEqual(item.excerpt ? [EDIT_ROLE] : ['Review']);
+    expect(item.excerpt === undefined || item.kind === 'film', item.id).toBe(true);
     expect('facts' in item, item.id).toBe(false);   // what a run did is read from its record, not written here
     for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${item.footage}.${extension}`), `${item.footage}.${extension}`).toBe(true);
   }
@@ -86,7 +88,12 @@ it('labels the cover footage for what it is, and claims delivery only where a pu
   expect(screen.queryByText('Cover: AI illustration')).toBeNull();
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
   const recording = cards()[KB], pixelCard = cards()[PIXEL];
-  for (const card of cards()) { expect(within(card).getByText('Recorded delivery')).toBeVisible(); expect(within(card).queryByText('Cover: AI illustration')).toBeNull(); }
+  // A film case's cover is a few seconds of its film, and says so; every other cover records its delivered page.
+  cards().forEach((card, index) => {
+    expect(within(card).getByText(PRODUCTION_CASES[index].excerpt ? 'Excerpt of the delivered film' : 'Recorded delivery')).toBeVisible();
+    expect(within(card).queryByText('Cover: AI illustration')).toBeNull();
+  });
+  expect(screen.getByText('The cover is a few seconds of the film that run delivered')).toBeVisible();
   PRODUCTION_CASES.forEach((item, index) => {
     const card = cards()[index], run = PRODUCTION_RUN_SUMMARY[item.id];
     expect(within(card).getByRole('list', { name: 'Agent team, by stage' }).children).toHaveLength(item.stages.length);

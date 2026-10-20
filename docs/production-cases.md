@@ -23,7 +23,7 @@ The homepage's 17 production cases each have a real AwwO canvas that ran, and ev
 - Neon Circuit and the EV plant run on three.js r186 (`stack: 'r186'` in their `OfficialWorkflow`, since 2026-10-14); every other case stays on r128 by its one script line. Their pages write the import map that names the pinned release (`THREE_MODULES_IMPORT_MAP`, `previewImportMap.ts`) and import three and its addons as ES modules, which AwwO's preview supplies with no network (`previewModules.ts`). An r186 page renders through an EffectComposer with bloom and a PMREM environment, and each case states its own exposure, environment strength, bloom threshold, lights and backdrop, because the right numbers depend on the scene and a model left to choose them washed both cases out: the race is a night city (exposure 0.95, bloom above 0.85, no light brighter than the kerbs near the road and no extra lamps), the plant a white diorama on a darker studio backdrop (exposure 1.0, environment 0.25, bloom above 1.4 so lit white never blooms, and no fog, which a far orthographic camera turns into an even white haze). These numbers were found by changing them in a delivered page and screenshotting it before any task changed; their records' notes name the failures of the earlier texts.
 - Their tasks carry what the runs taught. Every node that writes code the build pastes must deliver code that runs as pasted (balanced brackets, nothing running on its own at the top level). Every build checks itself silently, starts with `<!DOCTYPE html>` with nothing before it, fits its frame, and never reads an object, such as an `AudioContext`, before the first user action creates it. Games with several phases name them and the keys between them (menu → countdown → play → end); feel is given as baseline numbers rather than adjectives; the 3D projection is written out; and every module has a length limit the build can hold.
 - The homepage says every case ran only when every case has a published record (`summary.json`); a case's caption points to its delivery only when its record exists.
-- The ad case does not make video. AwwO's agents deliver the script, storyboard, edit sheet, grade and a playable HTML animatic, and the case says so. Every cover is a screen recording of what its published run delivered, played with scripted input (`recording` in `productionCatalog.ts`); a cover that is not would be labelled an illustration.
+- The ad case does not make video. AwwO's agents deliver the script, storyboard, edit sheet, grade and a playable HTML animatic, and the case says so. THE LONG CHORD does: it is a film case, below. Every cover is a screen recording of what its published run delivered, played with scripted input (`recording` in `productionCatalog.ts`); a cover that is not would be labelled an illustration.
 - Members copy a case's canvas through the copy dialog (`OfficialCopySetup`), and the copy carries the case's run. `productionCopy.ts` gives every node that delivered its recorded delivery as `lastOutput`, with `source: 'case'` and the run's model and date. Each node therefore shows what its agent delivered and each input what it received, labelled 「案例实录」 and never as a run of the member's workspace. The copy never starts a run. Running the whole graph replaces every recording, and rerunning one node reuses its upstream recordings. Settings, task and wire edits keep the recordings (`invalidateOutputs` treats them as references); a node's own new result clears the recordings downstream of it. When the record cannot be loaded, no canvas is created. Records carry no language field: every case is run and published in English (`publish-run.mjs` refuses a run in any other language).
 
 ## Run records
@@ -38,4 +38,44 @@ The homepage's 17 production cases each have a real AwwO canvas that ran, and ev
 
 A published run must have used exactly the canvas text in `productionWorkflows.ts`: `publish-run.mjs` refuses any other run and stores the SHA-256 of that text (`canvasSHA256`, see `productionCanvasText.ts`), which `saas-production-runs` recomputes from the canvas a member copies. When a task changes, its case runs again. A canvas may run more than once: the record's note counts every run of the published text and says what went wrong in the ones that were not published, and names the problems of an earlier text that led to the change.
 
-Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-copy`, `saas-production-cases`, `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.
+## Film cases (recorded canvases)
+
+THE LONG CHORD, Episode I, Act I (2026-10-20) is the first case that delivers a film, and the first whose canvas is
+*recorded*: the run's own document, not a workflow compiled from tasks. Its canvas (image, video and audio nodes, two
+editor agents and three edit nodes) was built and run by the operator's scripts on production, over 33 scoped graph runs,
+and its texts name files by node id (an editor's brief lists `vid_s05_04/video-1.mp4`; the last edit's own timeline names
+`edit_R1/r1.mp4`), while a video numbers its pictures by where their nodes sit. A compiled copy, with fresh ids and its own
+layout, would not be the canvas that ran.
+
+- **Raw record.** The operator reads the live canvas (outside the repo: every graph run with its frozen document, the run
+  that made each output, each node's run and an agent's model calls, and every file those outputs name, downloaded by
+  artifact id with its SHA-256 and checked against the canvas's whole artifact listing, AwwO's own SHA-256 and size of
+  each file, which the read keeps beside it). It must show the film's lineage: for every wire, the output its source had
+  in the document its target's run started from is the source's published output. Any gap means making that node again.
+- **Publish.** `node scripts/showcase/publish-recorded-run.mjs <raw.json> <notes.json>` (the same notes as above, plus
+  `footage`: the homepage excerpt's stem, start and length, and `releases`: the API releases in order, each with the
+  time it went live, which name the release each media node ran on). It writes the record (`canvas: 'recorded'`; agents
+  and edits in `nodes`, edits as `kind: 'edit'` with their film's facts; the media nodes in `media` with their stage and
+  words), the stored canvas (`apps/web/src/saas/production-canvases/<case>.ts`: each node as frozen in the run that made
+  its output, without bindings, conversations, outputs or an agent's runtime and model), its `canvasSHA256`
+  (`recordedCanvasText.ts`, which covers media models, settings and words, timelines, ids and places), posters (WebP) for
+  every picture and clip, the last edit's stills, its subtitles as WebVTT, and the excerpt (`showcase/<stem>.mp4`/`.jpg`,
+  without sound). It refuses lineage gaps, a node whose run did not finish with its output, a wire from a node it does
+  not publish, a stored file that is not the bytes the listing names, placeholder notes and any media provider's name in
+  what the case says. Its gates are tested offline: `node --test scripts/showcase/publish-recorded-run.test.mjs`.
+- **The film is staged, not shipped.** The web copy (1280 px, its sound copied as mixed) and the file as delivered go
+  once to the host's store of earlier website files, as `showcase/staged/<case>/<sha16>.mp4` (checked by their SHA-256
+  after the copy and never overwritten), which nginx serves for any `/showcase/` path the live release lacks. No release carries them (`saas-production-film` refuses any file over 10 MB under `showcase/`). The dev server
+  serves them from `AWWO_STAGED_SHOWCASE/<case>/` when that is set (`apps/web/scripts/staged-showcase.mjs`).
+- **Self-hosted sites.** A site deployed with `deploy/saas` has no store of earlier files: its nginx serves `/showcase/`
+  from the build alone, so a film case's dialog says the film could not be loaded (with Try again), and its stages,
+  nodes, receipt and copy still work. To show the film there, put the staged files at `showcase/staged/<case>/` in the
+  web root that nginx serves, under the same names.
+- **Dialog.** A recorded case opens `ProductionFilm.tsx`: the film from its staged URL with English subtitles and its
+  stills, a download of the file as delivered, every node by stage (the media nodes as strips of posters), each node's
+  words, brief or answer verbatim, and the run receipt. No page runs; the subtitles are the one file fetched, as text, and
+  given to the player as WebVTT whatever type the server sends them with.
+- **Copy.** A member's copy is the stored canvas, copied only while its text still hashes to the record; nothing is
+  pre-filled, since the film's deliveries are files, so its first run makes every picture, clip and sound again.
+
+Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-copy`, `saas-production-cases` (and `saas-production-film`, which pins a film case's record, stored canvas, files and dialog, and `saas-staged-showcase`, the dev server's staged files), `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.

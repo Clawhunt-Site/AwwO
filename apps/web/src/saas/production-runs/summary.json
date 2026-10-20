@@ -212,6 +212,19 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "the-long-chord": {
+    "completed": 5,
+    "total": 5,
+    "seconds": 65882,
+    "delivered": true,
+    "capturedOn": "2026-10-20",
+    "model": "Claude Opus 4.8 (the two editors)",
+    "runtime": "openai-agents",
+    "media": {
+      "completed": 104,
+      "total": 104
+    }
+  },
   "umber-photo": {
     "completed": 13,
     "total": 13,

@@ -15,7 +15,8 @@ import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
 import { ProductionCases } from './ProductionCases';
 import { type OfficialWorkflow } from './examples/officialWorkflows';
-import { OfficialCopySetup, type OfficialCopyModel } from './examples/OfficialCopySetup';
+import { OfficialCopySetup, type OfficialCopyModel, type RecordedCopyItem } from './examples/OfficialCopySetup';
+import type { ProductionCase } from './productionCatalog';
 import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
 
 /** Recent canvases shown before the operator expands the full list: two rows of four at desktop width, four rows of two
@@ -71,7 +72,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const [notice, setNotice] = useState<Notice>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
   // A homepage production case being copied; the copy carries its recorded run (productionCopy.ts).
-  const [caseCopy, setCaseCopy] = useState<OfficialWorkflow | null>(null);
+  const [caseCopy, setCaseCopy] = useState<OfficialWorkflow | RecordedCopyItem | null>(null);
   // The operator's own text, set aside when an example replaced it.
   const [replaced, setReplaced] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -146,13 +147,22 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   };
   // A production case's copy carries what each agent delivered in its recorded run. When that
   // recording cannot be read, nothing is created: an empty copy is what this exists to replace.
-  const productionCopyDocument = async (official: OfficialWorkflow, model: OfficialCopyModel | null) => {
+  const productionCopyDocument = async (official: OfficialWorkflow | RecordedCopyItem, model: OfficialCopyModel | null) => {
     const unavailable = () => new SaaSApiError(0, 'case_record_unavailable', 'The case run recording could not be loaded.');
+    if ('recorded' in official) {
+      // A film case's canvas is the run's own document, stored beside its record: it is copied only when it is still the
+      // canvas the record pins (its recordedCanvasText's SHA-256).
+      const [record, recorded] = await Promise.all([loadProductionRun(official.id), import('./recordedCanvas')]).catch(() => { throw unavailable(); });
+      const canvas = record && await recorded.loadRecordedCanvas(official.id).catch(() => undefined);
+      const document = record && canvas ? await recorded.recordedCopyDocument(record, canvas, model) : null;
+      if (!document) throw unavailable();
+      return document;
+    }
     const [record, copy] = await Promise.all([loadProductionRun(official.id), import('./productionCopy')]).catch(() => { throw unavailable(); });
     if (!record) throw unavailable();
     return copy.createProductionCopyDocument(official, record, model);
   };
-  const create = async (prompt: string | null, official?: OfficialWorkflow, model: OfficialCopyModel | null = null) => {
+  const create = async (prompt: string | null, official?: OfficialWorkflow | RecordedCopyItem, model: OfficialCopyModel | null = null) => {
     if (sending.current || tenant.role === 'reader' || tenant.status !== 'active') return;
     // Files go with a typed request only: a blank canvas and a copied case take none.
     const typed = prompt !== null && !official;
@@ -255,6 +265,13 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   };
 
   const copyCase = (item: OfficialWorkflow) => { if (!sending.current) { setError(null); setCaseCopy(item); } };
+  // A film case: its node counts come from its run's summary (the canvas itself loads only when the copy is made).
+  const copyRecordedCase = (item: ProductionCase) => {
+    const run = PRODUCTION_RUN_SUMMARY[item.id];
+    if (!run || sending.current) return;
+    setError(null);
+    setCaseCopy({ id: item.id, title: item.title, recorded: { nodes: run.total + (run.media?.total ?? 0), media: run.media?.total ?? 0 } });
+  };
   const example = notice?.kind === 'case' ? STARTER_CASES.find(item => item.id === notice.caseId) : undefined;
   const noticeText = example ? t(`已填入案例「${example.title.zh}」，可以直接生成，也可以先修改。`, `Filled in the “${example.title.en}” example. Generate it as is, or edit it first.`)
     : notice?.kind === 'restored' ? t('已恢复原来的输入。', 'Your earlier text is back.') : '';
@@ -316,7 +333,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <ProductionCases compact onReuse={copyCase} />
+    <ProductionCases compact onReuse={copyCase} onCopyRecorded={copyRecordedCase} />
     {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} busy={busy}
       recording={PRODUCTION_RUN_SUMMARY[caseCopy.id]}
       error={error !== null ? saasErrorMessage(error, 'en') : undefined} onClose={() => setCaseCopy(null)}

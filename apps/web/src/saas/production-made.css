@@ -90,3 +90,27 @@
 .production-made-media li img, .production-made-media li video, .production-made-media li > i { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 6px; background: var(--saas-muted); opacity: 1; }
 .production-made-media li > i { opacity: .25; }
 .production-made-media li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A film case (ProductionFilm.tsx): the media nodes of each stage as strips of posters, the film player and its stills. */
+.production-film-stages > li > div { display: grid; gap: 8px; }
+.production-film-strip { display: grid; gap: 5px; min-width: 0; }
+.production-film-strip > span { color: var(--saas-muted); font: 600 11px/1.3 system-ui, sans-serif; letter-spacing: .02em; }
+.production-film-strip ul { display: flex; gap: 6px; margin: 0; padding: 0 0 4px; overflow-x: auto; overscroll-behavior-x: contain; list-style: none; scrollbar-width: thin; }
+.production-film-strip li { flex: 0 0 auto; }
+.production-dialog .production-film-strip button { display: grid; gap: 3px; width: 88px; padding: 3px; border: 1px solid var(--production-line); border-radius: 7px; background: var(--saas-card);
+  color: var(--saas-text); font: 500 10.5px/1.25 system-ui, sans-serif; text-align: left; cursor: pointer; }
+.production-dialog .production-film-strip button[aria-pressed='true'] { border-color: var(--saas-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--saas-accent) 30%, transparent); }
+.production-film-strip button img, .production-film-strip button i { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 5px;
+  background: var(--saas-soft); color: var(--saas-muted); font-style: normal; font-size: 14px; }
+.production-film-strip button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.production-film-nodes { display: flex; flex-wrap: wrap; gap: 6px; }
+.production-made-links em { color: var(--saas-muted); font-size: 11.5px; font-style: normal; }
+.production-film-poster { display: block; width: 100%; max-height: 220px; margin: 0 0 8px; object-fit: contain; border-radius: 8px; background: #000; }
+.production-dialog p.production-film-words { margin: 0; max-height: 220px; overflow: auto; color: var(--saas-text); font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.production-film-player { display: block; width: 100%; aspect-ratio: 7 / 3; background: #000; }
+.production-film-player[hidden] { display: none; }
+.production-film-stills { display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--production-line); scrollbar-width: thin; }
+.production-dialog .production-film-stills button { flex: 0 0 auto; padding: 0; border: 1px solid transparent; border-radius: 4px; background: none; cursor: pointer; }
+.production-dialog .production-film-stills button:hover { border-color: var(--saas-accent); }
+.production-film-stills img { display: block; width: 84px; aspect-ratio: 7 / 3; object-fit: cover; border-radius: 3px; }
+.production-film-download { display: inline-flex; align-items: center; gap: 4px; color: var(--saas-accent); }

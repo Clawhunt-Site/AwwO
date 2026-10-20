@@ -59,10 +59,13 @@ export function createOfficialCopyDocument(item: OfficialWorkflow, model: Offici
 
 /** A production case's recorded run, whose deliveries the copy carries (productionCopy.ts). */
 export type OfficialCopyRecording = { capturedOn: string; completed: number; total: number; model: string };
+/** A recorded-canvas case (a film, recordedCanvas.ts): its canvas is stored beside its record, so the dialog knows it by
+ * its title and how many nodes, and how many of them generate media, its copy holds. */
+export type RecordedCopyItem = { readonly id: string; readonly title: string; readonly recorded: { readonly nodes: number; readonly media: number } };
 
 /** The copy dialog is part of the case flow, which reads in English in both interface languages (owner 2026-10-14). */
 type Props = {
-  item: OfficialWorkflow; tenantId: string; busy: boolean;
+  item: OfficialWorkflow | RecordedCopyItem; tenantId: string; busy: boolean;
   error?: string; recording?: OfficialCopyRecording; onClose: () => void;
   onConfirm: (model: OfficialCopyModel | null) => Promise<void>;
 };
@@ -92,7 +95,9 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     return () => controller.abort();
   }, [tenantId, revision]);
   const chosen = models.find(model => modelKey(model) === selection);
-  const sandboxed = item.nodes.some(node => node.sandbox);
+  const recorded = 'recorded' in item ? item.recorded : null;
+  const workflow = 'recorded' in item ? null : item;
+  const sandboxed = workflow?.nodes.some(node => node.sandbox) === true;
   const locked = busy || checking;
   const invalidChoice = selection !== '' && (!chosen || loading || catalogError);
   const close = () => { if (!busy && !checking && !submitting.current) onClose(); };
@@ -119,9 +124,11 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
       <header><span>PRODUCTION CASE</span><h2 id={`${id}-title`}>Copy example to my canvases</h2><p>{item.title}</p></header>
-      <p id={`${id}-description`}>{recording
-        ? `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${item.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}${item.nodes.some(node => node.assemble?.file || node.assemble?.fileOnly) ? '; the assembly makes its file again on the first run, with no model' : ''}${item.nodes.some(node => node.handoff) ? '; the turns that hand their project on as a file run again on the first run, and so make the team session again' : ''}. Optionally choose one execution model for every new node.`
-        : `Keep all ${item.nodes.length} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
+      <p id={`${id}-description`}>{recorded
+        ? `Keep all ${recorded.nodes} nodes and their wires with the texts and settings the real run${recording ? ` on ${recording.capturedOn}` : ''} used: every picture, clip, voice and score cue with its words, the editors’ briefs and the edits. Nothing is pre-filled: the film’s deliveries are files, which a copy does not carry, so its first run makes all ${recorded.media} pictures, clips and sounds again before any editor runs, and that takes a paid plan’s media allowance. New clips speak their lines at other moments and run to other lengths: the sync sheets in the editors’ briefs and the act’s own timeline were measured on the case run’s clips, so measure and edit them again before cutting. Optionally choose one execution model for the editor agents.`
+        : workflow && recording
+        ? `Keep all ${workflow.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${workflow.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}${workflow.nodes.some(node => node.assemble?.file || node.assemble?.fileOnly) ? '; the assembly makes its file again on the first run, with no model' : ''}${workflow.nodes.some(node => node.handoff) ? '; the turns that hand their project on as a file run again on the first run, and so make the team session again' : ''}. Optionally choose one execution model for every new node.`
+        : `Keep all ${workflow?.nodes.length ?? 0} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
       <label className="official-copy-model" htmlFor={`${id}-model`}>Execution model
         <select id={`${id}-model`} autoFocus value={selection} disabled={locked} onChange={event => { setSelection(event.target.value); setSubmitError(null); }}>
           <option value="">Draft only · choose models later</option>
@@ -129,7 +136,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
           {models.map(model => <option key={modelKey(model)} value={modelKey(model)}>{model.label}</option>)}
         </select>
       </label>
-      {chosen && <div className="official-copy-selection"><strong>Applies to every new node</strong><span>{chosen.label}</span>
+      {chosen && <div className="official-copy-selection"><strong>{recorded ? 'Applies to the editor agents' : 'Applies to every new node'}</strong><span>{chosen.label}</span>
         {sandboxed && <small>{chosen.sandbox
           ? 'Its agents keep working in their sandbox computers, on this model.'
           : 'This model does not run in a sandbox computer, so its agents keep working there on the sandbox’s own model.'}</small>}</div>}
@@ -140,7 +147,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>Refresh model catalog</button>
       </div>
       <p className="official-copy-note">This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.
-        {recording && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}</p>
+        {recording && !recorded && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}</p>
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
       <footer><button type="button" disabled={busy || checking} onClick={close}>Cancel</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
         {busy ? 'Creating…' : checking ? 'Checking model…' : selection ? 'Copy with model' : 'Create draft'}

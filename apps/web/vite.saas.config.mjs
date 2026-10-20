@@ -5,6 +5,7 @@ import { copyFileSync, cpSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assetFileNames } from './scripts/asset-names.mjs';
 import { bundleLicences } from './scripts/bundle-licences.mjs';
+import { stagedShowcase } from './scripts/staged-showcase.mjs';
 import { familyLicences, fontLicences, inlinedFontLicences } from './scripts/font-licences.mjs';
 import { withoutCutCode } from './scripts/three-cuts.mjs';
 import { PREVIEW_FONTS } from './src/canvas/previewFontList.ts';
@@ -23,6 +24,10 @@ export default defineConfig({
   // The homepage's case footage (showcase/) ships with the hosted site only, not through public/,
   // which the desktop build bundles too. The dev server already serves them from the root.
   { name: 'awwo-saas-showcase', apply: 'build', writeBundle(options) { cpSync(join(root, 'showcase'), join(options.dir, 'showcase'), { recursive: true }); } },
+  // A film case's film is staged once on the host, outside every release, never in showcase/:
+  // the dev server serves /showcase/staged/<case>/<file> from AWWO_STAGED_SHOWCASE/<case>/<file> when that is set, byte
+  // ranges included, so the case dialog's player can be tried locally (scripts/staged-showcase.mjs).
+  stagedShowcase(),
   // The figure kit a figure page names by URL (src/canvas/figureKit/figureKit.ts FIGURE_KIT_URL). Running previews inline
   // these bytes; the hosted site serves the same file at that path so a downloaded page still draws.
   { name: 'awwo-saas-figure-kit',

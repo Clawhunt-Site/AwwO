@@ -13,6 +13,8 @@ export interface ProductionCase {
   kind: ProductionKind;
   /** The cover footage records what the run delivered, not an illustration. */
   recording?: true;
+  /** The cover footage is a few seconds of the film the run delivered (a film case), not a screen recording. */
+  excerpt?: true;
   title: string;
   brief: string;
   /** Short role names of the canvas's agents, stage by stage; the roles in one stage work in parallel. */
@@ -41,7 +43,15 @@ export const MEDIA_ROLE = 'Media';
 export const ASSEMBLY_ROLE = 'Assembly';
 /** A flagship's recorder: a stage member that writes a tool file from its template with no model, so not an agent. */
 export const RECORDER_ROLE = 'Recorder';
+/** A film's edit nodes: they join clips and sounds into a film by a timeline with no model, so not agents. (Not "Edit":
+ * that is an agent of the summer ad, its timing sheet.) */
+export const EDIT_ROLE = 'Edit node';
 const MEDIA = MEDIA_ROLE;
+const NOT_AGENTS: ReadonlySet<string> = new Set([MEDIA_ROLE, ASSEMBLY_ROLE, RECORDER_ROLE, EDIT_ROLE]);
+/** The agents of a case's team: its stage members but its media, assemblies, recorders and edits, which run no agent.
+ * Each marker is a name no agent of a case takes (tests/saas-production-workflows.test.ts counts every case's agents
+ * from its canvas). */
+export const agentCount = (item: ProductionCase) => item.stages.reduce((sum, stage) => sum + stage.filter(role => !NOT_AGENTS.has(role)).length, 0);
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
   // The epic case (epicWorkflows.ts): a game written by twenty agents in sandbox computers from three design specs and
@@ -54,6 +64,15 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       ['Kernel', 'Renderer', 'Assets', 'Bodies', 'Terrain', 'Landmarks', 'Castle', 'Controls', 'Camera', 'Rigs', 'Combat rules', 'Fighter', 'Bearer', 'Foes', 'Bosses', 'World state', 'Effects', 'Sound', 'HUD', 'Menus'],
       [ASSEMBLY_ROLE], ['Test'], [ASSEMBLY_ROLE], ['Second test'], [REVIEW]],
     deliverable: 'An open-world action game in the browser',
+  },
+  // The epic film (a recorded canvas, recordedCanvas.ts): its pictures, clips, voices and score made on one canvas, two
+  // reels cut by editor agents and joined by edit nodes, which run no model.
+  {
+    id: 'the-long-chord', kind: 'film', recording: true, excerpt: true, footage: 'long-chord-real',
+    title: 'THE LONG CHORD · Episode I, Act I',
+    brief: 'An original space-opera film: on Corrow, a world sealed for twenty years, a girl who can still hear the ringing of the universe is found out by the woman who came to silence it. Every picture, clip, voice and score cue made on one canvas, two reels cut by two editor agents, and the act joined with dialogue in sync, score and subtitles.',
+    stages: [[MEDIA], [MEDIA], ['Reel 1 editor', 'Reel 2 editor'], [EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE]],
+    deliverable: 'Act I of Episode I: a film with dialogue, score and subtitles',
   },
   // The flagship cases (flagshipWorkflows.ts): large systems written in a clean room by agents that work in sandbox
   // computers, assembled with no model and tested in a real browser.

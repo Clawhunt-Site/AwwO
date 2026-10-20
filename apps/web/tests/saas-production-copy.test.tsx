@@ -32,6 +32,8 @@ const CASES = Object.keys(WORKFLOWS);
 // A media case's image and video nodes generate afresh in a copy, and the page they feed is made on its first run.
 const RECORDED = CASES.filter(id => !WORKFLOWS[id].media?.length);
 const records = new Map<string, ProductionRunRecord>();
+// The film case: a recorded canvas, stored beside its record rather than compiled from a workflow.
+const FILM = 'the-long-chord', FILM_TITLE = 'THE LONG CHORD · Episode I, Act I';
 const copyOf = (id: string) => createProductionCopyDocument(WORKFLOWS[id], records.get(id)!, null);
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const identity: Identity = { user: { id: 'copy-user', name: 'Copy user', email: 'copy@example.invalid', platformRole: 'user' }, tenants: [tenant] };
@@ -40,6 +42,8 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 beforeAll(async () => {
   for (const id of CASES) records.set(id, (await loadProductionRun(id))!);
   await import('../src/saas/ProductionShowcase');
+  // A film case's dialog and its record (recordedCanvas.ts), loaded once here rather than inside a test's wait.
+  await Promise.all([import('../src/saas/ProductionFilm'), loadProductionRun(FILM)]);
 }, 300_000);
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); history.replaceState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -365,6 +369,37 @@ it('stops the copy when a delivered node has no recording its canvas can hold, r
   expect(() => createProductionCopyDocument(workflow, cut, null)).toThrow(new RegExp(`${build.id} its canvas cannot hold`));
 });
 
+
+it('copies a film case from the workspace home as the canvas that ran, with nothing pre-filled, and says what its first run makes again', async () => {
+  const posts = server(), onOpen = vi.fn();
+  const canvas = (await import('../src/saas/production-canvases/the-long-chord')).default;
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  const setup = await openCopy(FILM_TITLE);
+  expect(setup).toHaveAttribute('lang', 'en');
+  expect(within(setup).getByText(/^Keep all 109 nodes and their wires with the texts and settings the real run on 2026-10-20 used: .* so its first run makes all 104 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the act’s own timeline were measured on the case run’s clips, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
+  fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
+  expect(posts).toHaveLength(1);
+  expect(posts[0].body.name).toBe(FILM_TITLE);
+  const sent = posts[0].body.document;
+  expect(sent.nodes.map((node: any) => node.id).sort()).toEqual(canvas.nodes.map(node => node.id).sort());
+  expect(sent.edges.map((edge: any) => `${edge.fromNode}>${edge.toNode}`).sort()).toEqual(canvas.edges.map(edge => `${edge.fromNode}>${edge.toNode}`).sort());
+  expect(sent.nodes.every((node: any) => node.lastOutput === null)).toBe(true);
+});
+
+it('creates nothing from a film case whose stored canvas is not the one its record pins', async () => {
+  const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
+  const record = (await actual(FILM))!;
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  const setup = await openCopy(FILM_TITLE);
+  load.mockResolvedValue({ ...record, canvasSHA256: '0'.repeat(64) });
+  try {
+    fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
+    expect(await within(setup).findByText('Could not load this case’s run recording, so no canvas was created. Refresh and try again.')).toBeVisible();
+    expect(posts).toHaveLength(0);
+    expect(onOpen).not.toHaveBeenCalled();
+  } finally { load.mockImplementation(actual); }
+});
 
 it('tells a media case’s copier which deliveries its first run makes again', async () => {
   server();

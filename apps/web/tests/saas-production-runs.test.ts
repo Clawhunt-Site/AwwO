@@ -15,7 +15,8 @@ const MEDIA = import.meta.glob<Readonly<Record<string, ProductionMediaFile>>>('.
 const WEB = path.resolve(__dirname, '..');
 
 it('publishes exactly the generated files a media case’s page names as static files, and records its media nodes beside the agents', () => {
-  for (const record of RECORDS) {
+  // A film case (a recorded canvas) publishes posters, stills and its film instead: saas-production-film.test.tsx.
+  for (const record of RECORDS.filter(value => value.canvas !== 'recorded')) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`];
     if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
@@ -126,8 +127,9 @@ it('publishes a record for real cases only, and summarises each one exactly', ()
   expect(byCase.has('knowledge-base')).toBe(true);
   for (const record of RECORDS) {
     const delivery = record.nodes.find(node => node.id === record.artifactNodeId);
+    // Delivered: the page (an HTML output), or a film case's film (its last edit's).
     expect(PRODUCTION_RUN_SUMMARY[record.caseId], record.caseId).toEqual({ completed: record.completed, total: record.total, seconds: record.seconds,
-      delivered: delivery?.status === 'done' && delivery.outputType === 'html' && Boolean(delivery.output),
+      delivered: delivery?.status === 'done' && (delivery.outputType === 'video' ? Boolean(delivery.film) : delivery.outputType === 'html' && Boolean(delivery.output)),
       capturedOn: record.capturedOn, model: record.model, runtime: record.runtime,
       ...(record.media?.length ? { media: { completed: record.media.filter(item => item.status === 'done').length, total: record.media.length } } : {}) });
   }
@@ -160,6 +162,8 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
     for (const text of [record.edition, record.note, record.verification]) {
       expect(text.trim(), record.caseId).not.toBe('');
       expect(text, record.caseId).not.toMatch(/\p{Script=Han}/u);
+      // What happened and what was checked, written once it was done (as the publishers require): never a placeholder.
+      expect(text, record.caseId).not.toMatch(/PROVISIONAL|TODO|TBD|placeholder|lorem ipsum/i);
     }
     for (const node of record.nodes) expect(`${node.title}\n${node.output ?? ''}\n${node.detail ?? ''}`, `${record.caseId}/${node.id}`).not.toMatch(/\p{Script=Han}/u);
     for (const node of record.nodes) {
@@ -167,21 +171,28 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
         // An assemble node makes a file with no model: it has no text output, and its file is recorded when it ran.
         expect(node.output, `${record.caseId}/${node.id}`).toBeUndefined();
         if (node.status === 'done') expect(node.file?.bytes, `${record.caseId}/${node.id}`).toBeGreaterThan(0);
+      } else if (node.kind === 'edit') {
+        // An edit node joins clips and sounds with no model: no text output, the film it made recorded when it ran.
+        expect([node.output, node.outputType], `${record.caseId}/${node.id}`).toEqual([undefined, 'video']);
+        if (node.status === 'done') expect(node.film?.bytes, `${record.caseId}/${node.id}`).toBeGreaterThan(0);
       } else if (node.status === 'done') {
         expect(node.output?.trim(), `${record.caseId}/${node.id}`).toBeTruthy();
         if (node.outputType === 'html') expect(isCompleteHtmlDocument(node.output!), `${record.caseId}/${node.id}`).toBe(true);
       } else expect(node.output, `${record.caseId}/${node.id}`).toBeUndefined();
       expect(`${node.report ?? ''}`, `${record.caseId}/${node.id}`).not.toMatch(/\p{Script=Han}/u);
     }
-    const ids = new Set(record.nodes.map(node => node.id));
+    // A recorded canvas's wires join its media nodes too (a clip is made from its sheets and its take).
+    const ids = new Set([...record.nodes.map(node => node.id), ...(record.canvas === 'recorded' ? (record.media ?? []).map(value => value.id) : [])]);
     for (const edge of record.edges) expect(ids.has(edge.from) && ids.has(edge.to), `${record.caseId}: ${edge.from}->${edge.to}`).toBe(true);
     const artifact = record.nodes.find(node => node.id === record.artifactNodeId);
-    if (record.artifactSHA256) expect(createHash('sha256').update(artifact!.output!).digest('hex'), record.caseId).toBe(record.artifactSHA256);
+    // The result's checksum: the page's text, or a film's bytes as its edit delivered them.
+    if (record.artifactSHA256) expect(artifact!.film ? artifact!.film.sha256 : createHash('sha256').update(artifact!.output!).digest('hex'), record.caseId).toBe(record.artifactSHA256);
   }
 });
 
 it('records each SaaS case run on the very canvas a member can copy today', () => {
-  for (const record of RECORDS) {
+  // A film case's copyable canvas is the run's own, stored beside its record: saas-production-film.test.tsx pins it.
+  for (const record of RECORDS.filter(value => value.canvas !== 'recorded')) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     expect(workflow, record.caseId).toBeDefined();
     expect(record.nodes.map(node => [node.id, node.title, node.column, node.row, node.outputType])).toEqual(

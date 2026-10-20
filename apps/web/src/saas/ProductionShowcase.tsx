@@ -1,35 +1,22 @@
-import { Fragment, useEffect, useId, useMemo, useState } from 'react';
-import { ArrowDown, Check, CircleSlash, Copy, Maximize2, Minimize2, RotateCcw, TriangleAlert } from 'lucide-react';
+import { Fragment, lazy, Suspense, useEffect, useId, useMemo, useState } from 'react';
+import { ArrowDown, Copy, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import { htmlDocumentSource, htmlPreviewDocument } from '../canvas/htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds } from '../canvas/previewLibraries';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionNodeStatus, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
+import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
 import { showcasePage } from './examples/showcaseDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionCase } from './productionCatalog';
+import { renderRecordMarkdown, StatusChip } from './productionMadeParts';
 import './production-made.css';
+
+// A recorded-canvas case (a film) has its own dialog, which loads with the first such case opened.
+const ProductionFilm = lazy(() => import('./ProductionFilm'));
 
 // The case dialog reads in English in both interface languages, as the cases do (owner 2026-10-14).
 const ROLES: Readonly<Record<string, string>> = {
   general: 'Custom agent', frontend: 'Front end', backend: 'Backend', data: 'Data', users: 'Identity', materials: 'Content', review: 'Review',
 };
-const STATUS: Readonly<Record<ProductionNodeStatus, string>> = {
-  done: 'Done', failed: 'Failed', blocked: 'Blocked', cancelled: 'Stopped', cached: 'Reused',
-};
-function StatusChip({ status }: { status: ProductionNodeStatus }) {
-  return <em className={`production-made-status is-${status}`}>{status === 'done' ? <Check size={11} aria-hidden="true" /> : status === 'failed' ? <TriangleAlert size={11} aria-hidden="true" /> : <CircleSlash size={11} aria-hidden="true" />}{STATUS[status]}</em>;
-}
-
-// Inert like the delivery reader (canvas/DeliverableMarkdown.tsx), but stricter: only http(s) links are
-// links, and a path on the machine the run used (kept only as artifacts/<name>) is plain text.
-const external = (href?: string) => /^https?:\/\//i.test(href || '');
-const RECORD_MARKDOWN: Components = {
-  img: ({ alt }) => <span>{alt || '🖼'}</span>,
-  a: ({ node: _node, href, children, ...props }) => external(href) ? <a {...props} href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <span title={href}>{children}</span>,
-};
-const renderRecordMarkdown = (source: string) => <ReactMarkdown remarkPlugins={[remarkGfm]} components={RECORD_MARKDOWN}>{source}</ReactMarkdown>;
 
 /** A model-generated page runs only in an opaque sandbox, through the canvas's own preview sanitizer. A library AwwO
  * supplies (three.js r128) runs from its pinned copy, exactly as the Results preview runs it; other external scripts stay
@@ -117,7 +104,9 @@ function NodeWork({ node }: { node: ProductionRunNode }) {
 /** How a case was made: its canvas stage by stage, what every agent actually handed over, and the
  * delivered result. Everything shown comes from the run record; the workflow adds only each node's
  * written task and acceptance, which tests pin to the canvas that ran. */
-export default function ProductionShowcase({ item, onReuse }: { item: ProductionCase; onReuse?: (workflow: OfficialWorkflow) => void }) {
+export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { item: ProductionCase; onReuse?: (workflow: OfficialWorkflow) => void;
+  /** Copy a recorded-canvas case (a film), whose canvas is stored beside its record rather than defined as a workflow. */
+  onCopyRecorded?: (item: ProductionCase) => void }) {
   const id = useId();
   const [record, setRecord] = useState<ProductionRunRecord | null | undefined>(undefined);
   const [selected, setSelected] = useState<string | null>(null);
@@ -133,7 +122,8 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
   // missing, short or too slow) shows no page at all, with a way to try again: never a page without the files it uses.
   const [media, setMedia] = useState<{ id: string; files?: Readonly<Record<string, string>> } | undefined>(undefined);
   const [mediaAttempt, setMediaAttempt] = useState(0);
-  const hasMedia = Boolean(record?.media?.length);
+  // A film's dialog streams its files from their URLs instead (ProductionFilm.tsx): nothing is fetched whole here.
+  const hasMedia = Boolean(record?.media?.length) && record?.canvas !== 'recorded';
   useEffect(() => {
     if (!hasMedia) return;
     let live = true;
@@ -148,6 +138,9 @@ export default function ProductionShowcase({ item, onReuse }: { item: Production
     <header className="production-made-heading"><div><span className="production-eyebrow"><span />HOW IT WAS MADE</span>
       <h3 id={`${id}-title`}>{record === undefined ? 'Loading the run record…' : 'No run record has been published for this case yet'}</h3></div>{reuse}</header>
   </section>;
+  if (record.canvas === 'recorded') return <Suspense fallback={<section className="production-made" lang="en"><p className="production-made-empty" role="status">Loading the run record…</p></section>}>
+    <ProductionFilm item={item} record={record} onCopy={onCopyRecorded ? () => onCopyRecorded(item) : undefined} />
+  </Suspense>;
 
   const stages = [...new Set(record.nodes.map(node => node.column))].sort((a, b) => a - b).map(column => record.nodes.filter(node => node.column === column).sort((a, b) => a.row - b.row));
   // A media node's stage is where its canvas placed it, so the run's stages are counted and numbered over agents and

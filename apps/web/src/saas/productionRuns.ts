@@ -13,15 +13,16 @@ export interface ProductionRunNode {
   readonly status: ProductionNodeStatus;
   /** From admission to completion, in seconds. */
   readonly seconds?: number;
-  readonly outputType: 'markdown' | 'html';
+  readonly outputType: 'markdown' | 'html' | 'video';
   /** The delivered field value: Markdown text or a complete HTML document. */
   readonly output?: string;
   /** Why the node did not complete, exactly as recorded. */
   readonly detail?: string;
   /** Over all of the node's model calls. */
   readonly tokens?: { readonly input?: number; readonly output?: number };
-  /** An assemble node: it made its page from the modules by its template, with no model. */
-  readonly kind?: 'assemble';
+  /** An assemble node: it made its page from the modules by its template, with no model. An edit node: it joined clips
+   * and sounds into a film (`film`), with no model. */
+  readonly kind?: 'assemble' | 'edit';
   /** The file an assemble node made, as the run stored it. */
   readonly file?: { readonly name: string; readonly bytes: number };
   /** An assemble node with no inputs: its file is its template alone (a tool file, such as Errand's recorder). */
@@ -32,18 +33,44 @@ export interface ProductionRunNode {
   readonly calls?: number;
   /** A second, Markdown output beside the result: what the node reports for those downstream. */
   readonly report?: string;
+  /** An edit node (a recorded canvas's): it joined clips and sounds into a film by a timeline, with no model. */
+  readonly film?: ProductionRunFilm;
+  /** A recorded canvas's agent: its brief (persona) exactly as it ran, since no workflow definition holds it. */
+  readonly brief?: string;
 }
 
-/** One image, video or 3D model node of a recorded case run, as the run stored it. */
+/** The film an edit node delivered, as its run stored it (the API's edit facts, edit_outputs.go). */
+export interface ProductionRunFilm {
+  readonly name: string;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly seconds: number;
+  readonly frames: number;
+  readonly fps: number;
+  readonly width: number;
+  readonly height: number;
+  readonly loudness?: { readonly integratedLUFS: number; readonly truePeakDb: number; readonly rangeLU?: number };
+  readonly warnings: ReadonlyArray<string>;
+  /** The timeline's still interval: still n (from 1) is the frame at (n − 1) × this many seconds. */
+  readonly stillsEverySeconds?: number;
+  /** Its timeline: the answer of the agent wired into it (`from`), or its own, written on the node (`own`). */
+  readonly timeline: { readonly from: string } | { readonly own: string };
+}
+
+/** One image, video, 3D model or audio node of a recorded case run, as the run stored it. */
 export interface ProductionRunMedia {
   readonly id: string;
   readonly title: string;
-  readonly kind: 'image' | 'video' | 'model3d';
+  readonly kind: 'image' | 'video' | 'model3d' | 'audio';
   readonly status: ProductionNodeStatus;
   readonly seconds?: number;
   /** The files it generated, by the `<node id>/<file name>` path the canvas handed the page. */
   readonly files: ReadonlyArray<string>;
   readonly detail?: string;
+  /** A recorded canvas's media node: its stage (dependency depth) and place, and the words it generated from. */
+  readonly column?: number;
+  readonly row?: number;
+  readonly words?: string;
 }
 
 export interface ProductionRunRecord {
@@ -67,9 +94,14 @@ export interface ProductionRunRecord {
   /** The revisions the run ran on. When its nodes ran on more than one (a canvas that ran again between releases),
    * `runs` says which nodes ran on which, in order; `api` and `worker` are then the last run's. */
   readonly source: { readonly api: string; readonly worker: string;
-    readonly runs?: ReadonlyArray<{ readonly api: string; readonly worker: string; readonly nodes: ReadonlyArray<string> }> };
-  /** SHA-256 of the canvas text the run ran with (productionCanvasText.ts). */
+    readonly runs?: ReadonlyArray<{ readonly api: string; readonly worker: string; readonly nodes: ReadonlyArray<string> }>;
+    /** A recorded canvas's media nodes, by the API release that ran each one's graph run (they run in the API itself). */
+    readonly media?: ReadonlyArray<{ readonly api: string; readonly nodes: ReadonlyArray<string> }> };
+  /** SHA-256 of the canvas text the run ran with (productionCanvasText.ts; for a recorded canvas, recordedCanvas.ts). */
   readonly canvasSHA256: string;
+  /** The case's canvas is the run's own document, stored beside its record (production-canvases/<case>.ts), not a
+   * workflow definition compiled into one: a film case, whose clips, takes and timelines name each other by node id. */
+  readonly canvas?: 'recorded';
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
@@ -124,6 +156,11 @@ export interface ProductionMediaFile {
   readonly type: string;
   readonly bytes: number;
   readonly sha256: string;
+  /** Staged on the host once, outside the web releases (a film is too large to ship with every release): streamed
+   * from its URL, never fetched whole (loadProductionMedia skips it). */
+  readonly staged?: true;
+  /** A film's web copy: the file the edit delivered, byte for byte, offered for download beside it. */
+  readonly original?: { readonly src: string; readonly bytes: number; readonly sha256: string };
 }
 
 /** A media case's files by the `<node id>/<file>` path its page names (production-runs/<case>.media.json). */
@@ -168,10 +205,11 @@ export async function loadProductionMedia(id: string, fetchFile: typeof fetch = 
     const entries = await Promise.race([loadManifest(id).then(manifest => {
       // A manifest that came after the deadline starts nothing.
       if (controller.signal.aborted) throw new Error('production_media_unavailable');
-      const bytes = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
+      const bytes = Object.values(manifest).filter(file => !file.staged).reduce((sum, file) => sum + file.bytes, 0);
       arm(deadlineMs + Math.ceil((bytes / slowBytesPerSecond) * 1000));
       return manifest;
-    }).then(manifest => Promise.all(Object.entries(manifest).map(async ([path, file]) => {
+    // A staged file (a film) streams from its URL in its own player and is never fetched whole.
+    }).then(manifest => Promise.all(Object.entries(manifest).filter(([, file]) => !file.staged).map(async ([path, file]) => {
       const response = await fetchFile(file.src, { credentials: 'omit', signal: controller.signal });
       if (!response.ok) throw new Error('production_media_unavailable');
       const bytes = await response.arrayBuffer();
