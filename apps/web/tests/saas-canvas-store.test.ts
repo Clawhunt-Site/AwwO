@@ -15,6 +15,7 @@ const DRAFT = P + `${CANVAS_DRAFT_PREFIX}old-writer`;
 const PLAN = P + PLANNING_STORAGE_KEY;
 const VERSION = P + 'awwo.cloud.version';
 const MOVED = String.fromCharCode(0) + 'moved';
+const DAY_MS = 24 * 3600 * 1000;
 /** A run record as an earlier release wrote it (runJournal.ts), started at `startedAt`. */
 const journal = (startedAt: number) => JSON.stringify({ version: 1, id: 'run-1', startedAt, scope: ['n1'], nodes: {} });
 
@@ -734,6 +735,117 @@ describe('canvas store', () => {
     expect(c.store.get(P, VERSION)).toBe('12');
     await c.store.flush(); await settle();
     expect(storage.getItem(VERSION)).toBe('12');
+  });
+
+  it('lets a copied record and the version leave localStorage once no new bytes of them have come in for a day', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    const RECOVERY = P + 'awwo.canvas.manual-recovery.v1:c:a:n:t';
+    storage.setItem(RECOVERY, '{"records":[1]}');
+    storage.setItem(VERSION, '7');
+    const a = tab(shared, { legacy: storage });
+    await a.store.open(P, canvasStoreAdoption);
+    await a.store.flush(); await settle();
+    // Within the day: a page of the earlier release may still be working on them.
+    const b = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS - 3600 * 1000 });
+    await b.store.open(P, canvasStoreAdoption);
+    await b.store.flush(); await settle();
+    expect(storage.getItem(RECOVERY)).toBe('{"records":[1]}');
+    expect(storage.getItem(VERSION)).toBe('7');
+    // A day on, unchanged: they leave localStorage, and the store keeps them.
+    const c = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 3600 * 1000 });
+    await c.store.open(P, canvasStoreAdoption);
+    await c.store.flush(); await settle();
+    expect(storage.getItem(RECOVERY)).toBeNull();
+    expect(storage.getItem(VERSION)).toBeNull();
+    expect(c.store.get(P, RECOVERY)).toBe('{"records":[1]}');
+    expect(c.store.get(P, VERSION)).toBe('7');
+  });
+
+  it('never takes over what a page of the earlier release writes after a copied record left localStorage (it read none)', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    const full = JSON.stringify({ draft: '', messages: [{ id: 'm1', role: 'user', content: 'plan my launch' }] });
+    storage.setItem(PLAN, full);
+    const a = tab(shared, { legacy: storage });
+    await a.store.open(P, canvasStoreAdoption);
+    await a.store.flush(); await settle();
+    const b = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 3600 * 1000 });
+    await b.store.open(P, canvasStoreAdoption);
+    await b.store.flush(); await settle();
+    expect(storage.getItem(PLAN)).toBeNull();
+    // That page opens the canvas, reads no conversation and saves an empty one.
+    storage.setItem(PLAN, JSON.stringify({ draft: '', messages: [] }));
+    const c = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 2 * 3600 * 1000 });
+    await c.store.open(P, canvasStoreAdoption);
+    await c.store.flush(); await settle();
+    expect(c.store.get(P, PLAN)).toBe(full);
+    expect(shared.backend.value(PLAN)).toBe(full);
+  });
+
+  it('never takes over, sweeping another canvas, what such a page writes after the copy left', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    const Q = 'awwo.saas:user-a:tenant-a:canvas-q:';
+    const full = JSON.stringify({ draft: '', messages: [{ id: 'm1', role: 'user', content: 'plan my launch' }] });
+    storage.setItem(Q + PLANNING_STORAGE_KEY, full);
+    const a = tab(shared, { legacy: storage });
+    await a.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    const b = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 3600 * 1000 });
+    await b.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    expect(storage.getItem(Q + PLANNING_STORAGE_KEY)).toBeNull();
+    storage.setItem(Q + PLANNING_STORAGE_KEY, JSON.stringify({ draft: '', messages: [] }));
+    const c = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 2 * 3600 * 1000 });
+    await c.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    expect(shared.backend.value(Q + PLANNING_STORAGE_KEY)).toBe(full);
+    // Nor when the canvas opens.
+    const d = tab(nextVisit(shared), { legacy: storage, now: () => Date.now() + DAY_MS + 3 * 3600 * 1000 });
+    await d.store.open(Q, canvasStoreAdoption);
+    expect(d.store.get(Q, Q + PLANNING_STORAGE_KEY)).toBe(full);
+  });
+
+  it('keeps a copied record in localStorage for a day after a page of the earlier release last rewrote it', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    storage.setItem(PLAN, '{"messages":[1]}');
+    const a = tab(shared, { legacy: storage });
+    await a.store.open(P, canvasStoreAdoption);
+    await a.store.flush(); await settle();
+    // Two days on, that page has just rewritten it: the new bytes come in, and stay another day.
+    storage.setItem(PLAN, '{"messages":[1,2]}');
+    const later = Date.now() + 2 * DAY_MS;
+    const b = tab(nextVisit(shared), { legacy: storage, now: () => later });
+    await b.store.open(P, canvasStoreAdoption);
+    await b.store.flush(); await settle();
+    expect(b.store.get(P, PLAN)).toBe('{"messages":[1,2]}');
+    expect(storage.getItem(PLAN)).toBe('{"messages":[1,2]}');
+    const c = tab(nextVisit(shared), { legacy: storage, now: () => later + DAY_MS + 1000 });
+    await c.store.open(P, canvasStoreAdoption);
+    await c.store.flush(); await settle();
+    expect(storage.getItem(PLAN)).toBeNull();
+    expect(c.store.get(P, PLAN)).toBe('{"messages":[1,2]}');
+  });
+
+  it('lets another canvas\'s copied record leave localStorage once no new bytes of it have come in for a day, swept without opening it', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    const Q = 'awwo.saas:user-a:tenant-a:canvas-q:';
+    storage.setItem(Q + PLANNING_STORAGE_KEY, '{"messages":[1]}');
+    const a = tab(shared, { legacy: storage });
+    await a.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    expect(shared.backend.value(Q + PLANNING_STORAGE_KEY)).toBe('{"messages":[1]}');
+    expect(storage.getItem(Q + PLANNING_STORAGE_KEY)).toBe('{"messages":[1]}');
+    // Two days on, a page of the earlier release has just rewritten it: the new bytes come in and stay another day.
+    storage.setItem(Q + PLANNING_STORAGE_KEY, '{"messages":[1,2]}');
+    const later = Date.now() + 2 * DAY_MS;
+    const b = tab(nextVisit(shared), { legacy: storage, now: () => later });
+    await b.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    expect(shared.backend.value(Q + PLANNING_STORAGE_KEY)).toBe('{"messages":[1,2]}');
+    expect(storage.getItem(Q + PLANNING_STORAGE_KEY)).toBe('{"messages":[1,2]}');
+    const c = tab(nextVisit(shared), { legacy: storage, now: () => later + DAY_MS + 1000 });
+    await c.store.moveLegacy(Q, [Q + PLANNING_STORAGE_KEY], canvasStoreAdoption);
+    expect(storage.getItem(Q + PLANNING_STORAGE_KEY)).toBeNull();
+    expect(shared.backend.value(Q + PLANNING_STORAGE_KEY)).toBe('{"messages":[1,2]}');
   });
 
   it('records what it took in beside each key, without showing the record as a key', async () => {

@@ -58,7 +58,8 @@ export function keptInCanvasStore(name: string): boolean {
  * the large copies move out to free the space (its drafts always; the document, its backup and the sync proof, which
  * this release writes too, only while nothing here has written them since they were last taken in); the records it
  * reads and rewrites (version, reviewed drafts, run journals, recovery and presentation records, planning, page
- * repairs) are copied and stay, the version merged up, so that page keeps working. */
+ * repairs) are copied and stay while that page may still be working on them (until their bytes have not changed for a
+ * day), the version merged up. */
 export function canvasStoreAdoption(name: string): Adoption | null {
   if (!keptInCanvasStore(name)) return null;
   if (name === 'awwo.cloud.version') return 'max';

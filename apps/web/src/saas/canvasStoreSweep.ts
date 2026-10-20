@@ -2,7 +2,8 @@ import { canvasStore, canvasStoreAdoption, legacyRunGoingOn } from '../canvas/ca
 
 // Earlier releases kept every opened canvas's document, sync proof and records in localStorage, never removed, until the
 // site's ~5 MB was full. Once this page uses the canvas store, it takes in what the other canvases left there, while the
-// browser is idle: the large copies move out (see canvasStoreAdoption), the small records are copied. A reader's copy
+// browser is idle: the large copies move out (see canvasStoreAdoption), the small records are copied (and leave once
+// their bytes have not changed for a day, see canvasStore.ts LEGACY_COPY_MS). A reader's copy
 // holds nothing but the server's document, so it is dropped. A canvas with an unsent draft or a run record from the last
 // day (legacyRunGoingOn), or one a tab has open, is left as it is: its own opening takes those in.
 

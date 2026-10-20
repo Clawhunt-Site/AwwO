@@ -17,9 +17,9 @@ import { isCanvasStorageQuotaError } from '../saas/canvasBaselineCompression';
 // What earlier releases left in localStorage. A tab of the earlier release may still be open and still reads and writes
 // localStorage, so its keys come in by kind (see `Adoption`): large copies move (they become ordinary writes and leave
 // localStorage once IndexedDB holds the record of their move, written with them; the ones this release writes too are
-// taken in only while nothing here has written them since), small shared records are copied and stay, and the version
-// is merged up. Beside each key, the hashes of the bytes taken in tell a later opening which bytes it has seen, so bytes
-// a page left behind cannot overwrite what was written since.
+// taken in only while nothing here has written them since), small shared records are copied and stay until their bytes
+// have not changed for a day, and the version is merged up. Beside each key, the hashes of the bytes taken in tell a
+// later opening which bytes it has seen, so bytes a page left behind cannot overwrite what was written since.
 //
 // Honesty. A write IndexedDB refuses stays in memory and is retried, and listeners are told (also those that come later,
 // until a write succeeds), so the hosted canvas can pause its autosave as it did when localStorage was full.
@@ -43,7 +43,8 @@ export interface CanvasStoreBackend {
  * cache: taken in while this store has not written it since it was last taken in, never over what a tab of this release
  * wrote, then removed from localStorage), `copy` (a small record a page of that release may still read and rewrite:
  * taken in while this store has not written it since, and kept in localStorage), `max` (a number that only grows: the
- * larger one is kept). */
+ * larger one is kept). The bytes of a `copy` or `max` key leave localStorage once no new bytes have come in for a day
+ * (LEGACY_COPY_MS). */
 export type Adoption = 'move' | 'mirror' | 'copy' | 'max';
 
 export type StoreChannel = { postMessage(message: unknown): void; close(): void; onmessage: ((event: MessageEvent) => void) | null };
@@ -212,6 +213,10 @@ function takesOver(adoption: Adoption, raw: string, current: Pick<Entry, 'v' | '
   return Boolean(seen.s && current.c === seen.s[0] && current.p === seen.s[1]);
 }
 const removedAfterTaking = (adoption: Adoption) => adoption === 'move' || adoption === 'mirror';
+/** How long the bytes of a record a page of the earlier release may still read and rewrite ('copy', 'max') stay in
+ * localStorage once taken in: such a page that is still open rewrites them as it works, and one that has left them
+ * unchanged this long is gone. */
+const LEGACY_COPY_MS = 24 * 3600 * 1000;
 /** How the `mirror` group comes in, decided once by its first key's state here: `take` (nothing held, or nothing written
  * since it was last taken in: the group's bytes come in), `keep` (a tab of the earlier release may be running over them:
  * left as they are, to be decided at a later opening), `leave` (this release wrote its own since: never replaced; the
@@ -248,6 +253,9 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
 
   const database = () => (backend ??= options.backend().then(db => (resolved = db), () => null));
   const lockName = (prefix: string) => CANVAS_STORE_CHANNEL + prefix;
+  /** Whether bytes recorded at `t` (the record of their move, rewritten whenever new bytes come in) have stayed as they
+   * were long enough to leave localStorage (see LEGACY_COPY_MS). */
+  const settledCopy = (t: number | undefined) => t !== undefined && now() - t >= LEGACY_COPY_MS;
 
   function storageEvent(key: string, oldValue: string | null, newValue: string | null): Event {
     const url = typeof location === 'undefined' ? '' : location.href;
@@ -463,7 +471,11 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
         // Written with the value (one IndexedDB write), so a stored record means the bytes are stored too.
         writeEntry(scope, key + MOVED, JSON.stringify({ h: [...seen.h, hash].slice(-8), s: stamp }));
       }
-      if (removedAfterTaking(adoption)) scope.moved.push({ key, raw, hash });
+      const settled = !removedAfterTaking(adoption) && seen.h.includes(hash) && settledCopy(scope.entries.get(key + MOVED)?.t);
+      // Once these bytes leave, a page of the earlier release that opens the canvas finds none and writes its own (an
+      // empty planning conversation): such bytes are never taken over what this store holds. Stored before the bytes go.
+      if (settled && seen.s) writeEntry(scope, key + MOVED, JSON.stringify({ h: seen.h, s: null }));
+      if (removedAfterTaking(adoption) || settled) scope.moved.push({ key, raw, hash });
     }
     if (scope.moved.length) schedule(0);
   }
@@ -608,7 +620,10 @@ export function createCanvasStore(options: CanvasStoreOptions): CanvasStore {
         // The value's stamp is not known before stamping; marked for a later opening by its hash alone.
         items.push({ k: key + MOVED, v: JSON.stringify({ h: [...seen.h, hash].slice(-8), s: takes ? null : seen.s }) });
       }
-      if (removedAfterTaking(adoption)) remove.push({ key, raw });
+      const settled = !removedAfterTaking(adoption) && seen.h.includes(hash) && settledCopy(stored.get(key + MOVED)?.t);
+      // As in adoptLegacy: bytes that come back after these leave are never taken over (written before they go).
+      if (settled && seen.s) items.push({ k: key + MOVED, v: JSON.stringify({ h: seen.h, s: null }) });
+      if (removedAfterTaking(adoption) || settled) remove.push({ key, raw });
     }
     if (items.length) {
       const list = stampJustAbove(stored, items);
