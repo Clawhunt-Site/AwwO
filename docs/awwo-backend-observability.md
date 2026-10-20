@@ -81,7 +81,7 @@ Go exporter 使用有界批处理队列，worker 使用有界 JSON OTLP 队列�
 | --- | --- | --- |
 | `/tenants/{tenantId}/usage` | tenant admin / owner | 必填 `from,to,groupBy`；可选 `pageSize,cursor`；`{items,page:{nextCursor},freshness}` |
 | `/tenants/{tenantId}/runs/{id}/invocations` | tenant reader / member / admin / owner | 可选 `pageSize,cursor`；同一租户存在的 run；`{items,page:{nextCursor},freshness}` |
-| `/admin/observability/summary` | platform admin | 可选成对的 `from,to`，默认最近 24h；可选精确 `tenantId`；`{summary,freshness}` |
+| `/admin/observability/summary` | platform admin | 可选成对的 `from,to`，默认截至数据库时钟的最近 24h；可选精确 `tenantId`；`{summary,freshness}` |
 | `/admin/observability/invocations/{id}` | platform admin | 精确 invocation ID；`{invocation}`；读取成功同事务写审计 |
 
 非本租户成员或跨租户 run 返回 404，租户内角色不足返回 403。reader / member 的 invocation DTO **完全没有** `costStatus,estimatedCostMicrousd,currency,pricingVersion,priceSnapshot` 这些 key，不能仅赋 null。admin / owner 可见费用字段；平台单条查看也可见，审计 action 为 `observability.invocation.read`。平台 summary 指定 `tenantId` 时审计 `observability.summary.read`，不提供默认租户排行榜。

@@ -367,9 +367,9 @@ func (a *App) adminInvocation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"invocation": item})
 }
 func (a *App) adminUsageSummary(w http.ResponseWriter, r *http.Request) {
-	to := time.Now().UTC()
-	from := to.Add(-24 * time.Hour)
-	if r.URL.Query().Has("from") || r.URL.Query().Has("to") {
+	var from, to time.Time
+	ranged := r.URL.Query().Has("from") || r.URL.Query().Has("to")
+	if ranged {
 		var ok bool
 		from, to, ok = usageRange(w, r)
 		if !ok {
@@ -393,6 +393,13 @@ func (a *App) adminUsageSummary(w http.ResponseWriter, r *http.Request) {
 	if e = tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&asOf); e != nil {
 		usageUnavailable(w, r)
 		return
+	}
+	// Without a range the summary is of the day up to the database's clock, which stamps completed_at: a day ending at
+	// time.Now() would leave out calls that have just completed while the database's clock runs ahead of this process's.
+	// Its asOf is given in UTC, the zone the API's ranges are given in.
+	if !ranged {
+		asOf = asOf.UTC()
+		from, to = asOf.Add(-24*time.Hour), asOf
 	}
 	if to.Before(asOf) {
 		asOf = to
