@@ -212,6 +212,9 @@ const shiftView = (view: ViewportState, by: number): ViewportState => by ? { ...
 type OpenFit = { id: string; frame?: { w: number; h: number }; view: ViewportState; narrow?: number; content: OpenContent; resized?: boolean };
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
 const REFIT_DEBOUNCE_MS = 150;
+/** Tile previews (persistPreview) are written together once their reports pause this long, and at least this often. */
+const PREVIEW_QUIET_MS = 120;
+const PREVIEW_MAX_WAIT_MS = 600;
 /** A camera within this many pixels of the one the app fitted, at the same scale, is still the app's.
  * A click or tap on the background wobbles a few pixels (the viewport's own tap slop is 3px for a mouse
  * and 10px for touch) and a wheel tick at a clamped scale returns the same camera: neither is the
@@ -1514,6 +1517,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return () => clearInterval(t);
   }, [running]);
 
+  // Writes the tiles' last lines that wait to be written (writePreviews, set below) at once. A node setup and a run take
+  // them in first, as they did when each line was written as it came: neither takes an edit to its nodes once it starts.
+  const writePreviewsNow = useRef<() => void>(() => {});
+
   /**
     * Run some or all of the graph.
     *
@@ -1528,6 +1535,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const sessionScope = scope?.filter(id => docRef.current.nodes.some(node => node.id === id && node.kind === 'session'));
     if (sessionScope?.length === 0) return docRef.current;
     if (setupRequest.current) throw new Error(locale === 'zh' ? '节点正在准备，请稍候。' : 'Nodes are being prepared. Please wait.');
+    writePreviewsNow.current();
     const controller = new AbortController();
     setupRequest.current = controller; setInitializing(true); setHandoffNote('');
     try {
@@ -1548,6 +1556,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
+    writePreviewsNow.current();
     // Image, video and 3D nodes generate in a canvas or component run like any other node (graph_media.go on the
     // server), each one generation on today's allowance. A collaboration discusses in text, so it still leaves them
     // out (runScopeWithoutMedia). A whole-canvas run stays one: `whole`.
@@ -2025,25 +2034,63 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The glance LOD can only render `node.preview` — a far-away tile has no transcript loaded — so
   // the last line has to be persisted onto the document when a tile's stream settles. Guarded to a
   // real change so it never re-saves the document on an identical value.
+  // A tile reports it from an effect of the render that settled its history, and opening a canvas settles every tile's
+  // at once. Written one by one, each report re-rendered and saved the whole canvas, and a run of them back to back
+  // counted as an update loop (React error #185 on a 142-node canvas, 2026-10-19). So reports wait a moment and are
+  // written together, in one machine write, outside the render that made them: as if those tiles had settled then.
+  const pendingPreviews = useRef(new globalThis.Map<string, { nodeId: string; preview: string; threadId?: string }>());
+  const previewWrite = useRef<{ timer: ReturnType<typeof setTimeout>; since: number } | null>(null);
+  const writePreviews = useCallback(() => {
+    if (previewWrite.current) clearTimeout(previewWrite.current.timer);
+    previewWrite.current = null;
+    if (!pendingPreviews.current.size) return;
+    // A page that cannot write at all drops them. One that takes no edit for a while keeps them until it does: they were
+    // made before that began (a setup or a run started here takes them first; a review loop or a collaboration another
+    // tab started holds the canvas without asking).
+    if (readOnlyRef.current || outdatedObserver.current) { pendingPreviews.current.clear(); return; }
+    if (setupRequest.current || laneGuard.current.exclusive()) {
+      previewWrite.current = { since: performance.now(), timer: setTimeout(writePreviews, PREVIEW_MAX_WAIT_MS) };
+      return;
+    }
+    // Recovery can briefly display a previously loaded transcript while another tab has
+    // already saved the final document. Never write that stale tail back into its preview.
+    // With lanes, only the nodes a run executes are recovering; every other node keeps its preview.
+    const busy = laneGuard.current.busy();
+    const reports = new globalThis.Map<string, Array<{ preview: string; threadId?: string }>>();
+    for (const report of pendingPreviews.current.values()) {
+      if (!busy.has(report.nodeId)) reports.set(report.nodeId, [...(reports.get(report.nodeId) ?? []), report]);
+    }
+    pendingPreviews.current.clear();
+    if (!reports.size) return;
+    patchDoc((prev) => {
+      let changed = false;
+      const nodes = prev.nodes.map((node) => {
+        let next = node;
+        for (const report of reports.get(node.id) ?? []) {
+          if (next.kind === 'session') next = updateThreadPreview(next, report.threadId ?? activeThreadId(next), report.preview);
+        }
+        if (next !== node) changed = true;
+        return next;
+      });
+      return changed ? { ...prev, nodes } : prev;
+    }, { silent: true });
+  }, [patchDoc]);
+  writePreviewsNow.current = writePreviews;
   const persistPreview = useCallback(
     (nodeId: string, preview: string, threadId?: string) => {
-      // Recovery can briefly display a previously loaded transcript while another tab has
-      // already saved the final document. Never write that stale tail back into its preview.
-      // With lanes, only the nodes a run executes are recovering; every other node keeps its preview.
-      if (laneGuard.current.busy().has(nodeId)) return;
-      patchDoc((prev) => {
-        const target = prev.nodes.find((n) => n.id === nodeId);
-        if (!target || target.kind !== 'session') return prev;
-        const next = updateThreadPreview(target, threadId ?? activeThreadId(target), preview);
-        if (next === target) return prev;
-        return {
-          ...prev,
-          nodes: prev.nodes.map((n) => n.id === nodeId ? next : n),
-        };
-      }, { silent: true });
+      // A report the write would refuse now is dropped now (patchDoc's own refusals), as a write made at once was.
+      if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || laneGuard.current.exclusive()
+        || laneGuard.current.busy().has(nodeId)) return;
+      pendingPreviews.current.set(`${nodeId}\u0000${threadId ?? ''}`, { nodeId, preview, threadId });
+      // Written once the reports pause, and at least every PREVIEW_MAX_WAIT_MS while they keep coming.
+      const now = performance.now();
+      const since = previewWrite.current?.since ?? now;
+      if (previewWrite.current) clearTimeout(previewWrite.current.timer);
+      previewWrite.current = { since, timer: setTimeout(writePreviews, Math.max(0, Math.min(PREVIEW_QUIET_MS, since + PREVIEW_MAX_WAIT_MS - now))) };
     },
-    [patchDoc],
+    [writePreviews],
   );
+  useEffect(() => () => { if (previewWrite.current) clearTimeout(previewWrite.current.timer); }, []);
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
     // Once a node's own run executes, its draft belongs to that run's acceptance (as with the single run before lanes);
@@ -2882,6 +2929,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (blocked !== null) { if (blocked) setPlanningError(blocked); return; }
     const prompt = (request ?? planning.draft).trim();
     if (!prompt) return;
+    // The plan is for this document, and one that changes before it lands is refused (plan_stale): the tiles' waiting
+    // last lines go in first, as they did when each was written as it came.
+    writePreviews();
     const snapshot = docRef.current;
     const revision = canvasPlanRevision(snapshot);
     const id = `plan-${Date.now()}-${++planningSequence.current}`;
