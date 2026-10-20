@@ -467,8 +467,17 @@ export const SessionTile = memo(function SessionTile({
   // (deliverablesShown).
   const drawerShown = deliverablesShown(node, deliveryBeside);
   const [deliverablesOpen, setDeliverablesOpen] = useState(drawerShown);
-  // Before paint: a drawer that should not show on this stage must not flash open for a frame.
+  // Whether the drawer's form has been changed (updateDeliverables) since the node last showed a delivery: an edit of it
+  // takes that delivery back until the form is published again (invalidateOutputs).
+  const [formEdited, setFormEdited] = useState(false);
+  const editing = formEdited && node.kind === 'session' && !node.lastOutput;
+  useLayoutEffect(() => { if (formEdited && !editing) setFormEdited(false); }, [formEdited, editing]);
+  // Before paint: a drawer that should not show on this stage must not flash open for a frame. Nor does an edit of its
+  // form close it: a drawer that opened by itself for the delivery the edit took back would close under the reader's
+  // keystroke, its form editor with it. It stays open as the reader has it, and nothing is recorded, so the drawer's own
+  // rule is unchanged for the publication and after it.
   useLayoutEffect(() => {
+    if (!drawerShown && editing) return;
     setDeliverablesOpen(drawerShown);
     if (!drawerShown) setDeliverablesEditorOpen(false);
   }, [drawerShown]);
@@ -800,6 +809,12 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
+  // What the drawer's form changes (an edit of NodeDeliverables' fields, or the publication that ends them) keeps the
+  // drawer open while it has taken the delivery back (above).
+  const updateDeliverables = (next: CanvasNode) => {
+    if (next.kind === 'session') setFormEdited(true);
+    onUpdateNode?.(next);
+  };
   const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
   const editDeliverableForm = () => {
     setTemplateOpen(false);
@@ -1025,7 +1040,7 @@ export const SessionTile = memo(function SessionTile({
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode}
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode ? updateDeliverables : undefined}
                   editorOpen={deliverablesEditorOpen}
                   editorRequest={deliverablesEditorRequest}
                   canvasEntries={canvasEntries}

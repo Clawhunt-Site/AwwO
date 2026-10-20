@@ -1,13 +1,15 @@
 // An opened node shows what it was asked, what it made and how its last run ended, at a size its content can use
 // (owner request 2026-10-15: opened components did not show their context in full, in either mode).
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { SessionTile } from '../src/canvas/SessionTile';
+import { SessionTile, type SessionTileProps } from '../src/canvas/SessionTile';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
-import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { createSessionNode, type CanvasDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
+import { createNodeThread, getNodeThreads } from '../src/canvas/nodeThreads';
 import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { looksLikeCode } from '../src/canvas/codeLike';
 import { DeliverableMarkdown } from '../src/canvas/DeliverableMarkdown';
@@ -645,6 +647,102 @@ describe('an opened node that has delivered', () => {
     expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
     second();
     render(<SessionTile node={delivered({ lastOutput: { text: '{"result":"## 半"}', source: 'run', at: 1, partial: true } })} scale={1} focused />);
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+  });
+
+  const contract = (value = '') => ({ version: 1 as const, inputs: [], outputs: [{ id: 'result', label: '交付结果', type: 'markdown' as const, required: true, value }] });
+  /** The opened tile held as the canvas holds it: an update lands in the event that made it, through the canvas's
+   *  freshness rule (invalidateOutputs takes back a delivery an edit of the form replaces), unless the canvas refuses
+   *  it (`refusing`). `saved` is the node the canvas holds; `show` draws it with other props, `put` puts another in. */
+  const hosted = (from: SessionNode, props: Partial<SessionTileProps> = {}) => {
+    const host = { saved: from, refusing: false, replace: (_node: SessionNode) => {} };
+    const doc = (node: CanvasNode): CanvasDocument => ({ version: 2, updatedAt: 0, nodes: [node], edges: [], waypoints: [], view: null });
+    function Host(extra: Partial<SessionTileProps>) {
+      const [node, setNode] = useState(from);
+      host.saved = node;
+      host.replace = setNode;
+      return <SessionTile node={node} scale={1} focused {...extra} onUpdateNode={next => {
+        if (!host.refusing) setNode(invalidateOutputs(doc(node), doc(next)).nodes[0] as SessionNode);
+      }} />;
+    }
+    const view = render(<Host {...props} />);
+    return Object.assign(host, {
+      show: (extra: Partial<SessionTileProps>) => view.rerender(<Host {...props} {...extra} />),
+      put: (node: SessionNode) => act(() => host.replace(node)),
+      unmount: view.unmount,
+    });
+  };
+  /** A delivered node whose conversation keeps its delivery, as the canvas stores a node once it has talked or run. */
+  const talked = (extra: Partial<SessionNode> = {}) => {
+    const node = delivered({ contract: contract(), ...extra });
+    return { ...node, threads: getNodeThreads(node) };
+  };
+  const drawerOf = () => within(screen.getByRole('region', { name: '交付物' }));
+  const openForm = () => fireEvent.click(drawerOf().getByText('编辑输出表单'));
+  const type = (value: string) => fireEvent.change(screen.getByLabelText('交付结果的值'), { target: { value } });
+  const publish = () => fireEvent.click(drawerOf().getByRole('button', { name: '发布输出' }));
+
+  it('keeps its drawer open, the form editor too, while an edit of the output form takes the delivery back', () => {
+    const host = hosted(talked());
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openForm();
+    type('## 第二版');
+    // The canvas took the delivery back; the drawer shows the conversation's earlier one as history, and nothing about
+    // the drawer was recorded.
+    expect(host.saved.lastOutput).toBeNull();
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(within(drawer).getByText('历史交付 · 未传递给下游')).toBeTruthy();
+    expect(within(drawer).getByText('编辑输出表单').closest('details')).toHaveAttribute('open');
+    expect(screen.getByLabelText('交付结果的值')).toHaveValue('## 第二版');
+  });
+
+  it('publishes from the drawer it kept open, which then opens by itself for the new delivery', () => {
+    const host = hosted(talked());
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openForm();
+    type('## 第');
+    type('## 第二版');
+    publish();
+    expect(host.saved.lastOutput).toMatchObject({ text: '{"result":"## 第二版"}', source: 'manual' });
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    // Taken back later by something else (an output upstream replaced), the delivery takes its drawer with it, as before.
+    host.put({ ...host.saved, lastOutput: null });
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+  });
+
+  it('leaves the drawer as the reader has it once the edit has ended without a delivery, and its closing to the canvas', () => {
+    const onToggleDeliverables = vi.fn();
+    const from = talked();
+    const host = hosted(from, { onToggleDeliverables });
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openForm();
+    type('## 第二版');
+    // An undo: the earlier form again, its delivery not back (restoreDoc takes it back again).
+    host.put({ ...from, lastOutput: null });
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    // A run: it shows the drawer's view without a delivery until the run delivers.
+    host.show({ run: { state: 'running' } });
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    host.show({ run: { state: 'done' } });
+    // Closing it is the reader's, handed to the canvas as ever; nothing else was asked of it.
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(onToggleDeliverables.mock.calls).toEqual([[from.id, false]]);
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+  });
+
+  it('closes a drawer that opened by itself when something else takes its delivery back', () => {
+    const host = hosted(talked());
+    openForm();
+    // The canvas refused the edit (a run of another lane, say): the delivery stays, and so does the drawer.
+    host.refusing = true;
+    type('## 第二版');
+    expect(host.saved.lastOutput).toMatchObject({ source: 'run' });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    // Then a new conversation, which starts with no delivery: the drawer closes, as it did before.
+    host.put(createNodeThread(host.saved));
     expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
   });
 

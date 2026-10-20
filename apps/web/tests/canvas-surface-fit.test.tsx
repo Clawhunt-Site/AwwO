@@ -1581,6 +1581,55 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
   });
 
+  it('keeps a drawer that opened by itself open, its form editor too, while the reader edits a delivered value and publishes it', async () => {
+    // Editing the value takes the delivery back until it is published again (invalidateOutputs). The first keystroke
+    // used to close the drawer and its editor with it (2026-10-20), so publishing took 展开交付物 and 编辑输出表单 again.
+    const contract = { version: 1 as const, inputs: [], outputs: [{ id: 'result', label: 'Result', type: 'markdown' as const, required: true, value: '' }] };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered({ contract, lastOutput: { text: '{"result":"## 关卡规格"}', source: 'run', at: 1 } })));
+    const { world, tile } = await openOn({ w: 1600, h: 1000 });
+    const drawer = within(tile).getByRole('region', { name: '交付物' });
+    // The camera the opening glide lands on: under load its last frame can come after openOn's wait.
+    for (let landed = '', waits = 0; landed !== world.style.transform; waits += 1) {
+      if (waits === 10) throw new Error(`the opening glide never landed: ${world.style.transform}`);
+      landed = world.style.transform;
+      await glideDone();
+    }
+    const camera = world.style.transform;
+    const size = [tile.style.width, tile.style.height];
+    fireEvent.click(within(drawer).getByText('编辑输出表单'));
+    const field = within(drawer).getByLabelText('Result的值');
+    field.focus();
+    fireEvent.change(field, { target: { value: '## 关卡规格（第二' } });
+    await waitFor(() => expect(saved().lastOutput ?? null).toBeNull(), { timeout: 3000 });
+    // Nothing about the drawer is recorded.
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    // Past the refit the canvas would make for the delivery it took back, and its glide: the same drawer with its
+    // editor open, the same field focused and taking the next keystroke, the node where it was.
+    await settle();
+    await glideDone();
+    expect(screen.getByTestId('canvas-tile-s1')).toBe(tile);
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(within(tile).getByRole('button', { name: '收起交付物' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(drawer).getByText('编辑输出表单').closest('details')).toHaveAttribute('open');
+    expect(within(drawer).getByLabelText('Result的值')).toBe(field);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: '## 关卡规格（第二版）' } });
+    expect(field).toHaveValue('## 关卡规格（第二版）');
+    expect(world.style.transform).toBe(camera);
+    expect([tile.style.width, tile.style.height]).toEqual(size);
+    // Published where the reader is, nothing opened again: the drawer opens by itself for the new delivery.
+    fireEvent.click(within(drawer).getByRole('button', { name: '发布输出' }));
+    await waitFor(() => expect(saved().lastOutput).toMatchObject({ text: '{"result":"## 关卡规格（第二版）"}', source: 'manual' }), { timeout: 3000 });
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    await settle();
+    await glideDone();
+    expect(screen.getByTestId('canvas-tile-s1')).toBe(tile);
+    expect(within(drawer).getByRole('heading', { name: '关卡规格（第二版）' })).toBeTruthy();
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(world.style.transform).toBe(camera);
+    expect([tile.style.width, tile.style.height]).toEqual(size);
+  });
+
   it('keeps the drawer closed by default on a stage where it would cover the conversation', async () => {
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered()));
     const { tile } = await openOn({ w: 800, h: 700 });
