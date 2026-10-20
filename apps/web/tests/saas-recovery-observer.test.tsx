@@ -234,3 +234,44 @@ it.each([false, true])('retries its own unsaved recovery output after changing f
   expect(saved.nodes.map((node: any) => node.lastOutput?.text)).toEqual(['Delivered a', 'Delivered b']);
   expect(screen.queryByText(/This page has an older canvas/)).toBeNull();
 });
+
+// 2026-10-20: where the assistant's sidebar leaves an open node no readable room, the assistant steps aside for the node
+// and a focus left in its panel goes to its toggle (canvas-surface-fit). A collaboration this page sees finish opens its
+// lead node after awaiting the server, outside any event, and React draws that in a task of its own, which a frame can
+// come before: the focus moved at the next frame found the panel still there and left the focus to the page.
+it('hands a focus in the assistant to its toggle when a finished collaboration opens its lead node, frames passing before that is drawn', async () => {
+  // A 600 px stage, of which the sidebar covers 340 px.
+  const box = (width: number) => ({ x: 0, y: 0, top: 0, left: 0, right: width, bottom: 900, width, height: 900, toJSON: () => ({}) } as DOMRect);
+  const measure = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.classList.contains('canvas-root') || this.classList.contains('canvas-viewport')) return box(600);
+    if (this.classList.contains('awwo-planner-sidebar')) return box((this as HTMLElement).hidden ? 0 : 340);
+    return measure.call(this);
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('awwo-planner-sidebar') && !this.hidden ? 340 : 0;
+  });
+  const doc = document(); seed(doc);
+  const policy = { goal: 'Review the solution', rounds: 1, maxModelCalls: 5, synthesizerNodeId: 'a', turns: [] };
+  saveRunJournal(graphRecoveryJournal({ ...snapshot(doc), status: 'running', collaboration: { ...policy, phase: 'proposal', round: 0 },
+    nodes: [{ nodeId: 'a', state: 'running' }, { nodeId: 'b', state: 'running' }] }, tenant.id, doc));
+  let resolveRead!: (value: Response) => void;
+  const fetcher = fetchGraph(() => new Promise(resolve => { resolveRead = resolve; }));
+  renderCanvas();
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => String(url).includes('/graph-runs/'))).toBe(true));
+  const toggle = () => screen.getByRole('button', { name: 'Canvas assistant', exact: true });
+  const side = () => window.document.querySelector<HTMLElement>('.awwo-planner-sidebar');
+  fireEvent.click(toggle());
+  await waitFor(() => expect(side()?.hidden).toBe(false));
+  within(side()!).getByRole('textbox', { name: 'Canvas request' }).focus();
+  // act holds React's drawing until its callback ends: the poll reads the finished run and opens its lead node, then two
+  // frames pass, then that is drawn.
+  await act(async () => {
+    resolveRead(json({ ...snapshot(doc), collaboration: { ...policy, phase: 'synthesis', round: 1 },
+      nodes: [{ nodeId: 'a', state: 'done', output: 'Delivered a', partial: false }, { nodeId: 'b', state: 'done', output: 'Delivered b' }] }));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  expect(screen.getByTestId('canvas-tile-a').dataset.lod).toBe('focus');
+  expect(side()!.hidden).toBe(true);
+  await waitFor(() => expect(toggle()).toHaveFocus());
+});

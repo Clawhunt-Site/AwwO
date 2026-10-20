@@ -1208,6 +1208,43 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     expect(shown(), 'the reader brought it back').toBe(true);
   });
 
+  /** A node open beside the assistant on the 1400 px stage, the stage about to narrow to 600 px under it (as above). */
+  const openBesideAssistant = async () => {
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    render(<CanvasSurface />);
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    const side = () => document.querySelector<HTMLElement>('.awwo-planner-sidebar');
+    await waitFor(() => expect(side()?.hidden).toBe(false));
+    await settle();
+    await openNode();
+    expect(side()!.hidden).toBe(false);
+    layout = { ...layout, w: 600, sidebar: 340 };
+    return { box: within(side()!).getByRole('textbox'), stowed: () => side()!.hidden, deliver: () => deliveries.forEach(deliver => deliver()) };
+  };
+
+  // 2026-10-20: stepping aside hides the panel and keeps it mounted, so a focus in it stayed on its box, hidden but on
+  // the page, and the check that moves a lost focus left it there (a browser then drops it to the page). Where a
+  // recovered run's result opens its node and frames pass before that is drawn: saas-recovery-observer.
+  it('hands a focus left in the assistant to its toggle when it steps aside for the open node', async () => {
+    const assistant = await openBesideAssistant();
+    assistant.box.focus();
+    act(assistant.deliver);
+    await waitFor(() => expect(assistant.stowed()).toBe(true));
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  it('leaves a focus outside the assistant where it is when the assistant steps aside', async () => {
+    const assistant = await openBesideAssistant();
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus();
+    act(assistant.deliver);
+    await waitFor(() => expect(assistant.stowed()).toBe(true));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(search).toHaveFocus();
+  });
+
   it('judges the camera a node configured before the first size returns to on the board as it is once Configure closes', async () => {
     // At 900 px and below Configure lifts the board over the sidebar, so the first fit judged the saved camera (the card
     // at x 60, under the 340 px sidebar) on the whole stage and kept it: closing Configure and then the node returned the

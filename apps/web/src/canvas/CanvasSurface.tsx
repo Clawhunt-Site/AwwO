@@ -992,10 +992,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The 成果 view needs something to show the steps of; an emptied canvas returns to the board.
   const showingResults = Boolean(results) && stageView === 'results' && nodes.length > 0;
   useEffect(() => { if (stageView === 'results' && !nodes.length) changeStageView('canvas'); }, [stageView, nodes.length, changeStageView]);
-  // After a control that had focus goes away (it unmounted or its view closed), focus moves to `selector`.
+  // After a control that had focus goes away (it unmounted, its view closed, or a part of the page around it was hidden,
+  // as the assistant's panel is when it steps aside), focus moves to `selector`.
   const moveLostFocus = useCallback((selector: string) => {
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    if (active && active !== document.body && active.isConnected && !active.closest('[hidden]')) return;
     rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
   }, []);
   // At the next frame, by which React has drawn a change made in a click or a key press. A change made after awaiting
@@ -3811,13 +3812,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
-  // Stepped aside for the open node (focusNode): mounted, not drawn. Focus inside it goes to the toggle.
+  // Stepped aside for the open node (focusNode): mounted, not drawn. Focus inside it goes to the toggle, in the commit
+  // that hides it: a node opens there after awaiting the server too (a recovered run's result), in an effect (the stage
+  // narrowing under it) or in a frame.
   const assistantStowed = Boolean(assistantPanel) && stowedFor !== null && stowedFor === focusedId;
   assistantStowedRef.current = assistantStowed;
   stowAssistantRef.current = (nodeId: string) => {
     if (!assistantPanel) return;
     setStowedFor(nodeId);
-    refocus('.awwo-assistant-toggle');
+    refocusInCommit('.awwo-assistant-toggle');
   };
   const panelShown = Boolean(assistantPanel) && !assistantStowed;
   // What the stage says the assistant is doing (StageActivity.tsx): a message being handled, a plan being made, or the
