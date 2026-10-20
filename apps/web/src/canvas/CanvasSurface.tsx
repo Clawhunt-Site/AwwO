@@ -2405,6 +2405,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [canEditStructure, patchDoc, downstreamClosure, locale],
   );
+  // A part of a node its card changed (SessionTile's onPatchNode: its inputs, its outputs, a result published by hand),
+  // applied to the node as the document holds it now. A card's own copy is the node it last drew: two changes made
+  // before the next render would each put back what the other changed, or what the document cleared in between.
+  const patchNode = useCallback((nodeId: string, change: (node: SessionNode) => SessionNode) => {
+    const live = docRef.current.nodes.find(node => node.id === nodeId);
+    if (live?.kind === 'session') saveNode(change(live));
+  }, [saveNode]);
 
   // The inspector owns configuration, while cards own contracts and the transport owns thread IDs.
   const saveInspector = useCallback((draft: CanvasNode) => {
@@ -4205,6 +4212,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             onConfigure={simple ? undefined : tileOnConfigure}
             configurationPanel={!canInitialize && node.kind === 'session' && focusedId === node.id && inspectorId === node.id ? renderInspector(node, true) : null}
             onUpdateNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked ? undefined : saveNode}
+            onPatchNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked ? undefined : patchNode}
             onRunNode={readOnly || busyNow.has(node.id) || exclusiveNow || initializing || runUnavailableReason ? undefined : rerunNode}
             onDelete={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : tileDelete}
             modelChoices={tileModelChoices(node)}

@@ -29,8 +29,8 @@
 //  - An unbound tile's composer is disabled with the reason stated, never a live-looking box.
 //  - Unknown runtime/model/effort remain unset; a compact setup hint invents no selection.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Clapperboard, Code2, FileText, Image, Layers, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { AlertCircle, ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Clapperboard, Clock, Code2, FileText, Image, Layers, Loader2, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
@@ -43,6 +43,7 @@ import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
 import { mediaComposerInfo, TileComposer } from './TileComposer';
+import type { UploadCounts } from './ComposerAttachments';
 import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
@@ -347,6 +348,9 @@ export interface SessionTileProps {
   onDelete?: (nodeId: string) => void;
   /** The document owner records edits and preserves undo/redo and run locks. */
   onUpdateNode?: (node: CanvasNode) => void;
+  /** A part of the node this card changed (its inputs, its outputs, a result published by hand), which the document owner
+   *  applies to the node as its document holds it and records as onUpdateNode does. */
+  onPatchNode?: (nodeId: string, change: (node: SessionNode) => SessionNode) => void;
   onRunNode?: (nodeId: string) => void;
   /** Models this node's chat can switch to, shown as a picker in its composer (a stable array per node kind). */
   modelChoices?: ReadonlyArray<NodeModelChoice>;
@@ -412,6 +416,7 @@ export const SessionTile = memo(function SessionTile({
   onConfigure,
   onDelete,
   onUpdateNode,
+  onPatchNode,
   onRunNode,
   modelChoices,
   onChangeModel,
@@ -462,8 +467,19 @@ export const SessionTile = memo(function SessionTile({
     setTemplateOpen(false); setInputSchemaOpen(false); setInputOpen(true); setInputsTakeColumn(true);
   }, [inputRequest]);
   // Opened from the template guide's 编辑: the input drawer starts on its field structure, the deliverables drawer on
-  // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before.
+  // its form editor. Each resets when its drawer closes, so opening it the ordinary way shows values as before. The
+  // drawer's own structure toggle sets inputSchemaOpen too: the fields change mode without being mounted anew.
   const [inputSchemaOpen, setInputSchemaOpen] = useState(false);
+  // Uploads in the inputs' fields that are not files in them yet (going, waiting to be added, or failed). Closed inputs
+  // that still hold some only hide their fields: unmounted, the fields would end those uploads (ComposerAttachments).
+  const [inputUploads, setInputUploads] = useState<UploadCounts>({ pending: 0, waiting: 0, failed: 0 });
+  const onInputUploads = useCallback((next: UploadCounts) => setInputUploads(previous =>
+    previous.pending === next.pending && previous.waiting === next.waiting && previous.failed === next.failed ? previous : next), []);
+  const inputDrawerRef = useRef<HTMLElement>(null);
+  const inputHeldNoteId = useId();
+  const inputToggleRef = useRef<HTMLButtonElement>(null);
+  const sessionInputRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
   const [deliverablesEditorOpen, setDeliverablesEditorOpen] = useState(false);
   // Each press of the template guide's 编辑 opens the editor, also after the reader collapsed it.
   const [deliverablesEditorRequest, setDeliverablesEditorRequest] = useState(0);
@@ -798,9 +814,33 @@ export const SessionTile = memo(function SessionTile({
   const contract = sessionNode?.contract ?? emptyContract();
   const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.kind === 'edit' ? Clapperboard : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
     : node.agentKind === 'model3d' ? Box : node.agentKind === 'audio' ? Music : Bot;
+  // The inputs and the deliverables change their own part of the node, which the document owner applies to the node as
+  // its document holds it (onPatchNode), not to this render's copy. So two changes made before the next render (an
+  // input's file and an output's landing at once, as closed inputs go on uploading) put back neither what the other
+  // changed nor what the canvas cleared in between (a result an input change made stale, which would come back as if
+  // published by hand).
+  const writeNode = (change: (current: SessionNode) => SessionNode) => {
+    if (node.kind !== 'session') return;
+    if (onPatchNode) onPatchNode(nodeId, change);
+    else onUpdateNode?.(change(node));
+  };
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
-    onUpdateNode?.({ ...node, contract: { ...contract, inputs: fields } });
+    writeNode(current => ({ ...current, contract: { ...(current.contract ?? emptyContract()), inputs: fields } }));
+  };
+  // What the deliverables change, against this render's node: their outputs, or a result published by hand. A change of
+  // the drawer's form (an edit of NodeDeliverables' fields, or the publication that ends them) also starts or carries the
+  // edit in progress, which keeps the drawer open while it has taken the delivery back (above).
+  const updateDeliverables = (next: CanvasNode) => {
+    if (next.kind === 'session' && currentThread) {
+      setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery' });
+    }
+    if (next.kind !== 'session' || node.kind !== 'session') { onUpdateNode?.(next); return; }
+    writeNode(current => ({
+      ...current,
+      ...(next.contract?.outputs !== node.contract?.outputs ? { contract: { ...(current.contract ?? emptyContract()), outputs: next.contract?.outputs ?? [] } } : {}),
+      ...(next.lastOutput !== node.lastOutput ? { lastOutput: next.lastOutput } : {}),
+    }));
   };
   const changeThread = (id?: string) => {
     if (node.kind !== 'session' || busy) return;
@@ -823,14 +863,6 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else onUpdateNode?.({ ...node, deliverablesOpen: next });
   };
-  // What the drawer's form changes (an edit of NodeDeliverables' fields, or the publication that ends them) starts or
-  // carries the edit in progress, which keeps the drawer open while it has taken the delivery back (above).
-  const updateDeliverables = (next: CanvasNode) => {
-    if (next.kind === 'session' && currentThread) {
-      setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery' });
-    }
-    onUpdateNode?.(next);
-  };
   const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
   const editDeliverableForm = () => {
     setTemplateOpen(false);
@@ -838,10 +870,40 @@ export const SessionTile = memo(function SessionTile({
     setDeliverablesEditorRequest(count => count + 1);
     if (!deliverablesOpen) toggleDeliverables();
   };
-  const closeInput = () => { setInputOpen(false); setInputSchemaOpen(false); };
+  // Closed from its own button, the drawer would take the keyboard's focus with it to the page's body: the focus goes to
+  // the control that opens the inputs again, where there is none to the message box or the first control below them
+  // that takes it (the opened inputs hide the conversation's own, and a hidden control takes no focus), else to the
+  // node's own menu button. Only a focus inside the drawer moves (a click that focused nothing, as in Safari, leaves it
+  // where it was), and nothing scrolls for it (the canvas root clips, so a scroll would shift it).
+  const closeInput = () => {
+    if (inputDrawerRef.current?.contains(document.activeElement)) {
+      const below = chatRef.current?.querySelector('.awwo-node-panel--conversation');
+      const targets = [inputToggleRef.current, sessionInputRef.current, below?.querySelector<HTMLElement>('.canvas-composer-input:enabled'),
+        ...(below?.querySelectorAll<HTMLElement>(':is(button, textarea, select):enabled:not([tabindex="-1"])') ?? []), moreRef.current];
+      for (const target of targets) {
+        if (!target) continue;
+        target.focus({ preventScroll: true });
+        if (document.activeElement === target) break;
+      }
+    }
+    setInputOpen(false); setInputSchemaOpen(false);
+  };
   // The opened inputs take the column while no run is going (has-inputs): the replies wait, and a rework note's findings
   // in a short column, or in a taller one where they would push the message box out (ReworkFindingsNote).
   const inputsHaveColumn = expanded && inputOpen && inputsTakeColumn && !active;
+  // Closed inputs whose fields still hold uploads keep the fields, hidden, until the last one is a file or dismissed. The
+  // toggle's description names each state they hold, its icon the one that most needs the reader (a failure, then a file
+  // waiting for its 加入, then an upload going); the live region below speaks the waiting files and failures as they come.
+  const inputsHeld = expanded && !inputOpen && inputUploads.pending + inputUploads.waiting + inputUploads.failed > 0;
+  const heldStates = (withPending: boolean) => t('tile.inputHeld', { states: [
+    ...(withPending && inputUploads.pending ? [t('tile.inputHeldUploading')] : []),
+    ...(inputUploads.waiting ? [t('tile.inputHeldWaiting')] : []),
+    ...(inputUploads.failed ? [t('tile.inputHeldFailed')] : []),
+  ].join(locale === 'zh' ? '，' : ', ') });
+  const inputsHeldNote = inputsHeld ? heldStates(true) : undefined;
+  const inputsHeldNews = inputsHeld && (inputUploads.waiting || inputUploads.failed) ? heldStates(false) : '';
+  const inputToggleIcon = !inputsHeld ? <ArrowDownToLine size={14} /> : inputUploads.failed ? <AlertCircle size={14} className="awwo-input-upload-failed" />
+    : inputUploads.waiting ? <Clock size={14} /> : <Loader2 size={14} className="awwo-attachment-spin" />;
   const emptyConversation = session.turns.length === 0 && !currentRunDetails && session.history !== 'loading' && session.history !== 'unreadable' && !session.streaming;
   // An enlarged card shows its deliverable instead of its one-line summary, once it is readable on screen. Only the
   // card's presented size counts: a node's own w/h is the size it opens at, not how large its card is drawn.
@@ -931,7 +993,7 @@ export const SessionTile = memo(function SessionTile({
           {onOpenStudio && node.lastOutput ? <button type="button" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={15} /></button> : null}
           {!simple && <NodeViewStylePicker />}
           {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
-          <button type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
+          <button ref={moreRef} type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
             {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />{t('tile.focus')}</button> : null}
             {onRunNode ? <button type="button" disabled={viewOnly || busy || (!node.binding && !initializeOnSend)} onClick={() => { if (!viewOnlyRef.current) onRunNode(nodeId); setMenuOpen(false); }}><Play size={14} />{t('tile.runNode')}</button> : null}
@@ -1008,7 +1070,7 @@ export const SessionTile = memo(function SessionTile({
                   disabled={busy || (!viewOnly && !onUpdateNode)} onClick={() => changeThread(thread.id)} title={thread.preview || threadTitle(thread.title, t)}>
                   <MessageSquare size={13} /><span>{threadTitle(thread.title, t)}</span>
                 </button>)}</div>
-                <button className="awwo-session-input" type="button" aria-expanded={inputOpen} onClick={toggleInputs}><ArrowDownToLine size={14} />{t('tile.input')}</button>
+                <button ref={sessionInputRef} className="awwo-session-input" type="button" aria-describedby={inputsHeld ? inputHeldNoteId : undefined} title={inputsHeldNote} aria-expanded={inputOpen} onClick={toggleInputs}>{inputToggleIcon}{t('tile.input')}</button>
               </nav> : null}
               <div ref={chatRef} className={`awwo-node-chat${shortColumn ? ' is-short' : ''}${inputsHaveColumn ? ' has-inputs' : ''}`}>
                 {expanded ? <div className="awwo-chat-heading">
@@ -1017,7 +1079,13 @@ export const SessionTile = memo(function SessionTile({
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
                   {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
                   {/* What the node receives: always in developer mode, where its fields are added, and in the simple view once it has inputs to fill. */}
-                  {!sessionsOpen && (!simple || (node.kind === 'session' && (node.contract?.inputs.length ?? 0) > 0)) ? <button className="awwo-input-toggle" type="button" aria-label={t('tile.input')} title={t('tile.inputForm')} aria-expanded={inputOpen} onClick={toggleInputs}><ArrowDownToLine size={14} />{simple ? <span>{t('tile.input')}</span> : null}</button> : null}
+                  {/* What closed inputs come to hold, said to a screen reader (their chips' own alerts are hidden with them): a
+                      failed upload or a file waiting for its 加入, whatever else still uploads. Mounted with the node, so a change
+                      of its words is spoken; an upload still going is not said here. The toggles keep their name and describe
+                      what the inputs hold (a change there is not spoken), so nothing is said twice. */}
+                  <p className="sr-only" aria-live="polite">{inputsHeldNews}</p>
+                  {inputsHeld ? <p id={inputHeldNoteId} hidden>{inputsHeldNote}</p> : null}
+                  {!sessionsOpen && (!simple || (node.kind === 'session' && (node.contract?.inputs.length ?? 0) > 0)) ? <button ref={inputToggleRef} className="awwo-input-toggle" type="button" aria-label={t('tile.input')} aria-describedby={inputsHeld ? inputHeldNoteId : undefined} title={inputsHeldNote ?? t('tile.inputForm')} aria-expanded={inputOpen} onClick={toggleInputs}>{inputToggleIcon}{simple ? <span>{t('tile.input')}</span> : null}</button> : null}
                 </div> : null}
                 {expanded && sessionNode && run?.state === 'failed' ? <NodeFailure detail={runDetail ?? ''}
                   onRerun={onRunNode && !viewOnly && !busy && (sessionNode.binding || initializeOnSend) ? () => onRunNode(nodeId) : undefined}
@@ -1025,9 +1093,11 @@ export const SessionTile = memo(function SessionTile({
                 {/* Beside the inputs or above a conversation the task card is one line until expanded, so what is being read keeps the column. */}
                 {expanded && sessionNode && !mediaNode && !(templateOpen && template) ? <NodeBrief key={nodeId} node={sessionNode} template={template}
                   modelLabel={modelLabel} compact={inputOpen || !emptyConversation} onAskAssistant={onAskAssistant && !viewOnly ? () => onAskAssistant(nodeId, 'edit') : undefined} /> : null}
-                {expanded && inputOpen ? <section className="awwo-input-drawer awwo-node-panel" aria-label={t('tile.inputForm')}>
-                  <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>
-                  <ContractFields key={inputSchemaOpen ? 'structure' : 'values'} valuesFirst initialEditingSchema={inputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} mediaMissing={preparedConversation.mediaMissing} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} />
+                {/* Held (closed with uploads in it), the same section keeps its fields hidden under another class, so none of
+                    the drawer's layout rules apply. */}
+                {(expanded && inputOpen) || inputsHeld ? <section ref={inputDrawerRef} className={inputsHeld ? 'awwo-input-held' : 'awwo-input-drawer awwo-node-panel'} hidden={inputsHeld} aria-label={t('tile.inputForm')}>
+                  {inputsHeld ? null : <header><strong>{t('tile.input')}</strong><button type="button" aria-label={t('tile.collapseInput')} onClick={closeInput}><X size={14} /></button></header>}
+                  <ContractFields valuesFirst editingSchema={inputSchemaOpen} onEditingSchemaChange={setInputSchemaOpen} structureEditable={!simple} fields={contract.inputs} resolvedFields={preparedConversation.inputs} sources={preparedConversation.sources} recorded={preparedConversation.recorded} mediaMissing={preparedConversation.mediaMissing} label={t('tile.input')} readOnly={readOnly} onChange={updateFields} onUploadsChange={onInputUploads} holdUploads />
                 </section> : null}
                 <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
                   {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} waiting={shortColumn && inputsHaveColumn} column={inputsHaveColumn ? chatRef : undefined} /> : null}

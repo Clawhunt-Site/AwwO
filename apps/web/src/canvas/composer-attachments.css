@@ -33,6 +33,15 @@ a.awwo-attachment-name:focus-visible { outline: 2px solid var(--awwo-accent, #28
 .awwo-attachment-remove:hover:not(:disabled) { color: var(--awwo-ink, #232c29); background: var(--awwo-accent-soft, #edf4ee); }
 .awwo-attachment-remove:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 1px; }
 .awwo-attachment-chip.is-pending { border-style: dashed; }
+/* A file that landed while its box was locked: added when its owner presses 加入 (ComposerAttachments' deferWhileDisabled).
+   Its chip says so beside the name, so it may grow wider to keep the name readable. */
+.awwo-attachment-chip.is-ready { max-width: min(360px, 100%); }
+.awwo-attachment-add {
+  flex: 0 0 auto; height: 22px; padding: 0 8px; border: 1px solid var(--awwo-accent, #286454); border-radius: 6px;
+  color: var(--awwo-accent, #286454); background: var(--awwo-accent-soft, #edf4ee); font: inherit; font-size: 11px; line-height: 1; cursor: pointer;
+}
+.awwo-attachment-add:disabled { cursor: not-allowed; opacity: .45; }
+.awwo-attachment-add:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 1px; }
 .awwo-attachment-chip.is-failed { border-color: #c9887f; }
 .awwo-attachment-chip.is-failed .awwo-attachment-icon { color: #a33f35; background: color-mix(in srgb, #a33f35 12%, transparent); }
 .awwo-attachment-chip.is-failed .awwo-attachment-meta { color: #a33f35; }

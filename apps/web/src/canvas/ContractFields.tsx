@@ -4,7 +4,7 @@ import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { validateContractFields, type ContractField, type ContractFieldType } from './nodeContracts';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 import type { MediaOutputKind } from './mediaOutput';
-import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
+import { AttachButton, AttachmentTray, useComposerAttachments, type UploadCounts } from './ComposerAttachments';
 import { canvasUploadsAvailable } from '../saas/canvasBridge';
 
 const FIELD_TYPES: Array<{ value: ContractFieldType; label: CanvasTextKey }> = [
@@ -34,25 +34,36 @@ export interface ContractFieldsProps {
   valuesFirst?: boolean;
   /** With valuesFirst: open with the field structure editable (rename, retype, add, remove). */
   initialEditingSchema?: boolean;
+  /** With valuesFirst: whether the field structure is being edited, kept by the caller with onEditingSchemaChange. Either
+   *  way the fields stay mounted, so an upload in one of them goes on. */
+  editingSchema?: boolean;
+  onEditingSchemaChange?: (editing: boolean) => void;
   /** With valuesFirst: offer to edit the field structure at all. The simple view only fills the values in. */
   structureEditable?: boolean;
   label: string;
+  /** Hears how many uploads the fields hold that are not files in them yet (ComposerAttachments' counts, summed). */
+  onUploadsChange?: (counts: UploadCounts) => void;
+  /** A file that lands while the fields are read-only (their node works) waits on its chip to be added by hand
+   *  (ComposerAttachments' deferWhileDisabled), where the read-only fields would refuse it. */
+  holdUploads?: boolean;
 }
 
 /** The serialized value always remains Markdown; preview never rewrites the source. A wired value is
  * another agent's delivery, so the preview renders it as inert as the delivery itself. */
-function MarkdownValue({ field, name, readOnly, onChange, placeholder, describedBy }: {
+function MarkdownValue({ field, name, readOnly, onChange, placeholder, describedBy, onUploadsChange, holdUploads }: {
   field: ContractField;
   name: string;
   readOnly: boolean;
   onChange: (value: string) => void;
   placeholder?: string;
   describedBy?: string;
+  onUploadsChange: (counts: UploadCounts) => void;
+  holdUploads: boolean;
 }) {
   const { locale, t } = useCanvasI18n();
   const [preview, setPreview] = useState(false);
   const editor = useRef<HTMLTextAreaElement>(null);
-  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true });
+  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true, deferWhileDisabled: holdUploads, onUploadsChange });
   const source = attach.body;
   const format = (before: string, after = '') => {
     if (readOnly) return;
@@ -94,7 +105,7 @@ function MarkdownValue({ field, name, readOnly, onChange, placeholder, described
 
 /** A file input: upload files of any type (the "+", a drop or a paste) or enter a path or link. Uploaded files are
  * kept as attachment lines in the value, so a run of this node takes them along (uploads.go). */
-function FileFieldValue({ field, name, readOnly, onChange, placeholder, describedBy, rows = 2 }: {
+function FileFieldValue({ field, name, readOnly, onChange, placeholder, describedBy, rows = 2, onUploadsChange, holdUploads }: {
   field: ContractField;
   name: string;
   readOnly: boolean;
@@ -102,9 +113,11 @@ function FileFieldValue({ field, name, readOnly, onChange, placeholder, describe
   placeholder?: string;
   describedBy?: string;
   rows?: number;
+  onUploadsChange: (counts: UploadCounts) => void;
+  holdUploads: boolean;
 }) {
   const { t } = useCanvasI18n();
-  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true });
+  const attach = useComposerAttachments({ value: field.value, onChange, disabled: readOnly, keepOnRemove: true, deferWhileDisabled: holdUploads, onUploadsChange });
   return <div className={`awwo-file-field${attach.dragging ? ' is-dropping' : ''}`} {...attach.dropProps}>
     <AttachmentTray state={attach} disabled={readOnly} />
     <div className="awwo-file-field-row">
@@ -115,17 +128,34 @@ function FileFieldValue({ field, name, readOnly, onChange, placeholder, describe
   </div>;
 }
 
-export function ContractFields({ fields, resolvedFields, sources, recorded, mediaMissing, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false, structureEditable = true, label }: ContractFieldsProps) {
+export function ContractFields({ fields, resolvedFields, sources, recorded, mediaMissing, onChange, readOnly = false, valuesFirst = false, initialEditingSchema = false,
+  editingSchema: editingSchemaProp, onEditingSchemaChange, structureEditable = true, label, onUploadsChange, holdUploads = false }: ContractFieldsProps) {
   const { locale, t } = useCanvasI18n();
   const instanceId = useId();
-  const [editingSchema, setEditingSchema] = useState(initialEditingSchema && !readOnly && structureEditable);
+  const [ownEditingSchema, setOwnEditingSchema] = useState(initialEditingSchema && !readOnly && structureEditable);
+  const editingSchema = structureEditable && (editingSchemaProp ?? ownEditingSchema);
+  const setEditingSchema = onEditingSchemaChange ?? setOwnEditingSchema;
   const showSchema = !valuesFirst || editingSchema;
   const nextField = useRef(0);
+  // Each field's box says what it holds; the form says the sum.
+  const fieldUploads = useRef(new Map<string, UploadCounts>());
+  const reportUploads = (id: string, counts: UploadCounts) => {
+    if (counts.pending || counts.waiting || counts.failed) fieldUploads.current.set(id, counts); else fieldUploads.current.delete(id);
+    const sum = { pending: 0, waiting: 0, failed: 0 };
+    for (const each of fieldUploads.current.values()) { sum.pending += each.pending; sum.waiting += each.waiting; sum.failed += each.failed; }
+    onUploadsChange?.(sum);
+  };
   // A wired value is checked once it arrives, as a run's preflight does: until then its field says it is waiting for
   // its source, and only what is filled in here can be missing.
   const errors = validateContractFields(resolvedFields ?? fields.filter(field => !sources?.[field.id]), locale);
+  // Patches made before the next render build on one another: files landing in two fields at the same moment are written
+  // one after the other, and each built from this render's fields, the later would drop the earlier.
+  const latestFields = useRef(fields);
+  latestFields.current = fields;
   const patch = (id: string, update: Partial<ContractField>) => {
-    if (!readOnly) onChange(fields.map((field) => field.id === id ? { ...field, ...update } : field));
+    if (readOnly) return;
+    latestFields.current = latestFields.current.map((field) => field.id === id ? { ...field, ...update } : field);
+    onChange(latestFields.current);
   };
   const add = () => {
     if (readOnly) return;
@@ -134,7 +164,7 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, medi
     onChange([...fields, { id, label: t('contract.defaultField', { count: fields.length + 1 }), type: 'text', required: false, value: '' }]);
   };
   return <section className="awwo-contract-fields" aria-label={t('contract.fields', { label })}>
-    {valuesFirst && !readOnly && structureEditable && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(value => !value)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
+    {valuesFirst && !readOnly && structureEditable && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(!editingSchema)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
     {fields.length === 0 ? <div className="awwo-contract-empty">{t('contract.empty', { label })}</div> : null}
     {fields.map((field, index) => {
       const name = field.label || t('contract.defaultField', { count: index + 1 });
@@ -173,13 +203,14 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, medi
           disabled={readOnly} onChange={(event) => patch(field.id, { required: event.target.checked })} />{t('contract.required')}</label></> : <div className="awwo-field-value-label"><strong>{name}</strong>{field.required && <span>{t('contract.required')}</span>}</div>}
         {helpId ? <p className="awwo-field-help" id={helpId}>{field.help}</p> : null}
         {source && <p className="awwo-field-hint">{mediaNote || t(resolvedFields ? (recorded?.[field.id] ? 'contract.sourceCase' : 'contract.sourceResolved') : 'contract.sourceWaiting', { source })}</p>}
-        {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })} />
+        {field.type === 'markdown' ? <MarkdownValue field={displayed} name={name} readOnly={valueReadOnly} placeholder={field.placeholder} describedBy={helpId} onChange={(value) => patch(field.id, { value })}
+          onUploadsChange={counts => reportUploads(field.id, counts)} holdUploads={holdUploads} />
           : field.type === 'boolean' ? <select className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             onChange={(event) => patch(field.id, { value: event.target.value })}>
             <option value="">{field.placeholder ?? t('contract.choose')}</option><option value="true">{t('contract.yes')}</option><option value="false">{t('contract.no')}</option>
           </select>
           : field.type === 'file' || field.type === 'text' ? <FileFieldValue field={displayed} name={name} readOnly={valueReadOnly} describedBy={helpId}
-            rows={field.type === 'text' ? 3 : 2}
+            rows={field.type === 'text' ? 3 : 2} onUploadsChange={counts => reportUploads(field.id, counts)} holdUploads={holdUploads}
             placeholder={field.placeholder ?? t(field.type === 'file' ? 'contract.filePlaceholder' : 'contract.textPlaceholder')} onChange={(value) => patch(field.id, { value })} />
           : <textarea className="awwo-field-value" aria-label={t('contract.value', { name })} aria-describedby={helpId} value={displayed.value} disabled={valueReadOnly}
             inputMode={field.type === 'number' ? 'decimal' : undefined} rows={field.type === 'html' ? 6 : 2}

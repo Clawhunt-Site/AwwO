@@ -2,7 +2,7 @@
 // one chip per file. The draft text stays the single source of truth: an uploaded file becomes a line at its end
 // (attachments.ts), so whatever already keeps, recovers or sends a draft keeps, recovers and sends its files too.
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
 import { AlertCircle, Box, File as FileIcon, FileArchive, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, Plus, X } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import {
@@ -13,7 +13,12 @@ import { canvasUploadsAvailable, deleteCanvasUpload, storedArtifactUrl, storedMe
 import { saasErrorMessage } from '../saas/api';
 import './composer-attachments.css';
 
-interface PendingUpload { key: string; name: string; size: number; progress: number; error?: string; controller?: AbortController }
+/** `ready`: uploaded while the box was disabled, waiting on its chip to be added by hand (deferWhileDisabled). */
+interface PendingUpload { key: string; name: string; size: number; progress: number; error?: string; controller?: AbortController; ready?: ComposerAttachment }
+
+/** A box's chips that are not attached files yet: uploads still going, files uploaded and waiting to be added
+ *  (deferWhileDisabled), and failed uploads not dismissed. */
+export interface UploadCounts { pending: number; waiting: number; failed: number }
 
 export interface ComposerAttachmentsOptions {
   /** The whole draft, attachment lines included. */
@@ -25,13 +30,21 @@ export interface ComposerAttachmentsOptions {
   max?: number;
   /** A file input's value may already have gone with a run, so taking a chip back never deletes the file. */
   keepOnRemove?: boolean;
+  /** For a value its owner locks while the box is disabled (a node's inputs while it works). A finished upload keeps its
+   *  chip until the file is in the value, so an add the owner refuses leaves it to try again; it is added at once only
+   *  where the box stayed enabled while it uploaded. Otherwise (a lock came, which may have been a run of the node: adding
+   *  the file after it on its own would clear what the run made) it waits on its chip for its 加入, pressable once the box
+   *  is enabled. Without this option a file is added as it lands and its chip goes. */
+  deferWhileDisabled?: boolean;
+  /** Hears the box's counts whenever they change, and none left once it unmounts (which ends its uploads). */
+  onUploadsChange?: (counts: UploadCounts) => void;
 }
 
-export function useComposerAttachments({ value, onChange, nodeId, disabled = false, max = MAX_COMPOSER_ATTACHMENTS, keepOnRemove = false }: ComposerAttachmentsOptions) {
+export function useComposerAttachments({ value, onChange, nodeId, disabled = false, max = MAX_COMPOSER_ATTACHMENTS, keepOnRemove = false, deferWhileDisabled = false, onUploadsChange }: ComposerAttachmentsOptions) {
   const { locale, t } = useCanvasI18n();
   const { body, attachments } = useMemo(() => splitAttachments(value), [value]);
-  const latest = useRef({ value, onChange, locale });
-  latest.current = { value, onChange, locale };
+  const latest = useRef({ value, onChange, locale, disabled, onUploadsChange });
+  latest.current = { value, onChange, locale, disabled, onUploadsChange };
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [notice, setNotice] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -42,18 +55,62 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
   const mounted = useRef(true);
   const uploadsRef = useRef(uploads);
   uploadsRef.current = uploads;
+  // Uploads that were in flight while the box was disabled (deferWhileDisabled).
+  const lockedDuring = useRef(new Set<string>());
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       for (const upload of uploadsRef.current) upload.controller?.abort();
+      latest.current.onUploadsChange?.({ pending: 0, waiting: 0, failed: 0 });
     };
   }, []);
+  // A finished upload waiting on its chip is done once its file is in the value: the chip goes in that same render (and
+  // then from the state), and an add its owner refused leaves it there.
+  const attachedIds = useMemo(() => new Set(attachments.map(item => item.id)), [attachments]);
+  const shown = useMemo(() => uploads.filter(upload => !(upload.ready && attachedIds.has(upload.ready.id))), [uploads, attachedIds]);
+  useEffect(() => {
+    if (shown.length < uploads.length) setUploads(previous => previous.filter(upload => !(upload.ready && attachedIds.has(upload.ready.id))));
+  }, [shown, uploads, attachedIds]);
+  useEffect(() => {
+    if (deferWhileDisabled && disabled) for (const upload of uploads) if (!upload.error && !upload.ready) lockedDuring.current.add(upload.key);
+  }, [deferWhileDisabled, disabled, uploads]);
+  const failed = shown.filter(upload => upload.error).length;
+  const waiting = shown.filter(upload => upload.ready).length;
+  const pending = shown.length - failed - waiting;
+  useEffect(() => { latest.current.onUploadsChange?.({ pending, waiting, failed }); }, [pending, waiting, failed]);
+
+  // The files this box added by writes whose answer is not drawn yet. Every write is built from the value it rendered plus
+  // these, so writes made before the next render (two files landing at once) build on one another. A file goes from here
+  // in the render that draws its owner's answer to the write that added it (`writes` is set with that write, so it is
+  // drawn with the answer): shown then, or refused and not written again by a later edit. A file waiting on its chip then
+  // goes in with its 加入 only, and a change of the value from elsewhere afterwards (an undo) is not undone.
+  const added = useRef(new Map<string, { item: ComposerAttachment; write: number }>());
+  const writeCount = useRef(0);
+  const [writes, setWrites] = useState(0);
+  useLayoutEffect(() => {
+    for (const [id, entry] of added.current) if (entry.write <= writes) added.current.delete(id);
+  }, [writes]);
+  const composed = useCallback(() => {
+    const current = splitAttachments(latest.current.value);
+    const unseen = Array.from(added.current.values(), entry => entry.item).filter(item => !current.attachments.some(shown => shown.id === item.id));
+    return { body: current.body, attachments: [...current.attachments, ...unseen] };
+  }, []);
+  const attach = useCallback((item: ComposerAttachment) => {
+    added.current.set(item.id, { item, write: ++writeCount.current });
+    const current = composed();
+    latest.current.onChange(joinAttachments(current.body, current.attachments, latest.current.locale));
+    setWrites(writeCount.current);
+  }, [composed]);
+  /** Adds a file waiting on its chip: its 加入, pressable once the box is enabled. */
+  const addReady = useCallback((key: string) => {
+    const item = uploadsRef.current.find(upload => upload.key === key)?.ready;
+    if (item) attach(item);
+  }, [attach]);
 
   const setBody = useCallback((next: string) => {
-    const current = splitAttachments(latest.current.value);
-    latest.current.onChange(joinAttachments(next, current.attachments, latest.current.locale));
-  }, []);
+    latest.current.onChange(joinAttachments(next, composed().attachments, latest.current.locale));
+  }, [composed]);
 
   const add = useCallback((files: File[]) => {
     if (!files.length || disabled || !canvasUploadsAvailable()) return;
@@ -73,12 +130,18 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
         .then(result => {
           uploadedHere.current.add(result.id);
           if (!mounted.current) return;
-          setUploads(previous => previous.filter(upload => upload.key !== key));
-          const current = splitAttachments(latest.current.value);
           const item: ComposerAttachment = { id: result.id, name: result.name, kind: attachmentKind(result.name, result.kind) };
-          latest.current.onChange(joinAttachments(current.body, [...current.attachments, item], latest.current.locale));
+          if (deferWhileDisabled) {
+            const locked = lockedDuring.current.delete(key) || latest.current.disabled;
+            setUploads(previous => previous.map(upload => upload.key === key ? { ...upload, progress: 1, controller: undefined, ready: item } : upload));
+            if (!locked) attach(item);
+            return;
+          }
+          setUploads(previous => previous.filter(upload => upload.key !== key));
+          attach(item);
         })
         .catch((error: unknown) => {
+          lockedDuring.current.delete(key);
           if (!mounted.current) return;
           if (error instanceof DOMException && error.name === 'AbortError') {
             setUploads(previous => previous.filter(upload => upload.key !== key));
@@ -89,16 +152,17 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
         });
     }
     if (refused.length) setNotice(refused.join(' '));
-  }, [disabled, max, nodeId, locale, t]);
+  }, [disabled, max, nodeId, locale, t, deferWhileDisabled, attach]);
 
   const remove = useCallback((id: string) => {
-    const current = splitAttachments(latest.current.value);
+    const current = composed();
     latest.current.onChange(joinAttachments(current.body, current.attachments.filter(item => item.id !== id), latest.current.locale));
     if (uploadedHere.current.delete(id) && !keepOnRemove) void deleteCanvasUpload(id).catch(() => { /* the file stays until its canvas goes */ });
-  }, [keepOnRemove]);
+  }, [keepOnRemove, composed]);
 
   const dismiss = useCallback((key: string) => {
     const upload = uploadsRef.current.find(item => item.key === key);
+    lockedDuring.current.delete(key);
     upload?.controller?.abort();
     setUploads(previous => previous.filter(item => item.key !== key));
   }, []);
@@ -136,7 +200,7 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
     add(files);
   };
   const busy = uploads.some(upload => !upload.error);
-  return { body, setBody, attachments, uploads, notice, clearNotice: () => setNotice(''), add, remove, dismiss, markSent, busy, available,
+  return { body, setBody, attachments, uploads: shown, notice, clearNotice: () => setNotice(''), add, remove, dismiss, addReady, markSent, busy, available,
     enabled, dragging, dropProps, onPaste, openPicker, picker, onPicked };
 }
 
@@ -161,23 +225,40 @@ export function AttachButton({ state, className }: { state: ComposerAttachmentsS
   </>;
 }
 
-/** One chip per attached file, uploads in flight and refusals included. Read-only in a transcript. */
-export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss, disabled = false, compact = false }: {
+/** One chip per attached file, uploads in flight and refusals included. Read-only in a transcript. A file that waits to
+ *  be added (deferWhileDisabled) has a 加入 of its own, pressable while `canAdd`. */
+export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss, onAdd, canAdd = false, disabled = false, compact = false }: {
   attachments: ReadonlyArray<ComposerAttachment>;
   uploads?: ReadonlyArray<PendingUpload>;
   onRemove?: (id: string) => void;
   onDismiss?: (key: string) => void;
+  onAdd?: (key: string) => void;
+  canAdd?: boolean;
   disabled?: boolean;
   compact?: boolean;
 }) {
   const { t, locale } = useCanvasI18n();
+  const noteId = useId();
+  // A 加入 pressed with the focus on it (from the keyboard; Chrome focuses a clicked button too) is replaced by the added
+  // file's chip: in the render the press draws (every add draws one, see `writes`), the focus goes to that chip's link (or
+  // its remove button), not to the page's body. Only in that render: an add the canvas refused draws no chip, and
+  // nothing is handed on later.
+  const list = useRef<HTMLUListElement>(null);
+  const focusAdded = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = focusAdded.current;
+    if (!id) return;
+    focusAdded.current = null;
+    const chip = [...(list.current?.querySelectorAll<HTMLElement>('[data-attachment-id]') ?? [])].find(element => element.dataset.attachmentId === id);
+    chip?.querySelector<HTMLElement>('a.awwo-attachment-name, .awwo-attachment-remove')?.focus({ preventScroll: true });
+  });
   if (!attachments.length && !uploads.length) return null;
-  return <ul className={`awwo-attachment-chips${compact ? ' is-compact' : ''}`} aria-label={t('attach.list')}>
+  return <><ul ref={list} className={`awwo-attachment-chips${compact ? ' is-compact' : ''}`} aria-label={t('attach.list')}>
     {attachments.map(item => {
       const Icon = KIND_ICON[item.kind];
       const media = storedMediaUrl(item.id);
       const href = item.kind === 'image' || item.kind === 'video' || item.kind === 'audio' ? media : storedArtifactUrl(`awwo-file:${item.id}`);
-      return <li key={item.id} className={`awwo-attachment-chip is-${item.kind}`}>
+      return <li key={item.id} className={`awwo-attachment-chip is-${item.kind}`} data-attachment-id={item.id}>
         {item.kind === 'image' && media ? <AttachmentThumb src={media} fallback={<Icon size={14} aria-hidden="true" />} />
           : <span className="awwo-attachment-icon"><Icon size={14} aria-hidden="true" /></span>}
         {href ? <a className="awwo-attachment-name" href={href} target="_blank" rel="noopener noreferrer" title={item.name}>{item.name}</a>
@@ -187,15 +268,25 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
           onClick={() => onRemove(item.id)}><X size={12} aria-hidden="true" /></button> : null}
       </li>;
     })}
-    {uploads.map(upload => <li key={upload.key} className={`awwo-attachment-chip is-pending${upload.error ? ' is-failed' : ''}`} role={upload.error ? 'alert' : 'status'}>
-      <span className="awwo-attachment-icon">{upload.error ? <AlertCircle size={14} aria-hidden="true" /> : <Loader2 size={14} className="awwo-attachment-spin" aria-hidden="true" />}</span>
-      <span className="awwo-attachment-name" title={upload.error || upload.name}>{upload.name}</span>
-      <span className="awwo-attachment-meta">{upload.error ? t('attach.failed') : t('attach.uploading', { percent: Math.round(upload.progress * 100), size: formatFileSize(upload.size, locale) })}</span>
-      {upload.error ? <span className="sr-only">{upload.error}</span> : null}
-      {onDismiss ? <button type="button" className="awwo-attachment-remove" aria-label={t(upload.error ? 'attach.dismiss' : 'attach.cancel', { name: upload.name })}
-        onClick={() => onDismiss(upload.key)}><X size={12} aria-hidden="true" /></button> : null}
-    </li>)}
-  </ul>;
+    {uploads.map(upload => {
+      const ReadyIcon = upload.ready ? KIND_ICON[upload.ready.kind] : null;
+      return <li key={upload.key} className={`awwo-attachment-chip is-pending${upload.error ? ' is-failed' : ''}${upload.ready ? ' is-ready' : ''}`} role={upload.error ? 'alert' : 'status'}>
+        <span className="awwo-attachment-icon">{upload.error ? <AlertCircle size={14} aria-hidden="true" /> : ReadyIcon ? <ReadyIcon size={14} aria-hidden="true" />
+          : <Loader2 size={14} className="awwo-attachment-spin" aria-hidden="true" />}</span>
+        <span className="awwo-attachment-name" title={upload.error || upload.name}>{upload.name}</span>
+        <span className="awwo-attachment-meta">{upload.error ? t('attach.failed') : upload.ready ? t(canAdd ? 'attach.ready' : 'attach.readyLocked')
+          : t('attach.uploading', { percent: Math.round(upload.progress * 100), size: formatFileSize(upload.size, locale) })}</span>
+        {upload.error ? <span className="sr-only">{upload.error}</span> : null}
+        {upload.ready && onAdd ? <button type="button" className="awwo-attachment-add" disabled={!canAdd} aria-label={t('attach.addReady', { name: upload.name })}
+          aria-describedby={noteId} title={canAdd ? t('attach.addReadyNote') : undefined}
+          onClick={event => { if (event.currentTarget === document.activeElement) focusAdded.current = upload.ready!.id; onAdd(upload.key); }}>{t('attach.addReadyShort')}</button> : null}
+        {onDismiss ? <button type="button" className="awwo-attachment-remove" aria-label={t(upload.error ? 'attach.dismiss' : upload.ready ? 'attach.remove' : 'attach.cancel', { name: upload.name })}
+          onClick={() => onDismiss(upload.key)}><X size={12} aria-hidden="true" /></button> : null}
+      </li>;
+    })}
+  </ul>
+  {/* Adding a waiting file changes the inputs, which leaves this node and those after it needing a new run: its 加入 says so. */}
+  {onAdd && uploads.some(upload => upload.ready) ? <span id={noteId} hidden>{t('attach.addReadyNote')}</span> : null}</>;
 }
 
 function AttachmentThumb({ src, fallback }: { src: string; fallback: ReactNode }) {
@@ -209,7 +300,8 @@ export function AttachmentTray({ state, disabled = false }: { state: ComposerAtt
   const { t } = useCanvasI18n();
   const noticeId = useId();
   return <>
-    <AttachmentChips attachments={state.attachments} uploads={state.uploads} onRemove={state.remove} onDismiss={state.dismiss} disabled={disabled} />
+    <AttachmentChips attachments={state.attachments} uploads={state.uploads} onRemove={state.remove} onDismiss={state.dismiss}
+      onAdd={state.addReady} canAdd={state.enabled} disabled={disabled} />
     {state.notice ? <p className="awwo-attachment-notice" id={noticeId} role="status">{state.notice}
       <button type="button" aria-label={t('attach.closeNotice')} onClick={state.clearNotice}><X size={12} aria-hidden="true" /></button></p> : null}
     {state.dragging ? <div className="awwo-attachment-drop" aria-hidden="true">{t('attach.drop')}</div> : null}

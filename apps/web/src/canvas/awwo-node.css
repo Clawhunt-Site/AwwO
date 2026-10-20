@@ -174,6 +174,8 @@
 .canvas-root .awwo-node-chat { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .canvas-root .awwo-chat-heading { min-height: 37px; padding: 5px 12px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--awwo-muted); flex-shrink: 0; }
 .canvas-root .awwo-chat-heading .awwo-input-toggle { margin-left: auto; }
+/* Closed inputs holding a failed upload (SessionTile: their fields wait, hidden, for it to be read). */
+.canvas-root :is(.awwo-input-toggle, .awwo-session-input) .awwo-input-upload-failed { color: var(--awwo-error); }
 .canvas-root .awwo-node-empty { align-items: center; text-align: center; font-size: 12px; gap: 6px; padding: 20px 12px; }
 .canvas-root .awwo-node-empty strong { font-size: 17px; font-weight: 550; letter-spacing: -.3px; }
 .canvas-root .awwo-node .canvas-composer { padding: 8px 12px 12px; }

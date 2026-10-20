@@ -1,17 +1,23 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ATTACHMENT_DATA_MARKER, attachmentKind, attachmentLine, attachmentSeenBy, joinAttachments, splitAttachments } from '../src/canvas/attachments';
 import { MessageWithAttachments } from '../src/canvas/ComposerAttachments';
 import { mediaComposerInfo, TileComposer, type MediaComposerInfo } from '../src/canvas/TileComposer';
 import { parseMediaCatalogue } from '../src/canvas/mediaCatalog';
-import { canvasText } from '../src/canvas/i18n';
+import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import { portsFor } from '../src/canvas/ports';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { ContractFields } from '../src/canvas/ContractFields';
+import { SessionTile } from '../src/canvas/SessionTile';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
+import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { CanvasSurface } from '../src/canvas/CanvasSurface';
+import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
+import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
 import { TileTranscript } from '../src/canvas/TileTranscript';
 import type { ContractField } from '../src/canvas/nodeContracts';
-import type { Turn } from '../src/canvas/sessions';
+import { resetAllSessions, setStreaming, type Turn } from '../src/canvas/sessions';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
@@ -23,13 +29,13 @@ class FakeUpload {
   static sent: FakeUpload[] = [];
   static ids: string[] = [];
   static hold = false;
-  url = ''; method = ''; body: unknown; status = 0; responseText = ''; withCredentials = false;
+  url = ''; method = ''; body: unknown; status = 0; responseText = ''; withCredentials = false; aborted = false;
   headers: Record<string, string> = {};
   upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
   onload: (() => void) | null = null; onerror: (() => void) | null = null; onabort: (() => void) | null = null;
   open(method: string, url: string) { this.method = method; this.url = url; }
   setRequestHeader(name: string, value: string) { this.headers[name] = value; }
-  abort() { this.onabort?.(); }
+  abort() { this.aborted = true; this.onabort?.(); }
   send(body: unknown) {
     this.body = body;
     FakeUpload.sent.push(this);
@@ -55,7 +61,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
 });
-afterEach(() => { cleanup(); clearSaaSCanvas(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); clearSaaSCanvas(); vi.unstubAllGlobals(); resetAllSessions(); });
 
 const deletes = () => fetchMock.mock.calls.filter(call => (call[1] as RequestInit | undefined)?.method === 'DELETE').map(call => String(call[0]));
 
@@ -228,6 +234,30 @@ describe('the node composer', () => {
     expect(screen.getByTestId('composer-send')).toBeEnabled();
   });
 
+  it('keeps both of two files that land at the same moment', async () => {
+    FakeUpload.hold = true;
+    render(<ComposerHost onSend={vi.fn()} initial="两份" />);
+    fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['a'], 'a.png', { type: 'image/png' }), new File(['b'], 'b.png', { type: 'image/png' })] } });
+    await screen.findByText('b.png');
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(screen.getByTestId('draft').textContent).toBe(`两份\n\n[附件] a.png · awwo-file:${ID_A}\n[附件] b.png · awwo-file:${ID_B}`));
+  });
+
+  it('takes a file that lands while a reply streams at once: its draft is never locked', async () => {
+    FakeUpload.hold = true;
+    function Host({ streaming }: { streaming: boolean }) {
+      const [draft, setDraft] = useState('');
+      return <><TileComposer streaming={streaming} draft={draft} onDraftChange={setDraft} onSend={vi.fn()} attachNodeId="node-a" />
+        <output data-testid="draft">{draft}</output></>;
+    }
+    const { rerender } = render(<Host streaming={false} />);
+    fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['png'], 'shot.png', { type: 'image/png' })] } });
+    await screen.findByText('shot.png');
+    rerender(<Host streaming />);
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(screen.getByTestId('draft').textContent).toBe(`[附件] shot.png · awwo-file:${ID_A}`));
+  });
+
   it('offers no upload where the canvas is not a cloud canvas', () => {
     clearSaaSCanvas();
     render(<ComposerHost onSend={vi.fn()} />);
@@ -290,6 +320,51 @@ describe('node inputs', () => {
     expect((screen.getByLabelText('需求的值') as HTMLTextAreaElement).value).toBe('做个落地页');
     expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe(`做个落地页\n\n[附件] data.csv · awwo-file:${ID_A}`);
   });
+
+  it('holds a file that lands while they are read-only only where their owner asks for it', async () => {
+    FakeUpload.hold = true;
+    const changes = vi.fn();
+    const form = (readOnly: boolean, holdUploads: boolean) => <ContractFields fields={[{ id: 'clip', label: '素材', type: 'file', required: false, value: '' }]}
+      onChange={changes} label="输入" valuesFirst readOnly={readOnly} holdUploads={holdUploads} />;
+    for (const holdUploads of [false, true]) {
+      FakeUpload.sent = []; changes.mockClear();
+      const { rerender, unmount } = render(form(false, holdUploads));
+      fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' })] } });
+      await screen.findByText('clip.mp4');
+      // Read-only now (a run of their node): the file that lands then is refused as before, or waits for its 加入.
+      rerender(form(true, holdUploads));
+      act(() => FakeUpload.sent[0].finish());
+      if (holdUploads) {
+        expect(await screen.findByRole('button', { name: '加入 clip.mp4' })).toBeDisabled();
+        expect(screen.getByText('已上传，可编辑时加入')).toBeVisible();
+      }
+      else await waitFor(() => expect(screen.queryByText('clip.mp4')).toBeNull());
+      expect(changes).not.toHaveBeenCalled();
+      // Editable again, an edit of the field carries no file it did not show: a refused one whose chip went (a node's
+      // outputs), or one waiting for its 加入.
+      rerender(form(false, holdUploads));
+      fireEvent.change(screen.getByLabelText('素材的值'), { target: { value: 'docs/x.md' } });
+      expect(changes).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'clip', value: 'docs/x.md' })]);
+      unmount();
+    }
+  });
+
+  it('lets its owner keep whether their structure is edited (so a change keeps its uploads), and shows none where it may not be', () => {
+    const fields: ContractField[] = [{ id: 'need', label: '需求', type: 'text', required: false, value: '' }];
+    const change = vi.fn();
+    const form = (editing: boolean, structureEditable = true) => <ContractFields fields={fields} onChange={vi.fn()} label="输入" valuesFirst
+      editingSchema={editing} onEditingSchemaChange={change} structureEditable={structureEditable} />;
+    const { rerender } = render(form(false));
+    fireEvent.click(screen.getByRole('button', { name: '编辑字段结构' }));
+    expect(change).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByLabelText('字段 1 名称')).toBeNull();
+    rerender(form(true));
+    expect(screen.getByLabelText('字段 1 名称')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '完成结构编辑' }));
+    expect(change).toHaveBeenLastCalledWith(false);
+    rerender(form(true, false));
+    expect(screen.queryByLabelText('字段 1 名称')).toBeNull();
+  });
 });
 
 describe('the node transcript', () => {
@@ -317,5 +392,586 @@ describe('a message whose pictures moved its run to a model that sees', () => {
     cleanup();
     render(<MessageWithAttachments text={block([{ name: 'hero.png', shown: true }])} />);
     expect(screen.queryByRole('note')).toBeNull();
+  });
+});
+
+// Seen 2026-10-20 in Chrome: an opened node's inputs closed from their own button dropped the keyboard's focus on the
+// page's body, and closed any way they ended every upload in their fields, which then never landed.
+describe('an opened node’s inputs', () => {
+  // The general template: a file input (参考资料, `references`) and a template guide; its required task filled in.
+  const templated = (): SessionNode => {
+    const node = createAgentTemplate('general', { x: 0, y: 0 }, 'zh');
+    return { ...node, id: 'n', contract: { ...node.contract!, inputs: node.contract!.inputs.map(field => field.id === 'brief' ? { ...field, value: '做一个关卡' } : field) } };
+  };
+  const updates: SessionNode[] = [];
+  // Sets the hosted node from outside the tile, as the canvas's undo does.
+  let setHostNode: (node: SessionNode) => void = () => {};
+  function TileHost({ initial, mode = 'developer', initializeOnSend = true, inputRequest }: { initial: SessionNode; mode?: CanvasUiMode; initializeOnSend?: boolean; inputRequest?: number }) {
+    const [node, setNode] = useState(initial);
+    // The document's copy of the node, as the canvas keeps it (docRef): an edit applies to it at once, a part changed by
+    // the card (onPatchNode) applies to it, and a result an edit makes stale is cleared as the canvas clears it.
+    const live = useRef(initial);
+    const save = (next: SessionNode) => {
+      const doc = emptyDocument();
+      const kept = invalidateOutputs({ ...doc, nodes: [live.current] }, { ...doc, nodes: [next] }).nodes[0] as SessionNode;
+      live.current = kept;
+      updates.push(kept);
+      setNode(kept);
+    };
+    setHostNode = next => { live.current = next; setNode(next); };
+    return <CanvasUiModeProvider mode={mode}><SessionTile node={node} scale={1} focused initializeOnSend={initializeOnSend} onSend={vi.fn()} inputRequest={inputRequest}
+      onUpdateNode={next => save(next as SessionNode)} onPatchNode={(_id, change) => save(change(live.current))} /></CanvasUiModeProvider>;
+  }
+  // A canvas that takes an edit only once `accept` is set (it refuses one that would clear a result a node downstream is
+  // running on); every edit it is offered is in `updates`.
+  let accept = false;
+  function RefusingHost() {
+    const [node, setNode] = useState(templated());
+    const live = useRef(node);
+    const offer = (next: SessionNode) => { updates.push(next); if (accept) { live.current = next; setNode(next); } };
+    return <CanvasUiModeProvider mode="developer"><SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()}
+      onUpdateNode={next => offer(next as SessionNode)} onPatchNode={(_id, change) => offer(change(live.current))} /></CanvasUiModeProvider>;
+  }
+  beforeEach(() => { updates.length = 0; FakeUpload.hold = true; accept = false; });
+  const toggle = () => document.querySelector<HTMLButtonElement>('.awwo-input-toggle')!;
+  const drawer = () => screen.queryByRole('region', { name: '输入表单' });
+  const inDrawer = () => within(drawer()!);
+  const held = () => document.querySelector<HTMLElement>('.awwo-input-held');
+  const pick = (name = 'clip.mp4') => fireEvent.change(drawer()!.querySelector('.awwo-file-field input[type=file]')!,
+    { target: { files: [new File(['mp4'], name, { type: 'video/mp4' })] } });
+  const references = () => updates.at(-1)?.contract?.inputs.find(field => field.id === 'references')?.value;
+  const clipLine = `[附件] clip.mp4 · awwo-file:${ID_A}`;
+  const closeButton = () => inDrawer().getByRole('button', { name: '收起输入' });
+  // What closed inputs come to hold, said to a screen reader (a polite live region in the chat heading).
+  const spoken = () => document.querySelector('.awwo-chat-heading [aria-live=polite]')?.textContent;
+
+  it('give the focus to the toggle that opens them again when they close from their own button', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    closeButton().focus();
+    // From the keyboard, Enter or Space on the button is its click.
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(toggle());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    // With the sessions list open, its 输入 opens them, and gets the focus back.
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
+    const listInput = document.querySelector<HTMLButtonElement>('.awwo-session-input')!;
+    fireEvent.click(listInput);
+    closeButton().focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(listInput);
+  });
+
+  it('leave the focus where it was when closed by a click that focused nothing, as in Safari', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    const box = screen.getByTestId('composer-input');
+    box.focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('give it to the message box where no toggle opens them again, else to the first control below them, else to the node menu', () => {
+    // A copied case node opens on its inputs; in the simple view a node that takes none has no input toggle.
+    const copied: SessionNode = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'c', title: '案例节点', lastOutput: { text: '完成', source: 'case', at: 1 } };
+    const { unmount } = render(<TileHost initial={copied} mode="simple" />);
+    expect(document.querySelector('.awwo-input-toggle')).toBeNull();
+    closeButton().focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('composer-input'));
+    unmount();
+    // Not set up and with no way to start it here, its message box is shut: the focus goes to its rework note's toggle.
+    const reworked: SessionNode = { ...copied, taskFrame: { version: 1, source: 'manual', constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'], acceptanceCriteria: [] } };
+    const second = render(<TileHost initial={reworked} mode="simple" initializeOnSend={false} />);
+    expect(screen.getByTestId('composer-input')).toBeDisabled();
+    closeButton().focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector('.awwo-rework-note-toggle'));
+    second.unmount();
+    // With nothing below them to take it either, it goes to the node's own menu button.
+    render(<TileHost initial={copied} mode="simple" initializeOnSend={false} />);
+    closeButton().focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '更多节点操作' }));
+  });
+
+  it('pass over controls the opened inputs hide, which take no focus in a browser, for the next that takes it', () => {
+    // A copied case node made from a template, taking no inputs, in the simple view and with its message box shut: no
+    // toggle opens its inputs again, and the first controls below them, the empty conversation's starter prompts, are
+    // hidden while the inputs are open (display: none, the case intro's rule in awwo-node.css).
+    const copied: SessionNode = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'c', title: '案例节点', templateId: 'general', lastOutput: { text: '完成', source: 'case', at: 1 } };
+    render(<TileHost initial={copied} mode="simple" initializeOnSend={false} />);
+    const starters = [...document.querySelectorAll<HTMLButtonElement>('.awwo-starter-prompts button')];
+    expect(starters.length).toBeGreaterThan(0);
+    // jsdom draws no layout, so a hidden button would still take the focus there: these refuse it, as a browser does.
+    for (const button of starters) button.focus = () => {};
+    closeButton().focus();
+    fireEvent.click(closeButton());
+    expect(drawer()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '更多节点操作' }));
+  });
+
+  it.each([
+    ['their own button', () => fireEvent.click(closeButton())],
+    ['their toggle', () => fireEvent.click(toggle())],
+    ['the template guide, which takes their place', () => fireEvent.click(screen.getByRole('button', { name: '模板指引' }))],
+  ])('keep an upload going when closed from %s, and take its file when it lands', async (_how, close) => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    expect(await inDrawer().findByText('clip.mp4')).toBeVisible();
+    close();
+    // Closed: the fields wait hidden, without the drawer's class (so none of its layout applies), and the toggle says so.
+    expect(drawer()).toBeNull();
+    expect(held()).not.toBeVisible();
+    expect(held()).not.toHaveClass('awwo-input-drawer');
+    expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('has-inputs');
+    expect(toggle()).toHaveAccessibleDescription('输入：文件仍在上传');
+    // Its name stays 输入 (a screen reader speaking a focused control's new name would say the state twice).
+    expect(toggle()).toHaveAccessibleName('输入');
+    // Described by an element of its own (its tooltip says it too, for a pointer).
+    expect(document.getElementById(toggle().getAttribute('aria-describedby') ?? '')).toHaveTextContent('输入：文件仍在上传');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(FakeUpload.sent).toHaveLength(1);
+    expect(FakeUpload.sent[0].aborted).toBe(false);
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(references()).toBe(clipLine));
+    // The fields go once the box has said it holds nothing more (an effect after the file's render).
+    await waitFor(() => expect(held()).toBeNull());
+    expect(toggle()).toHaveAccessibleName('输入');
+    expect(toggle()).not.toHaveAttribute('aria-describedby');
+    fireEvent.click(toggle());
+    expect(inDrawer().getByRole('link', { name: 'clip.mp4' })).toBeVisible();
+  });
+
+  it('hold on while any of their fields has an upload left, whichever lands first', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    fireEvent.change(drawer()!.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await inDrawer().findByText('data.csv');
+    // 限制与偏好's file lands first; closed then, the inputs still hold 参考资料's upload.
+    act(() => FakeUpload.sent[1].finish());
+    await waitFor(() => expect(updates.at(-1)?.contract?.inputs.find(field => field.id === 'constraints')?.value).toContain('data.csv'));
+    fireEvent.click(toggle());
+    expect(held()).not.toBeNull();
+    expect(toggle()).toHaveAccessibleDescription('输入：文件仍在上传');
+    expect(FakeUpload.sent[0].aborted).toBe(false);
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(splitAttachments(references() ?? '').attachments.map(item => item.name)).toEqual(['clip.mp4']));
+    await waitFor(() => expect(held()).toBeNull());
+  });
+
+  it('show the upload they hold when opened again, as it goes', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(toggle());
+    act(() => FakeUpload.sent[0].upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 4 } as ProgressEvent));
+    fireEvent.click(toggle());
+    // The same upload, not a new one: its progress came in while they were closed.
+    expect(inDrawer().getByText(/^上传中 25%/)).toBeVisible();
+    expect(FakeUpload.sent).toHaveLength(1);
+    act(() => FakeUpload.sent[0].finish());
+    expect(await inDrawer().findByRole('link', { name: 'clip.mp4' })).toBeVisible();
+    expect(references()).toBe(clipLine);
+  });
+
+  it('keep a failed upload until it is read, and the toggle says one failed', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(toggle());
+    act(() => FakeUpload.sent[0].finish(429));
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('输入：有文件上传失败'));
+    expect(spoken()).toBe('输入：有文件上传失败');
+    expect(held()).not.toBeVisible();
+    expect(toggle().querySelector('.awwo-input-upload-failed')).not.toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(toggle());
+    expect(inDrawer().getByRole('alert')).toHaveTextContent('上传失败');
+    fireEvent.click(inDrawer().getByRole('button', { name: '关闭 clip.mp4' }));
+    fireEvent.click(toggle());
+    expect(held()).toBeNull();
+    expect(toggle()).toHaveAccessibleName('输入');
+    expect(updates.some(node => node.contract?.inputs.some(field => field.value.includes('awwo-file:')))).toBe(false);
+  });
+
+  it('keep a file that lands while the node works on its chip, for 加入 once they can be edited again, open or closed', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    // A reply streams in, so the inputs are locked: a file that lands now waits on its chip, its 加入 not yet pressable.
+    act(() => { setStreaming('n', true); });
+    act(() => FakeUpload.sent[0].finish());
+    // Its chip says why its 加入 cannot be pressed yet (a disabled button takes no focus, so a tooltip would not do).
+    expect(await inDrawer().findByText('已上传，可编辑时加入')).toBeVisible();
+    const add = (name = 'clip.mp4') => inDrawer().getByRole('button', { name: `加入 ${name}` });
+    expect(add()).toBeDisabled();
+    // Unlocked, nothing is added behind the reader's back (it would change the inputs, which clears a run's result).
+    act(() => { setStreaming('n', false); });
+    expect(inDrawer().getByText('已上传，未加入')).toBeVisible();
+    expect(add()).toBeEnabled();
+    expect(add()).toHaveAccessibleDescription('加入会改动输入：这个节点和它后面的节点需要重新运行。');
+    // Described by an element of its own, not only by its tooltip (which touch and some screen readers never show).
+    expect(document.getElementById(add().getAttribute('aria-describedby') ?? '')).toHaveTextContent('加入会改动输入');
+    expect(references()).toBeUndefined();
+    // Pressed twice before a render (a double click), it is added once.
+    const button = add();
+    act(() => { button.click(); button.click(); });
+    expect(references()).toBe(clipLine);
+    expect(await inDrawer().findByRole('link', { name: 'clip.mp4' })).toBeVisible();
+    expect(inDrawer().queryByText('已上传，未加入')).toBeNull();
+    // Closed while the next one goes on: it waits hidden through the reply, and the toggle and a status say so.
+    pick('cut.mp4');
+    await inDrawer().findByText('cut.mp4');
+    fireEvent.click(toggle());
+    act(() => { setStreaming('n', true); });
+    act(() => FakeUpload.sent[1].finish());
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('输入：有文件等待加入'));
+    expect(toggle().querySelector('.awwo-attachment-spin')).toBeNull();
+    expect(spoken()).toBe('输入：有文件等待加入');
+    act(() => { setStreaming('n', false); });
+    expect(held()).not.toBeNull();
+    expect(splitAttachments(references()!).attachments.map(item => item.name)).toEqual(['clip.mp4']);
+    fireEvent.click(toggle());
+    fireEvent.click(add('cut.mp4'));
+    expect(splitAttachments(references()!).attachments.map(item => item.name)).toEqual(['clip.mp4', 'cut.mp4']);
+    await waitFor(() => expect(inDrawer().queryByText('已上传，未加入')).toBeNull());
+    fireEvent.click(toggle());
+    expect(held()).toBeNull();
+    expect(spoken()).toBe('');
+  });
+
+  it('keep a file whose upload outlasted a lock on its chip too: a run may have gone by without it', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(toggle());
+    // A reply streams and ends while the file still uploads; it lands after, with the inputs editable again.
+    act(() => { setStreaming('n', true); });
+    act(() => { setStreaming('n', false); });
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('输入：有文件等待加入'));
+    expect(spoken()).toBe('输入：有文件等待加入');
+    expect(references()).toBeUndefined();
+    fireEvent.click(toggle());
+    fireEvent.click(inDrawer().getByRole('button', { name: '加入 clip.mp4' }));
+    expect(references()).toBe(clipLine);
+  });
+
+  it('keep a file on its chip when the canvas refuses it as it lands, and hand the focus on when 加入 adds it', async () => {
+    render(<RefusingHost />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    act(() => FakeUpload.sent[0].finish());
+    // It was tried at once and refused: the file stays on its chip, 加入 ready, and closed inputs keep it.
+    await waitFor(() => expect(updates).toHaveLength(1));
+    expect(await inDrawer().findByText('已上传，未加入')).toBeVisible();
+    fireEvent.click(toggle());
+    expect(held()).not.toBeNull();
+    expect(toggle()).toHaveAccessibleDescription('输入：有文件等待加入');
+    // Accepted later, 加入 from the keyboard adds it, and the focus goes to the added file, not to the page's body.
+    accept = true;
+    fireEvent.click(toggle());
+    const add = inDrawer().getByRole('button', { name: '加入 clip.mp4' });
+    add.focus();
+    fireEvent.click(add);
+    expect(document.activeElement).toBe(inDrawer().getByRole('link', { name: 'clip.mp4' }));
+    expect(inDrawer().queryByText('已上传，未加入')).toBeNull();
+  });
+
+  it('add a file the canvas refused only with its 加入: not with an edit of its field, nor with taking another file out', async () => {
+    render(<RefusingHost />);
+    fireEvent.click(toggle());
+    accept = true;
+    pick('cut.mp4');
+    await inDrawer().findByText('cut.mp4');
+    act(() => FakeUpload.sent[0].finish());
+    expect(await inDrawer().findByRole('link', { name: 'cut.mp4' })).toBeVisible();
+    // The next file is refused as it lands, and again by the keyboard's 加入.
+    accept = false;
+    pick('clip.mp4');
+    await inDrawer().findByText('clip.mp4');
+    act(() => FakeUpload.sent[1].finish());
+    const add = await inDrawer().findByRole('button', { name: '加入 clip.mp4' });
+    add.focus();
+    fireEvent.click(add);
+    // Editable again: typing in the field, or taking cut.mp4 out, leaves clip.mp4 waiting, and the focus where it went.
+    accept = true;
+    const text = inDrawer().getByLabelText('参考资料的值');
+    text.focus();
+    fireEvent.change(text, { target: { value: 'docs/关卡素材.md' } });
+    expect(splitAttachments(references() ?? '').attachments.map(item => item.name)).toEqual(['cut.mp4']);
+    expect(document.activeElement).toBe(text);
+    fireEvent.click(inDrawer().getByRole('button', { name: '移除 cut.mp4' }));
+    expect(splitAttachments(references() ?? '')).toEqual({ body: 'docs/关卡素材.md', attachments: [] });
+    expect(inDrawer().getByText('已上传，未加入')).toBeVisible();
+    fireEvent.click(inDrawer().getByRole('button', { name: '加入 clip.mp4' }));
+    expect(splitAttachments(references() ?? '').attachments.map(item => item.name)).toEqual(['clip.mp4']);
+  });
+
+  it('keep a waiting file on its chip when adding it is refused, to try again', async () => {
+    // The canvas refuses the edit (as it does one that would clear a result a node downstream is running on).
+    const refused = vi.fn();
+    render(<CanvasUiModeProvider mode="developer"><SessionTile node={templated()} scale={1} focused initializeOnSend onSend={vi.fn()} onUpdateNode={refused} /></CanvasUiModeProvider>);
+    fireEvent.click(toggle());
+    pick('kept.mp4');
+    await inDrawer().findByText('kept.mp4');
+    act(() => { setStreaming('n', true); });
+    act(() => FakeUpload.sent[0].finish());
+    await inDrawer().findByText('已上传，可编辑时加入');
+    act(() => { setStreaming('n', false); });
+    fireEvent.click(inDrawer().getByRole('button', { name: '加入 kept.mp4' }));
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(inDrawer().getByRole('button', { name: '加入 kept.mp4' })).toBeEnabled();
+    fireEvent.click(toggle());
+    expect(held()).not.toBeNull();
+  });
+
+  it('take two files that land in two fields at the same moment, neither dropping the other', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    fireEvent.change(drawer()!.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await inDrawer().findByText('data.csv');
+    // Both answers arrive before the next render: each field's write builds on the other's.
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(inDrawer().queryAllByText(/^上传中/)).toHaveLength(0));
+    const inputs = updates.at(-1)!.contract!.inputs;
+    expect(splitAttachments(inputs.find(field => field.id === 'references')!.value).attachments.map(item => item.name)).toEqual(['clip.mp4']);
+    expect(splitAttachments(inputs.find(field => field.id === 'constraints')!.value).attachments.map(item => item.name)).toEqual(['data.csv']);
+  });
+
+  it('take two files picked together into one field, answered at the same moment, both', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    fireEvent.change(drawer()!.querySelector('.awwo-file-field input[type=file]')!,
+      { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' }), new File(['mp4'], 'cut.mp4', { type: 'video/mp4' })] } });
+    await inDrawer().findByText('cut.mp4');
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(splitAttachments(references() ?? '').attachments.map(item => item.name)).toEqual(['clip.mp4', 'cut.mp4']));
+    // Neither waits for 加入: no lock came.
+    expect(inDrawer().queryByText('已上传，未加入')).toBeNull();
+    fireEvent.click(toggle());
+    expect(held()).toBeNull();
+  });
+
+  it.each([
+    ['the output’s first', [1, 0]],
+    ['the input’s first', [0, 1]],
+  ])('keep an input’s file and an output’s that land at the same moment, %s, the inputs closed, and let the result they make stale go', async (_order, order) => {
+    // The node holds a result published by hand, which the canvas clears once an input changes.
+    render(<TileHost initial={{ ...templated(), lastOutput: { text: JSON.stringify({ result: '已交付关卡说明。', followups: '' }), at: 1, source: 'manual' } }} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(toggle());
+    expect(held()).not.toBeNull();
+    // Meanwhile a file is picked into the outputs editor (交付物 → 编辑输出表单, open by itself beside a result), into 交付结果.
+    const openDeliverables = screen.queryByRole('button', { name: '展开交付物' });
+    if (openDeliverables) fireEvent.click(openDeliverables);
+    const editor = [...document.querySelectorAll('.awwo-deliverables-editor')].find(element => element.querySelector('.awwo-contract-fields'))!;
+    fireEvent.change(editor.querySelector('.awwo-markdown input[type=file]')!, { target: { files: [new File(['# out'], 'out.md', { type: 'text/markdown' })] } });
+    await within(editor as HTMLElement).findByText('out.md');
+    // Both answers arrive before the next render; each owner's write is built from that render's node.
+    act(() => { for (const index of order) FakeUpload.sent[index].finish(); });
+    await waitFor(() => expect(held()).toBeNull());
+    const saved = updates.at(-1)!;
+    expect(splitAttachments(saved.contract!.inputs.find(field => field.id === 'references')!.value).attachments.map(item => item.name)).toEqual(['clip.mp4']);
+    expect(splitAttachments(saved.contract!.outputs.find(field => field.id === 'result')!.value).attachments.map(item => item.name)).toEqual(['out.md']);
+    // Cleared by the input's change, and not brought back by the other write as if it had been published again.
+    expect(saved.lastOutput ?? null).toBeNull();
+  });
+
+  it('bring back no file an undo took out of a field: the next edit there builds on what the undo left', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    act(() => FakeUpload.sent[0].finish());
+    expect(await inDrawer().findByRole('link', { name: 'clip.mp4' })).toBeVisible();
+    // The canvas's undo puts back the node from before the file; then the reader types in the same field.
+    act(() => setHostNode(templated()));
+    expect(inDrawer().queryByRole('link', { name: 'clip.mp4' })).toBeNull();
+    fireEvent.change(inDrawer().getByLabelText('参考资料的值'), { target: { value: 'docs/关卡素材.md' } });
+    expect(splitAttachments(references() ?? '')).toEqual({ body: 'docs/关卡素材.md', attachments: [] });
+  });
+
+  it('name every state they hold when closed, and speak a failure while another file still uploads', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    fireEvent.change(drawer()!.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await inDrawer().findByText('data.csv');
+    fireEvent.click(toggle());
+    act(() => FakeUpload.sent[1].finish(429));
+    // One still uploads, one failed: the description says both, the icon marks the failure, the live region speaks it.
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('输入：文件仍在上传，有文件上传失败'));
+    expect(toggle().querySelector('.awwo-input-upload-failed')).not.toBeNull();
+    expect(spoken()).toBe('输入：有文件上传失败');
+    // The other lands during a reply, so it waits for 加入: waiting and failed, both said.
+    act(() => { setStreaming('n', true); });
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('输入：有文件等待加入，有文件上传失败'));
+    expect(spoken()).toBe('输入：有文件等待加入，有文件上传失败');
+  });
+
+  it('name the states in English too, in words true of one file or several', async () => {
+    render(<LocaleProvider locale="en"><TileHost initial={templated()} /></LocaleProvider>);
+    fireEvent.click(toggle());
+    const form = screen.getByRole('region', { name: 'Input form' });
+    fireEvent.change(form.querySelector('.awwo-file-field input[type=file]')!, { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' })] } });
+    fireEvent.change(form.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await within(form).findByText('data.csv');
+    fireEvent.click(toggle());
+    act(() => FakeUpload.sent[1].finish(429));
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('Input: file(s) still uploading, upload(s) failed'));
+    expect(toggle()).toHaveAccessibleName('Input');
+    expect(spoken()).toBe('Input: upload(s) failed');
+    act(() => { setStreaming('n', true); });
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(toggle()).toHaveAccessibleDescription('Input: file(s) waiting to be added, upload(s) failed'));
+  });
+
+  it('pull no focus later when a 加入 pressed from the keyboard was refused', async () => {
+    render(<RefusingHost />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    act(() => FakeUpload.sent[0].finish());
+    await inDrawer().findByText('已上传，未加入');
+    const add = inDrawer().getByRole('button', { name: '加入 clip.mp4' });
+    add.focus();
+    fireEvent.click(add);
+    expect(inDrawer().getByText('已上传，未加入')).toBeVisible();
+    // The reader moves on to type elsewhere; later a click that focused nothing (as in Safari) adds the file.
+    const box = screen.getByTestId('composer-input');
+    box.focus();
+    accept = true;
+    fireEvent.click(inDrawer().getByRole('button', { name: '加入 clip.mp4' }));
+    expect(inDrawer().getByRole('link', { name: 'clip.mp4' })).toBeVisible();
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('add only the file whose 加入 is pressed, and move no focus for a click that focused nothing, after a refused 加入 from the keyboard', async () => {
+    render(<RefusingHost />);
+    fireEvent.click(toggle());
+    fireEvent.change(drawer()!.querySelector('.awwo-file-field input[type=file]')!,
+      { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' }), new File(['mp4'], 'cut.mp4', { type: 'video/mp4' })] } });
+    await inDrawer().findByText('cut.mp4');
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(inDrawer().getAllByText('已上传，未加入')).toHaveLength(2));
+    const add = (name: string) => inDrawer().getByRole('button', { name: `加入 ${name}` });
+    add('clip.mp4').focus();
+    fireEvent.click(add('clip.mp4'));
+    // Then a mouse press in Safari, whose buttons take no focus from a click: the focus leaves for the page's body first.
+    add('clip.mp4').blur();
+    accept = true;
+    fireEvent.click(add('cut.mp4'));
+    expect(inDrawer().getByRole('link', { name: 'cut.mp4' })).toBeVisible();
+    expect(splitAttachments(references() ?? '').attachments.map(item => item.name)).toEqual(['cut.mp4']);
+    expect(add('clip.mp4')).toBeEnabled();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('keep an upload they hold when a run asks for them, or the template guide opens their structure', async () => {
+    const { rerender } = render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(toggle());
+    expect(held()).not.toBeNull();
+    // Still uploading is said by the toggle's name; the live region speaks only what comes after.
+    expect(spoken()).toBe('');
+    // A run that needs them opens them on their values: the same upload.
+    rerender(<TileHost initial={templated()} inputRequest={1} />);
+    expect(inDrawer().getByText('clip.mp4')).toBeVisible();
+    // Closed again, then opened on their structure from the template guide: still the same upload.
+    fireEvent.click(screen.getByRole('button', { name: '模板指引' }));
+    expect(held()).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: canvasText('zh', 'template.editInputsLabel') }));
+    expect(inDrawer().getByRole('button', { name: '完成结构编辑' })).toBeTruthy();
+    expect(inDrawer().getByText('clip.mp4')).toBeVisible();
+    expect(FakeUpload.sent.map(upload => upload.aborted)).toEqual([false]);
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(references()).toBe(clipLine));
+  });
+
+  it('change between values and their structure without ending an upload', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(screen.getByRole('button', { name: '模板指引' }));
+    fireEvent.click(screen.getByRole('button', { name: canvasText('zh', 'template.editInputsLabel') }));
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    fireEvent.click(inDrawer().getByRole('button', { name: '完成结构编辑' }));
+    fireEvent.click(inDrawer().getByRole('button', { name: '编辑字段结构' }));
+    // Closed in their structure and opened the ordinary way, they show values again: still the same upload.
+    fireEvent.click(closeButton());
+    fireEvent.click(toggle());
+    expect(inDrawer().getByRole('button', { name: '编辑字段结构' })).toBeTruthy();
+    expect(inDrawer().getByText('clip.mp4')).toBeVisible();
+    expect(FakeUpload.sent.map(upload => upload.aborted)).toEqual([false]);
+    act(() => FakeUpload.sent[0].finish());
+    await waitFor(() => expect(references()).toBe(clipLine));
+  });
+});
+
+// The same race on the canvas itself (CanvasSurface's onPatchNode, its invalidateOutputs and its saved document), not
+// through a test host's stand-in for it.
+describe('the canvas, saving an opened node’s inputs and deliverables', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    FakeUpload.hold = true;
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 503, json: async () => ({}) })));
+  });
+  const saved = () => (JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).nodes[0] as SessionNode;
+  const names = (value: string | undefined) => splitAttachments(value ?? '').attachments.map(item => item.name);
+
+  it.each([
+    ['the output’s first', [1, 0]],
+    ['the input’s first', [0, 1]],
+  ])('keep an input’s file and an output’s that land at the same moment, %s, and the result they make stale cleared', async (_order, order) => {
+    const general = createAgentTemplate('general', { x: 0, y: 0 }, 'zh');
+    const node: SessionNode = { ...general, id: 'n', contract: { ...general.contract!, inputs: general.contract!.inputs.map(field => field.id === 'brief' ? { ...field, value: '做一个关卡' } : field) },
+      lastOutput: { text: JSON.stringify({ result: '已交付关卡说明。', followups: '' }), at: 1, source: 'manual' } };
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node] }));
+    render(<CanvasSurface />);
+    fireEvent.click(screen.getByRole('button', { name: `打开 ${node.title}`, exact: true }));
+    // Opened, and its camera's glide (260 ms) landed: a card still opening may draw its body anew, which ends an upload.
+    const tile = await screen.findByTestId('canvas-tile-n');
+    await waitFor(() => expect(tile.dataset.lod).toBe('focus'));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+    const toggle = await waitFor(() => { const found = document.querySelector<HTMLButtonElement>('.awwo-input-toggle'); expect(found).not.toBeNull(); return found!; });
+    fireEvent.click(toggle);
+    fireEvent.change(document.querySelector('.awwo-input-drawer .awwo-file-field input[type=file]')!, { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' })] } });
+    await screen.findByText('clip.mp4');
+    fireEvent.click(toggle);
+    expect(document.querySelector('.awwo-input-held')).not.toBeNull();
+    const openDeliverables = screen.queryByRole('button', { name: '展开交付物' });
+    if (openDeliverables) fireEvent.click(openDeliverables);
+    const editor = [...document.querySelectorAll('.awwo-deliverables-editor')].find(element => element.querySelector('.awwo-contract-fields'))!;
+    fireEvent.change(editor.querySelector('.awwo-markdown input[type=file]')!, { target: { files: [new File(['# out'], 'out.md', { type: 'text/markdown' })] } });
+    await within(editor as HTMLElement).findByText('out.md');
+    expect(FakeUpload.sent.map(upload => upload.aborted)).toEqual([false, false]);
+    act(() => { for (const index of order) FakeUpload.sent[index].finish(); });
+    await waitFor(() => {
+      const kept = saved();
+      expect(names(kept.contract!.inputs.find(field => field.id === 'references')!.value)).toEqual(['clip.mp4']);
+      expect(names(kept.contract!.outputs.find(field => field.id === 'result')!.value)).toEqual(['out.md']);
+      expect(kept.lastOutput ?? null).toBeNull();
+    }, { timeout: 4000 });
   });
 });
