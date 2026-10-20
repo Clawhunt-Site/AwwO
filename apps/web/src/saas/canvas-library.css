@@ -44,6 +44,8 @@
 .awwo-library-segments button { min-height: 28px; padding: 3px 9px; border-color: transparent; background: transparent; font-size: 12px; }
 .awwo-library-segments button[aria-pressed='true'] { background: var(--library-surface); border-color: var(--library-border); color: var(--library-accent); }
 .awwo-library-search { display: flex; flex: 1 1 220px; align-items: center; gap: 6px; min-width: 180px; color: var(--library-muted); }
+/* A page's own label rules (the settings centre stacks a label's content) must not put the icon above the box. */
+.awwo-library .awwo-library-search { flex-direction: row; gap: 6px; }
 .awwo-library-search button { flex-shrink: 0; }
 .awwo-library-empty { padding: 24px 8px; color: var(--library-muted); font-size: 12px; }
 .awwo-library-group h3 { margin: 6px 0; color: var(--library-muted); font-size: 12px; }
