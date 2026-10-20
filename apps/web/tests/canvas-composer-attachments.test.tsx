@@ -793,6 +793,12 @@ describe('an opened node’s inputs', () => {
     expect(splitAttachments(saved.contract!.outputs.find(field => field.id === 'result')!.value).attachments.map(item => item.name)).toEqual(['out.md']);
     // Cleared by the input's change, and not brought back by the other write as if it had been published again.
     expect(saved.lastOutput ?? null).toBeNull();
+    // The delivery drawer that opened by itself beside the result is held open at the delivery's share whichever lands
+    // first: the input's change keeps it as an edit of the inputs does, keyed to the output form the document holds.
+    expect(saved).not.toHaveProperty('deliverablesOpen');
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    const tile = screen.getByTestId('canvas-tile-n');
+    expect([tile.dataset.content, tile.style.getPropertyValue('--awwo-drawer-width')]).toEqual(['delivery', '52%']);
   });
 
   it('bring back no file an undo took out of a field: the next edit there builds on what the undo left', async () => {
@@ -973,5 +979,11 @@ describe('the canvas, saving an opened node’s inputs and deliverables', () => 
       expect(names(kept.contract!.outputs.find(field => field.id === 'result')!.value)).toEqual(['out.md']);
       expect(kept.lastOutput ?? null).toBeNull();
     }, { timeout: 4000 });
+    // The delivery drawer that opened by itself beside the result is held open at the delivery's share whichever lands
+    // first, nothing recorded about it.
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    const opened = screen.getByTestId('canvas-tile-n');
+    expect(within(opened).getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect([opened.dataset.content, opened.style.getPropertyValue('--awwo-drawer-width')]).toEqual(['delivery', '52%']);
   });
 });

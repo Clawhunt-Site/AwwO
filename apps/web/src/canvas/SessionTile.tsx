@@ -847,9 +847,22 @@ export const SessionTile = memo(function SessionTile({
     if (onPatchNode) onPatchNode(nodeId, change);
     else onUpdateNode?.(change(node));
   };
+  // An edit of the inputs takes the delivery back as one of the drawer's form does (invalidateOutputs), so it starts or
+  // carries the same edit in progress (updateDeliverables, below): the drawer that opened by itself for that delivery
+  // stays open beside the inputs, at its share of the width, instead of closing under the reader's keystroke. It starts
+  // one only where there is a delivery to take back, and keeps the share only of a drawer shown when it starts (Configure,
+  // laid over the node at its own width, takes none). Its output form is this render's node's with the change applied,
+  // which an edit of the inputs leaves as it is, unless the drawer's form has set its edit since this render (an
+  // output's file landing at the same moment, first): that edit's form is the one the document holds, and it stays.
   const updateFields = (fields: ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
-    writeNode(current => ({ ...current, contract: { ...(current.contract ?? emptyContract()), inputs: fields } }));
+    const change = (current: SessionNode): SessionNode => ({ ...current, contract: { ...(current.contract ?? emptyContract()), inputs: fields } });
+    if (currentThread && (editing || node.lastOutput)) {
+      const next = { form: outputFormKey(change(node)), thread: currentThread.id,
+        share: editing ? editing.share : shownContent === 'delivery' && deliverablesOpen };
+      setFormEdit(pending => pending !== formEdit && pending?.thread === next.thread ? pending : next);
+    }
+    writeNode(change);
   };
   // What the deliverables change, against this render's node: their outputs, or a result published by hand. A change of
   // the drawer's form (an edit of NodeDeliverables' fields, or the publication that ends them) also starts or carries the

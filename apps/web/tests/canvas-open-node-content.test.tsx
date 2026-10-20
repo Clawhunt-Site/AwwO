@@ -1859,6 +1859,186 @@ describe('an opened node that has delivered', () => {
     expect(share()).toEqual(['page', '62%']);
   });
 
+  // An edit of the inputs takes a delivery back as one of the drawer's form does (it changes what a run is asked), so the
+  // drawer that opened by itself for that delivery stays the same way, beside the inputs being edited (owner, 2026-10-21).
+  const inputFields = [{ id: 'brief', label: '任务要求', type: 'text' as const, required: false, value: '' }];
+  const withInputs = (extra: Partial<SessionNode> = {}) => talked({ contract: { ...contract(), inputs: inputFields }, ...extra });
+  const openInputs = () => fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+  const typeInput = (value: string) => fireEvent.change(screen.getByLabelText('任务要求的值'), { target: { value } });
+
+  it('keeps its drawer open, at its share of the width, while an edit of the inputs takes the delivery back', () => {
+    const host = hosted(withInputs());
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    expect(share()).toEqual(['delivery', '52%']);
+    openInputs();
+    const field = screen.getByLabelText('任务要求的值');
+    field.focus();
+    typeInput('三段');
+    // The canvas took the delivery back; the drawer stays as the reader has it, at the delivery's share, showing the
+    // conversation's earlier delivery as history, and nothing about it was recorded.
+    expect(host.saved.lastOutput).toBeNull();
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(within(drawer).getByText('历史交付 · 未传递给下游')).toBeTruthy();
+    expect(share()).toEqual(['delivery', '52%']);
+    typeInput('三段关卡');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['delivery', '52%']);
+    // The field being typed in stays where it was, the focus with it.
+    expect(screen.getByLabelText('任务要求的值')).toBe(field);
+    expect(field).toHaveValue('三段关卡');
+    expect(document.activeElement).toBe(field);
+    expect(host.saved.contract!.inputs[0].value).toBe('三段关卡');
+  });
+
+  it('keeps that share through an undo of the inputs and a keystroke in them the canvas refuses', () => {
+    const from = withInputs();
+    const host = hosted(from);
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openInputs();
+    typeInput('三段关卡');
+    // The canvas refuses the next keystroke (a run of another lane, say): the node is unchanged, and keeps its output form.
+    host.refusing = true;
+    typeInput('三段关卡，加一段');
+    expect(host.saved.contract!.inputs[0].value).toBe('三段关卡');
+    expect(share()).toEqual(['delivery', '52%']);
+    host.refusing = false;
+    // An undo: the earlier inputs again, the delivery not back (restoreDoc takes it back again), the output form the same.
+    host.put({ ...from, lastOutput: null });
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['delivery', '52%']);
+  });
+
+  it('carries into the inputs an edit of the drawer’s form that a refused keystroke left holding', () => {
+    const host = hosted(withInputs());
+    openForm();
+    type('## 第二');
+    // The canvas refuses the next keystroke (a run of another lane, say): the edit holds by the node it was made on.
+    host.refusing = true;
+    type('## 第二版');
+    host.refusing = false;
+    expect(share()).toEqual(['delivery', '52%']);
+    // An edit of the inputs then carries it, keyed to the form the node has now.
+    openInputs();
+    typeInput('三段关卡');
+    expect(host.saved.contract!.inputs[0].value).toBe('三段关卡');
+    expect(share()).toEqual(['delivery', '52%']);
+  });
+
+  it('holds a page’s drawer through an edit of the inputs at a page’s share, and no delivery’s once it is no page', () => {
+    // A webpage requirement (an html field) gives the drawer a page's share whatever it shows (openContentOf), so the
+    // drawer an edit of the inputs holds keeps no delivery's share: once that field is no page's, the node shows its
+    // conversation and the drawer a conversation's share.
+    const pageForm = { version: 1 as const, inputs: inputFields, outputs: [{ id: 'page', label: '页面', type: 'html' as const, required: true, value: '' }] };
+    const host = hosted(talked({ contract: pageForm, lastOutput: { text: '{"page":"<main>关卡</main>"}', source: 'run', at: 1 } }));
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    expect(share()).toEqual(['page', '62%']);
+    openInputs();
+    typeInput('三段关卡');
+    expect(host.saved.lastOutput).toBeNull();
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['page', '62%']);
+    openForm();
+    fireEvent.change(drawerOf().getByLabelText('页面的类型'), { target: { value: 'markdown' } });
+    expect(host.saved.contract!.outputs[0].type).toBe('markdown');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['chat', '38%']);
+  });
+
+  it('ends that edit with a run, and shows what the run delivers in the drawer by its own rule', () => {
+    const host = hosted(withInputs());
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openInputs();
+    typeInput('三段关卡');
+    // Starting work ends the edit: the drawer stays as the reader has it, at a conversation's share.
+    host.show({ run: { state: 'running' } });
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['chat', '38%']);
+    host.put({ ...host.saved, lastOutput: { text: '{"result":"## 三段关卡"}', source: 'run', at: 2 } });
+    host.show({ run: { state: 'done' } });
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['delivery', '52%']);
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+    // Taken back later by something else (an output upstream replaced), that delivery takes its drawer with it, as before.
+    host.put({ ...host.saved, lastOutput: null });
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+  });
+
+  it('carries an edit begun in the inputs into the drawer’s form, whose publication shows in the same drawer', () => {
+    const host = hosted(withInputs());
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    openInputs();
+    typeInput('三段关卡');
+    openForm();
+    type('## 三段关卡规格');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['delivery', '52%']);
+    publish();
+    expect(host.saved.lastOutput).toMatchObject({ text: '{"result":"## 三段关卡规格"}', source: 'manual' });
+    expect(host.saved.contract!.inputs[0].value).toBe('三段关卡');
+    expect(host.saved).not.toHaveProperty('deliverablesOpen');
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(share()).toEqual(['delivery', '52%']);
+  });
+
+  it('holds nothing for an edit of the inputs that took no delivery back', () => {
+    // A case recording stays through an edit of the inputs (a copied case's node opens on them); something else taking
+    // it back later closes the drawer that opened for it, and finds no share held.
+    const recorded = hosted(delivered({ contract: { ...contract(), inputs: inputFields }, lastOutput: { text: '{"result":"## 实录"}', source: 'case', at: 1 } }));
+    typeInput('三段关卡');
+    expect(recorded.saved.lastOutput).toMatchObject({ source: 'case' });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    recorded.put({ ...recorded.saved, lastOutput: null });
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(share()).toEqual(['chat', '38%']);
+    recorded.unmount();
+    // An edit the canvas refused (a run of another lane, say) leaves the delivery and its drawer; a new conversation,
+    // which starts with no delivery, then closes the drawer, as it did before.
+    const refused = hosted(withInputs());
+    refused.refusing = true;
+    openInputs();
+    typeInput('三段关卡');
+    expect(refused.saved.lastOutput).toMatchObject({ source: 'run' });
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    refused.put(createNodeThread(refused.saved));
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    refused.unmount();
+    // A node with no delivery to take back starts no edit: the drawer the reader then opens by hand has a conversation's
+    // share, and an undo (the document from before, without the drawer's flag) closes it again, as it did before.
+    const empty = agent({ contract: { ...contract(), inputs: inputFields } });
+    const blank = hosted(empty);
+    openInputs();
+    typeInput('三段关卡');
+    fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));
+    expect(blank.saved.deliverablesOpen).toBe(true);
+    expect(share()).toEqual(['chat', '38%']);
+    blank.put(empty);
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+  });
+
+  it('holds no share for a drawer that is not shown, closed by the reader or behind Configure', () => {
+    // The reader closed the drawer: two keystrokes in the inputs take the delivery back, and the drawer opened again by
+    // hand has a conversation's share, its delivery being history now.
+    const closed = hosted(withInputs({ deliverablesOpen: false }));
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    openInputs();
+    typeInput('三段');
+    typeInput('三段关卡');
+    expect(closed.saved.lastOutput).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));
+    expect(within(screen.getByRole('region', { name: '交付物' })).getByText('历史交付 · 未传递给下游')).toBeTruthy();
+    expect(share()).toEqual(['chat', '38%']);
+    closed.unmount();
+    // Configure in the drawer's place (a canvas on this device) is laid over the node at its own width (awwo-node.css,
+    // .canvas-inspector): the drawer closed behind it is not shown, and no share is held for it either.
+    hosted(withInputs({ deliverablesOpen: false }), { configurationPanel: <aside className="canvas-inspector">配置内容</aside> });
+    expect(share()).toEqual(['delivery', '52%']);
+    openInputs();
+    typeInput('三段关卡');
+    expect(screen.getByRole('region', { name: '节点配置' })).toBeTruthy();
+    expect(share()).toEqual(['chat', '38%']);
+  });
+
   it('gives a page most of its width, and leaves a picture, clip or model where its own view shows it', () => {
     const { unmount } = render(<SessionTile node={delivered({ contract: { version: 1, inputs: [], outputs: [{ id: 'result', label: '页面', type: 'html', required: true, value: '' }] } })} scale={1} focused />);
     const tile = screen.getByTestId('canvas-tile-n');

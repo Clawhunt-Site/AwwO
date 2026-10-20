@@ -1759,6 +1759,43 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(tile.style.width).toBe('520px');
   });
 
+  it('keeps that room, the drawer beside the inputs, while an edit of the inputs takes the delivery back', async () => {
+    // An edit of the inputs takes the delivery back too and keeps the drawer that opened by itself (SessionTile
+    // updateFields, 2026-10-21): narrowed to 520 px, the node would lay that drawer over the inputs being typed in.
+    const form = { ...resultForm, inputs: [{ id: 'brief', label: '任务要求', type: 'text' as const, required: false, value: '' }] };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered({ contract: form, lastOutput: { text: '{"result":"## 关卡规格"}', source: 'run', at: 1 } })));
+    const { world, tile } = await openOn({ w: 1600, h: 280 });
+    for (let landed = '', waits = 0; landed !== world.style.transform; waits += 1) {
+      if (waits === 10) throw new Error(`the opening glide never landed: ${world.style.transform}`);
+      landed = world.style.transform;
+      await glideDone();
+    }
+    const drawer = within(tile).getByRole('region', { name: '交付物' });
+    const before = { camera: world.style.transform, size: [tile.style.width, tile.style.height] };
+    expect(before.size).toEqual(['840px', '380px']);
+    fireEvent.click(within(tile).getByRole('button', { name: '输入', exact: true }));
+    const field = within(tile).getByLabelText('任务要求的值');
+    field.focus();
+    fireEvent.change(field, { target: { value: '三段关卡' } });
+    await waitFor(() => expect(saved().lastOutput ?? null).toBeNull(), { timeout: 3000 });
+    await settle();
+    await glideDone();
+    expect(saved().contract?.inputs[0].value).toBe('三段关卡');
+    expect(saved()).not.toHaveProperty('deliverablesOpen');
+    expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(within(tile).getByLabelText('任务要求的值')).toBe(field);
+    expect(document.activeElement).toBe(field);
+    expect([tile.style.width, tile.style.height]).toEqual(before.size);
+    expect(world.style.transform).toBe(before.camera);
+    // Its close is remembered as for a drawer the drawer's form kept open, and the node takes a conversation's width.
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
+    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await settle();
+    await glideDone();
+    expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(tile.style.width).toBe('520px');
+  });
+
   it('remembers the reader’s close of a drawer an edit kept open, so a later delivery leaves it closed', async () => {
     // The canvas compared the close with its own rule, which already said closed (no delivery, nothing recorded): it
     // recorded nothing, and the next delivery opened the drawer again (2026-10-21). Here a run of the node delivers.
