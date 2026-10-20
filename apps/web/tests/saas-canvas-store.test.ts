@@ -6,7 +6,7 @@ import { CANVAS_BASELINE_KEY, CANVAS_DRAFT_PREFIX, CANVAS_KEPT_DRAFTS_KEY, prese
 import { PLANNING_STORAGE_KEY } from '../src/canvas/canvasPlanning';
 import { PAGE_REPAIR_STORAGE_KEY } from '../src/canvas/pageRepair';
 import { CARD_FRAMES_KEY } from '../src/canvas/cardFrames';
-import { CANVAS_MIRROR_GROUP, canvasStoreAdoption, keepLegacyCanvasCache, keptInCanvasStore } from '../src/canvas/canvasStorage';
+import { CANVAS_MIRROR_GROUP, canvasStoreAdoption, keepLegacyCanvasCache, keptInCanvasStore, legacyRunGoingOn } from '../src/canvas/canvasStorage';
 import { channelHub, countedLocks, memoryBackend, quotaStorage, settle } from './saas-canvas-store-fakes';
 
 const P = 'awwo.saas:user-a:tenant-a:canvas-a:';
@@ -15,6 +15,8 @@ const DRAFT = P + `${CANVAS_DRAFT_PREFIX}old-writer`;
 const PLAN = P + PLANNING_STORAGE_KEY;
 const VERSION = P + 'awwo.cloud.version';
 const MOVED = String.fromCharCode(0) + 'moved';
+/** A run record as an earlier release wrote it (runJournal.ts), started at `startedAt`. */
+const journal = (startedAt: number) => JSON.stringify({ version: 1, id: 'run-1', startedAt, scope: ['n1'], nodes: {} });
 
 type World = { backend: ReturnType<typeof memoryBackend>; hub: ReturnType<typeof channelHub>; locks: ReturnType<typeof countedLocks> };
 function tab(shared: World, extra: Partial<CanvasStoreOptions> = {}) {
@@ -461,7 +463,7 @@ describe('canvas store', () => {
       await a.store.open(P, canvasStoreAdoption);
       await a.store.flush(); await settle();
       // A tab of the earlier release runs a node and writes its cache as the run goes on.
-      storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, '{"run":"under way"}');
+      storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, journal(Date.now()));
       storage.setItem(DOC, doc(4));
       const b = hosted(nextVisit(shared), storage);
       await b.store.open(P, canvasStoreAdoption);
@@ -536,7 +538,7 @@ describe('canvas store', () => {
     const { storage } = quotaStorage();
     const LANE = P + `${CANVAS_RUN_JOURNAL_KEY}.lane1`;
     storage.setItem(DOC, 'the cache a running tab of the earlier release saves over');
-    storage.setItem(LANE, '{"run":"under way"}');
+    storage.setItem(LANE, journal(Date.now() - 60 * 1000));
     storage.setItem(DRAFT, 'its draft');
     const a = tab(shared, { legacy: storage, keepLegacy: keepLegacyCanvasCache });
     await a.store.open(P, canvasStoreAdoption);
@@ -551,15 +553,48 @@ describe('canvas store', () => {
     expect(storage.getItem(DOC)).toBeNull();
   });
 
-  it('counts a run record, not the kept copy of a damaged one, as a run that keeps the document cache', () => {
+  it('counts a run record of the last day, not the kept copy of a damaged one, as a run that keeps the document cache', () => {
     const { storage } = quotaStorage();
     expect(keepLegacyCanvasCache(DOC, storage)).toBe(false);
-    storage.setItem(P + `${CANVAS_RUN_JOURNAL_KEY}.corrupt.17`, '{');
-    storage.setItem('awwo.saas:user-a:tenant-a:canvas-b:' + CANVAS_RUN_JOURNAL_KEY, '{"run":"another canvas"}');
+    storage.setItem(P + `${CANVAS_RUN_JOURNAL_KEY}.corrupt.17`, journal(Date.now()));
+    storage.setItem('awwo.saas:user-a:tenant-a:canvas-b:' + CANVAS_RUN_JOURNAL_KEY, journal(Date.now()));
     expect(keepLegacyCanvasCache(DOC, storage)).toBe(false);
-    storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, '{"run":"under way"}');
+    storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, journal(Date.now() - 23 * 3600 * 1000));
     expect(keepLegacyCanvasCache(DOC, storage)).toBe(true);
     expect(keepLegacyCanvasCache(DRAFT, storage)).toBe(false);
+    // Started ahead of this clock: as recent.
+    storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, journal(Date.now() + 3600 * 1000));
+    expect(keepLegacyCanvasCache(DOC, storage)).toBe(true);
+  });
+
+  it('lets the document cache go once its canvas\'s run record is a day old, or one its release could not read', () => {
+    const { storage } = quotaStorage();
+    const now = 1_800_000_000_000;
+    storage.setItem(P + `${CANVAS_RUN_JOURNAL_KEY}.lane1`, journal(now - 25 * 3600 * 1000));
+    expect(legacyRunGoingOn(P, storage, now)).toBe(false);
+    expect(legacyRunGoingOn(P, storage, now - 2 * 3600 * 1000)).toBe(true);
+    for (const raw of ['{', '{"run":"under way"}', '{"startedAt":"yesterday"}', 'null']) {
+      storage.setItem(P + `${CANVAS_RUN_JOURNAL_KEY}.lane1`, raw);
+      expect(legacyRunGoingOn(P, storage, now), raw).toBe(false);
+    }
+    // Any one record of the last day keeps it.
+    storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, journal(now - 3600 * 1000));
+    expect(legacyRunGoingOn(P, storage, now)).toBe(true);
+  });
+
+  it('takes a document cache held back by a run record in once that record is a day old', async () => {
+    const shared = world();
+    const { storage } = quotaStorage();
+    storage.setItem(DOC, 'the cache of a run long over');
+    storage.setItem(P + CANVAS_RUN_JOURNAL_KEY, journal(Date.now() - 25 * 3600 * 1000));
+    const a = tab(shared, { legacy: storage, keepLegacy: keepLegacyCanvasCache });
+    await a.store.open(P, canvasStoreAdoption);
+    await a.store.flush(); await settle();
+    expect(a.store.get(P, DOC)).toBe('the cache of a run long over');
+    expect(storage.getItem(DOC)).toBeNull();
+    // The run record is copied in and stays, as the store's copied records do.
+    expect(storage.getItem(P + CANVAS_RUN_JOURNAL_KEY)).not.toBeNull();
+    expect(a.store.get(P, P + CANVAS_RUN_JOURNAL_KEY)).not.toBeNull();
   });
 
   it('takes another canvas\'s bytes in below anything a tab that opened that canvas meanwhile wrote', async () => {
@@ -606,7 +641,8 @@ describe('canvas store', () => {
     const { storage } = quotaStorage();
     const Q = 'awwo.saas:user-a:tenant-a:canvas-q:';
     storage.setItem(Q + CANVAS_STORAGE_KEY, 'cache of a canvas a tab of the earlier release runs');
-    storage.setItem(Q + CANVAS_RUN_JOURNAL_KEY, '{"run":"started after the sweep listed its keys"}');
+    // Started after the sweep listed its keys.
+    storage.setItem(Q + CANVAS_RUN_JOURNAL_KEY, journal(Date.now()));
     const a = tab(shared, { legacy: storage, keepLegacy: keepLegacyCanvasCache });
     await a.store.moveLegacy(Q, [Q + CANVAS_STORAGE_KEY], canvasStoreAdoption);
     expect(shared.backend.value(Q + CANVAS_STORAGE_KEY)).toBe('cache of a canvas a tab of the earlier release runs');

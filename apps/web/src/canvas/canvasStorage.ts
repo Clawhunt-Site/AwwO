@@ -66,17 +66,29 @@ export function canvasStoreAdoption(name: string): Adoption | null {
   if (name === 'superclaw.canvas.v2' || name === 'superclaw.canvas.v2.corrupt' || name === 'awwo.cloud.baseline.v1') return 'mirror';
   return 'copy';
 }
-/** The document cache stays in localStorage while a run record of its canvas is there: a tab of the earlier release that
- * is running a node or watching a run saves its edits only over the cache it last wrote, and pauses when it is gone. */
-export function keepLegacyCanvasCache(key: string, legacy: Pick<Storage, 'key' | 'length'>): boolean {
-  if (!key.endsWith(':superclaw.canvas.v2')) return false;
-  const runs = key.slice(0, -'superclaw.canvas.v2'.length) + 'awwo.canvas.active-run.v1';
+/** How long an earlier release's run record counts as a run its tab may still be on: none runs or watches one this long. */
+const LEGACY_RUN_MS = 24 * 3600 * 1000;
+/** Whether an earlier release left a run record of the canvas under `prefix` that started less than a day ago (its
+ * `startedAt`): a tab of that release may still be running a node or watching that run. That release took a record it
+ * could not read for no run, and such a tab removes its record when the run ends; a record copied into the store stays
+ * in localStorage, so without the age an old one would hold the canvas's cache there for good. */
+export function legacyRunGoingOn(prefix: string, legacy: Pick<Storage, 'getItem' | 'key' | 'length'>, now = Date.now()): boolean {
+  const runs = prefix + 'awwo.canvas.active-run.v1';
   for (let index = 0; index < legacy.length; index++) {
     const name = legacy.key(index);
     // A damaged record's kept copy (….corrupt.<time>) is no run.
-    if (name?.startsWith(runs) && !name.includes('.corrupt.')) return true;
+    if (!name?.startsWith(runs) || name.includes('.corrupt.')) continue;
+    let started: unknown;
+    try { started = (JSON.parse(legacy.getItem(name) ?? 'null') as { startedAt?: unknown } | null)?.startedAt; } catch { continue; }
+    // A time ahead of this clock counts as recent.
+    if (typeof started === 'number' && Number.isFinite(started) && now - started < LEGACY_RUN_MS) return true;
   }
   return false;
+}
+/** The document cache stays in localStorage while such a run may be going on: a tab of the earlier release that is
+ * running a node or watching a run saves its edits only over the cache it last wrote, and pauses when it is gone. */
+export function keepLegacyCanvasCache(key: string, legacy: Pick<Storage, 'getItem' | 'key' | 'length'>): boolean {
+  return key.endsWith(':superclaw.canvas.v2') && legacyRunGoingOn(key.slice(0, -'superclaw.canvas.v2'.length), legacy);
 }
 
 /** The document cache first: the group decides by it (see canvasStore.ts mirrorGroup). */

@@ -1,14 +1,14 @@
-import { canvasStore, canvasStoreAdoption } from '../canvas/canvasStorage';
+import { canvasStore, canvasStoreAdoption, legacyRunGoingOn } from '../canvas/canvasStorage';
 
 // Earlier releases kept every opened canvas's document, sync proof and records in localStorage, never removed, until the
 // site's ~5 MB was full. Once this page uses the canvas store, it takes in what the other canvases left there, while the
 // browser is idle: the large copies move out (see canvasStoreAdoption), the small records are copied. A reader's copy
-// holds nothing but the server's document, so it is dropped. A canvas with an unsent draft or a run record, or one a tab
-// has open, is left as it is: its own opening takes those in.
+// holds nothing but the server's document, so it is dropped. A canvas with an unsent draft or a run record from the last
+// day (legacyRunGoingOn), or one a tab has open, is left as it is: its own opening takes those in.
 
 const SCOPE = /^awwo\.saas:[^:]+:[^:]+:[^:]+:/;
 const READER_SCOPE = /%2Fread-only:$/;
-const UNSETTLED = ['awwo.cloud.draft.v1:', 'awwo.canvas.active-run.v1'];
+const DRAFTS = 'awwo.cloud.draft.v1:';
 let swept = false;
 
 function legacyScopes(storage: Storage, current: string): Map<string, string[]> {
@@ -31,7 +31,7 @@ export async function moveLegacyCanvasStorage(current: string): Promise<void> {
       for (const key of keys) { try { storage.removeItem(key); } catch { /* Left in place. */ } }
       continue;
     }
-    if (keys.some(key => UNSETTLED.some(family => key.slice(prefix.length).startsWith(family)))) continue;
+    if (keys.some(key => key.slice(prefix.length).startsWith(DRAFTS)) || legacyRunGoingOn(prefix, storage)) continue;
     try { await canvasStore().moveLegacy(prefix, keys, canvasStoreAdoption); } catch { /* It moves when that canvas opens. */ }
   }
 }

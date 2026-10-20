@@ -362,12 +362,14 @@ it('deleting a canvas removes what this browser kept of it, after the server has
   expect(backend.value(zero + `${CANVAS_DRAFT_PREFIX}w`)).toBeNull();
 });
 
-it('moves other canvases out of localStorage, leaving unsent drafts and runs for their own opening and dropping reader copies', async () => {
+it('moves other canvases out of localStorage, leaving unsent drafts and runs of the last day for their own opening and dropping reader copies', async () => {
   useStore();
   const settled = 'awwo.saas:user-a:tenant-a:settled:';
   const drafting = 'awwo.saas:user-a:tenant-a:drafting:';
   const running = 'awwo.saas:user-b:tenant-b:running:';
+  const ranLong = 'awwo.saas:user-b:tenant-b:ran-long:';
   const reader = 'awwo.saas:user-a:tenant-a:shared%2Fread-only:';
+  const journal = (startedAt: number) => JSON.stringify({ version: 1, id: 'run-1', startedAt, scope: ['n1'], nodes: {} });
   localStorage.setItem(A + CANVAS_STORAGE_KEY, 'current canvas');
   localStorage.setItem(settled + CANVAS_STORAGE_KEY, 'settled doc');
   localStorage.setItem(settled + CANVAS_BASELINE_KEY, 'proof');
@@ -375,7 +377,11 @@ it('moves other canvases out of localStorage, leaving unsent drafts and runs for
   localStorage.setItem(drafting + CANVAS_STORAGE_KEY, 'drafting doc');
   localStorage.setItem(drafting + `${CANVAS_DRAFT_PREFIX}w`, 'unsent');
   localStorage.setItem(running + CANVAS_STORAGE_KEY, 'running doc');
-  localStorage.setItem(running + 'awwo.canvas.active-run.v1.lane1', '{}');
+  localStorage.setItem(running + 'awwo.canvas.active-run.v1.lane1', journal(Date.now() - 3600 * 1000));
+  // A run record over a day old: no tab of the earlier release is still on that run.
+  const longOver = journal(Date.now() - 25 * 3600 * 1000);
+  localStorage.setItem(ranLong + CANVAS_STORAGE_KEY, 'doc of a run long over');
+  localStorage.setItem(ranLong + 'awwo.canvas.active-run.v1', longOver);
   localStorage.setItem(reader + CANVAS_STORAGE_KEY, 'reader copy');
   localStorage.setItem('awwo.saas:user-a:tenant-a:awwo.canvas.planning.duration.v1', '40');
   await moveLegacyCanvasStorage(A);
@@ -385,6 +391,12 @@ it('moves other canvases out of localStorage, leaving unsent drafts and runs for
   expect(backend.value(settled + CANVAS_BASELINE_KEY)).toBe('proof');
   expect(canvasKeys(localStorage, drafting)).toHaveLength(2);
   expect(canvasKeys(localStorage, running)).toHaveLength(2);
+  expect(backend.value(running + CANVAS_STORAGE_KEY)).toBeNull();
+  expect(backend.value(running + 'awwo.canvas.active-run.v1.lane1')).toBeNull();
+  // Its document moves; its run record is copied and stays, as the store's copied records do.
+  expect(canvasKeys(localStorage, ranLong)).toEqual([ranLong + 'awwo.canvas.active-run.v1']);
+  expect(backend.value(ranLong + CANVAS_STORAGE_KEY)).toBe('doc of a run long over');
+  expect(backend.value(ranLong + 'awwo.canvas.active-run.v1')).toBe(longOver);
   expect(canvasKeys(localStorage, reader)).toEqual([]);
   expect(backend.value(reader + CANVAS_STORAGE_KEY)).toBeNull();
   expect(localStorage.getItem('awwo.saas:user-a:tenant-a:awwo.canvas.planning.duration.v1')).toBe('40');
