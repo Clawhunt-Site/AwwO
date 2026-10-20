@@ -999,9 +999,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
   }, []);
   // At the next frame, by which React has drawn a change made in a click or a key press. A change made after awaiting
-  // the server is drawn in a scheduler task, which a frame can come before: a task's start moves the focus in the
-  // commit that draws the panel instead (panelBoxAsked).
+  // the server is drawn in a scheduler task, which a frame can come before: such a change moves the focus in the commit
+  // that draws it instead (refocusInCommit).
   const refocus = useCallback((selector: string) => { requestAnimationFrame(() => moveLostFocus(selector)); }, [moveLostFocus]);
+  // In the commit that draws the change it is asked for with: for a change made after awaiting the server, in an effect
+  // or in a frame. Each request is a new object, so the same selector asked for again is looked at again.
+  const [focusRequest, setFocusRequest] = useState<{ selector: string } | null>(null);
+  useLayoutEffect(() => { if (focusRequest) moveLostFocus(focusRequest.selector); }, [focusRequest, moveLostFocus]);
+  const refocusInCommit = useCallback((selector: string) => setFocusRequest({ selector }), []);
 
   /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
@@ -3266,11 +3271,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ...(request !== undefined && request !== prompt ? { request } : {}) });
   // The identity a task is sent under, chosen here so its turn can carry it.
   const submissionId = () => `execution-${crypto.randomUUID()}`;
-  // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box had
-  // the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React draws the
-  // start in a scheduler task, which a frame can come before (see refocus).
-  const [panelBoxAsked, setPanelBoxAsked] = useState(0);
-  useLayoutEffect(() => { if (panelBoxAsked) moveLostFocus('.awwo-canvas-assistant--panel textarea'); }, [panelBoxAsked, moveLostFocus]);
   // A message routed to a task. Started, it joins the conversation with its task; refused, with the reason, and the
   // box keeps it; unconfirmed, the host offers to reconcile it and the box lets it go, so it is not sent twice.
   const startAssistantTask = async (prompt: string, id: string) => {
@@ -3284,7 +3284,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
         userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      setPanelBoxAsked(value => value + 1);
+      // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box
+      // had the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React
+      // draws the start in a scheduler task, which a frame can come before (see refocus).
+      refocusInCommit('.awwo-canvas-assistant--panel textarea');
     } catch (error) {
       if (!mounted.current) return;
       const unconfirmed = error instanceof TaskStartUnconfirmed;
@@ -3727,7 +3730,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
         userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      setPanelBoxAsked(value => value + 1);
+      refocusInCommit('.awwo-canvas-assistant--panel textarea');
     } catch (error) {
       if (!mounted.current) return;
       // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
