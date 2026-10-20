@@ -241,6 +241,22 @@
 .canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.has-inputs.is-short:not(:has(> .awwo-node-failure, > .awwo-node-brief.is-open)) .awwo-input-drawer:has(+ .awwo-node-panel--conversation):not(:has(+ .awwo-node-panel--conversation > .awwo-rework-note, + .awwo-node-panel--conversation > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked))) { scroll-padding-bottom: 18px; }
 .canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-node-empty :focus-visible)):is(:not(:has(> .awwo-rework-note)), :not(.awwo-node-failure ~ *, :has(> .awwo-rework-note > .awwo-rework-note-body, > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked)))) { overflow: clip; }
 .canvas-root .awwo-node:not([data-content='media']) .awwo-node-chat.is-short:not(.has-inputs) .awwo-node-panel--conversation:has(> .awwo-node-empty):not(:has(> .awwo-node-empty :focus-visible)):is(:not(:has(> .awwo-rework-note)), :not(.awwo-node-failure ~ *, :has(> .awwo-rework-note > .awwo-rework-note-body, > .canvas-composer :is(.awwo-attachment-chip, .awwo-attachment-notice, .canvas-composer-notice, .canvas-composer-blocked)))) > .canvas-composer { position: sticky; bottom: 0; }
+/* Above replies, a failed run's note leaves the conversation a lower floor (the failure note's rule near the top of this
+   file: 150 px in a 334 px column, 1280 × 720 beside the assistant), which a ten-line composer outgrows (2026-10-20,
+   1366 × 657 and 1280 × 720: the model and 用户须知 ended up to 23 px below the node, in every look): the panel kept that
+   floor while the note and the task card shrank. In a short column that floor is the panel's basis, never shrunk, and
+   the panel is never shorter than its content either (it clips without being a scroller, overflow: clip, so its
+   automatic minimum is its content), in which the replies count for nothing (size containment): the note and the task
+   card give way to the composer, scrolling in what is left. A column whose composer fits the floor lays out as before.
+   Where even their floors leave too little room (a file and ten lines at 1366 × 657 and 1280 × 720, or ten lines in a
+   294 px column: a node saved under the 380 px an opened node gets at least, as a reviewer added beside a node is at
+   340 × 260, on a stage as short as 1280 × 720 beside the assistant; a node added from the canvas or by the assistant is
+   a template's 560 × 420), the composer still runs past the column, by less than past the panel before, and a control
+   under its box focused from the keyboard scrolls the node's body, not the panel. Not beside the inputs, which keep
+   their own floor, nor beside a rework note (an open one would count in full, a closed one's 42 px would move columns
+   whose composer fits), nor in a media node (its prompt box can be taller than the column). */
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat.is-short .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns:not(.awwo-input-drawer + *, :has(> .awwo-rework-note)) { flex-basis: max(min(160px, 45%), min(340px, calc(100% - 200px))); flex-shrink: 0; min-height: auto; overflow: clip; }
+.canvas-root .awwo-node.canvas-tile--focus:not([data-content='media']) .awwo-node-chat.is-short .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns:not(.awwo-input-drawer + *, :has(> .awwo-rework-note)) > .canvas-transcript { contain: size; }
 /* Width mirrors DELIVERY_DRAWER_WIDTH in nodePresentation.ts. */
 /* An opened node gives its delivery the share of its width the delivery needs (SessionTile --awwo-drawer-width: a
    page most of it, a document half), never less than the drawer's own 320 px. */

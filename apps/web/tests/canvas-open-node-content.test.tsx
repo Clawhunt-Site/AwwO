@@ -36,6 +36,62 @@ function declarations(css: string, selector: string): Record<string, string> {
   }
   throw new Error(`no rule for ${selector}`);
 }
+/** The selector of the one top-level stylesheet rule (none inside an at-rule such as @media or @container) whose
+ *  declarations are exactly `body` (comments dropped, spaces collapsed). */
+function selectorOf(css: string, body: Record<string, string>): string {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules: [string, string][] = [];
+  for (let i = 0, depth = 0, start = 0, open = 0; i < text.length; i++) {
+    if (text[i] === '{' && depth++ === 0) open = i;
+    else if (text[i] === '}' && --depth === 0) {
+      const head = text.slice(start, open).split(';').pop()!.trim(), inner = text.slice(open + 1, i);
+      if (!head.startsWith('@') && !inner.includes('{')) rules.push([head, inner]);
+      start = i + 1;
+    }
+  }
+  const declared = (inner: string) => JSON.stringify(inner.split(';').map(part => part.trim()).filter(Boolean)
+    .map(part => [part.slice(0, part.indexOf(':')).trim(), part.slice(part.indexOf(':') + 1).trim().replace(/\s+/g, ' ')]).sort());
+  const heads = rules.filter(([, inner]) => declared(inner) === JSON.stringify(Object.entries(body).sort())).map(([head]) => head.replace(/\s+/g, ' '));
+  if (heads.length !== 1) throw new Error(`${heads.length} top-level rules for ${JSON.stringify(body)}`);
+  return heads[0];
+}
+/** A selector's specificity [ids, classes/attributes/pseudo-classes, types], for the selectors these stylesheets use:
+ *  :not(), :is() and :has() count as their most specific argument, :where() as nothing, another functional pseudo-class
+ *  as one, its argument unread (none here takes a selector, as `:nth-child(… of S)` would), and a pseudo-element
+ *  (::before, or :before) as a type. One selector, not a list (each of a list's selectors has its own; review
+ *  2026-10-20: summed, an unmatched `#id` arm would hide a `:where()` one). Escapes and strings are not read. */
+function specificity(selector: string): [number, number, number] {
+  for (let i = 0, depth = 0; i <= selector.length; i++) {
+    if (i === selector.length) { if (depth) throw new Error(`unbalanced parentheses: ${selector}`); break; }
+    depth += selector[i] === '(' ? 1 : selector[i] === ')' ? -1 : 0;
+    if (depth < 0) throw new Error(`unbalanced parentheses: ${selector}`);
+    if (selector[i] === ',' && depth === 0) throw new Error(`a selector list, not one selector: ${selector}`);
+  }
+  const total: [number, number, number] = [0, 0, 0];
+  for (let i = 0; i < selector.length;) {
+    const rest = selector.slice(i), call = /^:([\w-]+)\(/.exec(rest);
+    if (call) {
+      let end = i + call[0].length;
+      for (let depth = 1; depth; end++) depth += selector[end] === '(' ? 1 : selector[end] === ')' ? -1 : 0;
+      if (!['not', 'is', 'has', 'where'].includes(call[1])) total[1]++;
+      else if (call[1] !== 'where') {
+        const args: string[] = [];
+        for (let k = 0, depth = 0, from = 0, inner = selector.slice(i + call[0].length, end - 1); k <= inner.length; k++) {
+          if (k === inner.length || (inner[k] === ',' && depth === 0)) { args.push(inner.slice(from, k).trim().replace(/^[>+~]\s*/, '')); from = k + 1; }
+          else depth += inner[k] === '(' ? 1 : inner[k] === ')' ? -1 : 0;
+        }
+        const best = args.map(specificity).sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]).at(-1)!;
+        best.forEach((value, k) => { total[k] += value; });
+      }
+      i = end;
+      continue;
+    }
+    const token = /^(#[\w-]+)|^(::?(?:before|after|first-line|first-letter)\b|::[\w-]+|[a-zA-Z][\w-]*)|^(\.[\w-]+|\[[^\]]*\]|:[\w-]+)/.exec(rest);
+    if (token) total[token[1] ? 0 : token[2] ? 2 : 1]++;
+    i += token ? token[0].length : 1;
+  }
+  return total;
+}
 /** The text of the first stylesheet block whose head is exactly `head`, its nested blocks included (comments dropped,
  *  spaces collapsed). */
 function block(css: string, head: string): string {
@@ -668,6 +724,129 @@ describe('an opened node says what it was asked', () => {
       delete (document as { fonts?: unknown }).fonts;
       act(() => { saveNodeViewPreference(DEFAULT_NODE_VIEW); });
       localStorage.removeItem(nodeViewStorageKey());
+    }
+  });
+
+  // Seen 2026-10-20 in Chrome at 1366 × 657 and 1280 × 720: above replies, a failed run's note leaves the conversation
+  // its floor (150 px in a 334 px column), which a ten-line composer outgrows (176 to 181.5 px): the panel kept that
+  // floor while the note and the task card shrank, and the model and 用户须知 ended up to 23 px below the node. There the
+  // floor is the panel's basis, never shrunk, and its content its minimum, in which the replies count for nothing. jsdom
+  // lays nothing out: the rules are found in the stylesheet, and the node's own markup is matched against their selectors.
+  it('keeps a short column’s composer whole below a failed run’s note above replies: the note and the task card give way to it', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/canvas/awwo-node.css'), 'utf8');
+    const floor = '.canvas-root .awwo-node.canvas-tile--focus .awwo-node-failure ~ .awwo-node-panel--conversation.has-turns';
+    // The floor kept above replies and a failure note is the panel's basis here, and the panel never shrinks below it
+    // nor below its content (clipped without being a scroller, whose minimum would be 0); the replies count for nothing.
+    // Each rule is found by what it declares, and the node's markup is matched against the stylesheet's own selector.
+    const kept = declarations(css, floor)['min-height'];
+    expect(kept).toBe('max(min(160px, 45%), min(340px, calc(100% - 200px)))');
+    const panelRule = selectorOf(css, { 'flex-basis': kept, 'flex-shrink': '0', 'min-height': 'auto', overflow: 'clip' });
+    const repliesRule = selectorOf(css, { contain: 'size' });
+    expect(repliesRule.endsWith(' > .canvas-transcript')).toBe(true);
+    // It wins over the rules that size the panel otherwise (review 2026-10-20: matched but less specific, it would be dead).
+    for (const other of ['.canvas-root .awwo-node-panel', '.canvas-root .awwo-node-panel--conversation', floor]) {
+      expect(Object.keys(declarations(css, other)).length).toBeGreaterThan(0);
+      const [mine, theirs] = [specificity(panelRule), specificity(other)];
+      expect(mine[0] - theirs[0] || mine[1] - theirs[1] || mine[2] - theirs[2]).toBeGreaterThan(0);
+    }
+
+    let column = 408;
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return this.classList?.contains('awwo-node-chat') ? column : 0; } });
+    try {
+      type Extra = { run?: RunNodeStatus | null; focused?: boolean };
+      // The column as seen: the note's two buttons, the model picker and 用户须知 under the box, a ten-line draft in it.
+      const tile = (node: SessionNode, extra: Extra = {}) => <CanvasUiModeProvider mode="simple"><div className="canvas-root">
+        <SessionTile node={node} scale={1} focused modelChoices={choices} onChangeModel={vi.fn()} onRunNode={vi.fn()} onAskAssistant={vi.fn()}
+          onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div></CanvasUiModeProvider>;
+      const tenLines = Array.from({ length: 10 }, (_, i) => `第${i + 1}行：把这一段的语气改得更口语一些`).join('\n');
+      const drafted = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: tenLines, createdAt: 1 }] });
+      const failed = { run: { state: 'failed', detail: 'run_timeout' } as RunNodeStatus };
+      const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
+      const replies = () => document.querySelector('.awwo-node-panel--conversation > .canvas-transcript');
+      const matched = () => [panel().matches(panelRule), Boolean(replies()?.matches(repliesRule))];
+      const converse = (id: string) => act(() => { appendTurn(id, { role: 'user', text: '把关卡写成表格' }); appendTurn(id, { role: 'agent', text: '| 段 | 检查点 |\n| --- | --- |\n| 屋顶街 | 1 |' }); });
+
+      // A failed run with no conversation yet: the empty conversation's own rules apply, not these.
+      const view = render(tile(drafted(brief), failed));
+      expect(document.querySelector('.awwo-node-failure')).toBeTruthy();
+      expect(matched()).toEqual([false, false]);
+      // Replies below the failure note: the panel and its replies match, with the column as seen.
+      converse(brief.id);
+      view.rerender(tile(drafted(brief), failed));
+      expect(panel()).toHaveClass('has-turns');
+      expect(within(document.querySelector<HTMLElement>('.awwo-node-failure')!).getAllByRole('button').map(button => button.textContent)).toEqual(['重新运行', '让助手调整']);
+      expect([Boolean(panel().querySelector('.canvas-composer .awwo-node-model-picker')), Boolean(panel().querySelector('.canvas-composer .awwo-composer-notes-button'))]).toEqual([true, true]);
+      expect(screen.getByTestId<HTMLTextAreaElement>('composer-input').value).toBe(tenLines);
+      expect(matched()).toEqual([true, true]);
+      // Not without a failure note (the replies keep their own, higher floor then), nor once the run is fine again.
+      view.rerender(tile(drafted(brief)));
+      expect(document.querySelector('.awwo-node-failure')).toBeNull();
+      expect(matched()).toEqual([false, false]);
+      view.rerender(tile(drafted(brief), { run: { state: 'done' } }));
+      expect(matched()).toEqual([false, false]);
+      view.rerender(tile(drafted(brief), failed));
+      expect(matched()).toEqual([true, true]);
+      // Beside the opened inputs the conversation keeps their floor and steps aside, as before; closed, it matches again.
+      fireEvent.click(screen.getByRole('button', { name: '输入', exact: true }));
+      expect(document.querySelector('.awwo-node-chat')).toHaveClass('has-inputs');
+      expect(document.querySelector('.awwo-input-drawer + .awwo-node-panel--conversation')).toBe(panel());
+      expect(matched()).toEqual([false, false]);
+      // Left open across a run, the inputs no longer take the column, and the conversation beside them keeps their floor.
+      view.rerender(tile(drafted(brief), { run: { state: 'running' } }));
+      view.rerender(tile(drafted(brief), failed));
+      expect(document.querySelector('.awwo-node-chat')).not.toHaveClass('has-inputs');
+      expect(document.querySelector('.awwo-input-drawer + .awwo-node-panel--conversation.has-turns')).toBe(panel());
+      expect(matched()).toEqual([false, false]);
+      fireEvent.click(screen.getByRole('button', { name: '收起输入' }));
+      expect(matched()).toEqual([true, true]);
+      // The canvas draws a session node that is not focused compact; one drawn open without the focus (as here) has no
+      // floor, the floor's rule being the focused node's, and this rule keeps to that scope.
+      view.rerender(tile(drafted(brief), { ...failed, focused: false }));
+      expect(document.querySelector('.awwo-node')).not.toHaveClass('canvas-tile--focus');
+      expect(document.querySelector('.awwo-node-chat')).toHaveClass('is-short');
+      expect(matched()).toEqual([false, false]);
+      view.unmount();
+      // A column tall enough to read in keeps its floor, which a composer fits.
+      column = SHORT_COLUMN_PX;
+      const tall = render(tile(drafted(brief), failed));
+      expect(document.querySelector('.awwo-node-failure')).toBeTruthy();
+      expect(panel()).toHaveClass('has-turns');
+      expect(matched()).toEqual([false, false]);
+      tall.unmount();
+      resetAllSessions();
+      column = 408;
+
+      // A rework note beside the replies would count in full in the panel's content (open, with its findings): the column
+      // is laid out as before, the note closed or open.
+      const reworkedNode = agent({ taskFrame: { ...brief.taskFrame!, constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'] } });
+      converse(reworkedNode.id);
+      const reworked = render(tile(drafted(reworkedNode), failed));
+      expect(document.querySelector('.awwo-node-failure')).toBeTruthy();
+      expect(panel()).toHaveClass('has-turns');
+      expect(matched()).toEqual([false, false]);
+      fireEvent.click(within(screen.getByTestId('rework-findings-n')).getByRole('button', { expanded: false }));
+      expect(document.querySelector('.awwo-rework-note-body')).toBeTruthy();
+      expect(matched()).toEqual([false, false]);
+      reworked.unmount();
+      resetAllSessions();
+
+      // A media node's prompt box can be taller than the column: its panel is left as before, where an agent's matches,
+      // also one that has delivered (a document or a page) and failed since (all in the developer view).
+      const page = { version: 1 as const, inputs: [], outputs: [{ id: 'page', label: '页面', type: 'html' as const, required: true, value: '' }] };
+      const delivered = { text: '## 规格', source: 'run' as const, at: 1 };
+      for (const [node, content] of [[{ ...createSessionNode('image', { x: 0, y: 0 }), id: 'img', title: '海报图' }, 'media'], [agent(), 'chat'],
+        [agent({ lastOutput: delivered }), 'delivery'], [agent({ contract: page, lastOutput: delivered }), 'page']] as const) {
+        const applies = content !== 'media';
+        converse(node.id);
+        const developer = render(<div className="canvas-root"><SessionTile node={drafted(node)} scale={1} focused modelChoices={choices} onChangeModel={vi.fn()} onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...failed} /></div>);
+        expect(document.querySelector('.awwo-node')).toHaveAttribute('data-content', content);
+        expect(Boolean(document.querySelector('.awwo-node-failure'))).toBe(true);
+        expect(matched()).toEqual([applies, applies]);
+        developer.unmount();
+        resetAllSessions();
+      }
+    } finally {
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
     }
   });
 
