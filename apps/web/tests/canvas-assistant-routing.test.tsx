@@ -60,6 +60,14 @@ function deferred<T>() {
   const promise = new Promise<T>(settle => { resolve = settle; });
   return { promise, resolve };
 }
+// An earlier task of the conversation asks the reader something: its card holds a text box of its own, which comes
+// before the message box in the side panel.
+function taskAsking(overrides: Partial<AssistantExecutionHost> = {}) {
+  savePlanningConversation({ draft: '', messages: [
+    { id: 'turn-0-user', role: 'user', content: '先查一下资料', route: 'execute' },
+    { id: 'turn-0-task', role: 'assistant', content: '', route: 'execute', taskId: 'task-0' }] });
+  return fakeHost({ renderTask: id => <div><p>任务卡片 {id}</p>{id === 'task-0' ? <textarea aria-label="你的回复" /> : null}</div>, ...overrides });
+}
 // The next message `correct` sends is answered as a correction (redirect) toward this way.
 let correction: AssistantRoute | null = null;
 const routeTo = (route: AssistantRoute) => vi.fn(async (_request: AssistantRouteRequest, _signal: AbortSignal): Promise<AssistantRouteDecision> => {
@@ -644,7 +652,8 @@ describe('the canvas assistant’s one conversation', () => {
 
   it('moves the focus to the side panel’s box when a correction in the welcome hands its request over to a task', async () => {
     const starting = deferred<string>();
-    const { host } = fakeHost({ start: vi.fn(() => starting.promise) });
+    // The task asks the reader something: its card holds a box of its own, above the message box.
+    const { host } = fakeHost({ start: vi.fn(() => starting.promise), renderTask: id => <div><p>任务卡片 {id}</p><textarea aria-label="你的回复" /></div> });
     render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
     const welcomeBox = () => screen.getByRole('textbox', { name: '画布需求' });
     fireEvent.change(welcomeBox(), { target: { value: '写一份发布说明' } });
@@ -682,6 +691,153 @@ describe('the canvas assistant’s one conversation', () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(panel().getByText('任务卡片 task-1')).toBeVisible();
     expect(search).toHaveFocus();
+  });
+
+  // 2026-10-20 (review): the panel's first text box was taken for its message box, and a task card above it can hold one
+  // of its own (the answer to a question the task asks): the focus went there, and the reader's typing with it.
+  it('moves the focus to the side panel’s message box, not to a box a task card above it holds', async () => {
+    const starting = deferred<string>();
+    const { host } = taskAsking({ start: vi.fn(() => starting.promise) });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    // An empty canvas: the welcome holds the conversation, with the task that asks.
+    expect(screen.getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一首诗' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    await act(async () => {
+      starting.resolve('task-1');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    expect(panel().getByText('任务卡片 task-1')).toBeVisible();
+    expect(panel().getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  // 2026-10-20: a plan from the welcome took the conversation to the side panel and left the focus on the page, as a
+  // task's start did before: the welcome's box went with the welcome, and the panel's box came up idle, so it did not
+  // take the focus back the way it does after a message handled in the panel.
+  it('moves the focus to the side panel’s box when the first plan takes the conversation there, frames passing before it is drawn', async () => {
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    await act(async () => {
+      planning.resolve(plan);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1);
+    expect(panel().getByText(/^已添加一个节点。/)).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  it('moves the focus to the message box when the first plan takes a conversation whose task asks something there', async () => {
+    const { host } = taskAsking();
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    expect(panel().getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  // Found in review of the change above: a plan from the side panel had its box take the focus back (as after any
+  // message handled there), and a request asked for in the plan's commit sent it to the task's box above instead.
+  it('gives the focus back to the message box after a plan from the side panel, not to a box a task card above it holds', async () => {
+    seedNode();
+    const { host } = taskAsking();
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    fireEvent.click(toggle()!);
+    box().focus();
+    send('加一个审核节点');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    // A browser drops the focus to the page once the box is disabled while the plan is made (jsdom keeps it on the
+    // disabled box, which it will not blur either).
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus(); search.blur();
+    expect(document.body).toHaveFocus();
+    await act(async () => { planning.resolve(plan); });
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(2);
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  it('leaves the focus where the reader moved it while the first plan was made', async () => {
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus();
+    await act(async () => { planning.resolve(plan); });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(panel().getByText(/^已添加一个节点。/)).toBeVisible();
+    expect(search).toHaveFocus();
+  });
+
+  it('moves the focus to the side panel’s box when a start confirmed later takes the conversation out of the welcome', async () => {
+    // The task it confirms asks the reader something: its card holds a box of its own, above the message box.
+    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }),
+      renderTask: id => <div><p>任务卡片 {id}</p><textarea aria-label="你的回复" /></div> }, { waits: true });
+    const routes: AssistantRoute[] = ['plan', 'execute'];
+    const router = vi.fn(async (): Promise<AssistantRouteDecision> => ({ route: routes.shift() ?? 'execute' }));
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={planRequest} />);
+    const welcomeBox = () => screen.getByRole('textbox', { name: '画布需求' });
+    // A first plan opens the side panel; undone by hand, the canvas is empty again and the conversation is in the welcome,
+    // the panel still open: there a message whose start is not confirmed stays, unconfirmed.
+    fireEvent.change(welcomeBox(), { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull());
+    welcomeBox().focus();
+    fireEvent.change(welcomeBox(), { target: { value: '写一封邮件' } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    expect(await screen.findByText(UNCONFIRMED)).toBeVisible();
+    await waitFor(() => expect(welcomeBox()).toBeEnabled());
+    expect(sidebar()).toBeNull();
+    expect(welcomeBox()).toHaveFocus();
+    // Confirmed (by a reconcile, or announced by another page), it becomes the task, which draws the conversation in the
+    // side panel: the welcome and its box go.
+    const operationId = vi.mocked(host.start).mock.calls[0][1];
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={planRequest} />);
+    expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).toBeNull();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  it('moves no focus when a start confirmed later joins a conversation already in the side panel', async () => {
+    seedNode();
+    const { host } = fakeHost({ start: vi.fn(async () => { throw new TaskStartUnconfirmed('连接中断'); }) }, { waits: true });
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    send('写一封邮件');
+    expect(await panel().findByText(UNCONFIRMED)).toBeVisible();
+    // The box takes the focus back once the message is handled; the reader then leaves it for the canvas, nothing
+    // focused, and the start is confirmed (by another page, say): the focus is left where it is.
+    await waitFor(() => expect(box()).toHaveFocus());
+    box().blur();
+    expect(document.body).toHaveFocus();
+    const operationId = vi.mocked(host.start).mock.calls[0][1];
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(document.body).toHaveFocus();
   });
 
   it('says the task was stopped when the canvas became busy meanwhile', async () => {

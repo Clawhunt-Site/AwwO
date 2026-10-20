@@ -195,6 +195,8 @@ function sidebarCover(root: HTMLElement, stage: DOMRect): number {
 /** The least of the stage a floating sidebar leaves for the stage's notes, its selection bar and the 成果 view to move
  *  into (about a 150 px note between the note's own margins); with less, they stay where they are, under it. */
 const STAGE_OVERLAY_MIN_ROOM = 200;
+/** The side panel's message box: its composer's, not a box that a task card above it holds (a question's answer). */
+const PANEL_BOX = '.awwo-canvas-assistant--panel .awwo-assistant-composer textarea';
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
 const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
@@ -2804,6 +2806,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Opening or closing the assistant (画布助手, or a request that brings it up) ends its stepping aside.
   const setAssistantOpen = useCallback((open: boolean) => { setStowedFor(null); setAssistantOpenState(open); }, []);
   useEffect(() => { if (stowedFor !== null && stowedFor !== focusedId) setStowedFor(null); }, [stowedFor, focusedId]);
+  // Whether an empty canvas's welcome holds the conversation in the latest render (set where the panel is decided, below).
+  const welcomeShownRef = useRef(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
   // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
@@ -3068,6 +3072,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setSelection(applied.addedNodeIds);
         setAssistantOpen(true);
         setPlanningFitId(id);
+        // From an empty canvas's welcome the plan takes the conversation to the side panel, whose box comes up idle and
+        // so does not take the focus back as it does after a message handled in the panel: a focus left on the page
+        // goes there, as for a task's start.
+        if (welcomeShownRef.current) refocusInCommit(PANEL_BOX);
       }
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
@@ -3243,6 +3251,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [waitingOperation, readOnly]);
   // A start confirmed by a reconcile here, or announced by another page of this canvas, names its task: the request
   // recorded for it, unconfirmed or settled with no task (given up), becomes that task's turn, and leaves the box.
+  // Where an empty canvas's welcome holds the conversation, the task takes it to the side panel once that is open, and a
+  // focus the welcome's box left on the page goes to the panel's box, as for a task's start; elsewhere none is moved.
   const confirmedTask = assistantExecution?.confirmedTask;
   useLayoutEffect(() => {
     if (!confirmedTask || readOnly) return;
@@ -3257,6 +3267,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const request = status === 'error' ? requestBefore(messages, index) : '';
       return { draft: request && previous.draft.trim() === request ? '' : previous.draft, messages };
     });
+    if (welcomeShownRef.current) refocusInCommit(PANEL_BOX);
   }, [confirmedTask, readOnly]);
   useEffect(() => () => { pendingRef.current?.controller?.abort(); pendingRef.current = null; }, []);
   const planAvailable = !readOnly && !planningUnavailableReason;
@@ -3288,7 +3299,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box
       // had the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React
       // draws the start in a scheduler task, which a frame can come before (see refocus).
-      refocusInCommit('.awwo-canvas-assistant--panel textarea');
+      refocusInCommit(PANEL_BOX);
     } catch (error) {
       if (!mounted.current) return;
       const unconfirmed = error instanceof TaskStartUnconfirmed;
@@ -3731,7 +3742,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
         userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      refocusInCommit('.awwo-canvas-assistant--panel textarea');
+      refocusInCommit(PANEL_BOX);
     } catch (error) {
       if (!mounted.current) return;
       // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
@@ -3812,6 +3823,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
+  // Whether the welcome holds the conversation: the workspace draws it on an empty canvas without the panel (below).
+  welcomeShownRef.current = !readOnly && !assistantPanel && !nodes.length;
   // Stepped aside for the open node (focusNode): mounted, not drawn. Focus inside it goes to the toggle, in the commit
   // that hides it: a node opens there after awaiting the server too (a recovered run's result), in an effect (the stage
   // narrowing under it) or in a frame.
