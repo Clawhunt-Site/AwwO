@@ -621,6 +621,69 @@ describe('the canvas assistant’s one conversation', () => {
     await waitFor(() => expect(box()).toHaveFocus());
   });
 
+  // 2026-10-20: the focus moved at the next frame, and fell to the page wherever a frame came before React drew the
+  // panel (it draws a task's start in a scheduler task); the test above failed 5 of 12 runs of this whole file, in
+  // which the test before it left a frame pending.
+  it('moves the focus to the side panel’s box when frames pass before the panel is drawn', async () => {
+    const starting = deferred<string>();
+    const { host } = fakeHost({ start: vi.fn(() => starting.promise) });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一首诗' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    // act holds React's drawing until its callback ends: the task starts, then two frames pass, then the panel is drawn.
+    await act(async () => {
+      starting.resolve('task-1');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    expect(panel().getByText('任务卡片 task-1')).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  it('moves the focus to the side panel’s box when a correction in the welcome hands its request over to a task', async () => {
+    const starting = deferred<string>();
+    const { host } = fakeHost({ start: vi.fn(() => starting.promise) });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    const welcomeBox = () => screen.getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(welcomeBox(), { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    // Its plan undone by hand, the canvas is empty again, and the conversation is back in the welcome.
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull());
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
+    correction = 'execute';
+    welcomeBox().focus();
+    fireEvent.change(welcomeBox(), { target: { value: CORRECT.execute } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(host.start).toHaveBeenCalledExactlyOnceWith(handed('写一份发布说明', 'execute'), OPERATION));
+    await act(async () => {
+      starting.resolve('task-1');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    expect(panel().getByText('任务卡片 task-1')).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  it('leaves the focus where the reader moved it while the first task was created', async () => {
+    const starting = deferred<string>();
+    const { host } = fakeHost({ start: vi.fn(() => starting.promise) });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    const welcomeBox = screen.getByRole('textbox', { name: '画布需求' });
+    welcomeBox.focus();
+    fireEvent.change(welcomeBox, { target: { value: '写一首诗' } });
+    fireEvent.keyDown(welcomeBox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus();
+    await act(async () => { starting.resolve('task-1'); });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(panel().getByText('任务卡片 task-1')).toBeVisible();
+    expect(search).toHaveFocus();
+  });
+
   it('says the task was stopped when the canvas became busy meanwhile', async () => {
     seedNode();
     const stopping = deferred<void>();

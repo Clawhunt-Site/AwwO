@@ -1000,13 +1000,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const showingResults = Boolean(results) && stageView === 'results' && nodes.length > 0;
   useEffect(() => { if (stageView === 'results' && !nodes.length) changeStageView('canvas'); }, [stageView, nodes.length, changeStageView]);
   // After a control that had focus goes away (it unmounted or its view closed), focus moves to `selector`.
-  const refocus = useCallback((selector: string) => {
-    requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (active && active !== document.body && active.isConnected) return;
-      rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
-    });
+  const moveLostFocus = useCallback((selector: string) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
   }, []);
+  // At the next frame, by which React has drawn a change made in a click or a key press. A change made after awaiting
+  // the server is drawn in a scheduler task, which a frame can come before: a task's start moves the focus in the
+  // commit that draws the panel instead (panelBoxAsked).
+  const refocus = useCallback((selector: string) => { requestAnimationFrame(() => moveLostFocus(selector)); }, [moveLostFocus]);
 
   /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
@@ -3267,6 +3269,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ...(request !== undefined && request !== prompt ? { request } : {}) });
   // The identity a task is sent under, chosen here so its turn can carry it.
   const submissionId = () => `execution-${crypto.randomUUID()}`;
+  // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box had
+  // the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React draws the
+  // start in a scheduler task, which a frame can come before (see refocus).
+  const [panelBoxAsked, setPanelBoxAsked] = useState(0);
+  useLayoutEffect(() => { if (panelBoxAsked) moveLostFocus('.awwo-canvas-assistant--panel textarea'); }, [panelBoxAsked, moveLostFocus]);
   // A message routed to a task. Started, it joins the conversation with its task; refused, with the reason, and the
   // box keeps it; unconfirmed, the host offers to reconcile it and the box lets it go, so it is not sent twice.
   const startAssistantTask = async (prompt: string, id: string) => {
@@ -3280,7 +3287,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
         userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      refocus('.awwo-canvas-assistant--panel textarea');
+      setPanelBoxAsked(value => value + 1);
     } catch (error) {
       if (!mounted.current) return;
       const unconfirmed = error instanceof TaskStartUnconfirmed;
@@ -3698,7 +3705,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
         userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      refocus('.awwo-canvas-assistant--panel textarea');
+      setPanelBoxAsked(value => value + 1);
     } catch (error) {
       if (!mounted.current) return;
       // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
