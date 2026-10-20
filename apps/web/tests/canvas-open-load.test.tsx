@@ -7,11 +7,13 @@
 //   1. the reports of tiles that settle together are written together, in one machine write (and before anything that
 //      takes no edit for a while or compares whole documents: a run, a node setup, a plan);
 //   2. a tile re-renders only when something it shows changed (its props keep their identity);
+//   3. the canvas's plan revision, a hash of the whole document, is worked out once per document, not per render;
 import { createElement, memo, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { canvasPlanRevision } from '../src/canvas/canvasPlan';
 import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { updateNodeDraft } from '../src/canvas/nodeThreads';
@@ -32,6 +34,11 @@ vi.mock('../src/canvas/SessionTile', async (importOriginal) => {
     return createElement(Real, props);
   });
   return { ...actual, SessionTile: Counted };
+});
+
+vi.mock('../src/canvas/canvasPlan', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/canvas/canvasPlan')>();
+  return { ...actual, canvasPlanRevision: vi.fn(actual.canvasPlanRevision) };
 });
 
 class SilentResizeObserver {
@@ -92,6 +99,7 @@ beforeEach(() => {
   resetAllSessions();
   localStorage.clear();
   counts.tiles.clear();
+  vi.mocked(canvasPlanRevision).mockClear();
   vi.stubGlobal('ResizeObserver', SilentResizeObserver);
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(reply(503, {}))));
 });
@@ -345,5 +353,28 @@ describe('useWiring', () => {
     rerender({ ...props, onConnect: undefined });
     expect(result.current).not.toBe(first);
     expect(result.current.interactive).toBe(false);
+  });
+});
+
+describe('the plan revision', () => {
+  it('is worked out once per document, not on every render or save', async () => {
+    seed([{ ...createSessionNode('llm', { x: 0, y: 0 }), id: 'a', title: '甲' }]);
+    render(<CanvasSurface />);
+    await quiet(600);
+    vi.mocked(canvasPlanRevision).mockClear();
+    // Renders with the same document hash nothing.
+    for (let round = 0; round < 3; round += 1) {
+      fireEvent.keyDown(document, { key: 'p', code: 'KeyP', ...mod });
+      await waitFor(() => expect(document.querySelector('.canvas-cmdbar-overlay')).toBeTruthy());
+      fireEvent.keyDown(document, { key: 'Escape', code: 'Escape', bubbles: true });
+      await waitFor(() => expect(document.querySelector('.canvas-cmdbar-overlay')).toBeNull());
+    }
+    expect(canvasPlanRevision).not.toHaveBeenCalled();
+    // A drag changes the document on every move: one hash for each, none for the save that follows it.
+    fireEvent.pointerDown(screen.getByTestId('canvas-tile-a'), { button: 0, clientX: 0, clientY: 0 });
+    for (let step = 1; step <= 6; step += 1) fireEvent.pointerMove(window, { clientX: step * 10, clientY: 0 });
+    fireEvent.pointerUp(window, { clientX: 60, clientY: 0 });
+    await waitFor(() => expect((stored().nodes[0] as SessionNode).x).toBe(60));
+    expect(vi.mocked(canvasPlanRevision).mock.calls.length).toBeLessThanOrEqual(6);
   });
 });

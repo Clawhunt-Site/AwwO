@@ -365,9 +365,10 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
 }
 
 export type CanvasPlanRecovery = { pending: boolean; operationId?: string; prompt?: string; matches?: boolean };
-export async function readCanvasPlanRecovery(doc: CanvasDocument, signal?: AbortSignal): Promise<CanvasPlanRecovery> {
+/** `revision`: the document's canvasPlanRevision where the caller already has it (it hashes the whole canvas). */
+export async function readCanvasPlanRecovery(doc: CanvasDocument, signal?: AbortSignal, revision?: string): Promise<CanvasPlanRecovery> {
   if (!currentSaaSCanvas()) return { pending: false };
-  const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan/recovery?revision=${encodeURIComponent(canvasPlanRevision(doc))}`, { signal });
+  const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan/recovery?revision=${encodeURIComponent(revision ?? canvasPlanRevision(doc))}`, { signal });
   const payload = await response.json();
   if (!response.ok) throw new PlanFailure(payload.error, payload.code);
   if (payload?.pending === true && (typeof payload.operationId !== 'string' || !payload.operationId)) throw new PlanFailure('Planning recovery identity is unavailable.', 'planning_recovery_required');

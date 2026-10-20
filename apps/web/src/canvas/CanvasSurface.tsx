@@ -254,6 +254,15 @@ function sansCamera(json: string | null): string | null {
   } catch { return json; }
 }
 
+/** A saved document and what a run's recovery or start compares with it, each worked out when first asked for: its
+ *  canonical text and its plan revision in the normalized shape the loader returns. Documents are never changed in place,
+ *  so both are what they would have been at the save. */
+interface SavedDocument { readonly doc: CanvasDocument; canonical(): string; planRevision(): string }
+function savedDocument(doc: CanvasDocument, revision?: string): SavedDocument {
+  let json: string | undefined;
+  return { doc, canonical: () => json ??= canonicalCanvasDocumentJSON(doc), planRevision: () => revision ??= canvasPlanRevision(sanitizeDocument(doc)) };
+}
+
 /** Whether two versions of a node read the same as a wire's source: prepareNodeConversation and assembleInputViews read
  *  nothing of where it sits or how large it is drawn, so a card being dragged is the same source on every frame. */
 function sameAsSource(a: CanvasNode | undefined, b: CanvasNode | undefined): boolean {
@@ -508,6 +517,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return loadDocumentWithStatus().doc;
   });
   const nodes = doc.nodes;
+  // canvasPlanRevision hashes a document's whole canonical text, megabytes for a large canvas. It reads four fields, so
+  // it is worked out once for each state of them, not on every render (each camera frame and each tile's update).
+  const revisionCache = useRef<{ of: Pick<CanvasDocument, 'version' | 'nodes' | 'edges' | 'execution'>; revision: string } | null>(null);
+  const revisionOf = useCallback((document: CanvasDocument): string => {
+    const held = revisionCache.current;
+    if (held && held.of.version === document.version && held.of.nodes === document.nodes && held.of.edges === document.edges
+      && held.of.execution === document.execution) return held.revision;
+    const revision = canvasPlanRevision(document);
+    revisionCache.current = { of: { version: document.version, nodes: document.nodes, edges: document.edges, execution: document.execution }, revision };
+    return revision;
+  }, []);
+  const planRevision = revisionOf(doc);
 
   // Edges are reconciled against the CURRENT port specs before anything reads them: a wire whose
   // port vanished (an image agent switched to LLM) must not linger in the document, in the run
@@ -534,15 +555,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const docRef = useRef(doc);
   docRef.current = doc;
   const outdatedObserver = useRef(false);
-  const lastSavedDocument = useRef<string | null>(null);
+  // The document this page saved (or adopted) last. Its canonical text and its revision are compared only by a run's
+  // recovery and a run's start, so each is worked out from it when first asked for: a large canvas's take a second or
+  // more on a slow computer, and a drag saves on every frame.
+  const lastSaved = useRef<SavedDocument | null>(null);
   const pendingRecoveryDocument = useRef<{ storageKey: string; journalId: string; document: string } | null>(null);
-  if (lastSavedDocument.current === null) lastSavedDocument.current = canonicalCanvasDocumentJSON(doc);
-  // Compare revisions in the same normalized shape the loader returns. The last successful
-  // local save is also the base of an edit whose autosave effect has not committed yet.
-  const lastSavedRevision = useRef<string | null>(null);
+  if (lastSaved.current === null) lastSaved.current = savedDocument(doc);
   const localSaveFailure = useRef(onLocalDocumentSaveFailed);
   localSaveFailure.current = onLocalDocumentSaveFailed;
-  if (lastSavedRevision.current === null) lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(doc));
   const lastSavedRaw = useRef<string | null>(null);
   if (lastSavedRaw.current === null) { try { lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY); } catch { /* read again after the first save */ } }
   const saveLocalDocument = useCallback((next: CanvasDocument): boolean => {
@@ -551,8 +571,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       localSaveFailure.current?.(next);
       return false;
     }
-    lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(next));
-    lastSavedDocument.current = canonicalCanvasDocumentJSON(next);
+    lastSaved.current = savedDocument(next);
     try { lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY); } catch { lastSavedRaw.current = null; }
     pendingRecoveryDocument.current = null;
     return true;
@@ -819,11 +838,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [handoffNote, setHandoffNote] = useState('');
   const refusedRevision = useRef<string | null>(null);
   useEffect(() => {
-    if (refusedRevision.current && refusedRevision.current !== canvasPlanRevision(doc)) {
+    if (refusedRevision.current && refusedRevision.current !== planRevision) {
       refusedRevision.current = null;
       setHandoffNote('');
     }
-  }, [doc]);
+  }, [doc, planRevision]);
 
   const [selection, setSelection] = useState<string[]>([]);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -1336,7 +1355,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const live = canonicalCanvasDocumentJSON(docRef.current);
       const pending = pendingRecoveryDocument.current;
       // Where someone is looking (the camera, saved as they pan) is not an edit a recovery could lose.
-      return live === lastSavedDocument.current || sansCamera(live) === sansCamera(lastSavedDocument.current)
+      const saved = lastSaved.current?.canonical() ?? null;
+      return live === saved || sansCamera(live) === sansCamera(saved)
         || Boolean(pending && pending.document === live
         && pending.storageKey === capturedDocumentKey && pending.journalId === (loadRunJournal()?.id ?? journal.current?.id));
     };
@@ -1346,7 +1366,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // Scoped fingerprints omit unrelated nodes, drafts and history. Protect the complete
       // durable base AND any unsaved source edits in this page before rewriting the cache.
       // Only an exact recovery result that this observer failed to save may be retried.
-      if (cached.status !== 'ok' || canonicalCanvasDocumentJSON(cached.doc) !== lastSavedDocument.current) return pauseOutdatedObserver();
+      if (cached.status !== 'ok' || canonicalCanvasDocumentJSON(cached.doc) !== lastSaved.current?.canonical()) return pauseOutdatedObserver();
       if (hasNoUnsavedSourceEdits()) return true;
       // Lanes leave the canvas editable while they run: an edit this page made a moment ago (a card moved, another
       // node's chat) is this page's newest document over the cache it last wrote. Save it first, then recover over it.
@@ -1398,8 +1418,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         if (!observerIsActive()) return;
         if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
         docRef.current = current.doc; setDoc(current.doc);
-        lastSavedDocument.current = canonicalCanvasDocumentJSON(current.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
-        lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(current.doc));
+        lastSaved.current = savedDocument(current.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
         pendingRecoveryDocument.current = null;
         journal.current = null; setRecovering(false); setRunning(false); setRuns({}); setReviewRound(0);
         setHandoffNote(surfaceNotice(t, 'recovery_complete'));
@@ -1577,8 +1596,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const document = await initializeSaaSCanvas(sessionScope, controller.signal);
       if (!mounted.current || controller.signal.aborted || readOnlyRef.current) throw new Error(locale === 'zh' ? '节点准备已取消。' : 'Node setup was cancelled.');
       docRef.current = document; setDoc(document);
-      lastSavedRevision.current = canvasPlanRevision(sanitizeDocument(document));
-      lastSavedDocument.current = canonicalCanvasDocumentJSON(document); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
+      lastSaved.current = savedDocument(document); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
       return document;
     } finally {
       if (setupRequest.current === controller) setupRequest.current = null;
@@ -1674,12 +1692,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const persistedRevision = canvasPlanRevision(persistedCanvas.doc);
     if (persistedCanvas.status === 'ok'
         && persistedRevision !== canvasPlanRevision(sanitizeDocument(docRef.current))
-        && persistedRevision !== lastSavedRevision.current) {
+        && persistedRevision !== lastSaved.current?.planRevision()) {
       docRef.current = persistedCanvas.doc; setDoc(persistedCanvas.doc);
       // Another tab's document: what this page's undo knew about the plan no longer describes it.
       planStep.current?.reset();
-      lastSavedRevision.current = persistedRevision;
-      lastSavedDocument.current = canonicalCanvasDocumentJSON(persistedCanvas.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
+      lastSaved.current = savedDocument(persistedCanvas.doc, persistedRevision); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
       setHandoffNote(surfaceNotice(t, 'canvas_changed_elsewhere'));
       return;
     }
@@ -2843,7 +2860,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [modelFocusId, setModelFocusId] = useState<string | null>(null);
   const planningRequest = useRef<{ id: string; controller: AbortController; prompt: string } | null>(null);
   const planningSequence = useRef(0);
-  const planRevision = canvasPlanRevision(doc);
   const refreshPlanningRecovery = useCallback(async (signal?: AbortSignal) => {
     if (!canInitialize || !mounted.current || readOnlyRef.current || currentSaaSCanvas() !== cloudScope) return;
     const sequence = ++recoveryCheckSequence.current;
@@ -2851,7 +2867,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       && currentSaaSCanvas() === cloudScope && sequence === recoveryCheckSequence.current;
     setRecoveryChecking(true);
     try {
-      const recovery = await readCanvasPlanRecovery(docRef.current, signal);
+      const recovery = await readCanvasPlanRecovery(docRef.current, signal, revisionOf(docRef.current));
       if (!stillCurrent()) return;
       setPlanningRecovery(recovery);
       setRecoveryLoaded(true);
@@ -2867,7 +2883,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       recoveryReadError.current = planFailureMessage(t, error);
       setPlanningError(recoveryReadError.current);
     } finally { if (stillCurrent()) setRecoveryChecking(false); }
-  }, [canInitialize, cloudScope, t]);
+  }, [canInitialize, cloudScope, t, revisionOf]);
   useEffect(() => {
     if (!canInitialize || readOnly || planningBusy) return;
     const controller = new AbortController();
@@ -2965,7 +2981,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // last lines go in first, as they did when each was written as it came.
     writePreviews();
     const snapshot = docRef.current;
-    const revision = canvasPlanRevision(snapshot);
+    const revision = revisionOf(snapshot);
     const id = `plan-${Date.now()}-${++planningSequence.current}`;
     const startedAt = Date.now();
     const controller = new AbortController();
@@ -2999,7 +3015,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             ...(entry.efforts?.length ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { paid: true } : {}) })),
           runs: planRuns });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
-      if (canvasPlanRevision(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
+      if (revisionOf(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
         setPlanning(previous => ({ ...previous, draft: previous.draft || prompt }));
         return;
@@ -3012,12 +3028,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         planned.addedNodeIds.filter(id => !planned.modelSetNodeIds.includes(id)), assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
       // or select, and the reply says so instead of calling it applied.
-      const changed = canvasPlanRevision(applied.doc) !== canvasPlanRevision(before);
+      const changed = revisionOf(before) !== revisionOf(applied.doc);
       if (changed) {
         fitted.current = true;
         patchDoc(() => applied.doc, { label: `ai:${id}` });
         planUndoEntry.current = undoStack.current.at(-1) ?? null;
-        setLastPlanRevision(canvasPlanRevision(docRef.current));
+        setLastPlanRevision(revisionOf(docRef.current));
         setFocusedId(null);
         focusReturn.current = null;
         setInspectorId(null);
@@ -3312,7 +3328,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
 
   const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
-    && lastPlanRevision !== null && canvasPlanRevision(doc) === lastPlanRevision
+    && lastPlanRevision !== null && planRevision === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:')) && canEditStructure();
   assistantLatest.current = { planBlocker, sendPlanningMessage, canUndoPlan, undo };
   // The plan reply whose change was undone in this page (its stored reply still says applied). It stays undone
