@@ -719,8 +719,12 @@ func TestPostgresOverspendIsCarriedIntoTheNextPeriod(t *testing.T) {
 	}
 	settleNewest(t, h, tid, intp(2150))
 	ctx := context.Background()
+	// The next period's answer is asked at nextAsked; older stands for a read asked a moment before it whose answer
+	// comes back after it.
+	nextAsked := dbNow(t, h)
+	older := nextAsked.Add(-time.Millisecond)
 	next := paidPlan("pro", now.Add(-time.Minute).Unix(), now.Add(30*24*time.Hour).Unix(), map[string]int64{"pro": 2000})
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, next), time.Now()); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, next), nextAsked); e != nil {
 		t.Fatal(e)
 	}
 	p, e := accountPlan(ctx, h.db, uid)
@@ -736,13 +740,13 @@ func TestPostgresOverspendIsCarriedIntoTheNextPeriod(t *testing.T) {
 	}
 	// A later answer about the same period keeps the carry; an answer to an older request changes nothing.
 	same := paidPlan("max", now.Add(-time.Minute).Unix(), now.Add(30*24*time.Hour).Unix(), map[string]int64{"pro": 1000, "max": 5000})
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), time.Now().Add(-time.Hour)); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), older); e != nil {
 		t.Fatal(e)
 	}
 	if p, _ = accountPlan(ctx, h.db, uid); p.Plan != "pro" || p.Credits != 2000 {
 		t.Fatal("an older answer applied", p)
 	}
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), time.Now()); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), dbNow(t, h)); e != nil {
 		t.Fatal(e)
 	}
 	if p, _ = accountPlan(ctx, h.db, uid); withCarry(ctx, h.db, p) != nil || p.Plan != "max" || p.Credits != 6000 || p.Carry != 150 {
@@ -1249,7 +1253,9 @@ func TestPostgresPaidPlanGenerationsSpendCreditsInsteadOfTheMediaRouteLimit(t *t
 	}
 }
 
-// dbNow is the test database's clock, as a plan read stamps it.
+// dbNow is the test database's clock, as a plan read stamps it. Ask a test's plan answers at it, never at time.Now():
+// applyPlan ignores an answer asked before the stored one's synced_at, which is on the database's clock, and this
+// process's clock can run up to a second ahead of it or behind it (a test run on Windows against a PostgreSQL in WSL).
 func dbNow(t *testing.T, h *harness) time.Time {
 	t.Helper()
 	now, err := h.a.databaseNow(context.Background())
