@@ -65,6 +65,9 @@ export interface CanvasAssistantProps {
   nextSteps?: AssistantNextSteps;
   /** In 用户须知: what a message costs where calls are counted, and which questions cost nothing. */
   costNote?: string;
+  /** Whether the box takes back the focus a message's wait dropped once the message is done (by default it does). False
+   *  where the host does that itself: the canvas hands it back to its side panel only where the reader stayed with it. */
+  focusBack?: boolean;
 }
 
 export interface AssistantNextAction {
@@ -197,7 +200,8 @@ function nextActionControl(action: AssistantNextAction): ReactNode {
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
 export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
-  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified, nextSteps, costNote }: CanvasAssistantProps) {
+  onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified, nextSteps, costNote,
+  focusBack = true }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
   const examples = [t('assistant.exampleSaas'), t('assistant.exampleData'), t('assistant.exampleContent')];
   const welcome = mode === 'welcome';
@@ -234,14 +238,12 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     return () => clearInterval(timer);
   }, [waiting]);
   // The box is disabled while a message is handled, which drops the focus; it comes back to the box after, unless the
-  // panel is hidden then (stepped aside for an opened node, where the canvas hands it to 画布助手): a browser gives a
-  // hidden box no focus (jsdom would).
+  // host hands it back itself (focusBack).
   const wasWaiting = useRef(waiting);
   useEffect(() => {
-    if (wasWaiting.current && !waiting && (!document.activeElement || document.activeElement === document.body)
-      && !input.current?.closest('[hidden]')) input.current?.focus();
+    if (focusBack && wasWaiting.current && !waiting && (!document.activeElement || document.activeElement === document.body)) input.current?.focus();
     wasWaiting.current = waiting;
-  }, [waiting]);
+  }, [waiting, focusBack]);
   // How long the current stage has lasted, so a hint follows the stage rather than the request.
   // Taken when the stage changes, in the same render, so a new stage never inherits a hint.
   const stage = busy ? progress?.stage : undefined;

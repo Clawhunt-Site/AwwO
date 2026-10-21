@@ -409,6 +409,15 @@ describe('one conversation where the host also does tasks', () => {
     expect(screen.getByRole('button', { name: '关闭画布助手' })).toHaveFocus();
   });
 
+  it('leaves that to a host that hands the focus back itself (the canvas, where the reader stayed with its panel)', () => {
+    const pending = unified({ pending: { id: 'p', prompt: '写一封邮件', phase: 'starting' } });
+    const { rerender } = render(<Harness mode="panel" onClose={() => {}} draft="" unified={pending} focusBack={false} />);
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(<Harness mode="panel" onClose={() => {}} draft="" unified={unified()} focusBack={false} />);
+    expect(screen.getByRole('textbox', { name: '画布需求' })).toBeEnabled();
+    expect(document.body).toHaveFocus();
+  });
+
   it('draws the host’s notices above the composer and the model in its toolbar, with nothing under the box', () => {
     render(<Harness mode="panel" unified={unified({ notices: <p>任务服务提示</p>, settings: <p>直接执行用的模型</p> })} />);
     const form = screen.getByRole('form', { name: '画布需求表单' });

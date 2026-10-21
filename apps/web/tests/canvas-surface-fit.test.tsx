@@ -1287,7 +1287,7 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
    *  while the panel waits, and the page gets the focus, as Chrome drops a disabled control's (jsdom leaves it on the
    *  box). `beforeSending` runs with the box focused, before the message goes, which Enter sends where `byEnter` (its
    *  button otherwise). `done` ends the wait: with the plan failing, which leaves the canvas as it was and the node
-   *  `open` (s1 unless said) open, or with `plan` applied. `props` go to CanvasSurface. */
+   *  `open` (s1 unless said; null: none) open, or with `plan` applied. `props` go to CanvasSurface. */
   const sendFromThePanel = async (beforeSending?: () => void, byEnter = false, props: CanvasSurfaceProps = {}) => {
     let settle!: { fail: (error: Error) => void; apply: (plan: CanvasPlan) => void };
     const assistant = await openBesideAssistant(vi.fn<typeof requestCanvasPlan>(() => new Promise((apply, fail) => { settle = { apply, fail }; })), props);
@@ -1300,10 +1300,10 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     await waitFor(() => expect(box).toBeDisabled());
     box.disabled = false; box.blur(); box.disabled = true;
     expect(document.body).toHaveFocus();
-    const done = async (plan?: CanvasPlan, open = 's1') => {
+    const done = async (plan?: CanvasPlan, open: string | null = 's1') => {
       await act(async () => { if (plan) settle.apply(plan); else settle.fail(new Error('规划服务暂时不可用')); });
       await waitFor(() => expect(within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { hidden: true })).toBeEnabled());
-      if (!plan) expect(screen.getByTestId(`canvas-tile-${open}`).dataset.lod).toBe('focus');
+      if (!plan) expect(open ? screen.getByTestId(`canvas-tile-${open}`).dataset.lod : document.querySelector('.canvas-tile[data-lod="focus"]')).toBe(open ? 'focus' : null);
     };
     return { ...assistant, done };
   };
@@ -1533,6 +1533,262 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     await assistant.done();
     expect(assistant.stowed()).toBe(false);
     await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // 2026-10-21: beside the node the panel's box took a lost focus back once its message was done, whatever the reader had
+  // done meanwhile: another node opened by key, a wheel, a waypoint, a press on the board. In the box the canvas's keys
+  // no longer work (they leave a field alone), so the next Ctrl+] did nothing. It is armed and disarmed as when the
+  // panel steps aside (above).
+  /** As sendFromThePanel, the stage staying as wide (1400 px beside the 400 px sidebar): the node stays open beside the
+   *  assistant, and so does one opened by key. `nodes` puts s2 (LLM 会话二) under s1, and `waypoints` the canvas's. */
+  const sendBesideTheNode = async ({ nodes = false, waypoints = [] as CanvasDocument['waypoints'], props = {} as CanvasSurfaceProps,
+    beforeSending = undefined as (() => void) | undefined } = {}) => {
+    const doc = seed({ x: 60, y: 150 });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc, waypoints,
+      nodes: nodes ? [...doc.nodes, { ...createSessionNode('llm', { x: 60, y: 420 }), id: 's2', title: 'LLM 会话二' }] : doc.nodes }));
+    const assistant = await sendFromThePanel(beforeSending, true, props);
+    layout = { ...layout, w: stage.w, sidebar: SIDEBAR };
+    return assistant;
+  };
+  const openNow = () => document.querySelector<HTMLElement>('.canvas-tile[data-lod="focus"]')?.dataset.testid ?? null;
+
+  it.each([['Ctrl+]', { key: ']', code: 'BracketRight', ctrlKey: true }], ['⌘[', { key: '[', code: 'BracketLeft', metaKey: true }]])('leaves on the page a focus the reader took to the next node with %s meanwhile, when the assistant’s message is done beside it', async (_name, init) => {
+    const assistant = await sendBesideTheNode({ nodes: true });
+    fireEvent.keyDown(document.body, init);
+    await waitFor(() => expect(openNow()).toBe('canvas-tile-s2'));
+    await assistant.done(undefined, 's2');
+    expect(assistant.stowed()).toBe(false);
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+    // Where the reader left it, the canvas's keys still work: on to the next node (pressed where the focus is).
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: ']', code: 'BracketRight', ctrlKey: true });
+    await waitFor(() => expect(openNow()).toBe('canvas-tile-s1'));
+  });
+
+  it.each([
+    ['a wheel on the board', () => { fireEvent.wheel(document.querySelector<HTMLElement>('.canvas-viewport')!, { deltaY: 120 }); }],
+    ['Ctrl+1, a waypoint recalled', () => { fireEvent.keyDown(document.body, { key: '1', code: 'Digit1', ctrlKey: true }); }],
+  ])('leaves on the page a focus the reader moved the camera with meanwhile (%s), when the assistant’s message is done beside the node', async (_name, move) => {
+    const assistant = await sendBesideTheNode({ waypoints: [{ slot: 1, view: { x: -400, y: 0, scale: 1 } }] });
+    const camera = transformOf(document.querySelector('.canvas-world') as HTMLElement);
+    move();
+    expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)).not.toEqual(camera);
+    await assistant.done();
+    expect(assistant.stowed()).toBe(false);
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it.each([
+    ['Ctrl+0, which fits all and closes the node', () => { fireEvent.keyDown(document.body, { key: '0', code: 'Digit0', ctrlKey: true }); }],
+    ['Ctrl+E, which closes the node', () => { fireEvent.keyDown(document.body, { key: 'e', code: 'KeyE', ctrlKey: true }); }],
+    ['Escape, which closes the node', () => { fireEvent.keyDown(document.body, { key: 'Escape', code: 'Escape' }); }],
+  ])('leaves on the page a focus the reader turned to the canvas with meanwhile (%s), when the assistant’s message is done', async (_name, key) => {
+    const assistant = await sendBesideTheNode();
+    key();
+    await waitFor(() => expect(openNow()).toBeNull());
+    await assistant.done(undefined, null);
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it.each([
+    ['pressed on the board', () => {
+      const board = document.querySelector<HTMLElement>('.canvas-viewport')!;
+      fireEvent.pointerDown(board, { button: 0, pointerId: 1 }); fireEvent.pointerUp(board, { button: 0, pointerId: 1 });
+    }],
+    ['moved to 查找 Agent and then left', () => {
+      const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+      search.focus(); search.blur();
+    }],
+  ])('leaves on the page a focus the reader %s meanwhile, when the assistant’s message is done beside the node', async (_name, turn) => {
+    const assistant = await sendBesideTheNode();
+    turn();
+    expect(document.body).toHaveFocus();
+    await assistant.done();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it.each([
+    ['a press on its conversation', () => {
+      const log = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('log');
+      fireEvent.pointerDown(log, { button: 0, pointerId: 1 }); fireEvent.pointerUp(log, { button: 0, pointerId: 1 });
+    }],
+    ['keys that take the reader nowhere (a letter, a copy, a waypoint saved, Shift)', () => {
+      fireEvent.keyDown(document.body, { key: 'a', code: 'KeyA' });
+      fireEvent.keyDown(document.body, { key: 'c', code: 'KeyC', ctrlKey: true });
+      fireEvent.keyDown(document.body, { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: true });
+      fireEvent.keyDown(document.body, { key: 'Shift', shiftKey: true });
+    }],
+  ])('gives its box the focus back once the assistant’s message is done beside the node after %s meanwhile', async (_name, stay) => {
+    const assistant = await sendBesideTheNode();
+    stay();
+    await assistant.done();
+    expect(assistant.stowed()).toBe(false);
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // Found in review: the panel's 用户须知 opens in a layer of its own on the page (a portal), and a press on its notes
+  // counted as the reader leaving the panel. Pressed here as with a mouse that gives a button no focus (Safari): the
+  // focus stays on the page throughout.
+  it('gives its box the focus back once the assistant’s message is done beside the node after the reader read its 用户须知 meanwhile', async () => {
+    const assistant = await sendBesideTheNode();
+    const press = (element: Element) => {
+      fireEvent.pointerDown(element, { button: 0, pointerId: 1 }); fireEvent.pointerUp(element, { button: 0, pointerId: 1 }); fireEvent.click(element);
+    };
+    const notes = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('button', { name: '用户须知' });
+    press(notes);
+    const layer = screen.getByRole('region', { name: '用户须知' });
+    expect(document.querySelector('.awwo-planner-sidebar')!.contains(layer)).toBe(false);
+    press(within(layer).getAllByRole('listitem')[0]);
+    press(notes);
+    expect(screen.queryByRole('region', { name: '用户须知' })).toBeNull();
+    expect(document.body).toHaveFocus();
+    await assistant.done();
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // Found in review: once the box dropped the focus, Tab on the page goes on from where the box was, into the panel's
+  // toolbar (its model, 用户须知, 停止); counted as leaving, it left a reader who stopped the message from there on the
+  // page, where the next Backspace deleted the open node.
+  it('gives its box the focus back once the reader stops the assistant’s message from the panel’s toolbar, reached with Tab', async () => {
+    const assistant = await sendBesideTheNode();
+    const sidebar = document.querySelector<HTMLElement>('.awwo-planner-sidebar')!;
+    const stop = within(sidebar).getByRole('button', { name: '取消' });
+    // Tab pressed on the page; a browser moves the focus on from where the box was (jsdom does not).
+    fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' });
+    stop.focus();
+    fireEvent.keyDown(stop, { key: 'Enter', code: 'Enter' });
+    fireEvent.click(stop);
+    await waitFor(() => expect(assistant.box).toBeEnabled());
+    expect(stop).not.toBeInTheDocument();
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // Found in review (Codex): a Tab that takes the focus off the page, to the browser's own toolbar, brings no focusin;
+  // the window loses the focus instead, before the Tab's keyup reaches the page.
+  it('leaves on the page a focus the reader took to the browser’s toolbar with Tab meanwhile, when the assistant’s message is done', async () => {
+    const assistant = await sendBesideTheNode();
+    fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' });
+    act(() => { window.dispatchEvent(new FocusEvent('blur')); });
+    await assistant.done();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  // A Tab whose move the page sees (a focusin in the panel, or its keyup where it moved nothing) stays the reader's with
+  // the panel, and so does a switch to another window after it.
+  it.each([['moved the focus along the panel', true], ['moved nothing', false]])('gives its box the focus back after a Tab that %s and a switch to another window meanwhile', async (_name, moved) => {
+    const assistant = await sendBesideTheNode();
+    const stop = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('button', { name: '取消' });
+    fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' });
+    if (moved) stop.focus();
+    else fireEvent.keyUp(document.body, { key: 'Tab', code: 'Tab' });
+    act(() => { window.dispatchEvent(new FocusEvent('blur')); });
+    if (moved) {
+      fireEvent.click(stop);
+      await waitFor(() => expect(assistant.box).toBeEnabled());
+      expect(stop).not.toBeInTheDocument();
+    } else await assistant.done();
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // Found in review (Codex): the plan can open the panel again before closing it hands 画布助手 the focus at the next
+  // frame. That is not the panel the reader was with (they closed it), and its box takes nothing.
+  it('leaves the focus to 画布助手 when the panel, closed while its message is handled, comes back with the plan before the next frame', async () => {
+    const assistant = await sendBesideTheNode();
+    const close = screen.getByRole('button', { name: '关闭画布助手', exact: true });
+    close.focus();
+    fireEvent.pointerDown(close, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(close, { button: 0, pointerId: 1 });
+    // Closing hands 画布助手 the focus at the next frame (closeAssistant's refocus): that frame waits for the plan.
+    let frame: FrameRequestCallback | undefined;
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementationOnce(callback => { frame = callback; return 0; });
+    fireEvent.click(close);
+    expect(document.querySelector('.awwo-planner-sidebar')).toBeNull();
+    expect(frame).toBeDefined();
+    expect(document.body).toHaveFocus();
+    await assistant.done({ version: 1, summary: '已添加一个节点。', operations: [{ type: 'add_node', ref: 'a', templateId: 'general', title: '新节点' }] });
+    expect(assistant.stowed()).toBe(false);
+    expect(document.body).toHaveFocus();
+    act(() => frame!(performance.now()));
+    expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus();
+  });
+
+  // Found in review: the panel hands the focus back so with no node open too, on the overview.
+  it.each([['waits', false], ['wheels the board meanwhile', true]])('gives its box the focus back once the assistant’s message is done on the overview, unless the reader %s', async (_name, turned) => {
+    let fail!: (error: Error) => void;
+    const deliveries: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
+    render(<CanvasSurface planRequest={vi.fn<typeof requestCanvasPlan>(() => new Promise((_, reject) => { fail = reject; }))} />);
+    act(() => { deliveries.forEach(deliver => deliver()); });
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(document.querySelector<HTMLElement>('.awwo-planner-sidebar')?.hidden).toBe(false));
+    await settle();
+    expect(openNow()).toBeNull();
+    const box = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { name: '画布需求' }) as HTMLTextAreaElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: '加一个审核节点' } });
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(box).toBeDisabled());
+    box.disabled = false; box.blur(); box.disabled = true;
+    if (turned) {
+      const camera = transformOf(document.querySelector('.canvas-world') as HTMLElement);
+      fireEvent.wheel(document.querySelector<HTMLElement>('.canvas-viewport')!, { deltaY: 120 });
+      expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)).not.toEqual(camera);
+    }
+    await act(async () => fail(new Error('规划服务暂时不可用')));
+    await waitFor(() => expect(box).toBeEnabled());
+    await twoFrames();
+    if (turned) expect(document.body).toHaveFocus();
+    else expect(box).toHaveFocus();
+  });
+
+  it('gives its box the focus back once the assistant’s message is done beside the node after Ctrl+], which 成果 pauses, meanwhile', async () => {
+    const assistant = await sendBesideTheNode({ nodes: true, props: { results: {} }, beforeSending: () => {
+      // The reader turns to 成果 (the node stays open under it), then writes in the panel's box.
+      const results = within(screen.getByRole('group', { name: '画布视图' })).getByRole('button', { name: '成果' });
+      results.focus();
+      fireEvent.click(results);
+      within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { name: '画布需求' }).focus();
+    } });
+    fireEvent.keyDown(document.body, { key: ']', code: 'BracketRight', ctrlKey: true });
+    await assistant.done();
+    expect(within(screen.getByRole('group', { name: '画布视图' })).getByRole('button', { name: '成果' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  // A message the server routes to a task ends its wait as the task starts: the panel's box had the focus back from the
+  // start too (a request in the commit that draws it), whatever the reader had done meanwhile.
+  it.each([['waits', false], ['takes the focus to the next node with Ctrl+] meanwhile', true]])('hands the focus the panel’s box let go back to it as a task it sent starts beside the node, unless the reader %s', async (_name, turned) => {
+    const doc = seed({ x: 60, y: 150 });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc, nodes: [...doc.nodes, { ...createSessionNode('llm', { x: 60, y: 420 }), id: 's2', title: 'LLM 会话二' }] }));
+    let started!: (taskId: string) => void;
+    const host: AssistantExecutionHost = { readOnly: false, ready: true, activate: vi.fn(), setVisible: vi.fn(),
+      start: vi.fn(() => new Promise<string>(resolve => { started = resolve; })), stop: vi.fn(async () => {}), finished: () => false,
+      renderTask: id => <p>任务卡片 {id}</p>, renderEarlier: () => null, renderNotices: () => null, settings: null };
+    const assistant = await openBesideAssistant(vi.fn<typeof requestCanvasPlan>(), { assistantExecution: host, routeAssistant: async () => ({ route: 'execute' }) });
+    layout = { ...layout, w: stage.w, sidebar: SIDEBAR };
+    const box = assistant.box as HTMLTextAreaElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: '写一首诗' } });
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    expect(box).toBeDisabled();
+    box.disabled = false; box.blur(); box.disabled = true;
+    if (turned) {
+      fireEvent.keyDown(document.body, { key: ']', code: 'BracketRight', ctrlKey: true });
+      await waitFor(() => expect(openNow()).toBe('canvas-tile-s2'));
+    }
+    // A task's start is drawn in a scheduler task, which frames can come before.
+    await act(async () => { started('task-1'); await twoFrames(); });
+    expect(within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByText('任务卡片 task-1')).toBeVisible();
+    expect(assistant.stowed()).toBe(false);
+    if (turned) {
+      await twoFrames();
+      expect(document.body).toHaveFocus();
+    } else await waitFor(() => expect(box).toHaveFocus());
   });
 
   it('leaves the focus on the page when the panel, closed while its message is handled, comes back with the plan', async () => {
