@@ -197,6 +197,8 @@ function sidebarCover(root: HTMLElement, stage: DOMRect): number {
 const STAGE_OVERLAY_MIN_ROOM = 200;
 /** The side panel's message box: its composer's, not a box that a task card above it holds (a question's answer). */
 const PANEL_BOX = '.awwo-canvas-assistant--panel .awwo-assistant-composer textarea';
+/** An empty canvas's welcome's message box, as PANEL_BOX. */
+const WELCOME_BOX = '.awwo-canvas-assistant--welcome .awwo-assistant-composer textarea';
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
 const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
@@ -3081,8 +3083,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningFitId(id);
         // From an empty canvas's welcome the plan takes the conversation to the side panel, whose box comes up idle and
         // so does not take the focus back as it does after a message handled in the panel: a focus left on the page
-        // goes there, as for a task's start.
+        // goes there, as for a task's start. One that removed every node takes it back to the welcome the same way,
+        // where tasks do not keep the panel (with them, the panel's box takes the focus back itself).
         if (welcomeShownRef.current) refocusInCommit(PANEL_BOX);
+        else if (!applied.doc.nodes.length) refocusInCommit(WELCOME_BOX);
       }
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
@@ -3715,6 +3719,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // undo() can still decline (a node began talking since this render); only an undo that happened is said.
       if (!canUndoPlan || !undo()) return;
       appendPlanningMessage(`undo-${Date.now()}`, surfaceNotice(t, 'plan_undone'));
+      // The undo can move the conversation, and the button with it: from the welcome (a plan that had removed every node
+      // has them back) to the side panel, or from the side panel (the first plan undone) to the welcome, which comes up
+      // idle; tasks keep the panel. A focus the button took with it goes to the box there, or to 画布助手 where the reader
+      // had closed the panel (a task kept it while the canvas was empty). Only the assistant's own undo does this: one by
+      // hand (Ctrl+Z, a deletion) leaves the focus on the page, where the canvas's keys work.
+      if (welcomeShownRef.current) refocusInCommit(assistantOpen ? PANEL_BOX : '.awwo-assistant-toggle');
+      else if (!docRef.current.nodes.length) refocusInCommit(WELCOME_BOX);
     }, canUndo: canUndoPlan,
     ...(showPlannerLine ? { runtimeControls: <div className="awwo-planner-connection"><span className={plannerReady ? 'is-ready' : ''} />
       {plannerProvider === 'jev' ? jevStatus?.error || (locale === 'zh' ? 'Jev · 选择人设与模型，新增工作流' : 'Jev · Select personas and models for a new workflow') : plannerConnectionMessage(t, plannerStatus)}
@@ -3823,10 +3834,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A read-only canvas shows its tasks; an editable one draws the panel for a canvas to work on or a conversation
   // with tasks, which needs no canvas.
   const viewerTasks = readOnly && Boolean(assistantExecution);
-  // Closing the panel can take the pressed control with it (its close button; on an empty canvas the toggle).
+  // Closing the panel can take the pressed control with it (its close button): the focus goes to the toggle, which is
+  // offered wherever the panel is drawn (nodes, tasks, or a viewer's tasks).
   const closeAssistant = () => {
     setAssistantOpen(false);
-    refocus(nodes.length || viewerTasks || mentionedTasks.size ? '.awwo-assistant-toggle' : '.awwo-canvas-assistant--welcome textarea');
+    refocus('.awwo-assistant-toggle');
   };
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;

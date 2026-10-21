@@ -14,6 +14,8 @@ import { resetAllSessions, setStreaming } from '../src/canvas/sessions';
 // A message joins the conversation only once it is handled; until then the box keeps it.
 const plan: CanvasPlan = { version: 1, summary: '已添加一个节点。', operations: [{ type: 'add_node', ref: 'a', templateId: 'general', title: '新节点' }] };
 const seedNode = () => saveDocument({ ...emptyDocument(), nodes: [{ ...createAgentTemplate('general', { x: 80, y: 60 }), id: 'node-a', title: '已有节点' }], view: { x: 0, y: 0, scale: 1 } });
+// Removes the node seedNode puts on the canvas: the canvas is empty again.
+const clearPlan: CanvasPlan = { version: 1, summary: '已删除节点。', operations: [{ type: 'remove_node', nodeId: 'node-a' }] };
 const toggle = () => within(document.querySelector('.awwo-canvas-bar') as HTMLElement).queryByRole('button', { name: '画布助手', exact: true });
 const sidebar = () => document.querySelector('.awwo-planner-sidebar') as HTMLElement | null;
 const panel = () => within(sidebar()!);
@@ -838,6 +840,160 @@ describe('the canvas assistant’s one conversation', () => {
     expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(document.body).toHaveFocus();
+  });
+
+  // 2026-10-21 (left out of the changes above): the assistant's own undo or plan emptying the canvas took the conversation
+  // back from the side panel to the welcome and dropped the focus to the page. The panel went with the canvas's last node,
+  // and with it the control that had the focus (its 撤销本次更改, or its box while the plan was made); the welcome's box
+  // came up idle.
+  it('moves the focus to the welcome’s box when undoing the first plan takes the conversation back there', async () => {
+    // One of the canvas's earlier tasks asks the reader something: listed above the conversation, its card holds a box.
+    const { host } = fakeHost({ renderEarlier: () => <div><p>之前的任务</p><textarea aria-label="你的回复" /></div> });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan)} />);
+    const welcomeBox = () => screen.getByRole('textbox', { name: '画布需求' });
+    fireEvent.change(welcomeBox(), { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    const undo = await panel().findByRole('button', { name: '撤销本次更改' });
+    undo.focus();
+    fireEvent.click(undo);
+    await waitFor(() => expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull());
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
+    expect(sidebar()).toBeNull();
+    expect(screen.getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(welcomeBox()).toHaveFocus());
+  });
+
+  it('moves the focus to the welcome’s box when a plan that removes every node takes the conversation back there, frames passing before it is drawn', async () => {
+    seedNode();
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    // An earlier task of the canvas that asks something is listed above the welcome's composer too.
+    const { host } = fakeHost({ renderEarlier: () => <div><p>之前的任务</p><textarea aria-label="你的回复" /></div> });
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    fireEvent.click(toggle()!);
+    box().focus();
+    send('把这个节点删掉');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    // jsdom keeps the focus on the box disabled while the plan is made (a browser drops it to the page): either way it
+    // goes with the panel.
+    expect(box()).toHaveFocus();
+    await act(async () => {
+      planning.resolve(clearPlan);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
+    expect(sidebar()).toBeNull();
+    expect(screen.getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus());
+  });
+
+  // The reader closes the side panel while that plan is made: 画布助手 has the focus, and goes with the canvas's last node.
+  it('moves the focus to the welcome’s box when a plan that removes every node takes 画布助手 away, the panel closed meanwhile', async () => {
+    seedNode();
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    fireEvent.click(toggle()!);
+    send('把这个节点删掉');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    fireEvent.click(panel().getByRole('button', { name: '关闭画布助手' }));
+    await waitFor(() => expect(toggle()).toHaveFocus());
+    await act(async () => { planning.resolve(clearPlan); });
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
+    expect(toggle()).toBeNull();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus());
+  });
+
+  it('leaves the focus where the reader moved it while a plan that removes every node was made', async () => {
+    seedNode();
+    const planning = deferred<CanvasPlan>();
+    const planRequest = vi.fn<typeof requestCanvasPlan>(() => planning.promise);
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={planRequest} />);
+    fireEvent.click(toggle()!);
+    box().focus();
+    send('把这个节点删掉');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus();
+    await act(async () => { planning.resolve(clearPlan); });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(sidebar()).toBeNull();
+    expect(search).toHaveFocus();
+  });
+
+  // Undone from the welcome, that plan's node is back and the conversation goes to the side panel, the welcome's undo
+  // button with the welcome.
+  it('moves the focus to the side panel’s box when the welcome undoes a plan that removed every node', async () => {
+    seedNode();
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(clearPlan)} />);
+    fireEvent.click(toggle()!);
+    send('把这个节点删掉');
+    await waitFor(() => expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull());
+    expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0);
+    const undo = screen.getByRole('button', { name: '撤销本次更改' });
+    undo.focus();
+    fireEvent.click(undo);
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).toBeNull();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  // Found in review: where a task kept the panel on the emptied canvas and the reader closed it, the undo brings the node
+  // back with the assistant closed: no panel is drawn, and 画布助手 is.
+  it('gives the focus to 画布助手 when the welcome undoes such a plan with the assistant closed', async () => {
+    seedNode();
+    const { host } = taskAsking();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>().mockResolvedValue(clearPlan)} />);
+    fireEvent.click(toggle()!);
+    send('把这个节点删掉');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0));
+    expect(sidebar()).not.toBeNull();
+    fireEvent.click(panel().getByRole('button', { name: '关闭画布助手' }));
+    // Closing gives the focus to 画布助手 at the next frame: that comes first, so it cannot stand in for the undo's.
+    await waitFor(() => expect(toggle()).toHaveFocus());
+    const undo = screen.getByRole('button', { name: '撤销本次更改' });
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull();
+    undo.focus();
+    fireEvent.click(undo);
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    expect(sidebar()).toBeNull();
+    await waitFor(() => expect(toggle()).toHaveFocus());
+  });
+
+  // Found in review: emptied by hand (a deletion, Ctrl+Z), the canvas leaves the focus on the page, where its keys work.
+  // In the welcome's box, Ctrl+Z would undo the box's typing, not the deletion.
+  it('leaves the focus on the page when the reader empties the canvas by hand, so Ctrl+Z brings the node back', async () => {
+    seedNode();
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    expect(sidebar()).not.toBeNull();
+    const tile = within(screen.getByTestId('canvas-tile-node-a'));
+    fireEvent.click(tile.getByRole('button', { name: '更多节点操作' }));
+    const remove = tile.getByRole('button', { name: '删除', exact: true });
+    remove.focus();
+    fireEvent.click(remove);
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(0));
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(document.body).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: true });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+  });
+
+  // A reader who closes the panel is handed to 画布助手, though the conversation goes back to the welcome too.
+  it('gives the focus to 画布助手 when the reader closes the side panel of an empty canvas whose conversation has a task', async () => {
+    render(<CanvasSurface assistantExecution={fakeHost().host} routeAssistant={routeTo('execute')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '画布需求' }), { target: { value: '写一首诗' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(panel().getByText('任务卡片 task-1')).toBeVisible());
+    const close = panel().getByRole('button', { name: '关闭画布助手' });
+    close.focus();
+    fireEvent.click(close);
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull();
+    await waitFor(() => expect(toggle()).toHaveFocus());
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(toggle()).toHaveFocus();
   });
 
   it('says the task was stopped when the canvas became busy meanwhile', async () => {
