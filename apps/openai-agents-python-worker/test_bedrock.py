@@ -16,8 +16,8 @@ from agents import set_trace_processors
 from botocore.exceptions import ClientError, EventStreamError
 
 from bedrock_bridge import (
-    BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure, default_client,
-    stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache,
+    BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure, call_read_timeout,
+    default_client, stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -379,7 +379,8 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         # Production gives a run 25 minutes, since Claude Opus 5.5 thinks before its first word (2026-10-18: a node cut
         # at 600 s with nothing written): the OpenAI client's own timeout follows the run's deadline, never the SDK's
         # 600 s default, and the call may write the model's 64,000 tokens. Bedrock's read waits at most the stream's
-        # idle limit for the next byte (2026-10-19: stalled calls rode out whole 25-minute runs).
+        # idle limit for the next byte (2026-10-19: stalled calls rode out whole 25-minute runs), even without tools:
+        # Opus 5.5 may think silently for its whole 64,000-token limit.
         import runner
         seen = {}
         original = runner.AsyncOpenAI
@@ -606,6 +607,31 @@ class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.calls[1], {**client.calls[0], "modelId": OPUS_US}, "the same request, only the profile differs")
                 self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": code}])
 
+    async def test_the_other_profile_is_asked_with_the_calls_own_read_timeout(self):
+        # One client serves both profiles of a call: a call to Claude Opus 4.8 that offers no tools waits its quick limit on
+        # its fallback profile too, and one that offers tools the transport's limit on both.
+        opus48, opus48_us = "global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8"
+        tool = [{"type": "function", "function": {"name": "current_time", "parameters": {"type": "object", "properties": {}}}}]
+        for extra, want in (({}, 180.0), ({"tools": tool}, 900.0)):
+            with self.subTest(tools=bool(extra)):
+                client, timeouts = ScriptedClient([aws_error("ThrottlingException", 429), {"events": text_turn("OK")}]), []
+
+                def factory(region, auth, read_timeout, client=client, timeouts=timeouts):
+                    timeouts.append(read_timeout)
+                    return client
+                transport = BedrockConverseTransport(region="us-east-1", model=opus48, auth={"aws": True}, read_timeout=900.0,
+                                                     fallback_model=opus48_us, client_factory=factory, report=lambda fact: None)
+                body = {"model": opus48, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
+                async with httpx2.AsyncClient(transport=transport) as http:
+                    response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
+                self.assertEqual(response.status_code, 200)
+                frames = [line[6:] for line in response.text.split("\n") if line.startswith("data: ")]
+                self.assertEqual(frames[-1], "[DONE]")
+                self.assertEqual("".join(choice["delta"].get("content") or "" for frame in frames[:-1]
+                                         for choice in json.loads(frame)["choices"]), "OK")
+                self.assertEqual([call["modelId"] for call in client.calls], [opus48, opus48_us])
+                self.assertEqual(timeouts, [want], "one client, with the call's read timeout, for both profiles")
+
     async def test_an_exception_that_opens_the_stream_is_the_profiles_refusal(self):
         # As botocore raises it from the stream, and as the stream's first member.
         status, frames, client, facts = await self.call([{"events": text_turn("no"), "fail_after": 0, "fail_code": "throttlingException"},
@@ -809,6 +835,17 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
     def test_the_idle_limit_and_both_read_timeouts_botocore_raises(self):
         self.assertEqual(stream_read_timeout(120.0), 120.0, "a run's shorter deadline stays the read timeout")
         self.assertEqual(stream_read_timeout(1500.0), 900.0)
+        # A call to Claude Opus 4.8, which was never seen to think silently (no completed call took 3 minutes in all,
+        # 2026-10-21), that offers no tools waits 3 minutes, whichever inference profile serves it; one that offers tools (a
+        # toolConfig) keeps the idle limit, as does every call to Opus 5.5, which may think silently for 11 minutes or more,
+        # or to a model not measured.
+        tools = {"toolConfig": {"tools": [{"toolSpec": {"name": "t", "inputSchema": {"json": {"type": "object"}}}}]}}
+        for model in ("global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8", "anthropic.claude-opus-4-8"):
+            self.assertEqual(call_read_timeout(900.0, {"messages": []}, model), 180.0, model)
+            self.assertEqual(call_read_timeout(900.0, tools, model), 900.0, model)
+            self.assertEqual(call_read_timeout(120.0, {"messages": []}, model), 120.0, "a run's shorter deadline still comes first")
+        for model in (OPUS, OPUS_US, "global.anthropic.claude-sonnet-5", "moonshotai.kimi-k2.5", "global.anthropic.claude-opus-4-8-v2"):
+            self.assertEqual(call_read_timeout(900.0, {"messages": []}, model), 900.0, model)
         from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeout
         from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
         # botocore raises its own while it waits for the response, urllib3's inside a stream that already answered.
@@ -837,28 +874,61 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
                 self.assertEqual(len(taken), 1, "a stall is not a profile's refusal: the other profile is never asked")
 
+    async def test_a_stalled_call_to_opus_4_8_that_offers_no_tools_fails_at_its_quick_limit_and_any_other_waits_the_idle_limit(self):
+        # 2026-10-20: two canvas node calls to Claude Opus 4.8 (they offer no tools) waited the whole 15 minutes for nothing.
+        # A call that offers tools may be silent while it writes a tool call's input, and an Opus 5.5 call while it thinks,
+        # so both keep the idle limit (here the transport's 3 s). tool_choice "none" offers Bedrock no tools at all.
+        tool = [{"type": "function", "function": {"name": "current_time", "parameters": {"type": "object", "properties": {}}}}]
+        opus48 = "global.anthropic.claude-opus-4-8"
+        cases = (("opus 4.8", opus48, {}, 1), ("opus 4.8, tools", opus48, {"tools": tool}, 3.0),
+                 ("opus 4.8, tool_choice none", opus48, {"tools": tool, "tool_choice": "none"}, 1), ("opus 5.5", OPUS, {}, 3.0))
+        for headers, stage in ((False, "request"), (True, "stream")):
+            for name, model, extra, want in cases:
+                with self.subTest(stage=stage, call=name):
+                    url, _ = stalling_endpoint(self, headers)
+                    seen, facts = [], []
+                    transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, read_timeout=3.0,
+                                                         client_factory=local_client(url, seen), report=facts.append)
+                    body = {"model": model, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
+                    started = time.monotonic()
+                    with mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1}):
+                        async with httpx2.AsyncClient(transport=transport) as http:
+                            response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
+                    waited = time.monotonic() - started
+                    self.assertEqual(seen, [want], "botocore's read timeout for this call")
+                    self.assertGreaterEqual(waited, want * 0.9)
+                    self.assertLess(waited, want + 6)
+                    error = (response.json() if stage == "request" else
+                             json.loads([line for line in response.text.split("\n") if line.startswith("data: ")][-1][6:]))["error"]
+                    self.assertEqual((error["type"], error["status"]), ("ReadTimeoutError", 504))
+                    self.assertEqual(facts, [{"event": "failed", "model": model, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
+
     async def test_a_run_whose_call_stalls_ends_as_the_service_unavailable_long_before_its_deadline(self):
         set_trace_processors([])
         import runner
         original = runner.BedrockConverseTransport
         self.addCleanup(setattr, runner, "BedrockConverseTransport", original)
         config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="30000")
-        request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
-        # The JSON 504 answered before a stream, and the error frame inside one, both read as the service's outage.
-        for headers, stage in ((False, "request"), (True, "stream")):
-            with self.subTest(stage):
+        # The JSON 504 answered before a stream, and the error frame inside one, both read as the service's outage. A run
+        # offers no tools: an Opus 5.5 call ends at the stream's idle limit, an Opus 4.8 one at its quick limit.
+        runs = (("bedrock.claude-opus-5-5", OPUS, lambda: mock.patch("bedrock_bridge.BEDROCK_STREAM_IDLE_SECONDS", 1)),
+                ("bedrock.claude-opus-4-8", "global.anthropic.claude-opus-4-8",
+                 lambda: mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1})))
+        for (headers, stage), (model, target, limit) in [(case, run) for case in ((False, "request"), (True, "stream")) for run in runs]:
+            with self.subTest(stage=stage, model=model):
+                request = RunRequest("r1", "t1", "s1", "Say hello", [], model=model)
                 url, _ = stalling_endpoint(self, headers)
                 seen = []
                 runner.BedrockConverseTransport = lambda **kwargs: original(**kwargs, client_factory=local_client(url, seen))
                 started = time.monotonic()
-                with mock.patch("bedrock_bridge.BEDROCK_STREAM_IDLE_SECONDS", 1), mock.patch("sys.stderr") as stderr:
+                with limit(), mock.patch("sys.stderr") as stderr:
                     events = [event async for event in stream_run(request, config, asyncio.Event())]
                 self.assertLess(time.monotonic() - started, 15, "the idle limit, not the run's 30 s deadline")
                 self.assertEqual(seen, [1])
                 self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_UNAVAILABLE"), events[-1])
                 written = "".join(call.args[0] for call in stderr.write.call_args_list)
                 self.assertEqual([json.loads(line) for line in written.splitlines() if line.startswith('{"service"')], [{
-                    "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_call_failed", "model": OPUS,
+                    "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_call_failed", "model": target,
                     "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
 
 

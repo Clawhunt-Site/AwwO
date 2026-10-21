@@ -43,9 +43,22 @@ MAX_REQUEST_BYTES = 40 * 1024 * 1024
 # How long a Bedrock stream may send nothing (BEDROCK_STREAM_IDLE_MS in apps/bedrock-bridge.ts). Claude Opus 5.5 thinks
 # before its first word and Bedrock sends nothing until it is done, so a working stream is silent for minutes: of the
 # 3,384 Opus 5.5 calls that completed on the three workers from 2026-10-12 to 10-19, the longest wait for the first token
-# was 436 s (99th percentile 230-296 s), none over 600 s. One silent for longer has stalled: on 2026-10-19 five Opus 5.5
+# was 436 s (99th percentile 230-296 s), none over 600 s. Some silent far longer had stalled: on 2026-10-19 five Opus 5.5
 # calls gave nothing back for their runs' whole 25 minutes, and the same nodes, run again, answered in 64-164 s.
 BEDROCK_STREAM_IDLE_SECONDS = 15 * 60
+# The same limit, for a call that offers the model no tools, on a model whose calls were never seen silent for long: its
+# answer is text, which Bedrock streams as it is written. Only models measured so are here, by Converse model ID without
+# its inference profile's prefix; the limit is an empirical bound, not a guarantee. Claude Opus 4.8 was never seen to
+# think silently: none of the 5,341 of its calls that completed on the Python and sandbox workers from 2026-10-12 to 10-21
+# took 3 minutes in all (the longest 123.5 s, the longest wait for the first text 48.8 s), so no gap in one was that
+# long; on 10-20 two of its canvas node calls on this worker waited the whole 15 minutes for nothing before their nodes
+# ran again (graph_retry.go runs a node again only once its call has failed) and answered in 32 and 34 s. Claude Opus 5.5
+# is not here: it always thinks first and Bedrock sends nothing until it is done, which can take its whole 64,000-token
+# limit, 11 minutes or more (commit 7b495004), so a silent Opus 5.5 call may still be working. A call that offers tools
+# keeps the idle limit whatever the model: Bedrock holds a tool call's input back until the model has written it.
+QUICK_FIRST_BYTE_SECONDS = {"anthropic.claude-opus-4-8": 3 * 60}
+# An inference profile's prefix on a Converse model ID (as bedrock_catalog.PROFILE_PREFIX).
+PROFILE_PREFIX = re.compile(r"(?:global|us|eu|apac|jp|au|ca)\.")
 TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 TOOL_USE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 BEARER = re.compile(r"[\x21-\x7e]{16,8192}")
@@ -560,6 +573,17 @@ def stream_read_timeout(run_seconds: float) -> float:
     return min(run_seconds, BEDROCK_STREAM_IDLE_SECONDS)
 
 
+def call_read_timeout(read_timeout: float, command: dict, model_id: str) -> float:
+    """The read timeout of one call (its ConverseStream command, to `model_id`): the transport's, or the model's
+    QUICK_FIRST_BYTE_SECONDS when that comes first and the call offers the model no tools (no toolConfig: none were
+    given, or tool_choice was "none")."""
+    prefix = PROFILE_PREFIX.match(model_id)
+    quick = QUICK_FIRST_BYTE_SECONDS.get(model_id[prefix.end():] if prefix else model_id)
+    if quick is None or command.get("toolConfig") is not None:
+        return read_timeout
+    return min(read_timeout, quick)
+
+
 def bridge_failure(error: BaseException) -> BridgeError:
     """Status and type only: SDK messages can carry account IDs and role ARNs."""
     if isinstance(error, BridgeError):
@@ -762,6 +786,7 @@ class BedrockConverseTransport(AsyncBaseTransport):
             if self.prompt_cache:
                 command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False
+            read_timeout = call_read_timeout(self.read_timeout, command, self.model)
         except BridgeError as error:
             return self._json_error(self._failed(error, self.model, "request"))
 
@@ -814,7 +839,7 @@ class BedrockConverseTransport(AsyncBaseTransport):
 
         def worker():
             try:
-                client = self.client_factory(self.region, self.auth, self.read_timeout)
+                client = self.client_factory(self.region, self.auth, read_timeout)
                 try:
                     events, head = open_stream(client, self.model, bool(self.fallback_model))
                 except Exception as error:  # noqa: BLE001 - a profile's refusal turns to the model's other profile
