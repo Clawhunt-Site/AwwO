@@ -15,4 +15,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["bedrock_bridge", "bedrock_catalog", "config", "errors", "runner", "server", "tools", "provider_observation"]
+py-modules = ["bedrock_bridge", "bedrock_catalog", "config", "context_estimate", "context_overflow", "errors", "runner", "server", "tools", "provider_observation"]
