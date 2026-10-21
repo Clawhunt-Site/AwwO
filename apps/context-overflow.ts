@@ -27,7 +27,7 @@ const OVERFLOW: readonly RegExp[] = [
   /exceeded model token limit/i, // Kimi
   /too large for model with \d+ maximum context length/i, // Mistral
   /range of input length should be/i, // DashScope (Qwen)
-  /model_context_window_exceeded/i, // GLM (z.ai)
+  // Not z.ai's model_context_window_exceeded: a stop reason, after the model generated up to its window (work done).
   /context[_ ]length[_ ]exceeded/i, // OpenAI's code, and others'
 ];
 const NOT_OVERFLOW: readonly RegExp[] = [/rate.?limit/i, /too many requests/i, /throttl/i];

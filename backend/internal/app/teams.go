@@ -653,11 +653,12 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	}
 	budget -= toolBytes
 	// The member's system prompt ends with the note naming its model (model_identity.go), so its budget leaves room.
-	identity := a.modelIdentity(health, m.Model)
+	identity, noteUnits := a.modelIdentity(health, m.Model), 0
 	if identity != "" {
 		budget -= len(identity) + 2
+		noteUnits = utf16Len(identity) + 2
 	}
-	prompt, instructions, history, inputContext, err := prepareTeamInput(snap, m, input, budget, overhead)
+	prompt, instructions, history, inputContext, err := prepareTeamInputWith(snap, m, input, budget, overhead, noteUnits)
 	if err != nil {
 		return "", err
 	}

@@ -248,3 +248,29 @@ func TestPostgresOperatorPlannerCallsSpendNoPlanCredits(t *testing.T) {
 		t.Fatalf("ledger %v, want %v", got, want)
 	}
 }
+
+// A call of the operator's planner model that never began (settled not_incurred: refused by its worker, or by its
+// provider as larger than the model's window) spends neither planner ceiling, as it spends no daily call.
+func TestPostgresPlannerCeilingsSkipCallsThatNeverBegan(t *testing.T) {
+	pi, _ := plannerModelWorker(t, true)
+	h := newHarness(t, pi.URL)
+	h.a.cfg.PlannerModel, h.a.cfg.PlannerPerWorkspaceDay, h.a.cfg.PlannerTotalPerDay, h.a.cfg.PlannerMaxInputBytes = testPlannerModel, 1, 1, 60000
+	h.a.cfg.RouteFreeModels = []string{"test-model"}
+	c, tid, _ := h.register(t, "planner-never-began@awwo.invalid")
+	execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	if m, paid, _ := plannedOn(t, h, c, tid, "never-began-1"); m != testPlannerModel || !paid {
+		t.Fatalf("the first plan ran on %q (operator-paid %v)", m, paid)
+	}
+	execSQL(t, h, `UPDATE model_invocations SET cost_status='not_incurred' WHERE tenant_id=$1`, tid)
+	if allowance, ok, e := h.a.plannerAllowanceToday(context.Background(), h.db, tid); e != nil || !ok || allowance.Used != 0 {
+		t.Fatalf("the meter counts %d planner calls (%v, %v)", allowance.Used, ok, e)
+	}
+	// Neither the workspace's ceiling of 1 nor the deployment's is reached: the next plan runs on the planner model, and
+	// spends both.
+	if m, paid, _ := plannedOn(t, h, c, tid, "never-began-2"); m != testPlannerModel || !paid {
+		t.Fatalf("after a call that never began the plan ran on %q (operator-paid %v)", m, paid)
+	}
+	if m, _, _ := plannedOn(t, h, c, tid, "never-began-3"); m != "test-model" {
+		t.Fatalf("a spent ceiling still ran the plan on %q", m)
+	}
+}

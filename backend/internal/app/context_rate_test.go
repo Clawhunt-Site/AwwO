@@ -106,6 +106,28 @@ func TestTeamTurnCountsTheMemberRate(t *testing.T) {
 	}
 }
 
+// A team member's history leaves room for the note the turn's system prompt gains after it (the member's model and the
+// date, teams.go) within the worker's transport limit on all texts.
+func TestTeamHistoryLeavesRoomForTheModelNote(t *testing.T) {
+	m := fixtureTeam("sequential").Members[0]
+	health := piHealth{Model: m.Model, Limits: map[string]any{"maxContextTextBytes": float64(250000), "messageOverheadBytes": float64(32),
+		"proseBytesPerToken": float64(3), "totalTextChars": float64(40000)}}
+	history := []json.RawMessage{}
+	for i := 0; i < 6; i++ {
+		history = append(history, historyPair(strings.Repeat("问", 2900), strings.Repeat("答", 2900))...)
+	}
+	snap := executionSnapshot{Instructions: "说明", RuntimeHealth: runtimeCatalog{m.Runtime: health}, History: &history, HistoryAvailable: len(history)}
+	input := teamTurnInput{Task: "整理", Purpose: "work"}
+	_, _, without, _, e := prepareTeamInputWith(snap, m, input, 250000, 32, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, _, with, _, e := prepareTeamInputWith(snap, m, input, 250000, 32, 6000)
+	if e != nil || len(with) >= len(without) || len(without) == 0 {
+		t.Fatalf("history kept %d messages without the note's room, %d with it (%v)", len(without), len(with), e)
+	}
+}
+
 // The direct-task proxy counts a call's JSON at the run's rate, as the worker does: prose the byte rule refused is
 // admitted, base64 of the same size is not.
 func TestComputerCallCountsTheRate(t *testing.T) {
@@ -404,7 +426,8 @@ func TestPostgresTeamTurnSizeRefusalDoesNotCount(t *testing.T) {
 }
 
 func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
-	if runtimeFailureCode("MODEL_CONTEXT_LIMIT", true) != "context_limit" || runtimeFailureCode("MODEL_ERROR", false) != "runtime_failed" {
+	if runtimeFailureCode("MODEL_CONTEXT_LIMIT", true) != "context_limit" || runtimeFailureCode("CONTEXT_LIMIT", false) != "context_limit" ||
+		runtimeFailureCode("MODEL_ERROR", false) != "runtime_failed" {
 		t.Fatal("runtimeFailureCode")
 	}
 	for _, c := range []struct {
@@ -412,8 +435,14 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		want  bool
 	}{
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT"}, true},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: missingUsage("unknown", "transport_unknown")}, true},
+		// The Python worker's own measure, after its stream began.
+		{invocationFacts{WorkerCode: "CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", OutputBytes: 1}, false},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", HiddenTokens: 1}, false},
+		// A provider that reported usage read the request: it did work.
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: InvocationUsage{Status: "reported"}}, false},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: InvocationUsage{Status: "partial"}}, false},
 		{invocationFacts{WorkerCode: "MODEL_ERROR"}, false},
 	} {
 		if got := sizeRefusal(&c.facts); got != c.want {
@@ -421,8 +450,17 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		}
 	}
 	for body, want := range map[string]bool{
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:      true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:       true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:                          true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded"}}`:                          true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded"}}`:                          true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:                           true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded","detail":"before-output"}}`: true,
+		// A 200's label without the worker's word that nothing came before it is a frame after some of the answer, or an
+		// older worker's label of one.
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded"}}`:      false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:429:context_length_exceeded"}}`:      false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:500:context_length_exceeded"}}`:      false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:400:context_length_exceeded"}}`:  false,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:invalid_request_error"}}`:        false,
 		`{"error":{"code":"CONTEXT_LIMIT","reason":"provider:400:context_length_exceeded"}}`:       false,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"answer","detail":"context_length_exceeded"}}`: false,
@@ -433,6 +471,40 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 	}
 	if computerSizeRefusal(413, []byte(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`)) {
 		t.Error("a status other than the worker's 502 for a provider's refusal")
+	}
+}
+
+// A direct task's call is measured as its worker writes it again, compactly: the client's indentation changes nothing.
+func TestComputerCallTokensIgnoreTheClientsIndentation(t *testing.T) {
+	compact := []byte(`{"messages":[{"role":"user","content":"画布方案 plain words, if (a < b) {}"}],"tools":[]}`)
+	var indented bytes.Buffer
+	if e := json.Indent(&indented, compact, "", "        "); e != nil {
+		t.Fatal(e)
+	}
+	if got, want := computerCallTokens(indented.Bytes(), 3.25), estimateTokens(string(compact), 3.25); got != want || computerCallTokens(compact, 3.25) != want {
+		t.Fatalf("indented %d, compact %d, want %d", got, computerCallTokens(compact, 3.25), want)
+	}
+	if computerCallTokens([]byte("not json"), 3) != estimateTokens("not json", 3) {
+		t.Fatal("a body that is not JSON is measured as sent")
+	}
+}
+
+// A run of whitespace longer than 32 counts strictly whatever word follows it, so the class of that word (which a field
+// the worker adds when it writes a direct task's call again can change: apps/computer-model.ts measures its own JSON)
+// moves at most 32 bytes of whitespace: the API and the worker agree within the API's margin.
+func TestLongWhitespaceCountsStrictlyWhateverFollows(t *testing.T) {
+	content := strings.Repeat(" ", 30000) + strings.Repeat("x", 18)
+	asSent := `{"messages":[{"role":"user","content":"` + content + `"}]}`
+	asWritten := `{"messages":[{"role":"user","content":"` + content + `"}],"tools":[]}`
+	sent, written := estimateTokens(asSent, 2.95), estimateTokens(asWritten, 2.95)
+	if sent < 30000 || written < sent || written-sent > 64 {
+		t.Fatalf("the call as sent counts %d, as its worker writes it %d", sent, written)
+	}
+	if strict, _ := textCost(strings.Repeat(" ", 33) + "word"); strict != 33 {
+		t.Fatalf("33 spaces before a short word: %d strict", strict)
+	}
+	if strict, _ := textCost(strings.Repeat(" ", 32) + "word"); strict != 0 {
+		t.Fatalf("32 spaces before a short word: %d strict", strict)
 	}
 }
 

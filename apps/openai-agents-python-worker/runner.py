@@ -216,7 +216,9 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
     try:
         profile, effort = _prepare(request, config)
     except ValueError as e:
-        yield {**classify_error(RuntimeError("OUTPUT_LIMIT" if "too large" in str(e) else "MODEL_REQUEST_REJECTED")),
+        # A request larger than the model's budget by this worker's own measure (fits_context_budget) is that refusal,
+        # made before any model call: CONTEXT_LIMIT, which the API settles as a call that never began.
+        yield {**classify_error(RuntimeError("CONTEXT_LIMIT" if "too large" in str(e) else "MODEL_REQUEST_REJECTED")),
                "observability": observation.snapshot("failed")}
         return
     observation.protocol = profile.protocol

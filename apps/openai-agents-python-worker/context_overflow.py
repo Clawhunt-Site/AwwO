@@ -27,7 +27,6 @@ _OVERFLOW = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"exceeded model token limit",
     r"too large for model with \d+ maximum context length",
     r"range of input length should be",
-    r"model_context_window_exceeded",
     r"context[_ ]length[_ ]exceeded",
 ))
 _NOT_OVERFLOW = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (r"rate.?limit", r"too many requests", r"throttl"))

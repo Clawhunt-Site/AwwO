@@ -18,7 +18,7 @@
     {"message": "Your request exceeded model token limit: 262144 (requested: 300000)", "overflow": true},
     {"message": "Prompt contains 140000 tokens and 0 draft tokens, too large for model with 131072 maximum context length", "overflow": true},
     {"message": "<400> InternalError.Algo.InvalidParameter: Range of input length should be [1, 129024]", "overflow": true},
-    {"message": "finish_reason: model_context_window_exceeded", "overflow": true},
+    {"message": "finish_reason: model_context_window_exceeded", "overflow": false},
     {"message": "400 {\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"Too long\"}}", "overflow": true},
     {"message": "Too many tokens, please wait before trying again.", "overflow": false},
     {"message": "Throttling error: Too many tokens, please wait before trying again.", "overflow": false},

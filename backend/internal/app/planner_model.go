@@ -116,8 +116,14 @@ const operatorPaidRun = `EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=mi.tenant
 // (direct_task_refund.go). p is the query parameter holding the planner model; with none configured it is the empty
 // string and the first exception matches no row. A fallback plan on the default model is an ordinary call and counts.
 func countsTowardsDaily(p string) string {
-	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `) AND NOT (mi.status<>'running' AND mi.cost_status='not_incurred')`
+	return `NOT (mi.model_id=` + p + ` AND ` + operatorPaidRun + `) AND ` + reachedCall
 }
+
+// reachedCall matches a ledger row (alias mi) that is or may be a model's work: a call still running, or one that settled
+// having reached a model. A call settled cost_status not_incurred was refused before it started (by its worker, or by its
+// provider as larger than its model's window: runs.go sizeRefusal), so neither the daily totals nor the planner
+// ceilings count it.
+const reachedCall = `NOT (mi.status<>'running' AND mi.cost_status='not_incurred')`
 
 // plannerAllowanceToday is the workspace's operator-paid planner calls today against its ceiling, for the usage meter;
 // ok is false when plans do not run on an operator model (they then count like any call).
@@ -126,7 +132,7 @@ func (a *App) plannerAllowanceToday(ctx context.Context, q querier, tid string) 
 		return routeAllowance{}, false, nil
 	}
 	var used int
-	if e := q.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$2 AND mi.model_id=$1 AND mi.created_at>=`+todayUTC+` AND `+operatorPaidRun,
+	if e := q.QueryRow(ctx, `SELECT count(*) FROM model_invocations mi WHERE mi.tenant_id=$2 AND mi.model_id=$1 AND mi.created_at>=`+todayUTC+` AND `+operatorPaidRun+` AND `+reachedCall,
 		a.cfg.PlannerModel, tid).Scan(&used); e != nil {
 		return routeAllowance{}, false, e
 	}
@@ -153,7 +159,7 @@ func (a *App) plannerModelRefusal(ctx context.Context, q pgx.Tx, tid string, inp
 	}
 	var mine, all int
 	if e := q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.tenant_id=$2), count(*) FROM model_invocations mi
-		WHERE mi.model_id=$1 AND mi.created_at>=`+todayUTC+` AND `+operatorPaidRun, a.cfg.PlannerModel, tid).Scan(&mine, &all); e != nil {
+		WHERE mi.model_id=$1 AND mi.created_at>=`+todayUTC+` AND `+operatorPaidRun+` AND `+reachedCall, a.cfg.PlannerModel, tid).Scan(&mine, &all); e != nil {
 		return "", e
 	}
 	if mine >= a.cfg.PlannerPerWorkspaceDay {

@@ -92,6 +92,20 @@ class ProseRateConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "too large"):
             _prepare(RunRequest("r1", "t1", "s1", "QUJD" * (room // 4 + 1), []), config)
 
+    def test_a_run_too_large_by_this_workers_measure_ends_as_that_refusal(self):
+        # The stream has begun by then (server.py), so the refusal is its terminal event: CONTEXT_LIMIT, which the API
+        # settles as a call that never began, not a model failure it charges and runs again.
+        import asyncio
+        from runner import stream_run
+        config = self.config()
+        room = 4096 - 128 - 256 - 32
+
+        async def collect():
+            return [event async for event in stream_run(RunRequest("r1", "t1", "s1", "QUJD" * (room // 4 + 1), []), config, asyncio.Event())]
+
+        events = asyncio.run(collect())
+        self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "CONTEXT_LIMIT"), events)
+
     def test_bad_rates_stop_the_worker(self):
         for bad in ("abc", "4.5", "0.9", "2.13", "-1"):
             with self.subTest(env=bad), self.assertRaisesRegex(ConfigError, "AWWO_OPENAI_AGENTS_PROSE_BYTES_PER_TOKEN"):

@@ -1,8 +1,10 @@
 """How many input tokens a text can take, from its characters: the Python twin of apps/context-estimate.ts (see there
 for the measurements behind it). A word is a run of code points that are neither ASCII whitespace nor CJK, the
 whitespace before it going with it; a word longer than 32 code points, or one holding an ASCII digit, counts byte for
-byte (strict) with its whitespace; in any other word a non-ASCII code point is strict and the rest is prose; a CJK
-character, and the whitespace before one, is prose. The estimate is strict + ceil(prose / proseBytesPerToken): the
+byte (strict) with its whitespace; in any other word only the ASCII letters are prose (punctuation, symbols and
+non-ASCII code points are strict); a CJK
+character, and the whitespace before one, is prose; a run of more than 32 whitespace characters is strict whatever
+follows it. The estimate is strict + ceil(prose / proseBytesPerToken): the
 text's UTF-8 bytes at a rate of 1. apps/context-estimate-vectors.json holds the cases every implementation agrees on."""
 
 from __future__ import annotations
@@ -23,45 +25,45 @@ def _utf8(cp: int) -> int:
     return 1 if cp < 0x80 else 2 if cp < 0x800 else 3 if cp < 0x10000 else 4
 
 
+def _word_cost(space: int, word_bytes: int, word_letters: int, word_length: int, word_digit: bool) -> tuple[int, int]:
+    """(strict, prose) bytes of one word and the whitespace before it. A run of more than 32 whitespace characters is
+    strict whatever follows it, as apps/context-estimate.ts says why."""
+    strict = 0
+    if space > _LONG_WORD:
+        strict, space = space, 0
+    if word_length > _LONG_WORD or word_digit:
+        return strict + space + word_bytes, 0
+    return strict + word_bytes - word_letters, space + word_letters
+
+
 def text_cost(text: str) -> tuple[int, int]:
     """A text's (strict, prose) bytes; together its UTF-8 bytes."""
     strict = prose = 0
-    space = word_bytes = word_ascii = word_length = 0
+    space = word_bytes = word_letters = word_length = 0
     word_digit = False
     for ch in text:
         cp = ord(ch)
         if cp == 0x20 or 0x09 <= cp <= 0x0D:
             if word_length:
-                if word_length > _LONG_WORD or word_digit:
-                    strict += space + word_bytes
-                else:
-                    prose += space + word_ascii
-                    strict += word_bytes - word_ascii
-                space = word_bytes = word_ascii = word_length = 0
+                s, p = _word_cost(space, word_bytes, word_letters, word_length, word_digit)
+                strict, prose = strict + s, prose + p
+                space = word_bytes = word_letters = word_length = 0
                 word_digit = False
             space += 1
         elif _cjk(cp):
-            if word_length > _LONG_WORD or word_digit:
-                strict += space + word_bytes
-            else:
-                prose += space + word_ascii
-                strict += word_bytes - word_ascii
-            space = word_bytes = word_ascii = word_length = 0
+            s, p = _word_cost(space, word_bytes, word_letters, word_length, word_digit)
+            strict, prose = strict + s, prose + p + 3
+            space = word_bytes = word_letters = word_length = 0
             word_digit = False
-            prose += 3
         else:
             word_bytes += _utf8(cp)
-            if cp < 0x80:
-                word_ascii += 1
+            if 0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A:
+                word_letters += 1
             if 0x30 <= cp <= 0x39:
                 word_digit = True
             word_length += 1
-    if word_length > _LONG_WORD or word_digit:
-        strict += space + word_bytes
-    else:
-        prose += space + word_ascii
-        strict += word_bytes - word_ascii
-    return strict, prose
+    s, p = _word_cost(space, word_bytes, word_letters, word_length, word_digit)
+    return strict + s, prose + p
 
 
 def estimate_tokens(text: str, prose_bytes_per_token: float = PROSE_RATE_MIN) -> int:

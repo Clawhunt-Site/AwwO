@@ -8,6 +8,7 @@ MESSAGES = {
     "MODEL_UNAVAILABLE": "The model service is unavailable.",
     "MODEL_REQUEST_REJECTED": "The model service rejected the request.",
     "MODEL_CONTEXT_LIMIT": "The model service refused the request as larger than the model's context window.",
+    "CONTEXT_LIMIT": "The prompt and history exceed the configured model context budget.",
     "MODEL_OUTPUT_LIMIT": "The model response reached its configured output limit.",
     "MODEL_REFUSAL": "The model declined the request.",
     "MODEL_PROTOCOL_ERROR": "The model returned an incomplete or invalid response.",

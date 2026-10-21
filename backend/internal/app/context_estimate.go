@@ -11,9 +11,12 @@ import (
 //
 // A word is a run of code points that are neither ASCII whitespace nor CJK, the whitespace before it going with it. A
 // word longer than 32 code points, or one holding an ASCII digit, counts byte for byte (strict) with its whitespace; in
-// any other word a non-ASCII code point (or an invalid byte) is strict and the rest is prose; a CJK character, and the
-// whitespace before one, is prose. The estimate is strict + ceil(prose / rate), where rate is the model's measured
-// bytes of prose per token: len(text) at a rate of 1, the byte rule before 2026-10-21.
+// any other word only the ASCII letters are prose (punctuation, symbols, non-ASCII code points and invalid bytes are
+// strict); a CJK character, and the
+// whitespace before one, is prose; but a run of more than 32 whitespace characters is strict whatever follows it, so a
+// field a serializer adds after a word moves at most 32 bytes of whitespace between the two (the API measures a direct
+// task's call as it got it, its worker as it wrote it again). The estimate is strict + ceil(prose / rate), where rate
+// is the model's measured bytes of prose per token: len(text) at a rate of 1, the byte rule before 2026-10-21.
 const (
 	proseRateMin      = 1.0
 	proseRateMax      = 4.0
@@ -26,15 +29,19 @@ func estimateCJK(r rune) bool {
 
 // textCost is a text's strict and prose bytes; strict+prose == len(text).
 func textCost(text string) (strict, prose int) {
-	space, wordBytes, wordASCII, wordLen, wordDigit := 0, 0, 0, 0, false
+	space, wordBytes, wordLetters, wordLen, wordDigit := 0, 0, 0, 0, false
 	flush := func() {
+		if space > estimateLongWords {
+			strict += space
+			space = 0
+		}
 		if wordLen > estimateLongWords || wordDigit {
 			strict += space + wordBytes
 		} else {
-			prose += space + wordASCII
-			strict += wordBytes - wordASCII
+			prose += space + wordLetters
+			strict += wordBytes - wordLetters
 		}
-		space, wordBytes, wordASCII, wordLen, wordDigit = 0, 0, 0, 0, false
+		space, wordBytes, wordLetters, wordLen, wordDigit = 0, 0, 0, 0, false
 	}
 	for i := 0; i < len(text); {
 		r, size := utf8.DecodeRuneInString(text[i:])
@@ -50,11 +57,10 @@ func textCost(text string) (strict, prose int) {
 			prose += size
 		default:
 			wordBytes += size
-			if r < utf8.RuneSelf {
-				wordASCII++
-				if r >= '0' && r <= '9' {
-					wordDigit = true
-				}
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				wordLetters++
+			} else if r >= '0' && r <= '9' {
+				wordDigit = true
 			}
 			wordLen++
 		}

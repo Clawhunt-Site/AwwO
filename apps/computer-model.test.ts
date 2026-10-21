@@ -782,6 +782,13 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     moderation: res => void events(res, [partial, { code: 'DataInspectionFailed', message: 'secret-provider-key inappropriate content' }]),
     // An upstream overloaded after the stream began, as the Gate passes Anthropic's error on.
     overloaded: res => void events(res, [partial, { type: 'error', error: { type: 'overloaded_error', message: 'secret-provider-key Overloaded' } }]),
+    // A refusal of the request as too large for the model, as a gateway's first frame (by its words or its code): said
+    // so, with the word that nothing came before it; after some of the answer it is that answer's failure.
+    'too-long-first': res => void events(res, [{ type: 'error', error: { type: 'invalid_request_error', message: 'secret-provider-key prompt is too long: 213462 tokens > 200000 maximum' } }]),
+    'too-long-code': res => void events(res, [{ error: { code: 'context_length_exceeded', message: 'secret-provider-key' } }]),
+    'too-long-after': res => void events(res, [partial, { error: { code: 'context_length_exceeded', message: 'secret-provider-key maximum context length is 131072 tokens' } }]),
+    'too-long-after-reasoning': res => void events(res, [{ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] },
+      { error: { type: 'invalid_request_error', message: 'secret-provider-key prompt is too long' } }]),
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi', { edgeIdleMs: 400 });
   const socket = 'UND_ERR_SOCKET';
@@ -789,6 +796,8 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     // The gateway's error frame is its refusal inside a 200, as one read whole is (provider:200:<its code or type>).
     ['error-frame', 'provider:200:bad_response_status_code', undefined], ['moderation', 'provider:200:DataInspectionFailed', undefined],
     ['overloaded', 'provider:200:overloaded_error', undefined],
+    ['too-long-first', 'provider:200:context_length_exceeded', 'before-output'], ['too-long-code', 'provider:200:context_length_exceeded', 'before-output'],
+    ['too-long-after', 'provider:200:context_length_exceeded', undefined], ['too-long-after-reasoning', 'provider:200:invalid_request_error', undefined],
     ['no-finish', 'stream:closed', 'end'], ['unfinished', 'stream:unfinished', undefined],
     ['garbled', 'stream:shape', undefined], ['reset', 'stream:closed', socket], ['idle-reset', 'stream:closed:idle', socket], ['idle-end', 'stream:closed:idle', 'end'],
     ['length', 'answer', 'finish:length'], ['filtered', 'answer', 'finish:content_filter'], ['huge', 'answer', 'size'], ['refusal', 'answer', 'refusal'],
@@ -803,7 +812,7 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
   const finished = await s.send(input({ completion: { messages: [{ role: 'user', content: 'after-finish' }], tools: [tool] } }));
   assert.equal(finished.status, 200);
   assert.equal((await finished.json()).completion.choices[0].message.content, 'Done.');
-  assert.equal(logged.length, 13);
+  assert.equal(logged.length, 17);
   // Each close's silence is on its log line alone (quietMs), never in the reply.
   const closes = logged.filter(line => String(line.reason).startsWith('stream:closed'));
   assert.equal(closes.length, 4);

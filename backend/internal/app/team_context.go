@@ -92,6 +92,12 @@ func renderTeamPrompt(input teamTurnInput, upstream []teamOutput) string {
 // shared context keeps a recent suffix of complete member outputs and history
 // pairs. Required review/aggregation operands must all fit, or no call is made.
 func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead int) (string, string, []json.RawMessage, teamContextAudit, error) {
+	return prepareTeamInputWith(snap, m, input, budget, overhead, 0)
+}
+
+// prepareTeamInputWith is prepareTeamInput for a system prompt that gains noteUnits UTF-16 code units after it (the
+// note naming the member's model, teams.go): its history leaves them within the worker's transport limit too.
+func prepareTeamInputWith(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead, noteUnits int) (string, string, []json.RawMessage, teamContextAudit, error) {
 	system := teamSystemPrompt(snap.Instructions, m)
 	if snap.OutputPolicy != "" {
 		system += "\n\n" + snap.OutputPolicy
@@ -160,7 +166,7 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 			encoded, _ := json.Marshal(map[string]string{"role": message.Role, "content": message.Content})
 			history = append(history, encoded)
 		}
-		history = boundedHistoryAt(history, estimateTokens(prompt, rate)+systemTokens, budget, overhead, rate, units-utf16Len(prompt)-utf16Len(system))
+		history = boundedHistoryAt(history, estimateTokens(prompt, rate)+systemTokens, budget, overhead, rate, units-utf16Len(prompt)-utf16Len(system)-noteUnits)
 	}
 	audit.HistoryMessages = len(history)
 	audit.HistoryTruncated = audit.HistoryMessages < audit.HistoryAvailable

@@ -29,7 +29,7 @@ func validateComputerCompletion(raw []byte, budget int) (map[string]json.RawMess
 // validateComputerCompletionAt validates a call against a budget its text counts at the model's prose rate
 // (context_estimate.go; its bytes at 0 or 1), as the worker counts it.
 func validateComputerCompletionAt(raw []byte, budget int, rate float64) (map[string]json.RawMessage, bool, error) {
-	if len(raw) > 512<<10 || estimateTokens(string(raw), rate) > budget {
+	if len(raw) > 512<<10 || computerCallTokens(raw, rate) > budget {
 		return nil, false, errors.New("context_limit")
 	}
 	var request map[string]json.RawMessage
@@ -491,13 +491,23 @@ func (a *App) logComputerCall(lease *computerLease, call, status int, body []byt
 }
 
 // computerSizeRefusal says whether the worker answered that the call's provider refused it as larger than its model's
-// window (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error there, and the
-// Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let through but the
-// model did not take.
+// window before any work (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error
+// there, and the Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let
+// through but the model did not take. Only a refusal of the request (400, 413, 422) or AWS's, never a rate limit; inside
+// a 200 only with the detail before-output, which the worker gives a gateway's frame that came before anything else
+// (a frame after some of the answer, or an older worker's label of one, is a call that did work).
 func computerSizeRefusal(status int, body []byte) bool {
-	code, reason, _ := computerWorkerError(body)
-	return status == 502 && code == "PROVIDER_ERROR" && (strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "bedrock:")) &&
-		strings.HasSuffix(reason, ":context_length_exceeded")
+	code, reason, detail := computerWorkerError(body)
+	if status != 502 || code != "PROVIDER_ERROR" {
+		return false
+	}
+	switch reason {
+	case "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded", "bedrock:400:context_length_exceeded":
+		return true
+	case "provider:200:context_length_exceeded":
+		return detail == "before-output"
+	}
+	return false
 }
 
 // computerWorkerBodyLimit is what the worker reads of one call's body (MAX_BYTES in apps/computer-model.ts).
@@ -513,7 +523,8 @@ func computerForwardBody(lease *computerLease, completion map[string]json.RawMes
 
 // computerCallFits says whether a validated call should also pass the worker's own admission (apps/computer-model.ts):
 // its context measure, the JSON of the call at the model's prose rate plus 32 a message, within the model's budget
-// (estimated from above from the request as sent), and the body this proxy sends, with room for a personal key,
+// (the request as sent, written compactly as the worker writes it again: computerCallTokens; the 32 a tool and 256 more
+// leave room for the fields the worker's form adds), and the body this proxy sends, with room for a personal key,
 // within what the worker reads.
 func computerCallFits(raw []byte, completion map[string]json.RawMessage, lease *computerLease) bool {
 	return computerCallFitsWithin(raw, completion, lease, lease.snapshot.Budget)
@@ -524,10 +535,21 @@ func computerCallFitsWithin(raw []byte, completion map[string]json.RawMessage, l
 	var messages, tools []json.RawMessage
 	_ = json.Unmarshal(completion["messages"], &messages)
 	_ = json.Unmarshal(completion["tools"], &tools)
-	if estimateTokens(string(raw), lease.snapshot.ProseRate)+32*len(messages)+32*len(tools)+256 > budget {
+	if computerCallTokens(raw, lease.snapshot.ProseRate)+32*len(messages)+32*len(tools)+256 > budget {
 		return false
 	}
 	return len(computerForwardBody(lease, completion))+4096 <= computerWorkerBodyLimit
+}
+
+// computerCallTokens is a direct task's call's estimated tokens at a rate: its JSON written compactly, as the worker
+// writes the call again before it measures it (apps/computer-model.ts), whatever whitespace the client put between the
+// fields (indentation counts as prose the worker's form never has); the request as sent when it is not JSON.
+func computerCallTokens(raw []byte, rate float64) int {
+	var compact bytes.Buffer
+	if json.Compact(&compact, raw) != nil {
+		return estimateTokens(string(raw), rate)
+	}
+	return estimateTokens(compact.String(), rate)
 }
 
 // computerCallSettleLimit bounds one settleComputerCall, its retries included.
@@ -626,7 +648,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			reason = "going round"
 		}
 		a.log.Warn("direct task call refused; the task ends as too large for its model", "run", lease.runID, "call", call, "reason", reason,
-			"bytes", len(raw), "tokens", estimateTokens(string(raw), lease.snapshot.ProseRate), "budget", lease.snapshot.Budget, "cut", traffic.cut, "last_cut", sticky, "lost", lost, "row", row)
+			"bytes", len(raw), "tokens", computerCallTokens(raw, lease.snapshot.ProseRate), "budget", lease.snapshot.Budget, "cut", traffic.cut, "last_cut", sticky, "lost", lost, "row", row)
 		fail(w, 400, "context_limit", "Completion input exceeds its admitted schema or context budget")
 		return
 	}
