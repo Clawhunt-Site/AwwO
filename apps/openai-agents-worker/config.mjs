@@ -2,9 +2,9 @@ import { loadWorkspaceConfig, validateWorkspaceRequest } from './workspace-proto
 import { loadObservabilityConfig } from './observability.mjs';
 import { toolMetadata, toolDefinitionBytes, validateToolNames } from './tools.mjs';
 import { deliverySchemaBytes, validateOutputContract } from './delivery-contract.mjs';
-import { applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion } from '../bedrock-bridge.ts';
-const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1', llmgate: 'https://api.clawhunt.site/v1' });
+const DEFAULTS = Object.freeze({ openai: 'https://api.openai.com/v1', llmgate: 'https://api.clawhunt.site/v1', deepseek: DEEPSEEK_BASE_URL });
 const PROTOCOLS = new Set(['chat_completions', 'responses']);
 
 export const INPUT_LIMITS = Object.freeze({
@@ -71,7 +71,8 @@ export function parseStructuredOutput(value) {
 
 // The default profile's thinking switch: 'true' sends chat_template_kwargs.enable_thinking=false on
 // Chat Completions, for Qwen-style models whose hidden reasoning would otherwise spend the output
-// budget. Unset, empty and 'false' leave requests as they were; any other value stops startup.
+// budget (a deepseek profile gets the DeepSeek API's thinking: {type: 'disabled'} instead). Unset,
+// empty and 'false' leave requests as they were; any other value stops startup.
 export function parseDisableThinking(value) {
   if (value === undefined || value === '' || value === 'false') return false;
   if (value === 'true') return true;
@@ -140,6 +141,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
     const profiles = [defaultProfile];
     const ids = new Set([defaultProfile.id]);
     for (const [index, value] of values.entries()) {
+      const keyProblem = deepseekKeyProblem(value?.provider, value?.apiKeyEnv);
+      if (keyProblem) {
+        problem = `profile ${index + 1} ${keyProblem}`;
+        throw new Error();
+      }
       if (value?.provider === 'bedrock') {
         problem = `profile ${index + 1} is not a valid Bedrock profile`;
         profiles.push(bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing));
@@ -194,7 +200,9 @@ export function loadConfig(env = process.env) {
   try { enabledTools = validateToolNames(JSON.parse(env.AWWO_OPENAI_AGENTS_TOOLS_JSON || '[]')); }
   catch { throw new Error('AWWO_OPENAI_AGENTS_TOOLS_JSON must be a unique array of registered tool IDs'); }
   const model = (env.AWWO_OPENAI_AGENTS_MODEL ?? '').trim();
-  const apiKey = (env.AWWO_OPENAI_AGENTS_API_KEY ?? '').trim();
+  // A DeepSeek default model reads the DeepSeek key, never the worker's own key variable (DEEPSEEK_API_KEY_ENV).
+  const keyVariable = provider === 'deepseek' ? DEEPSEEK_API_KEY_ENV : 'AWWO_OPENAI_AGENTS_API_KEY';
+  const apiKey = (env[keyVariable] ?? '').trim();
   const token = env.AWWO_OPENAI_AGENTS_TOKEN ?? '';
   const baseURL = (env.AWWO_OPENAI_AGENTS_BASE_URL ?? '').trim() || DEFAULTS[provider] || '';
   const userCredentials = env.AWWO_CREDENTIAL_MODE === 'user';
@@ -203,7 +211,7 @@ export function loadConfig(env = process.env) {
   if (!PROTOCOLS.has(protocol)) missing.push('AWWO_OPENAI_AGENTS_PROTOCOL');
   if (!Object.hasOwn(DEFAULTS, provider)) missing.push('AWWO_OPENAI_AGENTS_PROVIDER');
   if (!MODEL_SELECTOR.test(model)) missing.push('AWWO_OPENAI_AGENTS_MODEL');
-  if (!apiKey || /[\r\n]/.test(apiKey)) missing.push('AWWO_OPENAI_AGENTS_API_KEY');
+  if (!apiKey || /[\r\n]/.test(apiKey)) missing.push(keyVariable);
   if (!validBaseURL(baseURL)) missing.push('AWWO_OPENAI_AGENTS_BASE_URL');
   const contextWindow = integer(env.AWWO_OPENAI_AGENTS_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_OPENAI_AGENTS_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_OPENAI_AGENTS_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_OPENAI_AGENTS_MAX_TOKENS');
@@ -224,12 +232,20 @@ export function loadConfig(env = process.env) {
   const platformProviders = parsePlatformProviders(env.AWWO_PLATFORM_PROVIDERS);
   // Older worker configs use "openai" as the protocol adapter for LLM Gate.
   // The URL is the network destination; personal mode replaces these profiles per request.
-  // Bedrock is a second operator destination only where the platform policy names it.
-  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.baseURL !== DEFAULTS.llmgate)) {
+  // Bedrock and the DeepSeek API are further operator destinations only where the platform policy names them.
+  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.provider !== 'deepseek' && profile.baseURL !== DEFAULTS.llmgate)) {
     throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
   }
   if (llmgateOnly && models.some(profile => profile.provider === 'bedrock') && !platformProviders.includes('bedrock')) {
     throw new Error('AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock');
+  }
+  assertDeepSeekProfiles(userCredentials, llmgateOnly, platformProviders, models, (env[DEEPSEEK_API_KEY_ENV] ?? '').trim());
+  // This worker's two multi-call paths, the sandbox's project execution and managed execution, never let a DeepSeek model
+  // think: its API wants a tool loop's earlier reasoning_content sent back, which neither keeps. So a deepseek profile here
+  // offers no thinking level but none, and a level it advertised could never be chosen only to be refused.
+  if (models.some(profile => profile.provider === 'deepseek' && (profile.reasoningEfforts.some(level => level !== 'none')
+    || (profile.defaultReasoningEffort !== '' && profile.defaultReasoningEffort !== 'none')))) {
+    throw new Error('A deepseek model profile on this worker lists no thinking level but none');
   }
   assertOperatorOnlyBedrock(userCredentials, models);
   for (const profile of models) {

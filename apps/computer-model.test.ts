@@ -15,7 +15,9 @@ const call = { id: 'call-1', type: 'function', function: { name: 'workspace_exec
 
 // Anthropic Messages is served by Pi and Chat Completions by the openai-agents worker, unless `worker` says;
 // Pi on Chat Completions binds a Gate model, as the router uses in production.
-async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}, worker?: 'pi' | 'openai-agents', serverOptions: Record<string, unknown> = {}) {
+// `adjust` reshapes the loaded configuration before the worker starts, for a profile its loader would refuse.
+async function serve(t: any, protocol: string, handler: (body: any, req: any, res: any) => void, overrides: Record<string, string> = {}, worker?: 'pi' | 'openai-agents', serverOptions: Record<string, unknown> = {},
+  adjust: (config: any) => any = config => config) {
   const calls: any[] = [];
   const provider = createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk;
@@ -25,7 +27,7 @@ async function serve(t: any, protocol: string, handler: (body: any, req: any, re
   const baseURL = `http://127.0.0.1:${(provider.address() as any).port}`;
   const pi = worker ? worker === 'pi' : protocol === 'anthropic_messages';
   const prefix = pi ? 'AWWO_PI' : 'AWWO_OPENAI_AGENTS';
-  const config = (pi ? loadPi : loadOpenAI)({ [`${prefix}_TOKEN`]: token, [`${prefix}_MODEL`]: 'fixture-model', [`${prefix}_API_KEY`]: 'secret-provider-key', [`${prefix}_BASE_URL`]: baseURL + (pi ? '' : '/v1'), [`${prefix}_PROVIDER`]: pi ? (protocol === 'anthropic_messages' ? 'anthropic' : 'llmgate') : 'openai', [`${prefix}_PROTOCOL`]: protocol, ...overrides });
+  const config = adjust((pi ? loadPi : loadOpenAI)({ [`${prefix}_TOKEN`]: token, [`${prefix}_MODEL`]: 'fixture-model', [`${prefix}_API_KEY`]: 'secret-provider-key', [`${prefix}_BASE_URL`]: baseURL + (pi ? '' : '/v1'), [`${prefix}_PROVIDER`]: pi ? (protocol === 'anthropic_messages' ? 'anthropic' : 'llmgate') : 'openai', [`${prefix}_PROTOCOL`]: protocol, ...overrides }));
   const app = (pi ? createPiServer : createOpenAIAgentsServer)(config, serverOptions as any);
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening');
   const origin = `http://127.0.0.1:${app.server.address().port}`;
@@ -519,10 +521,11 @@ test('a Chat Completions call through LLM Gate is streamed and gathered into one
   assert.doesNotMatch(JSON.stringify(body), /private reasoning|secret-provider-key/);
 });
 
-test('only a Chat Completions call through LLM Gate streams: a Gate profile named "openai" too, no other provider or protocol', () => {
+test('only a Chat Completions call through LLM Gate or to the DeepSeek API streams: a Gate profile named "openai" too, no other provider or protocol', () => {
   const completion = validateComputerCompletion({ messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] });
   const profile = (baseURL: string, provider: string, protocol = 'chat_completions') => ({ model: 'm', apiKey: 'k', baseURL, provider, protocol, maxTokens: 1024, contextWindow: 32768 });
-  for (const model of [profile('https://api.clawhunt.site/v1', 'openai'), profile('https://api.clawhunt.site/v1/', 'llmgate'), profile('http://127.0.0.1:9/v1', 'llmgate')]) {
+  for (const model of [profile('https://api.clawhunt.site/v1', 'openai'), profile('https://api.clawhunt.site/v1/', 'llmgate'), profile('http://127.0.0.1:9/v1', 'llmgate'),
+    profile('https://api.deepseek.com', 'deepseek')]) {
     const call = providerComputerRequest(completion, model);
     assert.equal(call.stream, true, model.baseURL);
     assert.equal(call.body.stream, true);
@@ -538,6 +541,135 @@ test('only a Chat Completions call through LLM Gate streams: a Gate profile name
     assert.equal(call.body.stream, false);
     assert.equal('stream_options' in call.body, false);
   }
+});
+
+test('a DeepSeek call is told not to think by its own field, takes the effort none where its profile lists it, and never thinks with tools', () => {
+  const toolless = validateComputerCompletion({ messages: [{ role: 'user', content: 'Name the project' }], tools: [] });
+  const withTools = validateComputerCompletion({ messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] });
+  const deepseek = { model: 'deepseek-flash', apiKey: 'k', baseURL: 'https://api.deepseek.com', provider: 'deepseek', protocol: 'chat_completions', maxTokens: 1024, contextWindow: 1_000_000 };
+  const quiet = providerComputerRequest(toolless, deepseek, undefined, { thinking: false });
+  assert.equal(quiet.url, 'https://api.deepseek.com/chat/completions');
+  assert.equal(quiet.headers.authorization, 'Bearer k');
+  assert.deepEqual(quiet.body.thinking, { type: 'disabled' });
+  assert.equal('chat_template_kwargs' in quiet.body, false, 'the DeepSeek API ignores the chat template');
+  assert.equal(quiet.body.max_tokens, 1024); assert.equal('max_completion_tokens' in quiet.body, false); assert.equal('store' in quiet.body, false);
+  const plain = providerComputerRequest(toolless, deepseek).body;
+  assert.equal('thinking' in plain, false); assert.equal('reasoning_effort' in plain, false);
+  // The effort none is no field at all, as for every provider, unless the profile lists it: then it is DeepSeek's own
+  // "do not think". A level is sent as a level.
+  const unlisted = providerComputerRequest(toolless, deepseek, 'none').body;
+  assert.equal('thinking' in unlisted, false); assert.equal('reasoning_effort' in unlisted, false);
+  const listed = providerComputerRequest(toolless, { ...deepseek, reasoningEfforts: ['none'] }, 'none').body;
+  assert.deepEqual(listed.thinking, { type: 'disabled' }); assert.equal('reasoning_effort' in listed, false);
+  assert.equal(providerComputerRequest(toolless, deepseek, 'high').body.reasoning_effort, 'high');
+  // With tools it never thinks: its API wants a tool loop's earlier reasoning sent back, which the thread does not keep.
+  for (const effort of [undefined, 'none', 'high']) {
+    const body = providerComputerRequest(withTools, deepseek, effort).body;
+    assert.deepEqual(body.thinking, { type: 'disabled' }, String(effort));
+    assert.equal('reasoning_effort' in body, false, String(effort));
+    assert.equal('chat_template_kwargs' in body, false, String(effort));
+  }
+  const gate = { ...deepseek, provider: 'llmgate', baseURL: 'https://api.clawhunt.site/v1' };
+  assert.equal('reasoning_effort' in providerComputerRequest(withTools, gate, 'none').body, false);
+  assert.equal('thinking' in providerComputerRequest(withTools, gate).body, false, 'tools change nothing for other providers');
+  const gateQuiet = providerComputerRequest(withTools, gate, undefined, { thinking: false }).body;
+  assert.deepEqual(gateQuiet.chat_template_kwargs, { enable_thinking: false });
+  assert.equal('thinking' in gateQuiet, false);
+});
+
+test('Pi serves a DeepSeek model to managed execution at its one URL, streamed, and without thinking when tools come', async t => {
+  const frames = [
+    { choices: [{ index: 0, delta: { role: 'assistant', content: 'Built.' }, finish_reason: null }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+    { choices: [], usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 } },
+    '[DONE]',
+  ];
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (const frame of frames) res.write(`data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`);
+    res.end();
+  }, { AWWO_PI_MODELS_JSON: JSON.stringify([{ id: 'deepseek-flash', provider: 'deepseek', model: 'deepseek-flash', apiKeyEnv: 'AWWO_DEEPSEEK_API_KEY', contextWindow: 1_000_000, maxTokens: 4096 }]),
+    AWWO_DEEPSEEK_API_KEY: 'deepseek-fixture-key' }, 'pi');
+  const originalFetch = globalThis.fetch;
+  const seen: string[] = [];
+  t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) => {
+    const url = String(target instanceof Request ? target.url : target);
+    if (url.startsWith('https://api.deepseek.com/')) { seen.push(url); return originalFetch(`${s.baseURL}/v1/chat/completions`, init); }
+    return originalFetch(target, init);
+  });
+  const response = await s.send(input({ model: 'deepseek-flash' }));
+  assert.equal(response.status, 200);
+  const answer = await response.json();
+  assert.equal(answer.completion.choices[0].message.content, 'Built.');
+  assert.deepEqual(seen, ['https://api.deepseek.com/chat/completions']);
+  const sent = s.calls[0];
+  assert.equal(sent.headers.authorization, 'Bearer deepseek-fixture-key');
+  assert.deepEqual(sent.body.thinking, { type: 'disabled' });
+  assert.equal(sent.body.stream, true);
+  assert.equal('reasoning_effort' in sent.body, false);
+});
+
+// A JS worker serving a DeepSeek model to managed execution, its calls to the DeepSeek API sent to the local provider.
+async function deepseekOnAgents(t: any, profile: Record<string, unknown>, adjust?: (config: any) => any) {
+  const frames = [
+    { choices: [{ index: 0, delta: { role: 'assistant', content: 'Named.' }, finish_reason: null }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+    '[DONE]',
+  ];
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (const frame of frames) res.write(`data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`);
+    res.end();
+  }, { AWWO_OPENAI_AGENTS_MODELS_JSON: JSON.stringify([{ id: 'deepseek-flash', provider: 'deepseek', model: 'deepseek-flash', apiKeyEnv: 'AWWO_DEEPSEEK_API_KEY',
+    contextWindow: 1_000_000, maxTokens: 4096, ...profile }]), AWWO_DEEPSEEK_API_KEY: 'deepseek-fixture-key' }, 'openai-agents', {}, adjust);
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', (target: string | URL | Request, init?: RequestInit) => {
+    const url = String(target instanceof Request ? target.url : target);
+    return url.startsWith('https://api.deepseek.com/') ? originalFetch(`${s.baseURL}/v1/chat/completions`, init) : originalFetch(target, init);
+  });
+  return s;
+}
+const toolless = (n: number) => ({ runId: `run-${n}`, sessionId: `session-${n}`, completion: { messages: [{ role: 'user', content: 'Name the project' }], tools: [] } });
+
+test('a DeepSeek profile on the JS worker takes the effort none, which keeps it from thinking, and no other level', async t => {
+  const s = await deepseekOnAgents(t, { reasoningEfforts: ['none'] });
+  const logged = rejections(t);
+  const refused = await s.send(input({ model: 'deepseek-flash', effort: 'high' }));
+  assert.equal(refused.status, 400);
+  assert.equal((await refused.json()).error.code, 'EFFORT_NOT_SUPPORTED');
+  assert.equal(s.calls.length, 0, 'nothing left the worker');
+  assert.deepEqual(logged.map(line => line.code), ['EFFORT_NOT_SUPPORTED']);
+  for (const [n, extra] of [[2, {}], [3, toolless(3)]] as const) {
+    const answer = await s.send(input({ model: 'deepseek-flash', effort: 'none', ...extra }));
+    assert.equal(answer.status, 200, String(n));
+  }
+  for (const call of s.calls) {
+    assert.deepEqual(call.body.thinking, { type: 'disabled' });
+    assert.equal('reasoning_effort' in call.body, false);
+  }
+  assert.equal(s.calls.length, 2);
+});
+
+test('a DeepSeek call with tools never thinks: a level it asks for is refused, the profile default is dropped, and without tools both are sent', async t => {
+  // A profile the loader refuses (levels besides none, and a default), so what is under test is the handler's own guard.
+  const s = await deepseekOnAgents(t, {}, config => ({ ...config, models: Object.freeze(config.models.map((profile: any) => profile.provider === 'deepseek'
+    ? Object.freeze({ ...profile, reasoningEfforts: Object.freeze(['none', 'high']), defaultReasoningEffort: 'high' }) : profile)) }));
+  const logged = rejections(t);
+  const refused = await s.send(input({ model: 'deepseek-flash', effort: 'high' }));
+  assert.equal(refused.status, 400);
+  assert.equal((await refused.json()).error.code, 'EFFORT_NOT_SUPPORTED');
+  assert.equal(s.calls.length, 0, 'nothing left the worker');
+  assert.deepEqual(logged.map(line => line.code), ['EFFORT_NOT_SUPPORTED']);
+  // The default was asked for by no one: the call goes, without thinking.
+  const fallback = await s.send(input({ model: 'deepseek-flash', runId: 'run-2', sessionId: 'session-2' }));
+  assert.equal(fallback.status, 200);
+  assert.deepEqual(s.calls[0].body.thinking, { type: 'disabled' });
+  assert.equal('reasoning_effort' in s.calls[0].body, false);
+  for (const [n, effort] of [[3, 'high'], [4, '']] as const) {
+    const answer = await s.send(input({ model: 'deepseek-flash', effort, ...toolless(n) }));
+    assert.equal(answer.status, 200, String(n));
+  }
+  assert.deepEqual(s.calls.slice(1).map(call => [call.body.reasoning_effort, 'thinking' in call.body]), [['high', false], ['high', false]]);
 });
 
 test('a streamed tool call sent whole without an index is joined by its id; one with neither is a broken stream', async () => {

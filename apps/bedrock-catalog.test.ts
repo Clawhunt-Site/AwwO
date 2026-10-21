@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { bedrockBridgeBaseURL } from './bedrock-bridge.ts';
 import {
-  applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockPromptCacheModels, bedrockRegion, parseBedrockCatalog,
-  parseBedrockCatalogFile, parsePlatformProviders, platformHealth, platformProvidersInUse, readBedrockCatalog, readBedrockCatalogRegions, type BedrockCatalogEntry,
+  DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockPromptCacheModels, bedrockRegion,
+  parseBedrockCatalog, parseBedrockCatalogFile, parsePlatformProviders, platformHealth, platformProvidersInUse, readBedrockCatalog, readBedrockCatalogRegions,
+  type BedrockCatalogEntry,
 } from './bedrock-catalog.ts';
 
 const raw = JSON.parse(readFileSync(new URL('./bedrock-models.json', import.meta.url), 'utf8'));
@@ -156,6 +157,31 @@ test('health claims the destinations the models reach, and personal workers refu
   assert.doesNotThrow(() => assertOperatorOnlyBedrock(false, [{ provider: 'bedrock' }]));
   assert.doesNotThrow(() => assertOperatorOnlyBedrock(true, gate));
   assert.throws(() => assertOperatorOnlyBedrock(true, [{ provider: 'bedrock' }]), /operator credentials.*AWWO_CREDENTIAL_MODE=user/);
+});
+
+test('DeepSeek is a third platform: canonical in the policy, claimed only when a profile reaches it, at its one URL', () => {
+  assert.deepEqual(parsePlatformProviders('deepseek,llmgate'), ['llmgate', 'deepseek']);
+  assert.deepEqual(parsePlatformProviders(' deepseek , bedrock , llmgate '), ['llmgate', 'bedrock', 'deepseek']);
+  for (const value of ['deepseek', 'llmgate,deepseek,deepseek', 'llmgate,DeepSeek', 'llmgate,deepseek-v4']) {
+    assert.throws(() => parsePlatformProviders(value), /AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock, deepseek and include llmgate/, value);
+  }
+  const deepseek = { provider: 'deepseek', baseURL: DEEPSEEK_BASE_URL, protocol: 'chat_completions' };
+  const all = ['llmgate', 'bedrock', 'deepseek'];
+  assert.deepEqual(platformProvidersInUse(all, [{ provider: 'llmgate' }]), ['llmgate'], 'a policy that allows DeepSeek is not a claim to reach it');
+  assert.deepEqual(platformProvidersInUse(all, [{ provider: 'llmgate' }, deepseek]), ['llmgate', 'deepseek']);
+  assert.deepEqual(platformProvidersInUse(all, [deepseek, { provider: 'bedrock' }]), ['llmgate', 'bedrock', 'deepseek']);
+  assert.deepEqual(platformHealth(true, ['llmgate', 'deepseek']), { platformOnly: true, platformProviders: ['llmgate', 'deepseek'] });
+  // Allowed: an operator worker whose policy names deepseek, or one that is not Gate-only.
+  assert.doesNotThrow(() => assertDeepSeekProfiles(false, true, ['llmgate', 'deepseek'], [{ provider: 'llmgate' }, deepseek]));
+  assert.doesNotThrow(() => assertDeepSeekProfiles(false, false, ['llmgate'], [deepseek]));
+  assert.doesNotThrow(() => assertDeepSeekProfiles(true, true, ['llmgate'], [{ provider: 'llmgate' }]), 'no DeepSeek profile, nothing to refuse');
+  assert.throws(() => assertDeepSeekProfiles(false, true, ['llmgate', 'bedrock'], [deepseek]), /AWWO_LLMGATE_ONLY allows DeepSeek profiles only when AWWO_PLATFORM_PROVIDERS includes deepseek/);
+  assert.throws(() => assertDeepSeekProfiles(true, false, all, [deepseek]), /DeepSeek models use operator credentials.*AWWO_CREDENTIAL_MODE=user/);
+  // The name never points anywhere else, in any mode.
+  for (const other of [{ baseURL: 'https://api.deepseek.com/v1' }, { baseURL: 'https://api.clawhunt.site/v1' }, { baseURL: 'http://api.deepseek.com' },
+    { baseURL: undefined }, { protocol: 'responses' }, { protocol: 'anthropic_messages' }]) {
+    assert.throws(() => assertDeepSeekProfiles(false, false, all, [{ ...deepseek, ...other }]), /deepseek model profile must use https:\/\/api\.deepseek\.com with Chat Completions/, JSON.stringify(other));
+  }
 });
 
 test('catalog entries cannot be mutated through the loaded copy', () => {

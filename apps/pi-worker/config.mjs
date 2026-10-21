@@ -1,11 +1,12 @@
 import { loadObservabilityConfig } from './observability.mjs';
-import { applyBedrockPromptCache, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
+import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com',
   ollama: 'http://127.0.0.1:11434/v1',
+  deepseek: DEEPSEEK_BASE_URL,
 });
 
 export const INPUT_LIMITS = Object.freeze({
@@ -35,7 +36,8 @@ function integer(value, fallback, minimum, maximum, name) {
   return parsed;
 }
 
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'input']);
+// disableThinking only on a deepseek profile: that model's own "do not think" switch (pi-task.mjs thinkingOff).
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'input', 'disableThinking']);
 const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name', 'input']);
 
 // What a profile's model takes: text, unless it names ["text","image"] (a model that sees pictures). Anything else is
@@ -123,11 +125,12 @@ function thinkingSetting(env) {
 
 // AWWO_PI_DISABLE_THINKING: the default profile's thinking switch, as AWWO_OPENAI_AGENTS_DISABLE_THINKING is the Agents
 // workers'. 'true' tells a Qwen-style default model's chat template not to think (chat_template_kwargs.enable_thinking
-// =false) on this worker's runs: the canvas planner plans on the default model when the operator's planner model may not
-// take a plan, and on 2026-10-19 its thinking spent all 16,384 output tokens of 9 plans. /internal/computer-model calls
-// keep their own per-call thinking option. The switch is for the model: turn it off when AWWO_PI_MODEL stops being a
-// Qwen-style one. Unset, empty and 'false' leave requests as they were; any other value, or a default model that is not
-// a Chat Completions model on the LLM Gate, stops startup.
+// =false), or a DeepSeek default model by the DeepSeek API's own thinking field, on this worker's runs: the canvas planner
+// plans on the default model when the operator's planner model may not take a plan, and on 2026-10-19 its thinking spent
+// all 16,384 output tokens of 9 plans. /internal/computer-model calls keep their own per-call thinking option. The switch
+// is for the model: turn it off when AWWO_PI_MODEL stops being one of those. Unset, empty and 'false' leave requests as
+// they were; any other value, or a default model that is not a Chat Completions model on the LLM Gate or the DeepSeek
+// API, stops startup.
 export function parseDisableThinking(value) {
   if (value === undefined || value === '' || value === 'false') return false;
   if (value === 'true') return true;
@@ -146,6 +149,11 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
     const profiles = [defaultProfile];
     const ids = new Set([defaultProfile.id]);
     for (const [index, value] of values.entries()) {
+      const keyProblem = deepseekKeyProblem(value?.provider, value?.apiKeyEnv);
+      if (keyProblem) {
+        problem = `profile ${index + 1} ${keyProblem}`;
+        throw new Error();
+      }
       if (value?.provider === 'bedrock') {
         problem = `profile ${index + 1} is not a valid Bedrock profile`;
         profiles.push(bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing));
@@ -173,7 +181,10 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       if (maxTokens + 256 >= contextWindow) throw new Error();
       problem = `profile ${index + 1} has an invalid input list`;
       const input = profileInput(value.input);
-      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens, input }));
+      problem = `profile ${index + 1} has a disableThinking flag that only a deepseek profile may carry`;
+      if (value.disableThinking !== undefined && (typeof value.disableThinking !== 'boolean' || value.provider !== 'deepseek')) throw new Error();
+      profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens, input,
+        ...(value.disableThinking === true ? { disableThinking: true } : {}) }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -187,7 +198,9 @@ export function loadConfig(env = process.env) {
   if (!['development', 'staging', 'production'].includes(environment)) throw new Error('APP_ENV must be development, staging, or production');
   const provider = (env.AWWO_PI_PROVIDER ?? (llmgateOnly ? 'llmgate' : '')).trim();
   const model = (env.AWWO_PI_MODEL ?? '').trim();
-  const apiKey = (env.AWWO_PI_API_KEY ?? '').trim();
+  // A DeepSeek default model reads the DeepSeek key, never the worker's own key variable (DEEPSEEK_API_KEY_ENV).
+  const keyVariable = provider === 'deepseek' ? DEEPSEEK_API_KEY_ENV : 'AWWO_PI_API_KEY';
+  const apiKey = (env[keyVariable] ?? '').trim();
   const token = env.AWWO_PI_TOKEN ?? '';
   const baseURL = (env.AWWO_PI_BASE_URL ?? '').trim() || DEFAULTS[provider] || '';
   const userCredentials = env.AWWO_CREDENTIAL_MODE === 'user';
@@ -195,7 +208,7 @@ export function loadConfig(env = process.env) {
   if (token.length < 32) missing.push('AWWO_PI_TOKEN');
   if (!Object.hasOwn(DEFAULTS, provider)) missing.push('AWWO_PI_PROVIDER');
   if (!model || model.length > 256) missing.push('AWWO_PI_MODEL');
-  if (provider !== 'ollama' && !apiKey) missing.push('AWWO_PI_API_KEY');
+  if (provider !== 'ollama' && !apiKey) missing.push(keyVariable);
   if (!validBaseURL(baseURL)) missing.push('AWWO_PI_BASE_URL');
   const contextWindow = integer(env.AWWO_PI_CONTEXT_WINDOW, 32_768, 4096, 2_000_000, 'AWWO_PI_CONTEXT_WINDOW');
   const maxTokens = integer(env.AWWO_PI_MAX_TOKENS, 4096, 128, 32_768, 'AWWO_PI_MAX_TOKENS');
@@ -205,9 +218,10 @@ export function loadConfig(env = process.env) {
   catch { throw new Error('AWWO_PI_INPUT must be text or text,image'); }
   const disableThinking = parseDisableThinking(env.AWWO_PI_DISABLE_THINKING);
   // The LLM Gate (named, or by its URL, as the computer-model calls tell it) hands chat_template_kwargs to the model's
-  // server; OpenAI refuses an unknown body field, Anthropic's protocol has no chat template, Ollama has a switch of its own.
-  if (disableThinking && (providerProtocol(provider) !== 'chat_completions' || (provider !== 'llmgate' && baseURL !== DEFAULTS.llmgate))) {
-    throw new Error('AWWO_PI_DISABLE_THINKING needs a Chat Completions default model on the LLM Gate');
+  // server, and the DeepSeek API has a thinking field of its own; OpenAI refuses an unknown body field, Anthropic's
+  // protocol has no chat template, Ollama has a switch of its own.
+  if (disableThinking && (providerProtocol(provider) !== 'chat_completions' || (provider !== 'llmgate' && provider !== 'deepseek' && baseURL !== DEFAULTS.llmgate))) {
+    throw new Error('AWWO_PI_DISABLE_THINKING needs a Chat Completions default model on the LLM Gate or the DeepSeek API');
   }
   const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens, input: defaultInput,
     ...(disableThinking ? { disableThinking: true } : {}) }), missing);
@@ -228,13 +242,14 @@ export function loadConfig(env = process.env) {
   const models = Object.freeze([...configured, ...catalog]);
   const platformProviders = parsePlatformProviders(env.AWWO_PLATFORM_PROVIDERS);
   // Provider labels may name the protocol adapter; only the URL chooses the destination.
-  // Bedrock is a second operator destination only where the platform policy names it.
-  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.baseURL !== DEFAULTS.llmgate)) {
+  // Bedrock and the DeepSeek API are further operator destinations only where the platform policy names them.
+  if (llmgateOnly && models.some(profile => profile.provider !== 'bedrock' && profile.provider !== 'deepseek' && profile.baseURL !== DEFAULTS.llmgate)) {
     throw new Error('AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile');
   }
   if (llmgateOnly && models.some(profile => profile.provider === 'bedrock') && !platformProviders.includes('bedrock')) {
     throw new Error('AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock');
   }
+  assertDeepSeekProfiles(userCredentials, llmgateOnly, platformProviders, models, (env[DEEPSEEK_API_KEY_ENV] ?? '').trim());
   assertOperatorOnlyBedrock(userCredentials, models);
   return Object.freeze({
     observability: loadObservabilityConfig(env, 'pi', environment),

@@ -242,9 +242,11 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
     if effort:
         settings["reasoning"] = {"effort": effort}
     if not profile.thinking and profile.protocol == "chat_completions":
-        # The chat-template switch Qwen-style models read. Opt-in per profile: an endpoint that
-        # does not know the field may reject it.
-        settings["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        # The model's own "do not think" switch: the chat-template switch Qwen-style models read, or the
+        # DeepSeek API's thinking field (which ignores the chat template). Opt-in per profile: an endpoint
+        # that does not know the field may reject it.
+        settings["extra_body"] = ({"thinking": {"type": "disabled"}} if profile.provider == "deepseek"
+                                  else {"chat_template_kwargs": {"enable_thinking": False}})
 
     client = None
     http_client = None
@@ -269,9 +271,10 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
                                               read_timeout=stream_read_timeout(config.timeout_ms / 1000), prompt_cache=profile.prompt_cache,
                                               fallback_model=profile.fallback_model, report=report)
+        # A DeepSeek call follows no redirect: the API has one address, and the profile may reach only that one.
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request], "response": [observation.on_response],
-        }, **({"transport": bridge} if bridge else {}))
+        }, **({"transport": bridge} if bridge else {}), **({"follow_redirects": False} if profile.provider == "deepseek" else {}))
         # The SDK's own 600 s default would cut a call short of the run's deadline (the Bedrock bridge keeps its own read
         # timeout, the stream's idle limit above).
         client = AsyncOpenAI(base_url=profile.base_url, api_key=BRIDGE_API_KEY if bridge else profile.api_key, max_retries=0, http_client=http_client,

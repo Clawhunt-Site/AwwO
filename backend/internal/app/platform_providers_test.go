@@ -16,13 +16,15 @@ func TestPlatformProvidersFromEnv(t *testing.T) {
 	}{
 		{"", []string{"llmgate"}}, {"  ", []string{"llmgate"}}, {"llmgate", []string{"llmgate"}},
 		{"llmgate,bedrock", []string{"llmgate", "bedrock"}}, {" bedrock , llmgate ", []string{"llmgate", "bedrock"}},
+		{"llmgate,deepseek", []string{"llmgate", "deepseek"}}, {"deepseek, bedrock ,llmgate", []string{"llmgate", "bedrock", "deepseek"}},
 	} {
 		got, err := parsePlatformProviders(test.value)
 		if err != nil || !slices.Equal(got, test.want) {
 			t.Fatal("platform providers", test.value, got, err)
 		}
 	}
-	for _, value := range []string{"bedrock", "llmgate,llmgate", "llmgate,openai", "llmgate,", "LLMGATE", "llmgate;bedrock"} {
+	for _, value := range []string{"bedrock", "llmgate,llmgate", "llmgate,openai", "llmgate,", "LLMGATE", "llmgate;bedrock",
+		"deepseek", "bedrock,deepseek", "llmgate,deepseek,deepseek", "llmgate,DeepSeek", "llmgate,deepseek-v4"} {
 		if _, err := parsePlatformProviders(value); err == nil || !strings.Contains(err.Error(), "AWWO_PLATFORM_PROVIDERS") {
 			t.Fatal("invalid platform providers accepted", value, err)
 		}
@@ -107,6 +109,63 @@ func TestGateOnlyPlatformWorkerClaims(t *testing.T) {
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = worker.URL, strings.Repeat("o", 32)
 	if _, err := New(nil, c).probeRuntime(context.Background(), runtimeOpenAIAgents); err != nil {
 		t.Fatal("open API rejected a platform worker", err)
+	}
+}
+
+// DeepSeek is a third operator platform: a worker reaching it is admitted only when it declares
+// deepseek in canonical position and the API's own policy names it; a DeepSeek model behind a
+// Gate-only claim, or outside the declared list, is refused whatever the policy.
+func TestGateOnlyDeepSeekWorkerClaims(t *testing.T) {
+	type claim struct {
+		name   string
+		health map[string]any
+		ok     bool
+	}
+	gate := map[string]any{"id": "gate-model", "provider": "llmgate", "runtime": runtimeOpenAIAgents}
+	deepseek := map[string]any{"id": "deepseek-flash", "name": "DeepSeek V4.1 Flash", "provider": "deepseek", "runtime": runtimeOpenAIAgents}
+	bedrock := map[string]any{"id": "bedrock.glm-5", "name": "GLM-5", "provider": "bedrock", "runtime": runtimeOpenAIAgents}
+	health := func(models []map[string]any, extra map[string]any) map[string]any {
+		h := map[string]any{"ready": true, "userCredentials": false, "provider": "llmgate", "model": "gate-model", "models": models}
+		for key, value := range extra {
+			h[key] = value
+		}
+		return h
+	}
+	withDeepSeek := []map[string]any{gate, deepseek}
+	withAll := []map[string]any{gate, bedrock, deepseek}
+	declare := func(providers ...any) map[string]any {
+		return map[string]any{"platformOnly": true, "platformProviders": providers}
+	}
+	for _, policy := range [][]string{nil, {"llmgate"}, {"llmgate", "bedrock"}, {"llmgate", "deepseek"}, {"llmgate", "bedrock", "deepseek"}} {
+		deepseekAllowed, bedrockAllowed := slices.Contains(policy, "deepseek"), slices.Contains(policy, "bedrock")
+		claims := []claim{
+			{"declared DeepSeek platform", health(withDeepSeek, declare("llmgate", "deepseek")), deepseekAllowed},
+			{"declared DeepSeek platform without DeepSeek models", health([]map[string]any{gate}, declare("llmgate", "deepseek")), deepseekAllowed},
+			{"all three platforms declared", health(withAll, declare("llmgate", "bedrock", "deepseek")), deepseekAllowed && bedrockAllowed},
+			{"Gate-only claim hiding a DeepSeek model", health(withDeepSeek, map[string]any{"llmgateOnly": true}), false},
+			{"DeepSeek model outside the declared list", health(withDeepSeek, declare("llmgate")), false},
+			{"DeepSeek model with only Bedrock declared", health(withAll, declare("llmgate", "bedrock")), false},
+			{"Bedrock model with only DeepSeek declared", health(withAll, declare("llmgate", "deepseek")), false},
+			{"reordered three", health(withAll, declare("llmgate", "deepseek", "bedrock")), false},
+			{"DeepSeek without LLM Gate", health(withDeepSeek, declare("deepseek")), false},
+			{"misspelt DeepSeek", health(withDeepSeek, declare("llmgate", "DeepSeek")), false},
+		}
+		for _, test := range claims {
+			t.Run(strings.Join(policy, "+")+"/"+test.name, func(t *testing.T) {
+				worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, test.health) }))
+				defer worker.Close()
+				c := testConfig()
+				c.LLMGateOnly, c.UserCredentials, c.PlatformProviders = true, false, policy
+				c.OpenAIAgentsURL, c.OpenAIAgentsToken = worker.URL, strings.Repeat("o", 32)
+				h, err := New(nil, c).probeRuntime(context.Background(), runtimeOpenAIAgents)
+				if (err == nil) != test.ok {
+					t.Fatalf("policy %v accepted=%v, want %v (%v)", policy, err == nil, test.ok, err)
+				}
+				if err == nil && len(h.Models) != len(test.health["models"].([]map[string]any)) {
+					t.Fatal("accepted catalog lost models", h.Models)
+				}
+			})
+		}
 	}
 }
 

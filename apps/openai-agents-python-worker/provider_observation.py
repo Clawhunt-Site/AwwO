@@ -74,9 +74,12 @@ class ProviderObservation:
         self._skip_frame = False
         self._skip_lf = False
 
-    async def on_request(self, _request):
+    async def on_request(self, request):
         if self.started is None:
             self.started = self.clock()
+        # The tap reads the body as it was sent (ObservedStream wraps the raw stream, before any decoding), so the stream
+        # is asked for uncompressed: the DeepSeek API compresses a streamed answer whenever the client accepts it.
+        request.headers["Accept-Encoding"] = "identity"
 
     async def on_response(self, response):
         if response.is_success and "text/event-stream" in response.headers.get("content-type", ""):

@@ -11,7 +11,8 @@
 //   AWWO_BEDROCK_API_KEY   optional Bedrock API key (bearer); without it the worker signs
 //                          with its own AWS credential chain (an EC2 instance role)
 //   AWWO_PLATFORM_PROVIDERS  operator destinations allowed under AWWO_LLMGATE_ONLY,
-//                          default llmgate; add bedrock to allow Bedrock profiles there
+//                          default llmgate; add bedrock to allow Bedrock profiles there, and
+//                          deepseek to allow DeepSeek API profiles (provider "deepseek")
 import { readFileSync } from 'node:fs';
 import { BEDROCK_REGIONS, bedrockBridgeBaseURL, validBedrockRegion } from './bedrock-bridge.ts';
 
@@ -33,7 +34,21 @@ export type BedrockProfile = Readonly<{
   fallbackModel?: string;
 }>;
 
-export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock']);
+export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock', 'deepseek']);
+/** The DeepSeek API's one OpenAI-compatible endpoint. A profile whose provider is "deepseek" must use exactly this base
+ *  URL in every mode (assertDeepSeekProfiles), so the name can never point anywhere else. */
+export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+/** The one environment variable a DeepSeek key is read from: a "deepseek" MODELS_JSON profile names it as its apiKeyEnv,
+ *  a DeepSeek default profile reads it in place of the worker's own key variable, and no other profile may name it. So
+ *  the operator's DeepSeek key only ever goes to the DeepSeek API, and no other key ever does. */
+export const DEEPSEEK_API_KEY_ENV = 'AWWO_DEEPSEEK_API_KEY';
+
+/** Why a MODELS_JSON profile's key reference breaks that rule (DEEPSEEK_API_KEY_ENV), or ''. */
+export function deepseekKeyProblem(provider: unknown, apiKeyEnv: unknown): string {
+  if (provider === 'deepseek' && apiKeyEnv !== DEEPSEEK_API_KEY_ENV) return `is a deepseek profile, which reads its key from ${DEEPSEEK_API_KEY_ENV}`;
+  if (provider !== 'deepseek' && apiKeyEnv === DEEPSEEK_API_KEY_ENV) return `may not read ${DEEPSEEK_API_KEY_ENV}, which only a deepseek profile reads`;
+  return '';
+}
 const ENTRY_FIELDS = ['id', 'name', 'vendor', 'target', 'contextWindow', 'maxTokens', 'input', 'tools', 'runtime', 'verified'];
 const OPTIONAL_FIELDS = ['fallbackTarget'];
 /** A model's output limit per call. Claude Opus 5.5 always thinks first (adaptive thinking: Bedrock refuses a request that
@@ -126,8 +141,8 @@ export function parsePlatformProviders(value: string | undefined): readonly stri
 
 /**
  * The platform destinations a worker's profiles actually reach, in canonical order: LLM Gate,
- * plus Bedrock only when a profile uses it. Health claims these, never the wider policy, so a
- * worker whose policy allows Bedrock but which serves no Bedrock model stays exactly Gate-only.
+ * plus Bedrock or DeepSeek only when a profile uses it. Health claims these, never the wider policy,
+ * so a worker whose policy allows them but which serves none of their models stays exactly Gate-only.
  */
 export function platformProvidersInUse(policy: readonly string[], models: readonly { provider: string }[]): readonly string[] {
   return Object.freeze(policy.filter(item => item === 'llmgate' || models.some(model => model.provider === item)));
@@ -137,6 +152,40 @@ export function platformProvidersInUse(policy: readonly string[], models: readon
 export function assertOperatorOnlyBedrock(userCredentials: boolean, models: readonly { provider: string }[]): void {
   if (userCredentials && models.some(model => model.provider === 'bedrock')) {
     throw new Error('Bedrock models use operator credentials; a worker with AWWO_CREDENTIAL_MODE=user serves personal LLM Gate connections only');
+  }
+}
+
+/**
+ * The DeepSeek API is an operator destination too, reached only by its own provider name at its one URL: a "deepseek"
+ * profile elsewhere, one in a worker serving personal connections, or one under AWWO_LLMGATE_ONLY without deepseek in the
+ * platform policy stops startup. A configuration error never falls back to an unintended destination. So does a setting
+ * the DeepSeek API cannot honour (a json_schema response format, which it answers with 400, or thinking levels on a
+ * profile that turns thinking off), and, with or without a DeepSeek profile, a DeepSeek key (`deepseekKey`, the trimmed
+ * value of DEEPSEEK_API_KEY_ENV) that is another profile's key: the backstop to the key rule for a key pasted into the
+ * wrong variable, which would otherwise reach the other service.
+ */
+export function assertDeepSeekProfiles(userCredentials: boolean, llmgateOnly: boolean, policy: readonly string[],
+  models: readonly { provider: string; baseURL?: string; protocol?: string; apiKey?: string; structuredOutput?: boolean; disableThinking?: boolean;
+    reasoningEfforts?: readonly string[] }[], deepseekKey = ''): void {
+  if (deepseekKey && models.some(model => model.provider !== 'deepseek' && model.apiKey === deepseekKey)) {
+    throw new Error(`${DEEPSEEK_API_KEY_ENV} must hold a DeepSeek API key, not the key of another model profile`);
+  }
+  const deepseek = models.filter(model => model.provider === 'deepseek');
+  if (!deepseek.length) return;
+  if (deepseek.some(model => model.baseURL !== DEEPSEEK_BASE_URL || model.protocol !== 'chat_completions')) {
+    throw new Error(`A deepseek model profile must use ${DEEPSEEK_BASE_URL} with Chat Completions`);
+  }
+  if (userCredentials) {
+    throw new Error('DeepSeek models use operator credentials; a worker with AWWO_CREDENTIAL_MODE=user serves personal LLM Gate connections only');
+  }
+  if (llmgateOnly && !policy.includes('deepseek')) {
+    throw new Error('AWWO_LLMGATE_ONLY allows DeepSeek profiles only when AWWO_PLATFORM_PROVIDERS includes deepseek');
+  }
+  if (deepseek.some(model => model.structuredOutput === true)) {
+    throw new Error('A deepseek model profile cannot enable structuredOutput: the DeepSeek API has no json_schema response format');
+  }
+  if (deepseek.some(model => model.disableThinking === true && (model.reasoningEfforts ?? []).some(level => level !== 'none'))) {
+    throw new Error('A deepseek model profile that turns thinking off lists no thinking level but none');
   }
 }
 

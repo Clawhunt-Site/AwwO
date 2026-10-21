@@ -16,12 +16,22 @@ import (
 // allowlist can never accidentally widen access. tenant is the workspace the
 // entitlement was read for (tenantModelEntitlement), "" when it was built without
 // one; only operator grants keyed by workspace (AWWO_JIMENG_WORKSPACES) read it.
+// operator says a platform administrator owns that workspace (operator_workspace.go);
+// it is read only for an unrestricted one, the only kind withholding reads it.
 type modelEntitlement struct {
-	allowed *[]string
-	tenant  string
+	allowed  *[]string
+	tenant   string
+	operator bool
 }
 
 const maxAllowedModels = 64
+
+// The DeepSeek API's models (provider "deepseek", apps/bedrock-catalog.ts) are offered only explicitly: to a
+// workspace whose allowlist names them, or to one a platform administrator owns. An unrestricted workspace alone is
+// not enough, the way it is not for Jimeng's (media_setup.go): the DeepSeek API processes what it is sent outside
+// the processors AwwO's privacy clause names, and whether users' work may go there is the owner's decision, pending
+// on 2026-10-21. Every other model of an unrestricted workspace's catalogue stays as it was.
+const explicitOnlyProvider = "deepseek"
 
 var errModelNotAllowed = errors.New("model_not_allowed")
 var errMalformedAllowlist = errors.New("workspace model allowlist is malformed")
@@ -33,6 +43,19 @@ func deniedModels() modelEntitlement {
 	return modelEntitlement{allowed: &empty}
 }
 func (e modelEntitlement) unrestricted() bool { return e.allowed == nil }
+
+// withholds reports whether a stamped catalog loses the explicit-only models: an unrestricted workspace read from its
+// row (tenant set) that no platform administrator owns. One built without a workspace withholds nothing.
+func (e modelEntitlement) withholds() bool { return e.allowed == nil && e.tenant != "" && !e.operator }
+
+// grants reports whether an explicit-only model may run for this entitlement's workspace: its allowlist names it, or it
+// has none and a platform administrator owns it. One not bound to a workspace (forWorkspace) grants nothing.
+func (e modelEntitlement) grants(model string) bool {
+	if e.allowed != nil {
+		return permittedModel(*e.allowed, model)
+	}
+	return e.tenant != "" && e.operator
+}
 func (e modelEntitlement) permits(model string) bool {
 	return e.allowed == nil || permittedModel(*e.allowed, model)
 }
@@ -53,8 +76,28 @@ func permittedModel(allowed []string, model string) bool {
 // Stamping only ever removes entries, so re-stamping an already stamped catalog
 // with a wider entitlement cannot resurrect a model the first pass dropped. That
 // direction is the safe one and it is why a persisted snapshot may be restamped.
+//
+// A workspace that withholds the explicit-only models is stamped as if its
+// allowlist named every other model of the catalog, so the worker's own default
+// (h.Provider is its provider) is held to it like any other model, a restamp
+// keeps it held, and every decision downstream reads one kind of restriction. A
+// catalog without such a model is left exactly as it was.
 func (e modelEntitlement) apply(h piHealth) piHealth {
 	h.Allowed = nil
+	if e.withholds() {
+		models, list := []piModel{}, []string{}
+		for _, m := range h.Models {
+			if m.Provider != explicitOnlyProvider {
+				models, list = append(models, m), append(list, m.ID)
+			}
+		}
+		if len(models) == len(h.Models) && h.Provider != explicitOnlyProvider {
+			return h
+		}
+		sort.Strings(list)
+		h.Models, h.Allowed = models, &list
+		return h
+	}
 	if e.allowed == nil {
 		return h
 	}
@@ -154,10 +197,26 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 		return deniedModels(), e
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
-	if e == nil {
-		entitlement.tenant = tid
+	if e != nil {
+		return entitlement, e
 	}
-	return entitlement, e
+	return entitlement.forWorkspace(ctx, q, tid)
+}
+
+// forWorkspace binds an entitlement read from workspace tid's row to it: the operator grants keyed by workspace read
+// tenant, and withholding (explicitOnlyProvider) reads whether a platform administrator owns it. Only an unrestricted
+// workspace's owner is read, so a restricted one costs no second read; an unreadable owner fails closed, as an
+// unreadable allowlist does. Every admission that reads the row itself binds through here.
+func (e modelEntitlement) forWorkspace(ctx context.Context, q querier, tid string) (modelEntitlement, error) {
+	e.tenant = tid
+	if e.allowed == nil {
+		operator, err := operatorWorkspace(ctx, q, tid)
+		if err != nil {
+			return deniedModels(), err
+		}
+		e.operator = operator
+	}
+	return e, nil
 }
 
 // A graph node freezes its snapshot when the graph is admitted, so the catalog it
@@ -167,10 +226,13 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 // failed instead of retrying it forever.
 func (s *executionSnapshot) restamp(e modelEntitlement) error {
 	s.Health = e.apply(s.Health)
+	withheld := s.Health.Allowed != nil
 	for runtime, h := range s.RuntimeHealth {
 		s.RuntimeHealth[runtime] = e.apply(h)
+		withheld = withheld || s.RuntimeHealth[runtime].Allowed != nil
 	}
-	if e.unrestricted() {
+	// An unrestricted workspace is checked like a restricted one only where a catalog withheld a model from it.
+	if e.unrestricted() && !withheld {
 		return nil
 	}
 	if _, _, ok := s.Health.modelLimits(s.Model); !ok {

@@ -97,14 +97,15 @@ export function validateComputerCompletion(value: unknown): Completion {
 export const COMPUTER_COMPLETION_OPTIONS: readonly string[] = Object.freeze(['thinking', 'maxTokens']);
 
 /** Per-call options. `thinking: false` asks a Chat Completions model served with a chat template (Qwen through
- *  LLM Gate and the like) to skip its hidden reasoning, as the agents workers' disableThinking profiles do;
- *  OpenAI and Google refuse unknown arguments and the other protocols have no such switch, so they never get it.
- *  `maxTokens` lowers the profile's output limit for this call, never raises it. */
+ *  LLM Gate and the like) to skip its hidden reasoning, as the agents workers' disableThinking profiles do; the DeepSeek
+ *  API gets its own thinking field instead. OpenAI and Google refuse unknown arguments and the other protocols have no
+ *  such switch, so they never get it. `maxTokens` lowers the profile's output limit for this call, never raises it. */
 export interface ComputerCallOptions { thinking?: boolean; maxTokens?: number }
 
 /** One provider call. `stream` says the call is sent streaming and its answer is to be gathered (gatherChatStream): a
  *  Chat Completions call through LLM Gate, where Cloudflare cuts a response that sends nothing for about 100 s and a call
- *  that is not streamed sends nothing until its last token. Every other call is sent whole, as before. */
+ *  that is not streamed sends nothing until its last token, and one to the DeepSeek API, which thinks before it answers.
+ *  Every other call is sent whole, as before. */
 export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue; stream?: boolean } {
   const base = model.baseURL.replace(/\/+$/, '');
   const common = { model: model.model, stream: false };
@@ -151,12 +152,19 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   // binding. Match the existing Agents wire by checking Google's actual origin.
   const origin = new URL(base).origin;
   const google = origin === 'https://generativelanguage.googleapis.com';
-  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN;
+  const deepseek = model.provider === 'deepseek';
+  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN || deepseek;
+  // A DeepSeek call thinks unless it is told not to by its own field: for thinking: false, for the effort none where its
+  // profile lists that level, and always when it carries tools, since the API wants a tool loop's earlier reasoning_content
+  // sent back, which a managed execution's thread does not keep (gatherChatStream passes reasoning over).
+  const deepseekQuiet = deepseek && (options.thinking === false || completion.tools.length > 0
+    || (effort === 'none' && model.reasoningEfforts?.includes('none') === true));
   return { url: `${base}/chat/completions`, headers, ...(stream ? { stream } : {}), body: { ...common,
     ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}), messages: thread.map(({ reasoning_details: _, ...msg }) => msg),
     ...(model.provider === 'openai' && !google ? { max_completion_tokens: maxTokens, store: false } : { max_tokens: maxTokens }),
-    ...(effort && effort !== 'none' ? { reasoning_effort: effort } : {}),
-    ...(options.thinking === false && model.provider !== 'openai' && !google ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+    ...(effort && effort !== 'none' && !deepseekQuiet ? { reasoning_effort: effort } : {}),
+    ...(deepseekQuiet ? { thinking: { type: 'disabled' } } : {}),
+    ...(options.thinking === false && model.provider !== 'openai' && !google && !deepseek ? { chat_template_kwargs: { enable_thinking: false } } : {}),
     ...(completion.tools.length ? { tools: completion.tools } : {}) } };
 }
 
@@ -468,8 +476,13 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   // capacity is taken or a request leaves the worker.
   const bedrock = model.provider === 'bedrock';
   if (bedrock && !options.bedrockCall) return reject(400, 'MODEL_NOT_SUPPORTED');
-  const effort = (body.effort === '' ? undefined : body.effort) ?? (model.defaultReasoningEffort || undefined);
+  const requested = body.effort === '' ? undefined : body.effort;
+  const effort = requested ?? (model.defaultReasoningEffort || undefined);
   if (effort !== undefined && effort !== 'none' && !model.reasoningEfforts?.includes(effort)) return reject(400, 'EFFORT_NOT_SUPPORTED');
+  // A DeepSeek call that carries tools runs without thinking (providerComputerRequest): its API wants every earlier
+  // reasoning_content of a tool loop sent back, which this protocol does not carry. A thinking level the call asks for is
+  // refused rather than dropped; the profile's own default was asked for by no one, so it goes with the thinking.
+  if (model.provider === 'deepseek' && completion.tools.length && requested !== undefined && requested !== 'none') return reject(400, 'EFFORT_NOT_SUPPORTED');
   const bytes = Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32, limit = model.contextWindow - model.maxTokens - 256;
   if (bytes > limit) return reject(413, 'CONTEXT_LIMIT', undefined, undefined, { bytes, limit });
   const sessionKey = `${body.tenantId}:${body.sessionId}`;

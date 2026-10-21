@@ -321,6 +321,22 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 				e = errModelNotAllowed
 			}
 		}
+		// A call to the DeepSeek API (explicitOnlyProvider) is checked again here, whoever pays for it, the operator's
+		// planner calls too, as modelEntitlement.grants decides: a workspace with an allowlist must name its model, one
+		// without must be owned by a platform administrator. So a grant withdrawn mid-run, the model taken off the list
+		// or the list cleared to none, stops the next call, a call waiting for a slot included.
+		if e == nil && facts != nil && facts.Provider == explicitOnlyProvider {
+			if restricted {
+				if !permittedModel(allowed, model) {
+					e = errModelNotAllowed
+				}
+			} else {
+				var operator bool
+				if operator, e = operatorWorkspace(ctx, tx, tid); e == nil && !operator {
+					e = errModelNotAllowed
+				}
+			}
+		}
 		if e == nil && facts != nil && facts.RequirePersonalConnection {
 			e = a.requireWorkspacePersonalConnection(ctx, tx, actor, facts.Runtime, model)
 		}

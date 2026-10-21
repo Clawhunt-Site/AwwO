@@ -275,15 +275,18 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 // platformPolicyAccepted decides whether a Gate-only API may use a worker. A worker either
 // makes the original claim (llmgateOnly: LLM Gate and nothing else) or declares, with
 // platformOnly, exactly which operator platforms its profiles reach; every one of them must
-// be in this API's own AWWO_PLATFORM_PROVIDERS. A Bedrock model is checked against the
-// claim as well, so a worker cannot route to Bedrock while claiming LLM Gate alone.
+// be in this API's own AWWO_PLATFORM_PROVIDERS. A model of another platform (Bedrock,
+// DeepSeek) is checked against the claim as well, so a worker cannot route to one while
+// claiming LLM Gate alone, or reach one its declared list leaves out.
 func (a *App) platformPolicyAccepted(gateOnly, platformOnly bool, rawProviders json.RawMessage, models []piModel) bool {
-	bedrockModel := false
+	reached := []string{}
 	for _, m := range models {
-		bedrockModel = bedrockModel || m.Provider == "bedrock"
+		if m.Provider != "llmgate" && slices.Contains(knownPlatformProviders, m.Provider) && !slices.Contains(reached, m.Provider) {
+			reached = append(reached, m.Provider)
+		}
 	}
 	if gateOnly || !platformOnly {
-		return gateOnly && !platformOnly && len(bytes.TrimSpace(rawProviders)) == 0 && !bedrockModel
+		return gateOnly && !platformOnly && len(bytes.TrimSpace(rawProviders)) == 0 && len(reached) == 0
 	}
 	var providers []string
 	if json.Unmarshal(rawProviders, &providers) != nil || len(providers) == 0 {
@@ -303,7 +306,12 @@ func (a *App) platformPolicyAccepted(gateOnly, platformOnly bool, rawProviders j
 			return false
 		}
 	}
-	return !bedrockModel || slices.Contains(declared, "bedrock")
+	for _, provider := range reached {
+		if !slices.Contains(declared, provider) {
+			return false
+		}
+	}
+	return true
 }
 
 // A probed catalog is entitlement-stamped before it is cached, so everything

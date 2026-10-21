@@ -24,9 +24,12 @@ function emit(event) {
 }
 
 // The payload hook that tells the model's chat template not to think, after any hook the agent itself sets.
-function thinkingOff(next) {
+// The model's own "do not think" switch on a request: the chat-template switch Qwen-style models read, or the DeepSeek
+// API's thinking field (which ignores the chat template).
+function thinkingOff(next, provider) {
   return async (params, model) => {
     const base = (next ? await next(params, model) : undefined) ?? params;
+    if (provider === 'deepseek') return { ...base, thinking: { type: 'disabled' } };
     return { ...base, chat_template_kwargs: { ...base.chat_template_kwargs, enable_thinking: false } };
   };
 }
@@ -145,12 +148,13 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     // before a response stream begins. One bounded Gate retry covers cold egress
     // failures without replaying an answer already streamed to the caller.
     // Pi's runs are thinking-off (thinkingLevel above), but Pi sends a chat template no switch for a model it does not
-    // know to reason: a Qwen-style default model thinks unless told (AWWO_PI_DISABLE_THINKING, config.mjs).
+    // know to reason: a Qwen-style default model thinks unless told (AWWO_PI_DISABLE_THINKING, config.mjs), and so does
+    // the DeepSeek API unless its profile says disableThinking.
     const withoutThinking = modelConfig.disableThinking === true && api === 'openai-completions';
     activeSession.agent.streamFunction = (selectedModel, context, options) => piStream(selectedModel, { ...context, systemPrompt }, {
       ...options, maxRetries: modelConfig.provider === 'llmgate' ? 1 : 0,
       maxRetryDelayMs: 2_000, fetch: observer.fetch,
-      ...(withoutThinking ? { onPayload: thinkingOff(options?.onPayload) } : {}),
+      ...(withoutThinking ? { onPayload: thinkingOff(options?.onPayload, modelConfig.provider) } : {}),
     });
     if (activeSession.agent.state.tools.length !== 0) throw new Error('Unexpected tools enabled');
     if (cancelled) { await cancel(); return await terminal({ type: 'cancelled' }); }

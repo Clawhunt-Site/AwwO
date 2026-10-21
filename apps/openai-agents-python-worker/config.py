@@ -9,8 +9,8 @@ from dataclasses import dataclass, field, replace
 
 from bedrock_bridge import bridge_base_url, valid_region
 from bedrock_catalog import (
-    OPERATOR_ONLY_BEDROCK, CatalogError, bedrock_api_key, bedrock_region, catalog_selection, parse_platform_providers, platform_health,
-    platform_providers_in_use, prompt_cache_models,
+    DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, OPERATOR_ONLY_BEDROCK, CatalogError, bedrock_api_key, bedrock_region, catalog_selection,
+    deepseek_key_problem, deepseek_profile_problem, parse_platform_providers, platform_health, platform_providers_in_use, prompt_cache_models,
 )
 from tools import tool_metadata
 
@@ -19,7 +19,7 @@ MAX_CATALOG_MODELS = 256  # Includes the required default profile.
 MAX_CATALOG_BYTES = 512 * 1024
 EFFORT_LEVELS = ["low", "medium", "high"]
 PROTOCOLS = {"chat_completions", "responses"}
-DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1", "llmgate": "https://api.clawhunt.site/v1"}
+DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1", "llmgate": "https://api.clawhunt.site/v1", "deepseek": DEEPSEEK_BASE_URL}
 # A run's pictures (vision): at most six, each at most 3.75 MiB, for the final user turn only. Six of the largest are
 # 31.5 MB as base64, so the body bound leaves room for the largest text besides.
 MAX_IMAGES = 6
@@ -55,7 +55,8 @@ class ModelProfile:
     reasoning_efforts: tuple = field(default_factory=tuple)
     default_reasoning_effort: str = ""
     # False sends `chat_template_kwargs.enable_thinking=false` on Chat Completions, for models
-    # (Qwen-style chat templates) whose hidden reasoning would otherwise spend the output budget.
+    # (Qwen-style chat templates) whose hidden reasoning would otherwise spend the output budget,
+    # or the DeepSeek API's own `thinking: {"type": "disabled"}` to a deepseek profile.
     thinking: bool = True
     # Display name for the model picker; empty keeps the provider model ID.
     name: str = ""
@@ -211,6 +212,9 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
     profiles = [default]
     ids = {default.id}
     for value in values:
+        key_problem = deepseek_key_problem(value.get("provider", "openai"), value.get("apiKeyEnv")) if isinstance(value, dict) else ""
+        if key_problem:
+            raise ConfigError(key_problem)
         if isinstance(value, dict) and value.get("provider") == "bedrock":
             profiles.append(_bedrock_models_json_profile(value, env, ids, default, missing))
             ids.add(value["id"])
@@ -245,6 +249,9 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
         disable_thinking = value.get("disableThinking", False)
         if not isinstance(disable_thinking, bool):
             raise ConfigError("Invalid disableThinking in AWWO_OPENAI_AGENTS_MODELS_JSON")
+        # This worker has no structured output; a DeepSeek profile that claims it is refused as it is on the JS worker.
+        if provider == "deepseek" and value.get("structuredOutput", False) is not False:
+            raise ConfigError("A deepseek model profile cannot enable structuredOutput: the DeepSeek API has no json_schema response format")
         input_kinds = _parse_input(value.get("input"), "AWWO_OPENAI_AGENTS_MODELS_JSON")
         profiles.append(ModelProfile(
             id=value["id"],
@@ -284,7 +291,9 @@ def load_config(env: dict | None = None) -> Config:
     except json.JSONDecodeError:
         raise ConfigError("AWWO_OPENAI_AGENTS_TOOLS_JSON must be a JSON array")
     model = (env.get("AWWO_OPENAI_AGENTS_MODEL") or "").strip()
-    api_key = (env.get("AWWO_OPENAI_AGENTS_API_KEY") or "").strip()
+    # A DeepSeek default model reads the DeepSeek key, never the worker's own key variable (DEEPSEEK_API_KEY_ENV).
+    key_variable = DEEPSEEK_API_KEY_ENV if provider == "deepseek" else "AWWO_OPENAI_AGENTS_API_KEY"
+    api_key = (env.get(key_variable) or "").strip()
     token = env.get("AWWO_OPENAI_AGENTS_TOKEN") or ""
     base_url = (env.get("AWWO_OPENAI_AGENTS_BASE_URL") or "").strip() or DEFAULT_BASE_URLS.get(provider, "")
 
@@ -298,7 +307,7 @@ def load_config(env: dict | None = None) -> Config:
     if not MODEL_SELECTOR.fullmatch(model):
         missing.append("AWWO_OPENAI_AGENTS_MODEL")
     if not api_key or "\n" in api_key:
-        missing.append("AWWO_OPENAI_AGENTS_API_KEY")
+        missing.append(key_variable)
     if not base_url or not re.fullmatch(r"https?://[^\s]+", base_url):
         missing.append("AWWO_OPENAI_AGENTS_BASE_URL")
 
@@ -342,11 +351,14 @@ def load_config(env: dict | None = None) -> Config:
     models = tuple(configured + catalog)
     # Legacy "openai" profiles can be protocol adapters for the Gate endpoint.
     # Personal mode replaces every profile before a request can reach the SDK.
-    # Bedrock is a second operator destination only where the platform policy names it.
-    if llmgate_only and any(p.provider != "bedrock" and p.base_url != DEFAULT_BASE_URLS["llmgate"] for p in models):
+    # Bedrock and the DeepSeek API are further operator destinations only where the platform policy names them.
+    if llmgate_only and any(p.provider not in ("bedrock", "deepseek") and p.base_url != DEFAULT_BASE_URLS["llmgate"] for p in models):
         raise ConfigError("AWWO_LLMGATE_ONLY requires the LLM Gate endpoint for every model profile")
     if llmgate_only and any(p.provider == "bedrock" for p in models) and "bedrock" not in platform_providers:
         raise ConfigError("AWWO_LLMGATE_ONLY allows Bedrock profiles only when AWWO_PLATFORM_PROVIDERS includes bedrock")
+    deepseek_problem = deepseek_profile_problem(personal, llmgate_only, platform_providers, models, (env.get(DEEPSEEK_API_KEY_ENV) or "").strip())
+    if deepseek_problem:
+        raise ConfigError(deepseek_problem)
     if personal and any(p.provider == "bedrock" for p in models):
         raise ConfigError(OPERATOR_ONLY_BEDROCK)
     served = () if personal else models

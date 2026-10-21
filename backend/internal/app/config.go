@@ -37,8 +37,8 @@ type Config struct {
 	// the same policy before the API admits a run.
 	LLMGateOnly bool
 	// PlatformProviders are the operator destinations a Gate-only API admits workers
-	// for: always llmgate, plus bedrock when AWWO_PLATFORM_PROVIDERS names it. Personal
-	// connections stay Gate-only either way.
+	// for: always llmgate, plus bedrock and deepseek where AWWO_PLATFORM_PROVIDERS names
+	// them. Personal connections stay Gate-only either way.
 	PlatformProviders                                                                     []string
 	CredentialKey                                                                         []byte
 	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom                              string
@@ -358,8 +358,11 @@ func (c Config) Validate() error {
 	return c.validateObservability()
 }
 
-// knownPlatformProviders is the closed, canonically ordered set of operator destinations.
-var knownPlatformProviders = []string{"llmgate", "bedrock"}
+// knownPlatformProviders is the closed, canonically ordered set of operator destinations:
+// LLM Gate, Amazon Bedrock and the DeepSeek API (its one fixed endpoint, which the workers pin).
+var knownPlatformProviders = []string{"llmgate", "bedrock", "deepseek"}
+
+var errPlatformProviders = errors.New("AWWO_PLATFORM_PROVIDERS must list distinct values from " + strings.Join(knownPlatformProviders, ", ") + " and include llmgate")
 
 // parsePlatformProviders reads AWWO_PLATFORM_PROVIDERS: a comma list of distinct known
 // destinations that always includes llmgate, returned in canonical order. Empty means
@@ -372,12 +375,12 @@ func parsePlatformProviders(raw string) ([]string, error) {
 	for _, item := range strings.Split(raw, ",") {
 		item = strings.TrimSpace(item)
 		if seen[item] || !slices.Contains(knownPlatformProviders, item) {
-			return nil, errors.New("AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock and include llmgate")
+			return nil, errPlatformProviders
 		}
 		seen[item] = true
 	}
 	if !seen["llmgate"] {
-		return nil, errors.New("AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock and include llmgate")
+		return nil, errPlatformProviders
 	}
 	providers := []string{}
 	for _, item := range knownPlatformProviders {

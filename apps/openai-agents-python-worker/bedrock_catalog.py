@@ -2,7 +2,7 @@
 
 Mirrors apps/bedrock-catalog.ts and reads the same file and environment:
 AWWO_BEDROCK_CATALOG (off|builtin), AWWO_BEDROCK_REGION, AWWO_BEDROCK_MODELS,
-AWWO_BEDROCK_API_KEY and AWWO_PLATFORM_PROVIDERS.
+AWWO_BEDROCK_API_KEY and AWWO_PLATFORM_PROVIDERS (which also names the DeepSeek API).
 """
 
 from __future__ import annotations
@@ -21,7 +21,14 @@ MAX_OUTPUT_TOKENS = 65_536
 # The worker runs from the repository/release tree (apps/openai-agents-python-worker), where the
 # shared catalog sits one level up; a copy next to this module (a packaged install) takes precedence.
 CATALOG_PATHS = (Path(__file__).resolve().parent / "bedrock-models.json", Path(__file__).resolve().parent.parent / "bedrock-models.json")
-PLATFORM_PROVIDERS = ("llmgate", "bedrock")
+PLATFORM_PROVIDERS = ("llmgate", "bedrock", "deepseek")
+# The DeepSeek API's one OpenAI-compatible endpoint (DEEPSEEK_BASE_URL in apps/bedrock-catalog.ts): a "deepseek"
+# profile must use exactly this base URL in every mode, so the name can never point anywhere else.
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+# The one environment variable a DeepSeek key is read from (DEEPSEEK_API_KEY_ENV in apps/bedrock-catalog.ts): a "deepseek"
+# MODELS_JSON profile names it as its apiKeyEnv, a DeepSeek default profile reads it in place of AWWO_OPENAI_AGENTS_API_KEY,
+# and no other profile may name it, so the DeepSeek key only ever goes to the DeepSeek API and no other key ever does.
+DEEPSEEK_API_KEY_ENV = "AWWO_DEEPSEEK_API_KEY"
 ENTRY_FIELDS = ("id", "name", "vendor", "target", "contextWindow", "maxTokens", "input", "tools", "runtime", "verified")
 # fallbackTarget: the same model through its other inference profile (global. <-> us.), which the bridge asks once when
 # the target refuses a call before anything streamed (BedrockConverseTransport's fallback_model).
@@ -119,18 +126,50 @@ def read_catalog_regions(paths: tuple = CATALOG_PATHS) -> tuple:
 def parse_platform_providers(value: str | None) -> tuple:
     items = ["llmgate"] if value is None or not value.strip() else [item.strip() for item in value.split(",")]
     if any(item not in PLATFORM_PROVIDERS for item in items) or len(set(items)) != len(items) or "llmgate" not in items:
-        raise CatalogError("AWWO_PLATFORM_PROVIDERS must list distinct values from llmgate, bedrock and include llmgate")
+        raise CatalogError("AWWO_PLATFORM_PROVIDERS must list distinct values from " + ", ".join(PLATFORM_PROVIDERS) + " and include llmgate")
     return tuple(item for item in PLATFORM_PROVIDERS if item in items)
 
 
 def platform_providers_in_use(policy: tuple, providers) -> tuple:
-    """The platform destinations a worker's profiles reach: LLM Gate, plus Bedrock only when used."""
+    """The platform destinations a worker's profiles reach: LLM Gate, plus Bedrock or DeepSeek only when used."""
     used = set(providers)
     return tuple(item for item in policy if item == "llmgate" or item in used)
 
 
 OPERATOR_ONLY_BEDROCK = ("Bedrock models use operator credentials; a worker with AWWO_CREDENTIAL_MODE=user "
                          "serves personal LLM Gate connections only")
+
+
+def deepseek_key_problem(provider, api_key_env) -> str:
+    """Why a MODELS_JSON profile's key reference breaks the DeepSeek key rule (DEEPSEEK_API_KEY_ENV), or ""."""
+    if provider == "deepseek" and api_key_env != DEEPSEEK_API_KEY_ENV:
+        return f"A deepseek profile in AWWO_OPENAI_AGENTS_MODELS_JSON reads its key from {DEEPSEEK_API_KEY_ENV}"
+    if provider != "deepseek" and api_key_env == DEEPSEEK_API_KEY_ENV:
+        return f"Only a deepseek profile in AWWO_OPENAI_AGENTS_MODELS_JSON may read {DEEPSEEK_API_KEY_ENV}"
+    return ""
+
+
+def deepseek_profile_problem(personal: bool, llmgate_only: bool, policy: tuple, profiles, deepseek_key: str = "") -> str:
+    """Why the "deepseek" profiles cannot start (assertDeepSeekProfiles in apps/bedrock-catalog.ts), or "": each must
+    use DEEPSEEK_BASE_URL with Chat Completions, none in a worker serving personal connections, and under
+    AWWO_LLMGATE_ONLY only where the platform policy names deepseek. A profile that turns thinking off lists no thinking
+    level. With or without a DeepSeek profile, a DeepSeek key (deepseek_key, the stripped value of DEEPSEEK_API_KEY_ENV)
+    that is another profile's key (one pasted into the wrong variable) stops startup too."""
+    if deepseek_key and any(p.provider != "deepseek" and p.api_key == deepseek_key for p in profiles):
+        return f"{DEEPSEEK_API_KEY_ENV} must hold a DeepSeek API key, not the key of another model profile"
+    deepseek = [p for p in profiles if p.provider == "deepseek"]
+    if not deepseek:
+        return ""
+    if any(p.base_url != DEEPSEEK_BASE_URL or p.protocol != "chat_completions" for p in deepseek):
+        return f"A deepseek model profile must use {DEEPSEEK_BASE_URL} with Chat Completions"
+    if personal:
+        return ("DeepSeek models use operator credentials; a worker with AWWO_CREDENTIAL_MODE=user "
+                "serves personal LLM Gate connections only")
+    if llmgate_only and "deepseek" not in policy:
+        return "AWWO_LLMGATE_ONLY allows DeepSeek profiles only when AWWO_PLATFORM_PROVIDERS includes deepseek"
+    if any(not p.thinking and p.reasoning_efforts for p in deepseek):
+        return "A deepseek model profile that turns thinking off lists no thinking level"
+    return ""
 
 
 def platform_health(llmgate_only: bool, providers: tuple) -> dict:

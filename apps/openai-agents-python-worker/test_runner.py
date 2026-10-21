@@ -42,11 +42,17 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.answer = "Hello"
         self.same_chunk = False
         self.send_done = True
+        # Compress the stream whenever the request accepts it, as the DeepSeek API does (gzip, br, zstd).
+        self.compress = False
+        self.encodings = []
+        # The paths the "redirect" mode's 307 brought a request to.
+        self.redirected = []
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
         app = web.Application()
         app.router.add_post("/v1/chat/completions", self.provider)
         app.router.add_post("/v1/responses", self.responses_provider)
+        app.router.add_post("/elsewhere/v1/chat/completions", self.elsewhere)
         self.server = web.AppRunner(app)
         await self.server.setup()
         site = web.TCPSite(self.server, "127.0.0.1", 0)
@@ -70,11 +76,16 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def provider(self, request):
         self.calls.append(await request.json())
+        self.encodings.append(request.headers.get("Accept-Encoding"))
         self.entered.set()
         if self.mode == "wait":
             await self.release.wait()
             return web.Response()
+        if self.mode == "redirect":
+            return web.Response(status=307, headers={"Location": "/elsewhere/v1/chat/completions"})
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        if self.compress:
+            response.enable_compression()
         await response.prepare(request)
         delta = {"role": "assistant", "content": self.answer}
         finish = self.finish_reason
@@ -104,6 +115,21 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if self.send_done:
             await response.write(b"data: [DONE]\n\n")
         return response
+
+    async def elsewhere(self, request):
+        # Where the "redirect" mode's 307 points: it answers as the provider does.
+        self.redirected.append(request.path)
+        self.mode = "text"
+        return await self.provider(request)
+
+    def deepseek_config(self):
+        # The loader holds a deepseek profile to the DeepSeek API's URL; only its destination moves to the loopback
+        # provider here, so what is under test is what the call carries and where it goes.
+        flash = {"id": "flash", "provider": "deepseek", "model": "deepseek-flash", "apiKeyEnv": "AWWO_DEEPSEEK_API_KEY"}
+        catalog = json.dumps([flash, {**flash, "id": "flash-quiet", "disableThinking": True}])
+        loaded = load_config({**self.env, "AWWO_OPENAI_AGENTS_MODELS_JSON": catalog, "AWWO_DEEPSEEK_API_KEY": "k"})
+        base = self.env["AWWO_OPENAI_AGENTS_BASE_URL"]
+        return replace(loaded, models=tuple(replace(p, base_url=base) if p.provider == "deepseek" else p for p in loaded.models))
 
     async def responses_provider(self, request):
         self.calls.append(await request.json())
@@ -304,6 +330,41 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events[-1]["type"], "completed", events)
         self.assertEqual([(call["model"], call.get("chat_template_kwargs")) for call in self.calls[-2:]],
                          [("quiet-model", {"enable_thinking": False}), ("plain-model", None)])
+
+    async def test_a_provider_that_compresses_its_stream_whenever_allowed_is_asked_for_it_plain_and_observed(self):
+        # The stream tap reads the body as it was sent, so a compressed stream would read as a broken one (the DeepSeek
+        # API answered every run MODEL_PROTOCOL_ERROR that way, 2026-10-21): the worker asks for the stream uncompressed.
+        self.compress = True
+        self.usage = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        events = await self.collect()
+        self.assertEqual(events[-1]["type"], "completed", events)
+        self.assertEqual(events[-1]["text"], "Hello")
+        self.assertEqual(self.encodings[-1], "identity")
+        self.assertEqual(events[-1]["observability"]["usage"]["status"], "reported")
+        self.assertEqual(events[-1]["observability"]["usage"]["inputTokens"], 3)
+
+    async def test_a_deepseek_profile_switches_thinking_off_with_its_own_field_never_the_chat_template(self):
+        config = self.deepseek_config()
+        for model in ("flash-quiet", "flash"):
+            events = await self.collect(self.request(model=model), config=config)
+            self.assertEqual(events[-1]["type"], "completed", events)
+        quiet, plain = self.calls[-2:]
+        self.assertEqual(quiet["thinking"], {"type": "disabled"})
+        self.assertNotIn("chat_template_kwargs", quiet)
+        self.assertNotIn("thinking", plain)
+        self.assertNotIn("chat_template_kwargs", plain)
+
+    async def test_a_deepseek_call_follows_no_redirect_while_other_providers_keep_their_client(self):
+        # The DeepSeek API has one address and a deepseek profile may reach only that one: a redirect fails the call and
+        # never sends the request where it points. Every other provider's client is left as it was, and follows it.
+        self.mode = "redirect"
+        events = await self.collect(self.request(model="flash"), config=self.deepseek_config())
+        self.assertEqual(events[-1]["type"], "failed", events)
+        self.assertEqual((len(self.calls), self.redirected), (1, []))
+        self.mode = "redirect"
+        events = await self.collect()
+        self.assertEqual(events[-1]["type"], "completed", events)
+        self.assertEqual(self.redirected, ["/elsewhere/v1/chat/completions"])
 
     def test_thinking_switch_is_strict_and_never_inherited(self):
         self.assertTrue(self.config.models[0].thinking)

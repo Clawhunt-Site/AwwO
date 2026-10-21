@@ -131,6 +131,54 @@ test('SDK workspace loop edits, tests and publishes with one admission and recei
   assert.equal(events.filter(event => event.type === 'text_delta').length, 0);
 });
 
+test('a DeepSeek model runs the project loop without thinking, by its own field on every call, and a thinking level is refused', { timeout: 20_000 }, async t => {
+  // Its API wants a tool loop's earlier reasoning_content sent back with each later call, which this SDK does not keep.
+  const calls: Record<string, unknown>[] = [];
+  const server = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const value = JSON.parse(body);
+    if (req.url === '/api/internal/workspace-calls') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ [value.operation === 'admit' ? 'admitted' : 'settled']: true, index: value.index })); return;
+    }
+    calls.push(value);
+    const first = calls.length % 2 === 1;
+    res.setHeader('content-type', 'text/event-stream');
+    const send = (delta: unknown, finish: string | null) => res.write(`data: ${JSON.stringify({ id: `chat_${calls.length}`, object: 'chat.completion.chunk', created: 1, model: 'deepseek-flash', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    send({ role: 'assistant', ...(first ? { tool_calls: [{ index: 0, id: `tool_${calls.length}`, type: 'function', function: { name: 'workspace_list', arguments: '{"path":"."}' } }] } : { content: 'Listed the project.' }) }, null);
+    send({}, first ? 'tool_calls' : 'stop');
+    res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })}\n\ndata: [DONE]\n\n`); res.end();
+  });
+  const base = await listening(server); t.after(() => { server.closeAllConnections(); server.close(); });
+  const broker = async (name: string) => {
+    if (name === 'workspace_list') return [];
+    if (name === 'snapshot') return snapshot();
+    throw new Error('unexpected tool');
+  };
+  const spec = { ...workspace(`${base}/api/internal/workspace-calls`), outputFields: [] };
+  const run = (modelConfig: Record<string, unknown>, effort?: string) => {
+    const events: Record<string, unknown>[] = [];
+    return executeWorkspaceAgent({ request: { prompt: 'List the project', messages: [], ...(effort ? { effort } : {}), workspace: spec },
+      modelConfig: { model: 'deepseek-flash', apiKey: 'deepseek-fixture-key', baseURL: `${base}/v1`, protocol: 'chat_completions', contextWindow: 65_536, maxTokens: 4096, ...modelConfig } as never,
+      signal: new AbortController().signal, emit: async event => { events.push(event); }, broker: broker as never }).then(() => events);
+  };
+  for (const effort of [undefined, 'none']) {
+    const events = await run({ provider: 'deepseek' }, effort);
+    assert.equal(events.at(-1)?.type, 'completed', String(effort));
+  }
+  assert.equal(calls.length, 4);
+  for (const call of calls) {
+    assert.deepEqual(call.thinking, { type: 'disabled' });
+    assert.ok(!('reasoning_effort' in call) && !('chat_template_kwargs' in call));
+  }
+  await assert.rejects(run({ provider: 'deepseek' }, 'high'), (error: unknown) => classifyError(error).code === 'MODEL_REQUEST_REJECTED');
+  assert.equal(calls.length, 4, 'nothing left the worker');
+  // Any other profile keeps its own switch: the chat template's, and only when it disables thinking.
+  await run({ provider: 'llmgate', disableThinking: true });
+  assert.deepEqual(calls.at(-1)?.chat_template_kwargs, { enable_thinking: false });
+  assert.ok(!('thinking' in (calls.at(-1) ?? {})));
+});
+
 test('a model call may wait for its first byte as long as the runtime says, not the SDK default of 10 minutes', { timeout: 20_000 }, async t => {
   // Bedrock answers a Claude call only once the model has thought: Opus 5.5's Rigs builder was cut at 600 s (2026-10-18).
   assert.ok(WORKSPACE_MODEL_TIMEOUT_MS >= 30 * 60_000);

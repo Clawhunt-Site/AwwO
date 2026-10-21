@@ -395,11 +395,13 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
+	if e == nil {
+		entitlement, e = entitlement.forWorkspace(r.Context(), tx, tid)
+	}
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	entitlement.tenant = tid
 	// An entitled owner's plan replaces the workspace's own allowances with the account's (plans.go); read here
 	// without its lock, which the paid generation below and every model call take when they count or spend them.
 	plan, e := ownerPlan(r.Context(), tx, tid, false)
@@ -542,10 +544,16 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			// Its own catalog: the unrestricted entitlement it is probed under must never be the one a fallback
 			// to the default model freezes for the workspace.
 			unrestricted, _ := newModelEntitlement(false, nil)
-			if s, err := a.runtimeSnapshot(r.Context(), unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team); err == nil {
+			s, err := a.runtimeSnapshot(r.Context(), unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team)
+			switch {
+			case err == nil && s.Health.modelProvider(s.Model) == explicitOnlyProvider && !entitlement.grants(s.Model):
+				// The planner model is the operator's, outside the workspace's allowlist, but a DeepSeek one is not
+				// (explicitOnlyProvider): where the workspace may not use it, the plan runs on the default model.
+				a.log.Info("planner model not admitted; planning on the default model", "reason", "explicit_only_model")
+			case err == nil:
 				snapshot, operatorPlanner = s, true
 				snapshot.OperatorPaid = true
-			} else {
+			default:
 				a.log.Warn("planner model unavailable; planning on the default model", "runtime", defaultRuntime(runtime), "error_type", fmt.Sprintf("%T", err))
 			}
 		} else if refusal != plannerOff {
