@@ -31,6 +31,31 @@ func metricText(t *testing.T, a *App) string {
 	return w.Body.String()
 }
 
+// histogramMetric is the number of observations and their sum, over every series of the histogram that has key=value.
+func histogramMetric(t *testing.T, a *App, name, key, value string) (uint64, float64) {
+	t.Helper()
+	families, err := a.obs.registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count uint64
+	var sum float64
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == key && label.GetValue() == value {
+					count += metric.GetHistogram().GetSampleCount()
+					sum += metric.GetHistogram().GetSampleSum()
+				}
+			}
+		}
+	}
+	return count, sum
+}
+
 func TestObservabilityTraceHelpersWithoutInitialization(t *testing.T) {
 	a := &App{}
 	parent, cancel := context.WithCancel(context.WithValue(context.Background(), requestIDKey{}, "server-request"))

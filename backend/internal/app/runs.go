@@ -776,8 +776,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	defer tx.Rollback(context.Background())
-	var queuedAt time.Time
-	e = tx.QueryRow(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued' RETURNING created_at", tid, id).Scan(&queuedAt)
+	// The wait is read on the database's clock, which stamped created_at, when the row is claimed: this process's clock
+	// can be a second or more off it, which would move every wait by the difference (a shorter one to 0).
+	var queuedAt, claimedAt time.Time
+	e = tx.QueryRow(ctx, "UPDATE runs SET status='running',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='queued' RETURNING created_at,clock_timestamp()", tid, id).Scan(&queuedAt, &claimedAt)
 	if e != nil {
 		return
 	}
@@ -788,7 +790,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	a.notifyRunEvent(id)
-	queueDuration := time.Since(queuedAt)
+	queueDuration := claimedAt.Sub(queuedAt)
 	if queueDuration < 0 {
 		queueDuration = 0
 	}

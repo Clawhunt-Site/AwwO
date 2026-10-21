@@ -218,3 +218,40 @@ func TestPostgresInvocationCostUsesReservedPrice(t *testing.T) {
 		t.Fatal("committed estimate metric missing")
 	}
 }
+
+// The database stamps a run's created_at, and this process's clock can be a second or more off it (a test process on
+// Windows against a PostgreSQL in WSL is), so a run's wait in the queue is read on the database's clock alone, from
+// created_at to the claim. A claim held up in its own statement (here by a trigger, as by a lock) is still waiting, so
+// the wait lies between the claim's start (its running event) plus the hold and the call's reservation.
+func TestPostgresRunQueueWaitIsMeasuredOnTheDatabaseClock(t *testing.T) {
+	provider := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) {
+		completeObserved(w, "QUEUED", observationFixture(1, 1))
+	})
+	defer provider.Close()
+	h := newHarness(t, provider.URL)
+	h.a.cfg.MetricsEnabled = true
+	c, tid, _ := h.register(t, "queue-clock@example.test")
+	_, _, sid := h.fixture(t, c, tid)
+	hold := 50 * time.Millisecond
+	if _, err := h.db.Exec(context.Background(), fmt.Sprintf(`CREATE FUNCTION hold_claim() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.status='queued' AND NEW.status='running' THEN PERFORM pg_sleep(%g);END IF;RETURN NEW;END $$;CREATE TRIGGER hold_claim BEFORE UPDATE ON runs FOR EACH ROW EXECUTE FUNCTION hold_claim()`, hold.Seconds())); err != nil {
+		t.Fatal(err)
+	}
+	run := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "TASK", "operationId": "queue-clock"}, 202)
+	rid := run["id"].(string)
+	h.awaitRun(t, c, tid, rid, "completed")
+	var queued, claimed, reserved time.Time
+	var queueMs int64
+	err := h.db.QueryRow(context.Background(), `SELECT r.created_at,e.created_at,mi.created_at,mi.queue_ms FROM runs r
+		JOIN run_events e ON e.tenant_id=r.tenant_id AND e.run_id=r.id AND e.data->>'type'='running'
+		JOIN model_invocations mi ON mi.tenant_id=r.tenant_id AND mi.run_id=r.id WHERE r.tenant_id=$1 AND r.id=$2`, tid, rid).Scan(&queued, &claimed, &reserved, &queueMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	least, most := claimed.Sub(queued)+hold, reserved.Sub(queued)
+	if queueMs < least.Milliseconds() || queueMs > most.Milliseconds() {
+		t.Fatalf("queue_ms %d, want %d..%d", queueMs, least.Milliseconds(), most.Milliseconds())
+	}
+	if count, sum := histogramMetric(t, h.a, "awwo_run_queue_duration_seconds", "outcome", "started"); count != 1 || sum < least.Seconds() || sum > most.Seconds() {
+		t.Fatalf("queue metric %d observation(s) adding up to %.6f s, want one in %.6f..%.6f s", count, sum, least.Seconds(), most.Seconds())
+	}
+}
