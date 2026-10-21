@@ -67,8 +67,8 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	var scope []string
 	if len(body.Scope) != 0 {
-		if json.Unmarshal(body.Scope, &scope) != nil || len(scope) == 0 || len(scope) > 200 {
-			fail(w, 400, "invalid_scope", "Scope must contain 1 to 200 distinct session node IDs")
+		if json.Unmarshal(body.Scope, &scope) != nil || len(scope) == 0 || len(scope) > maxGraphNodes {
+			fail(w, 400, "invalid_scope", fmt.Sprintf("Scope must contain 1 to %d distinct session node IDs", maxGraphNodes))
 			return
 		}
 	}
@@ -106,8 +106,8 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	var doc map[string]json.RawMessage
 	var nodes []json.RawMessage
-	if json.Unmarshal(raw, &doc) != nil || doc == nil || (len(doc["nodes"]) != 0 && json.Unmarshal(doc["nodes"], &nodes) != nil) || len(nodes) > 200 {
-		fail(w, 400, "invalid_document", "Canvas nodes must be an array of at most 200 nodes")
+	if json.Unmarshal(raw, &doc) != nil || doc == nil || (len(doc["nodes"]) != 0 && json.Unmarshal(doc["nodes"], &nodes) != nil) || len(nodes) > maxGraphNodes {
+		fail(w, 400, "invalid_document", fmt.Sprintf("Canvas nodes must be an array of at most %d nodes", maxGraphNodes))
 		return
 	}
 	selected, e := setupScope(nodes, scope)

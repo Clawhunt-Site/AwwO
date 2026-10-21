@@ -183,10 +183,45 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 	}
 	return "", false
 }
+
+// A canvas holds at most maxGraphNodes nodes and maxGraphEdges wires: a graph run, an initialize and a collaboration
+// each read its whole document. 400 nodes since 2026-10-21 (was 200): a film's episode of three acts is one canvas of
+// about 310 nodes, so its acts share their reference sheets and one edit can join them.
+const (
+	maxGraphNodes = 400
+	maxGraphEdges = 2000
+)
+
+// savedNodeDocuments maps each node id of a canvas document to a document holding that node alone, in its saved bytes
+// ({"nodes":[<node>]}), so a helper that looks one node up (savedNodeTeam, savedMediaNode, savedNodeTaskFrame, ...)
+// reads that node and not the whole canvas. A node listed twice keeps its first entry, as those helpers' lookups do.
+// An unreadable document maps nothing; the caller hands such a helper the whole document then, as before.
+func savedNodeDocuments(raw []byte) map[string][]byte {
+	var doc struct {
+		Nodes []json.RawMessage `json:"nodes"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil
+	}
+	docs := make(map[string][]byte, len(doc.Nodes))
+	for _, node := range doc.Nodes {
+		var key struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(node, &key) != nil || key.ID == "" || docs[key.ID] != nil {
+			continue
+		}
+		one := make([]byte, 0, len(node)+12)
+		one = append(append(append(one, `{"nodes":[`...), node...), ']', '}')
+		docs[key.ID] = one
+	}
+	return docs
+}
+
 func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 	var d graphDocument
-	if json.Unmarshal(raw, &d) != nil || len(d.Nodes) == 0 || len(d.Nodes) > 200 || len(d.Edges) > 2000 {
-		return d, nil, errors.New("Graph requires 1–200 nodes and at most 2000 edges")
+	if json.Unmarshal(raw, &d) != nil || len(d.Nodes) == 0 || len(d.Nodes) > maxGraphNodes || len(d.Edges) > maxGraphEdges {
+		return d, nil, fmt.Errorf("Graph requires 1–%d nodes and at most %d edges", maxGraphNodes, maxGraphEdges)
 	}
 	// Canvas storage and manual conversations retain native workflow metadata,
 	// but this host must never execute a review policy as an ordinary DAG.

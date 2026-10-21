@@ -175,9 +175,16 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	// back decided nothing, and a metric emitted inside the transaction would claim
 	// an envelope that no run will ever use.
 	contractOutcomes := []string{}
+	// Each helper below looks one node up in a document; given the whole canvas, admission read it whole once per helper
+	// per node under the workspace's row lock (a 400-node canvas: thousands of full parses). Each gets its node alone.
+	nodeDocs := savedNodeDocuments(raw)
 	for i, n := range d.Nodes {
 		if !needed[n.ID] {
 			continue
+		}
+		own := nodeDocs[n.ID]
+		if own == nil {
+			own = raw
 		}
 		state, output, detail, sid := "waiting", "", "", ""
 		snap := executionSnapshot{}
@@ -207,7 +214,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if in[n.ID] && n.Kind == "session" {
-			if err := validateSavedWorkspaceAgent(raw, n.ID, n.Binding.AgentID); err != nil {
+			if err := validateSavedWorkspaceAgent(own, n.ID, n.Binding.AgentID); err != nil {
 				input := err.(setupError)
 				status := 400
 				if input.code == "node_setup_required" {
@@ -240,19 +247,19 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					fail(w, 400, "media_collaboration_unsupported", "Image, video and 3D nodes do not take part in a collaboration")
 					return
 				}
-				if snap, e = a.mediaPlanSnapshot(raw, n.ID, model, entitlement); e == nil {
+				if snap, e = a.mediaPlanSnapshot(own, n.ID, model, entitlement); e == nil {
 					e = a.mediaStorageReady()
 				}
 				if e != nil {
 					a.mediaAdmissionError(w, e)
 					return
 				}
-			} else if team, e = savedNodeTeam(raw, n.ID); e != nil {
+			} else if team, e = savedNodeTeam(own, n.ID); e != nil {
 				fail(w, 400, "invalid_team", e.Error())
 				return
 			}
 			if !media {
-				if !savedRuntimeMatches(raw, n.ID, runtime) {
+				if !savedRuntimeMatches(own, n.ID, runtime) {
 					fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 					return
 				}
@@ -266,7 +273,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.runtimeAdmissionError(w, e)
 					return
 				}
-				if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, raw, snap); e != nil {
+				if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, own, snap); e != nil {
 					a.workspaceAgentAdmissionError(w, e)
 					return
 				}
@@ -277,12 +284,12 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					snap.Workspace.OutputFields = workspaceOutputFields(n)
 					snap.OutputPolicy = graphWorkspaceOutputPolicy(n)
 				}
-				snap.TaskFrame, e = savedNodeTaskFrame(raw, n.ID)
+				snap.TaskFrame, e = savedNodeTaskFrame(own, n.ID)
 				if e != nil {
 					fail(w, 400, "invalid_task_frame", e.Error())
 					return
 				}
-				if snap.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, raw, n.ID); e != nil {
+				if snap.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, own, n.ID); e != nil {
 					a.skillFailure(w, e)
 					return
 				}

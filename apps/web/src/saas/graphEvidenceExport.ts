@@ -1,3 +1,4 @@
+import { MAX_CANVAS_NODES } from '../canvas/canvasDoc';
 import { API_BASE, api, SaaSApiError, tenantPath } from './api';
 import { graphPath, graphIsActive, validGraphCollaboration, type GraphRunSnapshot } from './graphRuns';
 import { readRunEvidence, readRunInvocations, type RunEvidenceSummary, type RunInvocation } from './runEvidenceApi';
@@ -34,7 +35,7 @@ function validateGraph(value: unknown, scope: GraphEvidenceScope): GraphRunSnaps
   if (!object(value) || value.id !== scope.graphId || value.canvasId !== scope.canvasId
     || (value.tenantId !== undefined && value.tenantId !== scope.tenantId) || !identity(value.operationId)
     || !Number.isSafeInteger(value.documentVersion) || Number(value.documentVersion) < 1 || !states.has(String(value.status))
-    || !Array.isArray(value.nodes) || value.nodes.length > 200 || !Array.isArray(value.scope)
+    || !Array.isArray(value.nodes) || value.nodes.length > MAX_CANVAS_NODES || !Array.isArray(value.scope)
     || !value.scope.every(identity) || new Set(value.scope).size !== value.scope.length
     || value.nodes.some(node => !object(node) || !identity(node.nodeId) || !nodeStates.has(String(node.state))
       || (node.runId != null && !identity(node.runId)) || (node.sessionId != null && !identity(node.sessionId)))

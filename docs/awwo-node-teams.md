@@ -142,7 +142,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 | 方法与路径 | 请求 / 响应及边界 |
 | --- | --- |
 | `PUT T/canvases/{canvasId}` | 沿用 `{name, document, version}` CAS 保存；`document.nodes[].team` 保存配置，无独立团队 CRUD API |
-| `POST T/canvases/{canvasId}/initialize` | 必填 `{documentVersion, scope?}`；按已保存配置准备 Agent / Session 并返回 canonical 画布，不执行模型；scope 省略为全部 session，传入则为 1–200 个不重复的已保存 session 节点 ID |
+| `POST T/canvases/{canvasId}/initialize` | 必填 `{documentVersion, scope?}`；按已保存配置准备 Agent / Session 并返回 canonical 画布，不执行模型；scope 省略为全部 session，传入则为 1–400 个不重复的已保存 session 节点 ID |
 | `POST T/runs` | 原 `{sessionId, prompt, operationId}`；普通节点会话也从保存的节点读取 team，受理后冻结执行快照。未设置 team 沿用单 Agent |
 | `GET T/sessions/{id}/messages` | `{items: [{id, sessionId, runId, role, content, createdAt}]}`；runId 将持久消息与原运行及团队过程关联 |
 | `GET T/runs/{id}/turns` | `{items: [...]}`，按 `ordinal` 排序，最多受该次团队 64 调用上限约束；普通单 Agent 无成员记录 |
@@ -174,7 +174,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 
 ## 6. 依赖、失败与恢复
 
-Go 校验最多 200 节点、2000 连线、字段版本/类型、端口、必填输入、绑定和无环图。选中范围之外的直接上游只使用快照中有效、非 partial 的已有输出，或表单节点值，标记 `cached`；缺失或无效结果阻断相关下游。范围内已完成节点经过输出契约验证才标记 `done`，失败/取消/被阻断的上游使依赖节点 `blocked`，其他独立分支仍可继续。
+Go 校验最多 400 节点（2026-10-21 起，原为 200）、2000 连线、字段版本/类型、端口、必填输入、绑定和无环图。选中范围之外的直接上游只使用快照中有效、非 partial 的已有输出，或表单节点值，标记 `cached`；缺失或无效结果阻断相关下游。范围内已完成节点经过输出契约验证才标记 `done`，失败/取消/被阻断的上游使依赖节点 `blocked`，其他独立分支仍可继续。
 
 图状态为 `queued / running / completed / failed / cancelled / interrupted`；节点状态为 `waiting / running / done / failed / blocked / cancelled / cached`；run 与成员调用使用 `queued / running / completed / failed / cancelled / interrupted`。后台详情保留各成员发言和失败原因；节点会话显示团队最终结果，不能将中间审核文本当成节点交付。
 

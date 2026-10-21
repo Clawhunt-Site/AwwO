@@ -198,6 +198,20 @@ it.each(['model3d', 'agent', 'project'] as const)('requires actual %s files with
   expect(fake.requests).toHaveLength(2);
 });
 
+it('plans new roles up to a full 400-node canvas and refuses one past it, leaving the canvas unchanged', async () => {
+  const filled = (count: number) => ({ ...emptyDocument(), nodes: Array.from({ length: count }, (_, i) => ({ ...createSessionNode('llm', { x: 0, y: 0 }), id: `old-${i}` })) });
+  const over = mock();
+  const full = filled(399); const original = structuredClone(full);
+  await expect(requestJevPlan('安排两个角色', full, [], signal())).rejects.toThrow('新增节点将超过画布 400 个节点的上限。');
+  expect(over.requests).toHaveLength(1);
+  expect(full).toEqual(original);
+  const fits = mock();
+  const room = filled(398);
+  const result = await requestJevPlan('安排两个角色', room, [], signal());
+  expect(fits.requests).toHaveLength(2);
+  expect(applyJevPlan(room, result).doc.nodes).toHaveLength(400);
+});
+
 it('stops safely before an oversized second batch and leaves the canvas unchanged', async () => {
   const fake = mock({ status: { ...status, limits: { ...status.limits, maxQuestions: 6 } } });
   const doc = emptyDocument(); const original = structuredClone(doc);

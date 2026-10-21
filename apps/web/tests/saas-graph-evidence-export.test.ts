@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createSessionNode, emptyDocument } from '../src/canvas/canvasDoc';
+import { createSessionNode, emptyDocument, MAX_CANVAS_NODES } from '../src/canvas/canvasDoc';
 import { collectGraphEvidence, GRAPH_EVIDENCE_LIMITS } from '../src/saas/graphEvidenceExport';
 
 const scope = { tenantId: 'tenant-a', canvasId: 'canvas-a', graphId: 'graph-a' };
@@ -153,6 +153,26 @@ it('does not include a ledger page belonging to another run', async () => {
   expect(result.runs[0].invocations.items).toEqual([]);
   expect(result.errors).toContainEqual({ stage: 'invocations', runId: 'run-a', code: 'invalid_run_invocations', status: 502 });
   expect(result.completeness.complete).toBe(false);
+});
+
+it('reads a graph of a full 400-node canvas and rejects one node more', async () => {
+  expect(MAX_CANVAS_NODES).toBe(400);
+  const ids = (count: number) => Array.from({ length: count }, (_, i) => `n${i}`);
+  // Nodes not yet run have no run to read, so only the graph itself is checked.
+  const waiting = (count: number) => graph(ids(count), { nodes: ids(count).map(nodeId => ({ nodeId, state: 'waiting' })), status: 'running' });
+  server(waiting(MAX_CANVAS_NODES));
+  expect((await collect()).graph.nodes).toHaveLength(MAX_CANVAS_NODES);
+  const fetcher = server(waiting(MAX_CANVAS_NODES + 1));
+  await expect(collect()).rejects.toMatchObject({ code: 'invalid_graph_evidence' });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  // A full canvas whose every node ran has 400 runs: the bundle reads the first 200 and names the rest as omitted.
+  expect(GRAPH_EVIDENCE_LIMITS.maxRuns).toBe(200);
+  server(graph(ids(MAX_CANVAS_NODES)));
+  const full = await collect();
+  expect(full.runs).toHaveLength(GRAPH_EVIDENCE_LIMITS.maxRuns);
+  expect(full.completeness).toMatchObject({ complete: false, status: 'partial' });
+  expect(full.completeness.omittedRunIds).toEqual(ids(MAX_CANVAS_NODES).slice(GRAPH_EVIDENCE_LIMITS.maxRuns).map(id => `run-${id}`));
+  expect(full.completeness.boundsReached).toContain('maxRuns');
 });
 
 it('marks a missing frozen document incomplete and rejects a document from another tenant', async () => {

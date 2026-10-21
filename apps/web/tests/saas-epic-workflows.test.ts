@@ -7,7 +7,7 @@ import { createOfficialCopyDocument } from '../src/saas/examples/OfficialCopySet
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { assembleTemplate, templateIssues, MAX_ASSEMBLE_OUTPUT_BYTES } from '../src/canvas/assembleNode';
 import { SANDBOX_RUNTIME } from '../src/canvas/nodeRuntime';
-import { sanitizeDocument, type AssembleNode, type MediaParams, type SessionNode } from '../src/canvas/canvasDoc';
+import { MAX_CANVAS_NODES, sanitizeDocument, type AssembleNode, type MediaParams, type SessionNode } from '../src/canvas/canvasDoc';
 import { canConnect, isSoftMediaFeed, reconcileEdges } from '../src/canvas/ports';
 import { findCycle } from '../src/canvas/runGraph';
 import { invalidMediaParams, mediaKindOf, parseMediaCatalogue, type MediaModel } from '../src/canvas/mediaCatalog';
@@ -88,12 +88,12 @@ it('is listed as a case exactly when a run of it is published', () => {
   expect(Object.keys(EPIC_WORKFLOWS)).toEqual(['pallward']);
 });
 
-it('has the design\'s 71 nodes, well under the 200-node cap: 3 design nodes, 10 concepts, 33 models, 20 builders, assembly, two fix passes with the first one\'s page between them, and review', () => {
+it('has the design\'s 71 nodes, well under the 400-node canvas cap: 3 design nodes, 10 concepts, 33 models, 20 builders, assembly, two fix passes with the first one\'s page between them, and review', () => {
   const document = createOfficialDocument(PALLWARD);
   expect(PALLWARD.nodes).toHaveLength(28);
   expect(PALLWARD.media).toHaveLength(43);
   expect(document.nodes).toHaveLength(71);
-  expect(document.nodes.length).toBeLessThanOrEqual(200);
+  expect(document.nodes.length).toBeLessThanOrEqual(MAX_CANVAS_NODES);
   expect(PALLWARD.media!.filter(spec => spec.kind === 'image')).toHaveLength(10);
   expect(PALLWARD.media!.filter(spec => spec.kind === 'model3d')).toHaveLength(33);
   expect(builders(PALLWARD).map(node => node.id)).toEqual(MODULES);

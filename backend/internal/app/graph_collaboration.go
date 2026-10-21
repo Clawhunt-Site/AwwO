@@ -43,7 +43,7 @@ func parseCollaborationGraph(raw []byte, scope []string, p *collaborationPolicy)
 	if p == nil || strings.TrimSpace(p.Goal) == "" || utf8.RuneCountInString(p.Goal) > 8000 || p.Rounds < 1 || p.Rounds > 3 || len(scope) < 2 || len(scope) > 6 {
 		return bad("Collaboration requires a goal, 1–3 rounds and 2–6 selected Session nodes")
 	}
-	if json.Unmarshal(raw, &original) != nil || len(original.Nodes) == 0 || len(original.Nodes) > 200 || len(original.Edges) > 2000 {
+	if json.Unmarshal(raw, &original) != nil || len(original.Nodes) == 0 || len(original.Nodes) > maxGraphNodes || len(original.Edges) > maxGraphEdges {
 		return bad("Invalid collaboration canvas")
 	}
 	byID := map[string]graphNode{}

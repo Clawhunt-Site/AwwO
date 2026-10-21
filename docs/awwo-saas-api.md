@@ -131,7 +131,7 @@ Agent 响应包含 `{id,tenantId,name,status:'active',model,role,title,instructi
 {"documentVersion":12,"scope":["research-node","review-node"]}
 ```
 
-`documentVersion` 必填、整数且至少为 1，必须匹配当前 API 外层版本。省略 `scope` 处理全部 session 节点；传入时必须为 1–200 个已有、不重复的 session 节点 ID，空数组、null、form 节点和未知 ID 返回 `400 invalid_scope`。form 节点本身不需要初始化。
+`documentVersion` 必填、整数且至少为 1，必须匹配当前 API 外层版本。省略 `scope` 处理全部 session 节点；传入时必须为 1–400 个已有、不重复的 session 节点 ID，空数组、null、form 节点和未知 ID 返回 `400 invalid_scope`。form 节点本身不需要初始化。
 
 Go 在事务中重新检查 member 以上权限、租户 active 状态及画布归属，锁定画布并比较版本。过期版本返回 `409 version_conflict`；当前画布存在 queued/running 的图、节点或规划任务时返回 `409 resource_in_use`。已有 Agent 绑定必须属于当前租户；当前及历史会话还需属于当前画布和节点，并与声明的 Agent 引用一致。伪造或跨范围引用返回 `404 not_found`。选中节点全部成功后才提交，有任一错误则整体回滚。
 

@@ -5,7 +5,7 @@ import { automaticChoices } from './userChosenModels';
 import { evaluateJev, jevMessage, readJevStatus, type JevEvaluation, type JevQuestion, type JevStatus, type JevUsage } from '../saas/jev';
 import { getAgentTemplates } from './agentTemplates';
 import { getTeamMarketAgents, createMarketplaceRoleNode } from './teamMarketAgents';
-import type { CanvasDocument, SessionNode } from './canvasDoc';
+import { MAX_CANVAS_NODES, type CanvasDocument, type SessionNode } from './canvasDoc';
 import { applyCanvasPlan, canvasPlanRevision, parseCanvasPlan, type AppliedCanvasPlan, type CanvasPlan, type CanvasPlanOperation } from './canvasPlan';
 import type { PlanningMessage, PlanProgressReporter } from './canvasPlanning';
 import { deliveryProfiles, type DeliveryProfile } from './deliveryProfiles';
@@ -157,7 +157,7 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
         : jevMessage(locale, '请补充希望完成的目标与交付物；Jev 尚未选择可用工作流，画布未修改。', 'Specify the goal and expected deliverable. Jev did not select a usable workflow; the canvas was not changed.');
       return finish({ version: 1, summary, operations: [] }, []);
     }
-    if (doc.nodes.length + selected.length > 200) fail(locale, '新增节点将超过画布 200 个节点的上限。', 'The new nodes would exceed the 200-node canvas limit.');
+    if (doc.nodes.length + selected.length > MAX_CANVAS_NODES) fail(locale, `新增节点将超过画布 ${MAX_CANVAS_NODES} 个节点的上限。`, `The new nodes would exceed the ${MAX_CANVAS_NODES}-node canvas limit.`);
     const modelKeys = Object.fromEntries(models.map((model, index) => [`model_${index}`, `${model.label} (${model.runtime}, ${model.model}); ${model.execution === 'workspace' ? 'project execution in an isolated workspace' : 'text/source generation only; no project commands'}`]));
     const modelByKey = new Map(models.map((model, index) => [`model_${index}`, model]));
     const choices: Record<string, JevQuestion> = {

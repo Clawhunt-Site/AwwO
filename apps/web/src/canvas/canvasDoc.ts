@@ -262,6 +262,9 @@ export const AGENT_KIND_META: Record<AgentKind, { label: string; glyph: string }
   audio: { label: '音频', glyph: 'A' },
 };
 
+/** The most nodes a canvas holds: the API's bound (graph_contracts.go maxGraphNodes), 400 since 2026-10-21 (was 200). */
+export const MAX_CANVAS_NODES = 400;
+
 /** Default tile sizes. Sessions are taller because they render a live transcript. */
 export const SESSION_NODE_SIZE = { w: 340, h: 260 } as const;
 export const FORM_NODE_SIZE = { w: 300, h: 200 } as const;
