@@ -50,16 +50,19 @@ type executionSnapshot struct {
 	// VisionFrom is the model this run's node chose, when the run moved to one that sees its pictures (vision.go).
 	VisionFrom string `json:"visionFrom,omitempty"`
 
-	Runtime          string             `json:"runtime,omitempty"`
-	RuntimeHealth    runtimeCatalog     `json:"runtimeHealth,omitempty"`
-	Instructions     string             `json:"instructions"`
-	OutputPolicy     string             `json:"outputPolicy,omitempty"`
-	OutputContract   *outputContract    `json:"outputContract,omitempty"`
-	TaskFrame        *taskFrame         `json:"taskFrame,omitempty"`
-	Model            string             `json:"model"`
-	Effort           string             `json:"effort,omitempty"`
-	Budget           int                `json:"budget"`
-	Overhead         int                `json:"overhead"`
+	Runtime        string          `json:"runtime,omitempty"`
+	RuntimeHealth  runtimeCatalog  `json:"runtimeHealth,omitempty"`
+	Instructions   string          `json:"instructions"`
+	OutputPolicy   string          `json:"outputPolicy,omitempty"`
+	OutputContract *outputContract `json:"outputContract,omitempty"`
+	TaskFrame      *taskFrame      `json:"taskFrame,omitempty"`
+	Model          string          `json:"model"`
+	Effort         string          `json:"effort,omitempty"`
+	Budget         int             `json:"budget"`
+	Overhead       int             `json:"overhead"`
+	// ProseRate is the model's measured bytes of prose per token its budget counts at (context_estimate.go), frozen
+	// with the budget; absent (a run admitted before 2026-10-22, or a model without one), one byte is one token.
+	ProseRate        float64            `json:"proseRate,omitempty"`
 	Team             *nodeTeam          `json:"team,omitempty"`
 	Health           piHealth           `json:"health"`
 	History          *[]json.RawMessage `json:"history,omitempty"`
@@ -208,6 +211,36 @@ func (h piHealth) modelLimits(model string) (int, int, bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+// modelRate is the measured prose rate a model's worker counts its budget at (proseBytesPerToken in its /health,
+// context_estimate.go), resolved as modelLimits resolves the budget; 1 when the worker publishes none, or one outside
+// the bounds a worker accepts, so an unknown value never loosens a budget.
+func (h piHealth) modelRate(model string) float64 {
+	if model == "" && h.Allowed != nil {
+		model = h.defaultModel()
+	}
+	rate := 0.0
+	if model == "" || model == h.Model {
+		rate, _ = h.Limits["proseBytesPerToken"].(float64)
+	} else {
+		for _, m := range h.Models {
+			if m.ID == model {
+				rate = m.ProseBytesPerToken
+				break
+			}
+		}
+	}
+	if !validProseRate(rate) {
+		return proseRateMin
+	}
+	return rate
+}
+
+// tokens is a text's estimated input tokens at the run's frozen prose rate (context_estimate.go): its bytes for a run
+// admitted before the rate was frozen, or on a model without one.
+func (s executionSnapshot) tokens(text string) int {
+	return estimateTokens(text, s.ProseRate)
 }
 func savedNodeTeam(raw []byte, nodeID string) (*nodeTeam, error) {
 	var d struct {

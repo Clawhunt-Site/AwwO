@@ -498,7 +498,7 @@ func (a *App) executeComputer(ctx context.Context, tid, rid, sid, prompt, instru
 	// user's words alone. The earlier tasks take a share of what the model budget leaves after everything else.
 	request := prompt
 	canvas := a.canvasBriefing(ctx, tid, sid, request)
-	earlier := a.earlierTasksBriefing(ctx, tid, rid, sid, request, snap.Budget-snap.Overhead-len(prompt)-len(instructions)-len(canvas))
+	earlier := a.earlierTasksBriefing(ctx, tid, rid, sid, request, snap.Budget-snap.Overhead-snap.tokens(prompt)-snap.tokens(instructions)-snap.tokens(canvas))
 	var blocks []string
 	for _, block := range []string{earlier, canvas} {
 		if block != "" {

@@ -113,8 +113,15 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 	if budget > 262144 {
 		budget = 262144
 	}
+	// The member's model counts its budget at the prose rate its worker publishes, read from the same frozen health
+	// its budget came from (context_estimate.go): the byte rule for a model without one, or a run frozen before it.
+	rate, units := proseRateMin, 262144
+	if health, ok := snap.memberHealth(m.Runtime); ok {
+		rate, units = health.modelRate(m.Model), health.textUnitsLimit()
+	}
+	systemTokens := estimateTokens(system, rate)
 	fits := func(prompt string) bool {
-		return len(prompt)+len(system)+overhead <= budget && len(utf16.Encode([]rune(prompt))) <= 128000
+		return estimateTokens(prompt, rate)+systemTokens+overhead <= budget && len(utf16.Encode([]rune(prompt))) <= 128000
 	}
 	prompt := evidenceUserPrompt(renderTeamPrompt(input, nil), snap.Knowledge, snap.Memory)
 	if !fits(prompt) || len(utf16.Encode([]rune(system))) > 32768 {
@@ -153,7 +160,7 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 			encoded, _ := json.Marshal(map[string]string{"role": message.Role, "content": message.Content})
 			history = append(history, encoded)
 		}
-		history = boundedHistoryWithLimits(history, len(prompt)+len(system), budget, overhead)
+		history = boundedHistoryAt(history, estimateTokens(prompt, rate)+systemTokens, budget, overhead, rate, units-utf16Len(prompt)-utf16Len(system))
 	}
 	audit.HistoryMessages = len(history)
 	audit.HistoryTruncated = audit.HistoryMessages < audit.HistoryAvailable

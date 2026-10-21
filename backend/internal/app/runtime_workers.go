@@ -377,7 +377,8 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 			used[m.Runtime] = catalog[m.Runtime]
 		}
 	}
-	snapshot := executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead, Team: resolved, Health: h, RuntimeHealth: used}
+	snapshot := executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead,
+		ProseRate: frozenRate(h.modelRate(model)), Team: resolved, Health: h, RuntimeHealth: used}
 	if runtime == runtimeSandbox && resolved != nil {
 		return executionSnapshot{}, invalidSetup("A sandbox node runs one agent, not a team")
 	}

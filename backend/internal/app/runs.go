@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -82,6 +83,9 @@ type piModel struct {
 	Runtime              string `json:"runtime"`
 	MaxContextTextBytes  int    `json:"maxContextTextBytes"`
 	MessageOverheadBytes int    `json:"messageOverheadBytes"`
+	// ProseBytesPerToken is the model's measured bytes of prose per token, as its worker counts its budget with
+	// (context_estimate.go); absent or invalid, the budget counts one byte a token.
+	ProseBytesPerToken float64 `json:"proseBytesPerToken,omitempty"`
 	// ReasoningEfforts is the closed set of reasoning-effort levels a worker
 	// advertises for this model. Empty means the model accepts no explicit level,
 	// so an effort on such a node is refused rather than silently dropped. The
@@ -673,15 +677,17 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
 	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
 	instructionsFit := (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
-	excess := max(len(framedPrompt)-maxRunPromptBytes, len(framedPrompt)+len(framedInstructions)+overhead-budget)
-	if team == nil && (excess > 0 || !instructionsFit) {
+	// The prompt's own bound is in bytes; the model's budget counts estimated tokens at its prose rate, as its worker does.
+	promptExcess := len(framedPrompt) - maxRunPromptBytes
+	modelExcess := snapshot.tokens(framedPrompt) + snapshot.tokens(framedInstructions) + overhead - budget
+	if team == nil && (promptExcess > 0 || modelExcess > 0 || !instructionsFit) {
 		// A plan the canvas assistant asked for learns how much of its canvas context would fit (planning.go), with
 		// space for personal settings its size left out, and on the operator's planner model where only its size kept
 		// the plan off it.
 		if c := plannerContextOf(r); kind == "planner" && c.bytes > 0 {
 			room := 0
 			if instructionsFit {
-				room = planContextRoom(c.bytes, excess+c.droppedPersonal)
+				room = min(planContextRoom(c.bytes, promptExcess+c.droppedPersonal), planContextRoom(c.bytes, c.bytesFor(modelExcess+c.droppedPersonal, snapshot.ProseRate)))
 				if plannerRefusal == plannerInputTooLarge && a.plannerModelTakes(r.Context(), runtime, instructions, team) {
 					room = max(room, a.plannerModelRoom(c, len(b.Prompt), len(instructions)))
 				}
@@ -863,7 +869,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	instructions = a.sentInstructions(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot)
-	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && (len(prompt)+len(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
+	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && (snapshot.tokens(prompt)+snapshot.tokens(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}
@@ -910,7 +916,8 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	if kind == "planner" || kind == "knowledge" || kind == "computer" {
 		history = []json.RawMessage{}
 	} else {
-		history = boundedHistoryWithLimits(history, len(prompt)+len(instructions)+outputContractReserve(snapshot), budget, overhead)
+		history = boundedHistoryAt(history, snapshot.tokens(prompt)+snapshot.tokens(instructions)+outputContractReserve(snapshot), budget, overhead, snapshot.ProseRate,
+			snapshot.Health.textUnitsLimit()-utf16Len(prompt)-utf16Len(instructions))
 	}
 	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": workerRuntime(snapshot.Runtime)}
 	if snapshot.Effort != "" {
@@ -1642,6 +1649,14 @@ func boundedHistory(history []json.RawMessage, currentBytes int) []json.RawMessa
 	return boundedHistoryWithLimits(history, currentBytes, 262144, 0)
 }
 func boundedHistoryWithLimits(history []json.RawMessage, currentBytes, budget, overhead int) []json.RawMessage {
+	return boundedHistoryAt(history, currentBytes, budget, overhead, 0, math.MaxInt)
+}
+
+// boundedHistoryAt keeps the most recent complete pairs that fit beside current (the turn's own estimated tokens), each
+// message counted at the model's prose rate as its worker counts it (context_estimate.go; its bytes at a rate of 0 or
+// 1), and whose texts take at most units UTF-16 code units: what the worker's transport takes beside the turn's own
+// texts (textUnitsLimit), which a budget in estimated tokens no longer keeps them under by itself.
+func boundedHistoryAt(history []json.RawMessage, current, budget, overhead int, rate float64, units int) []json.RawMessage {
 	// Historical/frozen snapshots can predate artifact publication. Never send
 	// embedded file bytes to another model, even when no durable reference exists.
 	var clean []json.RawMessage
@@ -1668,30 +1683,56 @@ func boundedHistoryWithLimits(history []json.RawMessage, currentBytes, budget, o
 	if budget > 262144 {
 		budget = 262144
 	}
-	budget -= currentBytes + overhead
-	total := 0
+	budget -= current + overhead
+	total, totalUnits := 0, 0
 	start := len(history)
 	for i := len(history) - 2; i >= 0; i -= 2 {
-		pair := 2 * overhead
+		pair, pairUnits := 2*overhead, 0
 		valid := true
 		for _, raw := range history[i : i+2] {
 			var m struct {
 				Content string `json:"content"`
 			}
 			if json.Unmarshal(raw, &m) == nil {
-				if len(utf16.Encode([]rune(m.Content))) > 32768 {
+				n := utf16Len(m.Content)
+				if n > 32768 {
 					valid = false
 				}
-				pair += len(m.Content)
+				pair += estimateTokens(m.Content, rate)
+				pairUnits += n
 			}
 		}
-		if !valid || total+pair > budget {
+		if !valid || total+pair > budget || totalUnits+pairUnits > units {
 			break
 		}
 		total += pair
+		totalUnits += pairUnits
 		start = i
 	}
 	return history[start:]
+}
+
+// utf16Len is a text's length in UTF-16 code units, as the workers' transport limits count it (an invalid byte is one,
+// as encoding/json writes it as U+FFFD).
+func utf16Len(text string) int {
+	n := 0
+	for _, r := range text {
+		if r >= 0x10000 {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// textUnitsLimit is the most UTF-16 code units a worker takes across a request's texts (totalTextChars in its /health:
+// 262,144 for Pi and the JS worker, 500,000 for the Python worker), 262,144 when it publishes none.
+func (h piHealth) textUnitsLimit() int {
+	if n, ok := h.Limits["totalTextChars"].(float64); ok && n >= 32768 && n <= 1<<20 {
+		return int(n)
+	}
+	return 262144
 }
 
 func (h piHealth) contextLimits() (int, int) {

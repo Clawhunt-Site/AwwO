@@ -151,7 +151,7 @@ func fitTraffic(lease *computerLease, raw []byte, over bool) trafficFit {
 	}
 	within := func(budget int) func([]byte) bool {
 		return func(candidate []byte) bool {
-			c, _, err := validateComputerCompletion(candidate, budget)
+			c, _, err := validateComputerCompletionAt(candidate, budget, lease.snapshot.ProseRate)
 			return err == nil && computerCallFitsWithin(candidate, c, lease, budget)
 		}
 	}

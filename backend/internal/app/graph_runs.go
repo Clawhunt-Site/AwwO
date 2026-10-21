@@ -356,7 +356,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				// The response-format envelope occupies context too, so history is trimmed
 				// against the instructions this run will actually send plus that reserve.
 				// Both terms are unchanged when no contract is frozen.
-				history = boundedHistoryWithLimits(history, len(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory))+len(evidenceUserPrompt("", snap.Knowledge, snap.Memory))+outputContractReserve(snap), snap.Budget, snap.Overhead)
+				// The node's own prompt is unknown until its inputs arrive: the run trims again against it (execute).
+				system := memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap)), snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory)
+				evidence := evidenceUserPrompt("", snap.Knowledge, snap.Memory)
+				history = boundedHistoryAt(history, snap.tokens(system)+snap.tokens(evidence)+outputContractReserve(snap), snap.Budget, snap.Overhead, snap.ProseRate,
+					snap.Health.textUnitsLimit()-utf16Len(system)-utf16Len(evidence))
 				snap.History = &history
 			}
 		}
@@ -885,7 +889,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
 	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap)
 	framedPrompt := evidenceUserPrompt(prompt, snap.Knowledge, snap.Memory)
-	if len(framedPrompt) > 128000 || (snap.Team == nil && (len(framedPrompt)+len(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	if len(framedPrompt) > 128000 || (snap.Team == nil && (snap.tokens(framedPrompt)+snap.tokens(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
 		return errors.New("context_limit")
 	}
 	var busy bool

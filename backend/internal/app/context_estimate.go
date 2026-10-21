@@ -65,15 +65,30 @@ func textCost(text string) (strict, prose int) {
 
 // estimateTokens is a text's estimated input tokens at a model's prose rate (at most len(text); exactly that at 1).
 func estimateTokens(text string, rate float64) int {
-	strict, prose := textCost(text)
-	if !(rate > proseRateMin) {
-		return strict + prose
+	return costTokens(textCost(text))(rate)
+}
+
+// costTokens is the estimate of a text already split into strict and prose bytes, at a rate.
+func costTokens(strict, prose int) func(rate float64) int {
+	return func(rate float64) int {
+		if !(rate > proseRateMin) {
+			return strict + prose
+		}
+		return strict + int(math.Ceil(float64(prose)/math.Min(rate, proseRateMax)))
 	}
-	return strict + int(math.Ceil(float64(prose)/math.Min(rate, proseRateMax)))
 }
 
 // validProseRate is whether a worker's published rate may loosen a budget: 1 to 4 in steps of 0.05, as the workers
 // accept it from a catalogue. Anything else counts as none (the byte rule).
 func validProseRate(rate float64) bool {
 	return rate >= proseRateMin && rate <= proseRateMax && math.Abs(rate*20-math.Round(rate*20)) <= 1e-9
+}
+
+// frozenRate is a rate as a run's snapshot keeps it: 0 (omitted) for the byte rule, so a run on a model without a
+// rate freezes exactly the snapshot it froze before.
+func frozenRate(rate float64) float64 {
+	if rate > proseRateMin {
+		return rate
+	}
+	return 0
 }

@@ -98,7 +98,8 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs, AttachmentText: b.Prompt})
 	// Only this request may run on the operator's planner model (planner_model.go).
-	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context)), plannerContext{len(b.Context), dropped})
+	strict, prose := textCost(b.Context)
+	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context)), plannerContext{len(b.Context), dropped, strict, prose})
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")
@@ -118,8 +119,24 @@ const (
 type plannerContextKey struct{}
 
 // plannerContext is what createRun needs of a plan's context for a refusal's room: its size in the prompt planCanvas
-// hands it, and the personal settings left out of that prompt for its size, which a shorter request carries again.
-type plannerContext struct{ bytes, droppedPersonal int }
+// hands it, its strict and prose bytes (context_estimate.go), and the personal settings left out of that prompt for
+// its size, which a shorter request carries again.
+type plannerContext struct{ bytes, droppedPersonal, strict, prose int }
+
+// bytesFor is how many bytes of the context come out to save tokens estimated tokens at rate: the context's own bytes
+// per estimated token, so a shorter view of the same canvas takes about what the model can read (a shorter view that
+// still does not fit is refused again with a smaller room). A token excess of 0 or less needs none.
+func (c plannerContext) bytesFor(tokens int, rate float64) int {
+	if tokens <= 0 {
+		return tokens
+	}
+	cost := costTokens(c.strict, c.prose)(rate)
+	if cost <= 0 {
+		return c.bytes
+	}
+	// Rounded up: a byte short of the excess would leave a view that still does not fit.
+	return (tokens*c.bytes + cost - 1) / cost
+}
 
 func withPlannerContext(r *http.Request, c plannerContext) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), plannerContextKey{}, c))

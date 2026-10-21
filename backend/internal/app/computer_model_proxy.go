@@ -23,7 +23,13 @@ const computerModelCallTimeout = 10 * time.Minute
 // OpenMaus receives a task-scoped bearer, never a user's provider key. Only the
 // already trusted Pi/OpenAI worker receives personalAdmission's ephemeral key.
 func validateComputerCompletion(raw []byte, budget int) (map[string]json.RawMessage, bool, error) {
-	if len(raw) > budget || len(raw) > 512<<10 {
+	return validateComputerCompletionAt(raw, budget, 0)
+}
+
+// validateComputerCompletionAt validates a call against a budget its text counts at the model's prose rate
+// (context_estimate.go; its bytes at 0 or 1), as the worker counts it.
+func validateComputerCompletionAt(raw []byte, budget int, rate float64) (map[string]json.RawMessage, bool, error) {
+	if len(raw) > 512<<10 || estimateTokens(string(raw), rate) > budget {
 		return nil, false, errors.New("context_limit")
 	}
 	var request map[string]json.RawMessage
@@ -496,8 +502,9 @@ func computerForwardBody(lease *computerLease, completion map[string]json.RawMes
 }
 
 // computerCallFits says whether a validated call should also pass the worker's own admission (apps/computer-model.ts):
-// its context measure, the JSON of the call plus 32 bytes a message, within the model's budget (estimated from above
-// from the request as sent), and the body this proxy sends, with room for a personal key, within what the worker reads.
+// its context measure, the JSON of the call at the model's prose rate plus 32 a message, within the model's budget
+// (estimated from above from the request as sent), and the body this proxy sends, with room for a personal key,
+// within what the worker reads.
 func computerCallFits(raw []byte, completion map[string]json.RawMessage, lease *computerLease) bool {
 	return computerCallFitsWithin(raw, completion, lease, lease.snapshot.Budget)
 }
@@ -507,7 +514,7 @@ func computerCallFitsWithin(raw []byte, completion map[string]json.RawMessage, l
 	var messages, tools []json.RawMessage
 	_ = json.Unmarshal(completion["messages"], &messages)
 	_ = json.Unmarshal(completion["tools"], &tools)
-	if len(raw)+32*len(messages)+32*len(tools)+256 > budget {
+	if estimateTokens(string(raw), lease.snapshot.ProseRate)+32*len(messages)+32*len(tools)+256 > budget {
 		return false
 	}
 	return len(computerForwardBody(lease, completion))+4096 <= computerWorkerBodyLimit
@@ -560,7 +567,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_completion", "Invalid completion input")
 		return
 	}
-	completion, streaming, e := validateComputerCompletion(raw, lease.snapshot.Budget)
+	completion, streaming, e := validateComputerCompletionAt(raw, lease.snapshot.Budget, lease.snapshot.ProseRate)
 	// The reference blocks executeComputer added to the task's words come after admission: a call they push over the
 	// model's budget, here or in the worker's own admission, goes without them, the earlier tasks first. Never for a
 	// body the read limit cut short.
@@ -571,7 +578,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		if trimmed, ok := withoutReferenceBlock(raw, block); ok {
 			raw = trimmed
-			completion, streaming, e = validateComputerCompletion(raw, lease.snapshot.Budget)
+			completion, streaming, e = validateComputerCompletionAt(raw, lease.snapshot.Budget, lease.snapshot.ProseRate)
 		}
 	}
 	// Then the bulk of the turn's earlier tool traffic, oldest first, as far as the call needs, and a fifth of the model's
@@ -581,7 +588,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	traffic := fitTraffic(lease, raw, over)
 	if traffic.fitted {
 		raw = traffic.raw
-		completion, streaming, e = validateComputerCompletion(raw, lease.snapshot.Budget)
+		completion, streaming, e = validateComputerCompletionAt(raw, lease.snapshot.Budget, lease.snapshot.ProseRate)
 	}
 	if e != nil && e.Error() != "context_limit" {
 		fail(w, 400, e.Error(), "Completion input exceeds its admitted schema or context budget")
@@ -609,7 +616,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			reason = "going round"
 		}
 		a.log.Warn("direct task call refused; the task ends as too large for its model", "run", lease.runID, "call", call, "reason", reason,
-			"bytes", len(raw), "budget", lease.snapshot.Budget, "cut", traffic.cut, "last_cut", sticky, "lost", lost, "row", row)
+			"bytes", len(raw), "tokens", estimateTokens(string(raw), lease.snapshot.ProseRate), "budget", lease.snapshot.Budget, "cut", traffic.cut, "last_cut", sticky, "lost", lost, "row", row)
 		fail(w, 400, "context_limit", "Completion input exceeds its admitted schema or context budget")
 		return
 	}

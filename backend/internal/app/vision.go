@@ -208,7 +208,7 @@ func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, ro
 			}
 		}
 		budget, overhead, _ := s.Health.modelLimits(model)
-		s.VisionFrom, s.Model, s.Budget, s.Overhead = s.Model, model, budget, overhead
+		s.VisionFrom, s.Model, s.Budget, s.Overhead, s.ProseRate = s.Model, model, budget, overhead, frozenRate(s.Health.modelRate(model))
 		if !s.Health.supportsEffort(model, s.Effort) {
 			s.Effort = ""
 		}
