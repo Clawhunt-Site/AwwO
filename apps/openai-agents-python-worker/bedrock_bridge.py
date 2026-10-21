@@ -46,6 +46,21 @@ MAX_REQUEST_BYTES = 40 * 1024 * 1024
 # was 436 s (99th percentile 230-296 s), none over 600 s. Some silent far longer had stalled: on 2026-10-19 five Opus 5.5
 # calls gave nothing back for their runs' whole 25 minutes, and the same nodes, run again, answered in 64-164 s.
 BEDROCK_STREAM_IDLE_SECONDS = 15 * 60
+# Models that think before every answer (Bedrock refuses to turn it off, commit 7b495004) and stream their thinking only
+# when asked, by Converse model ID without its inference profile's prefix. As Bedrock calls them by default (adaptive
+# thinking, display "omitted") it sends nothing at all, not even messageStart, until the thinking ends, and since the
+# move to UCloud a stream silent for more than about 6 minutes has not been delivered: on 2026-10-21 Bedrock's records
+# showed it had run 11 calls of this worker to their 64,000-token cap in 559-647 s whose answers never arrived (the
+# sandbox worker lost 3 it finished in 435-457 s; fully silent streams of up to 360.6 s were delivered).
+THINKS_SILENTLY = frozenset({"anthropic.claude-opus-5-5"})
+# Those asked to stream a summary of their thinking, which they then do from the start: in 14 probe calls to Claude
+# Opus 5.5 on 2026-10-21, the first reasoning text came 3.7-8.6 s into a call (8.6 s with a 110,668-token input) and no
+# call was ever silent for more than 6.5 s, also two that thought for 3.2 and 3.5 minutes (1,825 and 1,953 reasoning
+# deltas) on a question that, asked without the summary, sent nothing for 192.5 s; calls of the same question took about
+# as long as without it. The summary crosses the worker only as a count (runner.ReasoningCounter). A model taken out of
+# this set is asked as before, and THINKS_SILENTLY keeps it waiting the idle limit.
+SUMMARIZED_THINKING_MODELS = frozenset({"anthropic.claude-opus-5-5"})
+SUMMARIZED_THINKING = {"type": "adaptive", "display": "summarized"}
 # The same limit, for a call that offers the model no tools, on a model whose calls were never seen silent for long: its
 # answer is text, which Bedrock streams as it is written. Only models measured so are here, by Converse model ID without
 # its inference profile's prefix; the limit is an empirical bound, not a guarantee. Claude Opus 4.8 was never seen to
@@ -53,10 +68,11 @@ BEDROCK_STREAM_IDLE_SECONDS = 15 * 60
 # took 3 minutes in all (the longest 123.5 s, the longest wait for the first text 48.8 s), so no gap in one was that
 # long; on 10-20 two of its canvas node calls on this worker waited the whole 15 minutes for nothing before their nodes
 # ran again (graph_retry.go runs a node again only once its call has failed) and answered in 32 and 34 s. Claude Opus 5.5
-# is not here: it always thinks first and Bedrock sends nothing until it is done, which can take its whole 64,000-token
-# limit, 11 minutes or more (commit 7b495004), so a silent Opus 5.5 call may still be working. A call that offers tools
-# keeps the idle limit whatever the model: Bedrock holds a tool call's input back until the model has written it.
-QUICK_FIRST_BYTE_SECONDS = {"anthropic.claude-opus-4-8": 3 * 60}
+# (THINKS_SILENTLY) waits it only in a call that asks for its thinking summarized: asked otherwise it sends nothing until
+# its thinking ends, which can take its whole 64,000-token limit, 11 minutes or more, so a silent call may still be
+# working. A call that offers tools keeps the idle limit whatever the model: Bedrock holds a tool call's input back until
+# the model has written it.
+QUICK_FIRST_BYTE_SECONDS = {"anthropic.claude-opus-4-8": 3 * 60, "anthropic.claude-opus-5-5": 3 * 60}
 # An inference profile's prefix on a Converse model ID (as bedrock_catalog.PROFILE_PREFIX).
 PROFILE_PREFIX = re.compile(r"(?:global|us|eu|apac|jp|au|ca)\.")
 TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
@@ -573,13 +589,30 @@ def stream_read_timeout(run_seconds: float) -> float:
     return min(run_seconds, BEDROCK_STREAM_IDLE_SECONDS)
 
 
+def base_model_id(model_id: str) -> str:
+    """A Converse model ID without its inference profile's prefix (global., us., ...)."""
+    prefix = PROFILE_PREFIX.match(model_id)
+    return model_id[prefix.end():] if prefix else model_id
+
+
+def with_summarized_thinking(command: dict, model_id: str) -> dict:
+    """Asks a model of SUMMARIZED_THINKING_MODELS (`model_id`, the command's) to stream a summary of the thinking it does
+    anyway, so that its stream is not silent while it thinks. Any other command is returned unchanged."""
+    if base_model_id(model_id) not in SUMMARIZED_THINKING_MODELS:
+        return command
+    return {**command, "additionalModelRequestFields": {"thinking": dict(SUMMARIZED_THINKING)}}
+
+
 def call_read_timeout(read_timeout: float, command: dict, model_id: str) -> float:
     """The read timeout of one call (its ConverseStream command, to `model_id`): the transport's, or the model's
     QUICK_FIRST_BYTE_SECONDS when that comes first and the call offers the model no tools (no toolConfig: none were
-    given, or tool_choice was "none")."""
-    prefix = PROFILE_PREFIX.match(model_id)
-    quick = QUICK_FIRST_BYTE_SECONDS.get(model_id[prefix.end():] if prefix else model_id)
+    given, or tool_choice was "none"); for a model that thinks silently (THINKS_SILENTLY) only while the command asks for
+    its thinking summarized."""
+    model = base_model_id(model_id)
+    quick = QUICK_FIRST_BYTE_SECONDS.get(model)
     if quick is None or command.get("toolConfig") is not None:
+        return read_timeout
+    if model in THINKS_SILENTLY and command.get("additionalModelRequestFields") != {"thinking": SUMMARIZED_THINKING}:
         return read_timeout
     return min(read_timeout, quick)
 
@@ -782,7 +815,7 @@ class BedrockConverseTransport(AsyncBaseTransport):
                 body = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 _reject("The request body is not JSON")
-            command = to_converse_input(body, self.model)
+            command = with_summarized_thinking(to_converse_input(body, self.model), self.model)
             if self.prompt_cache:
                 command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False

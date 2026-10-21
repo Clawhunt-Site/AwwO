@@ -16,8 +16,8 @@ from agents import set_trace_processors
 from botocore.exceptions import ClientError, EventStreamError
 
 from bedrock_bridge import (
-    BRIDGE_API_KEY, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure, call_read_timeout,
-    default_client, stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache,
+    BRIDGE_API_KEY, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
+    call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache, with_summarized_thinking,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -375,12 +375,13 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.record["read_timeout"], 120.0)
         self.assertEqual(self.record["thread"], "awwo-bedrock-converse", "boto3 never blocks the event loop")
 
-    async def test_a_long_deadline_reaches_the_client_bedrock_waits_its_idle_limit_and_opus_may_write_64000_tokens(self):
+    async def test_a_long_deadline_reaches_the_client_and_an_opus_5_5_call_streams_its_thinking(self):
         # Production gives a run 25 minutes, since Claude Opus 5.5 thinks before its first word (2026-10-18: a node cut
         # at 600 s with nothing written): the OpenAI client's own timeout follows the run's deadline, never the SDK's
-        # 600 s default, and the call may write the model's 64,000 tokens. Bedrock's read waits at most the stream's
-        # idle limit for the next byte (2026-10-19: stalled calls rode out whole 25-minute runs), even without tools:
-        # Opus 5.5 may think silently for its whole 64,000-token limit.
+        # 600 s default, and the call may write the model's 64,000 tokens. The call asks Bedrock to stream a summary of
+        # its thinking, so without tools Bedrock's read waits at most 3 minutes for the next byte; with tools, the
+        # stream's idle limit (2026-10-19: stalled calls rode out whole 25-minute runs), since Bedrock holds a tool call's
+        # input back until the model has written it.
         import runner
         seen = {}
         original = runner.AsyncOpenAI
@@ -390,13 +391,45 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
             return original(**kwargs)
         runner.AsyncOpenAI = client
         self.addCleanup(setattr, runner, "AsyncOpenAI", original)
-        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="1500000")
-        request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5")
-        events = [event async for event in stream_run(request, config, asyncio.Event())]
+        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="1500000",
+                                AWWO_OPENAI_AGENTS_TOOLS_JSON='["calculator"]')
+        for tools, want in (([], 180.0), (["calculator"], 900.0)):
+            with self.subTest(tools=tools):
+                request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5", tools=tools)
+                events = [event async for event in stream_run(request, config, asyncio.Event())]
+                self.assertEqual(events[-1]["type"], "completed", events[-1])
+                self.assertEqual(self.record["read_timeout"], want)
+                self.assertEqual((seen["timeout"].read, seen["timeout"].connect), (1500.0, 5.0))
+                self.assertEqual(self.record["input"]["inferenceConfig"]["maxTokens"], 64000)
+                self.assertEqual(self.record["input"]["additionalModelRequestFields"], {"thinking": {"type": "adaptive", "display": "summarized"}})
+
+    async def test_an_opus_5_5_call_streams_its_summarized_thinking_as_a_count_and_answers(self):
+        # As Bedrock streams it when asked (a probe call on 2026-10-21): reasoning text, then the block's signature, then
+        # the answer. The thinking crosses the worker as a count only; the answer is the run's output.
+        thinking = [{"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": REASONING_TEXT[:20]}}}},
+                    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": REASONING_TEXT[20:]}}}},
+                    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "c2lnbmF0dXJl"}}}},
+                    {"contentBlockStop": {"contentBlockIndex": 0}}]
+        self.events = text_turn("OK", prefix=thinking)
+        events = await self.run_model("bedrock.claude-opus-5-5")
+        self.assertEqual((events[-1]["type"], events[-1]["text"]), ("completed", "OK"), events[-1])
+        self.assertEqual([event for event in events if event["type"] == "reasoning"][-1], {"type": "reasoning", "characters": len(REASONING_TEXT)})
+        dumped = json.dumps(events, ensure_ascii=False)
+        self.assertNotIn("44102", dumped)
+        self.assertNotIn("c2lnbmF0dXJl", dumped)
+        self.assertEqual(self.record["input"]["additionalModelRequestFields"], {"thinking": {"type": "adaptive", "display": "summarized"}})
+        self.assertEqual(self.record["read_timeout"], 120.0, "the run's 2-minute deadline comes before the 3-minute limit")
+        # A tool call after the thinking runs as before.
+        self.events = [{"messageStart": {"role": "assistant"}}, *thinking,
+                       {"contentBlockStart": {"contentBlockIndex": 1, "start": {"toolUse": {"toolUseId": "tooluse_calc", "name": "calculator"}}}},
+                       {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"toolUse": {"input": '{"expression":"(2+3)*4"}'}}}},
+                       {"contentBlockStop": {"contentBlockIndex": 1}}, {"messageStop": {"stopReason": "tool_use"}},
+                       {"metadata": {"usage": {"inputTokens": 30, "outputTokens": 9}}}]
+        events = await self.run_model("bedrock.claude-opus-5-5", tools=["calculator"], prompt="Compute (2+3)*4")
         self.assertEqual(events[-1]["type"], "completed", events[-1])
-        self.assertEqual(self.record["read_timeout"], 900.0)
-        self.assertEqual((seen["timeout"].read, seen["timeout"].connect), (1500.0, 5.0))
-        self.assertEqual(self.record["input"]["inferenceConfig"]["maxTokens"], 64000)
+        self.assertIn("20", events[-1]["text"])
+        self.assertNotIn("44102", json.dumps(events, ensure_ascii=False))
+        self.assertEqual(self.record["input"]["additionalModelRequestFields"], {"thinking": {"type": "adaptive", "display": "summarized"}})
 
     async def test_tool_call_result_is_the_output(self):
         self.events = [{"messageStart": {"role": "assistant"}},
@@ -608,20 +641,22 @@ class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": code}])
 
     async def test_the_other_profile_is_asked_with_the_calls_own_read_timeout(self):
-        # One client serves both profiles of a call: a call to Claude Opus 4.8 that offers no tools waits its quick limit on
-        # its fallback profile too, and one that offers tools the transport's limit on both.
-        opus48, opus48_us = "global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8"
+        # One client serves both profiles of a call: a call to Claude Opus 4.8 or Opus 5.5 that offers no tools waits its
+        # quick limit on its fallback profile too, and one that offers tools the transport's limit on both. Opus 5.5 asks
+        # both profiles for its thinking summarized.
         tool = [{"type": "function", "function": {"name": "current_time", "parameters": {"type": "object", "properties": {}}}}]
-        for extra, want in (({}, 180.0), ({"tools": tool}, 900.0)):
-            with self.subTest(tools=bool(extra)):
+        for (model, fallback), (extra, want) in [(pair, case) for pair in (("global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8"),
+                                                                          (OPUS, OPUS_US))
+                                                 for case in (({}, 180.0), ({"tools": tool}, 900.0))]:
+            with self.subTest(model=model, tools=bool(extra)):
                 client, timeouts = ScriptedClient([aws_error("ThrottlingException", 429), {"events": text_turn("OK")}]), []
 
                 def factory(region, auth, read_timeout, client=client, timeouts=timeouts):
                     timeouts.append(read_timeout)
                     return client
-                transport = BedrockConverseTransport(region="us-east-1", model=opus48, auth={"aws": True}, read_timeout=900.0,
-                                                     fallback_model=opus48_us, client_factory=factory, report=lambda fact: None)
-                body = {"model": opus48, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
+                transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, read_timeout=900.0,
+                                                     fallback_model=fallback, client_factory=factory, report=lambda fact: None)
+                body = {"model": model, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
                 async with httpx2.AsyncClient(transport=transport) as http:
                     response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
                 self.assertEqual(response.status_code, 200)
@@ -629,7 +664,9 @@ class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(frames[-1], "[DONE]")
                 self.assertEqual("".join(choice["delta"].get("content") or "" for frame in frames[:-1]
                                          for choice in json.loads(frame)["choices"]), "OK")
-                self.assertEqual([call["modelId"] for call in client.calls], [opus48, opus48_us])
+                self.assertEqual([call["modelId"] for call in client.calls], [model, fallback])
+                self.assertEqual(client.calls[1], {**client.calls[0], "modelId": fallback}, "the same request, only the profile differs")
+                self.assertEqual("additionalModelRequestFields" in client.calls[0], model == OPUS)
                 self.assertEqual(timeouts, [want], "one client, with the call's read timeout, for both profiles")
 
     async def test_an_exception_that_opens_the_stream_is_the_profiles_refusal(self):
@@ -836,16 +873,22 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stream_read_timeout(120.0), 120.0, "a run's shorter deadline stays the read timeout")
         self.assertEqual(stream_read_timeout(1500.0), 900.0)
         # A call to Claude Opus 4.8, which was never seen to think silently (no completed call took 3 minutes in all,
-        # 2026-10-21), that offers no tools waits 3 minutes, whichever inference profile serves it; one that offers tools (a
-        # toolConfig) keeps the idle limit, as does every call to Opus 5.5, which may think silently for 11 minutes or more,
-        # or to a model not measured.
+        # 2026-10-21), that offers no tools waits 3 minutes, whichever inference profile serves it; so does one to Opus 5.5
+        # that asks for its thinking summarized. One that offers tools (a toolConfig) keeps the idle limit, as does a call
+        # to Opus 5.5 without the summary, which may think silently for 11 minutes or more, or to a model not measured.
         tools = {"toolConfig": {"tools": [{"toolSpec": {"name": "t", "inputSchema": {"json": {"type": "object"}}}}]}}
-        for model in ("global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8", "anthropic.claude-opus-4-8"):
-            self.assertEqual(call_read_timeout(900.0, {"messages": []}, model), 180.0, model)
-            self.assertEqual(call_read_timeout(900.0, tools, model), 900.0, model)
-            self.assertEqual(call_read_timeout(120.0, {"messages": []}, model), 120.0, "a run's shorter deadline still comes first")
-        for model in (OPUS, OPUS_US, "global.anthropic.claude-sonnet-5", "moonshotai.kimi-k2.5", "global.anthropic.claude-opus-4-8-v2"):
+        summarized = {"additionalModelRequestFields": {"thinking": {"type": "adaptive", "display": "summarized"}}}
+        for model, extra in [(model, {}) for model in ("global.anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8", "anthropic.claude-opus-4-8")] + [
+                (model, summarized) for model in (OPUS, OPUS_US, "anthropic.claude-opus-5-5")]:
+            self.assertEqual(call_read_timeout(900.0, {"messages": [], **extra}, model), 180.0, model)
+            self.assertEqual(call_read_timeout(900.0, {**tools, **extra}, model), 900.0, model)
+            self.assertEqual(call_read_timeout(120.0, {"messages": [], **extra}, model), 120.0, "a run's shorter deadline still comes first")
+        for model in (OPUS, OPUS_US, "global.anthropic.claude-sonnet-5", "moonshotai.kimi-k2.5", "global.anthropic.claude-opus-4-8-v2",
+                      "global.anthropic.claude-opus-5-5-v2"):
             self.assertEqual(call_read_timeout(900.0, {"messages": []}, model), 900.0, model)
+        for fields in ({"thinking": {"type": "adaptive"}}, {"thinking": {"type": "adaptive", "display": "omitted"}}, {}):
+            self.assertEqual(call_read_timeout(900.0, {"messages": [], "additionalModelRequestFields": fields}, OPUS), 900.0, fields)
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **summarized}, "global.anthropic.claude-sonnet-5"), 900.0)
         from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeout
         from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
         # botocore raises its own while it waits for the response, urllib3's inside a stream that already answered.
@@ -874,14 +917,16 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
                 self.assertEqual(len(taken), 1, "a stall is not a profile's refusal: the other profile is never asked")
 
-    async def test_a_stalled_call_to_opus_4_8_that_offers_no_tools_fails_at_its_quick_limit_and_any_other_waits_the_idle_limit(self):
-        # 2026-10-20: two canvas node calls to Claude Opus 4.8 (they offer no tools) waited the whole 15 minutes for nothing.
-        # A call that offers tools may be silent while it writes a tool call's input, and an Opus 5.5 call while it thinks,
-        # so both keep the idle limit (here the transport's 3 s). tool_choice "none" offers Bedrock no tools at all.
+    async def test_a_stalled_call_that_offers_no_tools_fails_at_its_models_quick_limit_and_any_other_waits_the_idle_limit(self):
+        # 2026-10-20: two canvas node calls to Claude Opus 4.8 (they offer no tools) waited the whole 15 minutes for nothing;
+        # so did 14 to Opus 5.5 from 10-19 to 10-21, which now stream their thinking. A call that offers tools may be silent
+        # while it writes a tool call's input, so it keeps the idle limit (here the transport's 3 s), as does a call to a
+        # model not measured. tool_choice "none" offers Bedrock no tools at all.
         tool = [{"type": "function", "function": {"name": "current_time", "parameters": {"type": "object", "properties": {}}}}]
         opus48 = "global.anthropic.claude-opus-4-8"
         cases = (("opus 4.8", opus48, {}, 1), ("opus 4.8, tools", opus48, {"tools": tool}, 3.0),
-                 ("opus 4.8, tool_choice none", opus48, {"tools": tool, "tool_choice": "none"}, 1), ("opus 5.5", OPUS, {}, 3.0))
+                 ("opus 4.8, tool_choice none", opus48, {"tools": tool, "tool_choice": "none"}, 1), ("opus 5.5", OPUS, {}, 1),
+                 ("opus 5.5, tools", OPUS, {"tools": tool}, 3.0), ("kimi", "moonshotai.kimi-k2.5", {}, 3.0))
         for headers, stage in ((False, "request"), (True, "stream")):
             for name, model, extra, want in cases:
                 with self.subTest(stage=stage, call=name):
@@ -891,7 +936,7 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                                                          client_factory=local_client(url, seen), report=facts.append)
                     body = {"model": model, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
                     started = time.monotonic()
-                    with mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1}):
+                    with mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1, "anthropic.claude-opus-5-5": 1}):
                         async with httpx2.AsyncClient(transport=transport) as http:
                             response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions", json=body)
                     waited = time.monotonic() - started
@@ -910,10 +955,12 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(setattr, runner, "BedrockConverseTransport", original)
         config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="30000")
         # The JSON 504 answered before a stream, and the error frame inside one, both read as the service's outage. A run
-        # offers no tools: an Opus 5.5 call ends at the stream's idle limit, an Opus 4.8 one at its quick limit.
-        runs = (("bedrock.claude-opus-5-5", OPUS, lambda: mock.patch("bedrock_bridge.BEDROCK_STREAM_IDLE_SECONDS", 1)),
+        # offers no tools: an Opus 5.5 or Opus 4.8 call ends at its quick limit, a call to another model at the stream's
+        # idle limit.
+        runs = (("bedrock.claude-opus-5-5", OPUS, lambda: mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-5-5": 1})),
                 ("bedrock.claude-opus-4-8", "global.anthropic.claude-opus-4-8",
-                 lambda: mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1})))
+                 lambda: mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1})),
+                ("bedrock.kimi-k2-5", "moonshotai.kimi-k2.5", lambda: mock.patch("bedrock_bridge.BEDROCK_STREAM_IDLE_SECONDS", 1)))
         for (headers, stage), (model, target, limit) in [(case, run) for case in ((False, "request"), (True, "stream")) for run in runs]:
             with self.subTest(stage=stage, model=model):
                 request = RunRequest("r1", "t1", "s1", "Say hello", [], model=model)
@@ -1003,4 +1050,58 @@ class PromptCacheTests(unittest.IsolatedAsyncioTestCase):
                 usage_frame = json.loads(frames[-2][len("data: "):])
                 self.assertEqual(usage_frame["usage"], {"prompt_tokens": 2043, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 2000}})
             else:
-                self.assertEqual(record["input"], to_converse_input(body, CLAUDE), "off sends exactly the request the bridge sent before")
+                self.assertEqual(record["input"], with_summarized_thinking(to_converse_input(body, CLAUDE), CLAUDE),
+                                 "off sends exactly the request the bridge builds without checkpoints")
+
+
+class SummarizedThinkingTests(unittest.IsolatedAsyncioTestCase):
+    """Claude Opus 5.5 always thinks, and as Bedrock calls it by default it sends nothing until the thinking ends: the
+    bridge asks it to stream a summary of its thinking instead (SUMMARIZED_THINKING_MODELS)."""
+
+    def test_only_a_model_that_thinks_silently_is_asked_for_its_thinking_summarized(self):
+        command = {"modelId": CLAUDE, "messages": [{"role": "user", "content": [{"text": "hi"}]}], "inferenceConfig": {"maxTokens": 64000}}
+        for model in (CLAUDE, "us.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"):
+            with self.subTest(model=model):
+                given = {**command, "modelId": model}
+                snapshot = json.dumps(given, sort_keys=True)
+                asked = with_summarized_thinking(given, model)
+                self.assertEqual(asked, {**command, "modelId": model,
+                                         "additionalModelRequestFields": {"thinking": {"type": "adaptive", "display": "summarized"}}})
+                self.assertIsNot(asked["additionalModelRequestFields"]["thinking"], SUMMARIZED_THINKING)
+                self.assertEqual(json.dumps(given, sort_keys=True), snapshot, "the command given is not mutated")
+        for model in ("global.anthropic.claude-opus-4-8", "global.anthropic.claude-sonnet-5", "moonshotai.kimi-k2.5",
+                      "global.anthropic.claude-opus-5-5-v2"):
+            with self.subTest(model=model):
+                plain = {**command, "modelId": model}
+                self.assertIs(with_summarized_thinking(plain, model), plain)
+
+    async def test_the_transport_asks_for_it_only_for_such_a_model_and_keeps_its_prompt_cache(self):
+        events = text_turn("OK")
+        body = chat_body(messages=[{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}, {"role": "user", "content": "More"}])
+        for model, prompt_cache, asked in ((CLAUDE, False, True), (CLAUDE, True, True), ("global.anthropic.claude-opus-4-8", True, False)):
+            with self.subTest(model=model, prompt_cache=prompt_cache):
+                record: dict = {}
+                transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, prompt_cache=prompt_cache,
+                                                     client_factory=lambda *args, record=record: FakeClient(record, events))
+                async with httpx2.AsyncClient(transport=transport) as client:
+                    response = await client.post(bridge_base_url("us-east-1") + "/chat/completions", json={**body, "model": model})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(record["input"].get("additionalModelRequestFields"),
+                                 {"thinking": {"type": "adaptive", "display": "summarized"}} if asked else None)
+                self.assertEqual(json.dumps(record["input"]).count('"cachePoint"'), 1 if prompt_cache else 0)
+
+    async def test_a_model_no_longer_asked_for_the_summary_waits_the_idle_limit(self):
+        # The rollback: taken out of SUMMARIZED_THINKING_MODELS, Opus 5.5 is asked as before (no thinking setting) and,
+        # since it thinks silently (THINKS_SILENTLY), waits the transport's limit, not the 3 minutes it waits with a summary.
+        timeouts, record = [], {}
+
+        def factory(region, auth, read_timeout):
+            timeouts.append(read_timeout)
+            return FakeClient(record, text_turn("OK"))
+        transport = BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True}, read_timeout=900.0, client_factory=factory)
+        with mock.patch("bedrock_bridge.SUMMARIZED_THINKING_MODELS", frozenset()):
+            async with httpx2.AsyncClient(transport=transport) as client:
+                response = await client.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body())
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("additionalModelRequestFields", record["input"])
+        self.assertEqual(timeouts, [900.0])
