@@ -287,6 +287,11 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 				if m.Label != "" {
 					model["label"] = m.Label
 				}
+				// The page never picks such a model by itself (userChosenProvider; apps/web canvas/userChosenModels.ts),
+				// and only a client that says so is shown one (listedFor).
+				if h.userChosenOnly(m.ID) {
+					model["userChosen"] = true
+				}
 				models = append(models, a.catalogueModel(model, m.ID, closed))
 				seen[m.ID] = true
 			}
@@ -294,6 +299,9 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 			// entitlement still resolves to it, never as an unfiltered fallback.
 			if fallback := h.defaultModel(); fallback != "" && !seen[fallback] {
 				models = append(models, a.catalogueModel(map[string]any{"id": fallback, "name": fallback, "provider": h.Provider, "runtime": id, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}, fallback, closed))
+			} else if h.Model != "" && !seen[h.Model] && h.userChosenOnly(h.Model) && h.permits(h.Model) {
+				// Such a catalog's own default when only a user may choose it: never the default (defaultModel), still a pick.
+				models = append(models, a.catalogueModel(map[string]any{"id": h.Model, "name": h.Model, "provider": h.Provider, "runtime": id, "reasoningEfforts": []string{}, "defaultReasoningEffort": "", "userChosen": true}, h.Model, closed))
 			}
 		}
 		available = available || result.err == nil
@@ -315,6 +323,7 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 	}
 	selectedPlanner := found[plannerRuntime]
 	planner := selectedPlanner.err == nil && entitlement.apply(selectedPlanner.h).defaultModel() != ""
+	models = listedFor(w, r, models)
 	v := map[string]any{"engine": runtimePI, "configured": configured, "available": available, "plannerAvailable": planner, "plannerRuntime": plannerRuntime, "models": models, "runtimes": runtimes, "modelConnectivityVerified": false, "limits": pi.h.Limits}
 	if !available {
 		v["reason"] = "No configured runtime is available"
@@ -395,13 +404,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
-	if e == nil {
-		entitlement, e = entitlement.forWorkspace(r.Context(), tx, tid)
-	}
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
+	entitlement.tenant = tid
 	// An entitled owner's plan replaces the workspace's own allowances with the account's (plans.go); read here
 	// without its lock, which the paid generation below and every model call take when they count or spend them.
 	plan, e := ownerPlan(r.Context(), tx, tid, false)
@@ -543,12 +550,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		}
 		plannerRefusal = refusal
 		if refusal == "" {
-			s, withheld, err := a.plannerModelSnapshot(r.Context(), entitlement, runtime, instructions, team)
+			s, withheld, err := a.plannerModelSnapshot(r.Context(), runtime, instructions, team)
 			switch {
 			case withheld:
-				// The planner model is the operator's, outside the workspace's allowlist, but a DeepSeek one is not
-				// (explicitOnlyProvider): where the workspace may not use it, the plan runs on the default model.
-				a.log.Info("planner model not admitted; planning on the default model", "reason", "explicit_only_model")
+				// The planner model is the operator's choice, never the user's, so a DeepSeek one (userChosenProvider)
+				// does not plan: the plan runs on the default model.
+				a.log.Info("planner model not admitted; planning on the default model", "reason", "user_chosen_only_model")
 			case err == nil:
 				snapshot, operatorPlanner = s, true
 				snapshot.OperatorPaid = true
@@ -675,7 +682,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			room := 0
 			if instructionsFit {
 				room = planContextRoom(c.bytes, excess+c.droppedPersonal)
-				if plannerRefusal == plannerInputTooLarge && a.plannerModelTakes(r.Context(), entitlement, runtime, instructions, team) {
+				if plannerRefusal == plannerInputTooLarge && a.plannerModelTakes(r.Context(), runtime, instructions, team) {
 					room = max(room, a.plannerModelRoom(c, len(b.Prompt), len(instructions)))
 				}
 			}

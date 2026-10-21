@@ -42,6 +42,7 @@ import { EditSettings } from './EditSettings';
 import type { EditWiredFiles } from './editNode';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
+import { automaticChoices } from './userChosenModels';
 import {
   type AgentKind,
   type CanvasNode,
@@ -716,11 +717,12 @@ export function InspectorPanel({
 }
 
 /** The node moved into its own sandbox computer, keeping its model where the sandbox offers it (else the sandbox's first
- *  ready model), or back out to the runtime AwwO chooses. A reasoning level is not carried across. */
-export function withSandbox(node: SessionNode, on: boolean, entries: ReadonlyArray<{ runtime: string; model: string; available: boolean }>): SessionNode {
+ *  ready model, never one only a user may choose: userChosenModels.ts), or back out to the runtime AwwO chooses. A
+ *  reasoning level is not carried across. */
+export function withSandbox(node: SessionNode, on: boolean, entries: ReadonlyArray<{ runtime: string; model: string; available: boolean; userChosen?: boolean }>): SessionNode {
   if (!on) return node.runtime === SANDBOX_RUNTIME ? { ...node, runtime: '', effort: '' } : node;
   const ready = entries.filter(entry => entry.runtime === SANDBOX_RUNTIME && entry.available);
-  const model = ready.some(entry => entry.model === node.model) ? node.model : ready[0]?.model ?? node.model;
+  const model = ready.some(entry => entry.model === node.model) ? node.model : automaticChoices(ready)[0]?.model ?? node.model;
   return { ...node, runtime: SANDBOX_RUNTIME, model, effort: '' };
 }
 

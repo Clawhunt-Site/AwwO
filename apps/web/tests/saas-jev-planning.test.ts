@@ -206,6 +206,34 @@ it('stops safely before an oversized second batch and leaves the canvas unchange
   expect(doc).toEqual(original);
 });
 
+// Jev assigns models by itself, so never one only a user may choose (the DeepSeek API's, userChosen), whatever the goal
+// says: ClawHunt's privacy policy promises AwwO never moves a request to DeepSeek by itself.
+it('never offers Jev a model only a user may choose', async () => {
+  const flash = { runtime: 'pi', id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', provider: 'deepseek', userChosen: true };
+  const offered = (request: JevRequest) => (request.state as { models: Array<{ model: string }> }).models.map(model => model.model);
+  for (const goal of ['安排独立角色', '安排独立角色，用 DeepSeek']) {
+    // With it left out, the one other model is the sole candidate: no model question, and every role gets it.
+    const fake = mock({ runtime: { ...runtime, models: [flash, runtime.models[0]] }, second: { topology: 'parallel' } });
+    const result = await requestJevPlan(goal, emptyDocument(), [], signal());
+    expect(offered(fake.requests[1])).toEqual(['shared-model']);
+    expect(Object.keys(fake.requests[1].questions).some(id => id.startsWith('model_'))).toBe(false);
+    expect(result.modelAssignments.every(model => model.model === 'shared-model')).toBe(true);
+    vi.unstubAllGlobals();
+  }
+  // Only that model: Jev assigns none and the canvas is left as it was.
+  mock({ runtime: { ...runtime, models: [flash] } });
+  await expect(requestJevPlan('安排独立角色', emptyDocument(), [], signal())).rejects.toThrow('工作区没有可用于执行节点的模型');
+  vi.unstubAllGlobals();
+  // A goal that requires it finds no candidate meeting it: the reply says who picks such a model, and only then.
+  mock({ runtime: { ...runtime, models: [flash, runtime.models[0]] }, second: { compatibility: 'unavailable' } });
+  const asked = await requestJevPlan('安排独立角色，必须用 DeepSeek', emptyDocument(), [], signal());
+  expect(asked.plan.operations).toEqual([]);
+  expect(asked.plan.summary).toContain('「DeepSeek V4.1 Flash」这类模型只能由你自己在节点设置里选，Jev 不替你分配。');
+  vi.unstubAllGlobals();
+  mock({ second: { compatibility: 'unavailable' } });
+  expect((await requestJevPlan('使用指定但未配置的模型', emptyDocument(), [], signal())).plan.summary).not.toContain('只能由你自己');
+});
+
 it('ranks real workspace models first for new roles and supplies honest execution capabilities to Jev', async () => {
   const codingRuntime = { ...runtime, runtimes: runtime.runtimes.map(item => item.id === 'openai-agents'
     ? { ...item, workspace: { version: 1, available: true, maxModelCalls: 16 } } : item) };

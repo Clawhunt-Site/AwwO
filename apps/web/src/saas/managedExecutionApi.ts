@@ -1,7 +1,8 @@
 import { API_BASE, api, SaaSApiError, tenantPath } from './api';
 
-/** requiresUpgrade: this workspace's free allowance does not include the model (a premium route closed to it). */
-export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean }
+/** requiresUpgrade: this workspace's free allowance does not include the model (a premium route closed to it).
+ *  userChosen: a model only a user may choose (canvas/userChosenModels.ts), never the one a task starts on by itself. */
+export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean; userChosen?: boolean }
 export interface ExecutionRuntime { ready: boolean; reason?: string; capabilities: { workspace: boolean; approvals: boolean }; models: ExecutionModel[] }
 /** error: how a task that ended without its result ended (the run's error code; empty otherwise). */
 export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string; error?: string }

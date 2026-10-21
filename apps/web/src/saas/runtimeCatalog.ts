@@ -9,6 +9,9 @@ export type SaaSRuntimeModel = {
   /** Set by the server when this workspace's free allowance does not include the model (a premium route closed to it
    * with a limit of 0): a run on it is refused until the owner upgrades to Pro or Max. */
   requiresUpgrade?: boolean;
+  /** Set by the server for a model only a user may choose (the DeepSeek API's): the page never picks it by itself
+   * (canvas/userChosenModels.ts). */
+  userChosen?: boolean;
 };
 
 /** What a picker shows for a model: its own label, tagged when the workspace's allowance does not include it, so a

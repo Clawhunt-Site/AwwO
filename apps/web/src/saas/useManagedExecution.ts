@@ -6,6 +6,7 @@
 // Nothing loads until the canvas activates it.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TaskStartUnconfirmed } from '../canvas/assistantRouting';
+import { automaticChoices } from '../canvas/userChosenModels';
 import { SaaSApiError, saasErrorMessage } from './api';
 import { canvasKnowledgeRevisionIds, subscribeCanvasKnowledge } from './canvasBridge';
 import { createKnowledgeSource } from './knowledgeApi';
@@ -382,7 +383,10 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
           // Only the reader's pick here becomes the model of the components a plan adds; the account default is the
           // assistant's alone, so they keep the workspace default.
           const kept = offered(stored) ? stored : offered(accountDefaultRef.current) ? accountDefaultRef.current : '';
-          chooseKey(kept || (models[0] ? executionModelKey(models[0].runtime, models[0].id) : '')); setChosenByReader(Boolean(kept) && kept === stored); setStaleLabel('');
+          // The first model is a choice nobody made, so never one only a user may choose (userChosenModels.ts): with no
+          // other model, nothing is chosen until the reader picks one.
+          const first = automaticChoices(models)[0];
+          chooseKey(kept || (first ? executionModelKey(first.runtime, first.id) : '')); setChosenByReader(Boolean(kept) && kept === stored); setStaleLabel('');
         }
         else if (models.some(item => executionModelKey(item.runtime, item.id) === previous)) setStaleLabel('');
         else {

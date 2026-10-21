@@ -39,6 +39,7 @@ type invocationFacts struct {
 	WorkspaceSnapshot         *workspaceFile // only a completed coding run; never provider telemetry
 	RequirePersonalConnection bool           // live admission check for each workbench model call
 	OperatorPaid              bool           // a planner call on the operator's planner model (planner_model.go)
+	UserChosen                bool           // the model runs only where someone chose it (piHealth.userChosenOnly)
 
 	Runtime, Model, Provider, ProviderModel, Protocol, TurnID, AgentID string
 	Admission                                                          string
@@ -212,6 +213,8 @@ func invocationMetadata(s executionSnapshot, member *teamMember) *invocationFact
 				break
 			}
 		}
+		// The catalogue's own judgement, a default it lists without a provider included (the last gate reads it).
+		f.UserChosen = h.userChosenOnly(f.Model)
 	}
 	// Older workers may omit provider provenance; preserve unknown values.
 	return f

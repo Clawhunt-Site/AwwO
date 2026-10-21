@@ -182,7 +182,8 @@ func validateTeam(t *nodeTeam) error {
 // asked "does this model exist" now also enforces the workspace allowlist.
 func (h piHealth) modelLimits(model string) (int, int, bool) {
 	if model == "" {
-		if h.Allowed == nil {
+		// An empty model asks the worker for its own default, which is not one only a user may choose (defaultModel).
+		if h.Allowed == nil && !h.userChosenOnly(h.Model) {
 			b, o := h.contextLimits()
 			return b, o, true
 		}
@@ -321,21 +322,10 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 				e = errModelNotAllowed
 			}
 		}
-		// A call to the DeepSeek API (explicitOnlyProvider) is checked again here, whoever pays for it, the operator's
-		// planner calls too, as modelEntitlement.grants decides: a workspace with an allowlist must name its model, one
-		// without must be owned by a platform administrator. So a grant withdrawn mid-run, the model taken off the list
-		// or the list cleared to none, stops the next call, a call waiting for a slot included.
-		if e == nil && facts != nil && facts.Provider == explicitOnlyProvider {
-			if restricted {
-				if !permittedModel(allowed, model) {
-					e = errModelNotAllowed
-				}
-			} else {
-				var operator bool
-				if operator, e = operatorWorkspace(ctx, tx, tid); e == nil && !operator {
-					e = errModelNotAllowed
-				}
-			}
+		// A model only a user may choose (userChosenProvider) never runs as the operator's own call: AwwO does not plan
+		// on one (plannerModelSnapshot), and a call admitted as the operator's on one anyway is refused here.
+		if e == nil && operatorPaid && facts != nil && (facts.UserChosen || facts.Provider == userChosenProvider) {
+			e = errModelNotAllowed
 		}
 		if e == nil && facts != nil && facts.RequirePersonalConnection {
 			e = a.requireWorkspacePersonalConnection(ctx, tx, actor, facts.Runtime, model)

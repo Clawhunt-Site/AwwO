@@ -7,6 +7,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshCw, Sparkles, Square, X } from 'lucide-react';
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import type { AssistantExecutionHost, AssistantTaskActions } from '../canvas/assistantRouting';
+import { automaticChoices } from '../canvas/userChosenModels';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
@@ -182,12 +183,12 @@ function TaskSummary({ execution, task }: { execution: ManagedExecution; task: E
 }
 
 /** A direct task refused for want of a plan. A premium refusal gets the paid plans first, then the free way on — the
- * model the service lists first, which is the one a new canvas's direct tasks start on (the default model). A full
- * daily allowance counts the default model too, so it gets the plans alone. Switching changes only the choice; the
- * request is sent again by the reader, never re-sent here. */
+ * model the service lists first, less any only a user may choose (userChosenModels.ts), which is the one a new canvas's
+ * direct tasks start on (the default model). A full daily allowance counts the default model too, so it gets the plans
+ * alone. Switching changes only the choice; the request is sent again by the reader, never re-sent here. */
 function PremiumTaskActions({ execution, code }: { execution: ManagedExecution; code: string }) {
   const { t } = useSaaSPreferences();
-  const fallback = execution.runtime?.models[0];
+  const fallback = automaticChoices(execution.runtime?.models ?? [])[0];
   const key = fallback ? executionModelKey(fallback.runtime, fallback.id) : '';
   const label = fallback ? fallback.label || fallback.id : '';
   if (upsellReason(code) === 'daily') return <div className="awwo-execution-premium"><PlanUpsell tenantId={execution.tenantId} reason="daily" /></div>;

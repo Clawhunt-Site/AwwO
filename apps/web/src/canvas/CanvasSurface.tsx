@@ -48,10 +48,11 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, type CanvasPlanMedia, type CanvasPlanModelChoice } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, type CanvasPlanMedia } from './canvasPlan';
 import { withAssistantModel } from './assistantModel';
 import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
+import { planModelsOf } from './userChosenModels';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
@@ -3026,12 +3027,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // `request` plans a prompt handed over (a carried-over request, a routed message) rather than the box's draft;
   // the box is emptied only where it holds that prompt.
-  // The chat models a plan may put a node on: this canvas's palette, each entry with its name and effort levels.
-  const planningModelChoices = (): Array<CanvasPlanModelChoice & { requiresUpgrade?: boolean }> => {
+  // The chat models a plan may put a node on: this canvas's palette less the models only a user may choose
+  // (userChosenModels.ts planModelsOf): the planner sees no other, and a plan's set_model resolves against the same list.
+  const planningModels = () => {
     const live = paletteRef.current; const here = currentSaaSCanvas();
-    if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId) return [];
-    return live.models.map(entry => ({ runtime: entry.runtime, model: entry.model, available: entry.available, name: entry.displayName || entry.label,
-      ...(entry.efforts ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { requiresUpgrade: true } : {}) }));
+    if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId) return planModelsOf([]);
+    return planModelsOf(live.models);
   };
   // `shown`: the reader's own words for the conversation, where the planner is given more (a hand-over's request).
   const sendPlanningMessage = async (request?: string, resume = false, shown?: string) => {
@@ -3070,7 +3071,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // The planner sees the models a node can run (each once, where AwwO runs it) and how each node's last run ended,
       // so it can change a node's model and act on a failure the reader asks it to fix: what happened, not the note's
       // advice to the reader.
-      const planModels = planningModelChoices();
+      const modelChoices = planningModels(); const planModels = modelChoices.choices;
       const planRuns = Object.fromEntries(Object.entries(runs).map(([id, run]) => [id,
         { state: run.state, ...(run.detail ? { detail: failureReason(t, run.detail, locale) || run.detail } : {}) }]));
       const jev = !resume && plannerProvider === 'jev'
@@ -3087,7 +3088,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, { choices: planModels }, currentSaaSCanvas() !== null);
+      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own).
       // ...except a node the plan itself put on a model, the workspace default included.
       const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc,

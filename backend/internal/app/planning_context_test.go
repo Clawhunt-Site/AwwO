@@ -219,9 +219,9 @@ func TestPostgresPlanRoomCountsTheOperatorPlannerModel(t *testing.T) {
 	}
 }
 
-// A DeepSeek planner model the workspace may not use takes none of its plans (explicitOnlyProvider): a plan too large
-// for the default model is told the default model's room, not that model's; one whose allowlist names it, that model's.
-func TestPostgresPlanRoomLeavesOutAWithheldPlannerModel(t *testing.T) {
+// A DeepSeek planner model never plans (userChosenProvider), so it takes none of a workspace's plans, whatever its
+// allowlist names: a plan too large for the default model is told the default model's room, not that model's.
+func TestPostgresPlanRoomLeavesOutADeepSeekPlannerModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test",
@@ -249,10 +249,9 @@ func TestPostgresPlanRoomLeavesOutAWithheldPlannerModel(t *testing.T) {
 		return roomOf(t, h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan",
 			map[string]string{"prompt": "Build a data product", "context": strings.Repeat("a", 70000), "operationId": "withheld-room"}, 413))
 	}
-	if withheld := roomFor("plan-room-withheld@awwo.invalid", `ARRAY['test-model']`); withheld != 0 {
-		t.Fatalf("room %d where the planner model is withheld and the default model has none", withheld)
-	}
-	if granted := roomFor("plan-room-granted@awwo.invalid", `ARRAY['test-model','deepseek-flash']`); granted <= 4000 || granted >= 60000 {
-		t.Fatalf("room %d where the workspace may use the planner model", granted)
+	for name, allowed := range map[string]string{"without-it": `ARRAY['test-model']`, "naming-it": `ARRAY['test-model','deepseek-flash']`, "unrestricted": `NULL`} {
+		if room := roomFor("plan-room-"+name+"@awwo.invalid", allowed); room != 0 {
+			t.Fatalf("%s: room %d where the planner model is a DeepSeek one and the default model has none", name, room)
+		}
 	}
 }

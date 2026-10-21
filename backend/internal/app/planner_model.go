@@ -170,18 +170,18 @@ func (a *App) plannerModelRefusal(ctx context.Context, q pgx.Tx, tid string, inp
 
 // plannerModelSnapshot probes the operator's planner model for a workspace's canvas plan (createRun) under its own
 // catalog: the unrestricted entitlement it is probed under must never be the one a fallback to the default model freezes
-// for the workspace. withheld: it is a DeepSeek one (explicitOnlyProvider) the workspace may not use.
-func (a *App) plannerModelSnapshot(ctx context.Context, entitlement modelEntitlement, runtime, instructions string, team *nodeTeam) (executionSnapshot, bool, error) {
+// for the workspace. withheld: it is a model only a user may choose (userChosenProvider), which never plans.
+func (a *App) plannerModelSnapshot(ctx context.Context, runtime, instructions string, team *nodeTeam) (executionSnapshot, bool, error) {
 	unrestricted, _ := newModelEntitlement(false, nil)
 	s, err := a.runtimeSnapshot(ctx, unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team)
-	return s, err == nil && s.Health.modelProvider(s.Model) == explicitOnlyProvider && !entitlement.grants(s.Model), err
+	return s, err == nil && s.Health.userChosenOnly(s.Model), err
 }
 
 // plannerModelTakes says whether the operator's planner model would run a shorter plan of the workspace, as far as its
 // size leaves aside: it can be probed and is not withheld. A plan refused as too large is offered that model's room only
 // then (planning.go plannerModelRoom).
-func (a *App) plannerModelTakes(ctx context.Context, entitlement modelEntitlement, runtime, instructions string, team *nodeTeam) bool {
-	_, withheld, err := a.plannerModelSnapshot(ctx, entitlement, runtime, instructions, team)
+func (a *App) plannerModelTakes(ctx context.Context, runtime, instructions string, team *nodeTeam) bool {
+	_, withheld, err := a.plannerModelSnapshot(ctx, runtime, instructions, team)
 	return err == nil && !withheld
 }
 

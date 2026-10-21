@@ -9,7 +9,8 @@ DeepSeek API（`https://api.deepseek.com`，OpenAI 兼容）是 Gate-only 生产
   缓存命中输入 $0.006；北京时间工作日 9–12 点、14–18 点为高峰，其余时段半价。Claude Haiku 4.5 是 $1 / $5，Opus 5.5 是 $4 / $20。
 - DeepSeek 自动做前缀缓存，不用配置（规划器的固定指令在第二次调用起就按命中价计）。
 - 支持工具调用、JSON 输出（`json_object`）、看图、1M 上下文、单次最多 384K 输出、并发 2500。**不支持** `json_schema` 结构化输出（400）。
-- 数据在 DeepSeek（中国）处理。隐私条款没有列出 DeepSeek，开放给用户是业主待定事项，所以现在只有运营方自己的工作区能用（见「谁能用」）。
+- 数据在 DeepSeek（中国）处理。ClawHunt 隐私政策第 08 条（2026-10-21 更新）写明了这一点，并承诺只有选了 DeepSeek 模型的请求才发给它，
+  AwwO 自己从不选它（见「谁能用」）。
 
 ## 配置
 
@@ -53,29 +54,46 @@ JS worker（`AWWO_OPENAI_AGENTS_MODELS_JSON`，生产的 sandbox worker 跑这�
   但没有档案时，仍逐字节是原来的 `llmgateOnly: true`。API 拒绝列表外的 DeepSeek 模型，也拒绝藏在 Gate-only 声明后面的 DeepSeek 模型。
 - 重定向即失败，不会把请求发到别处：Python worker 对 DeepSeek 的请求不跟随重定向；JS 与 Pi 的运行和托管执行的请求本来就是 `redirect: 'error'`。
 
-## 谁能用（API 的显式授权规则）
+## 谁能用（2026-10-21 起所有用户；只在有人选了它时运行）
 
-API 只把 DeepSeek 模型（worker 目录里 provider 为 `deepseek` 的模型）给两类工作区：模型白名单里写了它的，和没有白名单、由平台管理员拥有的
-（运营方自己的，`operator_workspace.go`；有白名单的管理员工作区也要白名单写了它）。没有白名单的其他工作区本来能看到所有模型，但看不到 DeepSeek，
-也运行不了（`tenant_models.go` `explicitOnlyProvider`，和即梦的显式授权同一个思路）。授权看工作区不看人：管理员拉进自己工作区的成员，
-在那里也能用 DeepSeek。三处把关：
+业主 2026-10-21：「先改隐私条款，然后对所有用户开放 DeepSeek」。ClawHunt 隐私政策第 08 条写明 DeepSeek（杭州深度求索，在中国境内处理）
+之后，DeepSeek 模型（worker 目录里 provider 为 `deepseek` 的模型）和其他模型一样按工作区的模型白名单提供：没有白名单的工作区都能用，
+有白名单的要白名单写了它。生产上新工作区的列表（`AWWO_NEW_WORKSPACE_ALLOWED_MODELS`）和现有的白名单都加了 `deepseek-flash`。
+（之前只给运营方自己的工作区，见 `5acdbe38`。）
 
-- 每次准入（运行、画布图的每个节点、节点设置、托管执行的模型列表、助手路由）读到的模型目录都先按这条规则过滤；
-  过滤等于一份「除 DeepSeek 外全部模型」的白名单，worker 自己的默认模型在 DeepSeek 上时也一样被挡住。目录里没有 DeepSeek 模型时什么都不变。
-- 规划器的目录是运营方自己的（不按工作区过滤），所以另外两处：`AWWO_PLANNER_MODEL` 是 DeepSeek 模型时，不能用它的工作区回到默认模型规划；
-  附图时换成能看图的模型，也跳过它不能用的 DeepSeek 模型（`vision.go`）。
-- 每次模型调用前的最后一道门（`teams.go` `reserveInvocation`）对 DeepSeek 调用再查一次实时的白名单和所有者，不管谁付费：
-  运行途中撤销授权（白名单清成不限制），下一次 DeepSeek 调用就被拒（`model_not_allowed`）。
+条款承诺：只有选了 DeepSeek 模型的请求才发给它，由用户自己选，或用户让画布助手改模型时由助手选；AwwO 的规划、助手消息路由和它自己的
+默认模型从不用它，也从不自己把请求换到它上面。所以 AwwO 自己从不选它（`tenant_models.go` `userChosenProvider`）：
 
-2026-10-21 生产：没有白名单的工作区 7 个，4 个是管理员的，3 个是 9 月的早期用户（9 月 30 日后没用过）；
-其余 202 个的白名单都没写 DeepSeek。所以现在只有运营方自己的工作区能用。
+- 空选择（节点、成员、托管执行没选模型）解析默认模型时跳过它：worker 自己的默认模型在 DeepSeek 上时不用，替补也跳过它；
+  没有别的模型可用就是没有默认（`model_unavailable`），不会退到 DeepSeek。
+- 附图时换成能看图的模型，从不换到 DeepSeek（`vision.go` `seeingModels`）。
+- `AWWO_PLANNER_MODEL` 是 DeepSeek 模型时，规划一律回到默认模型（`planner_model.go` `plannerModelSnapshot`）；每次模型调用前的最后一道门
+  （`teams.go` `reserveInvocation`）也拒绝记成运营方自付的 DeepSeek 调用（`model_not_allowed`）。
+- 空模型只在 worker 的默认模型不在 DeepSeek 上时才原样发给 worker（让它用自己的默认模型）；在 DeepSeek 上时，有白名单的工作区
+  按白名单换成别的模型（同上），没有白名单或白名单里没有别的模型就拒绝（`model_unavailable`；`teams.go` `modelLimits`）。
+- 网页自己做的选择也一样（`apps/web/src/canvas/userChosenModels.ts`；API 在运行时目录和托管执行目录里把这种模型标成 `userChosen`，
+  worker 没列出的、只能由用户选的默认模型也列出来并标上）：直接执行在读者没选模型时用的第一个模型、任务因额度被拒后建议的默认模型都
+  跳过它（没有别的模型就不选，等读者自己选，`useManagedExecution.ts`、`AssistantExecution.tsx`）；Jev 给新角色分配的候选模型里没有它
+  （`jevPlanning.ts`）；画布规划能用的模型列表里没有它，`set_model` 也只能在这个列表里找（`CanvasSurface.tsx`）；节点改进沙盒时换的
+  模型也跳过它（`InspectorPanel.tsx` `withSandbox`）。不管请求里写了什么都这样：只有读者自己在模型选择器里选，才会用到它。
+- 只有认得这个标记的页面才看得到这种模型：网页经 `api()` 发的请求都带 `X-Awwo-Model-Marks: userChosen`（`apps/web/src/saas/api.ts`；
+  两个模型目录都经它读），运行时目录和托管执行目录对没带它的客户端不列这种模型（`tenant_models.go` `listedFor`）。发布前打开、还没刷新的旧页面会自己挑模型
+  （第一个模型、Jev、规划器的列表），这样它根本看不到 DeepSeek。
+- 用户自己选的（节点、Agent、团队成员、托管执行、账户默认模型）照常运行；白名单照常每次调用都查，运行途中从白名单拿掉，下一次调用就被拒。
+  条款也允许用户让画布助手把模型改成它，但网页分不清一条请求是不是真在要 DeepSeek（「别用 DeepSeek」也写了它的名字），所以画布助手
+  目前不会选它：让它改用 DeepSeek 时，节点保持原样，回复说明这个模型只能由用户自己在节点设置里选（`canvasPlan.ts`，模型列表来自
+  `userChosenModels.ts` `planModelsOf`）；Jev 遇到要求它的目标、而工作区还有别的可用模型时也这样说（`jevPlanning.ts`；只剩这种模型时
+  Jev 只说工作区没有可用于执行节点的模型）。
 
-业主更新隐私条款、决定开放后：把 `deepseek-flash` 加进 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 并补写现有白名单；要让没有白名单的工作区也看到、
-或把规划器、默认模型换成 DeepSeek（它们处理的是用户的内容），再去掉这条规则。
+要让规划器或默认模型用 DeepSeek，先改条款，再改这几处。撤回：从 worker 的模型目录拿掉 `deepseek-flash`（每个 worker 空闲时重启一次）
+对所有工作区同时生效，前提是 worker 自己的默认模型不在 DeepSeek 上（worker 会把自己的默认模型补回目录；生产的默认模型都不是）；
+只撤某些工作区就改它们的白名单。
 
-用量计算：DeepSeek 模型不在 `AWWO_ROUTE_FREE_MODELS` 里时，按 `gate` 路线计（后台标签是「Claude / GPT」）；要按免费模型计就加进那个列表。
-付费套餐要在 `AWWO_MODEL_PRICING_JSON` 里给每个运行时的 DeepSeek 模型定价（官方价 × 1.5），否则付费用户选它会被 `model_unpriced` 拒绝；
-白名单里有它时（启用付费结账）启动检查也要求定价。
+用量计算：DeepSeek 模型不在 `AWWO_ROUTE_FREE_MODELS` 里，按 `gate` 路线计（后台标签是「Claude / GPT」，与 Gate 上的模型共用每日上限）；
+要按免费模型计就加进那个列表。付费套餐按 `AWWO_MODEL_PRICING_JSON` 扣积分（官方价 × 1.5）；新工作区列表（`AWWO_NEW_WORKSPACE_ALLOWED_MODELS`）里有它、启用付费结账时，启动检查要求
+两个运行时都有定价。生产定价（2026-10-21）：`pi:deepseek-flash` 与 `openai-agents:deepseek-flash` 都是官方高峰价，输入 `300000`、输出
+`1200000` 微美元 / 百万 token，缓存命中按输入价计（`included_in_input_rate`），思考按输出计，逐项向上取整；版本
+`awwo-list-2026-10-06+haiku-4-5+deepseek-flash`。
 
 ## 思考
 
@@ -91,7 +109,8 @@ DeepSeek 默认先思考再回答，思考 token 计入 `max_tokens` 和输出�
 **工具循环里不思考。** DeepSeek 要求：带 `tools` 的请求，之前每一轮的 `reasoning_content` 都要原样回传，否则返回 400
 （官方 thinking_mode 文档；2026-10-21 实测暂时放行，但不能依赖）。AwwO 有两条多次调用的工具循环保存不了它：
 托管执行（线程里不保留推理，`gatherChatStream` 跳过它）和 sandbox 的项目执行（固定版本的 Agents SDK 不收也不回传
-`reasoning_content`）。所以这两条路上 DeepSeek 的请求一律带 `thinking: {"type": "disabled"}`；调用方明确要求的思考强度（`none` 以外）
+`reasoning_content`）。所以这两条路上带工具的 DeepSeek 请求一律带 `thinking: {"type": "disabled"}`（托管执行不带工具的那次调用照常
+可以思考，`apps/computer-model.ts`）；调用方明确要求的思考强度（`none` 以外）
 直接拒绝（托管执行 `EFFORT_NOT_SUPPORTED`，项目执行 `MODEL_REQUEST_REJECTED`），不会悄悄丢掉；档案自己的默认强度没人要求，随思考一起不发。
 只调用一次模型的路径（Pi 的运行不带工具，Agents 节点 `max_turns=1`）照常思考；它们的对话历史里没有 `reasoning_content`，
 DeepSeek 接受（2026-10-21 实测 7 种组合全部 200，见验收记录）。
@@ -112,6 +131,14 @@ fetch 解压后的正文，不受影响。
 
 回滚倒过来：先去掉 worker 的档案和策略，再去掉 API 环境里的 `deepseek`，最后才能换回旧二进制。环境里有 `deepseek` 时，旧版 API 和旧版 worker
 都会拒绝启动。
+
+对所有用户开放的那一版（2026-10-21）先上 API、再上网页，最后才改设置和白名单。网页切换（`host/switch-web.sh`）的 `EXPECT_API`
+要填这一版自己的 SHA，这样新 API 不在服务时它不切换。
+新 API 配旧页面没问题：旧页面不带 `X-Awwo-Model-Marks`，新 API 不给它列 DeepSeek。反过来不行：旧 API 不标 `userChosen`，照旧把 DeepSeek
+列给运营方自己的工作区和白名单写了它的工作区，新页面就会把它当成可以自己选的模型。回滚倒过来：先回滚网页，再从现有白名单和
+`AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 拿掉 `deepseek-flash`，最后才回滚 API（旧版 API 附图时也可能把运行换到白名单写了的 DeepSeek 模型上）。
+这样回到这一版之前的状态：旧版 API 仍把 DeepSeek 列给平台管理员自己的、没有白名单的工作区，旧页面在那里会自己选它。要连这也避免，
+回滚 API 之前先从 worker 的模型目录拿掉 `deepseek-flash`（每个 worker 空闲时重启一次；worker 的默认模型不能在 DeepSeek 上）。
 
 worker 声明 `deepseek` 后，健康信息的 `platformProviders` 变成 `["llmgate", …, "deepseek"]`；主机脚本（`host/switch-api.sh` 等）的 worker 检查
 接受这几种列表，旧的发布工具若只认 `["llmgate", "bedrock"]` 要改那一行。

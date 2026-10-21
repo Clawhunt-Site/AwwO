@@ -168,9 +168,9 @@ func showablePicture(item *uploadAttachment) bool {
 // a workspace with route limits (routes non-nil: a free one) a model whose route has no call left today, or is closed
 // to it, is passed over, asked without locks, so the switch does not turn the message into a premium_quota_exceeded
 // refusal; so is a plan-only model for a workspace without a paid plan that no platform administrator owns
-// (plan_only_models.go), and a DeepSeek model the workspace may not use (explicitOnlyProvider), which a planner run's
-// catalogue, the operator's own, still lists. The reservation still decides. With no such model nothing changes and
-// the pictures are described in words.
+// (plan_only_models.go). A model only a user may choose (userChosenProvider) is never one this moves a run to
+// (seeingModels). The reservation still decides. With no such model nothing changes and the pictures are described
+// in words.
 // It must run before freezeVisionImages.
 func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, routes []byte, s *executionSnapshot, attached *uploadAttachments) error {
 	if attached == nil || s.Team != nil || s.Workspace != nil || s.Computer != nil || s.Media != nil ||
@@ -183,22 +183,7 @@ func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, ro
 	// A plan-only model (plan_only_models.go) is passed over the same way for a workspace without a paid plan that no
 	// platform administrator owns; whether that holds is read once, only if such a model is a candidate.
 	planOnlyKnown, planOnlyOutside := false, false
-	// So is a DeepSeek model (explicitOnlyProvider) the workspace may not use: a planner run's catalogue is the
-	// operator's own, not stamped with the workspace's entitlement, which is read once, only if such a model is a candidate.
-	var entitlement *modelEntitlement
 	for _, model := range a.seeingModels(s.Health, s.Model) {
-		if s.Health.modelProvider(model) == explicitOnlyProvider {
-			if entitlement == nil {
-				read, e := tenantModelEntitlement(ctx, tx, tid)
-				if e != nil {
-					return e
-				}
-				entitlement = &read
-			}
-			if !entitlement.grants(model) {
-				continue
-			}
-		}
 		if a.cfg.planOnlyModel(model) {
 			if !planOnlyKnown {
 				plan, e := ownerPlan(ctx, tx, tid, false)
@@ -236,7 +221,8 @@ func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, ro
 func (a *App) seeingModels(h piHealth, current string) []string {
 	var free, planner, rest []string
 	for _, m := range h.Models {
-		if m.ID == current || !h.modelSeesImages(m.ID) {
+		// A model only a user may choose (userChosenProvider) is never one a run is moved to.
+		if m.ID == current || !h.modelSeesImages(m.ID) || h.userChosenOnly(m.ID) {
 			continue
 		}
 		if _, _, ok := h.modelLimits(m.ID); !ok {

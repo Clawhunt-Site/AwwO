@@ -112,6 +112,41 @@ describe('the canvas assistant’s tasks', () => {
     expect(screen.getByText('确认输出格式')).toBeVisible();
   });
 
+  // ClawHunt's privacy policy (clause 08): AwwO never moves a request to DeepSeek by itself, so the model a task starts
+  // on when the reader picked none is never one only a user may choose (userChosen).
+  it('never starts a task on a model only a user may choose that nobody picked, and keeps it there to pick', async () => {
+    const flash = { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', runtime: 'pi', efforts: [], userChosen: true };
+    const serve = (models: unknown[]) => vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime')
+      ? { ...runtime, models } : url.endsWith('/computer-runs') ? { items: [] } : detail)));
+    serve([flash, runtime.models[0]]);
+    render(view());
+    // Listed first, it is passed over for the next model.
+    expect(await composerReady()).toBeInTheDocument();
+    cleanup();
+    localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh');
+    serve([flash]);
+    render(view());
+    // Alone, nothing is chosen until the reader picks it, and then it is the reader's.
+    expect(await screen.findByTitle('选择画布助手的模型')).toBeInTheDocument();
+    expect(screen.getByLabelText('画布助手的模型')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('pi', 'deepseek-flash') } });
+    expect(await screen.findByTitle('画布助手用：DeepSeek V4.1 Flash')).toBeInTheDocument();
+  });
+
+  it('offers the default model a task starts on after a premium refusal, never one only a user may choose', async () => {
+    const flash = { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', runtime: 'pi', efforts: [], userChosen: true };
+    const models = { ...runtime, models: [flash, { id: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6', runtime: 'pi', efforts: [] }, { id: 'claude-opus-5', label: 'Claude Opus 5', runtime: 'pi', efforts: [] }] };
+    const refused = { ...detail, status: 'failed', error: 'premium_quota_exceeded', canRespond: false, canCancel: false, approvals: [], messages: [] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? models
+      : url.endsWith('/computer-runs') ? { items: [{ ...summary, status: 'failed' }] }
+        : url.endsWith('/upgrade-interest') ? { recorded: true, clicks: 1 } : refused)));
+    render(view());
+    await screen.findByTitle('画布助手用：qwen3.8-27b-p6');
+    fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('pi', 'claude-opus-5') } });
+    expect(await screen.findByRole('button', { name: '改用默认模型 qwen3.8-27b-p6（免费）' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /DeepSeek/ })).toBeNull();
+  });
+
   it('offers the paid plans and the free default model when a direct task is refused for premium', async () => {
     const models = { ...runtime, models: [{ id: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6', runtime: 'pi', efforts: [] }, { id: 'claude-opus-5', label: 'Claude Opus 5', runtime: 'pi', efforts: [] }] };
     const refused = { ...detail, status: 'failed', error: 'premium_quota_exceeded', canRespond: false, canCancel: false, approvals: [], messages: [] };

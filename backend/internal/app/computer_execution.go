@@ -274,6 +274,7 @@ func (a *App) computerRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	models = listedFor(w, r, models)
 	reason := ""
 	if healthErr != nil {
 		reason = "Managed execution service is not ready"
@@ -327,10 +328,19 @@ func computerModelChoices(runtime string, h piHealth) []map[string]any {
 			label = m.ID
 		}
 		efforts := append([]string{}, m.ReasoningEfforts...)
-		models = append(models, map[string]any{"id": m.ID, "label": label, "runtime": runtime, "efforts": efforts})
+		model := map[string]any{"id": m.ID, "label": label, "runtime": runtime, "efforts": efforts}
+		// A task never starts on such a model unless the reader picked it (userChosenProvider; apps/web useManagedExecution.ts),
+		// and only a client that says so is shown one (listedFor, computerRuntime).
+		if h.userChosenOnly(m.ID) {
+			model["userChosen"] = true
+		}
+		models = append(models, model)
 	}
 	if id := h.defaultModel(); id != "" && !seen[id] {
 		models = append(models, map[string]any{"id": id, "label": id, "runtime": runtime, "efforts": []string{}})
+	} else if h.Model != "" && !seen[h.Model] && h.userChosenOnly(h.Model) && h.permits(h.Model) {
+		// A worker default only a user may choose, left out of its list: offered to pick, never started on by itself.
+		models = append(models, map[string]any{"id": h.Model, "label": h.Model, "runtime": runtime, "efforts": []string{}, "userChosen": true})
 	}
 	return models
 }

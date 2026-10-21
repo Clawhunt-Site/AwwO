@@ -30,11 +30,16 @@ function endSession(sentUnder: number): void {
   for (const listener of [...sessionEndListeners]) listener();
 }
 const ENDED_MESSAGE = 'Your session expired. Sign in again.';
+/** Tells the API's model listings that this page honours their userChosen mark: it never picks such a model by itself
+ *  (canvas/userChosenModels.ts). Without it they leave such models out, so a page of an earlier release, which would,
+ *  is never shown one (backend tenant_models.go listedFor). */
+export const MODEL_MARKS_HEADER = 'X-Awwo-Model-Marks';
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   if (sessionEnded && !path.startsWith('/auth/')) throw new SaaSApiError(401, 'unauthorized', ENDED_MESSAGE);
   const sentUnder = sessionGeneration;
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
+  headers.set(MODEL_MARKS_HEADER, 'userChosen');
   if (init.body) headers.set('Content-Type', 'application/json');
   const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);

@@ -1,6 +1,7 @@
 import type { UiLocale } from '../locale';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
 import { readModelPalette, type ModelPaletteSelection } from './modelPalette';
+import { automaticChoices } from './userChosenModels';
 import { evaluateJev, jevMessage, readJevStatus, type JevEvaluation, type JevQuestion, type JevStatus, type JevUsage } from '../saas/jev';
 import { getAgentTemplates } from './agentTemplates';
 import { getTeamMarketAgents, createMarketplaceRoleNode } from './teamMarketAgents';
@@ -116,8 +117,9 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     check();
     const reason = unavailable(status, locale);
     if (reason) throw new Error(reason);
-    // Rank only newly planned roles. Existing nodes and their model selections are untouched.
-    const models = palette.models.filter(model => model.available).sort((a, b) => Number(b.execution === 'workspace') - Number(a.execution === 'workspace'));
+    // Rank only newly planned roles. Existing nodes and their model selections are untouched. Jev assigns the models
+    // itself, so never one only a user may choose (userChosenModels.ts).
+    const models = automaticChoices(palette.models).filter(model => model.available).sort((a, b) => Number(b.execution === 'workspace') - Number(a.execution === 'workspace'));
     if (!models.length) fail(locale, '工作区没有可用于执行节点的模型。', 'This workspace has no available node execution model.');
     if (models.length > 255) fail(locale, '当前可用模型超过 Jev 候选上限，请先缩小工作区模型目录。', 'The available model catalog exceeds the Jev candidate limit. Narrow the workspace catalog first.');
     const availableRoles = roles(locale);
@@ -190,7 +192,11 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     }
     usedConfidence.push(second!.answers.compatibility.confidence);
     if (second!.answers.compatibility.choice === 'unavailable') {
-      return finish({ version: 1, summary: jevMessage(locale, '当前工作区可用模型不能满足指定模型要求，未替换模型或修改画布。请先启用所需模型，或明确选择其他可用模型。', 'The available workspace models do not meet the requested model requirements. No model was substituted and the canvas was not changed. Enable the required model or choose an available alternative.'), operations: [] }, []);
+      // A model only a user may choose is never among Jev's candidates, so when the workspace has one, say who picks it.
+      const own = palette.models.find(model => model.userChosen === true && model.available);
+      const name = own ? own.displayName || own.label : '';
+      return finish({ version: 1, summary: jevMessage(locale, '当前工作区可用模型不能满足指定模型要求，未替换模型或修改画布。请先启用所需模型，或明确选择其他可用模型。', 'The available workspace models do not meet the requested model requirements. No model was substituted and the canvas was not changed. Enable the required model or choose an available alternative.')
+        + (own ? jevMessage(locale, `「${name}」这类模型只能由你自己在节点设置里选，Jev 不替你分配。`, ` Only you can choose a model such as “${name}”, in a node’s settings; Jev does not assign it.`) : ''), operations: [] }, []);
     }
     const sequential = selected.length > 1 && second!.answers.topology.choice === 'sequential';
     const ordered = sequential ? orders[Number(second!.answers.order.choice.slice('order_'.length))].map(key => selected.find(role => role.key === key)!) : selected;

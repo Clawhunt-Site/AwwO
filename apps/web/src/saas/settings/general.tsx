@@ -68,7 +68,7 @@ function DefaultModel({ identity }: { identity: Identity }) {
   const currentKey = current ? executionModelKey(current.runtime, current.model) : '';
   const listed = (models || []).some(item => executionModelKey(item.runtime, item.id) === currentKey);
   return <SettingsCard title={t('画布助手默认模型', 'Canvas assistant default model')}
-    description={t('画布助手在一个工作区里还没被你选过模型时，先用这里的模型；工作区不提供它时，仍用服务的第一个模型。在画布里另选的模型照旧记在那个工作区。', 'Where you have not picked a model for the canvas assistant in a workspace yet, it starts with this one; a workspace that does not offer it keeps the service’s first model. A model you pick on a canvas is still kept for that workspace.')}>
+    description={t('画布助手在一个工作区里还没被你选过模型时，先用这里的模型；工作区不提供它时，仍用服务列表里的第一个模型（只能由你自己选的模型除外）。在画布里另选的模型照旧记在那个工作区。', 'Where you have not picked a model for the canvas assistant in a workspace yet, it starts with this one; a workspace that does not offer it keeps the first model on the service’s list (other than models only you can choose). A model you pick on a canvas is still kept for that workspace.')}>
     {saved.status}
     {saved.preferences && <>
       <TenantPicker identity={identity} tenant={tenant} onChange={setTenant} label={t('按这个工作区的模型列表选择', 'Choose from this workspace’s models')} />
@@ -79,7 +79,7 @@ function DefaultModel({ identity }: { identity: Identity }) {
           const [runtime, model] = value ? JSON.parse(value) as [string, string] : ['', ''];
           void saved.save({ ...saved.preferences!, defaultModel: value ? { runtime, model } : null });
         }}>
-          <option value="">{t('不设默认（用服务的第一个模型）', 'No default (the service’s first model)')}</option>
+          <option value="">{t('不设默认（用服务列表里的第一个模型）', 'No default (the first model on the service’s list)')}</option>
           {current && !listed && <option value={currentKey}>{current.model}{t('（这个工作区不提供）', ' (not offered in this workspace)')}</option>}
           {(models || []).map(item => <option key={executionModelKey(item.runtime, item.id)} value={executionModelKey(item.runtime, item.id)}>{item.label || item.id}{item.requiresUpgrade ? t('（需升级套餐）', ' (needs an upgrade)') : ''}</option>)}
         </select>

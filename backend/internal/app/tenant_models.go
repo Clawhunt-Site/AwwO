@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"sort"
 	"strings"
 	"unicode"
@@ -16,22 +17,19 @@ import (
 // allowlist can never accidentally widen access. tenant is the workspace the
 // entitlement was read for (tenantModelEntitlement), "" when it was built without
 // one; only operator grants keyed by workspace (AWWO_JIMENG_WORKSPACES) read it.
-// operator says a platform administrator owns that workspace (operator_workspace.go);
-// it is read only for an unrestricted one, the only kind withholding reads it.
 type modelEntitlement struct {
-	allowed  *[]string
-	tenant   string
-	operator bool
+	allowed *[]string
+	tenant  string
 }
 
 const maxAllowedModels = 64
 
-// The DeepSeek API's models (provider "deepseek", apps/bedrock-catalog.ts) are offered only explicitly: to a
-// workspace whose allowlist names them, or to one a platform administrator owns. An unrestricted workspace alone is
-// not enough, the way it is not for Jimeng's (media_setup.go): the DeepSeek API processes what it is sent outside
-// the processors AwwO's privacy clause names, and whether users' work may go there is the owner's decision, pending
-// on 2026-10-21. Every other model of an unrestricted workspace's catalogue stays as it was.
-const explicitOnlyProvider = "deepseek"
+// The DeepSeek API's models (provider "deepseek", apps/bedrock-catalog.ts) are offered like any other model, but run
+// only where someone chose them: AwwO never picks one by itself, not as a default (defaultModel), not when pictures
+// call for a model that sees (vision.go), and not as the planner (runs.go). ClawHunt's privacy policy (clause 08,
+// 2026-10-21) promises exactly that: a request goes to DeepSeek, which processes it in China, only when a DeepSeek
+// model is selected for it, by the user or by the canvas assistant at the user's request.
+const userChosenProvider = "deepseek"
 
 var errModelNotAllowed = errors.New("model_not_allowed")
 var errMalformedAllowlist = errors.New("workspace model allowlist is malformed")
@@ -43,19 +41,6 @@ func deniedModels() modelEntitlement {
 	return modelEntitlement{allowed: &empty}
 }
 func (e modelEntitlement) unrestricted() bool { return e.allowed == nil }
-
-// withholds reports whether a stamped catalog loses the explicit-only models: an unrestricted workspace read from its
-// row (tenant set) that no platform administrator owns. One built without a workspace withholds nothing.
-func (e modelEntitlement) withholds() bool { return e.allowed == nil && e.tenant != "" && !e.operator }
-
-// grants reports whether an explicit-only model may run for this entitlement's workspace: its allowlist names it, or it
-// has none and a platform administrator owns it. One not bound to a workspace (forWorkspace) grants nothing.
-func (e modelEntitlement) grants(model string) bool {
-	if e.allowed != nil {
-		return permittedModel(*e.allowed, model)
-	}
-	return e.tenant != "" && e.operator
-}
 func (e modelEntitlement) permits(model string) bool {
 	return e.allowed == nil || permittedModel(*e.allowed, model)
 }
@@ -76,28 +61,8 @@ func permittedModel(allowed []string, model string) bool {
 // Stamping only ever removes entries, so re-stamping an already stamped catalog
 // with a wider entitlement cannot resurrect a model the first pass dropped. That
 // direction is the safe one and it is why a persisted snapshot may be restamped.
-//
-// A workspace that withholds the explicit-only models is stamped as if its
-// allowlist named every other model of the catalog, so the worker's own default
-// (h.Provider is its provider) is held to it like any other model, a restamp
-// keeps it held, and every decision downstream reads one kind of restriction. A
-// catalog without such a model is left exactly as it was.
 func (e modelEntitlement) apply(h piHealth) piHealth {
 	h.Allowed = nil
-	if e.withholds() {
-		models, list := []piModel{}, []string{}
-		for _, m := range h.Models {
-			if m.Provider != explicitOnlyProvider {
-				models, list = append(models, m), append(list, m.ID)
-			}
-		}
-		if len(models) == len(h.Models) && h.Provider != explicitOnlyProvider {
-			return h
-		}
-		sort.Strings(list)
-		h.Models, h.Allowed = models, &list
-		return h
-	}
 	if e.allowed == nil {
 		return h
 	}
@@ -136,18 +101,62 @@ func (h piHealth) permits(model string) bool {
 // catalog, with nothing visible to the operator. The list is canonically ordered both on
 // write and on read, so this is stable even for a row written outside the API, and it is
 // the operator's own list rather than the provider's.
+//
+// An empty selection is nobody's choice, so it never resolves to a model only a user may
+// choose (userChosenProvider): not to a worker default of that provider, and not to one as
+// the substitute; with nothing else entitled it resolves to no model at all.
 func (h piHealth) defaultModel() string {
-	if h.Allowed == nil || h.permits(h.Model) {
+	if (h.Allowed == nil || h.permits(h.Model)) && !h.userChosenOnly(h.Model) {
 		return h.Model
+	}
+	if h.Allowed == nil {
+		return ""
 	}
 	for _, id := range *h.Allowed {
 		for _, m := range h.Models {
-			if m.ID == id {
+			if m.ID == id && !h.userChosenOnly(id) {
 				return id
 			}
 		}
 	}
 	return ""
+}
+
+// userChosenOnly reports whether a model of this catalog runs only where someone chose it (userChosenProvider). The
+// worker's own default may be missing from the Pi worker's list, or listed without a provider (probeRuntime accepts
+// both), so its provider is then the catalog's own.
+func (h piHealth) userChosenOnly(model string) bool {
+	provider := h.modelProvider(model)
+	if provider == "" && model != "" && model == h.Model {
+		provider = h.Provider
+	}
+	return provider == userChosenProvider
+}
+
+// modelMarksHeader is how a client asking for a model listing says which marks it honours. The page that leaves a
+// userChosen model out of every choice it makes by itself sends "userChosen" (apps/web saas/api.ts); any other client,
+// a page of an earlier release still open in a tab among them, might pick such a model by itself, so it is not shown
+// one (listedFor).
+const modelMarksHeader = "X-Awwo-Model-Marks"
+
+// listedFor is a listing's models for the client asking: without the models only a user may choose, unless the client
+// honours their mark. The reply varies with modelMarksHeader.
+func listedFor(w http.ResponseWriter, r *http.Request, models []map[string]any) []map[string]any {
+	w.Header().Add("Vary", modelMarksHeader)
+	for _, value := range r.Header.Values(modelMarksHeader) {
+		for _, mark := range strings.Split(value, ",") {
+			if strings.TrimSpace(mark) == "userChosen" {
+				return models
+			}
+		}
+	}
+	listed := []map[string]any{}
+	for _, m := range models {
+		if chosen, _ := m["userChosen"].(bool); !chosen {
+			listed = append(listed, m)
+		}
+	}
+	return listed
 }
 
 // validModelID mirrors what probeRuntime accepts from a worker (any non-empty id
@@ -197,26 +206,10 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 		return deniedModels(), e
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
-	if e != nil {
-		return entitlement, e
+	if e == nil {
+		entitlement.tenant = tid
 	}
-	return entitlement.forWorkspace(ctx, q, tid)
-}
-
-// forWorkspace binds an entitlement read from workspace tid's row to it: the operator grants keyed by workspace read
-// tenant, and withholding (explicitOnlyProvider) reads whether a platform administrator owns it. Only an unrestricted
-// workspace's owner is read, so a restricted one costs no second read; an unreadable owner fails closed, as an
-// unreadable allowlist does. Every admission that reads the row itself binds through here.
-func (e modelEntitlement) forWorkspace(ctx context.Context, q querier, tid string) (modelEntitlement, error) {
-	e.tenant = tid
-	if e.allowed == nil {
-		operator, err := operatorWorkspace(ctx, q, tid)
-		if err != nil {
-			return deniedModels(), err
-		}
-		e.operator = operator
-	}
-	return e, nil
+	return entitlement, e
 }
 
 // A graph node freezes its snapshot when the graph is admitted, so the catalog it
@@ -226,13 +219,10 @@ func (e modelEntitlement) forWorkspace(ctx context.Context, q querier, tid strin
 // failed instead of retrying it forever.
 func (s *executionSnapshot) restamp(e modelEntitlement) error {
 	s.Health = e.apply(s.Health)
-	withheld := s.Health.Allowed != nil
 	for runtime, h := range s.RuntimeHealth {
 		s.RuntimeHealth[runtime] = e.apply(h)
-		withheld = withheld || s.RuntimeHealth[runtime].Allowed != nil
 	}
-	// An unrestricted workspace is checked like a restricted one only where a catalog withheld a model from it.
-	if e.unrestricted() && !withheld {
+	if e.unrestricted() {
 		return nil
 	}
 	if _, _, ok := s.Health.modelLimits(s.Model); !ok {

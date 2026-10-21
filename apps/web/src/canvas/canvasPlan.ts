@@ -85,7 +85,8 @@ export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; p
 /** What a host tells a plan about the chat models its nodes can run (the palette): a set_model names one of these, by id
  *  or by its name, and may pick one of the levels its entry advertises. Without it a plan cannot change a model. */
 export interface CanvasPlanModelChoice { runtime: string; model: string; available: boolean; name?: string; efforts?: ReadonlyArray<string> }
-export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice> }
+/** `userChosen`: the models only a user may choose, which a plan never puts a node on (userChosenModels.ts planModelsOf). */
+export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice>; userChosen?: ReadonlyArray<{ model: string; name?: string }> }
 
 /** The fields of each node a plan's context showed only in part (canvasPlanning.ts fitPlanningContext): 'persona',
  *  'constraints' (its own items or a shared requirement it holds), 'acceptanceCriteria' and 'input:<field id>' (a form's
@@ -782,6 +783,14 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         const id = choices.find(choice => choice.model === wanted)?.model
           ?? choices.find(choice => choice.model.toLowerCase() === folded || (choice.name ?? '').trim().toLowerCase() === folded)?.model;
         const entry = id ? automaticEntry(id, choices) : undefined;
+        const own = entry ? undefined : models?.userChosen?.find(choice => choice.model === wanted
+          || choice.model.toLowerCase() === folded || (choice.name ?? '').trim().toLowerCase() === folded);
+        if (own) {
+          const name = own.name || own.model;
+          adjust(`没有把「${title}」改用「${name}」：这个模型只能由你自己在节点设置里选，助手不替你选`,
+            `Did not switch “${title}” to “${name}”: only you can choose this model, in the node’s settings; the assistant does not choose it for you`);
+          break;
+        }
         if (!entry) {
           adjust(`没有把「${title}」改用「${wanted}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${wanted}”: this workspace has no such model ready`);
           break;
