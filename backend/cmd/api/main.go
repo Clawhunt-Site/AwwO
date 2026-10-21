@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,15 @@ import (
 
 	"awwo/backend/internal/app"
 )
+
+// stopOnClose asks for one orderly stop once r ends, at its end or on an error reading it.
+func stopOnClose(r io.Reader, stopped chan<- os.Signal) {
+	_, _ = io.Copy(io.Discard, r)
+	select {
+	case stopped <- os.Interrupt:
+	default:
+	}
+}
 
 func main() {
 	if e := run(); e != nil {
@@ -49,6 +59,11 @@ func run() error {
 	stopped := make(chan os.Signal, 1)
 	signal.Notify(stopped, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stopped)
+	// A supervisor that cannot send a console program a polite signal (AwwO 本地版 on Windows) stops the API by closing
+	// its standard input: with this set, that end asks for the same orderly stop as SIGINT/SIGTERM.
+	if os.Getenv("AWWO_STOP_ON_STDIN_CLOSE") == "true" {
+		go stopOnClose(os.Stdin, stopped)
+	}
 	errs := make(chan error, 1)
 	go func() {
 		slog.Info("Awwo API listening", "address", cfg.ListenAddr, "environment", cfg.Env)
