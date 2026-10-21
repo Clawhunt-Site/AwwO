@@ -871,6 +871,9 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 			// Members deliver through their own turn and never carry a contract, so a
 			// contract refusal reported here stays the generic runtime failure.
 			facts.WorkerCode = ev.Code
+			if sizeRefusal(facts) {
+				facts.Admission = "rejected_before_start"
+			}
 			code = runtimeFailureCode(ev.Code, false)
 			return "", errors.New(code)
 		default:

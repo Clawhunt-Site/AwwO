@@ -30,6 +30,8 @@ from typing import Any, Callable
 
 from httpx2 import AsyncBaseTransport, AsyncByteStream, Request, Response
 
+from context_overflow import context_overflow
+
 BEDROCK_REGIONS = (
     "us-east-1", "us-east-2", "us-west-2", "ca-central-1", "sa-east-1",
     "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "eu-south-1",
@@ -108,6 +110,12 @@ SDK_STATUS = {
     "ModelStreamErrorException": 502,
 }
 _SDK_NAMES = {name.lower(): name for name in SDK_STATUS}
+
+
+# The type and message of a request AWS refused as larger than its model's window (bridge_failure): the label an
+# OpenAI-compatible provider gives it, and words the worker's reading of a refusal knows (context_overflow.py).
+BEDROCK_CONTEXT_LIMIT_TYPE = "context_length_exceeded"
+BEDROCK_CONTEXT_LIMIT_MESSAGE = "Input is too long for requested model"
 
 
 class BridgeError(Exception):
@@ -618,7 +626,9 @@ def call_read_timeout(read_timeout: float, command: dict, model_id: str) -> floa
 
 
 def bridge_failure(error: BaseException) -> BridgeError:
-    """Status and type only: SDK messages can carry account IDs and role ARNs."""
+    """Status and type only: SDK messages can carry account IDs and role ARNs. A request AWS refused as larger than its
+    model's window, read from its message here and only here, is told apart by its type (BEDROCK_CONTEXT_LIMIT_TYPE), as
+    apps/bedrock-bridge.ts does."""
     if isinstance(error, BridgeError):
         return error
     if any(cls.__name__ == "ReadTimeoutError" for cls in type(error).__mro__):
@@ -631,6 +641,7 @@ def bridge_failure(error: BaseException) -> BridgeError:
         return BridgeError(401, "api_error", "The Bedrock request failed", upstream=True)
     code = ""
     status = None
+    details: dict = {}
     response = getattr(error, "response", None)
     if isinstance(response, dict):
         details = response.get("Error") if isinstance(response.get("Error"), dict) else {}
@@ -639,6 +650,8 @@ def bridge_failure(error: BaseException) -> BridgeError:
         if isinstance(metadata.get("HTTPStatusCode"), int):
             status = metadata["HTTPStatusCode"]
     name = _SDK_NAMES.get(code.lower(), "")
+    if name == "ValidationException" and context_overflow(details.get("Message")):
+        return BridgeError(400, BEDROCK_CONTEXT_LIMIT_TYPE, BEDROCK_CONTEXT_LIMIT_MESSAGE, upstream=True)
     if name:
         return BridgeError(SDK_STATUS[name], name, "The Bedrock request failed", upstream=True)
     if code in STREAM_EXCEPTIONS:

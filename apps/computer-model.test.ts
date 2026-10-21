@@ -467,6 +467,9 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   const scenarios: Record<string, (res: any, req: any) => void> = {
     'gate-400': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key: your prompt has 99999 tokens', type: 'invalid_request_error', code: 'context_length_exceeded' } })); },
     'gate-anthropic-529': res => { res.writeHead(529, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'secret-provider-key overloaded' } })); },
+    // A refusal of the request as larger than the model's window carries that label whatever the provider calls it.
+    'anthropic-too-long': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'secret-provider-key: prompt is too long: 213462 tokens > 200000 maximum' } })); },
+    'gate-400-other': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key: text content blocks must be non-empty', type: 'invalid_request_error' } })); },
     'edge-524': res => { res.writeHead(524, { 'content-type': 'text/html' }); res.end('<html>secret-provider-key: a timeout occurred</html>'); },
     'gate-200-error': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key quota', type: 'new_api_error' } })),
     'not-json': res => res.end('secret-provider-key, not json'),
@@ -482,6 +485,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
     ['gate-400', 'provider:400:context_length_exceeded', undefined], ['gate-anthropic-529', 'provider:529:overloaded_error', undefined],
+    ['anthropic-too-long', 'provider:400:context_length_exceeded', undefined], ['gate-400-other', 'provider:400:invalid_request_error', undefined],
     ['edge-524', 'provider:524', undefined], ['gate-200-error', 'provider:200:new_api_error', undefined], ['not-json', 'body', undefined],
     ['empty', 'answer', 'empty'], ['filtered', 'answer', 'finish:content_filter'], ['refused', 'answer', 'refusal'], ['unfinished', 'answer', 'finish:none'],
     ['mismatch', 'answer', 'tools-mismatch'], ['bad-args', 'answer', 'tool-args'], ['two-choices', 'answer', 'choices'],
@@ -495,9 +499,10 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 13);
+  assert.equal(logged.length, 15);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
-  assert.deepEqual(logged.slice(0, 3).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error', 'provider:524']);
+  assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
+    'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);
   assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|tokens|quota|gate-400|not json/);
 });
 

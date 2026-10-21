@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { estimateTokens } from './context-estimate.ts';
+import { contextOverflow } from './context-overflow.ts';
 import { bindUserModel } from './user-models.ts';
 
 type ObjectValue = Record<string, any>;
@@ -404,9 +405,12 @@ function streamClosed(error: unknown, quietMs: number, idleMs: number): { reason
 }
 
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
- *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`); its message is never read. */
+ *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
+ *  tell a refusal of the request as larger than its model's window (context-overflow.ts), which carries the label an
+ *  OpenAI-compatible provider gives it whatever this one calls it; it is never relayed. */
 function refusal(status: number, body: ObjectValue = {}): string {
   const error = object(body.error) ? body.error : body;
+  if ([200, 400, 413, 422].includes(status) && contextOverflow(error.message)) return `provider:${status}:context_length_exceeded`;
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
   return `provider:${status}${kind ? `:${kind}` : ''}`;
 }

@@ -1111,6 +1111,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			return
 		case "failed":
 			facts.WorkerCode = ev.Code
+			if sizeRefusal(facts) {
+				facts.Admission = "rejected_before_start"
+			}
 			finish("failed", output.String(), runtimeFailureCode(ev.Code, snapshot.OutputContract != nil))
 			return
 		case "cancelled":
@@ -1159,6 +1162,8 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 		return "run_timeout"
 	case "WORKSPACE_CONTEXT_LIMIT":
 		return "workspace_context_limit"
+	case "MODEL_CONTEXT_LIMIT":
+		return "context_limit"
 	case "WORKSPACE_ADMISSION_FAILED":
 		return "workspace_admission_failed"
 	case "WORKSPACE_FILE_INVALID":
@@ -1167,6 +1172,15 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 		return "workspace_unavailable"
 	}
 	return "runtime_failed"
+}
+
+// sizeRefusal says whether a call that failed was its provider refusing the request as larger than its model's window
+// before any output or reasoning (the worker's MODEL_CONTEXT_LIMIT: apps/context-overflow.ts and the Python worker's
+// context_overflow.py read the provider's own words): a request the API's estimate let through but the model did not
+// take. Such a call never began, so it settles as refused before it started (not counted, not paid for), and its run
+// fails as context_limit, which a canvas node does not run again (graph_retry.go) and the reader is told is too large.
+func sizeRefusal(facts *invocationFacts) bool {
+	return facts.WorkerCode == "MODEL_CONTEXT_LIMIT" && facts.OutputBytes == 0 && facts.HiddenTokens == 0
 }
 
 // runContextOutcome reports how a run ended when its own context is what stopped it. Once the

@@ -450,6 +450,15 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("563688183799", json.dumps(denied))
         self.fail = ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow"}, "ResponseMetadata": {"HTTPStatusCode": 429}}, "ConverseStream")
         self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_RATE_LIMIT")
+        # A request larger than the model's window is that refusal, not a request the worker got wrong; AWS's words stay.
+        self.fail = ClientError({"Error": {"Code": "ValidationException", "Message": "Input is too long for requested model. arn:aws:iam::563688183799:user/x"},
+                                 "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream")
+        too_long = await self.run_model("bedrock.glm-5")
+        self.assertEqual((too_long[-1]["type"], too_long[-1]["code"]), ("failed", "MODEL_CONTEXT_LIMIT"))
+        self.assertNotIn("563688183799", json.dumps(too_long))
+        self.fail = ClientError({"Error": {"Code": "ValidationException", "Message": "The provided model identifier is invalid."},
+                                 "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream")
+        self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_REQUEST_REJECTED")
         self.fail = None
         self.events = [{"messageStart": {}}, {"contentBlockDelta": {"delta": {"text": "half"}}}, {"messageStop": {"stopReason": "end_turn"}}]
         self.fail_after = 2
@@ -526,6 +535,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         from botocore.exceptions import NoCredentialsError
         self.assertEqual(bridge_failure(NoCredentialsError()).status, 401, "no usable AWS credentials is an authentication failure")
         self.assertEqual(classify_error(BridgeError(401, "api_error", "x"))["code"], "MODEL_AUTHENTICATION")
+        too_long = bridge_failure(ClientError({"Error": {"Code": "ValidationException", "Message": "prompt is too long: 213462 tokens > 200000 maximum (arn:aws:iam::1:role/x)"},
+                                               "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream"))
+        self.assertEqual((too_long.status, too_long.kind, too_long.message, too_long.upstream), (400, "context_length_exceeded", "Input is too long for requested model", True))
+        self.assertEqual(classify_error(too_long)["code"], "MODEL_CONTEXT_LIMIT")
+        invalid = bridge_failure(ClientError({"Error": {"Code": "ValidationException", "Message": "Malformed input request"}, "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream"))
+        self.assertEqual((invalid.status, invalid.kind), (400, "ValidationException"))
+        self.assertEqual(classify_error(invalid)["code"], "MODEL_REQUEST_REJECTED")
         self.assertEqual(classify_error(httpx2.HTTPStatusError("x", request=httpx2.Request("POST", "https://x"), response=httpx2.Response(429)))["code"], "MODEL_ERROR")
 
     def test_default_client_pins_endpoint_and_sends_a_bearer_key_unsigned(self):

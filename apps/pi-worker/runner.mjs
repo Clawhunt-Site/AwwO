@@ -115,6 +115,9 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       else if (event.type === 'completed' && typeof event.text === 'string' && Buffer.byteLength(event.text) <= config.maxOutputBytes) {
         rememberTerminal({ type: 'completed', text: event.text });
       } else if (event.type === 'cancelled') rememberTerminal({ type: 'cancelled' });
+      // A provider's refusal of the request as larger than its model's window keeps its code (pi-task.mjs), so the API
+      // settles it as that refusal; any other failure is the model's, whatever the child said.
+      else if (event.code === 'MODEL_CONTEXT_LIMIT') rememberTerminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: 'The model service refused the request as larger than the model\'s context window.' });
       else rememberTerminal({ type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
     }
   });

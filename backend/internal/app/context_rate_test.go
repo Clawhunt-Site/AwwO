@@ -315,6 +315,127 @@ func TestPostgresGraphPromptBoundCountsUnits(t *testing.T) {
 	}
 }
 
+// A run its provider refuses as larger than its model's window (the worker's MODEL_CONTEXT_LIMIT) fails as one too large
+// for its model, and its call settles as one that never began: not counted, not paid for. A canvas node refused so is not
+// run again; any other failure of the model counts as before.
+func TestPostgresProviderSizeRefusalNeitherCountsNorRepeats(t *testing.T) {
+	var code atomic.Value
+	code.Store("MODEL_CONTEXT_LIMIT")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "limits": map[string]any{"maxContextTextBytes": 100000, "messageOverheadBytes": 32}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		raw, _ := json.Marshal(map[string]any{"type": "failed", "code": code.Load(), "message": "The model service refused the request."})
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}))
+	t.Cleanup(server.Close)
+	h := newHarness(t, server.URL)
+	c, tid, _ := h.register(t, "provider-size@awwo.invalid")
+	execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	_, aid, sid := h.fixture(t, c, tid)
+	prefix := "/tenants/" + tid
+	ledger := func(id string) (admission, cost string) {
+		t.Helper()
+		if e := h.db.QueryRow(context.Background(), "SELECT admission_status,cost_status FROM model_invocations WHERE tenant_id=$1 AND run_id=$2", tid, id).Scan(&admission, &cost); e != nil {
+			t.Fatal(e)
+		}
+		return
+	}
+	id := h.request(t, c, "POST", prefix+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "provider-size-run"}, 202)["id"].(string)
+	if done := h.awaitRun(t, c, tid, id, "failed"); done["error"] != "context_limit" {
+		t.Fatalf("the run ended with %v", done["error"])
+	}
+	if admission, cost := ledger(id); admission != "rejected_before_start" || cost != "not_incurred" {
+		t.Fatalf("the refused call settled %s / %s", admission, cost)
+	}
+	code.Store("MODEL_ERROR")
+	other := h.request(t, c, "POST", prefix+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "provider-size-other"}, 202)["id"].(string)
+	if done := h.awaitRun(t, c, tid, other, "failed"); done["error"] != "runtime_failed" {
+		t.Fatalf("the other run ended with %v", done["error"])
+	}
+	if admission, cost := ledger(other); admission == "rejected_before_start" || cost == "not_incurred" {
+		t.Fatalf("a model failure settled %s / %s, as a call that never began", admission, cost)
+	}
+	// A canvas node refused so fails at once, after its one call.
+	code.Store("MODEL_CONTEXT_LIMIT")
+	calls.Store(0)
+	n := graphNode{ID: "only", Kind: "session", Title: "Sized"}
+	n.Binding = &struct {
+		CompanyID string `json:"companyId"`
+		AgentID   string `json:"agentId"`
+	}{CompanyID: tid, AgentID: aid}
+	cid := h.request(t, c, "POST", prefix+"/canvases", map[string]any{"name": "Sized", "document": graphDocument{Nodes: []graphNode{n}, Edges: []graphEdge{}}}, 201)["id"].(string)
+	base := prefix + "/canvases/" + cid + "/graph-runs"
+	accepted := h.request(t, c, "POST", base, map[string]string{"operationId": "provider-size-graph"}, 202)
+	done := awaitGraph(t, h, c, base+"/"+accepted["id"].(string), "failed")
+	if node := done["nodes"].([]any)[0].(map[string]any); node["detail"] != "context_limit" || calls.Load() != 1 {
+		t.Fatalf("the node ended %v after %d calls", node["detail"], calls.Load())
+	}
+}
+
+// A team member's turn its provider refuses as larger than its model's window settles the same way: a call that never
+// began, and a turn and run that fail as too large for the model.
+func TestPostgresTeamTurnSizeRefusalDoesNotCount(t *testing.T) {
+	pi := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) {
+		fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"MODEL_CONTEXT_LIMIT\",\"message\":\"The model service refused the request.\"}\n\n")
+	})
+	defer pi.Close()
+	h := newHarness(t, pi.URL)
+	c, tid, _ := h.register(t, "team-size@awwo.invalid")
+	_, _, sid := installTeam(t, h, c, tid, fixtureTeam("sequential"))
+	id := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "TASK", "operationId": "team-size-refusal"}, 202)["id"].(string)
+	if done := h.awaitRun(t, c, tid, id, "failed"); done["error"] != "context_limit" {
+		t.Fatalf("the team run ended with %v", done["error"])
+	}
+	var calls, counted int
+	if e := h.db.QueryRow(context.Background(), "SELECT count(*), count(*) FILTER (WHERE admission_status<>'rejected_before_start' OR cost_status<>'not_incurred') FROM model_invocations WHERE tenant_id=$1 AND run_id=$2",
+		tid, id).Scan(&calls, &counted); e != nil || calls == 0 || counted != 0 {
+		t.Fatalf("%d calls, %d of them counted (%v)", calls, counted, e)
+	}
+}
+
+func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
+	if runtimeFailureCode("MODEL_CONTEXT_LIMIT", true) != "context_limit" || runtimeFailureCode("MODEL_ERROR", false) != "runtime_failed" {
+		t.Fatal("runtimeFailureCode")
+	}
+	for _, c := range []struct {
+		facts invocationFacts
+		want  bool
+	}{
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT"}, true},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", OutputBytes: 1}, false},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", HiddenTokens: 1}, false},
+		{invocationFacts{WorkerCode: "MODEL_ERROR"}, false},
+	} {
+		if got := sizeRefusal(&c.facts); got != c.want {
+			t.Errorf("sizeRefusal(%+v) = %v", c.facts, got)
+		}
+	}
+	for body, want := range map[string]bool{
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:      true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:       true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:invalid_request_error"}}`:        false,
+		`{"error":{"code":"CONTEXT_LIMIT","reason":"provider:400:context_length_exceeded"}}`:       false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"answer","detail":"context_length_exceeded"}}`: false,
+	} {
+		if got := computerSizeRefusal(502, []byte(body)); got != want {
+			t.Errorf("computerSizeRefusal(502, %s) = %v", body, got)
+		}
+	}
+	if computerSizeRefusal(413, []byte(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`)) {
+		t.Error("a status other than the worker's 502 for a provider's refusal")
+	}
+}
+
 func TestPlannerContextBytesForUnits(t *testing.T) {
 	c := plannerContext{bytes: 300, units: 100}
 	for units, want := range map[int]int{10: 30, 1: 3, 0: 0, -5: -5} {

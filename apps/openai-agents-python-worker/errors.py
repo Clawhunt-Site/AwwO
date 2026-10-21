@@ -1,10 +1,13 @@
 """Error codes and messages, mirroring the Node worker's errors.mjs."""
 
+from context_overflow import context_overflow
+
 MESSAGES = {
     "MODEL_AUTHENTICATION": "The model service rejected its configured credentials.",
     "MODEL_RATE_LIMIT": "The model service is rate limited.",
     "MODEL_UNAVAILABLE": "The model service is unavailable.",
     "MODEL_REQUEST_REJECTED": "The model service rejected the request.",
+    "MODEL_CONTEXT_LIMIT": "The model service refused the request as larger than the model's context window.",
     "MODEL_OUTPUT_LIMIT": "The model response reached its configured output limit.",
     "MODEL_REFUSAL": "The model declined the request.",
     "MODEL_PROTOCOL_ERROR": "The model returned an incomplete or invalid response.",
@@ -30,6 +33,18 @@ def failure_event(code: str) -> dict:
     return {"type": "failed", "code": safe, "message": MESSAGES[safe]}
 
 
+def refuses_size(error: BaseException) -> bool:
+    """A provider's refusal of the request as larger than the model's window (context_overflow.py): by its code (the
+    Bedrock bridge's own, or an OpenAI-compatible provider's), or by its message, which is read here and never relayed."""
+    body = getattr(error, "body", None)
+    inner = body.get("error") if isinstance(body, dict) and isinstance(body.get("error"), dict) else body
+    codes = (getattr(error, "code", None), getattr(error, "kind", None), inner.get("code") if isinstance(inner, dict) else None)
+    if "context_length_exceeded" in codes:
+        return True
+    texts = (getattr(error, "message", None), inner.get("message") if isinstance(inner, dict) else None, str(error))
+    return any(context_overflow(text) for text in texts)
+
+
 def classify_error(error: BaseException) -> dict:
     from tools import ToolInputError
 
@@ -53,6 +68,8 @@ def classify_error(error: BaseException) -> dict:
         inner = body.get("status") if isinstance(body, dict) else None
         if isinstance(inner, int) and not isinstance(inner, bool) and 400 <= inner <= 599:
             status = inner
+    if status in (400, 413, 422) and refuses_size(error):
+        return failure_event("MODEL_CONTEXT_LIMIT")
     if status in (401, 403):
         return failure_event("MODEL_AUTHENTICATION")
     if status == 429:

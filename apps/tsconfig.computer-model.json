@@ -11,5 +11,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["computer-model.ts", "user-models.ts", "bedrock-bridge.ts", "bedrock-catalog.ts", "context-estimate.ts", "bedrock-bridge.test.ts", "bedrock-catalog.test.ts", "context-estimate.test.ts"]
+  "include": ["computer-model.ts", "user-models.ts", "bedrock-bridge.ts", "bedrock-catalog.ts", "context-estimate.ts", "context-overflow.ts", "bedrock-bridge.test.ts", "bedrock-catalog.test.ts", "context-estimate.test.ts", "context-overflow.test.ts"]
 }

@@ -456,6 +456,74 @@ func TestThrashingIsTheSameLostResultTwiceInARow(t *testing.T) {
 	}
 }
 
+// A call its provider refuses as larger than its model's window (the worker's label context_length_exceeded, read from
+// the provider's words or AWS's: apps/context-overflow.ts) ends the task as one too large for its model does, and never
+// counts, for it never began; another refusal of the request still counts and ends it otherwise.
+func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
+	var reason atomic.Value
+	trusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true})
+			return
+		}
+		writeJSON(w, 502, map[string]any{"error": map[string]any{"code": "PROVIDER_ERROR", "message": "The managed model request could not be completed.", "reason": reason.Load()}})
+	}))
+	defer trusted.Close()
+	started := make(chan computerWorkerInput, 1)
+	end := make(chan struct{}, 1)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"service": "awwo-openmaus-worker", "ready": true, "capabilities": map[string]bool{"workspace": true, "approvals": true}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(200)
+			return
+		}
+		var input computerWorkerInput
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		started <- input
+		select {
+		case <-end:
+			fmt.Fprint(w, "data: {\"type\":\"failed\",\"code\":\"CORE_EXECUTION_FAILED\"}\n\n")
+		case <-r.Context().Done():
+		}
+	}))
+	defer worker.Close()
+	h := newHarness(t, trusted.URL)
+	mockPersonalDiscovery(t, h)
+	h.a.cfg.OpenMausURL = worker.URL
+	h.a.cfg.OpenMausToken = strings.Repeat("m", 32)
+	h.a.cfg.ComputerModelProxyURL = h.server.URL + "/api/internal/computer-model/v1"
+	owner, tid, _ := h.register(t, "computer-provider-size@example.test")
+	model := connectionModelID(addPersonalConnection(t, h, owner), "test-chat-model")
+	canvas, _, _ := h.fixture(t, owner, tid)
+	base := "/tenants/" + tid
+	for i, c := range []struct {
+		reason string
+		sized  bool
+	}{{"provider:400:context_length_exceeded", true}, {"bedrock:400:context_length_exceeded", true}, {"provider:400:invalid_request_error", false}} {
+		reason.Store(c.reason)
+		id := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": fmt.Sprintf("provider-size-%d", i), "prompt": "build the page", "runtime": "pi", "model": model}, 202)["id"].(string)
+		computerProxyRaw(t, <-started, coreRequest(t, toolTurn(100)), 502)
+		end <- struct{}{}
+		done := h.awaitRun(t, owner, tid, id, "failed")
+		if c.sized != (done["error"] == "computer_context_limit") {
+			t.Fatalf("%s: the task ended with %v", c.reason, done["error"])
+		}
+		want := float64(1)
+		if c.sized {
+			want = 0
+		}
+		if detail := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); detail["calls"] != want {
+			t.Fatalf("%s: the task reads calls=%v, want %v", c.reason, detail["calls"], want)
+		}
+	}
+}
+
 // fakeComputerModel is a model worker that measures a call as apps/computer-model.ts does (the call's JSON as the worker
 // writes it, plus 32 bytes a message, against the model's budget) and refuses one over it with 413 CONTEXT_LIMIT; it
 // sends every call it takes on sent, and answers refuseNext's with that 413 too.

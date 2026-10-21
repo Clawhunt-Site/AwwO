@@ -25,6 +25,8 @@
 // turn's pictures, sent as base64 data URLs, become Converse image blocks without their
 // `detail` hint, which Converse has no counterpart for.
 
+import { contextOverflow } from './context-overflow.ts';
+
 /** Commercial regions with a Bedrock runtime endpoint. GovCloud and China are excluded. */
 export const BEDROCK_REGIONS: readonly string[] = Object.freeze([
   'us-east-1', 'us-east-2', 'us-west-2', 'ca-central-1', 'sa-east-1',
@@ -545,11 +547,20 @@ const SDK_STATUS: Record<string, number> = {
   ModelStreamErrorException: 502,
 };
 
-/** Status and type only: SDK messages can carry account IDs and role ARNs, which never leave the worker. */
+/** The type and message of a request AWS refused as larger than its model's window: the label an OpenAI-compatible
+ *  provider gives it, and words the workers' reading of a refusal knows (context-overflow.ts). */
+export const BEDROCK_CONTEXT_LIMIT = { type: 'context_length_exceeded', message: 'Input is too long for requested model' } as const;
+
+/** Status and type only: SDK messages can carry account IDs and role ARNs, which never leave the worker. A request AWS
+ *  refused as larger than its model's window, read from its message here and only here, is told apart by its type
+ *  (BEDROCK_CONTEXT_LIMIT): the workers answer it as the size refusal it is, not as a request the bridge got wrong. */
 export function bridgeFailure(error: unknown): BedrockBridgeError {
   if (error instanceof BedrockBridgeError) return error;
-  const e = (error ?? {}) as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const e = (error ?? {}) as { name?: unknown; message?: unknown; $metadata?: { httpStatusCode?: unknown } };
   const name = typeof e.name === 'string' ? e.name : '';
+  if (name === 'ValidationException' && contextOverflow(e.message)) {
+    return new BedrockBridgeError(400, BEDROCK_CONTEXT_LIMIT.type, BEDROCK_CONTEXT_LIMIT.message, true);
+  }
   const httpStatus = Number.isInteger(e.$metadata?.httpStatusCode) ? e.$metadata!.httpStatusCode as number : undefined;
   const status = SDK_STATUS[name] ?? (httpStatus && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 502);
   return new BedrockBridgeError(status, Object.hasOwn(SDK_STATUS, name) ? name : 'api_error', 'The Bedrock request failed', true);

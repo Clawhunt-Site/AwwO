@@ -9,6 +9,7 @@ let started = false;
 // Provider reasoning is reported as a count, never its text, and at most this often:
 // a reader needs to see that the model is working, not each token of its scratchpad.
 const REASONING_REPORT_MS = 500;
+const CONTEXT_LIMIT_MESSAGE = 'The model service refused the request as larger than the model\'s context window.';
 
 function codePoints(text) {
   let count = 0;
@@ -212,6 +213,12 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
+    if (finalMessage?.stopReason === 'error' && !text) {
+      // A provider's refusal of the request as larger than its model's window, read from its message here and never
+      // relayed (context-overflow.ts; loaded only on a failure).
+      const { contextOverflow } = await import('../context-overflow.ts');
+      if (contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
+    }
     if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Model did not complete successfully');
     text = finalMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('');
     if (!text.trim()) throw new Error('Model returned no answer');

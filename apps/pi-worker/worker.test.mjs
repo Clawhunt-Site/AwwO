@@ -95,6 +95,13 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
       return;
     }
+    if (mode === 'too_long' || mode === 'rejected') {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: mode === 'too_long'
+        ? { message: 'This model\'s maximum context length is 131072 tokens. However, you requested 140000 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded' }
+        : { message: 'messages: text content blocks must be non-empty', type: 'invalid_request_error' } }));
+      return;
+    }
     if (mode === 'transient' && requests.length === 1) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { type: 'temporarily_unavailable', message: 'try again' } }));
@@ -522,6 +529,20 @@ test('provider authentication failures are redacted and do not produce a success
   assert.equal(events.at(-1).type, 'failed');
   assert.equal(JSON.stringify(events).includes('private-provider-key'), false);
   assert.equal(events.some((event) => event.type === 'completed'), false);
+});
+
+test('a provider\'s refusal of the request as larger than its model\'s window keeps its code, without its words', { timeout: 20000 }, async (t) => {
+  const refused = await provider(t, { mode: 'too_long' });
+  const first = await run(t, configuration(refused.baseURL));
+  await first.handle.done;
+  assert.deepEqual([first.events.at(-1).type, first.events.at(-1).code], ['failed', 'MODEL_CONTEXT_LIMIT']);
+  assert.equal(JSON.stringify(first.events).includes('131072'), false);
+  assert.equal(refused.requests.length, 1, 'a size refusal is not sent again');
+  // Another refusal of the request stays the model's failure.
+  const other = await provider(t, { mode: 'rejected' });
+  const second = await run(t, configuration(other.baseURL));
+  await second.handle.done;
+  assert.deepEqual([second.events.at(-1).type, second.events.at(-1).code], ['failed', 'MODEL_ERROR']);
 });
 
 test('cancellation terminates an actual child and cleans its temporary directory', { timeout: 20000 }, async (t) => {

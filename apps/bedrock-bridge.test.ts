@@ -557,6 +557,25 @@ test('no fallback without a fallback model, for any other failure, or a second t
   assert.deepEqual(second.facts.at(-1), { event: 'failed', model: FALLBACK, error: 'throttlingException', status: 429, stage: 'stream', upstream: true });
 });
 
+test('a request AWS refuses as larger than its model\'s window is named so, without AWS\'s message, and not sent to the other profile', async () => {
+  const tooLong = Object.assign(new Error('Input is too long for requested model. (arn:aws:iam::563688183799:user/machine/x)'), { name: 'ValidationException', $metadata: { httpStatusCode: 400 } });
+  const refused = bridgeFailure(tooLong);
+  assert.deepEqual([refused.status, refused.type, refused.message, refused.upstream], [400, 'context_length_exceeded', 'Input is too long for requested model', true]);
+  // Anthropic's words for an input that leaves no room for the output limit are the same refusal.
+  assert.equal(bridgeFailure(Object.assign(new Error('input length and `max_tokens` exceed context limit: 190000 + 32000 > 200000'), { name: 'ValidationException' })).type, 'context_length_exceeded');
+  // Another refusal of the request, or a throttle that names tokens, is not.
+  assert.equal(bridgeFailure(Object.assign(new Error('The provided model identifier is invalid.'), { name: 'ValidationException' })).type, 'ValidationException');
+  assert.equal(bridgeFailure(Object.assign(new Error('Too many tokens, please wait before trying again.'), { name: 'ThrottlingException' })).type, 'ThrottlingException');
+  const run = fallbackFetch([{ fail: tooLong }]);
+  const response = await run.call();
+  assert.equal(response.status, 400);
+  const text = await response.text();
+  assert.doesNotMatch(text, /arn|563688183799/);
+  assert.deepEqual(JSON.parse(text).error, { message: 'Input is too long for requested model', type: 'context_length_exceeded', code: 'context_length_exceeded', status: 400 });
+  assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(run.facts, [{ event: 'failed', model: MODEL, error: 'context_length_exceeded', status: 400, stage: 'request', upstream: true }]);
+});
+
 test('a failure the bridge itself makes is reported as not AWS\'s, and a child\'s bridge carries its parent\'s settings', async () => {
   const facts: BedrockCallFact[] = [];
   const script = scriptedSdk([]);

@@ -490,6 +490,16 @@ func (a *App) logComputerCall(lease *computerLease, call, status int, body []byt
 		"workerStatus", status, "workerCode", workerCode, "reason", reason, "detail", detail, "code", code, "ms", facts.Ended.Sub(facts.Streamed).Milliseconds())
 }
 
+// computerSizeRefusal says whether the worker answered that the call's provider refused it as larger than its model's
+// window (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error there, and the
+// Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let through but the
+// model did not take.
+func computerSizeRefusal(status int, body []byte) bool {
+	code, reason, _ := computerWorkerError(body)
+	return status == 502 && code == "PROVIDER_ERROR" && (strings.HasPrefix(reason, "provider:") || strings.HasPrefix(reason, "bedrock:")) &&
+		strings.HasSuffix(reason, ":context_length_exceeded")
+}
+
 // computerWorkerBodyLimit is what the worker reads of one call's body (MAX_BYTES in apps/computer-model.ts).
 const computerWorkerBodyLimit = 512 << 10
 
@@ -717,6 +727,12 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			code = computerModelFailure(response.StatusCode, data, a.cfg.UserCredentials)
 			// The worker's own measure found the call too large for its model: the task's own end, as above.
 			if workerCode, _, _ := computerWorkerError(data); response.StatusCode == 413 && workerCode == "CONTEXT_LIMIT" {
+				lease.noteRefusal("computer_context_limit")
+			}
+			// Its provider refused it as larger than its model's window, before any work: the same end, and a call
+			// that never began, so it never counts.
+			if computerSizeRefusal(response.StatusCode, data) {
+				facts.Admission = "rejected_before_start"
 				lease.noteRefusal("computer_context_limit")
 			}
 		}
