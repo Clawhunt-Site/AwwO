@@ -413,7 +413,8 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 			t.Fatalf("%q reads %q, want %q", worker, got, want)
 		}
 	}
-	if !computerRefundable("computer_execution_failed") || !computerRefundable("computer_stream_ended") || computerRefundable("computer_task_timeout") || computerRefundable("quota_exceeded") {
+	if !computerRefundable("computer_execution_failed") || !computerRefundable("computer_stream_ended") || computerRefundable("computer_task_timeout") || computerRefundable("quota_exceeded") ||
+		computerRefundable("computer_context_limit") {
 		t.Fatal("only the execution service's failures may be refunded")
 	}
 	// A call a time limit on its way cut is a timeout in the ledger, never evidence that gives back its task's every call.

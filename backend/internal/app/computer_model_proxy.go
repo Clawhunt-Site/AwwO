@@ -499,10 +499,15 @@ func computerForwardBody(lease *computerLease, completion map[string]json.RawMes
 // its context measure, the JSON of the call plus 32 bytes a message, within the model's budget (estimated from above
 // from the request as sent), and the body this proxy sends, with room for a personal key, within what the worker reads.
 func computerCallFits(raw []byte, completion map[string]json.RawMessage, lease *computerLease) bool {
+	return computerCallFitsWithin(raw, completion, lease, lease.snapshot.Budget)
+}
+
+// computerCallFitsWithin is computerCallFits for a budget other than the model's (a smaller one leaves room).
+func computerCallFitsWithin(raw []byte, completion map[string]json.RawMessage, lease *computerLease, budget int) bool {
 	var messages, tools []json.RawMessage
 	_ = json.Unmarshal(completion["messages"], &messages)
 	_ = json.Unmarshal(completion["tools"], &tools)
-	if len(raw)+32*len(messages)+32*len(tools)+256 > lease.snapshot.Budget {
+	if len(raw)+32*len(messages)+32*len(tools)+256 > budget {
 		return false
 	}
 	return len(computerForwardBody(lease, completion))+4096 <= computerWorkerBodyLimit
@@ -569,7 +574,16 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			completion, streaming, e = validateComputerCompletion(raw, lease.snapshot.Budget)
 		}
 	}
-	if e != nil {
+	// Then the bulk of the turn's earlier tool traffic, oldest first, as far as the call needs, and a fifth of the model's
+	// budget more for the calls after it to grow into (computer_history_fit.go). What it goes without, and what its
+	// latest exchange brings back of what the last call lost, count only once it is the task's call (below).
+	over := whole && ((e != nil && e.Error() == "context_limit") || (e == nil && !computerCallFits(raw, completion, lease)))
+	traffic := fitTraffic(lease, raw, over)
+	if traffic.fitted {
+		raw = traffic.raw
+		completion, streaming, e = validateComputerCompletion(raw, lease.snapshot.Budget)
+	}
+	if e != nil && e.Error() != "context_limit" {
 		fail(w, 400, e.Error(), "Completion input exceeds its admitted schema or context budget")
 		return
 	}
@@ -579,6 +593,27 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "computer_lease_unavailable", "Task finished, call in progress or model budget exhausted")
 		return
 	}
+	// The call is the task's now. One too large even without the bulk of its earlier traffic, or one whose turn keeps
+	// bringing back what its calls lost (it has outgrown its model; only a call that goes without some can), is the
+	// task's own end: it says so (computer_context_limit, as noteRefusal would; the first refusal kept), and the log
+	// says which, for a heuristic's ends to be found.
+	if thrash := e == nil && traffic.fitted && lease.thrashesLocked(traffic.latest); e != nil || thrash {
+		if lease.refusal == "" {
+			lease.refusal = "computer_context_limit"
+		}
+		sticky, lost, row := lease.trafficLocked()
+		call := lease.calls + 1
+		lease.mu.Unlock()
+		reason := "size"
+		if thrash {
+			reason = "going round"
+		}
+		a.log.Warn("direct task call refused; the task ends as too large for its model", "run", lease.runID, "call", call, "reason", reason,
+			"bytes", len(raw), "budget", lease.snapshot.Budget, "cut", traffic.cut, "last_cut", sticky, "lost", lost, "row", row)
+		fail(w, 400, "context_limit", "Completion input exceeds its admitted schema or context budget")
+		return
+	}
+	lease.noteTrafficLocked(traffic.cut, traffic.lost)
 	lease.busy = true
 	idle := make(chan struct{})
 	lease.idle = idle
@@ -673,6 +708,10 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			code = computerCallBroke(e, ctx.Err() != nil) // the worker's answer broke off, or was cut
 		default:
 			code = computerModelFailure(response.StatusCode, data, a.cfg.UserCredentials)
+			// The worker's own measure found the call too large for its model: the task's own end, as above.
+			if workerCode, _, _ := computerWorkerError(data); response.StatusCode == 413 && workerCode == "CONTEXT_LIMIT" {
+				lease.noteRefusal("computer_context_limit")
+			}
 		}
 		a.logComputerCall(lease, index, response.StatusCode, data, code, facts)
 		fail(w, 502, "computer_model_failed", "The selected model could not complete this call")

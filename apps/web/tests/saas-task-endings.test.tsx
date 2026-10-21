@@ -46,6 +46,12 @@ describe('a direct task that ended without its result', () => {
     expect(send).toHaveBeenCalledWith('做一个专属游戏');
   });
 
+  it('says what it had to send outgrew its model, at its start or part-way, and offers no retry that would end the same way', async () => {
+    await shown({ error: 'computer_context_limit' }, { send: vi.fn() });
+    expect(await screen.findByText('任务要交给模型的内容超出了这个模型一次能读的量，没能继续。可以换一个上下文更大的模型，或把任务拆成几步、每步少带些资料分别发。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '重试这个任务' })).toBeNull();
+  });
+
   it('says the platform failed it and that its calls go back', async () => {
     await shown({ error: 'computer_execution_failed', refundedCalls: 7 }, { send: vi.fn() });
     expect(await screen.findByText('任务在执行途中失败了（执行服务或一次模型调用出了错），没有做完。')).toBeVisible();

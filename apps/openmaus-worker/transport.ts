@@ -6,6 +6,8 @@ import { diagnostic, proxyErrorCode } from './diagnostics.ts';
 import { ToolFailure, failedResult, recoverableFailure } from './tool-failures.ts';
 
 const prop = (description: string) => ({ type: 'string', description });
+/** The API's model proxy takes list and read for the tools that only read (backend/internal/app/computer_history_fit.go
+ *  readingTools, by their model names): keep the two in step when a tool is added or renamed. */
 export const TOOLS = [
   { name: 'list', description: 'List files in the isolated AwwO workspace. No host files are available.', inputSchema: { type: 'object', properties: { path: prop('Relative directory; empty for root') }, additionalProperties: false } },
   { name: 'read', description: 'Read a real file in the isolated workspace. A result holds at most 50 KiB: a longer file comes back cut and says truncated: true, and exec can read the rest (for example sed -n or tail -c).', inputSchema: { type: 'object', properties: { path: prop('Relative file path') }, required: ['path'], additionalProperties: false } },

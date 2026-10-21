@@ -140,6 +140,8 @@ func earlierTaskEnding(status, code string) string {
 		return "stopped: it used all of its model calls before it finished"
 	case "computer_tool_budget":
 		return "stopped: a model answer asked for more tool calls at once than allowed"
+	case "computer_context_limit":
+		return "stopped: what it had to send its model was more than the model can read at once"
 	case "":
 		return "failed"
 	}

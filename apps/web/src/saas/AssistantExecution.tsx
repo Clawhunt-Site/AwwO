@@ -51,6 +51,7 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
     computer_task_timeout: ['任务超过了时间上限，没有做完。可以重试，或把它拆成几步分别发。', 'The task ran out of time before it finished. Try again, or send it in smaller steps.'],
     computer_call_budget: ['任务用完了一个任务可用的模型调用，没有做完。可以重试，或把它拆成几步分别发。', 'The task used every model call one task may make before it finished. Try again, or send it in smaller steps.'],
     computer_tool_budget: ['模型一次要用的工具太多，任务停下了。可以重试。', 'A model answer asked for too many tools at once, so the task stopped. Try again.'],
+    computer_context_limit: ['任务要交给模型的内容超出了这个模型一次能读的量，没能继续。可以换一个上下文更大的模型，或把任务拆成几步、每步少带些资料分别发。', 'What the task had to send its model was more than this model can read at once, so it could not go on. Choose a model with a larger context, or send the task in smaller steps, each bringing less.'],
     computer_stream_ended: ['与执行服务的连接中断，任务没有完成。', 'The connection to the execution service ended before the task finished.'],
     computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
     computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
@@ -89,6 +90,7 @@ function taskOutcome(execution: ManagedExecution, taskId: string): string | unde
   return ({ computer_execution_failed: 'failed part-way: the execution service or a model call failed',
     computer_stream_ended: 'failed part-way: the execution service stopped answering',
     computer_task_timeout: 'stopped part-way: it ran out of time', computer_call_budget: 'stopped part-way: it used all its model calls',
+    computer_context_limit: 'stopped: what it had to send its model was more than the model can read at once',
   } as Record<string, string>)[code] ?? (code ? `failed (${code})` : 'failed');
 }
 

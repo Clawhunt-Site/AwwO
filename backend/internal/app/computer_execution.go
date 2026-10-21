@@ -148,11 +148,14 @@ type computerLease struct {
 	busy, closed               bool
 	// idle is closed once the call in progress has ended, after its handler settled it (computerModelProxy).
 	idle chan struct{}
-	// refusal is an allowance or plan refusal of one of the run's model calls; the run fails with it.
+	// refusal is an allowance or plan refusal of one of the run's model calls, or a call too large for its model
+	// (computer_context_limit, noteRefusal); the run fails with it.
 	refusal string
 	// blocks are the reference blocks added to the task's words (earlier tasks, canvas briefing), in the order a model
 	// call they push over the model's budget goes without them; set before the lease is shared, then only read.
 	blocks []string
+	// traffic is what the task's calls went without of their earlier tool traffic (computer_history_fit.go).
+	traffic trafficState
 }
 
 // How much of a task's start is its text (the prompt with its reference blocks), and how long its prompt may be
@@ -750,6 +753,16 @@ func (l *computerLease) refused() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.refusal
+}
+
+// noteRefusal records that one of the task's calls could not be made for code (computer_context_limit: too large for
+// its model even without its earlier tool traffic), unless another refusal came first; the task fails with it.
+func (l *computerLease) noteRefusal(code string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.refusal == "" {
+		l.refusal = code
+	}
 }
 
 // computerCallSettleWait bounds how long a direct task's ending waits for the model call it cut to be settled by its
