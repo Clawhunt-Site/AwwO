@@ -2455,9 +2455,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [canEditStructure, patchDoc, downstreamClosure, locale],
   );
-  // A part of a node its card changed (SessionTile's onPatchNode: its inputs, its outputs, a result published by hand),
-  // applied to the node as the document holds it now. A card's own copy is the node it last drew: two changes made
-  // before the next render would each put back what the other changed, or what the document cleared in between.
+  // A change a node's card made (SessionTile's onPatchNode: its inputs, its outputs, a result published by hand, another
+  // conversation opened), applied to the node as the document holds it now; saveNode's checks apply as to any save. A
+  // card's own copy is the node it last drew: two changes made before the next render would each put back what the other
+  // changed, or what the document cleared in between.
   const patchNode = useCallback((nodeId: string, change: (node: SessionNode) => SessionNode) => {
     const live = docRef.current.nodes.find(node => node.id === nodeId);
     if (live?.kind === 'session') saveNode(change(live));

@@ -13,11 +13,13 @@ import { SessionTile } from '../src/canvas/SessionTile';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
-import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
+import * as invalidation from '../src/canvas/invalidateOutputs';
 import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
 import { TileTranscript } from '../src/canvas/TileTranscript';
 import type { ContractField } from '../src/canvas/nodeContracts';
 import { resetAllSessions, setStreaming, type Turn } from '../src/canvas/sessions';
+import { activeNodeThread, activeThreadId, getNodeThreads, selectNodeThread, updateNodeDraft, updateThreadPreview } from '../src/canvas/nodeThreads';
+import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
@@ -324,7 +326,8 @@ describe('node inputs', () => {
   it('holds a file that lands while they are read-only only where their owner asks for it', async () => {
     FakeUpload.hold = true;
     const changes = vi.fn();
-    const form = (readOnly: boolean, holdUploads: boolean) => <ContractFields fields={[{ id: 'clip', label: '素材', type: 'file', required: false, value: '' }]}
+    const clip: ContractField = { id: 'clip', label: '素材', type: 'file', required: false, value: '' };
+    const form = (readOnly: boolean, holdUploads: boolean) => <ContractFields fields={[clip]}
       onChange={changes} label="输入" valuesFirst readOnly={readOnly} holdUploads={holdUploads} />;
     for (const holdUploads of [false, true]) {
       FakeUpload.sent = []; changes.mockClear();
@@ -344,7 +347,7 @@ describe('node inputs', () => {
       // outputs), or one waiting for its 加入.
       rerender(form(false, holdUploads));
       fireEvent.change(screen.getByLabelText('素材的值'), { target: { value: 'docs/x.md' } });
-      expect(changes).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'clip', value: 'docs/x.md' })]);
+      expect(changes.mock.lastCall![0]([clip])).toEqual([expect.objectContaining({ id: 'clip', value: 'docs/x.md' })]);
       unmount();
     }
   });
@@ -364,6 +367,38 @@ describe('node inputs', () => {
     expect(change).toHaveBeenLastCalledWith(false);
     rerender(form(true, false));
     expect(screen.queryByLabelText('字段 1 名称')).toBeNull();
+  });
+});
+
+describe('a node’s output form', () => {
+  it('takes two files that land in two fields at the same moment, from a host that takes whole nodes only, and builds on an undo after', async () => {
+    FakeUpload.hold = true;
+    const outputs: ContractField[] = [
+      { id: 'result', label: '交付结果', type: 'markdown', required: true, value: '' },
+      { id: 'notes', label: '交付说明', type: 'markdown', required: false, value: '' },
+    ];
+    const saves: SessionNode[] = [];
+    const first: SessionNode = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'n', contract: { version: 1, inputs: [], outputs } };
+    let put: (node: SessionNode) => void = () => {};
+    function Host() {
+      const [node, setNode] = useState<SessionNode>(first);
+      put = setNode;
+      return <NodeDeliverables node={node} readOnly={false} editorOpen onUpdateNode={next => { saves.push(next as SessionNode); setNode(next as SessionNode); }} />;
+    }
+    render(<Host />);
+    const pickers = document.querySelectorAll('.awwo-deliverables-editor .awwo-markdown input[type=file]');
+    fireEvent.change(pickers[0], { target: { files: [new File(['# a'], 'a.md', { type: 'text/markdown' })] } });
+    fireEvent.change(pickers[1], { target: { files: [new File(['# b'], 'b.md', { type: 'text/markdown' })] } });
+    await screen.findByText('b.md');
+    // Both answers arrive before the next render: each write builds on the one before it.
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(screen.queryAllByText(/^上传中/)).toHaveLength(0));
+    expect(saves).toHaveLength(2);
+    expect(saves[1].contract!.outputs.map(field => splitAttachments(field.value).attachments.map(item => item.name))).toEqual([['a.md'], ['b.md']]);
+    // The host's undo puts back the very form from before the files; the next edit builds on it, not on those writes.
+    act(() => put(first));
+    fireEvent.change(screen.getByLabelText('交付说明的值'), { target: { value: '见附件' } });
+    expect(saves.at(-1)!.contract!.outputs.map(field => field.value)).toEqual(['', '见附件']);
   });
 });
 
@@ -413,7 +448,7 @@ describe('an opened node’s inputs', () => {
     const live = useRef(initial);
     const save = (next: SessionNode) => {
       const doc = emptyDocument();
-      const kept = invalidateOutputs({ ...doc, nodes: [live.current] }, { ...doc, nodes: [next] }).nodes[0] as SessionNode;
+      const kept = invalidation.invalidateOutputs({ ...doc, nodes: [live.current] }, { ...doc, nodes: [next] }).nodes[0] as SessionNode;
       live.current = kept;
       updates.push(kept);
       setNode(kept);
@@ -801,6 +836,234 @@ describe('an opened node’s inputs', () => {
     expect([tile.dataset.content, tile.style.getPropertyValue('--awwo-drawer-width')]).toEqual(['delivery', '52%']);
   });
 
+  // A file's answer comes in a task of its own and the render that draws it in a later one, so a click can come between
+  // them, its handler reading the node that render drew. Here the answer's write is made (a timer waited, so however many
+  // steps the answer takes; checked: one more write) and the click comes before the render (both inside one act, which
+  // holds every render until it ends).
+  const names = (value: string | undefined) => splitAttachments(value ?? '').attachments.map(item => item.name);
+  const input = (node: SessionNode | undefined, id: string) => node?.contract?.inputs.find(field => field.id === id);
+  const clickAfterAnswer = (index: number, click: () => void, writes = () => updates.length) => act(async () => {
+    const before = writes();
+    FakeUpload.sent[index].finish();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(writes()).toBe(before + 1);
+    click();
+  });
+
+  it.each([
+    ['is added', () => fireEvent.click(inDrawer().getByRole('button', { name: '添加字段' })), 4],
+    ['is taken out', () => fireEvent.click(inDrawer().getByRole('button', { name: '删除限制与偏好' })), 2],
+  ])('keep a file that lands as a field %s before its render', async (_how, click, count) => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    fireEvent.click(inDrawer().getByRole('button', { name: '编辑字段结构' }));
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    await clickAfterAnswer(0, click);
+    const inputs = updates.at(-1)!.contract!.inputs;
+    expect(inputs).toHaveLength(count);
+    expect(names(input(updates.at(-1), 'references')?.value)).toEqual(['clip.mp4']);
+    expect(await inDrawer().findByRole('link', { name: 'clip.mp4' })).toBeVisible();
+  });
+
+  it('keep a file the canvas refused in one field out of another field’s write before the next render: it waits for its 加入', async () => {
+    render(<RefusingHost />);
+    fireEvent.click(toggle());
+    pick();
+    fireEvent.change(drawer()!.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await inDrawer().findByText('data.csv');
+    // 参考资料's file is refused as it lands; then the canvas takes edits again, and 限制与偏好's lands, before a render.
+    await act(async () => {
+      FakeUpload.sent[0].finish();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(updates).toHaveLength(1);
+      accept = true;
+      FakeUpload.sent[1].finish();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(updates).toHaveLength(2);
+    expect(names(input(updates[1], 'constraints')?.value)).toEqual(['data.csv']);
+    expect(names(input(updates[1], 'references')?.value)).toEqual([]);
+    expect(inDrawer().getByText('已上传，未加入')).toBeVisible();
+    expect(inDrawer().getByRole('button', { name: '加入 clip.mp4' })).toBeEnabled();
+  });
+
+  it('keep an output’s file that lands as a requirement is added to the output form before its render', async () => {
+    render(<TileHost initial={templated()} />);
+    const openDeliverables = screen.queryByRole('button', { name: '展开交付物' });
+    if (openDeliverables) fireEvent.click(openDeliverables);
+    fireEvent.click(screen.getByText('添加交付要求'));
+    const editor = [...document.querySelectorAll('.awwo-deliverables-editor')].find(element => element.querySelector('.awwo-contract-fields'))!;
+    fireEvent.change(editor.querySelector('.awwo-markdown input[type=file]')!, { target: { files: [new File(['# out'], 'out.md', { type: 'text/markdown' })] } });
+    await within(editor as HTMLElement).findByText('out.md');
+    await clickAfterAnswer(0, () => fireEvent.click(screen.getByRole('button', { name: '添加到交付' })));
+    const outputs = updates.at(-1)!.contract!.outputs;
+    expect(names(outputs.find(field => field.id === 'result')?.value)).toEqual(['out.md']);
+    expect(outputs.map(field => field.id)).toEqual(['result', 'followups', 'delivery_web']);
+  });
+
+  it('keep the delivery drawer open through an output’s file and an edit of another output made before the next render', async () => {
+    // A node that has delivered from a run, its drawer open by itself beside the conversation (deliverablesShown); an
+    // edit of its output form takes that delivery back (invalidateOutputs) and holds the drawer open while it lasts.
+    const delivered = { ...templated(), lastOutput: { text: JSON.stringify({ result: '已交付关卡说明。', followups: '' }), at: 1, source: 'run' as const } };
+    render(<TileHost initial={{ ...delivered, threads: getNodeThreads(delivered) }} />);
+    const drawer = screen.getByRole('region', { name: '交付物' });
+    fireEvent.click(within(drawer).getByText('编辑输出表单'));
+    fireEvent.change(within(drawer).getByLabelText('交付结果的值').closest('.awwo-markdown')!.querySelector('input[type=file]')!,
+      { target: { files: [new File(['# out'], 'out.md', { type: 'text/markdown' })] } });
+    await within(drawer).findByText('out.md');
+    await clickAfterAnswer(0, () => fireEvent.change(within(drawer).getByLabelText('后续事项的值'), { target: { value: '下一步：联调' } }));
+    const saved = updates.at(-1)!;
+    expect(saved.lastOutput ?? null).toBeNull();
+    expect(names(saved.contract!.outputs.find(field => field.id === 'result')?.value)).toEqual(['out.md']);
+    expect(saved.contract!.outputs.find(field => field.id === 'followups')?.value).toBe('下一步：联调');
+    // The edit in progress is the form as the node holds it, the file in it: the drawer and its editor stay.
+    expect(screen.getByRole('region', { name: '交付物' })).toBe(drawer);
+    expect(within(drawer).getByText('编辑输出表单').closest('details')).toHaveAttribute('open');
+  });
+
+  it.each([
+    ['a new conversation', false, '新建 Session'],
+    ['an earlier conversation', true, '打开 对话 1'],
+  ])('open %s from the node the document holds, not the one this render drew: a file that landed, a preview and a draft the canvas wrote', async (_what, earlier, target) => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
+    if (earlier) {
+      fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
+      expect(getNodeThreads(updates.at(-1)!)).toHaveLength(2);
+    }
+    const left = activeThreadId(updates.at(-1) ?? templated());
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.awwo-session-input')!);
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    await clickAfterAnswer(0, () => {
+      // Meanwhile the canvas writes the conversation's preview line, as a reply's text comes in, and a draft into it (as
+      // another tab's document brings one): this box never changed that draft, so it keeps the canvas's.
+      setHostNode(updateNodeDraft(updateThreadPreview(updates.at(-1)!, left, '关卡草图已收到'), '另一页写下的草稿', left));
+      fireEvent.click(screen.getByRole('button', { name: target }));
+    });
+    const saved = updates.at(-1)!;
+    expect(activeThreadId(saved)).not.toBe(left);
+    expect(getNodeThreads(saved)).toHaveLength(2);
+    expect(names(input(saved, 'references')?.value)).toEqual(['clip.mp4']);
+    expect(getNodeThreads(saved).find(thread => thread.id === left)).toMatchObject({ preview: '关卡草图已收到', draft: '另一页写下的草稿' });
+  });
+
+  it('keep a file that lands in the message box as another conversation opens before its render, in the conversation it went to', async () => {
+    // As the canvas: the box's drafts are saved to the node as its document holds it (persistDraft), the card's changes too.
+    const saves: SessionNode[] = [];
+    function DraftHost() {
+      const [node, setNode] = useState(templated());
+      const live = useRef(node);
+      const save = (next: SessionNode) => { live.current = next; saves.push(next); setNode(next); };
+      return <CanvasUiModeProvider mode="developer"><SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()}
+        onUpdateNode={next => save(next as SessionNode)} onPatchNode={(_id, change) => save(change(live.current))}
+        onDraftChange={(_id, thread, draft) => save(updateNodeDraft(live.current, draft, thread))} /></CanvasUiModeProvider>;
+    }
+    render(<DraftHost />);
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
+    fireEvent.change(screen.getByTestId('composer-input').closest('.canvas-composer')!.querySelector('input[type=file]')!,
+      { target: { files: [new File(['png'], 'map.png', { type: 'image/png' })] } });
+    await screen.findByText('map.png');
+    // The file goes into the box's draft, saved at once; the click's handler runs before the render that draws it.
+    await clickAfterAnswer(0, () => fireEvent.click(screen.getByRole('button', { name: '新建 Session' })), () => saves.length);
+    const threads = getNodeThreads(saves.at(-1)!);
+    expect(threads).toHaveLength(2);
+    expect(names(threads.find(thread => thread.id === 'default')?.draft)).toEqual(['map.png']);
+  });
+
+  it.each([
+    ['a keystroke in the message box', () => fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '先看参考资料' } }),
+      (saved: SessionNode) => expect(activeNodeThread(saved).draft).toBe('先看参考资料')],
+    ['the delivery drawer opened', () => fireEvent.click(screen.getByRole('button', { name: '展开交付物' })),
+      (saved: SessionNode) => expect(saved.deliverablesOpen).toBe(true)],
+  ])('keep a file that lands in the inputs as %s before its render, where the canvas does not handle it itself', async (_what, act2, check) => {
+    // TileHost passes neither onDraftChange nor onToggleDeliverables: the tile writes the draft and the drawer itself.
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    pick();
+    await inDrawer().findByText('clip.mp4');
+    await clickAfterAnswer(0, act2);
+    const saved = updates.at(-1)!;
+    check(saved);
+    expect(names(input(saved, 'references')?.value)).toEqual(['clip.mp4']);
+  });
+
+  it('take two files that land in two fields at the same moment from a host that takes whole nodes only, and build on an undo after', async () => {
+    // Without onPatchNode the tile writes whole nodes: each built on the ones made since its render.
+    const saves: SessionNode[] = [];
+    const first = templated();
+    let put: (node: SessionNode) => void = () => {};
+    function WholeNodeHost() {
+      const [node, setNode] = useState(first);
+      put = setNode;
+      return <CanvasUiModeProvider mode="developer"><SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()}
+        onUpdateNode={next => { saves.push(next as SessionNode); setNode(next as SessionNode); }} /></CanvasUiModeProvider>;
+    }
+    render(<WholeNodeHost />);
+    fireEvent.click(toggle());
+    pick();
+    fireEvent.change(drawer()!.querySelectorAll('.awwo-markdown input[type=file]')[1], { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
+    await inDrawer().findByText('data.csv');
+    act(() => { FakeUpload.sent[0].finish(); FakeUpload.sent[1].finish(); });
+    await waitFor(() => expect(inDrawer().queryAllByText(/^上传中/)).toHaveLength(0));
+    expect(saves).toHaveLength(2);
+    expect(names(input(saves[1], 'references')?.value)).toEqual(['clip.mp4']);
+    expect(names(input(saves[1], 'constraints')?.value)).toEqual(['data.csv']);
+    // The host's undo puts back the very node from before the files; the next edit builds on it, not on those writes.
+    act(() => put(first));
+    fireEvent.change(inDrawer().getByLabelText('参考资料的值'), { target: { value: 'docs/关卡素材.md' } });
+    expect(input(saves.at(-1), 'references')?.value).toBe('docs/关卡素材.md');
+    expect(names(input(saves.at(-1), 'constraints')?.value)).toEqual([]);
+  });
+
+  it('build no change on one a host that takes whole nodes refused and drew nothing for', () => {
+    // The host takes changes only once `accept` is set, and draws nothing for one it refuses.
+    const offered: SessionNode[] = [];
+    function RefusingWholeNodeHost() {
+      const [node, setNode] = useState(templated());
+      return <CanvasUiModeProvider mode="developer"><SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()}
+        onUpdateNode={next => { offered.push(next as SessionNode); if (accept) setNode(next as SessionNode); }} /></CanvasUiModeProvider>;
+    }
+    render(<RefusingWholeNodeHost />);
+    fireEvent.click(toggle());
+    fireEvent.click(inDrawer().getByRole('button', { name: '编辑字段结构' }));
+    fireEvent.click(inDrawer().getByRole('button', { name: '添加字段' }));
+    expect(offered.at(-1)!.contract!.inputs).toHaveLength(4);
+    accept = true;
+    fireEvent.change(inDrawer().getByLabelText('任务要求的值'), { target: { value: '做两个关卡' } });
+    expect(offered.at(-1)!.contract!.inputs).toHaveLength(3);
+    expect(input(offered.at(-1), 'brief')?.value).toBe('做两个关卡');
+  });
+
+  it('keep the draft in its box with its conversation when another opens, where the host saves no draft as it is typed', () => {
+    // The host hears each draft (onDraftChange) and keeps none of them in the node: the switch saves the box's.
+    render(<CanvasUiModeProvider mode="developer"><SessionTile node={templated()} scale={1} focused initializeOnSend onSend={vi.fn()}
+      onUpdateNode={next => updates.push(next as SessionNode)} onDraftChange={vi.fn()} /></CanvasUiModeProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '先看参考资料' } });
+    expect(updates).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
+    expect(getNodeThreads(updates.at(-1)!).find(thread => thread.id === 'default')?.draft).toBe('先看参考资料');
+  });
+
+  it('leave the draft in its box with the conversation the box showed, when the canvas changed conversations before the render', async () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
+    const second = activeThreadId(updates.at(-1)!);
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '第二个对话的草稿' } });
+    await act(async () => {
+      // The canvas goes back to Session 1 (an undo, another tab's document); the reader still sees Session 2.
+      setHostNode(selectNodeThread(updates.at(-1)!, 'default'));
+      fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
+    });
+    const threads = getNodeThreads(updates.at(-1)!);
+    expect(threads).toHaveLength(3);
+    expect(threads.find(thread => thread.id === second)?.draft).toBe('第二个对话的草稿');
+    expect(threads.find(thread => thread.id === 'default')?.draft ?? '').toBe('');
+  });
+
   it('bring back no file an undo took out of a field: the next edit there builds on what the undo left', async () => {
     render(<TileHost initial={templated()} />);
     fireEvent.click(toggle());
@@ -985,5 +1248,43 @@ describe('the canvas, saving an opened node’s inputs and deliverables', () => 
     const opened = screen.getByTestId('canvas-tile-n');
     expect(within(opened).getByRole('region', { name: '交付物' })).toBeTruthy();
     expect([opened.dataset.content, opened.style.getPropertyValue('--awwo-drawer-width')]).toEqual(['delivery', '52%']);
+  });
+
+  it.each([
+    ['another conversation opens', '新建 Session', (kept: SessionNode) => expect(kept.threads).toHaveLength(2)],
+    ['a field is added', '添加字段', (kept: SessionNode) => expect(kept.contract!.inputs).toHaveLength(4)],
+  ])('keep an input’s file that lands as %s before its render', async (_how, button, check) => {
+    const general = createAgentTemplate('general', { x: 0, y: 0 }, 'zh');
+    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [{ ...general, id: 'n' }] }));
+    render(<CanvasSurface />);
+    fireEvent.click(screen.getByRole('button', { name: `打开 ${general.title}`, exact: true }));
+    const tile = await screen.findByTestId('canvas-tile-n');
+    await waitFor(() => expect(tile.dataset.lod).toBe('focus'));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+    // The inputs opened from the sessions list, on their structure.
+    fireEvent.click(await screen.findByRole('button', { name: '展开 Session 列表' }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('.awwo-session-input')!);
+    fireEvent.click(screen.getByRole('button', { name: '编辑字段结构' }));
+    fireEvent.change(document.querySelector('.awwo-input-drawer .awwo-file-field input[type=file]')!, { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' })] } });
+    await screen.findByText('clip.mp4');
+    // The answer's write is made (the canvas runs each edit of its document through invalidateOutputs: one more call), and
+    // the click's handler runs before the render that draws it (one act holds both).
+    const edits = vi.spyOn(invalidation, 'invalidateOutputs');
+    try {
+      await act(async () => {
+        const before = edits.mock.calls.length;
+        FakeUpload.sent[0].finish();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(edits.mock.calls.length).toBe(before + 1);
+        fireEvent.click(screen.getByRole('button', { name: button }));
+      });
+    } finally {
+      edits.mockRestore();
+    }
+    await waitFor(() => {
+      const kept = saved();
+      check(kept);
+      expect(names(kept.contract!.inputs.find(field => field.id === 'references')!.value)).toEqual(['clip.mp4']);
+    }, { timeout: 4000 });
   });
 });

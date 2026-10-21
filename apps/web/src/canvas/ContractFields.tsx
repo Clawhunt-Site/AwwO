@@ -28,7 +28,11 @@ export interface ContractFieldsProps {
   /** Wired fields whose media upstream has made no file, by what it makes (nodeConversation.ts): their resolved value is
    *  the agent's note, so the field shows no value and says so in the page's language. */
   mediaMissing?: Record<string, MediaOutputKind>;
-  onChange: (fields: ContractField[]) => void;
+  /** Each change, as a change of the list its owner holds when it comes, which `fields` (the list this render drew) may lag
+   *  behind: changes made before the next render (files landing in two fields at once, a field added as a file lands)
+   *  build on one another, and none puts back what the owner's list lost or gained since (a file the owner refused, a
+   *  field an undo took out). A `useState` setter takes it as it is. */
+  onChange: (change: (fields: ContractField[]) => ContractField[]) => void;
   readOnly?: boolean;
   /** Task entry starts with values; contract customization remains available on demand. */
   valuesFirst?: boolean;
@@ -148,20 +152,20 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, medi
   // A wired value is checked once it arrives, as a run's preflight does: until then its field says it is waiting for
   // its source, and only what is filled in here can be missing.
   const errors = validateContractFields(resolvedFields ?? fields.filter(field => !sources?.[field.id]), locale);
-  // Patches made before the next render build on one another: files landing in two fields at the same moment are written
-  // one after the other, and each built from this render's fields, the later would drop the earlier.
-  const latestFields = useRef(fields);
-  latestFields.current = fields;
+  // A change touches only its own field (or adds or removes one) of the owner's list as it is then (onChange), never this
+  // render's whole list: built from that, a file landing in one field would drop the one that just landed in another.
   const patch = (id: string, update: Partial<ContractField>) => {
-    if (readOnly) return;
-    latestFields.current = latestFields.current.map((field) => field.id === id ? { ...field, ...update } : field);
-    onChange(latestFields.current);
+    if (!readOnly) onChange(current => current.map((field) => field.id === id ? { ...field, ...update } : field));
   };
   const add = () => {
     if (readOnly) return;
-    let id: string;
-    do { id = `field-${instanceId.replace(/[^a-zA-Z0-9]/g, '')}-${++nextField.current}`; } while (fields.some((field) => field.id === id));
-    onChange([...fields, { id, label: t('contract.defaultField', { count: fields.length + 1 }), type: 'text', required: false, value: '' }]);
+    const prefix = `field-${instanceId.replace(/[^a-zA-Z0-9]/g, '')}-`;
+    const from = ++nextField.current;
+    onChange(current => {
+      let count = from;
+      while (current.some((field) => field.id === `${prefix}${count}`)) count++;
+      return [...current, { id: `${prefix}${count}`, label: t('contract.defaultField', { count: current.length + 1 }), type: 'text', required: false, value: '' }];
+    });
   };
   return <section className="awwo-contract-fields" aria-label={t('contract.fields', { label })}>
     {valuesFirst && !readOnly && structureEditable && <button type="button" className="awwo-field-structure-toggle" aria-expanded={editingSchema} onClick={() => setEditingSchema(!editingSchema)}>{locale === 'zh' ? (editingSchema ? '完成结构编辑' : '编辑字段结构') : (editingSchema ? 'Done editing fields' : 'Edit field structure')}</button>}
@@ -194,7 +198,7 @@ export function ContractFields({ fields, resolvedFields, sources, recorded, medi
             {FIELD_TYPES.map((type) => <option key={type.value} value={type.value}>{t(type.label)}</option>)}
           </select>
           <button type="button" className="awwo-field-remove" aria-label={t('contract.removeField', { name })} disabled={readOnly}
-            onClick={() => !readOnly && onChange(fields.filter((candidate) => candidate.id !== field.id))}>
+            onClick={() => !readOnly && onChange(current => current.filter((candidate) => candidate.id !== field.id))}>
             <Trash2 size={15} aria-hidden="true" />
           </button>
         </div>

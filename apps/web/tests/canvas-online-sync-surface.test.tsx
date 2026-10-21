@@ -96,7 +96,8 @@ it('offers HTML output contracts in SaaS and preserves the existing source', () 
   const onChange = vi.fn(); const view = render(<ContractFields fields={[text]} onChange={onChange} label="Output" />);
   expect(screen.getByRole('option', { name: /HTML/ })).toBeEnabled();
   fireEvent.change(screen.getByRole('combobox', { name: /Body/ }), { target: { value: 'html' } });
-  expect(onChange).toHaveBeenCalledWith([{ ...text, type: 'html' }]); onChange.mockClear();
+  // A change of the owner's list as it is then (ContractFields' onChange).
+  expect(onChange).toHaveBeenCalledOnce(); expect(onChange.mock.calls[0][0]([text])).toEqual([{ ...text, type: 'html' }]); onChange.mockClear();
   view.rerender(<ContractFields fields={[{ ...text, type: 'html', value: '<!doctype html><html><head></head><body>Saved</body></html>' }]} onChange={onChange} label="Output" />);
   expect(screen.getByRole('option', { name: /HTML/ })).toBeEnabled();
   expect(screen.getByDisplayValue(/<!doctype html>/)).toBeInTheDocument(); expect(onChange).not.toHaveBeenCalled();
