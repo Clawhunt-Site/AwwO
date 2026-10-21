@@ -34,6 +34,17 @@ AwwO 是一个协作式 AI 画布。登录账号后，选择执行引擎并连�
 
 Key 在服务端加密存储，并绑定到个人账号。共享画布不会共享凭证；其他成员执行时需要选择自己的连接。账号设置支持资料修改、密码修改、连接删除和登录会话撤销。官方线上版已启用邮件找回密码；自行部署时需要管理员配置 SMTP。
 
+## 本地版
+
+在自己的电脑上运行与线上版同一套服务：数据保存在本机，模型使用自己的 Key，没有套餐与额度。需要 Go 1.27.1+；Node.js 24 与（Windows 上的）PostgreSQL 缺少时会自动下载。
+
+```sh
+npm run setup:local
+npm run local
+```
+
+打开 `http://awwo.localhost:5199`（会跳转到这个数据目录自己的地址），用 `.local/awwo-local/state/admin-credentials.txt` 中的账号登录。说明见 [AwwO 本地版](docs/awwo-local-edition.md)。
+
 ## 本地启动完整服务
 
 需要 Node.js 24 LTS、Go 1.27.1+、PostgreSQL 16+，以及 PATH 中的 `initdb`、`pg_ctl`、`psql`、`createdb`。
