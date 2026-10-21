@@ -1144,6 +1144,20 @@ describe('the canvas assistant’s one conversation', () => {
     expect(document.body).toHaveFocus();
   });
 
+  // 2026-10-21: a node handed to the assistant from its own view had the panel's first text box take the focus, and a task
+  // card above the composer can hold one (its question's answer): the request to change the node went to the task.
+  it('moves the focus to the side panel’s message box, not to a task’s box above it, when an opened node asks the assistant to change it', async () => {
+    seedNode();
+    const { host } = taskAsking();
+    render(<CanvasSurface assistantExecution={host} routeAssistant={routeTo('plan')} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(screen.getByRole('button', { name: '打开 已有节点', exact: true }));
+    const card = within(await screen.findByRole('region', { name: '「已有节点」的任务' }));
+    fireEvent.click(card.getByRole('button', { name: '让助手修改' }));
+    expect(panel().getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    expect(box()).toHaveValue('修改「已有节点」：');
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
   it('says the task was stopped when the canvas became busy meanwhile', async () => {
     seedNode();
     const stopping = deferred<void>();

@@ -3493,10 +3493,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A draft the reader started is theirs: a change request leaves it, a fix request goes after it.
     setPlanning(previous => !previous.draft.trim() ? { ...previous, draft: lead }
       : kind === 'fix' && !previous.draft.includes(lead) ? { ...previous, draft: `${previous.draft.trimEnd()}\n${lead}` } : previous);
+    // The message box, not a box that a task card above it holds (a question's answer), which the draft is not in.
     requestAnimationFrame(() => {
       const scope = rootRef.current?.closest('.awwo-workspace') ?? document;
-      const box = scope.querySelector<HTMLTextAreaElement>('.awwo-canvas-assistant--panel textarea')
-        ?? scope.querySelector<HTMLTextAreaElement>('.awwo-canvas-assistant textarea');
+      const box = scope.querySelector<HTMLTextAreaElement>(PANEL_BOX) ?? scope.querySelector<HTMLTextAreaElement>(MESSAGE_BOX);
       box?.focus(); box?.setSelectionRange(box.value.length, box.value.length);
     });
   };
