@@ -108,14 +108,15 @@ function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: 
  * fits all, with Shift and a digit from 1 to 9 only saves one); a wheel outside its node, which moves the canvas or scrolls something
  * else (over its own opened node a wheel scrolls it); or the focus gone into a frame, a preview, which gives the page no
  * focusin. Typing, editing chords and the browser's own keys do not count (AltGr's digits do: the canvas moves its camera
- * for them). Listens in the capture phase, as a press on a node stops at its tile. Returns the cleanup.
+ * for them). Listens in the capture phase, as a press on a node stops at its tile. Returns the cleanup. `cameraKeys:
+ * false` leaves the camera keys to the caller (the assistant's panel counts them as the canvas takes them).
  */
-function watchReaderAway(composer: HTMLElement, away: () => void): () => void {
+export function watchReaderAway(composer: HTMLElement, away: () => void, { cameraKeys = true }: { cameraKeys?: boolean } = {}): () => void {
   const node = composer.closest('.canvas-tile') ?? composer;
   const outside = (event: Event, scope: Element) => !(event.target instanceof Node && scope.contains(event.target));
   const onPress = (event: Event) => { if (outside(event, composer)) away(); };
   const onKey = (event: DocumentEventMap['keydown']) => {
-    const camera = (event.ctrlKey || event.metaKey) && ((/^Digit[1-9]$/.test(event.code) && !event.shiftKey) || event.code === 'Digit0' || event.key === '0');
+    const camera = cameraKeys && (event.ctrlKey || event.metaKey) && ((/^Digit[1-9]$/.test(event.code) && !event.shiftKey) || event.code === 'Digit0' || event.key === '0');
     if ((camera || event.key === 'Escape' || event.key === 'Tab') && outside(event, composer)) away();
   };
   const onWheel = (event: Event) => { if (outside(event, node)) away(); };

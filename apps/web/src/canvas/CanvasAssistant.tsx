@@ -234,10 +234,13 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
     const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [waiting]);
-  // The box is disabled while a message is handled, which drops the focus; it comes back to the box after.
+  // The box is disabled while a message is handled, which drops the focus; it comes back to the box after, unless the
+  // panel is hidden then (stepped aside for an opened node, where the canvas hands it to 画布助手): a browser gives a
+  // hidden box no focus (jsdom would).
   const wasWaiting = useRef(waiting);
   useEffect(() => {
-    if (wasWaiting.current && !waiting && (!document.activeElement || document.activeElement === document.body)) input.current?.focus();
+    if (wasWaiting.current && !waiting && (!document.activeElement || document.activeElement === document.body)
+      && !input.current?.closest('[hidden]')) input.current?.focus();
     wasWaiting.current = waiting;
   }, [waiting]);
   // How long the current stage has lasted, so a hint follows the stage rather than the request.

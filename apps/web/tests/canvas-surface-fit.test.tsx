@@ -17,10 +17,14 @@
 // node — closing it, deleting it — glides back to the operator's camera, which is also the one saved.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { CanvasSurface } from '../src/canvas/CanvasSurface';
-import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument } from '../src/canvas/canvasDoc';
+import { useState } from 'react';
+import { CanvasSurface, type CanvasSurfaceProps } from '../src/canvas/CanvasSurface';
+import type { AssistantExecutionHost } from '../src/canvas/assistantRouting';
+import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
-import { PLANNING_STORAGE_KEY } from '../src/canvas/canvasPlanning';
+import { PLANNING_STORAGE_KEY, savePlanningConversation, type requestCanvasPlan } from '../src/canvas/canvasPlanning';
+import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { loadRunJournal } from '../src/canvas/runJournal';
@@ -1210,10 +1214,10 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
   });
 
   /** A node open beside the assistant on the 1400 px stage, the stage about to narrow to 600 px under it (as above). */
-  const openBesideAssistant = async () => {
+  const openBesideAssistant = async (planRequest?: typeof requestCanvasPlan, props: CanvasSurfaceProps = {}) => {
     const deliveries: Array<() => void> = [];
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { deliveries.push(callback); } observe() {} unobserve() {} disconnect() {} });
-    render(<CanvasSurface />);
+    render(<CanvasSurface planRequest={planRequest} {...props} />);
     act(() => { deliveries.forEach(deliver => deliver()); });
     fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
     const side = () => document.querySelector<HTMLElement>('.awwo-planner-sidebar');
@@ -1222,7 +1226,7 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     await openNode();
     expect(side()!.hidden).toBe(false);
     layout = { ...layout, w: 600, sidebar: 340 };
-    return { box: within(side()!).getByRole('textbox'), stowed: () => side()!.hidden, deliver: () => deliveries.forEach(deliver => deliver()) };
+    return { box: within(side()!).getByRole('textbox', { name: '画布需求' }), stowed: () => side()!.hidden, deliver: () => deliveries.forEach(deliver => deliver()) };
   };
 
   // 2026-10-20: stepping aside hides the panel and keeps it mounted, so a focus in it stayed on its box, hidden but on
@@ -1244,6 +1248,356 @@ describe('CanvasSurface keeps an opened node clear of a sidebar floating over th
     await waitFor(() => expect(assistant.stowed()).toBe(true));
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(search).toHaveFocus();
+  });
+
+  // 2026-10-21: stepping aside moved every focus it found lost to 画布助手, not only the one it hid in the panel: a
+  // node's 打开 takes the focus away with its card as the node opens, Chrome drops it to the page from an opened node's
+  // box while its reply runs (the box takes it back once the reply ends), and on the page the canvas's keys work. The
+  // toggle then took the next key (Enter brought the assistant back over the node), and whatever hands the focus on
+  // beside the assistant no longer could. A focus the panel did not hold as it stepped aside is left as it is; one the
+  // panel would take back later goes to the toggle then.
+  /** The focus where a browser leaves a control that lets it go: on the page (<body>). */
+  const focusToPage = () => {
+    const search = screen.getByRole('searchbox', { name: '查找 Agent' });
+    search.focus(); search.blur();
+    expect(document.body).toHaveFocus();
+  };
+  const twoFrames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const stowed = () => document.querySelector<HTMLElement>('.awwo-planner-sidebar')!.hidden;
+  /** The assistant open over `doc` on a 600 px stage, whose 340 px sidebar leaves an opened node no readable room. */
+  const crampedAssistant = async (doc: CanvasDocument, withResults = false) => {
+    layout = { ...layout, w: 600, h: 900, sidebar: 340 };
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
+    render(<CanvasSurface results={withResults ? {} : undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(stowed()).toBe(false));
+    await settle();
+  };
+
+  it('leaves a focus on the page there when the stage narrows under the open node', async () => {
+    const assistant = await openBesideAssistant();
+    focusToPage();
+    act(assistant.deliver);
+    await waitFor(() => expect(assistant.stowed()).toBe(true));
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  /** A node open beside the assistant (as openBesideAssistant), a message sent from the panel's box: the box is disabled
+   *  while the panel waits, and the page gets the focus, as Chrome drops a disabled control's (jsdom leaves it on the
+   *  box). `beforeSending` runs with the box focused, before the message goes, which Enter sends where `byEnter` (its
+   *  button otherwise). `done` ends the wait: with the plan failing, which leaves the canvas as it was and the node
+   *  `open` (s1 unless said) open, or with `plan` applied. `props` go to CanvasSurface. */
+  const sendFromThePanel = async (beforeSending?: () => void, byEnter = false, props: CanvasSurfaceProps = {}) => {
+    let settle!: { fail: (error: Error) => void; apply: (plan: CanvasPlan) => void };
+    const assistant = await openBesideAssistant(vi.fn<typeof requestCanvasPlan>(() => new Promise((apply, fail) => { settle = { apply, fail }; })), props);
+    const box = assistant.box as HTMLTextAreaElement;
+    box.focus();
+    beforeSending?.();
+    fireEvent.change(box, { target: { value: '把这个节点改名为玩法设计' } });
+    if (byEnter) fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' });
+    else fireEvent.click(screen.getByRole('button', { name: '修改画布', exact: true }));
+    await waitFor(() => expect(box).toBeDisabled());
+    box.disabled = false; box.blur(); box.disabled = true;
+    expect(document.body).toHaveFocus();
+    const done = async (plan?: CanvasPlan, open = 's1') => {
+      await act(async () => { if (plan) settle.apply(plan); else settle.fail(new Error('规划服务暂时不可用')); });
+      await waitFor(() => expect(within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { hidden: true })).toBeEnabled());
+      if (!plan) expect(screen.getByTestId(`canvas-tile-${open}`).dataset.lod).toBe('focus');
+    };
+    return { ...assistant, done };
+  };
+  /** The window narrowing under the open node while the panel waits: the assistant steps aside, the focus on the page. */
+  const narrowMeanwhile = async (assistant: Awaited<ReturnType<typeof sendFromThePanel>>) => {
+    act(assistant.deliver);
+    await waitFor(() => expect(assistant.stowed()).toBe(true));
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  };
+
+  it('hands 画布助手 the focus the assistant’s box would take back once its message is done, stepped aside meanwhile', async () => {
+    // The box takes a lost focus back once a message is handled (CanvasAssistant), which it cannot do hidden (found in
+    // review: the focus stayed on the page).
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    await assistant.done();
+    expect(assistant.stowed()).toBe(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  // The reader turning elsewhere meanwhile keeps it where they put it, as for an opened node's own box (TileComposer):
+  // found in review, a node's box the reader sent from meanwhile lost its own hand-back to 画布助手.
+  it('leaves on the page a focus the reader moved elsewhere meanwhile, when the assistant’s message is done', async () => {
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    focusToPage();
+    await assistant.done();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('leaves on the page a focus the reader pressed elsewhere meanwhile, when the assistant’s message is done', async () => {
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    const board = document.querySelector<HTMLElement>('.canvas-viewport')!;
+    fireEvent.pointerDown(board, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(board, { button: 0, pointerId: 1 });
+    expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus');
+    await assistant.done();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('hands 画布助手 the focus once the assistant’s message is done after a press inside the panel meanwhile', async () => {
+    // On its conversation, to read it, before the window narrows: the reader is still in the panel.
+    const assistant = await sendFromThePanel();
+    const log = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('log');
+    fireEvent.pointerDown(log, { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(log, { button: 0, pointerId: 1 });
+    await narrowMeanwhile(assistant);
+    await assistant.done();
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  // 让助手帮我填写 sends the assistant a message, and the card goes as the panel begins to wait (it is offered only while
+  // the panel is idle): a focus on the step falls to the page as the message goes (found in review: the panel's
+  // hand-back was armed only by a focus still in the panel then). Safari gives a button pressed with the mouse no focus:
+  // the press tells the reader was there.
+  it.each([['from the keyboard', true], ['with a mouse that gives it no focus (Safari)', false]])('hands 画布助手 the focus a step of 接下来 pressed %s took away with the card, once its message is done stepped aside', async (_how, focused) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => String(input).endsWith('/canvas/planner')
+      ? new Response(JSON.stringify({ available: true, provider: 'pi' })) : new Response('{}', { status: 503 })));
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed(), nodes: [{ ...createAgentTemplate('general', { x: 60, y: 150 }), id: 's1', title: 'LLM 会话' }] }));
+    let fail!: (error: Error) => void;
+    const assistant = await openBesideAssistant(vi.fn<typeof requestCanvasPlan>(() => new Promise((_, reject) => { fail = reject; })));
+    const step = await within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).findByRole('button', { name: '让助手帮我填写' });
+    if (focused) step.focus();
+    else { fireEvent.pointerDown(step, { button: 0, pointerId: 1 }); fireEvent.pointerUp(step, { button: 0, pointerId: 1 }); }
+    fireEvent.click(step);
+    await waitFor(() => expect(step).not.toBeInTheDocument());
+    expect(document.body).toHaveFocus();
+    await narrowMeanwhile({ ...assistant, done: async () => {} });
+    await act(async () => fail(new Error('规划服务暂时不可用')));
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  it('leaves on the page a focus the reader wheeled the canvas with meanwhile, when the assistant’s message is done', async () => {
+    // A wheel moves the canvas: the reader turned to it, as for an opened node's own box (TileComposer).
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    fireEvent.wheel(document.querySelector<HTMLElement>('.canvas-viewport')!, { deltaY: 120 });
+    await assistant.done();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('hands 画布助手 the focus the box had as its message went though a press outside came before, once it is done', async () => {
+    // A press that leaves the focus in the box, then Enter: the message still went from the box. The middle button pans
+    // the board, which cancels its press (Chrome 155 keeps the focus in the box; a left or a right press takes it).
+    const assistant = await sendFromThePanel(() => {
+      const board = document.querySelector<HTMLElement>('.canvas-viewport')!;
+      fireEvent.pointerDown(board, { button: 1, buttons: 4, pointerId: 1 });
+      fireEvent.pointerUp(board, { button: 1, pointerId: 1 });
+      expect(within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox')).toHaveFocus();
+    }, true);
+    await narrowMeanwhile(assistant);
+    await assistant.done();
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  // Found in review: the canvas's node keys took the reader to another node with the panel still aside, and 画布助手
+  // took the focus over it at the answer (the next Enter or Space brought the assistant back over the node).
+  it.each([['Ctrl+]', { key: ']', code: 'BracketRight', ctrlKey: true }], ['⌘[', { key: '[', code: 'BracketLeft', metaKey: true }]])('leaves on the page a focus the reader took to the next node with %s meanwhile, when the assistant’s message is done', async (_name, init) => {
+    const doc = seed({ x: 60, y: 150 });
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc, nodes: [...doc.nodes, { ...createSessionNode('llm', { x: 60, y: 420 }), id: 's2', title: 'LLM 会话二' }] }));
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    fireEvent.keyDown(document.body, init);
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s2').dataset.lod).toBe('focus'));
+    expect(assistant.stowed()).toBe(true);
+    await assistant.done(undefined, 's2');
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it.each([['Ctrl+E', { key: 'e', code: 'KeyE', ctrlKey: true }], ['Ctrl+Shift+E', { key: 'E', code: 'KeyE', ctrlKey: true, shiftKey: true }]])('leaves on the page a focus the reader opened a node with by %s meanwhile, when the assistant’s message is done', async (_name, init) => {
+    // On a stage that leaves an opened node no room beside the assistant: the node opens under it, which steps aside.
+    let fail!: (error: Error) => void;
+    layout = { ...layout, w: 600, h: 900, sidebar: 340 };
+    render(<CanvasSurface planRequest={vi.fn<typeof requestCanvasPlan>(() => new Promise((_, reject) => { fail = reject; }))} />);
+    fireEvent.click(screen.getByRole('button', { name: '画布助手', exact: true }));
+    await waitFor(() => expect(stowed()).toBe(false));
+    await settle();
+    // The node selected from the keyboard (Ctrl+] with none open), then a message sent from the panel's box.
+    fireEvent.keyDown(document.body, { key: ']', code: 'BracketRight', ctrlKey: true });
+    const box = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox') as HTMLTextAreaElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: '把这个节点改名为玩法设计' } });
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(box).toBeDisabled());
+    box.disabled = false; box.blur(); box.disabled = true;
+    fireEvent.keyDown(document.body, init);
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus'));
+    expect(stowed()).toBe(true);
+    await act(async () => fail(new Error('规划服务暂时不可用')));
+    await waitFor(() => expect(box).toBeEnabled());
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  // A waypoint recalled moves the camera off the node: the reader turned to the canvas, as for an opened node's own box.
+  it.each([['Ctrl+1', { key: '1', code: 'Digit1', ctrlKey: true }, [-400, 0, 1]], ['⌘2', { key: '2', code: 'Digit2', metaKey: true }, [0, -300, 1]]])('leaves on the page a focus the reader moved the camera with by %s meanwhile, when the assistant’s message is done', async (_name, init, camera) => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 60, y: 150 }), waypoints: [{ slot: 1, view: { x: -400, y: 0, scale: 1 } }, { slot: 2, view: { x: 0, y: -300, scale: 1 } }] }));
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    fireEvent.keyDown(document.body, init);
+    expect(transformOf(document.querySelector('.canvas-world') as HTMLElement)).toEqual(camera);
+    await assistant.done();
+    expect(assistant.stowed()).toBe(true);
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  // Under 成果 the canvas's keys are paused (useCanvasKeys): a node key or a camera key there moves nothing and keeps the
+  // reader with the panel (found in review: the rule counted them).
+  it.each([['Ctrl+]', { key: ']', code: 'BracketRight', ctrlKey: true }], ['Ctrl+0', { key: '0', code: 'Digit0', ctrlKey: true }],
+    ['Ctrl+1', { key: '1', code: 'Digit1', ctrlKey: true }]])('hands 画布助手 the focus once the assistant’s message is done after %s, which 成果 pauses, meanwhile', async (_name, init) => {
+    canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...seed({ x: 60, y: 150 }), waypoints: [{ slot: 1, view: { x: -400, y: 0, scale: 1 } }] }));
+    const assistant = await sendFromThePanel(() => {
+      // The reader turns to 成果 (the node stays open under it), then writes in the panel's box.
+      const results = within(screen.getByRole('group', { name: '画布视图' })).getByRole('button', { name: '成果' });
+      results.focus();
+      fireEvent.click(results);
+      within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { name: '画布需求' }).focus();
+    }, true, { results: {} });
+    await narrowMeanwhile(assistant);
+    fireEvent.keyDown(document.body, init);
+    await assistant.done();
+    expect(within(screen.getByRole('group', { name: '画布视图' })).getByRole('button', { name: '成果' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  // A node key typed in a field is the field's (useCanvasKeys leaves it alone): typed in the answer box of a task that
+  // asks something in the panel, it keeps the reader with the panel, whose answer then takes the box away (found in
+  // review: the rule counted it).
+  it('hands 画布助手 the focus a task’s answer box in the panel let go, a node key typed in it, once the message is done', async () => {
+    savePlanningConversation({ draft: '', messages: [
+      { id: 'turn-0-user', role: 'user', content: '先查一下资料', route: 'execute' },
+      { id: 'turn-0-task', role: 'assistant', content: '', route: 'execute', taskId: 'task-0' }] });
+    function Asking() {
+      const [answered, setAnswered] = useState(false);
+      return answered ? <p>已回复</p> : <div><textarea aria-label="你的回复" /><button type="button" onClick={() => setAnswered(true)}>回复</button></div>;
+    }
+    const host: AssistantExecutionHost = { readOnly: false, ready: true, activate: vi.fn(), setVisible: vi.fn(), start: vi.fn(async () => 'task-1'),
+      stop: vi.fn(async () => {}), finished: () => false, renderTask: id => id === 'task-0' ? <Asking /> : <p>任务卡片 {id}</p>,
+      renderEarlier: () => null, renderNotices: () => null, settings: null };
+    let fail!: (error: Error) => void;
+    const assistant = await openBesideAssistant(vi.fn<typeof requestCanvasPlan>(() => new Promise((_, reject) => { fail = reject; })),
+      { assistantExecution: host, routeAssistant: async () => ({ route: 'plan' }) });
+    const box = assistant.box as HTMLTextAreaElement;
+    box.focus();
+    fireEvent.change(box, { target: { value: '把这个节点改名为玩法设计' } });
+    fireEvent.keyDown(box, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(box).toBeDisabled());
+    box.disabled = false; box.blur(); box.disabled = true;
+    const answer = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('textbox', { name: '你的回复' });
+    answer.focus();
+    fireEvent.change(answer, { target: { value: '用第二份资料' } });
+    fireEvent.keyDown(answer, { key: 'E', code: 'KeyE', ctrlKey: true, shiftKey: true });
+    expect(screen.getByTestId('canvas-tile-s1').dataset.lod).toBe('focus');
+    fireEvent.click(screen.getByRole('button', { name: '回复' }));
+    await waitFor(() => expect(answer).not.toBeInTheDocument());
+    expect(document.body).toHaveFocus();
+    await narrowMeanwhile({ ...assistant, done: async () => {} });
+    await act(async () => fail(new Error('规划服务暂时不可用')));
+    await waitFor(() => expect(box).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  it('hands 画布助手 the focus once the assistant’s message is done after keys that take the reader nowhere meanwhile', async () => {
+    // A letter, ] or a digit on the page, a copy, a waypoint saved (Ctrl+Shift with a digit), Shift alone: the canvas
+    // moves nothing.
+    const assistant = await sendFromThePanel();
+    await narrowMeanwhile(assistant);
+    fireEvent.keyDown(document.body, { key: 'a', code: 'KeyA' });
+    fireEvent.keyDown(document.body, { key: ']', code: 'BracketRight' });
+    fireEvent.keyDown(document.body, { key: '1', code: 'Digit1' });
+    fireEvent.keyDown(document.body, { key: 'c', code: 'KeyC', ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(document.body, { key: 'Shift', shiftKey: true });
+    await assistant.done();
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  it('leaves its box the focus the assistant takes back once its message is done beside the node', async () => {
+    const assistant = await sendFromThePanel();
+    await assistant.done();
+    expect(assistant.stowed()).toBe(false);
+    await waitFor(() => expect(assistant.box).toHaveFocus());
+  });
+
+  it('leaves the focus on the page when the panel, closed while its message is handled, comes back with the plan', async () => {
+    // Found in review: a hand-back that outlived the closed panel put the focus in the box of the one the plan opened.
+    const assistant = await sendFromThePanel();
+    fireEvent.click(screen.getByRole('button', { name: '关闭画布助手', exact: true }));
+    await waitFor(() => expect(document.querySelector('.awwo-planner-sidebar')).toBeNull());
+    // Closed, it hands the focus to 画布助手, which the reader then leaves for the page.
+    const toggle = screen.getByRole('button', { name: '画布助手', exact: true });
+    await waitFor(() => expect(toggle).toHaveFocus());
+    toggle.blur();
+    expect(document.body).toHaveFocus();
+    await assistant.done({ version: 1, summary: '已添加一个节点。', operations: [{ type: 'add_node', ref: 'a', templateId: 'general', title: '新节点' }] });
+    expect(assistant.stowed()).toBe(false);
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('leaves on the page the focus a node’s 打开 took away with its card, and for the next node opened by key', async () => {
+    const doc = seed({ x: 60, y: 150 });
+    await crampedAssistant({ ...doc, nodes: [...doc.nodes, { ...createSessionNode('llm', { x: 60, y: 420 }), id: 's2', title: 'LLM 会话二' }] });
+    // Pressed from the keyboard, 打开 holds the focus as the node opens, and goes with the card.
+    const open = screen.getByRole('button', { name: '打开 LLM 会话', exact: true });
+    open.focus();
+    await openNode();
+    expect(stowed()).toBe(true);
+    expect(open).not.toBeInTheDocument();
+    await twoFrames();
+    expect(document.body).toHaveFocus();
+    // The next node (Ctrl+]), opened while the assistant is aside.
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', ctrlKey: true });
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-s2').dataset.lod).toBe('focus'));
+    await twoFrames();
+    expect(stowed()).toBe(true);
+    expect(document.body).toHaveFocus();
+  });
+
+  it('hands the focus on a step of 接下来 to 画布助手 when the step opens its node and the assistant steps aside', async () => {
+    const frontend = createAgentTemplate('frontend', { x: 40, y: 40 });
+    const review = createAgentTemplate('review', { x: 700, y: 40 });
+    await crampedAssistant({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
+      { ...frontend, id: 'frontend', lastOutput: { text: JSON.stringify({ delivery: '实现页面：18 个' }), at: 1, source: 'run' } },
+      { ...review, id: 'review', title: '交付验收', lastOutput: { text: JSON.stringify({ report: '结论：不通过。接口路径与契约不一致。', issues: '问题：线索列表的路径' }), at: 2, source: 'run' } },
+    ], edges: [{ id: 'delivery', fromNode: 'frontend', fromPort: 'out:delivery', toNode: 'review', toPort: 'in:delivery', dataType: 'text' }] });
+    const step = within(document.querySelector<HTMLElement>('.awwo-planner-sidebar')!).getByRole('button', { name: '查看验收报告' });
+    step.focus();
+    fireEvent.click(step);
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-review').dataset.lod).toBe('focus'));
+    expect(stowed()).toBe(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: '画布助手', exact: true })).toHaveFocus());
+  });
+
+  it('hands the focus to the view switch, as beside the assistant, when 成果 opens a step and the assistant steps aside', async () => {
+    const delivered: SessionNode = { ...createSessionNode('llm', { x: 60, y: 150 }), id: 'design', title: '玩法与数值',
+      contract: { version: 1, inputs: [], outputs: [{ id: 'result', label: '玩法交付', type: 'markdown', required: true, value: '' }] },
+      lastOutput: { text: JSON.stringify({ result: '规格：三封信' }), at: 1, source: 'run' } };
+    await crampedAssistant({ ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [delivered] }, true);
+    const views = () => within(screen.getByRole('group', { name: '画布视图' }));
+    fireEvent.click(views().getByRole('button', { name: '成果' }));
+    const open = await screen.findByRole('button', { name: '在画布中打开' });
+    open.focus();
+    fireEvent.click(open);
+    await waitFor(() => expect(screen.getByTestId('canvas-tile-design').dataset.lod).toBe('focus'));
+    expect(stowed()).toBe(true);
+    await waitFor(() => expect(views().getByRole('button', { name: '编排' })).toHaveFocus());
   });
 
   it('judges the camera a node configured before the first size returns to on the board as it is once Configure closes', async () => {

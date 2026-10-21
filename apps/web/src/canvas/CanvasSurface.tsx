@@ -62,6 +62,7 @@ import { followupDeliveryContract } from './followupDelivery';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
 import { CanvasViewport } from './CanvasViewport';
 import { SessionTile, type SelectMode } from './SessionTile';
+import { watchReaderAway } from './TileComposer';
 import { TilePorts, useWiring } from './TilePorts';
 import { WirePlane } from './WirePlane';
 import { Marquee, useMarquee } from './Marquee';
@@ -82,7 +83,7 @@ import { beginReviewRound, prepareReviewTurn } from './reviewJournal';
 import { RunTimeline, timelineRuns, type RunView } from './RunTimeline';
 import { Minimap } from './Minimap';
 import { CommandBar, type CommandBarMode, type CanvasCommandActions } from './CommandBar';
-import { useCanvasKeys, keyHintMap } from './useCanvasKeys';
+import { useCanvasKeys, keyHintMap, isTypingTarget } from './useCanvasKeys';
 import {
   CANVAS_STORAGE_KEY,
   createFormNode,
@@ -2701,6 +2702,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       else setSelection([]);
     },
   }, !showingResults);
+  // Whether they work now, for the assistant panel's hand-back, which counts the navigation keys among them (below).
+  const canvasKeysOn = useRef(true);
+  canvasKeysOn.current = !showingResults;
 
   /** A palette-created node lands in the middle of what the operator is looking at. */
   const addAtViewCenter = useCallback(
@@ -3882,16 +3886,66 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
   // Whether the welcome holds the conversation: the workspace draws it on an empty canvas without the panel (below).
   welcomeShownRef.current = !readOnly && !assistantPanel && !nodes.length;
-  // Stepped aside for the open node (focusNode): mounted, not drawn. Focus inside it goes to the toggle, in the commit
-  // that hides it: a node opens there after awaiting the server too (a recovered run's result), in an effect (the stage
-  // narrowing under it) or in a frame.
+  // Stepped aside for the open node (focusNode): mounted, not drawn. A focus inside it as it steps aside goes to the
+  // toggle, in the commit that hides it: a node opens there after awaiting the server too (a recovered run's result), in
+  // an effect (the stage narrowing under it) or in a frame. Any other focus stays where it is, as beside the assistant,
+  // one lost to the page too (a node's 打开 takes it away with its card as the node opens; a node's box, or the panel's,
+  // drops it while disabled for its reply): on the toggle the next Enter or Space would bring the assistant back over
+  // the node, and what hands the focus on there still does (that node's box once its reply ends, 成果's 在画布中打开 to
+  // the view switch), the panel's own hand-back going to the toggle (below).
   const assistantStowed = Boolean(assistantPanel) && stowedFor !== null && stowedFor === focusedId;
   assistantStowedRef.current = assistantStowed;
   stowAssistantRef.current = (nodeId: string) => {
     if (!assistantPanel) return;
+    const held = Boolean(rootRef.current?.closest('.awwo-workspace')?.querySelector('.awwo-planner-sidebar')?.contains(document.activeElement));
     setStowedFor(nodeId);
-    refocusInCommit('.awwo-assistant-toggle');
+    if (held) refocusInCommit('.awwo-assistant-toggle');
   };
+  // Whether the reader's last focus or press was in the assistant's panel (read as the panel begins to wait, below).
+  const readerInPanel = useRef(false);
+  useEffect(() => {
+    const track = (event: Event) => {
+      readerInPanel.current = event.target instanceof Node
+        && Boolean(rootRef.current?.closest('.awwo-workspace')?.querySelector('.awwo-planner-sidebar')?.contains(event.target));
+    };
+    document.addEventListener('focusin', track, true);
+    document.addEventListener('pointerdown', track, true);
+    return () => { document.removeEventListener('focusin', track, true); document.removeEventListener('pointerdown', track, true); };
+  }, []);
+  // The panel's box takes a lost focus back once a message the panel handled is done (CanvasAssistant: it waits while
+  // busy or routing), which it cannot do hidden: stepped aside, 画布助手 takes it instead, in the commit that ends the
+  // wait, as an opened node's box does for its own reply (TileComposer): where the panel had the reader as the wait
+  // began (its box, disabled in that commit, still has the focus then; a press on a control the message takes away with
+  // it, a step of 接下来 or a recovery's 继续, already let it go) and they have not turned elsewhere since
+  // (watchReaderAway, and the canvas's keys). Beside the node the panel's own does as before.
+  const panelWaiting = planningBusy || Boolean(unified?.pending);
+  const panelWaitHeld = useRef(false);
+  useLayoutEffect(() => {
+    const sidebar = rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>('.awwo-planner-sidebar');
+    if (!panelWaiting) {
+      if (panelWaitHeld.current && assistantStowedRef.current) moveLostFocus('.awwo-assistant-toggle');
+      panelWaitHeld.current = false;
+      return undefined;
+    }
+    panelWaitHeld.current = readerInPanel.current || Boolean(sidebar?.contains(document.activeElement));
+    if (!panelWaitHeld.current || !sidebar) return undefined;
+    const away = () => { panelWaitHeld.current = false; };
+    // The canvas's navigation keys too, wherever pressed, as useCanvasKeys takes them (not in a field, nor while 成果
+    // pauses them): Ctrl/⌘ with a digit recalls a waypoint (with Shift it saves one, which is no navigation), with 0
+    // fits all, with E opens or closes a node, with [ or ] goes to the one before or after (opens it, or selects it with
+    // the camera on it). Each counts whether or not it moves anything (an empty waypoint), as for a node's box.
+    // watchReaderAway leaves the camera keys to this.
+    const onCanvasKey = (event: KeyboardEvent) => {
+      if (!canvasKeysOn.current || !(event.ctrlKey || event.metaKey) || isTypingTarget(event.target)) return;
+      // A digit's code comes first, as in useCanvasKeys.
+      const moves = /^Digit[1-9]$/.test(event.code) ? !event.shiftKey
+        : event.code === 'Digit0' || event.key === '0' || ['e', '[', ']'].includes(event.key.toLowerCase());
+      if (moves) away();
+    };
+    document.addEventListener('keydown', onCanvasKey, true);
+    const stopWatching = watchReaderAway(sidebar, away, { cameraKeys: false });
+    return () => { stopWatching(); document.removeEventListener('keydown', onCanvasKey, true); };
+  }, [panelWaiting, moveLostFocus]);
   const panelShown = Boolean(assistantPanel) && !assistantStowed;
   // What the stage says the assistant is doing (StageActivity.tsx): a message being handled, a plan being made, or the
   // latest direct task under way (read only while the conversation is on screen); and on an empty canvas whose
