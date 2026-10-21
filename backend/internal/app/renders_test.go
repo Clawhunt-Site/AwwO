@@ -115,8 +115,10 @@ func TestRenderOnlyDeploymentLoadsFromEnv(t *testing.T) {
 	}
 	t.Setenv("AWWO_RENDER_URL", "")
 	t.Setenv("AWWO_RENDER_TOKEN", "")
-	if _, err := ConfigFromEnv(); err == nil || !strings.Contains(err.Error(), "AWWO_MEDIA_DIR") {
-		t.Fatal("a media directory with neither a provider nor a renderer is still refused", err)
+	// Canvas uploads keep their files there too, so the directory loads alone as well (AwwO 本地版 on a computer
+	// with neither a renderer nor a media key), and media is still not configured.
+	if loaded, err := ConfigFromEnv(); err != nil || loaded.MediaDir == "" || loaded.mediaConfigured() {
+		t.Fatal("a media directory alone must load, with no generator configured", err)
 	}
 }
 

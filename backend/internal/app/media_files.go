@@ -412,9 +412,13 @@ func (a *App) sweepMediaTenant(ctx context.Context, root, tid string, old func(o
 	}
 }
 
+// mediaSweepNeeded: whatever keeps files in AWWO_MEDIA_DIR (a generator, the motion renderer, canvas uploads) leaves
+// the files of deleted canvases and workspaces behind, so the sweep runs whenever the directory is set, the directory
+// alone included (media_config.go).
+func (c Config) mediaSweepNeeded() bool { return c.MediaDir != "" }
+
 func (a *App) startMediaSweeper(ctx context.Context) {
-	// Rendered motion videos live in the same directory (renders.go), so a renderer alone also needs the sweep.
-	if !a.cfg.mediaConfigured() && (a.cfg.RenderURL == "" || a.cfg.MediaDir == "") {
+	if !a.cfg.mediaSweepNeeded() {
 		return
 	}
 	a.tasks.Add(1)

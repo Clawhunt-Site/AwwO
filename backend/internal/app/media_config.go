@@ -251,9 +251,9 @@ func validateMediaConfig(c Config) error {
 	if c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.JimengCLI == "" && c.MediaDir == "" {
 		return nil
 	}
-	// The motion renderer (renders.go) also stores its videos in AWWO_MEDIA_DIR, so a deployment may set the
-	// directory for it alone.
-	if c.MediaDir == "" || (c.RunningHubAPIKey == "" && c.TripoAPIKey == "" && c.XtasyAPIKey == "" && c.JimengCLI == "" && c.RenderURL == "") {
+	// The motion renderer (renders.go) and canvas uploads (uploads.go) also store their files in AWWO_MEDIA_DIR, so a
+	// deployment may set the directory with no generator at all; its storage settings are checked all the same.
+	if c.MediaDir == "" {
 		switch {
 		case c.TripoAPIKey != "":
 			return errors.New("AWWO_TRIPO_API_KEY needs AWWO_MEDIA_DIR: generated models are stored there")

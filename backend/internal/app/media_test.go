@@ -420,9 +420,25 @@ func TestMediaConfigValidation(t *testing.T) {
 	if err := validateMediaConfig(testConfig()); err != nil {
 		t.Fatal("unconfigured media must be valid", err)
 	}
+	// Canvas uploads and renders keep their files in the directory, so it may be set with no generator; its own
+	// settings are still checked.
+	uploadsOnly := valid
+	uploadsOnly.RunningHubAPIKey = ""
+	if err := validateMediaConfig(uploadsOnly); err != nil {
+		t.Fatal("a media directory without a generator must be valid", err)
+	}
+	for name, mutate := range map[string]func(*Config){
+		"relative dir": func(c *Config) { c.MediaDir = "media" },
+		"tiny timeout": func(c *Config) { c.MediaTimeout = time.Second },
+	} {
+		c := uploadsOnly
+		mutate(&c)
+		if validateMediaConfig(c) == nil {
+			t.Fatal("accepted a directory alone with", name)
+		}
+	}
 	mutations := map[string]func(*Config){
 		"key without dir":    func(c *Config) { c.MediaDir = "" },
-		"dir without key":    func(c *Config) { c.RunningHubAPIKey = "" },
 		"short key":          func(c *Config) { c.RunningHubAPIKey = "short" },
 		"key with space":     func(c *Config) { c.RunningHubAPIKey = strings.Repeat("k", 20) + " x" },
 		"foreign API origin": func(c *Config) { c.RunningHubBaseURL = "https://runninghub.evil.test" },
@@ -685,5 +701,16 @@ func TestRunningHubAPIClientIgnoresProxyVariables(t *testing.T) {
 	local, _ := proxy(httptest.NewRequest("POST", "http://127.0.0.1:9000/openapi/v2/query", nil))
 	if remote == nil || remote.Host != "127.0.0.1:7890" || local != nil {
 		t.Fatal("development proxy routing", remote, local)
+	}
+}
+
+// Canvas uploads and renders keep files in the media directory too, so the sweep that removes those of deleted
+// canvases runs whenever the directory is set, with no generator or renderer configured as well.
+func TestMediaSweepRunsWheneverTheDirectoryIsSet(t *testing.T) {
+	if (Config{}).mediaSweepNeeded() {
+		t.Fatal("no directory, no sweep")
+	}
+	if !(Config{MediaDir: filepath.Join(t.TempDir(), "media")}).mediaSweepNeeded() {
+		t.Fatal("a directory alone is swept")
 	}
 }
