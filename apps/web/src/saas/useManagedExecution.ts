@@ -88,6 +88,7 @@ function readStarted(value: string | null): { operationId: string; taskId: strin
       && typeof raw.taskId === 'string' && raw.taskId !== '' && raw.taskId.length <= 200 ? { operationId: raw.operationId, taskId: raw.taskId } : null;
   } catch { return null; }
 }
+type ConfirmedTask = { taskId: string; operationId: string; here?: boolean };
 // A send gives up after its 15 s request limit: past this, no send of a submission is still in flight anywhere.
 const SEND_SETTLED_MS = 20000;
 // The refusals the service gives only after it has looked a submission's identity up and found no task under it
@@ -137,8 +138,9 @@ export interface ManagedExecution {
   history: ExecutionRuns;
   /** The canvas's task list could not be read; refreshAll reads it again. */
   historyFailed: boolean;
-  /** The task the last reconcile confirmed, with the submission it was. */
-  confirmedTask: { taskId: string; operationId: string } | null;
+  /** The tasks confirmed on this canvas since it was opened, each with the submission it was, once per submission (its
+   *  first answer): one a reconcile pressed in this page found (`here`), or one another page of this canvas announced. */
+  confirmedTasks: ReadonlyArray<ConfirmedTask>;
   /** The last waiting submission settled with no task, and why: a reconcile the service refused in a way that proves
    *  the start never happened, or the submission given up here (`givenUp`). */
   startRefusal: { reason: string; at: number; operationId: string; givenUp?: boolean } | null;
@@ -210,7 +212,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   const [history, setHistory] = useState<ExecutionRuns>({ items: [] });
   const [historyFailed, setHistoryFailed] = useState(false);
   // The task the last reconcile confirmed: the canvas gives it the request it recorded as unconfirmed.
-  const [confirmedTask, setConfirmedTask] = useState<{ taskId: string; operationId: string } | null>(null);
+  const [confirmedTasks, setConfirmedTasks] = useState<ReadonlyArray<ConfirmedTask>>([]);
   // The notice shown waits on the open task's next state; its end answers it.
   const awaitingOutcome = useRef(false);
   const [catalogueRevision, setCatalogueRevision] = useState(0);
@@ -278,6 +280,14 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     if (errorAbout.current !== operationId) return;
     errorAbout.current = null; setError(null);
   }, []);
+  // The submission a reconcile pressed in this page is reconciling: a task another page announces for it meanwhile
+  // answers that reconcile too (`here`), whose box goes with it, however this page's own request then ends.
+  const reconciling = useRef<string | null>(null);
+  // Adds a confirmed task to the canvas's list, once per submission: a later answer to the same one (this page's own
+  // request after another page's announcement, a second announcement) changes nothing, so the canvas sees each once,
+  // with its first answer. Added through the list it is given, so two that come before one draw are both kept.
+  const confirmTask = useCallback((next: ConfirmedTask) => setConfirmedTasks(previous =>
+    previous.some(entry => entry.operationId === next.operationId) ? previous : [...previous, next]), []);
   useEffect(() => {
     if (!storeKey) return;
     const sync = (event: StorageEvent) => {
@@ -287,7 +297,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
         startedTasks.current.set(started.operationId, started.taskId);
         // Stored back by a send here that ended unconfirmed just before this page heard of the task: released.
         releasePending(storeKey, started.operationId);
-        setConfirmedTask(started);
+        confirmTask(reconciling.current === started.operationId ? { ...started, here: true } : started);
         setPendingSubmission(previous => previous?.operationId === started.operationId ? null : previous);
         setStartRefusal(previous => previous?.operationId === started.operationId ? null : previous);
         clearErrorAbout(started.operationId);
@@ -308,7 +318,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     };
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
-  }, [storeKey, startedKey, readTasksQuietly, clearErrorAbout]);
+  }, [storeKey, startedKey, readTasksQuietly, clearErrorAbout, confirmTask]);
   // A give-up reads the canvas's tasks again once more after any send still in flight elsewhere has ended.
   const settledRead = useRef<number | undefined>(undefined);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -326,13 +336,13 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   useEffect(() => {
     if (lastScope.current === scope) return;
     lastScope.current = scope;
-    window.clearTimeout(settledRead.current); startedTasks.current.clear(); quietRead.current = false;
+    window.clearTimeout(settledRead.current); startedTasks.current.clear(); reconciling.current = null; quietRead.current = false;
     controllers.current.forEach(controller => controller.abort()); controllers.current.clear();
     importOperations.current.clear(); lock.current = false; shownBefore.current = false;
     runtimeRef.current = null; setRuntime(null); setHistory({ items: [] }); chooseKey(''); setChosenByReader(false); setStaleLabel(''); setEffort('');
     setSelectedId(''); setPreview(null); setRun(null); setDetailLoading(false); setPollingPaused(false); setBusy(false);
     setError(null); setNotice(''); setNoticeWarning(false); setPendingSubmission(readPending(storeKey)); setStartRefusal(null); setAnswers({}); setUncertainResponses({});
-    setPendingImport(null); setImportTitle(''); setKnowledgeCount(0); setHistoryFailed(false); setConfirmedTask(null);
+    setPendingImport(null); setImportTitle(''); setKnowledgeCount(0); setHistoryFailed(false); setConfirmedTasks([]);
   }, [scope, chooseKey]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; window.clearTimeout(settledRead.current); controllers.current.forEach(controller => controller.abort()); controllers.current.clear(); }; }, []);
 
@@ -520,12 +530,13 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     const input = pendingSubmission;
     if (!input) return;
     setStartRefusal(null);
+    reconciling.current = input.operationId;
     try {
       const run = await createExecutionRun(tenantId, canvasId, input, signal);
       if (!signal.aborted) {
         created(run.id, run.status, input.prompt); startedTasks.current.set(input.operationId, run.id);
         announceStarted(startedKey, input.operationId, run.id); releasePending(storeKey, input.operationId);
-        setConfirmedTask({ taskId: run.id, operationId: input.operationId });
+        confirmTask({ taskId: run.id, operationId: input.operationId, here: true });
       }
     } catch (cause) {
       if (signal.aborted) throw cause;
@@ -552,7 +563,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
       // only stand over that one, so it is not shown. A lost session or access is said either way, as no submission's.
       const denial = cause instanceof SaaSApiError && [401, 403].includes(cause.status);
       if (alive.current && (kept || denial)) handleError(cause, kept && !denial ? input.operationId : null);
-    }
+    } finally { if (reconciling.current === input.operationId) reconciling.current = null; }
   });
   // Gives the waiting submission up without knowing its outcome: it is neither reconciled nor sent again from here. The
   // canvas's tasks are read again, so one it did start is listed, and its request is settled as given up (not put back
@@ -640,7 +651,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     // put on them: they would only be refused when they run.
     ...(chosenByReader && choiceModel && !staleLabel && choiceModel.requiresUpgrade !== true ? { componentModel: { runtime: choiceModel.runtime, model: choiceModel.id } } : {}),
     effort, setEffort, knowledgeCount,
-    history, historyFailed, confirmedTask, startRefusal, selectedId,
+    history, historyFailed, confirmedTasks, startRefusal, selectedId,
     select: id => { setSelectedId(id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); setPreview(null); },
     run: currentRun, detailLoading, pollingPaused,
     refreshDetail: () => { setError(null); setDetailRevision(value => value + 1); },

@@ -195,7 +195,7 @@ describe('the host says a task is under way only while it reads it', () => {
   it('trusts the open task while it is read, and no other', () => {
     const run = { id: 'run-a', status: 'running', prompt: '做一个专属游戏', createdAt: time, updatedAt: time, output: '', error: '', canRespond: false,
       canCancel: true, truncated: false, messages: [], approvals: [], artifacts: [] };
-    const host = (fields: Record<string, unknown>) => executionHost({ selectedId: 'run-a', run, pollingPaused: false, history: { items: [] }, ...fields } as never);
+    const host = (fields: Record<string, unknown>) => executionHost({ selectedId: 'run-a', run, pollingPaused: false, history: { items: [] }, confirmedTasks: [], ...fields } as never);
     expect(host({}).running?.('run-a')).toBe(true);
     expect(host({}).outcome?.('run-a')).toBe('still running');
     expect(host({ pollingPaused: true }).running?.('run-a')).toBe(false);

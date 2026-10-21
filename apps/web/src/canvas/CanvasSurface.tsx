@@ -199,6 +199,8 @@ const STAGE_OVERLAY_MIN_ROOM = 200;
 const PANEL_BOX = '.awwo-canvas-assistant--panel .awwo-assistant-composer textarea';
 /** An empty canvas's welcome's message box, as PANEL_BOX. */
 const WELCOME_BOX = '.awwo-canvas-assistant--welcome .awwo-assistant-composer textarea';
+/** The message box of whichever holds the conversation, the side panel or the welcome: one is drawn at a time. */
+const MESSAGE_BOX = '.awwo-canvas-assistant .awwo-assistant-composer textarea';
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
 const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
@@ -3230,6 +3232,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The request a reply answers.
   const requestBefore = (messages: PlanningMessage[], index: number) =>
     messages.slice(0, index).reverse().find(message => message.role === 'user')?.content ?? '';
+  // The turn a confirmed start becomes the task of: the request recorded for it, unconfirmed or settled with no task
+  // (given up). None where its task is already in the conversation, or where the start is another page's own (a page
+  // announces every task it starts).
+  const confirmedTurn = (messages: PlanningMessage[], confirmed: { taskId: string; operationId: string }) =>
+    messages.some(message => message.taskId === confirmed.taskId) ? -1
+      : messages.findIndex(message => (message.status === 'unconfirmed' || message.status === 'error') && message.operationId === confirmed.operationId);
   // A submission settled with no task (a reconcile refused in a way that proves the start never happened, or given up)
   // settles its request: it says why, and a refused one is offered again in the box (a given-up one is not: the task it
   // may have started is listed only once read). Settled once: the turn is no longer unconfirmed, and never while the
@@ -3261,25 +3269,33 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     });
   }, [waitingOperation, readOnly]);
   // A start confirmed by a reconcile here, or announced by another page of this canvas, names its task: the request
-  // recorded for it, unconfirmed or settled with no task (given up), becomes that task's turn, and leaves the box.
-  // Where an empty canvas's welcome holds the conversation, the task takes it to the side panel once that is open, and a
-  // focus the welcome's box left on the page goes to the panel's box, as for a task's start; elsewhere none is moved.
-  const confirmedTask = assistantExecution?.confirmedTask;
+  // recorded for it, unconfirmed or settled with no task (given up), becomes that task's turn, and leaves the box. The
+  // host lists every confirmation of the canvas, once per submission, so none is lost to another that comes before the
+  // page draws it; each is linked (a turn already linked is left).
+  // A focus a new one took goes to the message box of whichever holds the conversation then: where its task takes the
+  // conversation out of an empty canvas's welcome to the side panel (open), the welcome's box with it, as for a task's
+  // start; and where the reconcile was pressed here (`here`), its button going with its box, in the welcome or in the
+  // panel. A start another page announces while the conversation stays where it is moves none, nor one the host already
+  // listed when the canvas opened (it outlives the canvas, which is drawn again once its document is read).
+  const confirmedTasks = assistantExecution?.confirmedTasks;
+  const [confirmationsSeen] = useState(() => new Set(confirmedTasks ?? []));
   useLayoutEffect(() => {
-    if (!confirmedTask || readOnly) return;
-    setPlanning(previous => {
-      if (previous.messages.some(message => message.taskId === confirmedTask.taskId)) return previous;
-      const index = previous.messages.findIndex(message => (message.status === 'unconfirmed' || message.status === 'error')
-        && message.operationId === confirmedTask.operationId);
-      if (index < 0) return previous;
-      const { status, operationId: _operation, ...reply } = previous.messages[index];
-      const messages = [...previous.messages];
-      messages[index] = { ...reply, content: '', taskId: confirmedTask.taskId };
+    const listed = confirmedTasks ?? [];
+    const arrived = listed.filter(confirmed => !confirmationsSeen.has(confirmed));
+    for (const confirmed of arrived) confirmationsSeen.add(confirmed);
+    if (!listed.length || readOnly) return;
+    setPlanning(previous => listed.reduce((state, confirmed) => {
+      const index = confirmedTurn(state.messages, confirmed);
+      if (index < 0) return state;
+      const { status, operationId: _operation, ...reply } = state.messages[index];
+      const messages = [...state.messages];
+      messages[index] = { ...reply, content: '', taskId: confirmed.taskId };
       const request = status === 'error' ? requestBefore(messages, index) : '';
-      return { draft: request && previous.draft.trim() === request ? '' : previous.draft, messages };
-    });
-    if (welcomeShownRef.current) refocusInCommit(PANEL_BOX);
-  }, [confirmedTask, readOnly]);
+      return { draft: request && state.draft.trim() === request ? '' : state.draft, messages };
+    }, previous));
+    const takesWelcome = (confirmed: (typeof listed)[number]) => welcomeShownRef.current && assistantOpen && confirmedTurn(planning.messages, confirmed) >= 0;
+    if (arrived.some(confirmed => confirmed.here || takesWelcome(confirmed))) refocusInCommit(MESSAGE_BOX);
+  }, [confirmedTasks, readOnly]);
   useEffect(() => () => { pendingRef.current?.controller?.abort(); pendingRef.current = null; }, []);
   const planAvailable = !readOnly && !planningUnavailableReason;
   const assistantRoutes = (): AssistantRoute[] => {

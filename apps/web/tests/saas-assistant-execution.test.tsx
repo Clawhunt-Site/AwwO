@@ -481,11 +481,12 @@ describe('the canvas assistant’s tasks', () => {
     act(() => result.current.activate());
     await waitFor(() => expect(result.current.startBlockedReason).toBeUndefined());
     await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
-    expect(result.current.confirmedTask).toBeNull();
-    expect(executionHost(result.current).confirmedTask).toBeUndefined();
+    expect(result.current.confirmedTasks).toEqual([]);
+    expect(executionHost(result.current).confirmedTasks).toBeUndefined();
     act(() => result.current.reconcile());
-    await waitFor(() => expect(result.current.confirmedTask).toEqual({ taskId: 'run-z', operationId: creations[0].operationId }));
-    expect(executionHost(result.current).confirmedTask).toEqual({ taskId: 'run-z', operationId: creations[0].operationId });
+    // Pressed in this page (here): the canvas gives a focus the reconcile's button took to the message box.
+    await waitFor(() => expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-z', operationId: creations[0].operationId, here: true }]));
+    expect(executionHost(result.current).confirmedTasks).toEqual([{ taskId: 'run-z', operationId: creations[0].operationId, here: true }]);
     // The same text sent again later is a new task, not a replay of the reconciled one.
     await act(async () => { await result.current.start('生成报告').catch(() => undefined); });
     const operations = creations.map(body => body.operationId);
@@ -582,7 +583,7 @@ describe('the canvas assistant’s tasks', () => {
     await waitFor(() => expect(second.result.current.startBlockedReason).toBe('上一次提交的结果还没确认，请先核对。'));
     answer = 'created';
     act(() => second.result.current.reconcile());
-    await waitFor(() => expect(second.result.current.confirmedTask?.taskId).toBe('run-r'));
+    await waitFor(() => expect(second.result.current.confirmedTasks.at(-1)?.taskId).toBe('run-r'));
     expect(creations[1]).toEqual(creations[0]);
     second.unmount();
     // Settled, nothing is left for the page after.
@@ -799,7 +800,7 @@ describe('the canvas assistant’s tasks', () => {
     const set = localStorage.setItem.bind(localStorage);
     vi.spyOn(localStorage, 'setItem').mockImplementation((key: string, value: string) => { if (key === STARTED) said.push(value); set(key, value); });
     act(() => result.current.reconcile());
-    await waitFor(() => expect(result.current.confirmedTask?.taskId).toBe('run-r'));
+    await waitFor(() => expect(result.current.confirmedTasks.at(-1)?.taskId).toBe('run-r'));
     expect(said.map(value => JSON.parse(value))).toEqual([expect.objectContaining({ operationId: waiting.operationId, taskId: 'run-r' })]);
   });
 
@@ -818,10 +819,10 @@ describe('the canvas assistant’s tasks', () => {
     // A malformed announcement, or one for another account's copy of the canvas, changes nothing.
     act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: '{"operationId":"nope","taskId":"run-x"}' })); });
     act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED.replace('user-a', 'user-b'), newValue: JSON.stringify({ operationId: op, taskId: 'run-x', at: 1 }) })); });
-    expect(result.current.confirmedTask).toBeNull();
+    expect(result.current.confirmedTasks).toEqual([]);
     expect(result.current.pendingSubmission?.operationId).toBe(op);
     act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: op, taskId: 'run-x', at: 1 }) })); });
-    expect(executionHost(result.current).confirmedTask).toEqual({ taskId: 'run-x', operationId: op });
+    expect(executionHost(result.current).confirmedTasks).toEqual([{ taskId: 'run-x', operationId: op }]);
     expect(result.current.pendingSubmission).toBeNull();
     await waitFor(() => expect(taskReads()).toBe(before + 1));
     // Given up here, then announced by the page that sent it: the give-up is over, the task is linked.
@@ -832,7 +833,7 @@ describe('the canvas assistant’s tasks', () => {
     expect(result.current.startRefusal).toMatchObject({ operationId: later, givenUp: true });
     act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: later, taskId: 'run-y', at: 2 }) })); });
     expect(result.current.startRefusal).toBeNull();
-    expect(result.current.confirmedTask).toEqual({ taskId: 'run-y', operationId: later });
+    expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-x', operationId: op }, { taskId: 'run-y', operationId: later }]);
   });
 
   it('stores a reconcile’s submission again when it ends unconfirmed, though another page gave it up meanwhile', async () => {
@@ -881,7 +882,104 @@ describe('the canvas assistant’s tasks', () => {
     expect(localStorage.getItem(PENDING)).toBeNull();
     expect(result.current.pendingSubmission).toBeNull();
     expect(result.current.error).toBeNull();
-    expect(result.current.confirmedTask).toEqual({ taskId: 'run-t', operationId: waiting.operationId });
+    // It answers the reconcile pressed here, whose box it took away (here), though this page's own request then failed.
+    const answered = result.current.confirmedTasks;
+    expect(answered).toEqual([{ taskId: 'run-t', operationId: waiting.operationId, here: true }]);
+    // A later copy of the same submission changes nothing: the canvas sees each once.
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: waiting.operationId, taskId: 'run-t', at: 4 }) })); });
+    expect(result.current.confirmedTasks).toBe(answered);
+  });
+
+  // The answers to a reconcile pressed here: another page's announcement while it waits, this page's own request, or
+  // both, in one draw or two, with another task's between. The canvas's list has each submission once, with its first
+  // answer, and keeps every one that comes before React draws it.
+  async function reconcilingHere(own: 'waits' | 'answers') {
+    let posts = 0;
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => url.endsWith('/computer-runs') && init.method === 'POST'
+      ? ++posts === 1 ? json({ error: { code: 'unknown', message: '连接中断' } }, 503)
+        : own === 'answers' ? json({ id: 'run-t', status: 'running' }, 202) : new Promise<Response>(resolve => { answer = resolve; })
+      : json(url.endsWith('/computer-runs') ? { items: [] } : defaultResponse(url))));
+    const hook = renderHook(() => useManagedExecution('tenant-a', 'canvas-a', { userId: 'user-a' }), { wrapper: SaaSPreferencesProvider });
+    act(() => hook.result.current.activate());
+    await waitFor(() => expect(hook.result.current.startBlockedReason).toBeUndefined());
+    await act(async () => { await hook.result.current.start('生成报告').catch(() => undefined); });
+    const waiting = hook.result.current.pendingSubmission!;
+    act(() => hook.result.current.reconcile());
+    if (own === 'waits') await waitFor(() => expect(answer).toBeDefined());
+    const announce = (at: number) => window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: waiting.operationId, taskId: 'run-t', at }) }));
+    const answerWith = (response: Response) => answer!(response);
+    return { result: hook.result, operationId: waiting.operationId, announce, answerWith, respond: () => answerWith(json({ id: 'run-t', status: 'running' }, 202)) };
+  }
+  const OTHER = 'execution-55555555-5555-4555-8555-555555555555';
+  const announceOther = () => window.dispatchEvent(new StorageEvent('storage', { key: STARTED, newValue: JSON.stringify({ operationId: OTHER, taskId: 'run-u', at: 4 }) }));
+
+  it('lists a reconcile’s answer once: another page announces it first, and this page’s own request then finds it', async () => {
+    const { result, operationId, announce, respond } = await reconcilingHere('waits');
+    act(() => announce(3));
+    const answered = result.current.confirmedTasks;
+    expect(answered).toEqual([{ taskId: 'run-t', operationId, here: true }]);
+    await act(async () => { respond(); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.confirmedTasks).toBe(answered);
+  });
+
+  it('lists a reconcile’s answer here once when another page announces the same task after it, before one draw', async () => {
+    const { result, operationId, announce, respond } = await reconcilingHere('waits');
+    // This page's request finds the task and the reconcile ends; another page's announcement of it (no longer `here`)
+    // comes before React draws either.
+    await act(async () => {
+      respond();
+      // Released in the same step that confirms the task and ends the reconcile; React draws nothing inside act.
+      await vi.waitFor(() => expect(localStorage.getItem(PENDING)).toBeNull());
+      announce(4);
+    });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-t', operationId, here: true }]);
+  });
+
+  it('lists a reconcile’s answer here once through two announcements of it before one draw', async () => {
+    const { result, operationId, announce } = await reconcilingHere('waits');
+    act(() => { announce(3); announce(4); });
+    expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-t', operationId, here: true }]);
+  });
+
+  it('answers a reconcile pressed here only while it waits: one that ended unconfirmed is not, when another page announces later', async () => {
+    const { result, operationId, announce, answerWith } = await reconcilingHere('waits');
+    // An answer that settles nothing: the submission is kept waiting, and this page's reconcile is over.
+    await act(async () => { answerWith(json({ error: { code: 'unknown', message: '连接中断' } }, 503)); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.pendingSubmission?.operationId).toBe(operationId);
+    act(() => announce(6));
+    expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-t', operationId }]);
+  });
+
+  it('keeps both of two confirmations that come before one draw, and lists the reconcile’s answer once when its own request finds it', async () => {
+    const { result, operationId, announce, respond } = await reconcilingHere('waits');
+    act(() => { announce(3); announceOther(); });
+    const both = result.current.confirmedTasks;
+    expect(both).toEqual([{ taskId: 'run-t', operationId, here: true }, { taskId: 'run-u', operationId: OTHER }]);
+    await act(async () => { respond(); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.confirmedTasks).toBe(both);
+  });
+
+  it('keeps both of two confirmations that come before one draw, though the reconcile’s own request then fails', async () => {
+    const { result, operationId, announce, answerWith } = await reconcilingHere('waits');
+    // This page's answer, then another task's, both before one draw.
+    await act(async () => { announce(3); announceOther(); answerWith(json({ error: { code: 'execution_request_timeout', message: 'slow' } }, 408)); });
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-t', operationId, here: true }, { taskId: 'run-u', operationId: OTHER }]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('lists a reconcile’s answer by its own request once, through a later announcement of the same task', async () => {
+    const { result, operationId, announce } = await reconcilingHere('answers');
+    await waitFor(() => expect(result.current.confirmedTasks).toEqual([{ taskId: 'run-t', operationId, here: true }]));
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    const answered = result.current.confirmedTasks;
+    act(() => announce(5));
+    expect(result.current.confirmedTasks).toBe(answered);
   });
 
   it('resolves a start whose send ends unconfirmed with the task another page announced for it meanwhile', async () => {

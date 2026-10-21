@@ -816,7 +816,7 @@ describe('the canvas assistant’s one conversation', () => {
     // Confirmed (by a reconcile, or announced by another page), it becomes the task, which draws the conversation in the
     // side panel: the welcome and its box go.
     const operationId = vi.mocked(host.start).mock.calls[0][1];
-    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={planRequest} />);
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-7', operationId }] }} routeAssistant={router} planRequest={planRequest} />);
     expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
     expect(document.querySelector('.awwo-canvas-assistant--welcome')).toBeNull();
     await waitFor(() => expect(box()).toHaveFocus());
@@ -836,7 +836,7 @@ describe('the canvas assistant’s one conversation', () => {
     box().blur();
     expect(document.body).toHaveFocus();
     const operationId = vi.mocked(host.start).mock.calls[0][1];
-    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-7', operationId }] }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(document.body).toHaveFocus();
@@ -996,6 +996,154 @@ describe('the canvas assistant’s one conversation', () => {
     expect(toggle()).toHaveFocus();
   });
 
+  // With the assistant closed, a start confirmed in the welcome keeps the conversation there: the reconcile the reader
+  // pressed goes, and with it the focus.
+  it('moves the focus to the welcome’s message box when a reconcile there, the assistant closed, gives the start its task', async () => {
+    unconfirmedConversation();
+    // The task asks the reader something: its card holds a box of its own, above the message box.
+    const { host } = fakeHost({ pendingOperation: STORED_OP, renderNotices: () => <button type="button">核对上次提交</button>,
+      renderTask: id => <div><p>任务卡片 {id}</p><textarea aria-label="你的回复" /></div> });
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(screen.getByText('（存下的说明）')).toBeVisible();
+    expect(sidebar()).toBeNull();
+    screen.getByRole('button', { name: '核对上次提交' }).focus();
+    // Reconciled here, the start has its task, and the host takes its reconcile away.
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-7', operationId: STORED_OP, here: true }],
+      renderNotices: () => null }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await screen.findByText('任务卡片 task-7')).toBeVisible();
+    expect(sidebar()).toBeNull();
+    expect(screen.getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus());
+  });
+
+  it('moves the focus to the side panel’s message box when a reconcile pressed there gives the start its task', async () => {
+    seedNode();
+    unconfirmedConversation();
+    const { host } = fakeHost({ pendingOperation: STORED_OP, renderNotices: () => <button type="button">核对上次提交</button>,
+      renderTask: id => <div><p>任务卡片 {id}</p><textarea aria-label="你的回复" /></div> });
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    fireEvent.click(toggle()!);
+    panel().getByRole('button', { name: '核对上次提交' }).focus();
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-7', operationId: STORED_OP, here: true }],
+      renderNotices: () => null }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
+    expect(panel().getByRole('textbox', { name: '你的回复' })).toBeVisible();
+    await waitFor(() => expect(box()).toHaveFocus());
+  });
+
+  // Found in review: a start another page confirms (its reconcile) while the welcome here keeps the conversation, the
+  // assistant closed, links the request settled here (given up), and takes nothing away on this page.
+  it('moves no focus when another page confirms a start the closed welcome holds as given up', async () => {
+    savePlanningConversation({ draft: '', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '已放弃核对这次提交。', status: 'error', route: 'execute', operationId: STORED_OP }] });
+    const { host } = fakeHost();
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(screen.getByText('已放弃核对这次提交。')).toBeVisible();
+    expect(document.body).toHaveFocus();
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [{ taskId: 'task-9', operationId: STORED_OP }] }} routeAssistant={router}
+      planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await screen.findByText('任务卡片 task-9')).toBeVisible();
+    expect(sidebar()).toBeNull();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(document.body).toHaveFocus();
+  });
+
+  // The host outlives the canvas (the page draws the canvas again once its document is read): a confirmation it already
+  // held when the canvas opened is not one that arrives.
+  // The host lists every confirmation of the canvas, once per submission, keeping each entry as it was listed.
+  const OTHER_OP = 'execution-55555555-5555-4555-8555-555555555555';
+  const reconciled = { taskId: 'task-7', operationId: STORED_OP, here: true };
+  const otherTask = { taskId: 'task-8', operationId: OTHER_OP };
+  function reconcileInClosedWelcome(seed = unconfirmedConversation) {
+    seed();
+    const { host } = fakeHost({ pendingOperation: STORED_OP, renderNotices: () => <button type="button">核对上次提交</button> });
+    const router = routeTo('execute');
+    const surface = (overrides: Partial<AssistantExecutionHost>) => <CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, renderNotices: () => null, ...overrides }}
+      routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />;
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    screen.getByRole('button', { name: '核对上次提交' }).focus();
+    return { rerender, surface };
+  }
+
+  it('moves the focus once for a reconcile pressed here, not again when another task joins the host’s list', async () => {
+    const { rerender, surface } = reconcileInClosedWelcome();
+    rerender(surface({ confirmedTasks: [reconciled] }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus());
+    // The reader leaves the box for the page; another page's task joins the list.
+    screen.getByRole('textbox', { name: '画布需求' }).blur();
+    rerender(surface({ confirmedTasks: [reconciled, otherTask] }));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(screen.getByText('任务卡片 task-7')).toBeVisible();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('links both requests and moves the focus when a reconcile’s task and another’s are listed before one draw', async () => {
+    // The other task's request was given up here; another page's announcement of it links it too.
+    const { rerender, surface } = reconcileInClosedWelcome(() => savePlanningConversation({ draft: '', messages: [
+      { id: 'turn-0-user', role: 'user', content: '先查一下资料', route: 'execute' },
+      { id: 'turn-0-task', role: 'assistant', content: '已放弃核对这次提交。', status: 'error', route: 'execute', operationId: OTHER_OP },
+      { id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
+      { id: 'turn-1-task', role: 'assistant', content: '（存下的说明）', status: 'unconfirmed', route: 'execute', operationId: STORED_OP }] }));
+    expect(screen.getByText('已放弃核对这次提交。')).toBeVisible();
+    rerender(surface({ confirmedTasks: [reconciled, otherTask] }));
+    expect(await screen.findByText('任务卡片 task-7')).toBeVisible();
+    expect(screen.getByText('任务卡片 task-8')).toBeVisible();
+    expect(screen.queryByText('已放弃核对这次提交。')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '画布需求' })).toHaveFocus());
+  });
+
+  it('moves no focus for a reconcile the host had confirmed before the canvas opened', async () => {
+    unconfirmedConversation();
+    const { host } = fakeHost({ confirmedTasks: [reconciled] });
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(await screen.findByText('任务卡片 task-7')).toBeVisible();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(document.body).toHaveFocus();
+    // Nor when another task joins the list.
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [reconciled, otherTask] }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(document.body).toHaveFocus();
+  });
+
+  // Found in review: another page of the canvas announces every task it starts, and the host names each one here as
+  // confirmed. One this conversation has no request for changes nothing on this page.
+  it('moves no focus when another page announces a task this conversation has no request for', async () => {
+    const { host } = fakeHost();
+    const router = routeTo('execute');
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    expect(document.querySelector('.awwo-canvas-assistant--welcome')).not.toBeNull();
+    expect(document.body).toHaveFocus();
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [{ taskId: 'task-9', operationId: STORED_OP }] }} routeAssistant={router}
+      planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(screen.queryByText('任务卡片 task-9')).toBeNull();
+    expect(document.body).toHaveFocus();
+  });
+
+  it('moves no focus when another page announces a task with no request here, the assistant open over the welcome', async () => {
+    const { host } = fakeHost();
+    const router = routeTo('plan');
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
+    const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={planRequest} />);
+    const welcomeBox = () => screen.getByRole('textbox', { name: '画布需求' });
+    // A first plan opens the assistant; undone, the canvas is empty again, the conversation in the welcome, the assistant open.
+    fireEvent.change(welcomeBox(), { target: { value: '写一份发布说明' } });
+    fireEvent.keyDown(welcomeBox(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(1));
+    fireEvent.click(await panel().findByRole('button', { name: '撤销本次更改' }));
+    await waitFor(() => expect(welcomeBox()).toHaveFocus());
+    welcomeBox().blur();
+    expect(document.body).toHaveFocus();
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [{ taskId: 'task-9', operationId: STORED_OP }] }} routeAssistant={router} planRequest={planRequest} />);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(sidebar()).toBeNull();
+    expect(document.body).toHaveFocus();
+  });
+
   it('says the task was stopped when the canvas became busy meanwhile', async () => {
     seedNode();
     const stopping = deferred<void>();
@@ -1060,7 +1208,7 @@ describe('the canvas assistant’s one conversation', () => {
     expect(await panel().findByText(UNCONFIRMED)).toBeVisible();
     const operationId = vi.mocked(host.start).mock.calls[0][1];
     expect(loadPlanningConversation().messages.at(-1)).toMatchObject({ status: 'unconfirmed', operationId });
-    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTask: { taskId: 'task-7', operationId } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    rerender(<CanvasSurface assistantExecution={{ ...host, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-7', operationId }] }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(await panel().findByText('任务卡片 task-7')).toBeVisible();
     expect(panel().queryByText(UNCONFIRMED)).toBeNull();
     expect(loadPlanningConversation().messages.at(-1)).toEqual({ id: expect.any(String), role: 'assistant', content: '', route: 'execute', taskId: 'task-7' });
@@ -1325,7 +1473,7 @@ describe('the canvas assistant’s one conversation', () => {
     expect(panel().getByText(LOST)).toBeVisible();
     rerender(<CanvasSurface assistantExecution={{ ...other, pendingOperation: undefined, startRefusal: { reason: '所选模型已不可用。', at: 1, operationId: STORED_OP } }}
       routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
-    rerender(<CanvasSurface assistantExecution={{ ...other, pendingOperation: undefined, confirmedTask: { taskId: 'task-9', operationId: STORED_OP } }}
+    rerender(<CanvasSurface assistantExecution={{ ...other, pendingOperation: undefined, confirmedTasks: [{ taskId: 'task-9', operationId: STORED_OP }] }}
       routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(panel().getByText(LOST)).toBeVisible();
     expect(panel().queryByText('所选模型已不可用。')).toBeNull();
@@ -1421,7 +1569,7 @@ describe('the canvas assistant’s one conversation', () => {
     const router = routeTo('execute');
     const { rerender } = render(<CanvasSurface assistantExecution={host} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     fireEvent.click(toggle()!);
-    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTask: { taskId: 'task-9', operationId: STORED_OP } }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    rerender(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [{ taskId: 'task-9', operationId: STORED_OP }] }} routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(await panel().findByText('任务卡片 task-9')).toBeVisible();
     expect(panel().queryByText('所选模型已不可用。')).toBeNull();
     expect(box()).toHaveValue('');
@@ -1433,7 +1581,7 @@ describe('the canvas assistant’s one conversation', () => {
     cleanup(); seedNode();
     savePlanningConversation({ draft: '', messages: [{ id: 'turn-1-user', role: 'user', content: '写一封邮件', route: 'execute' },
       { id: 'turn-1-task', role: 'assistant', content: '已放弃核对这次提交。', status: 'error', route: 'execute', operationId: STORED_OP }] });
-    render(<CanvasSurface assistantExecution={{ ...host, confirmedTask: { taskId: 'task-8', operationId: 'execution-22222222-2222-4222-8222-222222222222' } }}
+    render(<CanvasSurface assistantExecution={{ ...host, confirmedTasks: [{ taskId: 'task-8', operationId: 'execution-22222222-2222-4222-8222-222222222222' }] }}
       routeAssistant={router} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     fireEvent.click(toggle()!);
     expect(panel().getByText('已放弃核对这次提交。')).toBeVisible();

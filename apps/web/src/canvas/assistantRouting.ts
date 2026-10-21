@@ -68,8 +68,10 @@ export interface AssistantExecutionHost {
   /** The model the reader chose under the composer, once chosen there: the Agent components a plan adds start on it,
    *  as the direct tasks run on it. Absent while the reader keeps the default. */
   componentModel?: { runtime: string; model: string };
-  /** The task the last reconcile in this page confirmed, with the submission it was. */
-  confirmedTask?: { taskId: string; operationId: string };
+  /** The tasks confirmed on this canvas since it was opened, each with the submission it was, once per submission: one a
+   *  reconcile pressed in this page found (`here`), whose box goes with it, or one another page of this canvas announced.
+   *  Entries keep their identity from list to list, so a new one is an entry the canvas has not seen. */
+  confirmedTasks?: ReadonlyArray<{ taskId: string; operationId: string; here?: boolean }>;
   /** The submission whose outcome is unknown and waits to be reconciled (kept across reloads and tabs). */
   pendingOperation?: string;
   /** The last submission settled with no task: which one, and why. A reconcile refused in a way that proves the start
