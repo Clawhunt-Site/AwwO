@@ -49,11 +49,16 @@ export function normalizeUsage(raw, protocol, complete = true) {
   return result;
 }
 
-// The parser observes the existing response stream without cloning/tee buffering.
-// Oversized/invalid telemetry is ignored; original bytes always reach the SDK.
+// The parser observes the existing response stream without cloning/tee buffering (a refusal's body alone, small and
+// read once, is read beside the SDK through a tee). Oversized/invalid telemetry is ignored; original bytes always reach
+// the SDK.
 export function createProviderObserver(protocol, { now = () => performance.now(), fetchImpl = globalThis.fetch, acceptedAtNs } = {}) {
   const born = now();
-  let setupMs, started, ended, first, raw, complete = false, invalidFrame = false, refusalCounted = false;
+  let setupMs, started, ended, first, raw, complete = false, invalidFrame = false, workCounted = false;
+  const reads = [];
+  // Whether usage that counts anything came, anywhere (the stream's, beside or inside an error frame's error, inside a
+  // choice, or a refusal's body): the provider read the request, so a refusal after it is not one before the call began.
+  const counted = (...usages) => { if (usages.some(countsWork)) workCounted = true; };
   function consume(value) {
     if (!object(value)) return;
     let found;
@@ -72,31 +77,31 @@ export function createProviderObserver(protocol, { now = () => performance.now()
     } else {
       if (value.choices?.some(choice => typeof choice.delta?.content === 'string' && choice.delta.content.length)) first ??= now();
       if (object(value.usage)) raw = value.usage;
+      if (Array.isArray(value.choices)) counted(...value.choices.map(choice => choice?.usage));
     }
+    counted(raw, object(value.error) ? value.error.usage : undefined);
   }
-  // A refusal's own JSON body is read as the SDK reads it (at most 64 KiB of it, kept until it ends, never relayed) for
-  // the usage it may state beside its error or inside it, which the agent library drops: usage that counts anything
-  // says the provider read the request (refusalCounted), so a refusal after it is not one before the call began.
+  // A refusal's body (any type: the SDK reads any as JSON it can) is read to its end beside the SDK, through a tee
+  // whose other half the SDK reads unchanged, at most 64 KiB of it kept and never relayed, for the usage it may state
+  // beside its error or inside it, which the agent library drops; a body past 64 KiB, which cannot be read whole, counts
+  // too. settled() waits for these reads.
   function readRefusal(response) {
-    const decoder = new TextDecoder();
-    let text = '', over = false;
-    const body = response.body.pipeThrough(new TransformStream({
-      transform(chunk, controller) {
-        if (!over && (text += decoder.decode(chunk, { stream: true })).length > 65_536) { text = ''; over = true; }
-        controller.enqueue(chunk);
-      },
-      flush() {
-        if (!over) {
-          try { const value = JSON.parse(text + decoder.decode()); refusalCounted ||= countsWork(value?.usage) || countsWork(value?.error?.usage); }
-          catch { /* a body that is not JSON states nothing */ }
+    const [mine, theirs] = response.body.tee();
+    reads.push((async () => {
+      const reader = mine.getReader(), decoder = new TextDecoder();
+      let text = '';
+      try {
+        for (let next = await reader.read(); !next.done; next = await reader.read()) {
+          if ((text += decoder.decode(next.value, { stream: true })).length > 65_536) { workCounted = true; await reader.cancel(); return; }
         }
-        text = '';
-      },
-    }));
-    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+        const value = JSON.parse(text + decoder.decode());
+        counted(value?.usage, value?.error?.usage);
+      } catch { /* a body that is not JSON, or breaks off, states nothing */ }
+    })());
+    return new Response(theirs, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   function observe(response) {
-    if (!response.ok && response.body && response.headers.get('content-type')?.includes('json')) { ended ??= now(); return readRefusal(response); }
+    if (!response.ok && response.body) { ended ??= now(); return readRefusal(response); }
     if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) { ended ??= now(); return response; }
     const decoder = new TextDecoder();
     let line = '', skipping = false, skipLF = false;
@@ -159,8 +164,15 @@ export function createProviderObserver(protocol, { now = () => performance.now()
       try { return observe(await fetchImpl(input, { ...init, headers, redirect: 'error' })); }
       catch (error) { ended ??= now(); throw error; }
     },
-    // Whether a refusal's body stated usage that counts anything (readRefusal).
-    refusalCounted() { return refusalCounted; },
+    // Whether usage that counts anything came anywhere (counted, readRefusal). Read after settled().
+    workCounted() { return workCounted; },
+    // Waits for every refusal body's read (readRefusal), at most 2 s: one still unread then counts (it cannot be told).
+    async settled() {
+      let timer;
+      const read = await Promise.race([Promise.all(reads).then(() => true), new Promise(resolve => { timer = setTimeout(resolve, 2000, false); })]);
+      clearTimeout(timer);
+      if (!read) workCounted = true;
+    },
     snapshot(outcome) {
       let usage = normalizeUsage(raw, protocol, complete);
       if (invalidFrame) usage = { ...usage, status: 'invalid', reason: 'protocol_invalid' };

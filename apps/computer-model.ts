@@ -293,9 +293,12 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!data) return;
     if (data === '[DONE]') { done = true; return; }
     const chunk = jsonObject(data, 'shape');
-    // Usage that counts anything says the provider read the request: work done, as anything the model sent is (read
-    // before the frame's own error, which may carry it).
-    if (countsWork(chunk.usage)) produced = true;
+    // Anything the model sent (its text, a refusal, a tool call, its hidden reasoning) is work done, and so is usage that
+    // counts anything (the provider read the request) wherever the frame has it, beside its choices, inside one (as
+    // some providers send it, Moonshot) or inside its error: all read before the frame's own error.
+    if (countsWork(chunk.usage) || (object(chunk.error) && countsWork(chunk.error.usage))
+      || (Array.isArray(chunk.choices) && chunk.choices.some(choice => countsWork(choice?.usage)
+        || (object(choice?.delta) && Object.entries(choice.delta).some(([key, value]) => key !== 'role' && value != null && value !== ''))))) produced = true;
     if (chunk.error != null || (chunk.choices == null && (chunk.code != null || chunk.message != null))) {
       const error = object(chunk.error) ? chunk.error : chunk.error != null ? {} : { code: chunk.code, message: chunk.message };
       const type = kind(error.type) ? error.type : kind(error.code) ? error.code : undefined;
@@ -312,9 +315,6 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail('shape');
     for (const choice of chunk.choices) {
       const delta = object(choice?.delta) ? choice.delta : {};
-      // Anything the model sent (its text, a refusal, a tool call, its hidden reasoning) is work done, and so is usage
-      // inside the choice that counts anything (as some providers send it, Moonshot).
-      if (Object.entries(delta).some(([key, value]) => key !== 'role' && value != null && value !== '') || countsWork(choice?.usage)) produced = true;
       if (delta.content != null) { if (typeof delta.content !== 'string') return fail('content'); text += delta.content; }
       // A refusal (OpenAI's) is kept as the answer read whole has it, for computerCompletionResponse to refuse; never forwarded.
       if (delta.refusal != null) { if (typeof delta.refusal !== 'string') return fail('content'); refused += delta.refusal; }
@@ -425,12 +425,13 @@ function countsWork(usage: unknown): boolean {
  *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed), which carries
  *  the label an OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output` when
  *  nothing else came back: inside a 200 only for an error read whole or a gateway's error frame that came before
- *  anything of the answer (`sizable`), and never beside usage that counts anything (countsWork: the provider read the
- *  request). The API takes the label for that refusal only with that detail; a provider's own code without it (after
+ *  anything of the answer (`sizable`), and never with usage that counts anything beside the error or inside it
+ *  (countsWork: the provider read the request; a body past 16 KiB is never read whole, so never that refusal). The API
+ *  takes the label for that refusal only with that detail; a provider's own code without it (after
  *  some of the answer, beside usage, or an older worker's label) is a call that did work. */
 function refusal(status: number, body: ObjectValue = {}, sizable = true): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if (sizable && !countsWork(body.usage) && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
+  if (sizable && !countsWork(body.usage) && !countsWork(error.usage) && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
     return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));

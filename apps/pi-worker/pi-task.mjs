@@ -219,13 +219,15 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
-    if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted && !answered(finalMessage) && !observer.refusalCounted()) {
+    if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted && !answered(finalMessage)) {
       // A provider's refusal of the request as larger than its model's window, said only of a call that got nothing
-      // back (its reasoning, which an ordinary caller never sees, counts, and so does usage the refusal's own body
-      // states: the API cannot tell a call that did work from one that never began without this worker); read from its
-      // message here and never relayed (context-overflow.ts; loaded only on a failure).
+      // back (its reasoning, which an ordinary caller never sees, counts, and so does usage anywhere in the stream or
+      // the refusal's own body, which the observer reads: the API cannot tell a call that did work from one that never
+      // began without this worker); read from its message here and never relayed (context-overflow.ts; loaded only on
+      // a failure).
       const { contextOverflow } = await import('../context-overflow.ts');
-      if (contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
+      await observer.settled();
+      if (contextOverflow(finalMessage.errorMessage) && !observer.workCounted()) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
     }
     if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Model did not complete successfully');
     text = finalMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('');

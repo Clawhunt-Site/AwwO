@@ -129,11 +129,13 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
         // Fewer than 1024 characters, but more than 1024 UTF-8 bytes.
         send({ role: 'assistant', content: '汉'.repeat(400) });
         send({}, 'stop');
-      } else if (mode === 'too_long_after_reasoning' || mode === 'too_long_after_usage') {
-        // The model began (its reasoning, or usage that counts something), then a refusal by its words and its code.
+      } else if (mode === 'too_long_after_reasoning' || mode === 'too_long_after_usage' || mode === 'too_long_frame_usage') {
+        // The model began (its reasoning, or usage that counts something), then a refusal by its words and its code; or
+        // the refusal's frame states usage inside its error.
         if (mode === 'too_long_after_reasoning') send({ role: 'assistant', reasoning_content: REASONING_TEXT.slice(0, 12) });
-        else res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } })}\n\n`);
-        res.end(`data: ${JSON.stringify({ error: { message: 'This model\'s maximum context length is 131072 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded' } })}\n\n`);
+        else if (mode === 'too_long_after_usage') res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } })}\n\n`);
+        res.end(`data: ${JSON.stringify({ error: { message: 'This model\'s maximum context length is 131072 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded',
+          ...(mode === 'too_long_frame_usage' ? { usage: { prompt_tokens: 140000 } } : {}) } })}\n\n`);
         return;
       } else if (mode === 'reasoning') {
         // A provider that streams its reasoning in a separate field before answering.
@@ -553,7 +555,7 @@ test('a provider\'s refusal of the request as larger than its model\'s window ke
   assert.deepEqual([second.events.at(-1).type, second.events.at(-1).code], ['failed', 'MODEL_ERROR']);
   // So does a refusal after the model began: its reasoning (which an ordinary caller never sees) or usage that counts
   // something, in the stream or in the refusal's own body, is work done, which the API counts.
-  for (const mode of ['too_long_after_reasoning', 'too_long_after_usage', 'too_long_usage']) {
+  for (const mode of ['too_long_after_reasoning', 'too_long_after_usage', 'too_long_usage', 'too_long_frame_usage']) {
     const began = await provider(t, { mode });
     const third = await run(t, configuration(began.baseURL));
     await third.handle.done;

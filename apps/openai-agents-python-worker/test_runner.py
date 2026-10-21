@@ -100,7 +100,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             before = {"too_long_after_reasoning": {"id": "chatcmpl_1", "object": "chat.completion.chunk", "created": 1, "model": "mock-model",
                                                    "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": REASONING_TEXT[:12]}, "finish_reason": None}]},
                       "too_long_after_usage": {"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}}.get(self.mode)
-            frames = ([before] if before else []) + [{"error": {**too_long, "status": 400}}]
+            inner = {"usage": {"prompt_tokens": 140000}} if self.mode == "too_long_first_inner_usage" else {}
+            frames = ([before] if before else []) + [{"error": {**too_long, "status": 400, **inner}}]
             await response.write("".join(f"data: {json.dumps(frame)}\n\n" for frame in frames).encode())
             return response
         delta = {"role": "assistant", "content": self.answer}
@@ -249,7 +250,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         # ordinary caller never sees) or usage that counts something, in the stream or in the refusal's own body: the
         # refusal of the request it otherwise is, which the API counts. Its words never cross the worker.
         for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_first", "MODEL_CONTEXT_LIMIT"), ("too_long_usage", "MODEL_REQUEST_REJECTED"),
-                           ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"), ("too_long_after_usage", "MODEL_REQUEST_REJECTED")]:
+                           ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"), ("too_long_after_usage", "MODEL_REQUEST_REJECTED"),
+                           ("too_long_first_inner_usage", "MODEL_REQUEST_REJECTED")]:
             with self.subTest(mode=mode):
                 self.mode = mode
                 events = await self.collect()

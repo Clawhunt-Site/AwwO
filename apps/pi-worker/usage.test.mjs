@@ -85,7 +85,7 @@ for (const separator of ['\n', '\r\n', '\r']) test(`multiline SSE usage survives
   }
 });
 
-test('a refusal\'s body is read for the usage it states, its bytes unchanged and at most 64 KiB of it kept', async () => {
+test('a refusal\'s body is read beside the SDK for the usage it states, its bytes unchanged, one too long to read whole counting', async () => {
   const json = { 'content-type': 'application/json' };
   for (const [body, status, headers, counted] of [
     [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 11, completion_tokens: 9 } }), 400, json, true],
@@ -93,15 +93,48 @@ test('a refusal\'s body is read for the usage it states, its bytes unchanged and
     [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 0, completion_tokens: 0 } }), 400, json, false],
     [JSON.stringify({ error: { code: 'context_length_exceeded' } }), 400, json, false],
     ['not json, usage 11', 400, json, false],
-    [JSON.stringify({ error: { message: 'x'.repeat(70_000) }, usage: { prompt_tokens: 11 } }), 400, json, false],
-    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 400, { 'content-type': 'text/plain' }, false],
+    // Read whatever its type says, as the SDKs read it.
+    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 400, { 'content-type': 'text/plain' }, true],
+    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 413, { 'content-type': 'Application/JSON' }, true],
+    // Past 64 KiB it cannot be read whole, and counts whatever it states.
+    [JSON.stringify({ error: { message: 'x'.repeat(70_000) } }), 400, json, true],
+    // Not a refusal.
     [JSON.stringify({ choices: [], usage: { prompt_tokens: 11 } }), 200, json, false],
   ]) {
     const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(body, { status, headers }) });
     const response = await observer.fetch('http://127.0.0.1/provider');
     assert.equal(response.status, status);
+    assert.equal(response.headers.get('content-type'), headers['content-type']);
     assert.equal(await response.text(), body);
-    assert.equal(observer.refusalCounted(), counted, body.slice(0, 80));
+    await observer.settled();
+    assert.equal(observer.workCounted(), counted, `${status} ${body.slice(0, 80)}`);
+  }
+  // A body the SDK never reads is read all the same; one that never ends counts after 2 s.
+  const unread = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(JSON.stringify({ error: {}, usage: { prompt_tokens: 4 } }), { status: 400 }) });
+  await unread.fetch('http://127.0.0.1/provider');
+  await unread.settled();
+  assert.equal(unread.workCounted(), true);
+  const endless = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"error":')); } }), { status: 400 }) });
+  await endless.fetch('http://127.0.0.1/provider');
+  const started = performance.now();
+  await endless.settled();
+  assert.ok(performance.now() - started >= 1900);
+  assert.equal(endless.workCounted(), true);
+});
+
+test('usage anywhere in a stream counts as work: beside its choices, inside one, inside an error frame\'s error', async () => {
+  for (const [frames, counted] of [
+    [[{ choices: [{ index: 0, delta: { role: 'assistant' } }] }, { error: { code: 'context_length_exceeded' } }], false],
+    [[{ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }, { error: { code: 'context_length_exceeded' } }], false],
+    [[{ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9 } }], true],
+    [[{ choices: [{ index: 0, delta: {}, usage: { prompt_tokens: 4 } }] }], true],
+    [[{ error: { code: 'context_length_exceeded', usage: { prompt_tokens: 140000 } } }], true],
+  ]) {
+    const text = frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('');
+    const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(text, { headers: { 'content-type': 'text/event-stream' } }) });
+    assert.equal(await (await observer.fetch('http://127.0.0.1/provider')).text(), text);
+    await observer.settled();
+    assert.equal(observer.workCounted(), counted, text);
   }
 });
 
