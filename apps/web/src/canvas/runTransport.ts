@@ -133,6 +133,10 @@ export async function execAgentViaGateway(
   let text = '';
   let gotText = false;
   let nativeCancelled = false;
+  // What the gateway said of a failure, its failed phase's message (canvasBridge.ts words it from the run's code): the
+  // failed run's detail, so the node's failure note, the timeline and the assistant say why and what to do, not only that
+  // it failed.
+  let failure: string | null = null;
   // FIRST terminal frame wins. A late frame must never rewrite an already-decided outcome
   // (e.g. a stream-teardown 'error' after 'done: succeeded' would flip a real success into a
   // failure — or worse, the reverse would fake a success after an error).
@@ -192,6 +196,9 @@ export async function execAgentViaGateway(
     // still deliver buffered progress or stdout afterwards; accepting any of it would mutate a
     // result the UI has already classified and can even make invalid JSON look valid/vice versa.
     if (terminal) return;
+    // Only a failed phase that ends the run says why it failed (canvasBridge.ts sends it just before `done`): one that
+    // another frame follows was the agent's own progress (the local gateway's heartbeat.run.progress).
+    if (f.event !== 'done' && !(f.event === 'phase' && f.phase === 'failed')) failure = null;
     switch (f.event) {
       case 'accepted':
         reportIssue(f.issueId);
@@ -216,6 +223,7 @@ export async function execAgentViaGateway(
         }
         break;
       case 'phase':
+        failure = f.phase === 'failed' && f.message?.trim() ? f.message.trim() : null;
         if (mirroring()) sessions.setStatus(storeKey, COPY.phaseLabel(f.phase, f.message));
         break;
       case 'status':
@@ -291,7 +299,8 @@ export async function execAgentViaGateway(
   if (t.kind === 'no_run') return { ok: false, unconfirmed: true, output: text, detail: `已投递但无可见运行${t.detail ? `（${t.detail}）` : ''}` };
   const ok = t.status === 'succeeded';
   if (ok && !text.trim()) return { ok: false, output: '', detail: 'empty_delivery' };
-  return { ok, ...(nativeCancelled || t.status === 'cancelled' ? { cancelled: true } : {}), output: text, detail: STATUS_LABEL[t.status] ?? t.status };
+  return { ok, ...(nativeCancelled || t.status === 'cancelled' ? { cancelled: true } : {}), output: text,
+    detail: (t.status === 'failed' && failure) || (STATUS_LABEL[t.status] ?? t.status) };
 }
 
 export interface GatewayExecutorArgs {

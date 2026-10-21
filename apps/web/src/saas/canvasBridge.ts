@@ -1,7 +1,7 @@
 import { api, API_BASE, SaaSApiError, sessionFetch, tenantPath, type Tenant, type SaaSAgent } from './api';
 import { modelEffortCapability, runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus } from './runtimeCatalog';
 import { readSseFrames } from '../sse';
-import { canvasErrorMessage, canvasText } from './canvasErrors';
+import { canvasErrorMessage, canvasText, planErrorMessage } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS } from '../canvas/canvasPlan';
 import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
@@ -346,7 +346,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               reader.abort();
             } else if (['failed', 'interrupted', 'cancelled'].includes(event.type)) {
               terminalObserved = true;
-              failure = canvasErrorMessage(event.message, event.code) || canvasText('规划未完成，请重试。', 'Planning did not complete. Please try again.');
+              // A live interrupted or cancelled event carries no code (runs.go finishOnce); the run's own snapshot names
+              // an interruption's cause.
+              failure = planErrorMessage(event.message, event.code || (event.type === 'failed' ? undefined : event.type));
               failureCode = typeof event.code === 'string' ? event.code : '';
               reader.abort();
             }
@@ -497,7 +499,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         throw error;
       }
       const upstream = await sessionFetch(`${API_BASE}${base}/runs/${encodeURIComponent(run.id)}/events`, { credentials: 'include', signal: init.signal });
-      if (!upstream.ok || !upstream.body) return json({ error: canvasText('无法连接运行事件，请刷新后恢复。', 'Run events could not be reached. Reload to restore the run.') }, upstream.status || 502);
+      // The run was admitted: a reload shows how it went.
+      if (!upstream.ok || !upstream.body) return json({ error: canvasErrorMessage('runtime_disconnected') }, upstream.status || 502);
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({ async start(controller) {
         let ended = false;
@@ -515,7 +518,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               emit({ event: 'done', status: 'succeeded' });
             }
             else if (event.type === 'failed' || event.type === 'interrupted') {
-              emit({ event: 'phase', phase: 'failed', message: canvasErrorMessage(event.message, event.code) || canvasText('执行失败', 'Execution failed.') });
+              // A live interrupted event carries no code (runs.go finishOnce).
+              emit({ event: 'phase', phase: 'failed', message: canvasErrorMessage(event.message, event.code || (event.type === 'interrupted' ? 'interrupted' : undefined))
+                || canvasText('执行失败', 'Execution failed.') });
               emit({ event: 'done', status: 'failed' });
             } else if (event.type === 'cancelled') emit({ event: 'done', status: 'cancelled' });
             else if (event.type === 'queued' || event.type === 'running') emit({ event: 'status', status: event.type });
@@ -524,7 +529,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
               if (status) emit({ event: 'status', status });
             }
           });
-        } catch { emit({ event: 'error', detail: canvasText('运行连接中断，请恢复运行状态。', 'The run connection was interrupted. Restore the run state.') }); }
+        } catch { emit({ event: 'error', detail: canvasErrorMessage('runtime_disconnected') }); }
         finally { ended = true; controller.close(); }
       } });
       return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });

@@ -5,6 +5,8 @@ import { GraphRunPanel } from '../src/saas/GraphRunPanel';
 import { useCanvasKeys } from '../src/canvas/useCanvasKeys';
 import type { GraphRunSnapshot, TeamTurn } from '../src/saas/graphRuns';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
+import { runErrorText } from '../src/saas/canvasErrors';
 
 const base = '/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -36,6 +38,10 @@ it('labels a delivery-contract failure in both locales and leaves an unmapped de
     ['zh', 'model_refused', '模型拒绝了请求'],
     ['en', 'provider_rate_limited', 'The provider is rate limited'],
     ['zh', 'provider_unavailable', '模型服务暂不可用'],
+    // A code with no short label reads as it does on the node, with what to do (it showed as its code).
+    ['en', 'run_timeout', runErrorText('run_timeout', 'en')!],
+    ['zh', 'team_timeout', runErrorText('team_timeout', 'zh')!],
+    ['en', 'context_limit', saasErrorMessage(new SaaSApiError(0, 'context_limit', ''), 'en')],
     ['en', 'provider_diagnostic_42', 'provider_diagnostic_42'],
   ] as const) {
     localStorage.setItem('superclaw_locale', locale);

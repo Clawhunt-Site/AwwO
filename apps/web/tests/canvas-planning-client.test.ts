@@ -84,6 +84,23 @@ describe('canvas planner context', () => {
     expect((doc.nodes[0] as SessionNode).lastOutput?.text).toBe('PRIVATE_CURRENT_ARTIFACT');
   });
 
+  // From 2026-10-16 to 10-19 20 of production's 22 timeouts were a model call that had not written a word when its time
+  // came: the way on is another model, not a smaller task (owner 2026-10-21), where the planner can set one (review
+  // 2026-10-21: with no model list it has no set_model, and the work split or narrowed stays its way on).
+  it('tells a planner that can set models to give a node that ran out of time another model, and one that cannot to split it', () => {
+    const models = { models: [{ id: 'm', name: 'M' }] };
+    const zh = buildPlanningContext(emptyDocument(), [], 'zh', [], models);
+    const en = buildPlanningContext(emptyDocument(), [], 'en', [], models);
+    expect(zh).toContain('修复失败：太长拆分或缩小交付，超时换模型，');
+    expect(zh).not.toContain('太长或超时就拆分工作或缩小交付');
+    expect(en).toContain('an answer too long → split the work or narrow the delivery; out of time → another model;');
+    expect(en).not.toContain('too long or out of time');
+    expect(buildPlanningContext(emptyDocument(), [], 'zh')).toContain('修复失败：太长或超时就拆分工作或缩小交付，');
+    expect(buildPlanningContext(emptyDocument(), [], 'zh')).not.toContain('超时换模型');
+    expect(buildPlanningContext(emptyDocument(), [], 'en')).toContain('an answer too long or out of time → split the work or narrow the delivery;');
+    expect(buildPlanningContext(emptyDocument(), [], 'en')).not.toContain('another model;');
+  });
+
   it('uses only the last ten planning messages and excludes their local identifiers and extra metadata', () => {
     const messages = Array.from({ length: 13 }, (_, index) => ({ ...message(index), localOnly: 'PRIVATE_METADATA' }));
     const context = buildPlanningContext(emptyDocument(), messages);

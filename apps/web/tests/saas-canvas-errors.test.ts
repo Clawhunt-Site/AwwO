@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { canvasErrorMessage, runErrorText } from '../src/saas/canvasErrors';
+import { canvasErrorMessage, isRunFailureCopy, planErrorMessage, runErrorText, runFailureText } from '../src/saas/canvasErrors';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBridge';
 import { fetchConversationIndex } from '../src/canvasAgentChat';
+import { canvasText } from '../src/canvas/i18n';
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 afterEach(() => { vi.unstubAllGlobals(); clearSaaSCanvas(); configureSaaSCanvasSave(null); document.documentElement.lang = ''; });
 it('tells a user with no personal engine to add a key while preserving real model errors', () => {
@@ -117,8 +120,9 @@ it('names the worker failures the API maps instead of showing the generic runtim
     provider_auth_failed: ['凭据', 'credentials'],
     provider_rate_limited: ['速率限制', 'rate limited'],
     provider_unavailable: ['不可用', 'unavailable'],
-    output_limit: ['超过限制', 'exceeds the limit'],
+    output_limit: ['超过了一次运行的上限', 'went past what one run may write'],
     run_timeout: ['超时', 'timed out'],
+    team_timeout: ['节点团队超过了团队设置的时间上限', 'ran past its time limit'],
     workspace_context_limit: ['上下文已满', 'context is full'],
     workspace_step_limit: ['调用步数上限', 'model-call limit'],
     workspace_admission_failed: ['额度不可用', 'quota is unavailable'],
@@ -136,6 +140,127 @@ it('names the worker failures the API maps instead of showing the generic runtim
   }
   // The raw worker codes themselves are never run codes; they still show as their own text.
   expect(canvasErrorMessage('diagnostic 456', 'MODEL_REFUSAL')).toBe('diagnostic 456');
+});
+// Owner 2026-10-21: 「运行超时，请缩小任务范围后重试」 came up again and again; an error has to say what to do. Nearly every
+// timeout in production was a call that never wrote a word, and running the node again was what finished it.
+it('tells a timed-out run to run again first, then to change the model or split the work, never to shrink the task', () => {
+  const zh = runErrorText('run_timeout', 'zh')!;
+  const en = runErrorText('run_timeout', 'en')!;
+  expect(zh.indexOf('先重新运行')).toBeGreaterThan(-1);
+  expect(zh.indexOf('先重新运行')).toBeLessThan(zh.indexOf('换个模型'));
+  expect(zh.indexOf('换个模型')).toBeLessThan(zh.indexOf('让助手调整画布'));
+  expect(zh).toContain('迟迟没有给出结果');
+  expect(en.indexOf('Run it again first')).toBeGreaterThan(-1);
+  expect(en.indexOf('Run it again first')).toBeLessThan(en.indexOf('choose another model'));
+  expect(en.indexOf('choose another model')).toBeLessThan(en.indexOf('let the assistant adjust the canvas'));
+  // One line of the failure note in a wide chat column (about 55 characters with 「上次运行失败：」 at 12.5 px in 860 px).
+  expect([...zh].length).toBeLessThanOrEqual(48);
+  // No node is named: the copy also reads under a team member's turn and on every node of a collaboration it ended.
+  for (const text of [zh, en]) expect(text).not.toMatch(/这个节点|this node/);
+  expect(zh).not.toContain('缩小任务范围');
+  expect(en).not.toMatch(/reduce the task scope/i);
+  // A node's own Send and a recovered run read the same words.
+  document.documentElement.lang = 'zh-CN';
+  expect(canvasErrorMessage('The model request timed out.', 'run_timeout')).toBe(zh);
+  document.documentElement.lang = 'en';
+  expect(canvasErrorMessage('run_timeout')).toBe(en);
+});
+it('says what to do after every run failure, and never asks to restore a run state or check a runtime configuration', () => {
+  const codes = ['runtime_session_busy', 'runtime_rejected', 'invalid_canvas_plan', 'database_unavailable', 'history_unavailable',
+    'invalid_runtime_event', 'output_limit', 'runtime_disconnected', 'server_restarted', 'API restarted before completion', 'interrupted',
+    'execution_interrupted', 'runtime_failed', 'run_timeout', 'team_timeout', 'team_turn_budget_exhausted', 'review_rounds_exhausted',
+    'invalid_review_verdict', 'tool_unavailable', 'turn_persistence_failed', 'accounting_commit_failed', 'provider_rate_limited',
+    'provider_unavailable', 'runtime_stream_ended', 'event_persistence_failed', 'inconsistent_runtime_output', 'deliverable_storage_failed'];
+  const actions = { zh: /重新运行|重试|再运行|换一个模型|联系管理员|刷新页面|调大|取消这个工具/, en: /\bretry\b|run it again|try again|choose another model|contact an administrator|reload the page|\braise\b|clear the tool/i };
+  const vague = { zh: /恢复运行状态|运行配置|核对历史|缩小任务范围/, en: /restore (?:the|its) (?:run )?state|runtime configuration|check its history|reduce the task scope/i };
+  for (const code of codes) {
+    for (const locale of ['zh', 'en'] as const) {
+      const text = runErrorText(code, locale);
+      expect(text, `${code} ${locale}`).toBeTruthy();
+      expect(text, `${code} ${locale}`).toMatch(actions[locale]);
+      expect(text, `${code} ${locale}`).not.toMatch(vague[locale]);
+    }
+  }
+  // Only a restart is said to be one: a graph run's interrupted node may have had its executor stop instead (runs.go
+  // dispatchFor's execution_interrupted), and that one says no cause.
+  expect(runErrorText('API restarted before completion', 'zh')).toContain('服务重启打断');
+  expect(runErrorText('interrupted', 'zh')).toContain('多半是服务重启');
+  expect(runErrorText('interrupted', 'en')).toContain('most often by a service restart');
+  for (const locale of ['zh', 'en'] as const) expect(runErrorText('execution_interrupted', locale)).not.toMatch(/重启|restart/);
+  // No copy that a collaboration's failed turn can put on every node, or a team member's turn can carry, names "this node",
+  // nor the canvas's own copy of a delivery-format refusal (graph_collaboration.go finishCollaboration).
+  const thisNode = /这个节点|该节点|这个组件|该组件|this node|this component/;
+  for (const code of ['runtime_rejected', 'output_limit', 'runtime_failed', 'run_timeout', 'provider_rate_limited', 'provider_unavailable',
+    'output_contract_invalid', 'deliverable_storage_failed', 'interrupted', 'execution_interrupted', 'event_persistence_failed']) {
+    for (const locale of ['zh', 'en'] as const) expect(runErrorText(code, locale), `${code} ${locale}`).not.toMatch(thisNode);
+  }
+  for (const locale of ['zh', 'en'] as const) expect(canvasText(locale, 'surface.deliveryFormat'), locale).not.toMatch(thisNode);
+  // A stream piece that could not be stored leaves what came before it with the run.
+  expect(runErrorText('event_persistence_failed', 'zh')).toContain('已写出的部分可能留在对话里');
+  // Not "did not start": the worker may have answered with an error after it began.
+  for (const locale of ['zh', 'en'] as const) expect(runErrorText('runtime_rejected', locale)).not.toMatch(/没有开始|did not start/);
+  // A team's own limits name the setting and its editor's bound (nodeTeam.ts validateNodeTeam).
+  expect(runErrorText('team_turn_budget_exhausted', 'zh')).toContain('「最多模型调用次数」');
+  expect(runErrorText('team_turn_budget_exhausted', 'zh')).toContain('最多 64 次');
+  expect(runErrorText('review_rounds_exhausted', 'en')).toContain('“Maximum rounds”');
+  expect(runErrorText('review_rounds_exhausted', 'en')).toContain('up to 8');
+  const team = readFileSync(resolve(process.cwd(), 'src/canvas/nodeTeam.ts'), 'utf8');
+  expect(team).toContain("['maxRounds', 1, 8], ['maxTurns', 1, 64]");
+  const editor = readFileSync(resolve(process.cwd(), 'src/canvas/NodeTeamEditor.tsx'), 'utf8');
+  for (const label of ["rounds: '最多轮数'", "turns: '最多模型调用次数'", "rounds: 'Maximum rounds'", "turns: 'Maximum model calls'"]) expect(editor).toContain(label);
+});
+it('names the node team setting a team timeout is lifted in, as its editor labels it', () => {
+  const editor = readFileSync(resolve(process.cwd(), 'src/canvas/NodeTeamEditor.tsx'), 'utf8');
+  expect(editor).toContain("timeout: '节点超时（秒）'");
+  expect(editor).toContain("timeout: 'Node timeout (seconds)'");
+  expect(runErrorText('team_timeout', 'zh')).toContain('「节点超时（秒）」');
+  expect(runErrorText('team_timeout', 'en')).toContain('“Node timeout (seconds)”');
+  // validateNodeTeam's own bound (nodeTeam.ts) is the most the copy offers.
+  expect(readFileSync(resolve(process.cwd(), 'src/canvas/nodeTeam.ts'), 'utf8')).toContain("['timeoutSeconds', 10, 1800]");
+  expect(runErrorText('team_timeout', 'zh')).toContain('最多 1800 秒');
+});
+it('reads a failed plan as the canvas assistant’s, with no node to run again and no model to change', () => {
+  for (const [locale, lang, kept, node] of [['zh', 'zh-CN', '画布保持原样', /这个节点|换一个模型|重新运行/], ['en', 'en', 'the canvas has not changed', /this node|choose another model|run it again/i]] as const) {
+    document.documentElement.lang = lang;
+    for (const code of ['run_timeout', 'runtime_failed', 'provider_unavailable', 'provider_rate_limited', 'output_limit', 'runtime_session_busy',
+      'API restarted before completion', 'interrupted', 'execution_interrupted', 'runtime_stream_ended', 'invalid_runtime_event', 'accounting_commit_failed']) {
+      const text = planErrorMessage('Pi execution failed', code);
+      expect(text, code).not.toMatch(node);
+      expect(text, code).not.toBe(runErrorText(code, locale));
+      if (code !== 'runtime_session_busy') expect(text, code).toContain(kept);
+    }
+    // One too large for a plan is sent in parts; only a restart is said to be one; a plan another page stopped says so.
+    expect(planErrorMessage('', 'output_limit')).toMatch(locale === 'zh' ? /分成几步/ : /split the request into steps/i);
+    expect(planErrorMessage('', 'API restarted before completion')).toMatch(/重启|restart/);
+    expect(planErrorMessage('', 'interrupted')).not.toMatch(/重启|restart/);
+    expect(planErrorMessage(undefined, 'cancelled')).toContain(locale === 'zh' ? '这次规划已停止' : 'This plan was stopped');
+    // Everything else reads as a run's failure does.
+    for (const code of ['invalid_canvas_plan', 'quota_exceeded', 'premium_quota_exceeded', 'reasoning_only_output']) {
+      expect(planErrorMessage('Pi execution failed', code), code).toBe(canvasErrorMessage('Pi execution failed', code));
+    }
+    expect(planErrorMessage('provider diagnostic', '')).toBe('provider diagnostic');
+  }
+});
+it('finds a failure’s copy as a node records it: a run’s, else the service’s, and nothing for the provider’s own words', () => {
+  for (const locale of ['zh', 'en'] as const) {
+    expect(runFailureText('run_timeout', locale)).toBe(runErrorText('run_timeout', locale));
+    expect(runFailureText('context_limit', locale)).toBe(saasErrorMessage(new SaaSApiError(0, 'context_limit', 'x'), locale));
+    expect(runFailureText('media_quota_exceeded', locale)).toBe(saasErrorMessage(new SaaSApiError(0, 'media_quota_exceeded', 'x'), locale));
+    expect(runFailureText('provider said no', locale)).toBeUndefined();
+    expect(runFailureText('Output must be a JSON object keyed by output field IDs', locale)).toBeUndefined();
+    // Nothing for nothing: the service's own fallback for an empty message is no copy of a detail.
+    expect(runFailureText('', locale)).toBeUndefined();
+  }
+});
+it('tells a copy a node’s own Send recorded, a run’s or the service’s, from the provider’s own words', () => {
+  for (const locale of ['zh', 'en'] as const) {
+    expect(isRunFailureCopy(runErrorText('run_timeout', locale)!)).toBe(true);
+    expect(isRunFailureCopy(saasErrorMessage(new SaaSApiError(0, 'context_limit', ''), locale))).toBe(true);
+    expect(isRunFailureCopy(saasErrorMessage(new SaaSApiError(0, 'media_quota_exceeded', ''), locale))).toBe(true);
+  }
+  expect(isRunFailureCopy('Request rejected. max_tokens exceeds 32000 for this model.')).toBe(false);
+  expect(isRunFailureCopy('context_limit')).toBe(false);
+  expect(isRunFailureCopy('')).toBe(false);
 });
 it('explains the project step budget in current and historical failures without promising to resume failed files', () => {
   const error = new SaaSApiError(500, 'workspace_step_limit', 'MaxTurnsExceededError');
@@ -178,6 +303,33 @@ it.each([
   }));
   const r = await canvasFetch('/gateway-api/conversations/tenant-a/agents/a/messages', { method: 'POST', body: JSON.stringify({ message: 'hello', issueId: 'session-a' }) });
   const text = await r.text(); expect(text).toContain(expected); expect(text).toContain('"status":"failed"');
+});
+// A live interrupted event carries no code (runs.go finishOnce): it read as 「请求失败，请重试。」, and a stream that broke
+// asked to "restore the run state".
+it('says a node’s own run was interrupted, or its connection dropped, with what to do', async () => {
+  document.documentElement.lang = 'zh-CN'; configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => {});
+  let events = `data: ${JSON.stringify({ type: 'interrupted' })}\n\n`;
+  let eventsStatus = 200;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('operationId=')) return new Response(JSON.stringify({ items: [] }));
+    if (url.endsWith('/runs')) return new Response(JSON.stringify({ id: 'run-a', sessionId: 'session-a', status: 'queued' }));
+    if (url.endsWith('/events')) return new Response(events, { status: eventsStatus });
+    throw new Error(url);
+  }));
+  const send = () => canvasFetch('/gateway-api/conversations/tenant-a/agents/a/messages', { method: 'POST', body: JSON.stringify({ message: 'hello', issueId: 'session-a' }) });
+  let text = await (await send()).text();
+  expect(text).toContain(runErrorText('interrupted', 'zh')!); expect(text).toContain('"status":"failed"');
+  expect(text).not.toContain('请求失败');
+  // A completed text that disagrees with what streamed ends the read as a broken stream.
+  events = [{ type: 'text_delta', delta: 'mine' }, { type: 'completed', text: 'other' }].map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+  text = await (await send()).text();
+  expect(text).toContain(runErrorText('runtime_disconnected', 'zh')!);
+  expect(text).not.toContain('恢复运行状态');
+  // An admitted run whose events could not be opened: a reload shows how it went (review 2026-10-21: 「请刷新后恢复」).
+  eventsStatus = 502;
+  const unreachable = await send();
+  expect(unreachable.status).toBe(502);
+  expect((await unreachable.json()).error).toBe(runErrorText('runtime_disconnected', 'zh'));
 });
 
 it('says a refused voice is the voice, not a picture, and that nothing was made or charged (M-1c)', () => {

@@ -91,6 +91,19 @@ export const quotaExceededMessages: [string, string] = [
 
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
+  return serviceMessage(error, locale, serviceCodes());
+}
+
+let serviceCopies: Set<string> | undefined;
+/** Whether the text is a code's copy below, in either language: what a node's own Send records of a failure only the
+ *  service words (canvasErrors.ts canvasErrorMessage), which the canvas tells from the provider's own words. */
+export function isServiceCopy(text: string): boolean {
+  serviceCopies ??= new Set(Object.values(serviceCodes()).flat());
+  return serviceCopies.has(text);
+}
+
+/** Each known application failure code's copy: [zh, en]. */
+function serviceCodes(): Record<string, [string, string]> {
   const codes: Record<string, [string, string]> = {
     invalid_task_frame: ['任务要求无效或版本不受支持；输入已保留。请检查条数与长度后重试。', 'Task requirements are invalid or unsupported. Your input is preserved. Check the entry counts and lengths before retrying.'],
     invalid_run_evidence: ['证据响应无效，请重试读取。', 'Invalid evidence response. Retry reading it.'],
@@ -149,7 +162,7 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
     model_unpriced: ['这个模型还不能按点数计费，请换用其他模型。', 'This model cannot be billed in credits yet. Choose another model.'],
     credits_exhausted: ['本期套餐点数已用完：可以换成默认模型继续，点数在下次续费后重置；需要更多点数可以请工作区所有者在「套餐与点数」里升级。', 'This period’s plan credits are used up: switch to the default model to keep going; credits reset after the next renewal. For more, the workspace’s owner can upgrade in Plans and credits.'],
-    plan_busy: ['套餐的同时运行数已用满（包括所有者的其他工作区），等其中一个运行结束后再试。', 'The plan’s agents at once are all running, counting the owner’s other workspaces; try again when one finishes.'],
+    plan_busy: ['套餐的同时运行数已用满（包括所有者的其他工作区）。等其中一个运行结束后再试。', 'The plan’s agents at once are all running, counting the owner’s other workspaces. Try again when one finishes.'],
     plan_media_quota_exceeded: ['套餐今日的图片 / 视频生成次数已用完，UTC 次日恢复。', 'The plan’s image and video generations for today are used up; they come back after the next UTC day.'],
     checkin_unavailable: ['这个工作区现在没有签到活动。', 'This workspace has no check-ins right now.'],
     checkin_taken: ['这个工作区今天已经有成员签到了，多出的次数已经加上。', 'Another member checked this workspace in today; the extra calls are already added.'],
@@ -230,6 +243,10 @@ export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
     invite_unavailable: ['邀请已失效，请联系工作区所有者。', 'This invitation is no longer valid. Contact the workspace owner.'],
     invite_membership_removed: ['原成员身份已移除，请索取新邀请。', 'Your membership was removed. Request a new invitation.'],
   };
+  return codes;
+}
+
+function serviceMessage(error: unknown, locale: 'zh' | 'en', codes: Record<string, [string, string]>): string {
   if (error instanceof SaaSApiError && codes[error.code]) return codes[error.code][locale === 'zh' ? 0 : 1];
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
   const missingCandidate = raw.match(/^Missing (?:completed|valid) cached input from (.+)$/s);

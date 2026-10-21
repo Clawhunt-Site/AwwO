@@ -61,7 +61,8 @@ describe('durable team run details', () => {
     phase = 1; await flushTimers(2000);
     expect(screen.getByText('Durable final or partial evidence')).toBeVisible();
     expect(screen.getByRole('status')).not.toHaveTextContent('Updating automatically');
-    if (terminal === 'failed') expect(screen.getByRole('alert')).toHaveTextContent('team_timeout');
+    // A team's own time limit says which setting lifts it, not its code.
+    if (terminal === 'failed') expect(screen.getByRole('alert')).toHaveTextContent('The node team ran past its time limit before it finished. Raise “Node timeout (seconds)”');
     expect(fetcher).toHaveBeenCalledTimes(4); await flushTimers(10000); expect(fetcher).toHaveBeenCalledTimes(4);
   });
 

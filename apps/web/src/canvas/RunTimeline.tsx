@@ -153,7 +153,7 @@ export function RunTimeline({
           const run = runs[node.id];
           const state = run.state;
           const meta = t(STATE_META[state]);
-          const detail = recoveryDetailMessage(t, run.detail);
+          const detail = recoveryDetailMessage(t, run.detail, locale);
           // A blocked row says WHY it was blocked; every other state keeps its own label and
           // carries the detail in the tooltip.
           const label = (state === 'blocked' || state === 'cancelled') && detail ? detail : meta;

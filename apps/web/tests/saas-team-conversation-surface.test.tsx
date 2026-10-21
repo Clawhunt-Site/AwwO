@@ -187,12 +187,12 @@ it('replaces a failed historical run observer with the newly admitted graph run 
     return fallback(input, init);
   });
   renderCanvas(); openChat();
-  await screen.findByText('Model execution failed. Check the runtime configuration and try again.');
+  await screen.findByText('Model execution failed, so there is no result this time. Run it again; if it fails again, choose another model.');
   expect(screen.getByText('Earlier attempt output')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Execute node task', exact: true }));
   await waitFor(() => expect(acceptGraph).toBeTypeOf('function'));
   expect(screen.getByText('Submitting the node task…')).toBeVisible();
-  expect(screen.queryByText('Model execution failed. Check the runtime configuration and try again.')).toBeNull();
+  expect(screen.queryByText('Model execution failed, so there is no result this time. Run it again; if it fails again, choose another model.')).toBeNull();
   expect(screen.queryByText('Run a terminal command')).toBeNull();
   const oldReads = fetcher.mock.calls.filter(([url]) => String(url) === `${base}/runs/old-failed-run`).length;
   await act(async () => { acceptGraph(response(graph, 202)); });

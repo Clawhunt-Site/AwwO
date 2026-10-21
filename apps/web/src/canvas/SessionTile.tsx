@@ -159,7 +159,7 @@ export function runBadgeText(
   locale: UiLocale = 'zh',
   translate: CanvasTranslate = (key, values) => canvasText(locale, key, values),
 ): string {
-  const detail = recoveryDetailMessage(translate, run.detail);
+  const detail = recoveryDetailMessage(translate, run.detail, locale);
   if ((run.state as string) === 'cancelled') return detail || canvasText(locale, 'tile.cancelled');
   switch (run.state) {
     case 'waiting':
@@ -811,7 +811,7 @@ export const SessionTile = memo(function SessionTile({
   // and on every transcript frame, which is far more often than this string needs to move.
   const outputAge = output ? relativeAge(output.at, Date.now(), locale) : '';
 
-  const runDetail = run ? recoveryDetailMessage(t, run.detail) : undefined;
+  const runDetail = run ? recoveryDetailMessage(t, run.detail, locale) : undefined;
   // The model the node runs, as its picker names it (the task card says it); none when it runs the workspace default.
   const modelLabel = sessionNode?.model
     ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices))?.label || nodeModelName(sessionNode, modelNames ?? {}, locale)

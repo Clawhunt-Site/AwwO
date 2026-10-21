@@ -132,14 +132,16 @@ export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Read
  *  workspace's planner has this, and how its nodes are sized for one call, in its server instructions
  *  (plannerInstructions, planning.go), which reach it without growing this context or its recovery journal. */
 function orchestrationGuidance(locale: UiLocale, models: boolean): string {
+  // A node out of time: production's were model calls that never answered (2026-10-16 to 10-19), which another model
+  // fixes where the planner can set one (owner 2026-10-21); with no model to offer, the work is split or narrowed.
   return locale === 'en'
     ? 'Write each persona you add or rewrite as a self-contained brief: what the node receives, exactly what it delivers (format, scope, size) and what it must not do. '
       + 'Give every Agent node you add 1–3 acceptanceCriteria in add_node, checkable against its own delivery; change criteria or constraints with set_task when the user asks for other rules or checks. '
       + (models ? 'Use set_model only when the user asks for another model or a node failed because of its model. ' : '')
-      + 'A node’s run is how its last run ended. To fix a failed node: an answer too long or out of time → split the work or narrow the delivery; a refused premium model → the default model; otherwise improve the brief. Say in summary what you changed.'
+      + `A node’s run is how its last run ended. To fix a failed node: ${models ? 'an answer too long → split the work or narrow the delivery; out of time → another model' : 'an answer too long or out of time → split the work or narrow the delivery'}; a refused premium model → the default model; otherwise improve the brief. Say in summary what you changed.`
     : 'persona写成完整任务说明：收到什么、交付什么（格式、范围、篇幅）、不做什么。新增Agent节点在add_node写1到3条可对照其交付核对的acceptanceCriteria；改规则或检查用set_task。'
       + (models ? '仅在用户要求或节点因模型失败时用set_model。' : '')
-      + 'run是上次运行结果；修复失败：太长或超时就拆分工作或缩小交付，高级模型被拒就换默认模型，否则改进说明。summary说明改动。';
+      + `run是上次运行结果；修复失败：${models ? '太长拆分或缩小交付，超时换模型' : '太长或超时就拆分工作或缩小交付'}，高级模型被拒就换默认模型，否则改进说明。summary说明改动。`;
 }
 
 /** The plan a SaaS workspace can apply. `kind: "data"` on a connect is the default kind, which models add although

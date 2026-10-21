@@ -291,6 +291,39 @@ describe('execAgentViaGateway', () => {
     expect(r).toMatchObject({ ok: false, detail: '运行失败' });
   });
 
+  // The node's failure note read 「上次运行失败：运行失败」 while only the conversation said why (2026-10-21, Chrome on a
+  // local stack: a node's own Send that timed out).
+  it('gives a failed run the words its failed phase said, so its note says why and what to do', async () => {
+    const why = '运行超时：模型迟迟没有给出结果。先重新运行，常常就能好；再超时就换个模型，或让助手调整画布。';
+    streamMock.mockImplementation(emitting([
+      { event: 'phase', phase: 'running', message: '处理中' },
+      { event: 'phase', phase: 'failed', message: why },
+      { event: 'done', status: 'failed' },
+    ]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: false, detail: why });
+    // Another phase's words, an empty message or a success never stand for a failure.
+    streamMock.mockImplementation(emitting([{ event: 'phase', phase: 'running', message: '处理中' }, { event: 'done', status: 'failed' }]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: false, detail: '运行失败' });
+    streamMock.mockImplementation(emitting([{ event: 'phase', phase: 'failed', message: '  ' }, { event: 'done', status: 'failed' }]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: false, detail: '运行失败' });
+    streamMock.mockImplementation(emitting([
+      { event: 'phase', phase: 'failed', message: why }, { event: 'delta', text: '交付' }, { event: 'done', status: 'succeeded' },
+    ]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: true, detail: '已完成' });
+    // Only the failed phase that ends the run: one another frame follows was the agent's own progress (the local
+    // gateway's heartbeat.run.progress, with a status frame before its end; review 2026-10-21).
+    streamMock.mockImplementation(emitting([
+      { event: 'phase', phase: 'failed', message: '一个工具调用失败了，换一种方式' }, { event: 'delta', text: '半截' },
+      { event: 'status', status: 'failed' }, { event: 'done', status: 'failed' },
+    ]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: false, detail: '运行失败' });
+    streamMock.mockImplementation(emitting([
+      { event: 'phase', phase: 'failed', message: '一个工具调用失败了，换一种方式' }, { event: 'delta', text: '半截' },
+      { event: 'phase', phase: 'failed', message: why }, { event: 'done', status: 'failed' },
+    ]));
+    expect(await execAgentViaGateway('/gw', agent('a', 'A'), 'msg')).toMatchObject({ ok: false, detail: why });
+  });
+
   it('FIRST terminal wins: an error before done:succeeded stays a failure', async () => {
     streamMock.mockImplementation(emitting([
       { event: 'error', detail: 'boom' },

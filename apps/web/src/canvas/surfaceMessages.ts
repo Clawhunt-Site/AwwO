@@ -1,4 +1,5 @@
 import type { UiLocale } from '../locale';
+import { isRunFailureCopy, runFailureText } from '../saas/canvasErrors';
 import type { CanvasTextKey, CanvasTextValues, CanvasTranslate } from './i18n';
 import type { PreflightIssue, PreflightIssueCode } from './runGraph';
 import type { ReviewPreflightReason } from './reviewGraph';
@@ -95,8 +96,10 @@ const RECOVERY_DETAIL_KEYS = {
 /** A timeline the render worker refused keeps the worker's own words (editFailureDetail in edits.go). */
 const EDIT_REJECTED = 'edit_rejected: ';
 
-/** Known persisted/native status codes are localized; unknown evidence remains verbatim. */
-export function recoveryDetailMessage(t: CanvasTranslate, detail?: string): string | undefined {
+/** Known persisted/native status codes are localized, and so is a failure's code as a cloud run's node records it (its
+ * run's, or its admission's): the reader is told what happened and what to do (canvasErrors.ts), never shown
+ * `run_timeout`. Unknown evidence remains verbatim. */
+export function recoveryDetailMessage(t: CanvasTranslate, detail: string | undefined, locale: UiLocale): string | undefined {
   if (!detail) return undefined;
   const key = RECOVERY_DETAIL_KEYS[detail as keyof typeof RECOVERY_DETAIL_KEYS];
   if (key) return t(key);
@@ -104,10 +107,32 @@ export function recoveryDetailMessage(t: CanvasTranslate, detail?: string): stri
   // The API's delivery-contract refusals (graph_contracts.go graphOutputFiles) say what a model's answer lacked, in
   // terms of field IDs the reader never sees; the reader is told what it means and what to do.
   if (DELIVERY_FORMAT_DETAIL.test(detail)) return t('surface.deliveryFormat');
-  return detail;
+  return runFailureText(detail, locale) ?? detail;
 }
 
 const DELIVERY_FORMAT_DETAIL = /^(?:Output must be a JSON object keyed by output field IDs|Missing output \S+|Output \S+ (?:requires|allows only|must be) .+)$/;
+
+/** What happened, from a failure copy: what it says before what to do (canvasErrors.ts, api.ts), which ends at its first
+ *  sentence or, in Chinese, where a 请 starts the advice in the same sentence (「生成超时，请稍后重试」). */
+export function failureCause(text: string): string {
+  const end = text.search(/[。！？]|[，；：]\s*请(?!求)|[.!?](?=\s|$)/);
+  return (end > 0 ? text.slice(0, end) : text).trim();
+}
+
+/** A node's last failure as what the reader asks the assistant and what the planner is told carry it: what a copy says
+ *  happened, not the advice the node's note gives the reader (to run it again, which the assistant cannot do), and any
+ *  other detail whole: the provider's or the worker's own words, an edit's refusal with the render worker's. A copy is
+ *  the canvas's words for a recorded code or status, or the copy a node's own Send recorded (canvasErrorMessage). */
+export function failureReason(t: CanvasTranslate, detail: string | undefined, locale: UiLocale): string | undefined {
+  const raw = detail?.trim();
+  const shown = recoveryDetailMessage(t, raw, locale)?.trim();
+  if (!raw || !shown) return undefined;
+  const copy = shown !== raw ? !raw.startsWith(EDIT_REJECTED) : isRunFailureCopy(raw);
+  return copy ? failureCause(shown) : shown;
+}
+
+/** Every code and status the canvas words itself (above). */
+export const recoveryDetailCodes = (): string[] => Object.keys(RECOVERY_DETAIL_KEYS);
 
 const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   empty_graph: 'run.preflightEmptyGraph',

@@ -115,7 +115,7 @@ import { subscribePageErrors, type PageErrorReport } from './pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
-import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage } from './surfaceMessages';
+import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, failureReason } from './surfaceMessages';
 import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
@@ -3064,10 +3064,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         setPlanningProgress(progress);
       };
       // The planner sees the models a node can run (each once, where AwwO runs it) and how each node's last run ended,
-      // so it can change a node's model and act on a failure the reader asks it to fix.
+      // so it can change a node's model and act on a failure the reader asks it to fix: what happened, not the note's
+      // advice to the reader.
       const planModels = planningModelChoices();
       const planRuns = Object.fromEntries(Object.entries(runs).map(([id, run]) => [id,
-        { state: run.state, ...(run.detail ? { detail: recoveryDetailMessage(t, run.detail) || run.detail } : {}) }]));
+        { state: run.state, ...(run.detail ? { detail: failureReason(t, run.detail, locale) || run.detail } : {}) }]));
       const jev = !resume && plannerProvider === 'jev'
         ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
@@ -3494,11 +3495,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   };
   // A step the assistant takes from the conversation, said as the reader's own message so the turn reads as asked.
   const askAssistant = (prompt: string) => { setAssistantOpen(true); void sendPlanningMessage(prompt); };
+  // Said as the reader's own message, so it carries what happened, and the request says how to change the canvas.
   const fixRequest = (ids: ReadonlyArray<string>) => {
     const failedNodes = ids.map(titleOf).filter(Boolean);
-    const detail = recoveryDetailMessage(t, runs[ids[0]]?.detail)?.trim();
     return t('assistant.fixRequest', { nodes: failedNodes.map(name => locale === 'zh' ? `「${name}」` : `“${name}”`).join(listSeparator),
-      reason: detail || t('assistant.repairNoReason') });
+      reason: failureReason(t, runs[ids[0]]?.detail, locale) || t('assistant.repairNoReason') });
   };
   // A node handed to the assistant from its own view: 'edit' starts the request in the composer (the reader says what
   // to change), 'fix' asks it to make the failed node finish, as the 接下来 card's step does.
@@ -3658,7 +3659,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     let scope: string[] | undefined;
     if (suggested.situation.kind === 'failed') {
       const first = failed[0];
-      const detail = recoveryDetailMessage(t, runs[first.id]?.detail)?.trim();
+      const detail = recoveryDetailMessage(t, runs[first.id]?.detail, locale)?.trim();
       const reason = !detail ? t('assistant.repairNoReason') : /[。.!?！？]$/.test(detail) ? detail : `${detail}${locale === 'zh' ? '。' : '.'}`;
       content = failed.length > 1 ? t('assistant.repairFailedMany', { node: first.title, count: failed.length, reason })
         : t('assistant.repairFailed', { node: first.title, reason });

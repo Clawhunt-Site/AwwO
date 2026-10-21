@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { api, SaaSApiError, saasErrorMessage, tenantPath } from './api';
 import type { TeamRunRecord, TeamTurn } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
-import { runErrorText } from './canvasErrors';
+import { runFailureText } from './canvasErrors';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
 import { RunEvidence } from './RunEvidence';
 import { readRunExecutionMetadata, workspaceToolLabel, type WorkspaceActivity } from './workspaceActivity';
@@ -121,7 +121,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
       {record && <p className="saas-team-run-status" role="status">{runReadFailed ? t('上次确认的运行状态：', 'Last confirmed run status: ') : t('运行状态：', 'Run status: ')}{status(record.status)}{error !== null
         ? t(' · 读取已暂停，请重试恢复', ' · Reading paused; retry to resume')
         : isActive(record.status) ? t(' · 自动更新中', ' · Updating automatically') : ''}</p>}
-      {record?.error && <p className="saas-team-error" role="alert">{runErrorText(record.error, locale) ?? record.error}</p>}
+      {record?.error && <p className="saas-team-error" role="alert">{runFailureText(record.error, locale) ?? record.error}</p>}
       {upsell && <PlanUpsell tenantId={tenantId} reason={upsellReason(upsell)} />}
       {error !== null && turns.length > 0 && <p>{t('成员记录未能刷新，下方为上次成功读取的旧记录。', 'Member records could not be refreshed. The records below are from the last successful read.')}</p>}
       {project && latestOperation && <p className="saas-workspace-latest">{runReadFailed ? t('上次记录：', 'Last observed: ') : t('最近开始：', 'Last started: ')}<strong>{workspaceToolLabel(latestOperation.tool, locale)}</strong><span> · {t('第', 'Step ')}{latestOperation.step}{t('步', '')}</span></p>}
@@ -161,7 +161,7 @@ function MemberTurn({ turn }: { turn: TeamTurn }) {
     <p className="saas-team-turn-meta">{t('模型：', 'Model: ')}{turn.model || unavailable} · {t('框架：', 'Runtime: ')}{turn.runtime || unavailable}</p>
     <p className="saas-team-turn-meta">{t('记录时间：', 'Created: ')}<time dateTime={turn.createdAt}>{time(turn.createdAt)}</time> · {t('更新时间：', 'Updated: ')}<time dateTime={turn.updatedAt}>{time(turn.updatedAt)}</time></p>
     <div className="saas-team-output"><strong>{t('成员输出', 'Member output')}</strong>{turn.output ? <pre>{turn.output}</pre> : <p>{isActive(turn.status) ? t('尚未收到成员输出。', 'No member output received yet.') : t('此记录没有输出。', 'This record has no output.')}</p>}</div>
-    {turn.error && <p className="saas-team-error" role="alert">{runErrorText(turn.error, locale) ?? turn.error}</p>}
+    {turn.error && <p className="saas-team-error" role="alert">{runFailureText(turn.error, locale) ?? turn.error}</p>}
     <details className="saas-team-input-audit"><summary>{t('查看实际输入、指令与上下文来源', 'Inspect actual input, instructions and context sources')}</summary>
       <dl>
         <dt>{t('实际任务输入', 'Actual task input')}</dt><dd><pre>{text(turn.prompt)}</pre></dd>

@@ -178,7 +178,7 @@ describe('durable collaboration details', () => {
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     const region = within(await screen.findByRole('region', { name: 'Selected-node collaboration' }));
-    expect(region.getByText('The model provider is rate limited. Please try again later.')).toBeVisible();
+    expect(region.getByText('The model provider is rate limited, so this did not finish. Run it again in a few minutes, or choose another model.')).toBeVisible();
     expect(region.queryByText('provider_rate_limited')).toBeNull();
   });
 

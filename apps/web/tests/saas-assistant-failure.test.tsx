@@ -9,6 +9,7 @@ import { loadRunJournal } from '../src/canvas/runJournal';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { recoveryDetailMessage } from '../src/canvas/surfaceMessages';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
+import { runErrorText } from '../src/saas/canvasErrors';
 
 // A user's report, 2026-10-11: 「画布的最后一个节点运行失败了」 went to a direct task, which saw an empty workspace and
 // asked what a canvas was. The canvas ran the nodes; it answers.
@@ -19,9 +20,11 @@ const sidebar = () => within(document.querySelector('.awwo-planner-sidebar') as 
 const FORMAT = 'Output must be a JSON object keyed by output field IDs';
 let posted: Array<{ scope?: string[] }>;
 let outcome: 'failed' | 'running';
+// What the failed node records: a delivery-format refusal, or its run's code.
+let failedDetail: string;
 const graph = (status: string) => ({ id: 'graph', operationId: loadRunJournal()?.id, status, canvasId: 'canvas', documentVersion: 9,
   nodes: status === 'failed'
-    ? [{ nodeId: 'frontend', state: 'failed', detail: FORMAT, threadId: 'default', agentId: 'agent-frontend', sessionId: 'session-frontend' },
+    ? [{ nodeId: 'frontend', state: 'failed', detail: failedDetail, threadId: 'default', agentId: 'agent-frontend', sessionId: 'session-frontend' },
       { nodeId: 'review', state: 'blocked', detail: 'Upstream did not complete', threadId: 'default', agentId: 'agent-review', sessionId: 'session-review' }]
     : ['frontend', 'review'].map(nodeId => ({ nodeId, state: 'waiting', threadId: 'default', agentId: `agent-${nodeId}`, sessionId: `session-${nodeId}` })) });
 
@@ -39,7 +42,7 @@ function seed() {
 }
 
 beforeEach(() => {
-  cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); posted = []; outcome = 'failed';
+  cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); posted = []; outcome = 'failed'; failedDetail = FORMAT;
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: vi.fn(async (_name, _options, callback) => callback({ name: 'owned' })) } });
   configureSaaSCanvas({ tenant, canvasId: 'canvas' }); configureSaaSCanvasSave(async () => 9);
@@ -77,7 +80,7 @@ describe('a message about the last run’s failure', () => {
     await failedRun();
     const box = await send('画布的最后一个节点运行失败了');
     const log = within(sidebar().getByRole('log', { name: '画布对话' }));
-    await waitFor(() => expect(log.getByText('「3D游戏前端实现」上次运行失败：交回的结果不符合这个组件的交付格式（模型没按要求的字段给出）。'
+    await waitFor(() => expect(log.getByText('「3D游戏前端实现」上次运行失败：交回的结果不符合要求的交付格式（模型没给出要求的字段）。'
       // What the rerun spends is said too: the failed node and the review it feeds.
       + '重新运行通常就能好；如果反复出现，可以换一个模型。现在重新运行失败的节点和它们后面的 1 个节点，完成后结果会更新在画布和成果里。至少会用 2 次调用。')).toBeVisible());
     await waitFor(() => expect(posted).toHaveLength(2));
@@ -86,11 +89,34 @@ describe('a message about the last run’s failure', () => {
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => /assistant\/route|computer-runs|\/plan/.test(String(url)))).toEqual([]);
   });
 
+  // Owner 2026-10-21: the node's code reached the reader as it was (「上次运行失败：run_timeout」); it reads as its copy,
+  // which says to run it again first.
+  it('says a node that timed out in a run of the canvas in words, with what to do, not as its code', async () => {
+    failedDetail = 'run_timeout';
+    await failedRun();
+    await send('为什么失败了');
+    const log = within(sidebar().getByRole('log', { name: '画布对话' }));
+    await waitFor(() => expect(log.getByText(`「3D游戏前端实现」上次运行失败：${runErrorText('run_timeout', 'zh')}建议下一步：查看失败原因。`)).toBeVisible());
+    expect(log.queryByText(/run_timeout/)).toBeNull();
+    expect(posted).toHaveLength(1);
+  });
+
+  // Review 2026-10-21: the request said as the reader's own message carries what happened, not the note's advice to run
+  // it again, and asks for another model or the work split for a timeout, not the delivery narrowed.
+  it('asks the assistant to fix a timed-out node with what happened and how to change the canvas', async () => {
+    failedDetail = 'run_timeout';
+    await failedRun();
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: '让助手调整画布' }));
+    const log = within(sidebar().getByRole('log', { name: '画布对话' }));
+    await waitFor(() => expect(log.getByText('「3D游戏前端实现」 上次运行失败了（运行超时：模型迟迟没有给出结果）。请调整画布，让它这次能完成：'
+      + '输出太长，就把工作拆给更多节点或缩小交付范围；超时，就换一个模型或把工作拆给更多节点；模型被拒绝，就换成默认模型。')).toBeVisible());
+  });
+
   it('only explains when asked why', async () => {
     await failedRun();
     await send('为什么失败了');
     const log = within(sidebar().getByRole('log', { name: '画布对话' }));
-    await waitFor(() => expect(log.getByText(/^「3D游戏前端实现」上次运行失败：交回的结果不符合这个组件的交付格式.*建议下一步：查看失败原因。$/)).toBeVisible());
+    await waitFor(() => expect(log.getByText(/^「3D游戏前端实现」上次运行失败：交回的结果不符合要求的交付格式.*建议下一步：查看失败原因。$/)).toBeVisible());
     expect(posted).toHaveLength(1);
   });
 });
@@ -112,7 +138,7 @@ describe('a delivery-format refusal', () => {
   it('reads as what it means, in the reader’s words', () => {
     const t = (key: string) => key;
     for (const detail of [FORMAT, 'Missing output delivery', 'Output preview requires a string or {name, content}', 'Output count requires number'])
-      expect(recoveryDetailMessage(t as never, detail)).toBe('surface.deliveryFormat');
-    expect(recoveryDetailMessage(t as never, 'provider said no')).toBe('provider said no');
+      expect(recoveryDetailMessage(t as never, detail, 'zh')).toBe('surface.deliveryFormat');
+    expect(recoveryDetailMessage(t as never, 'provider said no', 'zh')).toBe('provider said no');
   });
 });

@@ -1,6 +1,5 @@
 import type { UiLocale } from '../locale';
-import { SaaSApiError, saasErrorMessage } from '../saas/api';
-import { runErrorText } from '../saas/canvasErrors';
+import { runFailureText } from '../saas/canvasErrors';
 import type { CanvasTranslate } from './i18n';
 import { recoveryDetailMessage } from './surfaceMessages';
 
@@ -9,14 +8,8 @@ import { recoveryDetailMessage } from './surfaceMessages';
 // and edits.go their admission codes), or its copy where a node's own Send was refused (canvasBridge.ts reads the code to
 // its copy, in the language of the page that sent it): both are recognised, the code only whole.
 
-/** The service's copy of a code (api.ts), or undefined when it has none. */
-function serviceText(code: string, locale: UiLocale): string | undefined {
-  const text = saasErrorMessage(new SaaSApiError(0, code, code), locale);
-  return text !== code ? text : undefined;
-}
-
 /** A code's copy as a failure records it: a run's (canvasErrors), else the service's. */
-const copyOf = (code: string, locale: UiLocale) => runErrorText(code, locale) ?? serviceText(code, locale);
+const copyOf = (code: string, locale: UiLocale) => runFailureText(code, locale);
 
 const PREMIUM = ['premium_quota_exceeded', 'premium_capacity_exceeded'];
 /** The workspace may not run the node today: its own run allowance is full (today's calls, or runs at once), the
@@ -66,6 +59,6 @@ export function refusalReason(detail: string | undefined, t: CanvasTranslate, lo
   const code = refusalCode(detail, QUOTA);
   if (!code || code === 'quota_exceeded') return undefined;
   if (code === 'credits_exhausted' && media) return t('assistant.creditsUsedUpMedia');
-  const edit = recoveryDetailMessage(t, code);
+  const edit = recoveryDetailMessage(t, code, locale);
   return edit && edit !== code ? edit : copyOf(code, locale);
 }

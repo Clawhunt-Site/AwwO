@@ -185,7 +185,7 @@ describe('edit node runs', () => {
     expect(Object.keys(messages).sort()).toEqual(['clip', 'page']);
     expect(messages.page).toContain('「Reel 1」这次没有生成出视频文件');
     expect(summary).toMatchObject({ failed: 1, done: 2 });
-    expect(recoveryDetailMessage(en, statuses.e1.detail)).toBe('An edit node runs in a cloud canvas run.');
+    expect(recoveryDetailMessage(en, statuses.e1.detail, 'en')).toBe('An edit node runs in a cloud canvas run.');
   });
 
   it('needs one timeline before a run, wired or its own', () => {
@@ -210,10 +210,10 @@ describe('edit node runs', () => {
     const applied = applyRecoveredDocument(doc, { ...done, inputFingerprint: runInputFingerprint(doc, done.scope) });
     expect(applied.nodes.find(node => node.id === 'e1')?.lastOutput).toMatchObject({ text: RECORD, source: 'run' });
     const refused = mergeGraphSnapshot(done, snapshot({ nodeId: 'e1', state: 'failed', detail: 'edit_rejected: tracks.video[0].source must name a wired file' }));
-    expect(recoveryDetailMessage(en, refused.nodes.e1.detail)).toBe('The render worker refused the timeline: tracks.video[0].source must name a wired file');
+    expect(recoveryDetailMessage(en, refused.nodes.e1.detail, 'en')).toBe('The render worker refused the timeline: tracks.video[0].source must name a wired file');
     const named = 'The timeline names clip/video-9.mp4, which none of the nodes wired into this edit delivered';
-    expect(recoveryDetailMessage(en, named)).toBe(named);
-    expect(recoveryDetailMessage(en, 'edit_allowance')).toContain('Today’s edits are used up');
+    expect(recoveryDetailMessage(en, named, 'en')).toBe(named);
+    expect(recoveryDetailMessage(en, 'edit_allowance', 'en')).toContain('Today’s edits are used up');
   });
 
   it('is a new run input when its timeline changes, which clears its film and what used it', () => {
