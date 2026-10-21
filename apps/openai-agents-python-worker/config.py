@@ -12,6 +12,7 @@ from bedrock_catalog import (
     DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, OPERATOR_ONLY_BEDROCK, CatalogError, bedrock_api_key, bedrock_region, catalog_selection,
     deepseek_key_problem, deepseek_profile_problem, parse_platform_providers, platform_health, platform_providers_in_use, prompt_cache_models,
 )
+from context_estimate import ABSENT, estimate_tokens, prose_rate
 from tools import tool_metadata
 
 MODEL_SELECTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$")
@@ -69,9 +70,11 @@ class ModelProfile:
     # Bedrock catalog models only: the same model's other inference profile (the catalog's fallbackTarget), which the
     # bridge asks once when this one refuses a call before anything streamed. Empty: none.
     fallback_model: str = ""
+    # The model's measured bytes of prose per token (context_estimate.py); 1 is the byte rule.
+    prose_bytes_per_token: float = 1.0
 
     def to_health(self) -> dict:
-        return {
+        health = {
             "id": self.id,
             "name": self.name or self.model,
             "providerModel": self.model,
@@ -91,6 +94,10 @@ class ModelProfile:
             # The API shows pictures only to a model listing "image" here (vision).
             "input": list(self.input),
         }
+        # The rate the budget above is counted at; absent, one byte is one token.
+        if self.prose_bytes_per_token > 1:
+            health["proseBytesPerToken"] = self.prose_bytes_per_token
+        return health
 
 
 @dataclass(frozen=True)
@@ -154,16 +161,16 @@ def _flag(env: dict, key: str) -> bool:
 
 
 BEDROCK_PROFILE_FIELDS = {"id", "provider", "model", "region", "apiKeyEnv", "contextWindow", "maxTokens", "name",
-                          "reasoningEfforts", "defaultReasoningEffort", "structuredOutput", "input"}
+                          "reasoningEfforts", "defaultReasoningEffort", "structuredOutput", "input", "proseBytesPerToken"}
 
 
 def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int,
-                     input_kinds: tuple = ("text",), fallback_target: str = "") -> ModelProfile:
+                     input_kinds: tuple = ("text",), fallback_target: str = "", prose: float = 1.0) -> ModelProfile:
     # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint;
     # it never advertises effort (the bridge refuses it).
     return ModelProfile(id=entry_id, provider="bedrock", model=target, base_url=bridge_base_url(region), api_key=api_key,
                         protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region,
-                        input=input_kinds, fallback_model=fallback_target)
+                        input=input_kinds, fallback_model=fallback_target, prose_bytes_per_token=prose)
 
 
 def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: ModelProfile, missing: list) -> ModelProfile:
@@ -195,7 +202,12 @@ def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: Mode
     except CatalogError as e:
         raise ConfigError(str(e))
     input_kinds = _parse_input(value.get("input"), "AWWO_OPENAI_AGENTS_MODELS_JSON")
-    return _bedrock_profile(value["id"], value.get("name", value["model"]), value["model"], region, api_key, context_window, max_tokens, input_kinds)
+    try:
+        prose = prose_rate(value.get("proseBytesPerToken", ABSENT))
+    except ValueError:
+        raise invalid
+    return _bedrock_profile(value["id"], value.get("name", value["model"]), value["model"], region, api_key, context_window, max_tokens, input_kinds,
+                            prose=prose)
 
 
 def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, missing: list) -> list:
@@ -253,6 +265,10 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
         if provider == "deepseek" and value.get("structuredOutput", False) is not False:
             raise ConfigError("A deepseek model profile cannot enable structuredOutput: the DeepSeek API has no json_schema response format")
         input_kinds = _parse_input(value.get("input"), "AWWO_OPENAI_AGENTS_MODELS_JSON")
+        try:
+            prose = prose_rate(value.get("proseBytesPerToken", ABSENT))
+        except ValueError:
+            raise ConfigError("Invalid proseBytesPerToken in AWWO_OPENAI_AGENTS_MODELS_JSON (a number from 1 to 4 in steps of 0.05)")
         profiles.append(ModelProfile(
             id=value["id"],
             provider=provider,
@@ -266,6 +282,7 @@ def _load_profiles(serialized: str | None, env: dict, default: ModelProfile, mis
             default_reasoning_effort=default_effort,
             thinking=not disable_thinking,
             input=input_kinds,
+            prose_bytes_per_token=prose,
         ))
         ids.add(value["id"])
     return profiles
@@ -326,12 +343,20 @@ def load_config(env: dict | None = None) -> Config:
     except ConfigError:
         raise ConfigError("AWWO_OPENAI_AGENTS_INPUT must be text or text,image")
 
+    # The default model's measured bytes of prose per token (context_estimate.py): unset is the byte rule.
+    raw_prose = (env.get("AWWO_OPENAI_AGENTS_PROSE_BYTES_PER_TOKEN") or "").strip()
+    try:
+        if raw_prose and not re.fullmatch(r"[0-9](?:\.[0-9]{1,2})?", raw_prose):
+            raise ValueError
+        default_prose = prose_rate(float(raw_prose)) if raw_prose else 1.0
+    except ValueError:
+        raise ConfigError("AWWO_OPENAI_AGENTS_PROSE_BYTES_PER_TOKEN must be a number from 1 to 4 in steps of 0.05")
     default_profile = ModelProfile(
         id=model, provider=provider, model=model,
         base_url=base_url, api_key=api_key, protocol=protocol,
         context_window=context_window, max_tokens=max_tokens,
         reasoning_efforts=efforts, default_reasoning_effort=default_effort,
-        thinking=not disable_thinking, input=default_input,
+        thinking=not disable_thinking, input=default_input, prose_bytes_per_token=default_prose,
     )
     configured = _load_profiles(env.get("AWWO_OPENAI_AGENTS_MODELS_JSON"), env, default_profile, missing)
     try:
@@ -343,7 +368,7 @@ def load_config(env: dict | None = None) -> Config:
     except CatalogError as e:
         raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
     catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"],
-                                        tuple(entry["input"]), entry.get("fallbackTarget", "")),
+                                        tuple(entry["input"]), entry.get("fallbackTarget", ""), prose_rate(entry.get("proseBytesPerToken", ABSENT))),
                        prompt_cache=entry["id"] in cached)
                for entry in selected]
     if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:
@@ -423,6 +448,8 @@ def public_health(config: Config, active_runs: int = 0) -> dict:
             "maxOutputTokens": config.max_tokens,
             "maxContextTextBytes": max(0, config.context_window - config.max_tokens - 256),
             "messageOverheadBytes": 32,
+            **({"proseBytesPerToken": config.models[0].prose_bytes_per_token}
+               if config.models and config.models[0].id == config.model and config.models[0].prose_bytes_per_token > 1 else {}),
         },
     }
 
@@ -480,8 +507,14 @@ def resolve_model_config(config: Config, selector: str | None) -> ModelProfile:
     raise ValueError("Unknown configured model")
 
 
-def fits_context_budget(text_bytes: int, tool_bytes: int, message_count: int, profile: ModelProfile) -> bool:
-    return text_bytes + tool_bytes + 32 * (message_count + 1) <= profile.context_window - profile.max_tokens - 256
+def fits_context_budget(text_tokens: int, tool_bytes: int, message_count: int, profile: ModelProfile) -> bool:
+    """text_tokens: each text's estimate at the profile's prose rate (context_tokens), its UTF-8 bytes without one."""
+    return text_tokens + tool_bytes + 32 * (message_count + 1) <= profile.context_window - profile.max_tokens - 256
+
+
+def context_tokens(texts, profile: ModelProfile) -> int:
+    """The estimated input tokens of a request's texts (prompt, instructions, each history message), each on its own."""
+    return sum(estimate_tokens(text, profile.prose_bytes_per_token) for text in texts)
 
 
 def authorize_effort(profile: ModelProfile, effort: str | None) -> str:

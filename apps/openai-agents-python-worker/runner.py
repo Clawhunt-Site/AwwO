@@ -12,7 +12,9 @@ from agents import Agent, FunctionTool, ModelSettings, OpenAIChatCompletionsMode
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Timeout
 
 from bedrock_bridge import BRIDGE_API_KEY, BedrockConverseTransport, bedrock_fact_line, stream_read_timeout
-from config import MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, fits_context_budget, resolve_model_config
+from config import (
+    MAX_IMAGE_BYTES, MAX_IMAGES, PERSONAL_ENDPOINTS, Config, ModelProfile, authorize_effort, context_tokens, fits_context_budget, resolve_model_config,
+)
 from errors import RuntimeError, classify_error
 from provider_observation import ProviderObservation
 from tools import TOOL_SCHEMAS, ToolInputError, execute_tool, tool_definition_bytes, validate_tool_names
@@ -179,10 +181,8 @@ def _prepare(request: RunRequest, config: Config) -> tuple[ModelProfile, str]:
     # The server refused pictures for a text model already; a bound personal model is never one that takes them.
     if request.images and "image" not in profile.input:
         raise ValueError("Images are not supported by this model")
-    text_bytes = len(request.prompt.encode("utf-8")) + len((request.system_prompt or "").encode("utf-8"))
-    for message in request.messages:
-        text_bytes += len(message["content"].encode("utf-8"))
-    if not fits_context_budget(text_bytes, tool_definition_bytes(request.tools or []), len(request.messages), profile):
+    text_tokens = context_tokens([request.prompt, request.system_prompt or "", *(message["content"] for message in request.messages)], profile)
+    if not fits_context_budget(text_tokens, tool_definition_bytes(request.tools or []), len(request.messages), profile):
         raise ValueError("Conversation is too large")
     return profile, effort
 

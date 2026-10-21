@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { bedrockBridgeBaseURL } from './bedrock-bridge.ts';
 import {
-  DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockPromptCacheModels, bedrockRegion,
+  DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion,
   parseBedrockCatalog, parseBedrockCatalogFile, parsePlatformProviders, platformHealth, platformProvidersInUse, readBedrockCatalog, readBedrockCatalogRegions,
   type BedrockCatalogEntry,
 } from './bedrock-catalog.ts';
@@ -71,9 +71,12 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   const claude = agents.find(profile => profile.id === 'bedrock.claude-opus-5-5')!;
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', provider: 'bedrock', model: 'global.anthropic.claude-opus-5-5', name: 'Claude Opus 5.5', vendor: 'anthropic',
     region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'],
-    fallbackModel: 'us.anthropic.claude-opus-5-5' });
+    fallbackModel: 'us.anthropic.claude-opus-5-5', proseBytesPerToken: 2.15 });
   // A model without a fallback profile has none.
   assert.equal('fallbackModel' in agents.find(profile => profile.id === 'bedrock.kimi-k3')!, false);
+  // A model nobody measured has no prose rate: its budget stays counted byte for byte.
+  assert.equal('proseBytesPerToken' in agents.find(profile => profile.id === 'bedrock.nova-pro')!, false);
+  assert.equal(pi.find(profile => profile.id === 'bedrock.llama-3-3-70b')!.proseBytesPerToken, 2.95);
   // A model the catalog lists as text-only stays so.
   assert.deepEqual(agents.find(profile => profile.id === 'bedrock.deepseek-v3-2')!.input, ['text']);
 });
@@ -97,6 +100,23 @@ test('a fallback target is the same model through its other inference profile, a
   assert.ok(claude.length >= 7);
   for (const item of claude) assert.equal(item.fallbackTarget, item.target.replace(/^global\./, 'us.'), item.id);
   assert.ok(readBedrockCatalog().every(item => item.vendor === 'anthropic' || item.fallbackTarget === undefined), 'only Claude has a second profile the workers may call');
+});
+
+test('a measured prose rate is a number from 1 to 4 in steps of 0.05, carried to the profile only above 1', () => {
+  for (const rate of [1.05, 2.15, 4]) {
+    const [item] = parseBedrockCatalog(catalogOf(entry({ proseBytesPerToken: rate })));
+    assert.equal(item.proseBytesPerToken, rate);
+    assert.equal(bedrockProfile(item, 'us-east-1', '').proseBytesPerToken, rate);
+  }
+  const [one] = parseBedrockCatalog(catalogOf(entry({ proseBytesPerToken: 1 })));
+  assert.equal('proseBytesPerToken' in one || 'proseBytesPerToken' in bedrockProfile(one, 'us-east-1', ''), false);
+  for (const bad of [0, 0.95, 4.05, 2.13, '2', null, true, [2]]) {
+    assert.throws(() => parseBedrockCatalog(catalogOf(entry({ proseBytesPerToken: bad }))), /catalog is invalid/, String(bad));
+  }
+  // Every rate the built-in catalog carries is one a worker accepts, and only verified models carry one.
+  for (const item of readBedrockCatalog()) {
+    if (item.proseBytesPerToken !== undefined) assert.ok(item.proseBytesPerToken > 1 && item.proseBytesPerToken <= 4 && item.verified, item.id);
+  }
 });
 
 test('an explicit model list selects in catalog order and refuses unknown or tool-less Agents models', () => {

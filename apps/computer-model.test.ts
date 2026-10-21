@@ -145,6 +145,27 @@ test('admission refuses invalid history, credentials and context before any prov
   assert.doesNotMatch(JSON.stringify(logged), /漢|forged result|Build|secret-provider-key/);
 });
 
+test('a model\'s measured prose rate admits a call of prose the byte rule refused, never one of dense text', async t => {
+  const s = await serve(t, 'chat_completions', (_body, _req, res) => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Verified' }, finish_reason: 'stop' }] })),
+    { AWWO_PI_PROSE_BYTES_PER_TOKEN: '2.95' }, 'pi');
+  const logged = rejections(t);
+  const limit = s.config.models[0].contextWindow - s.config.models[0].maxTokens - 256;
+  // Chinese prose of 1.5 times the byte budget: refused at one byte a token, inside the budget at 2.95.
+  const prose = '画布上的方案'.repeat(Math.ceil(limit * 1.5 / 18));
+  assert.ok(Buffer.byteLength(prose) > limit);
+  const admitted = await s.send(input({ completion: { messages: [{ role: 'user', content: prose }], tools: [] } }));
+  assert.equal(admitted.status, 200); await admitted.body?.cancel();
+  assert.equal(s.calls.length, 1);
+  // Base64 of the same size counts byte for byte, and is refused before any provider call, the log saying both counts.
+  const dense = 'QUJD'.repeat(Math.ceil(limit * 1.5 / 4));
+  const refused = await s.send(input({ completion: { messages: [{ role: 'user', content: dense }], tools: [] } }));
+  assert.equal(refused.status, 413);
+  assert.equal((await refused.json()).error.code, 'CONTEXT_LIMIT');
+  assert.equal(s.calls.length, 1);
+  const line = logged.find(item => item.code === 'CONTEXT_LIMIT');
+  assert.ok(line.tokens > line.limit && line.bytes >= line.tokens - 32 && line.limit === limit);
+});
+
 test('a worker without the Converse bridge refuses a Bedrock model before any request or key leaves it', async t => {
   const bedrockKey = 'ABSKbedrockkey000000000000000000';
   const originalFetch = globalThis.fetch;

@@ -15,6 +15,7 @@
 //                          deepseek to allow DeepSeek API profiles (provider "deepseek")
 import { readFileSync } from 'node:fs';
 import { BEDROCK_REGIONS, bedrockBridgeBaseURL, validBedrockRegion } from './bedrock-bridge.ts';
+import { proseRate } from './context-estimate.ts';
 
 export type BedrockRuntime = 'pi' | 'openai-agents';
 export type BedrockCatalogEntry = Readonly<{
@@ -24,6 +25,8 @@ export type BedrockCatalogEntry = Readonly<{
   fallbackTarget?: string;
   contextWindow: number; maxTokens: number; input: readonly string[];
   tools: boolean; runtime: BedrockRuntime; verified: string;
+  // Bytes of prose per token measured for this model (context-estimate.ts); absent: the byte rule (1).
+  proseBytesPerToken?: number;
 }>;
 export type BedrockProfile = Readonly<{
   id: string; provider: 'bedrock'; model: string; name: string; vendor: string;
@@ -32,6 +35,8 @@ export type BedrockProfile = Readonly<{
   input?: readonly string[];
   // The catalog entry's fallbackTarget, for the bridge.
   fallbackModel?: string;
+  // The catalog entry's measured prose rate (context-estimate.ts), when above 1.
+  proseBytesPerToken?: number;
 }>;
 
 export const PLATFORM_PROVIDERS: readonly string[] = Object.freeze(['llmgate', 'bedrock', 'deepseek']);
@@ -50,7 +55,7 @@ export function deepseekKeyProblem(provider: unknown, apiKeyEnv: unknown): strin
   return '';
 }
 const ENTRY_FIELDS = ['id', 'name', 'vendor', 'target', 'contextWindow', 'maxTokens', 'input', 'tools', 'runtime', 'verified'];
-const OPTIONAL_FIELDS = ['fallbackTarget'];
+const OPTIONAL_FIELDS = ['fallbackTarget', 'proseBytesPerToken'];
 /** A model's output limit per call. Claude Opus 5.5 always thinks first (adaptive thinking: Bedrock refuses a request that
  *  turns it off) and can spend a whole 32,000-token call on thinking alone, ending it with nothing to show; Bedrock takes
  *  64,000 for it. */
@@ -107,12 +112,14 @@ export function parseBedrockCatalogFile(value: unknown): BedrockCatalog {
       // The OpenAI Agents runtime offers tools and project execution, so it only hosts tool-capable models.
       || (e.runtime === 'openai-agents' && e.tools !== true)
       || typeof e.verified !== 'string' || (e.verified !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(e.verified))) return fail();
+    let rate = 1;
+    try { rate = proseRate(e.proseBytesPerToken); } catch { return fail(); }
     ids.add(e.id);
     targets.add(e.target);
     return Object.freeze({ id: e.id, name: e.name as string, vendor: e.vendor, target: e.target,
       ...(typeof e.fallbackTarget === 'string' ? { fallbackTarget: e.fallbackTarget } : {}),
       contextWindow: e.contextWindow as number, maxTokens: e.maxTokens as number, input: Object.freeze([...(e.input as string[])]),
-      tools: e.tools, runtime: e.runtime as BedrockRuntime, verified: e.verified });
+      tools: e.tools, runtime: e.runtime as BedrockRuntime, verified: e.verified, ...(rate > 1 ? { proseBytesPerToken: rate } : {}) });
   });
   return Object.freeze({ regions: Object.freeze([...(regions as string[])]), entries: Object.freeze(entries) });
 }
@@ -208,10 +215,11 @@ export function bedrockApiKey(env: Record<string, string | undefined>, name = 'A
   return key;
 }
 
-export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens' | 'fallbackTarget'> & { input?: readonly string[] }, region: string, apiKey: string): BedrockProfile {
+export function bedrockProfile(entry: Pick<BedrockCatalogEntry, 'id' | 'name' | 'vendor' | 'target' | 'contextWindow' | 'maxTokens' | 'fallbackTarget' | 'proseBytesPerToken'> & { input?: readonly string[] }, region: string, apiKey: string): BedrockProfile {
   return Object.freeze({ id: entry.id, provider: 'bedrock', model: entry.target, name: entry.name, vendor: entry.vendor,
     region, baseURL: bedrockBridgeBaseURL(region), apiKey, contextWindow: entry.contextWindow, maxTokens: entry.maxTokens,
-    input: Object.freeze([...(entry.input ?? ['text'])]), ...(entry.fallbackTarget ? { fallbackModel: entry.fallbackTarget } : {}) });
+    input: Object.freeze([...(entry.input ?? ['text'])]), ...(entry.fallbackTarget ? { fallbackModel: entry.fallbackTarget } : {}),
+    ...((entry.proseBytesPerToken ?? 1) > 1 ? { proseBytesPerToken: entry.proseBytesPerToken } : {}) });
 }
 
 /** Profiles the built-in catalog contributes to one worker, or none when the catalog is off. */

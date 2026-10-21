@@ -13,6 +13,7 @@ import unicodedata
 from pathlib import Path
 
 from bedrock_bridge import BEARER, BEDROCK_REGIONS, valid_region
+from context_estimate import ABSENT, prose_rate
 
 # A model's output limit per call, as apps/bedrock-catalog.ts has it: Claude Opus 5.5 always thinks first and can spend
 # a whole 32,000-token call on thinking alone, so it gets 64,000.
@@ -32,7 +33,8 @@ DEEPSEEK_API_KEY_ENV = "AWWO_DEEPSEEK_API_KEY"
 ENTRY_FIELDS = ("id", "name", "vendor", "target", "contextWindow", "maxTokens", "input", "tools", "runtime", "verified")
 # fallbackTarget: the same model through its other inference profile (global. <-> us.), which the bridge asks once when
 # the target refuses a call before anything streamed (BedrockConverseTransport's fallback_model).
-OPTIONAL_FIELDS = ("fallbackTarget",)
+# proseBytesPerToken: the model's measured bytes of prose per token (context_estimate.py), from 1 to 4.
+OPTIONAL_FIELDS = ("fallbackTarget", "proseBytesPerToken")
 CATALOG_ID = re.compile(r"bedrock\.[a-z0-9][a-z0-9-]{0,62}")
 TARGET = re.compile(r"(?:(?:global|us|eu|apac|jp|au|ca)\.)?[a-z0-9-]+\.[A-Za-z0-9.:-]{1,120}")
 PROFILE_PREFIX = re.compile(r"(global|us|eu|apac|jp|au|ca)\.")
@@ -86,6 +88,10 @@ def parse_catalog_file(value) -> tuple:
                 or not isinstance(e["tools"], bool) or e["runtime"] not in ("pi", "openai-agents")
                 or (e["runtime"] == "openai-agents" and e["tools"] is not True)
                 or not isinstance(e["verified"], str) or (e["verified"] and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", e["verified"]))):
+            fail()
+        try:
+            prose_rate(e.get("proseBytesPerToken", ABSENT))
+        except ValueError:
             fail()
         ids.add(e["id"])
         targets.add(e["target"])

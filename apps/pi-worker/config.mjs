@@ -1,6 +1,7 @@
 import { loadObservabilityConfig } from './observability.mjs';
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
+import { estimateTokens, proseRate, proseRateSetting } from '../context-estimate.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
   openai: 'https://api.openai.com/v1',
@@ -37,8 +38,9 @@ function integer(value, fallback, minimum, maximum, name) {
 }
 
 // disableThinking only on a deepseek profile: that model's own "do not think" switch (pi-task.mjs thinkingOff).
-const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'input', 'disableThinking']);
-const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name', 'input']);
+// proseBytesPerToken: the model's measured bytes of prose per token (context-estimate.ts), from 1 to 4.
+const PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'baseURL', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'input', 'disableThinking', 'proseBytesPerToken']);
+const BEDROCK_PROFILE_FIELDS = new Set(['id', 'provider', 'model', 'apiKeyEnv', 'contextWindow', 'maxTokens', 'region', 'name', 'input', 'proseBytesPerToken']);
 
 // What a profile's model takes: text, unless it names ["text","image"] (a model that sees pictures). Anything else is
 // a configuration error, so a misspelt list never sends pictures to a text model.
@@ -96,7 +98,8 @@ function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
   const contextWindow = profileInteger(value.contextWindow, defaultProfile.contextWindow, 4096, 2_000_000);
   const maxTokens = profileInteger(value.maxTokens, defaultProfile.maxTokens, 128, 32_768);
   if (maxTokens + 256 >= contextWindow) throw new Error();
-  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens, input: profileInput(value.input) },
+  return workerBedrockProfile(bedrockProfile({ id: value.id, name: value.name ?? value.model, vendor: '', target: value.model, contextWindow, maxTokens, input: profileInput(value.input),
+    proseBytesPerToken: proseRate(value.proseBytesPerToken) },
     value.region ?? bedrockRegion(env), apiKey));
 }
 
@@ -183,8 +186,10 @@ function loadProfiles(serialized, env, defaultProfile, missing) {
       const input = profileInput(value.input);
       problem = `profile ${index + 1} has a disableThinking flag that only a deepseek profile may carry`;
       if (value.disableThinking !== undefined && (typeof value.disableThinking !== 'boolean' || value.provider !== 'deepseek')) throw new Error();
+      problem = `profile ${index + 1} has an invalid proseBytesPerToken (a number from 1 to 4 in steps of 0.05)`;
+      const prose = proseRate(value.proseBytesPerToken);
       profiles.push(Object.freeze({ id: value.id, provider: value.provider, model: value.model, protocol: providerProtocol(value.provider), baseURL, apiKey, contextWindow, maxTokens, input,
-        ...(value.disableThinking === true ? { disableThinking: true } : {}) }));
+        ...(value.disableThinking === true ? { disableThinking: true } : {}), ...(prose > 1 ? { proseBytesPerToken: prose } : {}) }));
       ids.add(value.id);
     }
     return Object.freeze(profiles);
@@ -217,6 +222,8 @@ export function loadConfig(env = process.env) {
   try { defaultInput = profileInput(env.AWWO_PI_INPUT === undefined || env.AWWO_PI_INPUT.trim() === '' ? undefined : env.AWWO_PI_INPUT.split(',').map((kind) => kind.trim())); }
   catch { throw new Error('AWWO_PI_INPUT must be text or text,image'); }
   const disableThinking = parseDisableThinking(env.AWWO_PI_DISABLE_THINKING);
+  // The default model's measured bytes of prose per token (context-estimate.ts): unset is the byte rule.
+  const prose = proseRateSetting(env.AWWO_PI_PROSE_BYTES_PER_TOKEN, 'AWWO_PI_PROSE_BYTES_PER_TOKEN');
   // The LLM Gate (named, or by its URL, as the computer-model calls tell it) hands chat_template_kwargs to the model's
   // server, and the DeepSeek API has a thinking field of its own; OpenAI refuses an unknown body field, Anthropic's
   // protocol has no chat template, Ollama has a switch of its own.
@@ -224,7 +231,7 @@ export function loadConfig(env = process.env) {
     throw new Error('AWWO_PI_DISABLE_THINKING needs a Chat Completions default model on the LLM Gate or the DeepSeek API');
   }
   const configured = loadProfiles(env.AWWO_PI_MODELS_JSON, env, Object.freeze({ id: model, provider, model, protocol: providerProtocol(provider), apiKey, baseURL, contextWindow, maxTokens, input: defaultInput,
-    ...(disableThinking ? { disableThinking: true } : {}) }), missing);
+    ...(disableThinking ? { disableThinking: true } : {}), ...(prose > 1 ? { proseBytesPerToken: prose } : {}) }), missing);
   let catalog;
   const thinking = thinkingSetting(env);
   try {
@@ -261,6 +268,7 @@ export function loadConfig(env = process.env) {
     maxConcurrency: integer(env.AWWO_PI_MAX_CONCURRENCY, 4, 1, 32, 'AWWO_PI_MAX_CONCURRENCY'),
     maxOutputBytes: integer(env.AWWO_PI_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_PI_MAX_OUTPUT_BYTES'),
     contextWindow, maxTokens, models,
+    ...(prose > 1 ? { proseBytesPerToken: prose } : {}),
     userCredentials,
     llmgateOnly,
     // What health claims: the destinations these profiles reach, within the policy checked above.
@@ -290,6 +298,8 @@ export function publicHealth(config, activeRuns = 0) {
       maxOutputTokens: profile.maxTokens,
       maxContextTextBytes: Math.max(0, profile.contextWindow - profile.maxTokens - 256),
       messageOverheadBytes: 32,
+      // The rate the budget above is counted at (context-estimate.ts); absent, one byte is one token.
+      ...(profile.proseBytesPerToken > 1 ? { proseBytesPerToken: profile.proseBytesPerToken } : {}),
       // What the model takes; the API shows pictures only to a model listing 'image' (vision).
       input: [...(profile.input ?? ['text'])],
     })),
@@ -309,6 +319,7 @@ export function publicHealth(config, activeRuns = 0) {
       maxOutputTokens: config.maxTokens,
       maxContextTextBytes: Math.max(0, config.contextWindow - config.maxTokens - 256),
       messageOverheadBytes: 32,
+      ...(config.proseBytesPerToken > 1 ? { proseBytesPerToken: config.proseBytesPerToken } : {}),
     },
   };
 }
@@ -358,12 +369,13 @@ export function resolveModelConfig(config, selector) {
   return profile;
 }
 
-// Text admission uses a conservative byte budget, not a provider-tokenizer claim.
-// Reserve output capacity and framing, and never silently truncate instructions,
-// planner context, or conversation history to make a request fit.
+// Text admission counts each text's estimated tokens at the profile's measured prose rate (context-estimate.ts: its
+// UTF-8 bytes without one), never a provider-tokenizer claim. Reserve output capacity and framing, and never
+// silently truncate instructions, planner context, or conversation history to make a request fit.
 export function fitsContextBudget(request, config) {
-  const textBytes = Buffer.byteLength(request.prompt)
-    + Buffer.byteLength(request.systemPrompt ?? '')
-    + request.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
-  return textBytes + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
+  const rate = config.proseBytesPerToken ?? 1;
+  const textTokens = estimateTokens(request.prompt, rate)
+    + estimateTokens(request.systemPrompt ?? '', rate)
+    + request.messages.reduce((total, message) => total + estimateTokens(message.content, rate), 0);
+  return textTokens + 32 * (request.messages.length + 1) <= config.contextWindow - config.maxTokens - 256;
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { estimateTokens } from './context-estimate.ts';
 import { bindUserModel } from './user-models.ts';
 
 type ObjectValue = Record<string, any>;
@@ -8,7 +9,9 @@ type Completion = { messages: Message[]; tools: ObjectValue[] };
 type Profile = { model: string; apiKey: string; baseURL: string; protocol: string; provider: string; maxTokens: number; contextWindow: number; reasoningEfforts?: string[]; defaultReasoningEffort?: string;
   /** Bedrock profiles only: the region the bridge calls, the operator's prompt-cache switch, and the model's other
    *  inference profile the bridge asks once when this one refuses the call (the catalog's fallbackTarget). */
-  region?: string; promptCache?: boolean; fallbackModel?: string };
+  region?: string; promptCache?: boolean; fallbackModel?: string;
+  /** The model's measured bytes of prose per token (context-estimate.ts); absent, one byte is one token. */
+  proseBytesPerToken?: number };
 type Entry = { handle: { cancel(): void }; cancelRequested: boolean; released: Promise<void> };
 /** A worker's way to a Bedrock model for managed execution: one call, sent through the Converse bridge
  *  (bedrock-bridge.ts) and gathered into one Chat Completions answer (gatherChatStream). It rejects with an Error whose
@@ -483,8 +486,11 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
   // reasoning_content of a tool loop sent back, which this protocol does not carry. A thinking level the call asks for is
   // refused rather than dropped; the profile's own default was asked for by no one, so it goes with the thinking.
   if (model.provider === 'deepseek' && completion.tools.length && requested !== undefined && requested !== 'none') return reject(400, 'EFFORT_NOT_SUPPORTED');
-  const bytes = Buffer.byteLength(JSON.stringify(completion)) + completion.messages.length * 32, limit = model.contextWindow - model.maxTokens - 256;
-  if (bytes > limit) return reject(413, 'CONTEXT_LIMIT', undefined, undefined, { bytes, limit });
+  // The call's estimated tokens at the model's measured prose rate (its UTF-8 bytes without one), as the API counts it.
+  const serialized = JSON.stringify(completion);
+  const bytes = Buffer.byteLength(serialized), tokens = estimateTokens(serialized, model.proseBytesPerToken ?? 1) + completion.messages.length * 32,
+    limit = model.contextWindow - model.maxTokens - 256;
+  if (tokens > limit) return reject(413, 'CONTEXT_LIMIT', undefined, undefined, { bytes, tokens, limit });
   const sessionKey = `${body.tenantId}:${body.sessionId}`;
   if (options.stopping()) return reject(503, 'RUNTIME_UNAVAILABLE');
   if (active.has(body.runId)) return reject(409, 'RUN_BUSY');

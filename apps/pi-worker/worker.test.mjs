@@ -409,6 +409,44 @@ test('context admission counts UTF-8 history bytes and reserves model output cap
   assert.equal(fitsContextBudget({ ...REQUEST, prompt: 'x'.repeat(bytes), messages: [{ role: 'user', content: 'previous' }] }, config), false);
 });
 
+test('a measured prose rate admits prose the byte rule refused, never dense text, and is published per model', () => {
+  const env = { ...ENV, AWWO_PI_CONTEXT_WINDOW: '4096', AWWO_PI_MAX_TOKENS: '128', AWWO_PI_PROSE_BYTES_PER_TOKEN: '2.95' };
+  const profile = { id: 'reviewer', provider: 'openai', model: 'review-model', apiKeyEnv: 'REVIEW_KEY', contextWindow: 4096, maxTokens: 128, proseBytesPerToken: 2.15 };
+  const config = loadConfig({ ...env, REVIEW_KEY: 'k', AWWO_PI_MODELS_JSON: JSON.stringify([profile]) });
+  const room = config.contextWindow - config.maxTokens - 256 - 32;
+  // Chinese prose of twice the byte budget: refused by the byte rule, admitted at 2.95 bytes per token, and at
+  // 2.15 for the other profile only while it costs no more than the budget.
+  const prose = '画布方案'.repeat(Math.ceil(room * 2 / 12));
+  assert.ok(Buffer.byteLength(prose) > room * 2 - 12);
+  assert.equal(fitsContextBudget({ ...REQUEST, prompt: prose }, loadConfig({ ...ENV, AWWO_PI_CONTEXT_WINDOW: '4096', AWWO_PI_MAX_TOKENS: '128' })), false);
+  assert.equal(fitsContextBudget({ ...REQUEST, prompt: prose }, resolveModelConfig(config)), true);
+  assert.equal(fitsContextBudget({ ...REQUEST, prompt: prose }, resolveModelConfig(config, 'reviewer')), true);
+  assert.equal(fitsContextBudget({ ...REQUEST, prompt: prose + prose }, resolveModelConfig(config, 'reviewer')), false);
+  // Base64, numbers and a long run count byte for byte whatever the rate.
+  for (const dense of ['QUJD'.repeat(Math.ceil((room + 4) / 4)), '1234 '.repeat(Math.ceil((room + 5) / 5)), 'y'.repeat(room + 1)]) {
+    assert.equal(fitsContextBudget({ ...REQUEST, prompt: dense }, resolveModelConfig(config)), false);
+  }
+  // The rate counts the system prompt and the history too, each text on its own.
+  assert.equal(fitsContextBudget({ ...REQUEST, prompt: 'ok', systemPrompt: prose, messages: [{ role: 'user', content: 'x'.repeat(10) }] }, resolveModelConfig(config)), true);
+  const health = publicHealth(config);
+  assert.equal(health.limits.proseBytesPerToken, 2.95);
+  assert.equal(health.models[0].proseBytesPerToken, 2.95);
+  assert.equal(health.models[1].proseBytesPerToken, 2.15);
+  assert.equal(health.models[1].maxContextTextBytes, 4096 - 128 - 256);
+  // Without a rate nothing new is published.
+  const plain = publicHealth(loadConfig(ENV));
+  assert.equal('proseBytesPerToken' in plain.limits || plain.models.some(model => 'proseBytesPerToken' in model), false);
+  for (const bad of ['abc', '4.5', '0.9', '2.13', '-1']) assert.throws(() => loadConfig({ ...env, AWWO_PI_PROSE_BYTES_PER_TOKEN: bad }), /AWWO_PI_PROSE_BYTES_PER_TOKEN/);
+  for (const bad of [0.5, 4.05, 2.13, '2', null]) {
+    assert.throws(() => loadConfig({ ...env, REVIEW_KEY: 'k', AWWO_PI_MODELS_JSON: JSON.stringify([{ ...profile, proseBytesPerToken: bad }]) }), /proseBytesPerToken/);
+  }
+  const bedrock = loadConfig({ ...env, AWWO_PLATFORM_PROVIDERS: 'llmgate,bedrock', AWWO_PI_MODELS_JSON: JSON.stringify([
+    { id: 'bedrock.custom', provider: 'bedrock', model: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', contextWindow: 200000, maxTokens: 8192, proseBytesPerToken: 2.35 }]) });
+  assert.equal(resolveModelConfig(bedrock, 'bedrock.custom').proseBytesPerToken, 2.35);
+  assert.throws(() => loadConfig({ ...env, AWWO_PI_MODELS_JSON: JSON.stringify([
+    { id: 'bedrock.custom', provider: 'bedrock', model: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', proseBytesPerToken: 5 }]) }), /Bedrock profile/);
+});
+
 test('HTTP authentication, unconfigured readiness, and body validation reject before starting a worker', async (t) => {
   let starts = 0;
   const app = createPiServer(loadConfig({ AWWO_PI_TOKEN: TOKEN }), { startRun: async () => { starts++; } });

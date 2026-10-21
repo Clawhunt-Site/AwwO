@@ -1,0 +1,273 @@
+{
+ "rates": [
+  1,
+  2.15,
+  3.3
+ ],
+ "cases": [
+  {
+   "name": "empty",
+   "text": "",
+   "strict": 0,
+   "prose": 0,
+   "estimate": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "ascii prose",
+   "text": "Plan the canvas again and check which node needs more references.",
+   "strict": 0,
+   "prose": 65,
+   "estimate": [
+    65,
+    31,
+    20
+   ]
+  },
+  {
+   "name": "digits in a word",
+   "text": "version 5.6 of gpt-5.6-terra ran 12 times on 2026-10-21.",
+   "strict": 33,
+   "prose": 23,
+   "estimate": [
+    56,
+    44,
+    40
+   ]
+  },
+  {
+   "name": "word of 32",
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "strict": 0,
+   "prose": 32,
+   "estimate": [
+    32,
+    15,
+    10
+   ]
+  },
+  {
+   "name": "word of 33",
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "strict": 33,
+   "prose": 0,
+   "estimate": [
+    33,
+    33,
+    33
+   ]
+  },
+  {
+   "name": "space goes with a long word",
+   "text": "see xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx then",
+   "strict": 41,
+   "prose": 8,
+   "estimate": [
+    49,
+    45,
+    44
+   ]
+  },
+  {
+   "name": "space goes with a digit word",
+   "text": "total  12345 done",
+   "strict": 7,
+   "prose": 10,
+   "estimate": [
+    17,
+    12,
+    11
+   ]
+  },
+  {
+   "name": "tabs and newlines",
+   "text": "line one\n\tline two\r\n  line three\f\u000b",
+   "strict": 0,
+   "prose": 34,
+   "estimate": [
+    34,
+    16,
+    11
+   ]
+  },
+  {
+   "name": "chinese",
+   "text": "\u6211\u4eec\u4eca\u5929\u628a\u753b\u5e03\u4e0a\u7684\u65b9\u6848\u518d\u8fc7\u4e00\u904d\uff0c\u770b\u770b\u54ea\u4e2a\u8282\u70b9\u9700\u8981\u8865\u8d44\u6599\u3002",
+   "strict": 0,
+   "prose": 84,
+   "estimate": [
+    84,
+    40,
+    26
+   ]
+  },
+  {
+   "name": "chinese with ascii",
+   "text": "\u7528 gpt-5.6-terra \u6a21\u578b\u5199\u4e00\u4efd README\uff0c\u518d\u68c0\u67e5 index.html \u7684\u6807\u9898\u3002",
+   "strict": 14,
+   "prose": 62,
+   "estimate": [
+    76,
+    43,
+    33
+   ]
+  },
+  {
+   "name": "space before chinese",
+   "text": "plan   \u65b9\u6848  ok",
+   "strict": 0,
+   "prose": 17,
+   "estimate": [
+    17,
+    8,
+    6
+   ]
+  },
+  {
+   "name": "japanese and korean",
+   "text": "\u30ad\u30e3\u30f3\u30d0\u30b9\u306e\u8a08\u753b\u3092\u78ba\u8a8d\u3057\u307e\u3059\u3002\uce94\ubc84\uc2a4\uc758 \uacc4\ud68d\uc744 \ud655\uc778\ud569\ub2c8\ub2e4.",
+   "strict": 0,
+   "prose": 84,
+   "estimate": [
+    84,
+    40,
+    26
+   ]
+  },
+  {
+   "name": "fullwidth punctuation",
+   "text": "\uff08\u6ce8\u610f\uff09\uff1a\uff21\uff22\uff23\uff0c\uff11\uff12\uff13\uff01",
+   "strict": 0,
+   "prose": 39,
+   "estimate": [
+    39,
+    19,
+    12
+   ]
+  },
+  {
+   "name": "latin-1 and emoji",
+   "text": "caf\u00e9 r\u00e9sum\u00e9 \ud83d\ude00 \u2705 na\u00efve",
+   "strict": 15,
+   "prose": 15,
+   "estimate": [
+    30,
+    22,
+    20
+   ]
+  },
+  {
+   "name": "emoji inside a word",
+   "text": "great\ud83d\ude00job",
+   "strict": 4,
+   "prose": 8,
+   "estimate": [
+    12,
+    8,
+    7
+   ]
+  },
+  {
+   "name": "cjk extension b is not cjk here",
+   "text": "\ud840\udc00\ud840\udc01 text",
+   "strict": 8,
+   "prose": 5,
+   "estimate": [
+    13,
+    11,
+    10
+   ]
+  },
+  {
+   "name": "base64",
+   "text": "aGVsbG8gd29ybGQgdGhpcyBpcyBhIGxvbmdlciBiYXNlNjQgc3RyaW5nIHRoYXQgZ29lcyBvbg==",
+   "strict": 76,
+   "prose": 0,
+   "estimate": [
+    76,
+    76,
+    76
+   ]
+  },
+  {
+   "name": "json",
+   "text": "{\"id\": \"node-1\", \"title\": \"\u4ea4\u4ed8\u9a8c\u6536\", \"inputs\": [{\"label\": \"\u4efb\u52a1\u8981\u6c42\", \"value\": \"\u76ee\u6807\uff1a\\n\u5b8c\u6210\u6807\u51c6\uff1a\"}]}",
+   "strict": 10,
+   "prose": 109,
+   "estimate": [
+    119,
+    61,
+    44
+   ]
+  },
+  {
+   "name": "csv",
+   "text": "date,region,sku,units\n2026-01-02,\u534e\u4e1c,SKU-12345,8642\n2026-03-04,Overseas,SKU-54321,17",
+   "strict": 60,
+   "prose": 27,
+   "estimate": [
+    87,
+    73,
+    69
+   ]
+  },
+  {
+   "name": "url",
+   "text": "read https://cdn1.example-123.com/assets/0123abcd/img_1234.webp?w=100&h=200 now",
+   "strict": 71,
+   "prose": 8,
+   "estimate": [
+    79,
+    75,
+    74
+   ]
+  },
+  {
+   "name": "code",
+   "text": "export function fits(request, config) {\n  return textBytes + 32 <= config.limit;\n}\n",
+   "strict": 3,
+   "prose": 80,
+   "estimate": [
+    83,
+    41,
+    28
+   ]
+  },
+  {
+   "name": "only spaces",
+   "text": "    \n\t  ",
+   "strict": 0,
+   "prose": 8,
+   "estimate": [
+    8,
+    4,
+    3
+   ]
+  },
+  {
+   "name": "trailing word",
+   "text": "end",
+   "strict": 0,
+   "prose": 3,
+   "estimate": [
+    3,
+    2,
+    1
+   ]
+  },
+  {
+   "name": "lone surrogate",
+   "text": "a\ud800b",
+   "strict": 3,
+   "prose": 2,
+   "estimate": [
+    5,
+    4,
+    4
+   ]
+  }
+ ]
+}
