@@ -23,6 +23,19 @@ export interface WorkspaceSandboxConfig {
   egress?: WorkspaceEgress;
   /** The container's memory in MiB, swap included (default 1,024; AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB). */
   memoryMB?: number;
+  /** The AwwO instance whose containers these are (AWWO_WORKSPACE_INSTANCE), labelled so that instance can remove what a
+   *  stopped worker left on a Docker daemon other instances share (AwwO 本地版 does at every start and stop). */
+  instance?: string;
+}
+/** The label naming a workspace container's instance, when one is configured. */
+export const WORKSPACE_INSTANCE_LABEL = 'awwo.workspace-instance';
+const validInstance = (value: string) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(value);
+/** AWWO_WORKSPACE_INSTANCE: unset means no instance label, as before. */
+export function loadWorkspaceInstance(env: Record<string, string | undefined>): string | undefined {
+  const value = env.AWWO_WORKSPACE_INSTANCE;
+  if (!value) return undefined;
+  if (!validInstance(value)) throw new Error('AWWO_WORKSPACE_INSTANCE must be 1-63 lowercase letters, digits or hyphens');
+  return value;
 }
 /** The workspace container's memory bounds, in MiB: a headless Chromium testing a large page needs more than 1 GiB. */
 export const WORKSPACE_MEMORY_MB = { default: 1024, min: 256, max: 4096 } as const;
@@ -449,13 +462,15 @@ async def main():
 asyncio.run(main())
 `;
 
-export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }, memoryMB: number = WORKSPACE_MEMORY_MB.default): string[] {
+export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }, memoryMB: number = WORKSPACE_MEMORY_MB.default, instance?: string): string[] {
   if (!Number.isSafeInteger(memoryMB) || memoryMB < WORKSPACE_MEMORY_MB.min || memoryMB > WORKSPACE_MEMORY_MB.max) throw new Error('Invalid workspace memory');
+  if (instance !== undefined && !validInstance(instance)) throw new Error('Invalid workspace instance');
   const memory = memoryMB === 1024 ? '1g' : `${memoryMB}m`;
   const web = egress ? ['--mount', `type=bind,source=${egress.socketDir},target=${EGRESS_MOUNT},readonly`,
     ...['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'].flatMap(key => ['--env', `${key}=${egress.proxyURL}`]),
     ...['NO_PROXY', 'no_proxy'].flatMap(key => ['--env', `${key}=localhost,127.0.0.1,::1`])] : [];
   return ['run', '--detach', '--pull=never', '--name', name, '--label', 'awwo.workspace-sandbox=true',
+    ...(instance ? ['--label', `${WORKSPACE_INSTANCE_LABEL}=${instance}`] : []),
     '--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges',
     `--memory=${memory}`, `--memory-swap=${memory}`, '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
     // exec: tools a project installs (a bundler's native binary) run from /workspace; /inputs and /tmp stay noexec.
@@ -553,7 +568,7 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
   try {
     // Set before run: a client timeout may occur after the daemon has already created the container.
     created = true;
-    const start = await runDocker(workspaceDockerArgs(name, config.image, egress, config.memoryMB), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
+    const start = await runDocker(workspaceDockerArgs(name, config.image, egress, config.memoryMB, config.instance), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
     if (start.code !== 0) throw new Error(`Workspace sandbox could not start: ${start.stderr.toString('utf8').slice(-1024)}`);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) throw new Error('Workspace operation cancelled');

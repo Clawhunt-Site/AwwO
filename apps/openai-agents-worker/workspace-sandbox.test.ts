@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createWorkspaceSandbox, validateWorkspacePath, workspaceDockerArgs, WORKSPACE_FILE_HELPER } from './workspace-sandbox.ts';
 import type { WorkspaceDockerRunner } from './workspace-sandbox.ts';
-import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, parseWorkspaceTools, sandboxAbilities, WORKSPACE_SOFTWARE } from './workspace-sandbox.ts';
+import { EGRESS_FORWARDER, egressToken, loadWorkspaceEgress, loadWorkspaceInstance, parseWorkspaceTools, sandboxAbilities, WORKSPACE_SOFTWARE } from './workspace-sandbox.ts';
 import { snapshotFailure } from './runner.mjs';
 import { EMPTY_WORKSPACE_SNAPSHOT } from './workspace-runtime.ts';
 import { excusable, EXCUSABLE_TYPES, globMatcher, MAX_PATH_LENGTH, parseMissingOk } from '../../deploy/saas/workspace/tools/missing-ok.mjs';
@@ -25,6 +25,20 @@ test('a workspace container takes the memory its worker is given, swap included,
   assert.ok(!args.includes('--memory=1g'));
   assert.ok(workspaceDockerArgs('awwo-ws-test', config.image, undefined, 1024).includes('--memory=1g'));
   for (const value of [255, 4097, 1.5]) assert.throws(() => workspaceDockerArgs('awwo-ws-test', config.image, undefined, value), /memory/);
+});
+
+test('a configured instance labels its containers, and nothing else changes without one', () => {
+  const plain = workspaceDockerArgs('awwo-ws-test', config.image);
+  assert.ok(!plain.some(value => value.startsWith('awwo.workspace-instance=')));
+  const labelled = workspaceDockerArgs('awwo-ws-test', config.image, undefined, 1024, 'local-0123abcd');
+  assert.deepEqual(labelled.filter(value => !plain.includes(value)), ['awwo.workspace-instance=local-0123abcd']);
+  assert.equal(labelled[labelled.indexOf('awwo.workspace-instance=local-0123abcd') - 1], '--label');
+  for (const bad of ['', 'Upper', 'has space', 'a,b', '-leading', 'x'.repeat(64)]) {
+    assert.throws(() => workspaceDockerArgs('awwo-ws-test', config.image, undefined, 1024, bad), /instance/, bad);
+  }
+  assert.equal(loadWorkspaceInstance({}), undefined);
+  assert.equal(loadWorkspaceInstance({ AWWO_WORKSPACE_INSTANCE: 'local-1' }), 'local-1');
+  assert.throws(() => loadWorkspaceInstance({ AWWO_WORKSPACE_INSTANCE: 'Local 1' }), /AWWO_WORKSPACE_INSTANCE/);
 });
 
 test('container arguments enforce isolation without host mounts, inherited credentials or a shell', () => {

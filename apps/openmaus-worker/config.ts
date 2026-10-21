@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UPSTREAM_REVISION, PATCH_VERSION } from './setup.ts';
-import { loadWorkspaceEgress, parseWorkspaceTools, type WorkspaceSandboxConfig, type WorkspaceTool } from '../openai-agents-worker/workspace-sandbox.ts';
+import { loadWorkspaceEgress, loadWorkspaceInstance, parseWorkspaceTools, type WorkspaceSandboxConfig, type WorkspaceTool } from '../openai-agents-worker/workspace-sandbox.ts';
 
 export const WORKER_DIR = dirname(fileURLToPath(import.meta.url));
 export { WORKSPACE_TOOLS, type WorkspaceTool } from '../openai-agents-worker/workspace-sandbox.ts';
@@ -21,12 +21,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const proxyOrigins = new Set((env.AWWO_OPENMAUS_MODEL_PROXY_ORIGINS || '').split(',').filter(Boolean).map(value => new URL(value.trim()).origin));
   const tools = parseWorkspaceTools(env.AWWO_OPENMAUS_WORKSPACE_TOOLS, 'AWWO_OPENMAUS_WORKSPACE_TOOLS');
   const egress = loadWorkspaceEgress(env);
+  const instance = loadWorkspaceInstance(env);
   // A code-structure report, a page check or an install takes longer than a quick command; the sandbox caps any one
   // at 120 s, the default once the web is on.
   const commandTimeoutMs = Number(env.AWWO_OPENMAUS_COMMAND_TIMEOUT_MS || (egress ? 120_000 : 30_000));
   if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENMAUS_COMMAND_TIMEOUT_MS must be 1000–120000');
   return { token, host: env.AWWO_OPENMAUS_HOST || '127.0.0.1', port, maxConcurrent, corePath, dataRoot, proxyOrigins, tools,
-    sandbox: { dockerExecutable, image: env.AWWO_OPENMAUS_WORKSPACE_IMAGE || env.AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE || 'awwo-workspace:20261016', dockerContext: env.AWWO_OPENMAUS_DOCKER_CONTEXT || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT, commandTimeoutMs, ...(egress ? { egress } : {}) } };
+    sandbox: { dockerExecutable, image: env.AWWO_OPENMAUS_WORKSPACE_IMAGE || env.AWWO_OPENAI_AGENTS_WORKSPACE_IMAGE || 'awwo-workspace:20261016', dockerContext: env.AWWO_OPENMAUS_DOCKER_CONTEXT || env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT, commandTimeoutMs, ...(egress ? { egress } : {}), ...(instance ? { instance } : {}) } };
 }
 export function coreInstalled(config: WorkerConfig): boolean {
   try { const build = JSON.parse(readFileSync(join(dirname(config.corePath), 'awwo-build.json'), 'utf8')); return build.upstreamRevision === UPSTREAM_REVISION && build.patchVersion === PATCH_VERSION && readFileSync(config.corePath).length > 1000; } catch { return false; }
