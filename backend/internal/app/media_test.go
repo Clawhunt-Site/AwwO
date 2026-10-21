@@ -704,6 +704,69 @@ func TestRunningHubAPIClientIgnoresProxyVariables(t *testing.T) {
 	}
 }
 
+// The operator's own workspace (one a platform administrator owns, read by tenantModelEntitlement) may use the media
+// models without the switch that opens them to every unrestricted workspace; one no administrator owns may not, nor
+// may an entitlement bound to no workspace. An allowlist still decides for a restricted workspace, and Jimeng stays
+// explicit.
+func TestMediaEntitledForTheOperatorsOwnWorkspace(t *testing.T) {
+	a := &App{cfg: testConfig()}
+	operator := modelEntitlement{tenant: "t1", operator: true}
+	for _, model := range []string{"rh.seedream-v5-pro", "xt.seedream-5-pro", "tripo.p1"} {
+		if !a.mediaEntitled(operator, model) {
+			t.Fatal("the operator's own workspace is offered", model)
+		}
+		if a.mediaEntitled(modelEntitlement{tenant: "t2"}, model) || a.mediaEntitled(modelEntitlement{operator: true}, model) {
+			t.Fatal("only a workspace an administrator owns is offered", model, "without the switch")
+		}
+	}
+	if a.mediaEntitled(operator, "jm.image-cinema") {
+		t.Fatal("Jimeng needs an explicit grant even in the operator's workspace")
+	}
+	listed := modelEntitlement{allowed: &[]string{"xt.seedream-5-pro"}, tenant: "t3"}
+	if !a.mediaEntitled(listed, "xt.seedream-5-pro") || a.mediaEntitled(listed, "rh.seedream-v5-pro") {
+		t.Fatal("an allowlist decides for a restricted workspace")
+	}
+	a.cfg.MediaUnrestrictedWorkspaces = true
+	if !a.mediaEntitled(modelEntitlement{tenant: "t2"}, "rh.seedream-v5-pro") {
+		t.Fatal("the switch still opens media to every unrestricted workspace")
+	}
+}
+
+// tenantModelEntitlement reads whether a platform administrator owns an unrestricted workspace, which only that grant
+// reads, and reads no owner for a restricted one.
+func TestPostgresEntitlementReadsTheOperatorsOwnWorkspace(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	_, mine, uid := h.register(t, "entitlement-owner@example.test")
+	_, theirs, _ := h.register(t, "entitlement-other@example.test")
+	makePlatformAdmin(t, h, uid)
+	ctx := context.Background()
+	for _, tid := range []string{mine, theirs} {
+		if _, err := h.db.Exec(ctx, "UPDATE tenants SET allowed_models=NULL WHERE id=$1", tid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(tid string) modelEntitlement {
+		t.Helper()
+		entitlement, err := tenantModelEntitlement(ctx, h.db, tid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return entitlement
+	}
+	if e := read(mine); !e.unrestricted() || !e.operator || e.tenant != mine {
+		t.Fatalf("the administrator's unrestricted workspace: %+v", e)
+	}
+	if e := read(theirs); e.operator || e.tenant != theirs {
+		t.Fatalf("a workspace no administrator owns: %+v", e)
+	}
+	if _, err := h.db.Exec(ctx, "UPDATE tenants SET allowed_models=ARRAY['rh.seedream-v5-pro'] WHERE id=$1", mine); err != nil {
+		t.Fatal(err)
+	}
+	if e := read(mine); e.unrestricted() || e.operator || !e.permits("rh.seedream-v5-pro") {
+		t.Fatalf("a restricted workspace is read by its allowlist alone: %+v", e)
+	}
+}
+
 // Canvas uploads and renders keep files in the media directory too, so the sweep that removes those of deleted
 // canvases runs whenever the directory is set, with no generator or renderer configured as well.
 func TestMediaSweepRunsWheneverTheDirectoryIsSet(t *testing.T) {

@@ -17,9 +17,13 @@ import (
 // allowlist can never accidentally widen access. tenant is the workspace the
 // entitlement was read for (tenantModelEntitlement), "" when it was built without
 // one; only operator grants keyed by workspace (AWWO_JIMENG_WORKSPACES) read it.
+// operator says a platform administrator owns that workspace (operator_workspace.go);
+// it is read only for an unrestricted one, the only kind the media models' grant to
+// the operator's own workspaces reads it for (mediaEntitled).
 type modelEntitlement struct {
-	allowed *[]string
-	tenant  string
+	allowed  *[]string
+	tenant   string
+	operator bool
 }
 
 const maxAllowedModels = 64
@@ -206,10 +210,20 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 		return deniedModels(), e
 	}
 	entitlement, e := newModelEntitlement(restricted, allowed)
-	if e == nil {
-		entitlement.tenant = tid
+	if e != nil {
+		return entitlement, e
 	}
-	return entitlement, e
+	entitlement.tenant = tid
+	// Only an unrestricted workspace's owner is read, so a restricted one costs no second read; an unreadable owner
+	// fails closed, as an unreadable allowlist does.
+	if entitlement.allowed == nil {
+		operator, err := operatorWorkspace(ctx, q, tid)
+		if err != nil {
+			return deniedModels(), err
+		}
+		entitlement.operator = operator
+	}
+	return entitlement, nil
 }
 
 // A graph node freezes its snapshot when the graph is admitted, so the catalog it

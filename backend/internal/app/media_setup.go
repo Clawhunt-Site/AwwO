@@ -63,7 +63,10 @@ func (a *App) mediaEntitled(entitlement modelEntitlement, model string) bool {
 		}
 	}
 	if entitlement.unrestricted() {
-		return a.cfg.MediaUnrestrictedWorkspaces
+		// A workspace a platform administrator owns (modelEntitlement.operator, read by tenantModelEntitlement) is the
+		// operator's own: the operator pays for its generations either way. Every other unrestricted workspace needs the
+		// deployment's switch.
+		return a.cfg.MediaUnrestrictedWorkspaces || (entitlement.tenant != "" && entitlement.operator)
 	}
 	return entitlement.permits(model)
 }
