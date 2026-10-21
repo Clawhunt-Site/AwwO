@@ -63,7 +63,7 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'THE LONG CHORD: a space opera made on one canvas', zh: 'THE LONG CHORD：一张画布做出的太空歌剧电影' },
     summary: { en: 'Watch the film in the case, see how its lip sync was measured and its two reels were cut, then copy its 109-node canvas as a draft.',
       zh: '在案例里看影片，看口型同步怎么测、两卷片子怎么剪，再把这张 109 个节点的画布复制成草稿。' },
-    seconds: 375, src: '/showcase/staged/academy/af1d2b05724d6cba.mp4', bytes: 59717797, sha256: 'af1d2b05724d6cba521ef65b4d0f9ddb6636afddbd50749dd08e343af0691b9f',
+    seconds: 385, src: '/showcase/staged/academy/b24de835e61ae95a.mp4', bytes: 62488472, sha256: 'b24de835e61ae95abe92e8488a818bc44ccdbe487a7f9b45b3c73292872ea92d',
     poster: null },
   { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-19',
     title: { en: 'Umber: a photo editor built by twelve agents', zh: 'Umber：十二个 Agent 做出的网页图片编辑器' },
