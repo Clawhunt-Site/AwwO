@@ -95,11 +95,13 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
       return;
     }
-    if (mode === 'too_long' || mode === 'rejected') {
+    if (mode === 'too_long' || mode === 'too_long_usage' || mode === 'rejected') {
       res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: mode === 'too_long'
-        ? { message: 'This model\'s maximum context length is 131072 tokens. However, you requested 140000 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded' }
-        : { message: 'messages: text content blocks must be non-empty', type: 'invalid_request_error' } }));
+      res.end(JSON.stringify({ error: mode === 'rejected'
+        ? { message: 'messages: text content blocks must be non-empty', type: 'invalid_request_error' }
+        : { message: 'This model\'s maximum context length is 131072 tokens. However, you requested 140000 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded' },
+      // The same refusal stating usage that counts something beside it: the provider read the request.
+      ...(mode === 'too_long_usage' ? { usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } } : {}) }));
       return;
     }
     if (mode === 'transient' && requests.length === 1) {
@@ -550,8 +552,8 @@ test('a provider\'s refusal of the request as larger than its model\'s window ke
   await second.handle.done;
   assert.deepEqual([second.events.at(-1).type, second.events.at(-1).code], ['failed', 'MODEL_ERROR']);
   // So does a refusal after the model began: its reasoning (which an ordinary caller never sees) or usage that counts
-  // something is work done, which the API counts.
-  for (const mode of ['too_long_after_reasoning', 'too_long_after_usage']) {
+  // something, in the stream or in the refusal's own body, is work done, which the API counts.
+  for (const mode of ['too_long_after_reasoning', 'too_long_after_usage', 'too_long_usage']) {
     const began = await provider(t, { mode });
     const third = await run(t, configuration(began.baseURL));
     await third.handle.done;

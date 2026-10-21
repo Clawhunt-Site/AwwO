@@ -87,6 +87,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                     "code": "context_length_exceeded"}
         if self.mode == "too_long":
             return web.json_response({"error": too_long}, status=400)
+        if self.mode == "too_long_usage":
+            # The same refusal stating usage that counts something beside it: the provider read the request.
+            return web.json_response({"error": too_long, "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}, status=400)
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         if self.compress:
             response.enable_compression()
@@ -243,9 +246,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_size_refusal_is_its_own_code_only_before_the_model_began(self):
         # Before anything (a 400, or the stream's first frame): the refusal; after the model's reasoning (which an
-        # ordinary caller never sees) or usage that counts something: the refusal of the request it otherwise is, which
-        # the API counts. Its words never cross the worker.
-        for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_first", "MODEL_CONTEXT_LIMIT"),
+        # ordinary caller never sees) or usage that counts something, in the stream or in the refusal's own body: the
+        # refusal of the request it otherwise is, which the API counts. Its words never cross the worker.
+        for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_first", "MODEL_CONTEXT_LIMIT"), ("too_long_usage", "MODEL_REQUEST_REJECTED"),
                            ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"), ("too_long_after_usage", "MODEL_REQUEST_REJECTED")]:
             with self.subTest(mode=mode):
                 self.mode = mode

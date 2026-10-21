@@ -312,8 +312,9 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) return fail('shape');
     for (const choice of chunk.choices) {
       const delta = object(choice?.delta) ? choice.delta : {};
-      // Anything the model sent (its text, a refusal, a tool call, its hidden reasoning) is work done.
-      if (Object.entries(delta).some(([key, value]) => key !== 'role' && value != null && value !== '')) produced = true;
+      // Anything the model sent (its text, a refusal, a tool call, its hidden reasoning) is work done, and so is usage
+      // inside the choice that counts anything (as some providers send it, Moonshot).
+      if (Object.entries(delta).some(([key, value]) => key !== 'role' && value != null && value !== '') || countsWork(choice?.usage)) produced = true;
       if (delta.content != null) { if (typeof delta.content !== 'string') return fail('content'); text += delta.content; }
       // A refusal (OpenAI's) is kept as the answer read whole has it, for computerCompletionResponse to refuse; never forwarded.
       if (delta.refusal != null) { if (typeof delta.refusal !== 'string') return fail('content'); refused += delta.refusal; }
@@ -422,14 +423,15 @@ function countsWork(usage: unknown): boolean {
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
  *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
  *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed), which carries
- *  the label an OpenAI-compatible provider gives it whatever this one calls it, and inside a 200 (an error read whole,
- *  or a gateway's error frame that came before anything else: `sizable`) the detail `before-output`, without which the
- *  API never takes a 200's label for that refusal: a call that streamed some of its answer did work. A body whose usage
- *  counts anything (countsWork) is never that refusal: the provider read the request. */
+ *  the label an OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output` when
+ *  nothing else came back: inside a 200 only for an error read whole or a gateway's error frame that came before
+ *  anything of the answer (`sizable`), and never beside usage that counts anything (countsWork: the provider read the
+ *  request). The API takes the label for that refusal only with that detail; a provider's own code without it (after
+ *  some of the answer, beside usage, or an older worker's label) is a call that did work. */
 function refusal(status: number, body: ObjectValue = {}, sizable = true): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
   if (sizable && !countsWork(body.usage) && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
-    return { reason: `provider:${status}:context_length_exceeded`, ...(status === 200 ? { detail: 'before-output' } : {}) };
+    return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
   return { reason: `provider:${status}${kind ? `:${kind}` : ''}` };

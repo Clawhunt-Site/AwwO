@@ -127,7 +127,9 @@ class ProviderObservation:
                     self._reject()
                     continue
                 delta = choice.get("delta")
-                if isinstance(delta, dict) and any(key != "role" and part is not None and part != "" for key, part in delta.items()):
+                # Usage inside the choice too, as some providers (Moonshot) send it.
+                if (isinstance(delta, dict) and any(key != "role" and part is not None and part != "" for key, part in delta.items())) \
+                        or counts_work(choice.get("usage")):
                     self.produced = True
                 if isinstance(delta, dict) and isinstance(delta.get("content"), str) and delta["content"]:
                     if self.first is None:

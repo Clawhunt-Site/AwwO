@@ -59,6 +59,8 @@ class ProviderObservationTests(unittest.TestCase):
             ({"choices": [{"index": 0, "delta": {"refusal": "no"}}]}, True),
             ({"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}, True),
             ({"choices": [], "usage": {"prompt_tokens_details": {"cached_tokens": 3}}}, True),
+            ({"choices": [{"index": 0, "delta": {}, "usage": {"prompt_tokens": 4}}]}, True),
+            ({"choices": [{"index": 0, "delta": {}, "usage": {"prompt_tokens": 0}}]}, False),
         ]:
             with self.subTest(frame=frame):
                 observer = ProviderObservation("chat_completions")

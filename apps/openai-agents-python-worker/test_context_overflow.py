@@ -38,8 +38,16 @@ class ContextOverflowTest(unittest.TestCase):
         self.assertEqual(classify_error(by_code)["code"], "MODEL_CONTEXT_LIMIT")
         event = classify_error(by_message)
         self.assertNotIn("131072", json.dumps(event))
-        # After the model began it is the refusal of the request it otherwise is.
+        # After the model began it is the refusal of the request it otherwise is, and so it is when its body states usage
+        # that counts something, beside its error or inside it (zero usage states nothing).
         self.assertEqual(classify_error(by_code, sizable=False)["code"], "MODEL_REQUEST_REJECTED")
+        for body, code in [
+            ({"error": {"code": "context_length_exceeded"}, "usage": {"prompt_tokens": 11, "completion_tokens": 9}}, "MODEL_REQUEST_REJECTED"),
+            ({"error": {"code": "context_length_exceeded", "usage": {"input_tokens": 0, "cache": {"read": 3}}}}, "MODEL_REQUEST_REJECTED"),
+            ({"error": {"code": "context_length_exceeded"}, "usage": {"prompt_tokens": 0, "completion_tokens": 0}}, "MODEL_CONTEXT_LIMIT"),
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(classify_error(provider_error(BadRequestError, 400, body))["code"], code)
         # Another refusal of the request, and a rate limit that names the context, are not.
         self.assertEqual(classify_error(provider_error(BadRequestError, 400, {"error": {"message": "messages: text content blocks must be non-empty"}}))["code"],
                          "MODEL_REQUEST_REJECTED")

@@ -450,26 +450,30 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		}
 	}
 	for body, want := range map[string]bool{
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:                          true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded"}}`:                          true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded"}}`:                          true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:                           true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`: true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded","detail":"before-output"}}`: true,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded","detail":"before-output"}}`: true,
-		// A 200's label without the worker's word that nothing came before it is a frame after some of the answer, or an
-		// older worker's label of one.
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded"}}`:      false,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:429:context_length_exceeded"}}`:      false,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:500:context_length_exceeded"}}`:      false,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:400:context_length_exceeded"}}`:  false,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:invalid_request_error"}}`:        false,
-		`{"error":{"code":"CONTEXT_LIMIT","reason":"provider:400:context_length_exceeded"}}`:       false,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"answer","detail":"context_length_exceeded"}}`: false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:                           true,
+		// A provider's label without the worker's word that nothing else came back is a refusal after some of the answer
+		// or beside usage that counts something, or an older worker's label of one.
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:                          false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded"}}`:                          false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded"}}`:                          false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded"}}`:                          false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"usage"}}`:         false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:429:context_length_exceeded","detail":"before-output"}}`: false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:500:context_length_exceeded","detail":"before-output"}}`: false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:400:context_length_exceeded"}}`:                      false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:invalid_request_error","detail":"before-output"}}`:   false,
+		`{"error":{"code":"CONTEXT_LIMIT","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`:  false,
+		`{"error":{"code":"PROVIDER_ERROR","reason":"answer","detail":"context_length_exceeded"}}`:                     false,
 	} {
 		if got := computerSizeRefusal(502, []byte(body)); got != want {
 			t.Errorf("computerSizeRefusal(502, %s) = %v", body, got)
 		}
 	}
-	if computerSizeRefusal(413, []byte(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`)) {
+	if computerSizeRefusal(413, []byte(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`)) {
 		t.Error("a status other than the worker's 502 for a provider's refusal")
 	}
 }

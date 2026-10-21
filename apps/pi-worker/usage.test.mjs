@@ -85,6 +85,26 @@ for (const separator of ['\n', '\r\n', '\r']) test(`multiline SSE usage survives
   }
 });
 
+test('a refusal\'s body is read for the usage it states, its bytes unchanged and at most 64 KiB of it kept', async () => {
+  const json = { 'content-type': 'application/json' };
+  for (const [body, status, headers, counted] of [
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 11, completion_tokens: 9 } }), 400, json, true],
+    [JSON.stringify({ error: { code: 'context_length_exceeded', usage: { input_tokens: 0, cache: { read: 3 } } } }), 400, json, true],
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 0, completion_tokens: 0 } }), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded' } }), 400, json, false],
+    ['not json, usage 11', 400, json, false],
+    [JSON.stringify({ error: { message: 'x'.repeat(70_000) }, usage: { prompt_tokens: 11 } }), 400, json, false],
+    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 400, { 'content-type': 'text/plain' }, false],
+    [JSON.stringify({ choices: [], usage: { prompt_tokens: 11 } }), 200, json, false],
+  ]) {
+    const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(body, { status, headers }) });
+    const response = await observer.fetch('http://127.0.0.1/provider');
+    assert.equal(response.status, status);
+    assert.equal(await response.text(), body);
+    assert.equal(observer.refusalCounted(), counted, body.slice(0, 80));
+  }
+});
+
 test('many small data lines share a bounded SSE event budget', async () => {
   const body = 'data: ' + 'x'.repeat(1024) + '\n';
   const text = body.repeat(1025) + '\ndata: [DONE]\n\n';

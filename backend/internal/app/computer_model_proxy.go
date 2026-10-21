@@ -493,18 +493,20 @@ func (a *App) logComputerCall(lease *computerLease, call, status int, body []byt
 // computerSizeRefusal says whether the worker answered that the call's provider refused it as larger than its model's
 // window before any work (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error
 // there, and the Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let
-// through but the model did not take. Only a refusal of the request (400, 413, 422) or AWS's, never a rate limit; inside
-// a 200 only with the detail before-output, which the worker gives a gateway's frame that came before anything else
-// (a frame after some of the answer, or an older worker's label of one, is a call that did work).
+// through but the model did not take. Only a refusal of the request (400, 413, 422, or inside a 200) or AWS's, never a
+// rate limit, and a provider's only with the detail before-output, the worker's word that nothing else came back (no
+// part of the answer before it, no usage that counts anything beside it); a provider's own code without it (after some
+// of the answer, beside usage, or an older worker's label) is a call that did work. AWS's refusal comes before its
+// stream begins (a refusal after is stream:error:…) in a body the bridge writes itself, which states no usage.
 func computerSizeRefusal(status int, body []byte) bool {
 	code, reason, detail := computerWorkerError(body)
 	if status != 502 || code != "PROVIDER_ERROR" {
 		return false
 	}
 	switch reason {
-	case "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded", "bedrock:400:context_length_exceeded":
+	case "bedrock:400:context_length_exceeded":
 		return true
-	case "provider:200:context_length_exceeded":
+	case "provider:200:context_length_exceeded", "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded":
 		return detail == "before-output"
 	}
 	return false

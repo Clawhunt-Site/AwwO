@@ -457,16 +457,17 @@ func TestThrashingIsTheSameLostResultTwiceInARow(t *testing.T) {
 }
 
 // A call its provider refuses as larger than its model's window (the worker's label context_length_exceeded, read from
-// the provider's words or AWS's: apps/context-overflow.ts) ends the task as one too large for its model does, and never
-// counts, for it never began; another refusal of the request still counts and ends it otherwise.
+// the provider's words or AWS's: apps/context-overflow.ts, with the worker's word before-output that nothing else came
+// back) ends the task as one too large for its model does, and never counts, for it never began; the label without that
+// word (beside usage, or an older worker's) and another refusal of the request still count and end it otherwise.
 func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
-	var reason atomic.Value
+	var reason, detail atomic.Value
 	trusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			writeJSON(w, 200, map[string]any{"ready": true, "userCredentials": true})
 			return
 		}
-		writeJSON(w, 502, map[string]any{"error": map[string]any{"code": "PROVIDER_ERROR", "message": "The managed model request could not be completed.", "reason": reason.Load()}})
+		writeJSON(w, 502, map[string]any{"error": map[string]any{"code": "PROVIDER_ERROR", "message": "The managed model request could not be completed.", "reason": reason.Load(), "detail": detail.Load()}})
 	}))
 	defer trusted.Close()
 	started := make(chan computerWorkerInput, 1)
@@ -503,10 +504,12 @@ func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid
 	for i, c := range []struct {
-		reason string
-		sized  bool
-	}{{"provider:400:context_length_exceeded", true}, {"bedrock:400:context_length_exceeded", true}, {"provider:400:invalid_request_error", false}} {
+		reason, detail string
+		sized          bool
+	}{{"provider:400:context_length_exceeded", "before-output", true}, {"bedrock:400:context_length_exceeded", "", true},
+		{"provider:400:context_length_exceeded", "", false}, {"provider:400:invalid_request_error", "", false}} {
 		reason.Store(c.reason)
+		detail.Store(c.detail)
 		id := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": fmt.Sprintf("provider-size-%d", i), "prompt": "build the page", "runtime": "pi", "model": model}, 202)["id"].(string)
 		computerProxyRaw(t, <-started, coreRequest(t, toolTurn(100)), 502)
 		end <- struct{}{}
