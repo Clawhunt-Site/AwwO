@@ -409,7 +409,7 @@ it('copies a film case from the workspace home as the canvas that ran, with noth
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const setup = await openCopy(FILM_TITLE);
   expect(setup).toHaveAttribute('lang', 'en');
-  expect(within(setup).getByText(/^Keep all 109 nodes and their wires with the texts and settings the real run on 2026-10-20 used: .* so its first run makes all 104 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the act’s own timeline were measured on the case run’s clips, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
+  expect(within(setup).getByText(/^Keep all 109 nodes and their wires with the texts and settings the real run on 2026-10-21 used: .* so its first run makes all 104 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the act’s own timeline were measured on the case run’s clips, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
   fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);

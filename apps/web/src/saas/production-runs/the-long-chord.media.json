@@ -1,14 +1,14 @@
 {
  "edit_act1/act-1.mp4": {
-  "src": "/showcase/staged/the-long-chord/4460cace2a1c6855.mp4",
+  "src": "/showcase/staged/the-long-chord/5269e52f5f1e404e.mp4",
   "type": "video/mp4",
-  "bytes": 43411839,
-  "sha256": "4460cace2a1c68553f0387fe7955b7e33181b562ab8b333c4dd97a11702d6c52",
+  "bytes": 43688983,
+  "sha256": "5269e52f5f1e404e2397fb338e0c6676f3bb4563a87a4f5d0735351628ba727a",
   "staged": true,
   "original": {
-   "src": "/showcase/staged/the-long-chord/263064b124a438ab.mp4",
-   "bytes": 150756543,
-   "sha256": "263064b124a438abdd0a0ac6eb593dd1e4cca3acdef0ec11e291ab2224ed6e40"
+   "src": "/showcase/staged/the-long-chord/8bdb2de30fda702c.mp4",
+   "bytes": 151033687,
+   "sha256": "8bdb2de30fda702c7516ac6e87813a07031547b9e0b739ad71b131f8a8f6b6b6"
   }
  },
  "edit_act1/act-1.vtt": {
