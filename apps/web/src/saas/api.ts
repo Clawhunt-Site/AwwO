@@ -143,7 +143,11 @@ function serviceCodes(): Record<string, [string, string]> {
     invalid_upload_name: ['文件名无效，改个名字再上传。', 'The file name is invalid. Rename the file and try again.'],
     tenant_suspended: ['工作区已暂停，请联系管理员或切换工作区。', 'This workspace is suspended. Contact an administrator or switch workspaces.'],
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
-    context_limit: ['输入超出模型上下文限制，请缩短输入或减少历史内容。', 'The input exceeds the model context limit. Shorten it or reduce the history.'],
+    // What a run would send was more than its model reads at once: the request, the node's brief and inputs, what
+    // upstream nodes delivered, files and selected knowledge. A node's own history is trimmed to fit by itself and is
+    // never the cause, so the copy points at what the reader can change.
+    context_limit: ['这次要发给模型的内容超出了它一次能读的量，没有运行。可以换一个上下文更大的模型，或少带一些内容（上游节点的交付、附件、选中的资料）后再试。',
+      'What this would send is more than the model can read at once, so it did not run. Choose a model with a larger context, or bring less into it (what upstream nodes delivered, attachments, selected knowledge), then try again.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
     quota_exceeded: quotaExceededMessages,
     free_capacity_exceeded: freeCapacityMessages,

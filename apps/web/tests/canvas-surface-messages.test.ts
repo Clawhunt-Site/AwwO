@@ -63,7 +63,7 @@ describe('canvas surface messages', () => {
     expect(failureCause(canvasText('zh', 'surface.deliveryFormat'))).toBe('交回的结果不符合要求的交付格式（模型没给出要求的字段）');
     // A 请 in the same Chinese sentence starts its advice (review 2026-10-21: 「生成超时，请稍后重试或换一个模型」).
     expect(failureCause(runErrorText('media_timeout', 'zh')!)).toBe('生成超时');
-    expect(failureCause(saasErrorMessage(new SaaSApiError(0, 'context_limit', ''), 'zh'))).toBe('输入超出模型上下文限制');
+    expect(failureCause(saasErrorMessage(new SaaSApiError(0, 'context_limit', ''), 'zh'))).toBe('这次要发给模型的内容超出了它一次能读的量，没有运行');
     // Words with no sentence end, or a full stop inside a number, stay whole.
     expect(failureCause('上游节点未完成')).toBe('上游节点未完成');
     expect(failureCause('provider said no: model v1.5 refused')).toBe('provider said no: model v1.5 refused');
@@ -91,10 +91,10 @@ describe('canvas surface messages', () => {
     // A code only the service words, recorded as its code by a cloud run's node or as its copy by a node's own Send, in
     // either language (review 2026-10-21: 「输入超出模型上下文限制，请…」 asked the assistant to do what the reader should).
     const contextLimit = (locale: 'zh' | 'en') => saasErrorMessage(new SaaSApiError(0, 'context_limit', ''), locale);
-    expect(failureReason(zh, 'context_limit', 'zh')).toBe('输入超出模型上下文限制');
-    expect(failureReason(zh, contextLimit('zh'), 'zh')).toBe('输入超出模型上下文限制');
-    expect(failureReason(zh, contextLimit('en'), 'zh')).toBe('The input exceeds the model context limit');
-    expect(failureReason(en, contextLimit('en'), 'en')).toBe('The input exceeds the model context limit');
+    expect(failureReason(zh, 'context_limit', 'zh')).toBe('这次要发给模型的内容超出了它一次能读的量，没有运行');
+    expect(failureReason(zh, contextLimit('zh'), 'zh')).toBe('这次要发给模型的内容超出了它一次能读的量，没有运行');
+    expect(failureReason(zh, contextLimit('en'), 'zh')).toBe('What this would send is more than the model can read at once, so it did not run');
+    expect(failureReason(en, contextLimit('en'), 'en')).toBe('What this would send is more than the model can read at once, so it did not run');
     // A code the canvas words itself, an edit's among them.
     expect(failureReason(zh, 'edit_busy', 'zh')).toBe('渲染服务一直在忙别的任务，这次剪辑没有执行');
     expect(failureReason(en, 'edit_file_missing', 'en')).toBe('A file the timeline names is no longer stored');

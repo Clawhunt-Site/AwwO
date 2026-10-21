@@ -6,6 +6,7 @@ import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBridge';
 import { fetchConversationIndex } from '../src/canvasAgentChat';
 import { canvasText } from '../src/canvas/i18n';
+import { failureCause } from '../src/canvas/surfaceMessages';
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 afterEach(() => { vi.unstubAllGlobals(); clearSaaSCanvas(); configureSaaSCanvasSave(null); document.documentElement.lang = ''; });
 it('tells a user with no personal engine to add a key while preserving real model errors', () => {
@@ -261,6 +262,23 @@ it('tells a copy a node’s own Send recorded, a run’s or the service’s, fro
   expect(isRunFailureCopy('Request rejected. max_tokens exceeds 32000 for this model.')).toBe(false);
   expect(isRunFailureCopy('context_limit')).toBe(false);
   expect(isRunFailureCopy('')).toBe(false);
+});
+it('says a run too large for its model did not run and what to change, never the history it trims by itself', () => {
+  document.documentElement.lang = 'zh-CN';
+  const zh = canvasErrorMessage(new SaaSApiError(413, 'context_limit', 'Prompt and instructions exceed the selected runtime context budget'));
+  expect(zh).toContain('没有运行');
+  expect(zh).toContain('上下文更大的模型');
+  expect(zh).toContain('上游节点的交付');
+  expect(zh).not.toContain('历史');
+  document.documentElement.lang = 'en';
+  const en = canvasErrorMessage(new SaaSApiError(413, 'context_limit', 'Prompt and instructions exceed the selected runtime context budget'));
+  expect(en).toContain('did not run');
+  expect(en).toContain('larger context');
+  expect(en).not.toMatch(/history/i);
+  // What happened, as a node's recorded code tells the assistant (failureCause): the first sentence, not the advice.
+  expect(failureCause(zh)).toBe('这次要发给模型的内容超出了它一次能读的量，没有运行');
+  expect(failureCause(en)).toBe('What this would send is more than the model can read at once, so it did not run');
+  for (const locale of ['zh', 'en'] as const) expect(runFailureText('context_limit', locale)).toBe(locale === 'zh' ? zh : en);
 });
 it('explains the project step budget in current and historical failures without promising to resume failed files', () => {
   const error = new SaaSApiError(500, 'workspace_step_limit', 'MaxTurnsExceededError');
