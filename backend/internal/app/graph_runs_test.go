@@ -506,3 +506,27 @@ func TestPostgresGraphConcurrentAdmissionCancellation(t *testing.T) {
 		}
 	}
 }
+
+// The database stamps a node's run's created_at, and this process's clock can be a second or more off it (a test process
+// on Windows against a PostgreSQL in WSL is), so a node's duration is read on the database's clock alone: from its run's
+// creation (here a second before its last update) to readings of that clock just before and just after it settles.
+func TestPostgresGraphNodeDurationIsMeasuredOnTheDatabaseClock(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	h.a.cfg.MetricsEnabled = true
+	c, tid, actor := h.register(t, "graph-node-clock@example.test")
+	cid, doc := graphFixture(t, h, c, tid)
+	gid, runs := seedUnprojectedGraph(t, h, tid, cid, actor, doc, map[string]string{"a": "completed"})
+	ctx := context.Background()
+	var created, before, after time.Time
+	if e := h.db.QueryRow(ctx, "UPDATE runs SET created_at=created_at-interval '1 second' WHERE tenant_id=$1 AND id=$2 RETURNING created_at,clock_timestamp()", tid, runs["a"]).Scan(&created, &before); e != nil {
+		t.Fatal(e)
+	}
+	h.a.setGraphNode(ctx, tid, gid, "a", "done", "SAVED-a", "")
+	if e := h.db.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&after); e != nil {
+		t.Fatal(e)
+	}
+	least, most := before.Sub(created), after.Sub(created)
+	if count, sum := histogramMetric(t, h.a, "awwo_graph_node_duration_seconds", "outcome", "done"); count != 1 || sum < least.Seconds() || sum > most.Seconds() {
+		t.Fatalf("node duration metric %d observation(s) adding up to %.6f s, want one in %.6f..%.6f s", count, sum, least.Seconds(), most.Seconds())
+	}
+}

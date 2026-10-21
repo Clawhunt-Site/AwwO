@@ -675,12 +675,14 @@ func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, de
 	if err == nil {
 		a.observeGraphNodeState(state)
 		if runID != nil {
-			var created time.Time
+			// The duration is read on the database's clock, which stamped created_at: this process's clock can be a second
+			// or more off it, which would move every duration by the difference (a shorter one below 0).
+			var created, now time.Time
 			var raw json.RawMessage
-			if a.db.QueryRow(ctx, "SELECT created_at,execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, *runID).Scan(&created, &raw) == nil {
+			if a.db.QueryRow(ctx, "SELECT created_at,clock_timestamp(),execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, *runID).Scan(&created, &now, &raw) == nil {
 				var snap executionSnapshot
 				if json.Unmarshal(raw, &snap) == nil {
-					a.observeGraphNode(snapshotRuntime(snap), state, time.Since(created))
+					a.observeGraphNode(snapshotRuntime(snap), state, max(0, now.Sub(created)))
 				}
 			}
 		}
