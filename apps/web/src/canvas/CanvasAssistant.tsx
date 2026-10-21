@@ -9,7 +9,6 @@ import type { AssistantPending, AssistantPendingPhase, AssistantRoute } from './
 import type { UiLocale } from '../locale';
 import { AttachButton, AttachmentTray, MessageWithAttachments, useComposerAttachments } from './ComposerAttachments';
 import { ComposerNotes } from './ComposerNotes';
-import { joinAttachments } from './attachments';
 
 export interface CanvasAssistantMessage {
   id: string;
@@ -391,9 +390,10 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
       <p id={disclaimerId} className="sr-only">{t('composer.disclaimerFull')}</p>
     </div>
 
+    {/* An example takes the words' place through the box, which keeps its files: one that has just landed too. */}
     {welcome && !recovery ? <div className="awwo-assistant-examples" role="group" aria-label={t('assistant.examples')}>
       {examples.map(example => <button type="button" key={example} disabled={waiting}
-        onClick={() => { onDraftChange(joinAttachments(example, attach.attachments, locale)); input.current?.focus(); }}>{example}</button>)}
+        onClick={() => { attach.setBody(example); input.current?.focus(); }}>{example}</button>)}
     </div> : null}
     </>}
   </section>;

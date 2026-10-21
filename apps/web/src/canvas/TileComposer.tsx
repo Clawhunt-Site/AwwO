@@ -16,7 +16,7 @@
 // It is a composite box: files of any type go with the words (the "+" button, a drop or a paste), shown as
 // chips and carried as lines at the end of the message (ComposerAttachments.tsx).
 
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
@@ -88,6 +88,15 @@ export interface TileComposerProps {
   attachNodeId?: string;
   /** An image, video or 3D node: what its generator does with attached files, which the box says when files are attached. */
   mediaNode?: MediaComposerInfo;
+  /** For the node's starter prompts, which are drawn outside the box. */
+  ref?: Ref<TileComposerHandle>;
+}
+
+/** What the node around the composer may write into it. */
+export interface TileComposerHandle {
+  /** Adds a prompt after the words the box shows, a blank line between. Through the box, which keeps its files: one that
+   *  has just landed too, whose answer is not drawn yet (useComposerAttachments). */
+  addPrompt: (prompt: string) => void;
 }
 
 /** The notice under a media node's attachments: which picture is used, or why none is. */
@@ -170,7 +179,7 @@ function useFocusBackOnUnlock(composer: RefObject<HTMLElement | null>, box: RefO
   }, [locked, composer]);
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode, ref }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -181,6 +190,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
   const attach = useComposerAttachments({ value: input, onChange: setInput, nodeId: attachNodeId, disabled });
   const waitReason = attach.busy ? t('attach.waiting') : undefined;
+  const { setBody } = attach;
+  useImperativeHandle(ref, () => ({ addPrompt: prompt => setBody(body => body ? `${body}\n\n${prompt}` : prompt) }), [setBody]);
   const composerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useFocusBackOnUnlock(composerRef, inputRef, disabled);

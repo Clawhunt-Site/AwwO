@@ -10,8 +10,9 @@ import { portsFor } from '../src/canvas/ports';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { ContractFields } from '../src/canvas/ContractFields';
 import { SessionTile } from '../src/canvas/SessionTile';
-import { createAgentTemplate } from '../src/canvas/agentTemplates';
+import { createAgentTemplate, getAgentTemplate } from '../src/canvas/agentTemplates';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { activeNodeThread } from '../src/canvas/nodeThreads';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import * as invalidation from '../src/canvas/invalidateOutputs';
 import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
@@ -287,6 +288,38 @@ describe('the canvas assistant', () => {
     expect((screen.getByLabelText('画布需求') as HTMLTextAreaElement).value).toBe('按这份需求搭画布');
     fireEvent.click(screen.getByRole('button', { name: /修改画布/ }));
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  // Seen on review 2026-10-21: an example chosen after a file had landed but before the box drew it was built from the
+  // drawn draft, which came after the file's own write, and the file went with nothing said (its chip already gone).
+  it('keeps a file that lands as an example is chosen, before the box has drawn it', async () => {
+    FakeUpload.hold = true;
+    const written: string[] = [];
+    function Host() {
+      const [draft, setDraft] = useState('');
+      return <><CanvasAssistant {...assistantProps({ mode: 'welcome', draft, onDraftChange: value => { written.push(value); setDraft(value); } })} />
+        <output data-testid="draft">{draft}</output></>;
+    }
+    render(<Host />);
+    fireEvent.change(screen.getByLabelText('画布需求'), { target: { value: '旧的需求' } });
+    fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['%PDF'], '需求.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText('需求.pdf');
+    const example = canvasText('zh', 'assistant.exampleSaas');
+    const button = screen.getByRole('button', { name: example });
+    const file = `[附件] 需求.pdf · awwo-file:${ID_A}`;
+    // The file's write is made and waits for a render (its chip not drawn yet); the example is chosen before that render,
+    // so both are drawn together.
+    await act(async () => {
+      FakeUpload.sent[0].finish();
+      await Promise.resolve();
+      expect(written.at(-1)).toBe(`旧的需求\n\n${file}`);
+      expect(screen.queryByRole('link', { name: '需求.pdf' })).toBeNull();
+      button.click();
+    });
+    // The example takes the words' place; the file stays.
+    expect(screen.getByTestId('draft').textContent).toBe(`${example}\n\n${file}`);
+    expect(screen.getByLabelText('画布需求')).toHaveValue(example);
+    expect(screen.getByRole('link', { name: '需求.pdf' })).toBeInTheDocument();
   });
 
   it('shows a sent message’s files as chips, not as reference lines', () => {
@@ -1194,6 +1227,48 @@ describe('an opened node’s inputs', () => {
     expect(FakeUpload.sent.map(upload => upload.aborted)).toEqual([false]);
     act(() => FakeUpload.sent[0].finish());
     await waitFor(() => expect(references()).toBe(clipLine));
+  });
+});
+
+// Seen on review 2026-10-21: a starter prompt chosen after a file had landed in the message box but before the box drew it
+// was built from the drawn draft, which came after the file's own write, and the file went with nothing said.
+describe('an opened node’s starter prompts', () => {
+  it('go after the words written so far, and keep the box’s files: one that lands as a prompt is chosen too', async () => {
+    FakeUpload.hold = true;
+    const general = createAgentTemplate('general', { x: 0, y: 0 }, 'zh');
+    // Its required task filled in, so the message box takes files.
+    const initial: SessionNode = { ...general, id: 'n', contract: { ...general.contract!, inputs: general.contract!.inputs.map(field => field.id === 'brief' ? { ...field, value: '做一个关卡' } : field) } };
+    const saved: SessionNode[] = [];
+    function Host() {
+      const [node, setNode] = useState(initial);
+      return <SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()}
+        onUpdateNode={next => { saved.push(next as SessionNode); setNode(next as SessionNode); }} />;
+    }
+    render(<Host />);
+    const box = screen.getByTestId('composer-input');
+    const pick = (file: File) => fireEvent.change(box.closest('.canvas-composer')!.querySelector('input[type=file]')!, { target: { files: [file] } });
+    fireEvent.change(box, { target: { value: '先说明' } });
+    pick(new File(['png'], 'shot.png', { type: 'image/png' }));
+    await screen.findByText('shot.png');
+    act(() => FakeUpload.sent[0].finish());
+    expect(await screen.findByRole('link', { name: 'shot.png' })).toBeInTheDocument();
+    pick(new File(['wav'], 'voice.wav', { type: 'audio/wav' }));
+    await screen.findByText('voice.wav');
+    const starter = getAgentTemplate('general', 'zh').starterPrompts[0];
+    const button = screen.getByRole('button', { name: starter.label });
+    const files = `[附件] shot.png · awwo-file:${ID_A}\n[附件] voice.wav · awwo-file:${ID_B}`;
+    // voice.wav's write is made and waits for a render (its chip not drawn yet); the prompt is chosen before that render,
+    // so both are drawn together.
+    await act(async () => {
+      FakeUpload.sent[1].finish();
+      await Promise.resolve();
+      expect(activeNodeThread(saved.at(-1)!).draft).toBe(`先说明\n\n${files}`);
+      expect(screen.queryByRole('link', { name: 'voice.wav' })).toBeNull();
+      button.click();
+    });
+    expect(activeNodeThread(saved.at(-1)!).draft).toBe(`先说明\n\n${starter.prompt}\n\n${files}`);
+    expect(box).toHaveValue(`先说明\n\n${starter.prompt}`);
+    expect(screen.getByRole('link', { name: 'voice.wav' })).toBeInTheDocument();
   });
 });
 

@@ -42,9 +42,8 @@ import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
-import { mediaComposerInfo, TileComposer } from './TileComposer';
+import { mediaComposerInfo, TileComposer, type TileComposerHandle } from './TileComposer';
 import type { UploadCounts } from './ComposerAttachments';
-import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
 import { MediaWiringGuide } from './MediaWiringGuide';
@@ -547,6 +546,8 @@ export const SessionTile = memo(function SessionTile({
     if (onDraftChange) onDraftChange(nodeId, currentThread.id, value);
     else writeNode(current => updateNodeDraft(current, value, currentThread.id));
   };
+  // The starter prompts write into the message box through it, as typing does, so a file landing there is not lost.
+  const composerHandle = useRef<TileComposerHandle>(null);
   const lod: TileLod = compact ? 'card' : lodFor(frame, scale, focused);
   // Zoomed out past this, a compact card's 11px state chip is under 9px on screen: `data-zoom="far"` lets the
   // card hide the chips its dot, ring and border already show and give the row to the title.
@@ -1185,13 +1186,13 @@ export const SessionTile = memo(function SessionTile({
                     <div className="awwo-node-empty" data-template={template?.id} data-media={!template && mediaKind ? mediaKind : undefined}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? (mediaKind ? t(MEDIA_EMPTY_TITLE[mediaKind]) : t('tile.startHere'))}</strong><span>{template?.emptyDescription ?? (mediaKind ? t('media.emptyDescription') : t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound'))}</span>
-                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => { const parts = splitAttachments(composerDraft); setComposerDraft(joinAttachments(parts.body ? `${parts.body}\n\n${starter.prompt}` : starter.prompt, parts.attachments, locale)); }}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => composerHandle.current?.addPrompt(starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                       {expanded && !template && mediaKind && !viewOnly ? <MediaWiringGuide kind={mediaKind} simple={simple} /> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
-                  {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
+                  {expanded ? <TileComposer ref={composerHandle} deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
