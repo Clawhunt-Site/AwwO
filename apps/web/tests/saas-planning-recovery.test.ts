@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { emptyDocument } from '../src/canvas/canvasDoc';
-import { configureCanvasStorage } from '../src/canvas/canvasStorage';
-import { cancelCanvasPlanRecovery, readCanvasPlanRecovery, requestCanvasPlan } from '../src/canvas/canvasPlanning';
-import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
+import { applyCanvasPlan, canvasPlanRevision, planContextCondensed } from '../src/canvas/canvasPlan';
+import { canvasStorageKey, configureCanvasStorage } from '../src/canvas/canvasStorage';
+import { buildPlanningContext, cancelCanvasPlanRecovery, fitPlanningContext, readCanvasPlanRecovery, requestCanvasPlan } from '../src/canvas/canvasPlanning';
+import { canvasFetch, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 import { onSessionEnded, trackSignedInSession } from '../src/saas/api';
 import { PLAN_STALL_TIMEOUT_MS } from '../src/saas/canvasBridge';
 import { plannerRecovery } from '../src/saas/plannerRecovery';
+import { gzipSync, strFromU8, strToU8 } from 'fflate';
 
 const tenant = { id: 'recovery-tenant', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const proposal = { version: 1, summary: 'Recovered original proposal', operations: [] };
@@ -365,5 +368,115 @@ describe('accepted planner run recovery', () => {
     await expect(cancelCanvasPlanRecovery(original.operationId)).rejects.toMatchObject({ code: 'planning_recovery_required' });
     expect(fetch.mock.calls).toHaveLength(calls);
     expect(recovery.read()?.operationId).toBe(replacement.operationId);
+  });
+
+  it('sends a shorter view of the canvas, as a new operation, once the API says how much of it fits', async () => {
+    const node = { ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'long', persona: 'A long brief. '.repeat(3000) };
+    const doc = { ...emptyDocument(), nodes: [node] };
+    const plans: Array<{ context: string; operationId: string }> = [];
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/plan')) {
+        plans.push(JSON.parse(String(init!.body)));
+        return plans.length === 1
+          ? json({ error: { code: 'context_limit', message: 'The canvas context is too large for this plan', details: { contextRoom: 30000 } } }, 413)
+          : json(run, 202);
+      }
+      if (url.endsWith('/events')) return events({ type: 'completed', text: JSON.stringify(proposal) });
+      return json({ ...run, status: 'completed', terminal: true, output: JSON.stringify(proposal) });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const plan = await requestCanvasPlan('Build a report', doc, [], new AbortController().signal, 'en');
+    expect(plan).toEqual(proposal);
+    expect(plans).toHaveLength(2);
+    expect(new TextEncoder().encode(plans[1].context).length).toBeLessThanOrEqual(30000);
+    expect(plans[1].context).toContain('more characters not shown; kept as they are]');
+    expect(plans[1].operationId).not.toBe(plans[0].operationId);
+    expect(planContextCondensed(plan)?.get('long')).toEqual(new Set(['persona']));
+  });
+
+  it('never sends a hosted plan a context past its bounds, and keeps what the view cut with the journal through a resume', async () => {
+    const long = { ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'long', persona: 'A long brief. '.repeat(10000) };
+    const doc = { ...emptyDocument(), nodes: [long] };
+    const plans: Array<{ context: string }> = [];
+    let completed = false;
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/plan')) { plans.push(JSON.parse(String(init!.body))); return json(run, 202); }
+      if (url.endsWith('/events')) return events({ type: 'running' });
+      return json(completed ? { ...run, status: 'completed', terminal: true, output: JSON.stringify(proposal) } : run);
+    });
+    vi.stubGlobal('fetch', fetch);
+    // The stream ends before the plan: the run is kept for recovery, made from the shortened request.
+    await expect(requestCanvasPlan('Build a report', doc, [], new AbortController().signal, 'en')).rejects.toMatchObject({ code: 'planning_recovery_required' });
+    expect(plans).toHaveLength(1);
+    expect(new TextEncoder().encode(plans[0].context).length).toBeLessThanOrEqual(120000 - 256);
+    const kept = plannerRecovery({ tenant, canvasId: 'recovery-canvas' }, []).read();
+    const operationId = kept?.operationId;
+    expect(operationId).toBeTruthy();
+    // Kept as version 2: a page of an earlier release, which reads only version 1, refuses it rather than applying its
+    // plan as one of the whole canvas.
+    expect(kept?.version).toBe(2);
+    // Resumed: this call's own view is the whole canvas, but the plan is the shortened request's, and says so.
+    completed = true;
+    const plan = await requestCanvasPlan('Build a report', doc, [], new AbortController().signal, 'en', undefined, { recoveryOperationId: operationId });
+    expect(plan).toEqual(proposal);
+    expect(plans).toHaveLength(1);
+    expect(planContextCondensed(plan)?.get('long')).toEqual(new Set(['persona']));
+  });
+
+  it('keeps a set of any size with its request, and refuses one that is not a set before a run is admitted', async () => {
+    // A node of 250 inputs, more than the journal once kept for one node: the set used to be dropped, and its plan
+    // applied as one of the whole canvas.
+    const wide = { ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'wide' };
+    wide.contract = { ...wide.contract!, inputs: Array.from({ length: 250 }, (_, i) => ({ id: `field-${i}`, label: `Field ${i}`, type: 'text' as const, required: false,
+      value: 'A long value. '.repeat(50) })) };
+    const fetch = vi.fn(async (url: string) => url.endsWith('/plan') ? json(run, 202) : events({ type: 'completed', text: JSON.stringify(proposal) }));
+    vi.stubGlobal('fetch', fetch);
+    const plan = await requestCanvasPlan('Build a report', { ...emptyDocument(), nodes: [wide] }, [], new AbortController().signal, 'en');
+    expect(planContextCondensed(plan)?.get('wide')?.size).toBe(250);
+    fetch.mockClear();
+    const refused = await canvasFetch('/gateway-api/canvas/plan', { method: 'POST',
+      body: JSON.stringify({ prompt: 'Build a report', context: 'Context', revision: 'revision', condensed: [['wide', 'persona']] }) });
+    expect(refused.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(plannerRecovery({ tenant, canvasId: 'recovery-canvas' }).read()).toBeNull();
+  });
+
+  it('reads a journal whose set cannot be read, or whose version does not say whether it has one, as unreadable', () => {
+    const key = canvasStorageKey(`awwo.canvas.planning.run.v1:${encodeURIComponent(tenant.id)}:${encodeURIComponent('recovery-canvas')}`);
+    const entry = { tenantId: tenant.id, canvasId: 'recovery-canvas', operationId: 'kept', prompt: 'Build a report', context: 'Context', revision: 'revision' };
+    // Stored as the journal stores an entry: gzip in a version 2 envelope (plannerRecovery.ts encode).
+    const read = (stored: Record<string, unknown>) => {
+      const bytes = strToU8(JSON.stringify({ ...entry, ...stored }));
+      localStorage.setItem(key, JSON.stringify({ version: 2, encoding: 'gzip', bytes: bytes.length, data: btoa(strFromU8(gzipSync(bytes, { level: 9, mtime: 0 }), true)) }));
+      try { return plannerRecovery({ tenant, canvasId: 'recovery-canvas' }).read(); } catch (error) { return error; }
+    };
+    for (const stored of [{ version: 2, condensed: [['long', 'persona']] }, { version: 1, condensed: [['long', ['persona']]] }, { version: 2 }, { version: 3 }]) {
+      expect(read(stored), JSON.stringify(stored)).toMatchObject({ code: 'planning_recovery_storage' });
+    }
+    expect(read({ version: 2, condensed: [['long', ['persona']]] })).toMatchObject({ version: 2, condensed: [['long', ['persona']]] });
+    expect(read({ version: 1 })).toMatchObject({ version: 1 });
+  });
+
+  it('applies a run of the whole canvas that another tab started as one, even where this tab’s own view is shortened', async () => {
+    const sized = (persona: string) => ({ ...emptyDocument(), nodes: [{ ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'long', persona }] });
+    const bytes = (text: string) => new TextEncoder().encode(text).length;
+    // About 114,000 bytes of canvas: whole, it fits a hosted plan; with ten turns of conversation, even cut, it does not.
+    const doc = sized('A long brief. '.repeat(Math.floor((114_000 - bytes(buildPlanningContext(sized('x'), [], 'en'))) / 14)));
+    const longTurns = Array.from({ length: 10 }, (_, i) => ({ id: `turn-${i}`, role: 'user' as const, content: 'A long turn. '.repeat(1000) }));
+    expect(fitPlanningContext(doc, longTurns, 'en', [], {}, 120_000 - 256)?.condensed.get('long')).toEqual(new Set(['persona']));
+    const rewrite = { version: 1, summary: 'Rewrite the brief', operations: [{ type: 'update_node', nodeId: 'long', persona: 'A new brief' }] };
+    const fetch = vi.fn(async (url: string) => url.endsWith('/plan') ? json(run, 202)
+      : url.endsWith('/events') ? events({ type: 'completed', text: JSON.stringify(rewrite) }) : json(run));
+    vi.stubGlobal('fetch', fetch);
+    // The other tab asked with no conversation: the whole canvas fits, and its run is kept with no fields shown in part.
+    await plannerRecovery({ tenant, canvasId: 'recovery-canvas' }).begin('Build a report', canvasPlanRevision(doc), buildPlanningContext(doc, [], 'en'));
+    const other = plannerRecovery({ tenant, canvasId: 'recovery-canvas' }).read();
+    expect(other?.version).toBe(1);
+    expect(other?.condensed).toBeUndefined();
+    // This tab's ten long turns would cut the brief; the plan it reads is the other tab's, made from the whole canvas.
+    const plan = await requestCanvasPlan('Build a report', doc, longTurns, new AbortController().signal, 'en');
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
+    expect(planContextCondensed(plan)).toBeUndefined();
+    expect((applyCanvasPlan(doc, plan, 'en').doc.nodes[0] as { persona?: string }).persona).toBe('A new brief');
   });
 });

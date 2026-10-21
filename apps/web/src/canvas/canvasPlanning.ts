@@ -5,7 +5,8 @@ import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import { figureRole } from './figureKit/figureKit';
 import type { CanvasDocument } from './canvasDoc';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, HOSTED_PAGE_TEMPLATE_ID, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS,
-  canvasPlanRevision, hostedPageOutputs, parseCanvasPlan, sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType } from './canvasPlan';
+  canvasPlanRevision, condensedFromJSON, condensedMark, condensedToJSON, hostedPageOutputs, markPlanContextCondensed, parseCanvasPlan, sharedRequirements,
+  withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
@@ -188,16 +189,77 @@ export function savePlanningConversation(value: PlanningConversation): void {
  *  (set_model is offered only with them) and how each node's last run ended. */
 export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale = 'zh', mediaKinds: ReadonlyArray<MediaKind> = [],
   extras: PlanningExtras = {}): string {
+  return planningContext(doc, messages, locale, mediaKinds, extras, { ...WHOLE_VIEW });
+}
+
+/** How much of the canvas a planning context shows. `cap`: the characters kept of each long text of a node (its persona,
+ *  requirements and criteria, input and form values, a media node's prompt), undefined for the whole text; a shared
+ *  requirement keeps what the most generous of the nodes holding it keep. `turns` and `turnCap`: the latest conversation
+ *  turns kept and the characters of each. The fields shown only in part are noted in `condensed`, node by node, and
+ *  `shortened` says whether any text was cut, the conversation's included. */
+interface PlanningView {
+  cap: (nodeId: string) => number | undefined;
+  turns: number;
+  turnCap?: number;
+  condensed?: Map<string, Set<string>>;
+  shortened?: boolean;
+}
+const WHOLE_VIEW: PlanningView = { cap: () => undefined, turns: 10 };
+
+function planningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale, mediaKinds: ReadonlyArray<MediaKind>,
+  extras: PlanningExtras, view: PlanningView): string {
   const saas = currentSaaSCanvas() !== null;
   const offeredMedia = saas ? MEDIA_PLAN_TEMPLATE_IDS.filter(kind => mediaKinds.includes(kind)) : [];
   const models = extras.models?.length ? extras.models : undefined;
+  // A shortened view shows a long text's first characters and says how many more the canvas keeps (condensedMark): only
+  // where that is shorter than the text itself, so a short value is never hidden behind a longer note.
+  let shortened = false;
+  const shorten = (text: string, keep: number | undefined): string => {
+    const characters = keep === undefined ? [] : Array.from(text);
+    if (keep === undefined || characters.length <= keep) return text;
+    const shown = characters.slice(0, keep).join('') + condensedMark(characters.length - keep, locale);
+    if (utf8Bytes(shown) >= utf8Bytes(text)) return text;
+    shortened = true;
+    return shown;
+  };
+  const mark = (nodeId: string, field: string) => {
+    if (!view.condensed) return;
+    const fields = view.condensed.get(nodeId) ?? new Set<string>();
+    view.condensed.set(nodeId, fields.add(field));
+  };
+  const short = <T>(nodeId: string, field: string, text: T): T => {
+    if (typeof text !== 'string') return text;
+    const shown = shorten(text, view.cap(nodeId));
+    if (shown !== text) mark(nodeId, field);
+    return shown as T;
+  };
   // A request copied to several nodes is shown once and named; the plan keeps it by that name (sharedRequirements).
   const requirements = sharedRequirements(doc);
   const refOf = new Map([...requirements].map(([ref, text]) => [text, ref]));
+  // The nodes holding each named requirement: it keeps what the most generous of them keeps, and when it is cut, every
+  // one of them shows its constraints only in part.
+  const holders = new Map<string, string[]>();
+  for (const node of doc.nodes) {
+    if (node.kind !== 'session' || !isTaskFrame(node.taskFrame)) continue;
+    for (const item of node.taskFrame.constraints) {
+      const ref = refOf.get(item);
+      if (ref && !holders.get(ref)?.includes(node.id)) holders.set(ref, [...(holders.get(ref) ?? []), node.id]);
+    }
+  }
+  const requirementCap = (ref: string): number | undefined => {
+    const caps = (holders.get(ref) ?? []).map(id => view.cap(id));
+    return caps.length === 0 || caps.includes(undefined) ? undefined : Math.max(...(caps as number[]));
+  };
+  const shownRequirements = [...requirements].map(([ref, text]) => {
+    const shown = shorten(text, requirementCap(ref));
+    if (shown !== text) for (const id of holders.get(ref) ?? []) mark(id, 'constraints');
+    return [ref, shown] as const;
+  });
   const graph = {
-    ...(requirements.size ? { requirements: Object.fromEntries(requirements) } : {}),
+    ...(requirements.size ? { requirements: Object.fromEntries(shownRequirements) } : {}),
     nodes: doc.nodes.map(node => {
-      if (node.kind === 'form') return { id: node.id, kind: node.kind, title: node.title, fields: node.fields };
+      if (node.kind === 'form') return { id: node.id, kind: node.kind, title: node.title,
+        fields: view.cap(node.id) === undefined ? node.fields : node.fields.map(field => ({ ...field, value: short(node.id, `input:${field.id}`, field.value) })) };
       // An assemble node runs no model: the planner sees what it reads and delivers, not its page frame.
       if (node.kind === 'assemble') return { id: node.id, kind: node.kind, title: node.title,
         inputs: node.contract.inputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
@@ -208,7 +270,7 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}), ...runView(extras.runs?.[node.id]) };
       // A media node is described by what it makes and the prompt it will make it from, never by its model.
       const media = mediaKindOf(node.agentKind);
-      if (media) return { id: node.id, templateId: media, title: node.title, prompt: activeNodeThread(node).draft, ...runView(extras.runs?.[node.id]) };
+      if (media) return { id: node.id, templateId: media, title: node.title, prompt: short(node.id, 'input:prompt', activeNodeThread(node).draft), ...runView(extras.runs?.[node.id]) };
       const template = getAgentTemplateForNode(node, locale);
       // A figure node's persona carries the kit guide after its role; the planner only reads (and writes) the role.
       const roleOf = (persona: string | undefined) => (template?.id === 'figure' && persona !== undefined ? figureRole(persona) : persona);
@@ -216,13 +278,13 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
       const frame = isTaskFrame(node.taskFrame) ? node.taskFrame : undefined;
       return { id: node.id, templateId: template?.id, title: node.title,
         // Templates already declare responsibilities below. Preserve only user-authored differences.
-        ...(persona !== roleOf(template?.persona) ? { persona } : {}),
-        ...(frame?.constraints.length ? { constraints: frame.constraints.map(item => refOf.get(item) ?? item) } : {}),
-        ...(frame?.acceptanceCriteria.length ? { acceptanceCriteria: frame.acceptanceCriteria } : {}),
+        ...(persona !== roleOf(template?.persona) ? { persona: short(node.id, 'persona', persona) } : {}),
+        ...(frame?.constraints.length ? { constraints: frame.constraints.map(item => refOf.get(item) ?? short(node.id, 'constraints', item)) } : {}),
+        ...(frame?.acceptanceCriteria.length ? { acceptanceCriteria: frame.acceptanceCriteria.map(item => short(node.id, 'acceptanceCriteria', item)) } : {}),
         // The planner sees a node's model only where it can change one; an unset node runs the workspace default.
         ...(models ? { model: node.model || DEFAULT_MODEL_REFERENCE } : {}),
         ...(node.team ? { team: true } : {}),
-        inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value })),
+        inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value: short(node.id, `input:${id}`, value) })),
         outputs: node.contract?.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}),
         ...runView(extras.runs?.[node.id]),
@@ -267,15 +329,69 @@ export function buildPlanningContext(doc: CanvasDocument, messages: PlanningMess
     ? ' When the request needs pictures, video or 3D models as assets, add one matching media node per asset with its prompt written, rather than having a text Agent describe the asset or claim a file.'
     : '需要图片、视频或3D模型素材时，为每个素材添加一个对应的媒体节点并写好提示词，不要让文字Agent用描述代替生成或声称已有文件。';
   const modelHeading = locale === 'en' ? 'Models a node can run (for set_model; "default" is the workspace default)' : '节点可用的模型（供 set_model 使用；"default" 为工作区默认模型）';
+  const turns = (view.turns > 0 ? messages.slice(-view.turns) : []).map(({ role, content, status }) => ({ role, content: shorten(content, view.turnCap), status }));
+  view.shortened = shortened;
+  // Said only when a text was shortened, so the whole view's context is as it was.
+  const shortenedNote = locale === 'en'
+    ? 'The canvas is large, so some long texts are shown only in part this time, ending in "… [N more characters not shown; kept as they are]": the canvas keeps them whole. Do not rewrite them or copy shortened text into any operation. When the user wants to change exactly such a text, return empty operations and say in summary that the canvas is too large for that text to be read here: they can edit it in the node themselves, or name that node in the request if they have not.'
+    : '画布内容较多，部分长文字这次只显示了开头，以「…〔另有 N 字未显示，保持原样〕」结尾：画布上的原文保持不变。不要改写这些文字，也不要把截短的文字写进任何操作。用户要改的正是被截短的内容时，返回空operations，并在summary里说明画布太大、这段文字这次读不全：可以直接在节点里修改，还没写明节点名称的话也可以写明后再发一次。';
   return [
     planningProtocol(saas, offeredMedia, Boolean(models)),
     guidance[0], guidance[1] + mediaGuidance, ...(saas ? [] : [orchestrationGuidance(locale, Boolean(models))]), ...guidance.slice(2, 4),
     `${guidance[4]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(templates)}`,
     ...(models ? [`${modelHeading}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(models.map(({ id, name, efforts, paid }) => ({ id, name,
       ...(efforts?.length ? { efforts } : {}), ...(paid ? { paid: true } : {}) })))}`] : []),
+    ...(shortened ? [shortenedNote] : []),
     `${guidance[5]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(graph)}`,
-    `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(messages.slice(-10).map(({ role, content, status }) => ({ role, content, status })))}`,
+    `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(turns)}`,
   ].join('\n\n');
+}
+
+/** The nodes a request is about, whose texts a shortened view keeps whole the longest: those selected, those named in
+ *  the request (by title or id), and those whose last run failed or was blocked. */
+export function planningFocus(doc: CanvasDocument, request: string, extras: PlanningExtras = {}, selected: ReadonlyArray<string> = []): Set<string> {
+  const asked = request.toLowerCase();
+  const focus = new Set(selected);
+  for (const node of doc.nodes) {
+    const title = node.title.trim().toLowerCase();
+    const state = extras.runs?.[node.id]?.state;
+    if ((Array.from(title).length >= 2 && asked.includes(title)) || request.includes(node.id) || state === 'failed' || state === 'blocked') focus.add(node.id);
+  }
+  return focus;
+}
+
+/** How each shortened view of the canvas cuts it, from the least to the most: the conversation first, then the long texts
+ *  of the nodes the request is not about, those of the nodes it is about last. */
+const FIT_LEVELS: ReadonlyArray<{ cap?: number; focusCap?: number; turns: number; turnCap?: number }> = [
+  { turns: 10, turnCap: 1200 },
+  { cap: 2000, turns: 10, turnCap: 1200 },
+  { cap: 800, turns: 8, turnCap: 600 },
+  { cap: 300, turns: 6, turnCap: 400 },
+  { cap: 100, turns: 4, turnCap: 300 },
+  { cap: 0, turns: 4, turnCap: 200 },
+  { cap: 0, focusCap: 1200, turns: 2, turnCap: 200 },
+  { cap: 0, focusCap: 300, turns: 2, turnCap: 120 },
+  { cap: 0, focusCap: 0, turns: 0 },
+];
+
+export function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/** A view of the canvas for the planner: its context, the fields it showed only in part, and whether it cut any text at
+ *  all (the conversation's included), which is what makes a plan made from it one made from a shortened view. */
+export interface FittedPlanningContext { context: string; condensed: PlanContextCondensed; shortened: boolean }
+
+/** The fullest view of the canvas whose context takes at most `room` UTF-8 bytes; null when even the shortest does not
+ *  fit. Every node, field and connection is still there, only long texts are cut. */
+export function fitPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale, mediaKinds: ReadonlyArray<MediaKind>,
+  extras: PlanningExtras, room: number, focus: ReadonlySet<string> = new Set()): FittedPlanningContext | null {
+  for (const level of FIT_LEVELS) {
+    const view: PlanningView = { cap: id => (focus.has(id) ? level.focusCap : level.cap), turns: level.turns, turnCap: level.turnCap, condensed: new Map() };
+    const context = planningContext(doc, messages, locale, mediaKinds, extras, view);
+    if (utf8Bytes(context) <= room) return { context, condensed: view.condensed!, shortened: view.shortened ?? false };
+  }
+  return null;
 }
 
 /** A node's last run as the planner reads it: the state, and the reason a failure or a block showed, kept short. */
@@ -288,7 +404,8 @@ function runView(run: PlanRunState | undefined): { run?: PlanRunState } {
 /** A planner failure that kept the server's code, so the caller can tell a malformed plan — worth
  * one more attempt — from a runtime fault, a quota rejection or a cancellation, which are not. */
 class PlanFailure extends Error {
-  constructor(message: string, readonly code: string) {
+  /** `contextRoom`: on a plan refused as too large, the bytes of canvas context the same request may carry. */
+  constructor(message: string, readonly code: string, readonly contextRoom?: number) {
     super(message);
     this.name = 'PlanFailure';
   }
@@ -305,8 +422,8 @@ function malformedPlan(error: unknown): boolean {
  * and returns the single proposal frame. An ended stream without a proposal is a failure, never
  * an empty plan — the canvas must not change on a lost connection. */
 async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale,
-  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<unknown> {
-  let proposal: { plan: unknown } | null = null;
+  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown }> {
+  let proposal: { plan: unknown; condensed?: unknown } | null = null;
   let failure = '';
   let failureCode = '';
   await readSseFrames(body, (_event, frame: any) => {
@@ -314,7 +431,7 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
     if (frame?.type === 'progress') {
       observed.last = observedProgress(frame, observed.last);
       onProgress?.(observed.last);
-    } else if (frame?.type === 'plan') proposal = { plan: frame.plan };
+    } else if (frame?.type === 'plan') proposal = { plan: frame.plan, ...(Object.hasOwn(frame, 'condensed') ? { condensed: frame.condensed } : {}) };
     else if (frame?.type === 'error') {
       failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
       failureCode = typeof frame.code === 'string' ? frame.code : '';
@@ -322,18 +439,26 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
   });
   if (failure) throw new PlanFailure(failure, failureCode);
   if (!proposal) throw new Error(canvasText(locale, 'planning.interrupted'));
-  return (proposal as { plan: unknown }).plan;
+  return proposal;
 }
 
-/** One planning attempt: its own run on the host, its own progress stream. A rejected plan is
- * reported as a PlanFailure carrying the reason so the caller can decide about another attempt. */
-async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
-  locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
+/** A view of the canvas a plan is asked from (fitPlanningContext), or the whole context alone. */
+type PlanView = Partial<FittedPlanningContext> & { context: string };
+
+/** One planning attempt with this view of the canvas: its own run on the host, its own progress stream. A rejected
+ * plan is reported as a PlanFailure carrying the reason so the caller can decide about another attempt. A hosted plan
+ * also says what the request its run was made from showed (`condensed`): the fields it showed only in part, or null for
+ * the whole canvas. The hosted app keeps that beside the request (plannerRecovery.ts), the one a resumed or another
+ * tab's plan was made from too; undefined where the host does not say (the desktop gateway). */
+async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, signal: AbortSignal,
+  locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter,
+  options?: PlanRequestOptions): Promise<{ plan: CanvasPlan; condensed?: PlanContextCondensed | null }> {
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
-    body: JSON.stringify({ prompt, context: buildPlanningContext(doc, messages, locale, options?.mediaKinds, { models: options?.models, runs: options?.runs }), ...(saas ? { revision: canvasPlanRevision(doc),
-      ...(options?.recoveryOperationId !== undefined ? { recoveryOperationId: options.recoveryOperationId } : {}) } : {}) }),
+    body: JSON.stringify({ prompt, context: view.context, ...(saas ? { revision: canvasPlanRevision(doc),
+      ...(options?.recoveryOperationId !== undefined ? { recoveryOperationId: options.recoveryOperationId } : {}),
+      ...(view.shortened ? { condensed: condensedToJSON(view.condensed ?? new Map()) } : {}) } : {}) }),
   });
   // A progress stream carries its own terminal frames, so its transport status is already 200.
   // Probed defensively: a non-streaming planner (and a minimal test double) may expose neither
@@ -341,11 +466,19 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   const contentType = typeof response.headers?.get === 'function' ? response.headers.get('content-type') : null;
   const streaming = response.ok && Boolean(response.body) && (contentType || '').includes('text/event-stream');
   let raw: unknown;
+  let condensed: PlanContextCondensed | null | undefined;
   if (streaming) {
-    raw = await readPlanStream(response.body!, locale, observed, onProgress);
+    const proposal = await readPlanStream(response.body!, locale, observed, onProgress);
+    raw = proposal.plan;
+    // A set that cannot be read could let the plan write over what its view showed only in part: no plan is applied.
+    if (Object.hasOwn(proposal, 'condensed')) {
+      condensed = proposal.condensed === null ? null : condensedFromJSON(proposal.condensed);
+      if (condensed === undefined) throw new Error(canvasText(locale, 'planning.invalidResponse'));
+    }
   } else {
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new PlanFailure(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'), typeof payload?.code === 'string' ? payload.code : '');
+    if (!response.ok) throw new PlanFailure(typeof payload?.error === 'string' ? payload.error : canvasText(locale, 'planning.unavailable'), typeof payload?.code === 'string' ? payload.code : '',
+      Number.isSafeInteger(payload?.contextRoom) && payload.contextRoom >= 0 ? payload.contextRoom : undefined);
     if (!payload || !Object.hasOwn(payload, 'plan')) throw new Error(canvasText(locale, 'planning.invalidResponse'));
     raw = payload.plan;
   }
@@ -363,7 +496,7 @@ async function planOnce(prompt: string, doc: CanvasDocument, messages: PlanningM
   // operation this workspace does not support, which the prompt already rules out, so it is a decision
   // rather than a slip and asking again would spend another run to be told the same thing.
   if (saas) plan = saasPlan(plan, locale);
-  return plan;
+  return { plan, ...(condensed !== undefined ? { condensed } : {}) };
 }
 
 export type CanvasPlanRecovery = { pending: boolean; operationId?: string; prompt?: string; matches?: boolean };
@@ -382,35 +515,74 @@ export async function cancelCanvasPlanRecovery(operationId: string, signal?: Abo
   if (!response.ok) throw new PlanFailure(payload.error, payload.code);
 }
 
-/** `mediaKinds`: the media nodes the workspace can generate, which the planner may then add. */
-export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind> } & PlanningExtras;
+/** `mediaKinds`: the media nodes the workspace can generate, which the planner may then add. `selected`: the nodes the
+ *  reader selected, whose texts a shortened view of the canvas keeps whole the longest (planningFocus). */
+export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind>; selected?: ReadonlyArray<string> } & PlanningExtras;
+// A hosted plan's own bounds (planning.go maxPlanContextBytes, maxRunPromptBytes and planContextRoomMargin): a larger
+// context is never sent whole there. The desktop gateway takes its own (apps/gateway/src/canvas/routes.ts).
+const MAX_PLAN_CONTEXT_BYTES = 120_000;
+const MAX_PLAN_PROMPT_BYTES = 128_000;
+const PLAN_REQUEST_JOIN_BYTES = utf8Bytes('\n\nUser request:\n');
+const PLAN_CONTEXT_MARGIN = 256;
+/** Shorter views a plan refused as too large may be asked again with, each shorter: a shorter request can also move to
+ *  the operator's planner model (planner_model.go), with a budget of its own. */
+const PLAN_SHRINKS = 3;
 export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, messages: PlanningMessage[], signal: AbortSignal,
   locale: UiLocale = 'zh', onProgress?: PlanProgressReporter, options?: PlanRequestOptions): Promise<CanvasPlan> {
   const scope = currentSaaSCanvas();
   const saas = scope !== null;
   const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
+  const extras: PlanningExtras = { models: options?.models, runs: options?.runs };
+  const fit = (room: number) => fitPlanningContext(doc, messages, locale, options?.mediaKinds ?? [], extras, room, planningFocus(doc, prompt, extras, options?.selected));
+  // The canvas alone is too large, or the room the request, its files and the selected knowledge leave is too small.
+  const contextFull = () => new PlanFailure(canvasText(locale, 'planning.contextFull'), 'context_limit');
+  const contextCrowded = () => new PlanFailure(canvasText(locale, 'planning.contextCrowded'), 'context_limit');
+  const whole = buildPlanningContext(doc, messages, locale, options?.mediaKinds, extras);
+  const wholeBytes = utf8Bytes(whole), promptBytes = utf8Bytes(prompt);
+  const wholeFits = !saas || (wholeBytes <= MAX_PLAN_CONTEXT_BYTES && wholeBytes + PLAN_REQUEST_JOIN_BYTES + promptBytes <= MAX_PLAN_PROMPT_BYTES);
+  // A recovery replays its run's own request, which the host keeps (plannerRecovery.ts): it is sent as it was.
+  const first: PlanView | null = options?.recoveryOperationId !== undefined || wholeFits ? { context: whole }
+    : fit(Math.min(MAX_PLAN_CONTEXT_BYTES, MAX_PLAN_PROMPT_BYTES - PLAN_REQUEST_JOIN_BYTES - promptBytes) - PLAN_CONTEXT_MARGIN);
+  if (!first) throw contextFull();
+  let view: PlanView = first;
+  let shrinks = 0;
   // Exactly one more attempt, and only for a malformed plan. A second retry would let a persistently
   // broken model spend the workspace's run quota in a loop, and retrying a runtime fault, a quota
   // rejection or a cancellation would spend it on something that cannot succeed. Each attempt is its
   // own run on the host, so what it costs stays visible rather than hidden inside one operation.
   let diagnosis: unknown;
-  for (let attempt = 0; ; attempt++) {
+  for (let retried = false; ;) {
     try {
-      const plan = await planOnce(prompt, doc, messages, signal, locale, saas, observed, onProgress, options);
+      const { plan, condensed } = await planOnce(prompt, view, doc, signal, locale, saas, observed, onProgress, options);
       if (signal.aborted || currentSaaSCanvas() !== scope) throw new PlanFailure(canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
+      // What the host kept with the request this plan's run was made from comes first, the whole canvas (null) too: a
+      // resumed run's, or one another tab started, was made from that request rather than from the view built here.
+      const shownInPart = condensed !== undefined ? condensed : view.shortened ? view.condensed : undefined;
+      if (shownInPart) markPlanContextCondensed(plan, shownInPart);
       return plan;
     } catch (error) {
       // A late old-workspace failure must never turn the malformed-plan retry into an admission
       // under whichever tenant happens to be active now.
       if (currentSaaSCanvas() !== scope) throw new PlanFailure(error instanceof Error ? error.message : canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
       if (error instanceof PlanFailure && ['planning_recovery_required', 'planning_recovery_storage', 'unauthorized'].includes(error.code)) throw error;
+      // A plan too large for its model was refused before any run, with how much canvas context the same request may
+      // carry: it goes again with a shorter view of the same canvas, which costs nothing (PLAN_SHRINKS times, each shorter).
+      if (error instanceof PlanFailure && error.code === 'context_limit' && error.contextRoom !== undefined && !signal.aborted
+        && options?.recoveryOperationId === undefined) {
+        const next = shrinks < PLAN_SHRINKS && error.contextRoom < utf8Bytes(view.context) ? fit(error.contextRoom) : null;
+        if (!next) throw contextCrowded();
+        view = next;
+        shrinks++;
+        continue;
+      }
       // The first failure describes what the model actually produced. The retry is our own
       // mitigation, so if it fails too its reason must not replace that diagnosis — reporting
       // "no plan was returned" for what was really an unsupported operation tells the reader
       // nothing they can act on.
-      if (attempt > 0) throw diagnosis;
+      if (retried) throw diagnosis;
       if (signal.aborted || options?.recoveryOperationId !== undefined || !malformedPlan(error)) throw error;
       diagnosis = error;
+      retried = true;
       // The next attempt starts from nothing, so the counts restart with it; keeping the previous
       // ones would report work that no longer exists. The attempt number stays on every report
       // that follows, so the reader knows this is the second run rather than a restart.

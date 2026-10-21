@@ -580,7 +580,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func fail(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "requestId": w.Header().Get("X-Request-ID"), "details": map[string]any{}}})
+	failDetails(w, status, code, message, map[string]any{})
+}
+
+// failDetails is fail with machine-readable details a client can act on (no user content).
+func failDetails(w http.ResponseWriter, status int, code, message string, details map[string]any) {
+	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "requestId": w.Header().Get("X-Request-ID"), "details": details}})
 }
 func (a *App) dbError(w http.ResponseWriter, e error) {
 	// Database messages, details and scan causes can contain user data or keys.

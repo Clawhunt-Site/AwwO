@@ -1,6 +1,7 @@
 export const API_BASE = '/api/v1';
 export class SaaSApiError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  /** `details`: the API's machine-readable details of the refusal (no user content), such as a plan's contextRoom. */
+  constructor(public status: number, public code: string, message: string, public details: Readonly<Record<string, unknown>> = {}) { super(message); }
 }
 // Once the API reports that the signed-in session has ended, nothing but the sign-in routes is
 // sent again: pollers stop reaching the server, and the page offers a new sign-in instead.
@@ -38,8 +39,10 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
+    const details = payload?.error?.details;
     const error = new SaaSApiError(response.status, payload?.error?.code || 'request_failed',
-      payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : `请求失败（${response.status}）`));
+      payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : `请求失败（${response.status}）`),
+      details && typeof details === 'object' && !Array.isArray(details) ? details : {});
     if (error.status === 401 && error.code === 'unauthorized') endSession(sentUnder);
     throw error;
   }

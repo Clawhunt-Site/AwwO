@@ -142,16 +142,14 @@ const (
 )
 
 // plannerModelRefusal reports why this planning request may not use the operator's planner model now, or "" when
-// it may: it fits the input ceiling, and neither the workspace's nor the deployment's daily planner-model calls
-// are used up. Only operator-paid calls count, so a workspace's own calls of the same model never use up its
-// planner allowance. Counts include calls in flight, so a burst cannot overshoot a ceiling by more than the calls
-// racing it.
+// it may: neither the workspace's nor the deployment's daily planner-model calls are used up, and it fits the input
+// ceiling. Only operator-paid calls count, so a workspace's own calls of the same model never use up its planner
+// allowance. Counts include calls in flight, so a burst cannot overshoot a ceiling by more than the calls racing it.
+// The ceilings come first: a plan refused as too large is offered the room of the planner model (planning.go
+// plannerModelRoom) only for plannerInputTooLarge, so only while that model would take a shorter one.
 func (a *App) plannerModelRefusal(ctx context.Context, q pgx.Tx, tid string, inputBytes int) (string, error) {
 	if a.cfg.PlannerModel == "" || a.cfg.UserCredentials {
 		return plannerOff, nil
-	}
-	if inputBytes > a.cfg.PlannerMaxInputBytes {
-		return plannerInputTooLarge, nil
 	}
 	var mine, all int
 	if e := q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE mi.tenant_id=$2), count(*) FROM model_invocations mi
@@ -164,7 +162,27 @@ func (a *App) plannerModelRefusal(ctx context.Context, q pgx.Tx, tid string, inp
 	if all >= a.cfg.PlannerTotalPerDay {
 		return plannerDeploymentDay, nil
 	}
+	if inputBytes > a.cfg.PlannerMaxInputBytes {
+		return plannerInputTooLarge, nil
+	}
 	return "", nil
+}
+
+// plannerModelSnapshot probes the operator's planner model for a workspace's canvas plan (createRun) under its own
+// catalog: the unrestricted entitlement it is probed under must never be the one a fallback to the default model freezes
+// for the workspace. withheld: it is a DeepSeek one (explicitOnlyProvider) the workspace may not use.
+func (a *App) plannerModelSnapshot(ctx context.Context, entitlement modelEntitlement, runtime, instructions string, team *nodeTeam) (executionSnapshot, bool, error) {
+	unrestricted, _ := newModelEntitlement(false, nil)
+	s, err := a.runtimeSnapshot(ctx, unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team)
+	return s, err == nil && s.Health.modelProvider(s.Model) == explicitOnlyProvider && !entitlement.grants(s.Model), err
+}
+
+// plannerModelTakes says whether the operator's planner model would run a shorter plan of the workspace, as far as its
+// size leaves aside: it can be probed and is not withheld. A plan refused as too large is offered that model's room only
+// then (planning.go plannerModelRoom).
+func (a *App) plannerModelTakes(ctx context.Context, entitlement modelEntitlement, runtime, instructions string, team *nodeTeam) bool {
+	_, withheld, err := a.plannerModelSnapshot(ctx, entitlement, runtime, instructions, team)
+	return err == nil && !withheld
 }
 
 // operatorPaidCall is the one rule for whether reserveInvocation treats a call as the operator's: the run's

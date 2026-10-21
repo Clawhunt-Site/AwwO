@@ -1,10 +1,16 @@
 import { api, SaaSApiError, tenantPath } from './api';
+import { condensedFromJSON } from '../canvas/canvasPlan';
 import { canvasStorageKey } from '../canvas/canvasStorage';
 import { canvasText } from './canvasErrors';
 import { gunzipSync, gzipSync, strFromU8, strToU8 } from 'fflate';
 
 type Scope = { tenant: { id: string }; canvasId: string };
-type Entry = { version: 1; tenantId: string; canvasId: string; operationId: string; prompt: string; context?: string; revision: string; knowledgeRevisionIds?: string[]; runId?: string };
+/** `condensed`: the fields of each node the request's context showed only in part, kept with it so that the plan its run
+ *  makes is applied as one made from that view, whoever reads it (canvasPlanning.ts planOnce); absent for a request of
+ *  the whole canvas. Such an entry is version 2, which a page of an earlier release refuses as unreadable: it would apply
+ *  the plan as one of the whole canvas. A journal whose set cannot be read is unreadable, never one of the whole canvas. */
+type Entry = { version: 1 | 2; tenantId: string; canvasId: string; operationId: string; prompt: string; context?: string; revision: string; knowledgeRevisionIds?: string[]; runId?: string;
+  condensed?: Array<[string, string[]]> };
 export type PlannerRun = { id: string; status?: string; terminal?: boolean; output?: string; error?: string };
 const terminal = (run: PlannerRun) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status ?? '');
 export const planningRecoveryRequired = () => new SaaSApiError(409, 'planning_recovery_required', canvasText(
@@ -73,11 +79,12 @@ export function plannerRecovery(scope: Scope, knowledgeRevisionIds: readonly str
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       const value = decode(raw);
-      if (value.version !== 1 || value.tenantId !== scope.tenant.id || value.canvasId !== scope.canvasId
+      if ((value.version !== 1 && value.version !== 2) || value.tenantId !== scope.tenant.id || value.canvasId !== scope.canvasId
         || typeof value.operationId !== 'string' || !value.operationId || typeof value.prompt !== 'string'
         || (value.context !== undefined && typeof value.context !== 'string')
         || typeof value.revision !== 'string' || (value.runId !== undefined && typeof value.runId !== 'string')
-        || (value.knowledgeRevisionIds !== undefined && (!Array.isArray(value.knowledgeRevisionIds) || value.knowledgeRevisionIds.some(id => typeof id !== 'string')))) throw storageError();
+        || (value.knowledgeRevisionIds !== undefined && (!Array.isArray(value.knowledgeRevisionIds) || value.knowledgeRevisionIds.some(id => typeof id !== 'string')))
+        || (value.version === 2) !== (value.condensed !== undefined) || (value.condensed !== undefined && !condensedFromJSON(value.condensed))) throw storageError();
       return value;
     } catch { throw storageError(); }
   }
@@ -120,7 +127,8 @@ export function plannerRecovery(scope: Scope, knowledgeRevisionIds: readonly str
     if (!value.runId) { value.runId = run.id; write(value); }
     return run;
   }
-  async function beginUnlocked(prompt: string, revision: string, context: string, signal?: AbortSignal, expectedOperationId?: string) {
+  async function beginUnlocked(prompt: string, revision: string, context: string, signal?: AbortSignal, expectedOperationId?: string,
+    condensed?: Array<[string, string[]]>) {
     let entry = read();
     if (expectedOperationId !== undefined && entry?.operationId !== expectedOperationId) throw planningRecoveryRequired();
     const recovering = Boolean(entry);
@@ -130,7 +138,8 @@ export function plannerRecovery(scope: Scope, knowledgeRevisionIds: readonly str
       if (run) return { entry, run, recovering: true };
       if (entry.context === undefined) throw planningRecoveryRequired();
     } else {
-      entry = { version: 1, tenantId: scope.tenant.id, canvasId: scope.canvasId, operationId: crypto.randomUUID(), prompt, context, revision, knowledgeRevisionIds: knowledge };
+      entry = { version: condensed ? 2 : 1, tenantId: scope.tenant.id, canvasId: scope.canvasId, operationId: crypto.randomUUID(), prompt, context, revision, knowledgeRevisionIds: knowledge,
+        ...(condensed ? { condensed } : {}) };
       // Fail closed before admission if refresh could otherwise forget an accepted paid run.
       write(entry);
     }
@@ -162,9 +171,10 @@ export function plannerRecovery(scope: Scope, knowledgeRevisionIds: readonly str
       return action();
     });
   }
-  const begin = (prompt: string, revision: string, context: string, signal?: AbortSignal, expectedOperationId?: string) => locked(() => {
+  const begin = (prompt: string, revision: string, context: string, signal?: AbortSignal, expectedOperationId?: string,
+    condensed?: Array<[string, string[]]>) => locked(() => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    return beginUnlocked(prompt, revision, context, signal, expectedOperationId);
+    return beginUnlocked(prompt, revision, context, signal, expectedOperationId, condensed);
   });
   const lookup = (entry: Entry, signal?: AbortSignal) => locked(async () => (await lookupUnlocked(entry, signal))!);
   const clear = (entry: Entry) => locked(() => clearUnlocked(entry));

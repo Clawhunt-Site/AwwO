@@ -534,19 +534,18 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	// otherwise, and whenever that model cannot be snapshotted, on the runtime's default model as before.
 	var snapshot executionSnapshot
 	operatorPlanner := false
+	plannerRefusal := ""
 	if kind == "planner" && isPlannerRequest(r) {
 		refusal, err := a.plannerModelRefusal(r.Context(), tx, tid, len(b.Prompt)+len(instructions))
 		if err != nil {
 			a.dbError(w, err)
 			return
 		}
+		plannerRefusal = refusal
 		if refusal == "" {
-			// Its own catalog: the unrestricted entitlement it is probed under must never be the one a fallback
-			// to the default model freezes for the workspace.
-			unrestricted, _ := newModelEntitlement(false, nil)
-			s, err := a.runtimeSnapshot(r.Context(), unrestricted, runtimeCatalog{}, runtime, a.cfg.PlannerModel, "", instructions, team)
+			s, withheld, err := a.plannerModelSnapshot(r.Context(), entitlement, runtime, instructions, team)
 			switch {
-			case err == nil && s.Health.modelProvider(s.Model) == explicitOnlyProvider && !entitlement.grants(s.Model):
+			case withheld:
 				// The planner model is the operator's, outside the workspace's allowlist, but a DeepSeek one is not
 				// (explicitOnlyProvider): where the workspace may not use it, the plan runs on the default model.
 				a.log.Info("planner model not admitted; planning on the default model", "reason", "explicit_only_model")
@@ -666,7 +665,23 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
 	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
-	if team == nil && (len(framedPrompt) > 128000 || len(framedPrompt)+len(framedInstructions)+overhead > budget || ((snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	instructionsFit := (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
+	excess := max(len(framedPrompt)-maxRunPromptBytes, len(framedPrompt)+len(framedInstructions)+overhead-budget)
+	if team == nil && (excess > 0 || !instructionsFit) {
+		// A plan the canvas assistant asked for learns how much of its canvas context would fit (planning.go), with
+		// space for personal settings its size left out, and on the operator's planner model where only its size kept
+		// the plan off it.
+		if c := plannerContextOf(r); kind == "planner" && c.bytes > 0 {
+			room := 0
+			if instructionsFit {
+				room = planContextRoom(c.bytes, excess+c.droppedPersonal)
+				if plannerRefusal == plannerInputTooLarge && a.plannerModelTakes(r.Context(), entitlement, runtime, instructions, team) {
+					room = max(room, a.plannerModelRoom(c, len(b.Prompt), len(instructions)))
+				}
+			}
+			failPlanContext(w, room)
+			return
+		}
 		fail(w, 413, "context_limit", "Prompt and instructions exceed the selected runtime context budget")
 		return
 	}

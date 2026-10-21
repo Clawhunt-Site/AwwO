@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,16 +25,22 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := b.Context + "\n\nUser request:\n" + b.Prompt
-	if strings.TrimSpace(b.Prompt) == "" || len(b.Prompt) > 8000 || len(b.Context) > 120000 || len(prompt) > 128000 || len(b.OperationID) < 8 || len(b.OperationID) > 200 {
+	if strings.TrimSpace(b.Prompt) == "" || len(b.Prompt) > 8000 || len(b.OperationID) < 8 || len(b.OperationID) > 200 {
 		fail(w, 400, "invalid_input", "Planner requires bounded prompt, context and operationId")
 		return
 	}
 	// The asker's own standing preferences (设置 → 个性化) go before the request, added by createRun after it hashes
 	// the request, so a retry still matches its first attempt when the settings changed between them. A request already
-	// near the run's size limit is planned without them rather than refused.
+	// near the run's size limit is planned without them rather than refused; the room a refusal gives leaves space for
+	// them, as a request that shorter carries them again.
 	personal := a.plannerPersonalization(r.Context(), currentUser(r).ID)
-	if len(prompt)+len(personal) > 128000 {
-		personal = ""
+	if max(len(b.Context)-maxPlanContextBytes, len(prompt)-maxRunPromptBytes) > 0 {
+		failPlanContext(w, planContextRoom(len(b.Context), max(len(b.Context)-maxPlanContextBytes, len(prompt)+len(personal)-maxRunPromptBytes)))
+		return
+	}
+	dropped := 0
+	if len(prompt)+len(personal) > maxRunPromptBytes {
+		personal, dropped = "", len(personal)
 	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
 	tx, e := a.db.Begin(r.Context())
@@ -91,11 +98,52 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs, AttachmentText: b.Prompt})
 	// Only this request may run on the operator's planner model (planner_model.go).
-	next := withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context))
+	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context)), plannerContext{len(b.Context), dropped})
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")
 	a.createRun(w, next)
+}
+
+// A plan's context is the page's own view of the canvas (canvasPlanning.ts buildPlanningContext). A plan too large for
+// these bounds or for its model's budget (createRun) is refused with how many bytes that context may take for the
+// same request to fit (details.contextRoom), so the page sends a shorter view of the same canvas instead of failing:
+// 0 when no shorter context fits, the request, the files it names or the selected knowledge taking the room themselves.
+const (
+	maxPlanContextBytes   = 120000
+	maxRunPromptBytes     = 128000
+	planContextRoomMargin = 256
+)
+
+type plannerContextKey struct{}
+
+// plannerContext is what createRun needs of a plan's context for a refusal's room: its size in the prompt planCanvas
+// hands it, and the personal settings left out of that prompt for its size, which a shorter request carries again.
+type plannerContext struct{ bytes, droppedPersonal int }
+
+func withPlannerContext(r *http.Request, c plannerContext) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), plannerContextKey{}, c))
+}
+
+func plannerContextOf(r *http.Request) plannerContext {
+	c, _ := r.Context().Value(plannerContextKey{}).(plannerContext)
+	return c
+}
+
+// planContextRoom is how many bytes a context of contextBytes may keep once excess bytes too many come out of it.
+func planContextRoom(contextBytes, excess int) int {
+	return max(0, contextBytes-excess-planContextRoomMargin)
+}
+
+// plannerModelRoom is the room of a plan the operator's planner model was refused for its size alone (planner_model.go):
+// a context short enough for its input bound runs on it, whose budget may take what the default model cannot. promptBytes
+// and instructionBytes are the refused request's, with its personal settings.
+func (a *App) plannerModelRoom(c plannerContext, promptBytes, instructionBytes int) int {
+	return planContextRoom(c.bytes, promptBytes+c.droppedPersonal+instructionBytes-a.cfg.PlannerMaxInputBytes)
+}
+
+func failPlanContext(w http.ResponseWriter, room int) {
+	failDetails(w, 413, "context_limit", "The canvas context is too large for this plan", map[string]any{"contextRoom": room})
 }
 
 // planFieldTypes are the field types a plan may add or change to: the canvas's own (FIELD_TYPES in

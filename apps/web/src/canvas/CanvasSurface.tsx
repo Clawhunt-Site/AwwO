@@ -48,7 +48,7 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, type CanvasPlanMedia, type CanvasPlanModelChoice } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, type CanvasPlanMedia, type CanvasPlanModelChoice } from './canvasPlan';
 import { withAssistantModel } from './assistantModel';
 import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
@@ -3075,7 +3075,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds,
           models: automaticEntries(planModels).filter(entry => entry.available).map(entry => ({ id: entry.model, name: entry.name || entry.model,
             ...(entry.efforts?.length ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { paid: true } : {}) })),
-          runs: planRuns });
+          runs: planRuns, selected: selection });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (revisionOf(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
         appendPlanningMessage(`${id}-assistant`, surfaceNotice(t, 'plan_stale'), 'stale', route);
@@ -3117,7 +3117,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // What the canvas now holds, node by node, under the model's own summary of what it meant to do.
       const modelName = (id: string) => planModels.find(entry => entry.model === id)?.name || id;
       const changes = changed ? describePlanChanges(before, applied.doc, locale, t, modelName) : [];
+      // A plan made from a shortened view of a large canvas says so: those texts were left as they are.
+      const condensedNodes = jev ? 0 : planContextCondensed(plan)?.size ?? 0;
       const lead = [...(!changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary]),
+        ...(condensedNodes ? [t('planning.condensed', { count: condensedNodes })] : []),
         ...(addedMedia ? [t('planning.mediaAdded', { count: addedMedia })] : []),
         ...(changes.length ? [t('planning.changesHeader'), ...changes.map(line => `· ${line}`)] : [])];
       const reply = applied.adjustments.length ? [...lead, ...(changed ? [t('planning.adjusted', { count: applied.adjustments.length })] : []),

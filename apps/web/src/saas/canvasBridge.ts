@@ -3,7 +3,7 @@ import { modelEffortCapability, runtimeDefinitions, runtimeModels, withPlanTag, 
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText, planErrorMessage } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS } from '../canvas/canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS, condensedFromJSON, condensedToJSON } from '../canvas/canvasPlan';
 import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
 import type { UploadedCanvasFile } from '../canvas/attachments';
 
@@ -237,8 +237,12 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       await saveCanvas();
       if (active !== scope || init.signal?.aborted) throw new Error(canvasText('工作区已切换或操作已取消。', 'The workspace changed or the operation was cancelled.'));
       const recovery = plannerRecovery(scope, knowledgeRevisionIds);
+      // Which fields a shortened request showed only in part goes into the journal with it (canvasPlanning.ts planOnce).
+      // A set that is not one is refused before the run is admitted, rather than kept as a whole request would be.
+      const condensed = body.condensed === undefined || body.condensed === null ? undefined : condensedFromJSON(body.condensed);
+      if (body.condensed !== undefined && body.condensed !== null && !condensed) throw new SaaSApiError(400, 'invalid_input', 'The planning request is malformed.');
       const { entry, run } = await recovery.begin(body.prompt, body.revision ?? body.context ?? '', body.context, init.signal ?? undefined,
-        typeof body.recoveryOperationId === 'string' ? body.recoveryOperationId : undefined);
+        typeof body.recoveryOperationId === 'string' ? body.recoveryOperationId : undefined, condensed ? condensedToJSON(condensed) : undefined);
       // A user cancel and the stall backstop can land together; cancelling once keeps that race
       // from issuing a second request the server would only have to discard.
       let cancelRequest: Promise<void> | undefined;
@@ -407,7 +411,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             let plan: unknown;
             let parsed = false;
             try { plan = JSON.parse(output.trim()); parsed = true; } catch { parsed = false; }
-            if (parsed) emit({ type: 'plan', plan });
+            // The plan says what the request its run was made from showed, whichever tab or resume reads it: the fields
+            // shown only in part (the journal's, which read() checked), or null for the whole canvas.
+            if (parsed) emit({ type: 'plan', plan, condensed: entry.condensed ?? null });
             // Same cause as the server's own rejection — the model's structure, not the request — so
             // it carries the same code and the caller may retry it on the same terms.
             else emit({ type: 'error', code: 'invalid_canvas_plan', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
@@ -536,6 +542,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
     }
     return json({ code: 'unsupported_operation', error: canvasText(`该功能尚未接入 SaaS：${path}`, `This feature is not connected to SaaS: ${path}`) }, 501);
   } catch (error) {
-    return json({ code: (error as { code?: string })?.code || 'request_failed', error: canvasErrorMessage(error) }, (error as { status?: number })?.status || 502);
+    // A plan refused as too large says how much canvas context fits, so the canvas can send a shorter view of itself.
+    const room = error instanceof SaaSApiError ? error.details.contextRoom : undefined;
+    return json({ code: (error as { code?: string })?.code || 'request_failed', error: canvasErrorMessage(error),
+      ...(typeof room === 'number' ? { contextRoom: room } : {}) }, (error as { status?: number })?.status || 502);
   }
 }

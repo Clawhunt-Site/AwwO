@@ -87,6 +87,44 @@ export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; p
 export interface CanvasPlanModelChoice { runtime: string; model: string; available: boolean; name?: string; efforts?: ReadonlyArray<string> }
 export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice> }
 
+/** The fields of each node a plan's context showed only in part (canvasPlanning.ts fitPlanningContext): 'persona',
+ *  'constraints' (its own items or a shared requirement it holds), 'acceptanceCriteria' and 'input:<field id>' (a form's
+ *  fields and a media node's prompt too). The plan leaves them as they are, since its planner never saw them whole, and
+ *  writes no text copied from a shortened one anywhere (applyCanvasPlan). An empty set: only the conversation was cut. */
+export type PlanContextCondensed = ReadonlyMap<string, ReadonlySet<string>>;
+/** A PlanContextCondensed as the planning recovery journal keeps it beside its request (plannerRecovery.ts). */
+export type PlanContextCondensedJSON = Array<[string, string[]]>;
+const condensedPlans = new WeakMap<object, PlanContextCondensed>();
+/** Say that a plan was made from a shortened view of the canvas; applyCanvasPlan then honours it for that plan. */
+export function markPlanContextCondensed(plan: CanvasPlan, condensed: PlanContextCondensed): void { condensedPlans.set(plan, condensed); }
+export function planContextCondensed(plan: unknown): PlanContextCondensed | undefined {
+  return plan !== null && typeof plan === 'object' ? condensedPlans.get(plan) : undefined;
+}
+export const condensedToJSON = (condensed: PlanContextCondensed): PlanContextCondensedJSON => [...condensed].map(([id, fields]) => [id, [...fields]]);
+/** The set a journal or a host kept, or undefined for anything not shaped as one. Any document's set is one: it names
+ *  only nodes and fields its request's context showed, which the journal bounds with that request (plannerRecovery.ts). */
+export function condensedFromJSON(value: unknown): PlanContextCondensed | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const condensed = new Map<string, Set<string>>();
+  for (const item of value) {
+    if (!Array.isArray(item) || item.length !== 2 || typeof item[0] !== 'string' || !Array.isArray(item[1])
+      || !item[1].every((field: unknown) => typeof field === 'string')) return undefined;
+    // A node named twice keeps the fields of both.
+    condensed.set(item[0], new Set([...(condensed.get(item[0]) ?? []), ...item[1]]));
+  }
+  return condensed;
+}
+/** The words a shortened text ends with in a plan's context: how many more characters the canvas keeps. */
+export function condensedMark(left: number, locale: UiLocale): string {
+  return locale === 'en' ? `… [${left} more characters not shown; kept as they are]` : `…〔另有 ${left} 字未显示，保持原样〕`;
+}
+// Matched loosely: a model copying the words may change the ellipsis, the brackets, the spaces (a line broken and
+// indented, in the number too), the number's digit grouping or the end. The number and the spaces are bounded, one run
+// of separators between two digits, so that no text makes the match slow.
+const CONDENSED_MARK = /另有\s{0,40}\d(?:[,，.'\s]{0,40}\d){0,12}\s{0,40}字\s{0,40}未显示|\d(?:[,.'\s]{0,40}\d){0,12}\s{1,40}more\s{1,40}characters?\s{1,40}not\s{1,40}shown/i;
+/** Whether a text carries shortened text from a plan's context, which a plan made from one must never write. */
+export const carriesCondensedText = (text: string | undefined): boolean => text !== undefined && CONDENSED_MARK.test(text);
+
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
@@ -392,16 +430,42 @@ function setMediaPrompt(node: SessionNode, fieldId: string, value: string, media
   node.threads = updateNodeDraft(node, characters.slice(0, max).join('')).threads;
 }
 
+/** Say that a text the plan's context showed only in part was left as it is (zhName / enName: the text's name). */
+function keptPartialAdjust(node: CanvasNode, zhName: string, enName: string, adjust: Adjust): void {
+  adjust(`没有改动「${titleOf(node)}」的「${zhName}」：画布内容较多，这次规划只给助手看了它的开头。要改它，可以直接在节点里改，或在请求里写明这个节点的名称`,
+    `Left the ${enName} of “${titleOf(node)}” as it was: the canvas is large, and this plan showed the assistant only its beginning. To change it, edit it in the node, or name the node in your request`);
+}
+/** Say that a text was left as it was because it copied text the plan's context showed only in part; on a node the plan
+ *  adds (`added`), that the node was added without it. */
+function copiedAdjust(node: CanvasNode, zhName: string, enName: string, adjust: Adjust, added = false): void {
+  if (added) adjust(`新增的「${titleOf(node)}」没有写入「${zhName}」：方案给的内容抄了只显示了开头的文字`,
+    `Added “${titleOf(node)}” without the ${enName} the plan gave it: that text copied text the plan saw only in part`);
+  else adjust(`没有改动「${titleOf(node)}」的「${zhName}」：新的内容抄了只显示了开头的文字`,
+    `Left the ${enName} of “${titleOf(node)}” as it was: the new text copied text the plan saw only in part`);
+}
+
+/** What a plan made from a shortened view of the canvas may not write (PlanContextCondensed): `partial` says which fields
+ *  of the node it is applied to the view showed only in part; copied shortened text is refused everywhere. `added`: the
+ *  node is one the plan adds. */
+interface ShownInPart { partial: (field: string) => boolean; added?: boolean }
+
 /** Fill one input, or say why it was left alone: a field that is not there, or a value its type does not take,
- *  costs that one value rather than the whole plan. Outputs are never reached from here. */
-function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust, media?: CanvasPlanMedia): void {
-  if (node.kind === 'session' && mediaKindOf(node.agentKind)) { setMediaPrompt(node, fieldId, value, media, adjust); return; }
+ *  costs that one value rather than the whole plan. Outputs are never reached from here. `shown`: the plan came from a
+ *  shortened view, whose fields shown only in part stay as they are. */
+function setInput(node: CanvasNode, fieldId: string, value: string, adjust: Adjust, media?: CanvasPlanMedia, shown?: ShownInPart): void {
+  if (shown && carriesCondensedText(value)) { copiedAdjust(node, fieldId, fieldId, adjust, shown.added); return; }
+  if (node.kind === 'session' && mediaKindOf(node.agentKind)) {
+    if (shown?.partial('input:prompt')) { keptPartialAdjust(node, canvasText('zh', 'planning.mediaPrompt'), canvasText('en', 'planning.mediaPrompt'), adjust); return; }
+    setMediaPrompt(node, fieldId, value, media, adjust);
+    return;
+  }
   const fields: ReadonlyArray<{ id: string; label: string; value: string }> | undefined = node.kind === 'form' ? node.fields : nodeContract(node)?.inputs;
   const field = fields && namedField(fields, fieldId, 'in:');
   if (!field) {
     adjust(`没有填写「${titleOf(node)}」的「${fieldId}」：它没有这个输入`, `Left “${fieldId}” on “${titleOf(node)}” unfilled: it has no such input`);
     return;
   }
+  if (shown?.partial(`input:${field.id}`)) { keptPartialAdjust(node, field.label || field.id, field.label || field.id, adjust); return; }
   if (node.kind === 'session') {
     const errors = validateContractFields([{ ...field as ContractField, required: false, value }]);
     if (errors.length) {
@@ -427,8 +491,10 @@ function inputTypeFor(from: CanvasNode, output: PortSpec): ContractFieldType | n
  * point at an input of another type, or name an input the node does not have; each of those used to fail the
  * whole plan after its call was spent. Here the target gets an input of its own for that delivery instead, and
  * the change is said. A connection that cannot be made at all (no such output, a loop) is left out and said.
+ * `copied`: whether a text copies one the plan's context showed only in part, which never names a new input.
  */
-function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode, op: Extract<CanvasPlanOperation, { type: 'connect' }>, locale: UiLocale, adjust: Adjust): void {
+function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode, op: Extract<CanvasPlanOperation, { type: 'connect' }>, locale: UiLocale, adjust: Adjust,
+  copied: (text: string) => boolean): void {
   const fromTitle = titleOf(from); const toTitle = titleOf(to);
   if (from.id === to.id) { adjust(`跳过了「${fromTitle}」连到自己的连线`, `Skipped a connection from “${fromTitle}” to itself`); return; }
   const output = plannedOutput(from, op.fromField);
@@ -488,7 +554,7 @@ function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode,
   let id = base;
   for (let n = 2; taken(id); n++) id = `${base}-${n}`;
   // A label the plan wrote in words (not an id) names the new input; otherwise it says what it receives.
-  const label = (!wanted && !NEW_FIELD_ID.test(requested) && requested.trim() ? requested.trim()
+  const label = (!wanted && !NEW_FIELD_ID.test(requested) && requested.trim() && !copied(requested) ? requested.trim()
     : locale === 'en' ? `${sourceLabel} (from ${fromTitle})` : `${sourceLabel}（来自${fromTitle}）`).slice(0, LIMITS.title);
   const help = (locale === 'en' ? `Added for a connection: receives “${sourceLabel}” from “${fromTitle}”.` : `连线时新增：接收「${fromTitle}」的「${sourceLabel}」。`).slice(0, LIMITS.help);
   contract.inputs.push({ id, label, type, required: false, value: '', help });
@@ -501,7 +567,8 @@ function connectPlanned(draft: CanvasDocument, from: CanvasNode, to: CanvasNode,
   const wantedField = wanted && namedField(contract.inputs, wanted.id, 'in:');
   const wantedName = wantedField?.label || wantedField?.id || op.toField;
   const occupied = Boolean(wanted && !wanted.multi && draft.edges.some(edge => edge.toNode === to.id && edge.toPort === wanted.id));
-  const reason = !wanted ? [`「${toTitle}」原来没有输入「${op.toField}」`, `“${toTitle}” had no input “${op.toField}”`]
+  const reason = !wanted && copied(op.toField) ? [`「${toTitle}」原来没有方案写的那个输入`, `“${toTitle}” had no input of the name the plan wrote`]
+    : !wanted ? [`「${toTitle}」原来没有输入「${op.toField}」`, `“${toTitle}” had no input “${op.toField}”`]
     : occupied ? [`「${toTitle}」的「${wantedName}」已经接了别的来源`, `“${wantedName}” on “${toTitle}” already had a source`]
       : [`「${toTitle}」的「${wantedName}」类型不同`, `“${wantedName}” on “${toTitle}” takes another type`];
   adjust(`${reason[0]}，已新增输入「${label}」接收「${fromTitle}」的「${sourceLabel}」`, `${reason[1]}, so a new input “${label}” receives “${sourceLabel}” from “${fromTitle}”`);
@@ -552,6 +619,11 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const plan = parseCanvasPlan(value);
   const adjustments: string[] = [];
   const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
+  // A plan made from a shortened view of the canvas leaves what that view showed only in part as it is, and writes no
+  // text copied from a shortened one. In any other plan such words are the reader's own, written as given.
+  const condensed = planContextCondensed(value);
+  const shownOf = (node: CanvasNode, added = false): ShownInPart | undefined => condensed && { partial: field => condensed.get(node.id)?.has(field) ?? false, added };
+  const copied = (text: string | undefined) => condensed !== undefined && carriesCondensedText(text);
   const requestCharacters = Array.from(originalRequest);
   if (requestCharacters.length > TASK_FRAME_MAX_TOTAL_LENGTH) fail('原始请求超过任务要求的长度限制。');
   const constraints: string[] = [];
@@ -599,8 +671,9 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
               `Did not add “${op.title ?? label}”: this workspace cannot generate ${kind === 'model3d' ? '3D models' : `${kind}s`} now`);
             break;
           }
-          const node: SessionNode = { ...createSessionNode(kind, { x: 0, y: 0 }), title: op.title ?? label, model };
-          for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, media);
+          const node: SessionNode = { ...createSessionNode(kind, { x: 0, y: 0 }), title: copied(op.title) ? label : op.title ?? label, model };
+          if (copied(op.title)) copiedAdjust(node, '名称', 'title', adjust, true);
+          for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, media, shownOf(node, true));
           draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
           break;
         }
@@ -609,22 +682,29 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           node.contract = { ...node.contract, outputs: hostedPageOutputs(locale) };
           node.persona = hostedPagePersona(locale);
         }
+        // A new node never takes text copied from one the plan's context showed only in part; what it is added
+        // without is said under the name it gets.
+        if (copied(op.title)) copiedAdjust(node, '名称', 'title', adjust, true);
+        else if (op.title !== undefined) node.title = op.title;
+        let persona = op.persona;
+        if (copied(persona)) { copiedAdjust(node, '人设', 'persona', adjust, true); persona = undefined; }
+        let criteria = op.acceptanceCriteria;
+        if (criteria?.some(copied)) { copiedAdjust(node, '验收标准', 'acceptance criteria', adjust, true); criteria = undefined; }
         // Carry the human's exact request separately from the model-authored persona.
         // Every new downstream reviewer receives it even if an upstream draft drifts.
-        if (constraints.length || op.acceptanceCriteria?.length) {
-          const frame = cleanTaskFrame({ version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [...(op.acceptanceCriteria ?? [])] });
+        if (constraints.length || criteria?.length) {
+          const frame = cleanTaskFrame({ version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [...(criteria ?? [])] });
           // The request is always kept whole; acceptance criteria that would push the frame past its limits are left out.
           if (taskFrameError(frame)) {
-            const name = op.title ?? node.title;
+            const name = titleOf(node);
             adjust(`「${name}」的验收标准太长，没有写入（任务要求合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
               `The acceptance criteria of “${name}” were too long and were left out (task requirements allow ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
             if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
           } else node.taskFrame = frame;
         }
-        if (op.title !== undefined) node.title = op.title;
         // A figure node's page is built with AwwO's figure kit: a planned persona replaces its role, never the guide.
-        if (op.persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
-        for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust);
+        if (persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(persona) : persona;
+        for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, undefined, shownOf(node, true));
         draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
         break;
       }
@@ -632,9 +712,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (skipped.has(op.nodeId)) break;
         const node = resolve(op.nodeId);
         if (op.persona !== undefined && node.kind !== 'session') fail('表单节点不能设置 persona。');
-        if (op.title !== undefined) node.title = op.title;
+        if (copied(op.title)) copiedAdjust(node, '名称', 'title', adjust);
+        else if (op.title !== undefined) node.title = op.title;
         if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) {
-          node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
+          if (shownOf(node)?.partial('persona')) keptPartialAdjust(node, '人设', 'persona', adjust);
+          else if (copied(op.persona)) copiedAdjust(node, '人设', 'persona', adjust);
+          else node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
         }
         break;
       }
@@ -660,8 +743,18 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           }
           return [item];
         });
-        const next = cleanTaskFrame({ ...current, ...(op.constraints ? { constraints: expand(op.constraints) } : {}),
-          ...(op.acceptanceCriteria ? { acceptanceCriteria: [...op.acceptanceCriteria] } : {}) });
+        // A list the plan's context showed only in part, or one that copies such text, stays as it is.
+        const kept = (list: string[] | undefined, field: 'constraints' | 'acceptanceCriteria', zh: string, en: string) => {
+          if (!list) return false;
+          if (shownOf(node)?.partial(field)) keptPartialAdjust(node, zh, en, adjust);
+          else if (list.some(copied)) copiedAdjust(node, zh, en, adjust);
+          else return false;
+          return true;
+        };
+        const setConstraints = kept(op.constraints, 'constraints', '约束', 'constraints') ? undefined : op.constraints;
+        const setCriteria = kept(op.acceptanceCriteria, 'acceptanceCriteria', '验收标准', 'acceptance criteria') ? undefined : op.acceptanceCriteria;
+        const next = cleanTaskFrame({ ...current, ...(setConstraints ? { constraints: expand(setConstraints) } : {}),
+          ...(setCriteria ? { acceptanceCriteria: [...setCriteria] } : {}) });
         if (taskFrameError(next)) {
           adjust(`没有改动「${titleOf(node)}」的任务要求：超过了长度限制（每个列表最多 ${TASK_FRAME_MAX_ENTRIES} 条，合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
             `Left the task requirements of “${titleOf(node)}” as they were: they exceed the limits (${TASK_FRAME_MAX_ENTRIES} entries per list, ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
@@ -700,7 +793,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         modelSetNodeIds.add(node.id);
         break;
       }
-      case 'set_input': if (!skipped.has(op.nodeId)) setInput(resolve(op.nodeId), op.fieldId, op.value, adjust, media); break;
+      case 'set_input': if (!skipped.has(op.nodeId)) { const node = resolve(op.nodeId); setInput(node, op.fieldId, op.value, adjust, media, shownOf(node)); } break;
       case 'add_field':
       case 'update_field':
       case 'remove_field': {
@@ -711,6 +804,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           // An image, video or 3D node's ports are its generator's; a contract would replace them and its result.
           adjust(`没有改动「${titleOf(node)}」的输入输出：图片、视频和 3D 节点的输入输出是固定的`,
             `Left the inputs and outputs of “${titleOf(node)}” as they are: image, video and 3D nodes have fixed ones`);
+          break;
+        }
+        const written = op.type === 'add_field' ? op.field : op.type === 'update_field' ? op.changes : undefined;
+        if (written && [written.label, written.help, written.placeholder].some(copied)) {
+          const name = op.type === 'add_field' ? op.field.label || op.field.id : op.fieldId;
+          copiedAdjust(node, name, name, adjust);
           break;
         }
         node.contract ??= { version: 1, inputs: [], outputs: [] };
@@ -787,7 +886,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       case 'connect': {
         const from = find(op.fromNode); const to = find(op.toNode);
         if (!from || !to) { later.push(op); break; }
-        connectPlanned(draft, from, to, op, locale, adjust);
+        connectPlanned(draft, from, to, op, locale, adjust, copied);
         checkGraph(draft);
         break;
       }
@@ -802,7 +901,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       adjust(`跳过了一条连线：节点「${missing}」不在画布上`, `Skipped a connection: the node “${missing}” is not on the canvas`);
       continue;
     }
-    connectPlanned(draft, from, to, op, locale, adjust);
+    connectPlanned(draft, from, to, op, locale, adjust, copied);
   }
   checkGraph(draft);
   checkExecution(draft);

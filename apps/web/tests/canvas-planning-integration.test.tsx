@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { emptyDocument, loadDocumentWithStatus, saveDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import type { CanvasPlan } from '../src/canvas/canvasPlan';
+import { markPlanContextCondensed, type CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { presentationNodes } from '../src/canvas/nodePresentation';
@@ -138,6 +138,37 @@ describe('canvas planning integration', () => {
       inputs: original.contract!.inputs.map(field => field.id === 'brief' ? { ...field, value: '改为移动端成员管理' } : field),
     } });
     expect(planRequest.mock.calls[0][1].nodes[0]).toEqual(original);
+  });
+
+  it('keeps a text a shortened view of the canvas showed only in part, and says the canvas was read in part', async () => {
+    const original = seedExisting();
+    const plan: CanvasPlan = { version: 1, summary: '已更新任务名称。', operations: [
+      { type: 'update_node', nodeId: original.id, title: '成员管理节点' },
+      { type: 'set_input', nodeId: original.id, fieldId: 'brief', value: '改写了只看到开头的需求' },
+    ] };
+    markPlanContextCondensed(plan, new Map([[original.id, new Set(['input:brief'])]]));
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
+    render(<CanvasSurface planRequest={planRequest} />);
+    openAssistant();
+    submit('把这个节点改名为成员管理', '修改画布');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0].title).toBe('成员管理节点'));
+    expect((loadDocumentWithStatus().doc.nodes[0] as SessionNode).contract!.inputs[0].value).toBe('人工填写的原始需求');
+    expect(await screen.findByText(/画布内容较多，这次只给助手看了 1 个节点里长文字的开头/)).toBeTruthy();
+    expect(screen.getByText(/没有改动「成员管理节点」的「节点需求」：画布内容较多，这次规划只给助手看了它的开头/)).toBeTruthy();
+    expect(planRequest.mock.calls[0][6]?.selected).toEqual([]);
+  });
+
+  it('tells the planner which nodes are selected, so a shortened view keeps their texts whole the longest', async () => {
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValueOnce(newProductPlan())
+      .mockResolvedValueOnce({ version: 1, summary: '没有改动。', operations: [] });
+    render(<CanvasSurface planRequest={planRequest} />);
+    openAssistant();
+    submit('搭建一个带用户权限的数据产品', '生成画布');
+    await waitFor(() => expect(loadDocumentWithStatus().doc.nodes).toHaveLength(3));
+    openAssistant();
+    submit('再看看这三个节点', '修改画布');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledTimes(2));
+    expect([...(planRequest.mock.calls[1][6]?.selected ?? [])].sort()).toEqual(loadDocumentWithStatus().doc.nodes.map(node => node.id).sort());
   });
 
   it('keeps a manual input edit made during planning and refuses to apply the now-stale plan', async () => {
