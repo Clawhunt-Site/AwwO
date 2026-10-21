@@ -574,6 +574,13 @@ test('a request AWS refuses as larger than its model\'s window is named so, with
   assert.deepEqual(JSON.parse(text).error, { message: 'Input is too long for requested model', type: 'context_length_exceeded', code: 'context_length_exceeded', status: 400 });
   assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL]);
   assert.deepEqual(run.facts, [{ event: 'failed', model: MODEL, error: 'context_length_exceeded', status: 400, stage: 'request', upstream: true }]);
+  // From the other profile, after the first one's refusal, it is two requests: not one made before any work, so it goes
+  // out as AWS's validation failure.
+  const second = fallbackFetch([{ fail: awsError('ThrottlingException', 429) }, { fail: tooLong }]);
+  const after = await second.call();
+  assert.equal(after.status, 400);
+  assert.deepEqual(JSON.parse(await after.text()).error, { message: 'The Bedrock request failed', type: 'ValidationException', code: 'ValidationException', status: 400 });
+  assert.deepEqual(second.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
 });
 
 test('a failure the bridge itself makes is reported as not AWS\'s, and a child\'s bridge carries its parent\'s settings', async () => {

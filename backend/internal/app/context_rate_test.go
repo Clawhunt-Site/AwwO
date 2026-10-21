@@ -380,6 +380,15 @@ func TestPostgresProviderSizeRefusalNeitherCountsNorRepeats(t *testing.T) {
 	if admission, cost := ledger(id); admission != "rejected_before_start" || cost != "not_incurred" {
 		t.Fatalf("the refused call settled %s / %s", admission, cost)
 	}
+	// After the window from the call's sending, the same refusal fails the run as too large but counts: it may follow
+	// work no worker saw.
+	lateRefusals.Store(true)
+	late := h.request(t, c, "POST", prefix+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "provider-size-late"}, 202)["id"].(string)
+	done := h.awaitRun(t, c, tid, late, "failed")
+	lateRefusals.Store(false)
+	if admission, cost := ledger(late); done["error"] != "context_limit" || admission == "rejected_before_start" || cost == "not_incurred" {
+		t.Fatalf("a late refusal ended %v and settled %s / %s", done["error"], admission, cost)
+	}
 	code.Store("MODEL_ERROR")
 	other := h.request(t, c, "POST", prefix+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "provider-size-other"}, 202)["id"].(string)
 	if done := h.awaitRun(t, c, tid, other, "failed"); done["error"] != "runtime_failed" {
@@ -399,7 +408,7 @@ func TestPostgresProviderSizeRefusalNeitherCountsNorRepeats(t *testing.T) {
 	cid := h.request(t, c, "POST", prefix+"/canvases", map[string]any{"name": "Sized", "document": graphDocument{Nodes: []graphNode{n}, Edges: []graphEdge{}}}, 201)["id"].(string)
 	base := prefix + "/canvases/" + cid + "/graph-runs"
 	accepted := h.request(t, c, "POST", base, map[string]string{"operationId": "provider-size-graph"}, 202)
-	done := awaitGraph(t, h, c, base+"/"+accepted["id"].(string), "failed")
+	done = awaitGraph(t, h, c, base+"/"+accepted["id"].(string), "failed")
 	if node := done["nodes"].([]any)[0].(map[string]any); node["detail"] != "context_limit" || calls.Load() != 1 {
 		t.Fatalf("the node ended %v after %d calls", node["detail"], calls.Load())
 	}
@@ -424,6 +433,17 @@ func TestPostgresTeamTurnSizeRefusalDoesNotCount(t *testing.T) {
 		tid, id).Scan(&calls, &counted); e != nil || calls == 0 || counted != 0 {
 		t.Fatalf("%d calls, %d of them counted (%v)", calls, counted, e)
 	}
+	// After the window from the member's call's sending, the same refusal counts.
+	lateRefusals.Store(true)
+	defer lateRefusals.Store(false)
+	late := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "TASK", "operationId": "team-size-late"}, 202)["id"].(string)
+	if done := h.awaitRun(t, c, tid, late, "failed"); done["error"] != "context_limit" {
+		t.Fatalf("the late team run ended with %v", done["error"])
+	}
+	if e := h.db.QueryRow(context.Background(), "SELECT count(*), count(*) FILTER (WHERE admission_status<>'rejected_before_start' OR cost_status<>'not_incurred') FROM model_invocations WHERE tenant_id=$1 AND run_id=$2",
+		tid, late).Scan(&calls, &counted); e != nil || calls == 0 || counted == 0 {
+		t.Fatalf("late: %d calls, %d of them counted (%v)", calls, counted, e)
+	}
 }
 
 func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
@@ -439,9 +459,9 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: missingUsage("unknown", "transport_unknown")}, true},
 		// Within moments of the stream's start; after a while it may follow work its worker could not see.
-		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Streamed: began, Ended: began.Add(3 * time.Second)}, true},
-		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Streamed: began, Ended: began.Add(15 * time.Second)}, false},
-		{invocationFacts{WorkerCode: "CONTEXT_LIMIT", Streamed: began, Ended: began.Add(40 * time.Second)}, false},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Sent: began, Ended: began.Add(3 * time.Second)}, true},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Sent: began, Ended: began.Add(15 * time.Second)}, false},
+		{invocationFacts{WorkerCode: "CONTEXT_LIMIT", Sent: began, Ended: began.Add(40 * time.Second)}, false},
 		// The Python worker's own measure, after its stream began.
 		{invocationFacts{WorkerCode: "CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", OutputBytes: 1}, false},
@@ -451,9 +471,17 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: InvocationUsage{Status: "partial"}}, false},
 		{invocationFacts{WorkerCode: "MODEL_ERROR"}, false},
 	} {
+		// Each case sent a second before its end, unless it says when.
+		if c.facts.Sent.IsZero() {
+			c.facts.Sent, c.facts.Ended = began, began.Add(time.Second)
+		}
 		if got := sizeRefusal(&c.facts); got != c.want {
 			t.Errorf("sizeRefusal(%+v) = %v", c.facts, got)
 		}
+	}
+	// A call no path stamped as sent is not known to have come back quickly.
+	if sizeRefusal(&invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT"}) {
+		t.Error("a refusal of an unstamped call is free")
 	}
 	for body, want := range map[string]bool{
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`: true,

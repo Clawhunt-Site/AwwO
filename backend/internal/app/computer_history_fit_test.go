@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 	"unicode/utf8"
 )
 
@@ -504,7 +503,7 @@ func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
 	model := connectionModelID(addPersonalConnection(t, h, owner), "test-chat-model")
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid
-	defer func(window time.Duration) { quickRefusal = window }(quickRefusal)
+	defer lateRefusals.Store(false)
 	for i, c := range []struct {
 		reason, detail string
 		sized, slow    bool
@@ -514,9 +513,9 @@ func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
 		{"provider:400:context_length_exceeded", "", false, false}, {"provider:400:invalid_request_error", "", false, false}} {
 		reason.Store(c.reason)
 		detail.Store(c.detail)
-		quickRefusal = 15 * time.Second
+		lateRefusals.Store(false)
 		if c.slow {
-			quickRefusal = 0
+			lateRefusals.Store(true)
 		}
 		id := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": fmt.Sprintf("provider-size-%d", i), "prompt": "build the page", "runtime": "pi", "model": model}, 202)["id"].(string)
 		computerProxyRaw(t, <-started, coreRequest(t, toolTurn(100)), 502)

@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -369,15 +370,23 @@ func creditCharge(reserve int, notIncurred, refused, reached bool, u InvocationU
 
 // quickRefusal is how soon a provider's refusal must come for the call to be taken as one that did no work: a refusal
 // comes within moments of the request, and one after a while may follow billed work no worker could see (hidden
-// reasoning, an earlier attempt). A variable only for tests.
-var quickRefusal = 15 * time.Second
+// reasoning, an earlier attempt). Tests set lateRefusals to take every refusal as a late one (atomically, as the API's
+// goroutines read it; a call in-process can take no measurable time on a coarse clock).
+var lateRefusals atomic.Bool
+
+func quickRefusal() time.Duration {
+	if lateRefusals.Load() {
+		return 0
+	}
+	return 15 * time.Second
+}
 
 // refusedBeforeOutput reports a failure the provider answers before generating anything, which it does not bill: a
 // rate limit, a rejected credential or an outage, answered within moments of the request (workerCode is the
 // worker's own code; a connection error, which may follow billed work, is not one of them). The same answers after a
 // while may follow billed reasoning (a throttle mid-stream), so they are charged like any other failure.
 func refusedBeforeOutput(code, workerCode string, bytesOut int64, unseen time.Duration) bool {
-	if bytesOut > 0 || unseen >= quickRefusal {
+	if bytesOut > 0 || unseen >= quickRefusal() {
 		return false
 	}
 	return code == "provider_rate_limited" || code == "provider_auth_failed" || workerCode == "MODEL_UNAVAILABLE"

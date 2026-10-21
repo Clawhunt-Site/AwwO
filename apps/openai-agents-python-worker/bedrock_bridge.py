@@ -920,7 +920,12 @@ class BedrockConverseTransport(AsyncBaseTransport):
         # The profile that answered (or refused last): written by the worker thread before what it put.
         active = holder.get("active", self.model)
         if kind == "error":
-            return self._json_error(self._failed(bridge_failure(value), active, "request"))
+            failure = bridge_failure(value)
+            # A refusal as too large from the other profile follows the first one's refusal: two requests, so not one made
+            # before any work (the workers' rule): it goes out as AWS's validation failure it is.
+            if active != self.model and failure.kind == BEDROCK_CONTEXT_LIMIT_TYPE:
+                failure = BridgeError(400, "ValidationException", "The Bedrock request failed", upstream=True)
+            return self._json_error(self._failed(failure, active, "request"))
         # The chunks name the model the caller asked for, whichever of its profiles answers.
         return Response(200, headers={"content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache"},
                         stream=_ConverseStream(queue, ChunkMapper(self.model, single_tool_call=single_tool_call), cancel,

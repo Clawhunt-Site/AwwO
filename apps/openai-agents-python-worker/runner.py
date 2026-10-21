@@ -252,6 +252,13 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
 
     client = None
     http_client = None
+    # How many requests the call made: the Agents SDK may send one again itself, whatever the client's max_retries, and
+    # a refusal after an earlier attempt is not one made before any work (classify_error).
+    requests = 0
+
+    async def count_request(_request):
+        nonlocal requests
+        requests += 1
 
     async def _run() -> AsyncIterator[dict]:
         nonlocal client, http_client
@@ -276,7 +283,7 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
                                               fallback_model=profile.fallback_model, report=report)
         # A DeepSeek call follows no redirect: the API has one address, and the profile may reach only that one.
         http_client = DefaultAsyncHttpxClient(event_hooks={
-            "request": [observation.on_request], "response": [observation.on_response],
+            "request": [observation.on_request, count_request], "response": [observation.on_response],
         }, **({"transport": bridge} if bridge else {}), **({"follow_redirects": False} if profile.provider == "deepseek" else {}))
         # The SDK's own 600 s default would cut a call short of the run's deadline (the Bedrock bridge keeps its own read
         # timeout, the stream's idle limit above).
@@ -370,7 +377,8 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         yield {"type": "cancelled", "observability": observation.snapshot("cancelled")}
         return
     except Exception as e:  # noqa: BLE001 - boundary: map everything to a wire failure
-        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(RuntimeError(observation.failure) if observation.failure else e)
+        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(
+            RuntimeError(observation.failure) if observation.failure else e, requests=requests)
         yield {**event, "observability": observation.snapshot(event["type"])}
     finally:
         if client is not None:

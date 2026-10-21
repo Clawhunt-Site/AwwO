@@ -81,7 +81,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if self.mode == "wait":
             await self.release.wait()
             return web.Response()
-        if self.mode == "redirect":
+        if self.mode in ("redirect", "redirect_too_long"):
             return web.Response(status=307, headers={"Location": "/elsewhere/v1/chat/completions"})
         too_long = {"message": "This model's maximum context length is 131072 tokens.", "type": "invalid_request_error",
                     "code": "context_length_exceeded"}
@@ -140,9 +140,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         return response
 
     async def elsewhere(self, request):
-        # Where the "redirect" mode's 307 points: it answers as the provider does.
+        # Where the "redirect" mode's 307 points: it answers as the provider does (the size refusal, in its other mode).
         self.redirected.append(request.path)
-        self.mode = "text"
+        self.mode = "too_long" if self.mode == "redirect_too_long" else "text"
         return await self.provider(request)
 
     def deepseek_config(self):
@@ -259,7 +259,9 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_usage", "MODEL_REQUEST_REJECTED"),
                            ("too_long_answer", "MODEL_REQUEST_REJECTED"), ("too_long_unreadable", "MODEL_REQUEST_REJECTED"),
                            ("too_long_first", "MODEL_REQUEST_REJECTED"), ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"),
-                           ("too_long_after_usage", "MODEL_REQUEST_REJECTED"), ("too_long_first_inner_usage", "MODEL_REQUEST_REJECTED")]:
+                           ("too_long_after_usage", "MODEL_REQUEST_REJECTED"), ("too_long_first_inner_usage", "MODEL_REQUEST_REJECTED"),
+                           # The same clean refusal to a second request (here a redirect's) follows an earlier attempt.
+                           ("redirect_too_long", "MODEL_REQUEST_REJECTED")]:
             with self.subTest(mode=mode):
                 self.mode = mode
                 events = await self.collect()

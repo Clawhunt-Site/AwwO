@@ -761,6 +761,7 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 		return "", errors.New(code)
 	}
 	admissionStart := time.Now()
+	facts.Sent = admissionStart
 	resp, e := a.admitRuntime(ctx, m.Runtime, body)
 	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
 	if errors.Is(e, errSessionBusy) || errors.Is(e, errNotSent) {

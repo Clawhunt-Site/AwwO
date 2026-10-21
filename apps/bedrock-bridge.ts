@@ -754,7 +754,11 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
     } catch (error) {
       release();
       if (abort.signal.aborted) throw aborted();
-      return jsonError(failed(bridgeFailure(error), active, 'request'));
+      // A refusal as too large from the other profile follows the first one's refusal: two requests, so not one made
+      // before any work (the workers' rule): it goes out as AWS's validation failure it is.
+      const failure = bridgeFailure(error);
+      return jsonError(failed(active !== model && failure.type === BEDROCK_CONTEXT_LIMIT.type
+        ? new BedrockBridgeError(400, 'ValidationException', 'The Bedrock request failed', true) : failure, active, 'request'));
     }
 
     // The chunks name the model the caller asked for, whichever of its profiles answers.

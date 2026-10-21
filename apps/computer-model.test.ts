@@ -491,6 +491,10 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     'gate-400-inner-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key', code: 'context_length_exceeded', usage: { prompt_tokens: 140000 } } })); },
     'gate-400-answer': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' }, choices: [{ message: { content: 'secret-provider-key answer' } }] })); },
     'gate-413-not-json': res => { res.writeHead(413, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length', code: 'context_length_exceeded' } }).slice(0, -1)); },
+    // A clean refusal the worker cuts off before its body's end (more after it than it reads, or a body that stalls)
+    // keeps its kind alone: only a body read to its own end can say it carries no work.
+    'gate-400-cut-long': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.write(JSON.stringify({ error: { code: 'context_length_exceeded' } })); setTimeout(() => res.end(' '.repeat(20_000)), 50); },
+    'gate-400-cut-stalled': (res, req) => { res.writeHead(400, { 'content-type': 'application/json' }); res.write(JSON.stringify({ error: { code: 'context_length_exceeded' } })); req.on('close', () => res.destroy()); },
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
@@ -503,6 +507,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     ['anthropic-too-long-usage', 'provider:400:invalid_request_error', undefined],
     ['gate-400-usage', 'provider:400:context_length_exceeded', undefined], ['gate-400-inner-usage', 'provider:400:context_length_exceeded', undefined],
     ['gate-400-answer', 'provider:400:context_length_exceeded', undefined], ['gate-413-not-json', 'provider:413', undefined],
+    ['gate-400-cut-long', 'provider:400:context_length_exceeded', undefined], ['gate-400-cut-stalled', 'provider:400:context_length_exceeded', undefined],
   ] as const) {
     const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
     assert.equal(response.status, 502, scenario);
@@ -513,7 +518,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 21);
+  assert.equal(logged.length, 23);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
     'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);

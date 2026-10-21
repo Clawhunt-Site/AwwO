@@ -731,6 +731,21 @@ class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call["modelId"] for call in client.calls], [OPUS, OPUS_US])
         self.assertEqual(facts, [{"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"},
                                  {"event": "failed", "model": OPUS_US, "error": "ServiceUnavailableException", "status": 503, "stage": "request", "upstream": True}])
+        # A refusal as too large is that refusal asked once; from the other profile, after the first one's refusal, it is
+        # two requests, not one made before any work, so it goes out as AWS's validation failure.
+        too_long = ClientError({"Error": {"Code": "ValidationException", "Message": "Input is too long for requested model."},
+                                "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream")
+        for steps, kind, profiles in (([too_long], "context_length_exceeded", [OPUS]),
+                                      ([aws_error("ThrottlingException", 429), too_long], "ValidationException", [OPUS, OPUS_US])):
+            with self.subTest(kind):
+                client = ScriptedClient(steps)
+                transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, client_factory=lambda *args: client,
+                                                     fallback_model=OPUS_US, report=lambda fact: None)
+                async with httpx2.AsyncClient(transport=transport) as http:
+                    response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions",
+                                               json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+                self.assertEqual((response.status_code, response.json()["error"]["type"]), (400, kind))
+                self.assertEqual([call["modelId"] for call in client.calls], profiles)
         # The fallback's own stream is relayed as it comes, even an exception that opens it.
         status, frames, client, facts = await self.call([aws_error("ThrottlingException", 429), {"events": [{"throttlingException": {"message": "also"}}]}])
         self.assertEqual(status, 200)

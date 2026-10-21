@@ -7,6 +7,7 @@ import (
 	"errors"
 	"go.opentelemetry.io/otel/trace"
 	"io"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,6 +53,9 @@ type invocationFacts struct {
 	// reported (plans.go creditCharge). Zero where a path does not count them.
 	InputBytes, OutputBytes      int64
 	Streamed, FirstOutput, Ended time.Time
+	// Sent is when the API sent the call to its worker, before anything it records meanwhile: the time a size refusal
+	// must come within counts from it (sinceSent, sizeRefusal).
+	Sent time.Time
 	// HiddenTokens is the reasoning a run was told about but never streamed (a planner's), and WorkerCode the
 	// worker's own failure code: what settles an unreported or refused call's charge.
 	HiddenTokens int64
@@ -72,6 +76,19 @@ func (f *invocationFacts) unseen(now time.Time) time.Duration {
 		end = f.FirstOutput
 	}
 	return max(0, end.Sub(f.Streamed))
+}
+
+// sinceSent is how long the call took from its sending to its terminal event (or now, without one); as long as can be
+// where a path does not stamp it (not known to be quick).
+func (f *invocationFacts) sinceSent(now time.Time) time.Duration {
+	if f.Sent.IsZero() {
+		return math.MaxInt64
+	}
+	end := now
+	if !f.Ended.IsZero() {
+		end = f.Ended
+	}
+	return max(0, end.Sub(f.Sent))
 }
 
 func int64ptr(n int64) *int64 { return &n }

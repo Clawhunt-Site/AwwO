@@ -426,10 +426,11 @@ function carriesWork(body: ObjectValue): boolean {
  *  work: with a status 400, 413 or 422 (an answer before any stream: one inside a 200 may follow work, and keeps its own
  *  code and type) in a body read whole that carries no work (carriesWork). That one carries the label an
  *  OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output`, without which the API
- *  never takes a label for that refusal; a body past 16 KiB, stalled or not JSON is never read as one. */
-function refusal(status: number, body: ObjectValue = {}): { reason: string; detail?: string } {
+ *  never takes a label for that refusal; a body not read to its own end (`whole`: past 16 KiB, or stalled) or not JSON
+ *  is never read as one. */
+function refusal(status: number, body: ObjectValue = {}, whole = false): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if ([400, 413, 422].includes(status) && !carriesWork(body) && (error.code === 'context_length_exceeded' || contextOverflow(error.message))) {
+  if (whole && [400, 413, 422].includes(status) && !carriesWork(body) && (error.code === 'context_length_exceeded' || contextOverflow(error.message))) {
     return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
@@ -438,24 +439,24 @@ function refusal(status: number, body: ObjectValue = {}): { reason: string; deta
 
 /** The refusal of a provider that answered a non-2xx. Its body is read for its kind only, at most 16 KiB for at most
  *  2 s: a provider that sends an error's headers and then stalls must not hold the call (as computerRefusalWait does in
- *  the API). */
+ *  the API). Only a body read to its own end can say it carries no work: one cut off there keeps its kind alone. */
 async function providerRefusal(upstream: Response): Promise<{ reason: string; detail?: string }> {
-  let body: ObjectValue | undefined;
+  let body: ObjectValue | undefined, cut = false, whole = false;
   const reader = upstream.body?.getReader();
-  const stalled = setTimeout(() => { void reader?.cancel().catch(() => {}); }, 2000);
+  const stalled = setTimeout(() => { cut = true; void reader?.cancel().catch(() => {}); }, 2000);
   try {
     const chunks: Uint8Array[] = [];
     let size = 0;
     for (;;) {
       const next = await reader?.read();
-      if (!next || next.done) break;
+      if (!next || next.done) { whole = !cut; break; }
       if ((size += next.value.length) > 16_384) { await reader!.cancel(); break; }
       chunks.push(next.value);
     }
     body = jsonObject(Buffer.concat(chunks).toString('utf8'), 'json');
   } catch { await reader?.cancel().catch(() => {}); }
   finally { clearTimeout(stalled); }
-  return refusal(upstream.status, body);
+  return refusal(upstream.status, body, whole);
 }
 
 export async function handleComputerModel(request: IncomingMessage, response: ServerResponse, options: {

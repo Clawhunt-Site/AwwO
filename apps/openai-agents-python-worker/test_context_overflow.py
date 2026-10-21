@@ -38,6 +38,8 @@ class ContextOverflowTest(unittest.TestCase):
         self.assertEqual(classify_error(by_code)["code"], "MODEL_CONTEXT_LIMIT")
         event = classify_error(by_message)
         self.assertNotIn("131072", json.dumps(event))
+        # After an earlier attempt of the same call it is not one made before any work.
+        self.assertEqual(classify_error(by_code, requests=2)["code"], "MODEL_REQUEST_REJECTED")
         # Only an HTTP refusal whose JSON body carries no work: usage that counts something (beside its error, inside it,
         # under usage_metadata) or any of an answer makes it the refusal of the request it otherwise is; zero usage, an
         # empty list or an empty text carries nothing.

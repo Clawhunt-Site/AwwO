@@ -722,6 +722,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	// The call's time counts from here should its answer never come (plans.go creditCharge).
 	facts.Streamed = time.Now()
+	facts.Sent = facts.Streamed
 	response, e := a.client.Do(req)
 	if e != nil {
 		facts.Ended = time.Now()
@@ -757,7 +758,7 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 			// that never began, so it never counts, when it came back within moments (quickRefusal: a refusal after a
 			// while may follow work its worker could not see).
 			if computerSizeRefusal(response.StatusCode, data) {
-				if facts.unseen(facts.Ended) < quickRefusal {
+				if facts.sinceSent(facts.Ended) < quickRefusal() {
 					facts.Admission = "rejected_before_start"
 				}
 				lease.noteRefusal("computer_context_limit")

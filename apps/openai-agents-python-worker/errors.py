@@ -82,9 +82,10 @@ def refused_before_any_work(error: BaseException) -> bool:
     return isinstance(body, dict) and not carries_work(body)
 
 
-def classify_error(error: BaseException) -> dict:
+def classify_error(error: BaseException, requests: int = 1) -> dict:
     """The wire failure for an error. A provider's refusal of the request as too large is MODEL_CONTEXT_LIMIT only when
-    it came before any work (refused_before_any_work); otherwise it is the refusal it otherwise is."""
+    it came before any work: to the call's one request (`requests`, as the runner counted them) and as
+    refused_before_any_work says; otherwise it is the refusal it otherwise is."""
     from tools import ToolInputError
 
     name = type(error).__name__
@@ -107,7 +108,7 @@ def classify_error(error: BaseException) -> dict:
         inner = body.get("status") if isinstance(body, dict) else None
         if isinstance(inner, int) and not isinstance(inner, bool) and 400 <= inner <= 599:
             status = inner
-    if refuses_size(error) and refused_before_any_work(error):
+    if requests == 1 and refuses_size(error) and refused_before_any_work(error):
         return failure_event("MODEL_CONTEXT_LIMIT")
     if status in (401, 403):
         return failure_event("MODEL_AUTHENTICATION")
