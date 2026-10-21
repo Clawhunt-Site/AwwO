@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // A worker's published rate resolves as the budget does, and only a rate a worker would accept loosens a budget.
@@ -430,12 +431,17 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		runtimeFailureCode("MODEL_ERROR", false) != "runtime_failed" {
 		t.Fatal("runtimeFailureCode")
 	}
+	began := time.Now().Add(-time.Minute)
 	for _, c := range []struct {
 		facts invocationFacts
 		want  bool
 	}{
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: missingUsage("unknown", "transport_unknown")}, true},
+		// Within moments of the stream's start; after a while it may follow work its worker could not see.
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Streamed: began, Ended: began.Add(3 * time.Second)}, true},
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Streamed: began, Ended: began.Add(15 * time.Second)}, false},
+		{invocationFacts{WorkerCode: "CONTEXT_LIMIT", Streamed: began, Ended: began.Add(40 * time.Second)}, false},
 		// The Python worker's own measure, after its stream began.
 		{invocationFacts{WorkerCode: "CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", OutputBytes: 1}, false},
@@ -453,10 +459,11 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded","detail":"before-output"}}`: true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:                           true,
-		// A provider's label without the worker's word that nothing else came back is a refusal after some of the answer
-		// or beside usage that counts something, or an older worker's label of one.
+		// Inside a 200 it may follow work, whatever the worker says.
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded","detail":"before-output"}}`: false,
+		// A provider's label without the worker's word that its body carries no work is a refusal beside work, or an
+		// older worker's label of one.
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded"}}`:                          false,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded"}}`:                          false,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded"}}`:                          false,

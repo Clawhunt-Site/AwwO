@@ -90,6 +90,12 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if self.mode == "too_long_usage":
             # The same refusal stating usage that counts something beside it: the provider read the request.
             return web.json_response({"error": too_long, "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}, status=400)
+        if self.mode == "too_long_answer":
+            # The same refusal carrying some of an answer beside it.
+            return web.json_response({"error": too_long, "choices": [{"index": 0, "message": {"role": "assistant", "content": "answer"}}]}, status=400)
+        if self.mode == "too_long_unreadable":
+            # The same refusal in a body that is not JSON (its last brace missing).
+            return web.Response(status=400, content_type="application/json", text=json.dumps({"error": too_long})[:-1])
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         if self.compress:
             response.enable_compression()
@@ -245,13 +251,15 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["observability"]["usage"]["reasoningTokens"], 2)
         self.assertEqual(len(self.calls), 1)
 
-    async def test_a_size_refusal_is_its_own_code_only_before_the_model_began(self):
-        # Before anything (a 400, or the stream's first frame): the refusal; after the model's reasoning (which an
-        # ordinary caller never sees) or usage that counts something, in the stream or in the refusal's own body: the
-        # refusal of the request it otherwise is, which the API counts. Its words never cross the worker.
-        for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_first", "MODEL_CONTEXT_LIMIT"), ("too_long_usage", "MODEL_REQUEST_REJECTED"),
-                           ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"), ("too_long_after_usage", "MODEL_REQUEST_REJECTED"),
-                           ("too_long_first_inner_usage", "MODEL_REQUEST_REJECTED")]:
+    async def test_a_size_refusal_is_its_own_code_only_before_any_work(self):
+        # Only an HTTP 400 before any stream, in a JSON body that carries no work: the refusal. Usage or an answer in its
+        # body, a body that is not JSON, and the same refusal inside a stream that answered 200 (first, or after the
+        # model's reasoning or usage) are the refusal of the request they otherwise are, which the API counts. Its
+        # words never cross the worker.
+        for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_usage", "MODEL_REQUEST_REJECTED"),
+                           ("too_long_answer", "MODEL_REQUEST_REJECTED"), ("too_long_unreadable", "MODEL_REQUEST_REJECTED"),
+                           ("too_long_first", "MODEL_REQUEST_REJECTED"), ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"),
+                           ("too_long_after_usage", "MODEL_REQUEST_REJECTED"), ("too_long_first_inner_usage", "MODEL_REQUEST_REJECTED")]:
             with self.subTest(mode=mode):
                 self.mode = mode
                 events = await self.collect()

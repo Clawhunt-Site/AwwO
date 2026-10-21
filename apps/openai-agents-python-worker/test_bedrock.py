@@ -537,8 +537,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_error(BridgeError(401, "api_error", "x"))["code"], "MODEL_AUTHENTICATION")
         too_long = bridge_failure(ClientError({"Error": {"Code": "ValidationException", "Message": "prompt is too long: 213462 tokens > 200000 maximum (arn:aws:iam::1:role/x)"},
                                                "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream"))
+        # (The worker classifies the HTTP 400 the transport makes of it, which the run above takes to MODEL_CONTEXT_LIMIT.)
         self.assertEqual((too_long.status, too_long.kind, too_long.message, too_long.upstream), (400, "context_length_exceeded", "Input is too long for requested model", True))
-        self.assertEqual(classify_error(too_long)["code"], "MODEL_CONTEXT_LIMIT")
         invalid = bridge_failure(ClientError({"Error": {"Code": "ValidationException", "Message": "Malformed input request"}, "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream"))
         self.assertEqual((invalid.status, invalid.kind), (400, "ValidationException"))
         self.assertEqual(classify_error(invalid)["code"], "MODEL_REQUEST_REJECTED")

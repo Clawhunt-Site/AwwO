@@ -47,33 +47,6 @@ class ProviderObservationTests(unittest.TestCase):
             observer.require_complete()
         self.assertEqual(failed.exception.code, "MODEL_PROTOCOL_ERROR")
 
-    def test_the_models_work_is_seen_in_the_bytes_and_an_opening_is_not(self):
-        # Chat Completions: any part of an answer but its role, or usage that counts something (one object down too).
-        for frame, produced in [
-            ({"choices": [{"index": 0, "delta": {"role": "assistant"}}]}, False),
-            ({"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}, False),
-            ({"choices": [], "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}, False),
-            ({"error": {"message": "prompt is too long", "status": 400}}, False),
-            ({"choices": [{"index": 0, "delta": {"reasoning_content": "x"}}]}, True),
-            ({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "c"}]}}]}, True),
-            ({"choices": [{"index": 0, "delta": {"refusal": "no"}}]}, True),
-            ({"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}, True),
-            ({"choices": [], "usage": {"prompt_tokens_details": {"cached_tokens": 3}}}, True),
-            ({"choices": [{"index": 0, "delta": {}, "usage": {"prompt_tokens": 4}}]}, True),
-            ({"choices": [{"index": 0, "delta": {}, "usage": {"prompt_tokens": 0}}]}, False),
-        ]:
-            with self.subTest(frame=frame):
-                observer = ProviderObservation("chat_completions")
-                observer.feed(f"data: {json.dumps(frame)}\n\n".encode())
-                self.assertEqual(observer.produced, produced)
-        # Responses: anything past the response's opening.
-        for kind, produced in [("response.created", False), ("response.in_progress", False), ("error", False),
-                               ("response.output_item.added", True), ("response.reasoning_summary_text.delta", True)]:
-            with self.subTest(kind=kind):
-                observer = ProviderObservation("responses")
-                observer.feed(f'data: {json.dumps({"type": kind})}\n\n'.encode())
-                self.assertEqual(observer.produced, produced)
-
     def test_conflicting_finish_or_oversized_frame_cannot_be_completed(self):
         first = b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
         other = b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n'

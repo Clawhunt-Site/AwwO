@@ -252,14 +252,9 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
 
     client = None
     http_client = None
-    # Whether the model sent anything (its text, its reasoning, a tool call, a refusal: any event past the response's
-    # opening), as the SDK passed it on; the tap's own witness (observation.produced) also sees what the SDK drops when
-    # the call fails. A provider's refusal of the request as too large after either is the model's failure, not one
-    # before the call began (its reasoning never reaches an ordinary caller, so the API cannot tell without this worker).
-    began = False
 
     async def _run() -> AsyncIterator[dict]:
-        nonlocal client, http_client, began
+        nonlocal client, http_client
         if cancel_event.is_set():
             yield {"type": "cancelled"}
             return
@@ -316,8 +311,6 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
                     continue
                 data = getattr(event, "data", None)
                 kind = getattr(data, "type", None)
-                if kind not in ("response.created", "response.in_progress"):
-                    began = True
                 if kind == "response.output_text.delta":
                     delta = getattr(data, "delta", "")
                     if delta and not tools:
@@ -377,8 +370,7 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         yield {"type": "cancelled", "observability": observation.snapshot("cancelled")}
         return
     except Exception as e:  # noqa: BLE001 - boundary: map everything to a wire failure
-        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(
-            RuntimeError(observation.failure) if observation.failure else e, sizable=not (began or observation.produced))
+        event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(RuntimeError(observation.failure) if observation.failure else e)
         yield {**event, "observability": observation.snapshot(event["type"])}
     finally:
         if client is not None:

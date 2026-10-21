@@ -85,21 +85,35 @@ for (const separator of ['\n', '\r\n', '\r']) test(`multiline SSE usage survives
   }
 });
 
-test('a refusal\'s body is read beside the SDK for the usage it states, its bytes unchanged, one too long to read whole counting', async () => {
+test('many small data lines share a bounded SSE event budget', async () => {
+  const body = 'data: ' + 'x'.repeat(1024) + '\n';
+  const text = body.repeat(1025) + '\ndata: [DONE]\n\n';
+  const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(text, { headers: { 'content-type': 'text/event-stream' } }) });
+  assert.equal(await (await observer.fetch('http://127.0.0.1/provider')).text(), text);
+  assert.equal(observer.snapshot('completed').usage.status, 'invalid');
+});
+
+test('a call is refused before any work only by an HTTP 400, 413 or 422 to its one request in a JSON body that carries no work', async () => {
   const json = { 'content-type': 'application/json' };
-  for (const [body, status, headers, counted] of [
-    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 11, completion_tokens: 9 } }), 400, json, true],
-    [JSON.stringify({ error: { code: 'context_length_exceeded', usage: { input_tokens: 0, cache: { read: 3 } } } }), 400, json, true],
-    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 0, completion_tokens: 0 } }), 400, json, false],
-    [JSON.stringify({ error: { code: 'context_length_exceeded' } }), 400, json, false],
-    ['not json, usage 11', 400, json, false],
+  const refusal = JSON.stringify({ error: { code: 'context_length_exceeded' } });
+  for (const [body, status, headers, before] of [
+    [refusal, 400, json, true],
+    [refusal, 413, { 'content-type': 'Application/JSON' }, true],
     // Read whatever its type says, as the SDKs read it.
-    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 400, { 'content-type': 'text/plain' }, true],
-    [JSON.stringify({ error: { code: 'x' }, usage: { prompt_tokens: 11 } }), 413, { 'content-type': 'Application/JSON' }, true],
-    // Past 64 KiB it cannot be read whole, and counts whatever it states.
-    [JSON.stringify({ error: { message: 'x'.repeat(70_000) } }), 400, json, true],
-    // Not a refusal.
-    [JSON.stringify({ choices: [], usage: { prompt_tokens: 11 } }), 200, json, false],
+    [refusal, 422, { 'content-type': 'text/plain' }, true],
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 0, completion_tokens: 0 }, choices: [] }), 400, json, true],
+    // Work in the body: usage beside or inside its error, under usage_metadata, or any of an answer.
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 11 } }), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded', usage: { input_tokens: 0, cache: { read: 3 } } } }), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage_metadata: { promptTokenCount: 7 } }), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded' }, choices: [{ message: { content: 'answer' } }] }), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded', output: [{ type: 'reasoning' }] } }), 400, json, false],
+    // A body that cannot say so: not JSON, or past 64 KiB.
+    [refusal.slice(0, -1), 400, json, false],
+    [JSON.stringify({ error: { code: 'context_length_exceeded', message: 'x'.repeat(70_000) } }), 400, json, false],
+    // Another status, and a stream that answered 200 whatever came inside it.
+    [refusal, 429, json, false],
+    [`data: ${refusal}\n\n`, 200, { 'content-type': 'text/event-stream' }, false],
   ]) {
     const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(body, { status, headers }) });
     const response = await observer.fetch('http://127.0.0.1/provider');
@@ -107,41 +121,24 @@ test('a refusal\'s body is read beside the SDK for the usage it states, its byte
     assert.equal(response.headers.get('content-type'), headers['content-type']);
     assert.equal(await response.text(), body);
     await observer.settled();
-    assert.equal(observer.workCounted(), counted, `${status} ${body.slice(0, 80)}`);
+    assert.equal(observer.refusedBeforeAnyWork(), before, `${status} ${body.slice(0, 80)}`);
   }
-  // A body the SDK never reads is read all the same; one that never ends counts after 2 s.
-  const unread = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(JSON.stringify({ error: {}, usage: { prompt_tokens: 4 } }), { status: 400 }) });
+  // A call sent twice (a retry) may have done work in its first attempt.
+  let sent = 0;
+  const twice = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(sent++ ? refusal : 'busy', { status: sent === 1 ? 503 : 400, headers: json }) });
+  await (await twice.fetch('http://127.0.0.1/provider')).text();
+  await (await twice.fetch('http://127.0.0.1/provider')).text();
+  await twice.settled();
+  assert.equal(twice.refusedBeforeAnyWork(), false);
+  // A body the SDK never reads is read all the same; one that never ends cannot say so, after 2 s.
+  const unread = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(refusal, { status: 400 }) });
   await unread.fetch('http://127.0.0.1/provider');
   await unread.settled();
-  assert.equal(unread.workCounted(), true);
+  assert.equal(unread.refusedBeforeAnyWork(), true);
   const endless = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"error":')); } }), { status: 400 }) });
   await endless.fetch('http://127.0.0.1/provider');
   const started = performance.now();
   await endless.settled();
   assert.ok(performance.now() - started >= 1900);
-  assert.equal(endless.workCounted(), true);
-});
-
-test('usage anywhere in a stream counts as work: beside its choices, inside one, inside an error frame\'s error', async () => {
-  for (const [frames, counted] of [
-    [[{ choices: [{ index: 0, delta: { role: 'assistant' } }] }, { error: { code: 'context_length_exceeded' } }], false],
-    [[{ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }, { error: { code: 'context_length_exceeded' } }], false],
-    [[{ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9 } }], true],
-    [[{ choices: [{ index: 0, delta: {}, usage: { prompt_tokens: 4 } }] }], true],
-    [[{ error: { code: 'context_length_exceeded', usage: { prompt_tokens: 140000 } } }], true],
-  ]) {
-    const text = frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('');
-    const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(text, { headers: { 'content-type': 'text/event-stream' } }) });
-    assert.equal(await (await observer.fetch('http://127.0.0.1/provider')).text(), text);
-    await observer.settled();
-    assert.equal(observer.workCounted(), counted, text);
-  }
-});
-
-test('many small data lines share a bounded SSE event budget', async () => {
-  const body = 'data: ' + 'x'.repeat(1024) + '\n';
-  const text = body.repeat(1025) + '\ndata: [DONE]\n\n';
-  const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(text, { headers: { 'content-type': 'text/event-stream' } }) });
-  assert.equal(await (await observer.fetch('http://127.0.0.1/provider')).text(), text);
-  assert.equal(observer.snapshot('completed').usage.status, 'invalid');
+  assert.equal(endless.refusedBeforeAnyWork(), false);
 });

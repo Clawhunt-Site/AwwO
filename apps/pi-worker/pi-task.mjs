@@ -1,4 +1,4 @@
-import { countsWork, createProviderObserver } from './usage.mjs';
+import { createProviderObserver } from './usage.mjs';
 // This fixed, trusted entrypoint is forked once per run by runner.mjs.
 // Provider credentials arrive over private IPC, never in argv or global env.
 import { createHash } from 'node:crypto';
@@ -15,12 +15,6 @@ function codePoints(text) {
   let count = 0;
   for (const _ of text) count += 1;
   return count;
-}
-
-// Whether a failed call got anything back: a part of an answer (text, reasoning, a tool call, even an empty one) or usage
-// that counts anything (a token read or written, a cost, one object down).
-function answered(message) {
-  return (Array.isArray(message.content) && message.content.length > 0) || countsWork(message.usage);
 }
 
 function emit(event) {
@@ -219,15 +213,14 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
-    if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted && !answered(finalMessage)) {
-      // A provider's refusal of the request as larger than its model's window, said only of a call that got nothing
-      // back (its reasoning, which an ordinary caller never sees, counts, and so does usage anywhere in the stream or
-      // the refusal's own body, which the observer reads: the API cannot tell a call that did work from one that never
-      // began without this worker); read from its message here and never relayed (context-overflow.ts; loaded only on
-      // a failure).
+    if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted) {
+      // A provider's refusal of the request as larger than its model's window, said only of one made before any work:
+      // an HTTP refusal of the call's one request in a JSON body that carries no work (the observer's
+      // refusedBeforeAnyWork; a refusal inside a stream may follow work that the API never sees, such as reasoning);
+      // read from its message here and never relayed (context-overflow.ts; loaded only on a failure).
       const { contextOverflow } = await import('../context-overflow.ts');
       await observer.settled();
-      if (contextOverflow(finalMessage.errorMessage) && !observer.workCounted()) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
+      if (observer.refusedBeforeAnyWork() && contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
     }
     if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Model did not complete successfully');
     text = finalMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('');

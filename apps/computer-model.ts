@@ -279,7 +279,7 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
   type Call = { id: string; name: string; arguments: string };
   const decoder = new TextDecoder();
   const calls: Call[] = [];
-  let size = 0, open: string[] = [], opened = 0, text = '', refused = '', finish: string | undefined, usage: ObjectValue | undefined, done = false, produced = false;
+  let size = 0, open: string[] = [], opened = 0, text = '', refused = '', finish: string | undefined, usage: ObjectValue | undefined, done = false;
   const kind = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value);
   // A call's id and name are said once: an empty one says nothing, a different one breaks the call.
   const settle = (slot: Call, key: 'id' | 'name', value: unknown) => {
@@ -293,22 +293,13 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!data) return;
     if (data === '[DONE]') { done = true; return; }
     const chunk = jsonObject(data, 'shape');
-    // Anything the model sent (its text, a refusal, a tool call, its hidden reasoning) is work done, and so is usage that
-    // counts anything (the provider read the request) wherever the frame has it, beside its choices, inside one (as
-    // some providers send it, Moonshot) or inside its error: all read before the frame's own error.
-    if (countsWork(chunk.usage) || (object(chunk.error) && countsWork(chunk.error.usage))
-      || (Array.isArray(chunk.choices) && chunk.choices.some(choice => countsWork(choice?.usage)
-        || (object(choice?.delta) && Object.entries(choice.delta).some(([key, value]) => key !== 'role' && value != null && value !== ''))))) produced = true;
     if (chunk.error != null || (chunk.choices == null && (chunk.code != null || chunk.message != null))) {
-      const error = object(chunk.error) ? chunk.error : chunk.error != null ? {} : { code: chunk.code, message: chunk.message };
+      const error = object(chunk.error) ? chunk.error : chunk.error != null ? {} : { code: chunk.code };
       const type = kind(error.type) ? error.type : kind(error.code) ? error.code : undefined;
-      // `frame` keeps the frame's own code and type, as labels only, for a provider's refusal (a gateway's frame), and
-      // whether it refused the request as too large for the model before anything else came (`sized`: its message is
-      // read here, never kept).
-      const sized = !produced && (error.code === 'context_length_exceeded' || contextOverflow(error.message));
+      // `frame` keeps the frame's own code and type, as labels only, for a provider's refusal (a gateway's frame).
       throw Object.assign(new Error('Invalid model protocol'), {
         detail: ['error', ...(Number.isInteger(error.status) ? [error.status] : []), ...(type ? [type] : [])].join(':'),
-        frame: { ...(kind(error.code) ? { code: error.code } : {}), ...(kind(error.type) ? { type: error.type } : {}), ...(sized ? { sized } : {}) } });
+        frame: { ...(kind(error.code) ? { code: error.code } : {}), ...(kind(error.type) ? { type: error.type } : {}) } });
     }
     if (object(chunk.usage)) usage = chunk.usage;
     if (chunk.choices == null) return;
@@ -414,24 +405,31 @@ function streamClosed(error: unknown, quietMs: number, idleMs: number): { reason
 }
 
 /** Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level or
- *  one object down): the provider read the request, so what follows it is never a refusal before the call began. */
+ *  one object down): the provider read the request. */
 function countsWork(usage: unknown): boolean {
   const positive = (value: unknown) => typeof value === 'number' && value > 0;
   return object(usage) && Object.values(usage).some(value => positive(value) || (object(value) && Object.values(value).some(positive)));
 }
 
+/** Whether a refusal's body carries anything of the work it refused, at its top level or inside any of its fields (its
+ *  error, a provider's own envelope): usage that counts anything, or any of an answer (Chat Completions, Responses,
+ *  Anthropic, Gemini). */
+function carriesWork(body: ObjectValue): boolean {
+  const answer = (value: unknown) => value != null && value !== '' && !(Array.isArray(value) && value.length === 0) && !(object(value) && Object.keys(value).length === 0);
+  return [body, ...Object.values(body).filter(object)].some(part => countsWork(part.usage) || countsWork(part.usage_metadata)
+    || ['choices', 'output', 'content', 'candidates'].some(key => answer(part[key])));
+}
+
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
  *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
- *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed), which carries
- *  the label an OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output` when
- *  nothing else came back: inside a 200 only for an error read whole or a gateway's error frame that came before
- *  anything of the answer (`sizable`), and never with usage that counts anything beside the error or inside it
- *  (countsWork: the provider read the request; a body past 16 KiB is never read whole, so never that refusal). The API
- *  takes the label for that refusal only with that detail; a provider's own code without it (after
- *  some of the answer, beside usage, or an older worker's label) is a call that did work. */
-function refusal(status: number, body: ObjectValue = {}, sizable = true): { reason: string; detail?: string } {
+ *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed) made before any
+ *  work: with a status 400, 413 or 422 (an answer before any stream: one inside a 200 may follow work, and keeps its own
+ *  code and type) in a body read whole that carries no work (carriesWork). That one carries the label an
+ *  OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output`, without which the API
+ *  never takes a label for that refusal; a body past 16 KiB, stalled or not JSON is never read as one. */
+function refusal(status: number, body: ObjectValue = {}): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if (sizable && !countsWork(body.usage) && !countsWork(error.usage) && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
+  if ([400, 413, 422].includes(status) && !carriesWork(body) && (error.code === 'context_length_exceeded' || contextOverflow(error.message))) {
     return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
@@ -581,12 +579,8 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
         catch (error) {
           if (controller.signal.aborted) throw error;
           const { broke, frame } = (error ?? {}) as ObjectValue;
-          // A gateway's error frame is its refusal inside a 200, named as an error inside a 200 read whole is; one that
-          // refuses the request as too large for the model counts as such only before anything else came (frame.sized).
-          if (frame) {
-            const refused = refusal(200, { error: frame }, (frame as ObjectValue).sized === true);
-            return reject(502, 'PROVIDER_ERROR', refused.reason, refused.detail);
-          }
+          // A gateway's error frame is its refusal inside a 200, named as an error inside a 200 read whole is.
+          if (frame) return reject(502, 'PROVIDER_ERROR', refusal(200, { error: frame }).reason);
           if (broke === undefined && detailOf(error) !== 'truncated') return reject(502, 'PROVIDER_ERROR', `stream:${detailOf(error)}`);
           const quietMs = Math.round(performance.now() - heard);
           const closed = streamClosed(broke, quietMs, options.edgeIdleMs ?? EDGE_IDLE_MS);
@@ -605,10 +599,7 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
           return reject(502, 'PROVIDER_ERROR', detail === 'json' ? 'body' : networkFailure(error));
         }
         // Some gateways answer an error with a 200: it is the provider's refusal, as a non-2xx would have been.
-        if (raw.error != null) {
-          const refused = refusal(upstream.status, raw);
-          return reject(502, 'PROVIDER_ERROR', refused.reason, refused.detail);
-        }
+        if (raw.error != null) return reject(502, 'PROVIDER_ERROR', refusal(upstream.status, raw).reason);
       }
     }
     // Past the size of an answer read whole, a gathered answer is the model's own output, refused as that one would be.

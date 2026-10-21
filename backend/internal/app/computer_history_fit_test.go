@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -503,13 +504,20 @@ func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
 	model := connectionModelID(addPersonalConnection(t, h, owner), "test-chat-model")
 	canvas, _, _ := h.fixture(t, owner, tid)
 	base := "/tenants/" + tid
+	defer func(window time.Duration) { quickRefusal = window }(quickRefusal)
 	for i, c := range []struct {
 		reason, detail string
-		sized          bool
-	}{{"provider:400:context_length_exceeded", "before-output", true}, {"bedrock:400:context_length_exceeded", "", true},
-		{"provider:400:context_length_exceeded", "", false}, {"provider:400:invalid_request_error", "", false}} {
+		sized, slow    bool
+	}{{"provider:400:context_length_exceeded", "before-output", true, false}, {"bedrock:400:context_length_exceeded", "", true, false},
+		// The same refusal after the window ends the task the same way, but counts: it may follow work no one saw.
+		{"provider:400:context_length_exceeded", "before-output", true, true},
+		{"provider:400:context_length_exceeded", "", false, false}, {"provider:400:invalid_request_error", "", false, false}} {
 		reason.Store(c.reason)
 		detail.Store(c.detail)
+		quickRefusal = 15 * time.Second
+		if c.slow {
+			quickRefusal = 0
+		}
 		id := h.request(t, owner, "POST", base+"/canvases/"+canvas+"/computer-runs", map[string]any{"operationId": fmt.Sprintf("provider-size-%d", i), "prompt": "build the page", "runtime": "pi", "model": model}, 202)["id"].(string)
 		computerProxyRaw(t, <-started, coreRequest(t, toolTurn(100)), 502)
 		end <- struct{}{}
@@ -518,7 +526,7 @@ func TestPostgresComputerCallTheProviderRefusesAsTooLarge(t *testing.T) {
 			t.Fatalf("%s: the task ended with %v", c.reason, done["error"])
 		}
 		want := float64(1)
-		if c.sized {
+		if c.sized && !c.slow {
 			want = 0
 		}
 		if detail := h.request(t, owner, "GET", base+"/computer-runs/"+id, nil, 200); detail["calls"] != want {

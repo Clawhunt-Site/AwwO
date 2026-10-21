@@ -481,15 +481,16 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     mismatch: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [call] }, finish_reason: 'stop' }] })),
     'bad-args': res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ ...call, function: { name: 'workspace_exec', arguments: '{"command":' } }] }, finish_reason: 'tool_calls' }] })),
     'two-choices': res => res.end(JSON.stringify({ choices: [{ message: { content: 'a' }, finish_reason: 'stop' }, { message: { content: 'b' }, finish_reason: 'stop' }] })),
-    // A refusal of the request as too large, in a 200 read whole: before anything, unless its usage counts something
-    // (the provider read the request), at its top level or one object down.
+    // The same refusal inside a 200 read whole is never the one before any work: it keeps its own code and type.
     'gate-200-too-long': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error' } })),
-    'gate-200-too-long-usage': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error' }, usage: { prompt_tokens: 11, completion_tokens: 9 } })),
+    // A 4xx whose body carries work (usage that counts something, beside its error, one object down or inside its error;
+    // any of an answer) keeps the provider's own code without the word that nothing came back, and so does one whose
+    // body is not JSON (its last brace missing): the API counts them.
     'anthropic-too-long-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'secret-provider-key: prompt is too long: 213462 tokens > 200000 maximum' }, usage: { input_tokens: 0, cache: { read: 7 } } })); },
-    // A refusal by the provider's own code beside usage that counts something keeps that code, without the word that
-    // nothing came back: the API counts it.
     'gate-400-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key: your prompt has 99999 tokens', type: 'invalid_request_error', code: 'context_length_exceeded' }, usage: { prompt_tokens: 11, completion_tokens: 9 } })); },
     'gate-400-inner-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key', code: 'context_length_exceeded', usage: { prompt_tokens: 140000 } } })); },
+    'gate-400-answer': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' }, choices: [{ message: { content: 'secret-provider-key answer' } }] })); },
+    'gate-413-not-json': res => { res.writeHead(413, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length', code: 'context_length_exceeded' } }).slice(0, -1)); },
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
@@ -498,10 +499,10 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     ['edge-524', 'provider:524', undefined], ['gate-200-error', 'provider:200:new_api_error', undefined], ['not-json', 'body', undefined],
     ['empty', 'answer', 'empty'], ['filtered', 'answer', 'finish:content_filter'], ['refused', 'answer', 'refusal'], ['unfinished', 'answer', 'finish:none'],
     ['mismatch', 'answer', 'tools-mismatch'], ['bad-args', 'answer', 'tool-args'], ['two-choices', 'answer', 'choices'],
-    ['gate-200-too-long', 'provider:200:context_length_exceeded', 'before-output'],
-    ['gate-200-too-long-usage', 'provider:200:invalid_request_error', undefined],
+    ['gate-200-too-long', 'provider:200:invalid_request_error', undefined],
     ['anthropic-too-long-usage', 'provider:400:invalid_request_error', undefined],
     ['gate-400-usage', 'provider:400:context_length_exceeded', undefined], ['gate-400-inner-usage', 'provider:400:context_length_exceeded', undefined],
+    ['gate-400-answer', 'provider:400:context_length_exceeded', undefined], ['gate-413-not-json', 'provider:413', undefined],
   ] as const) {
     const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
     assert.equal(response.status, 502, scenario);
@@ -512,7 +513,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 20);
+  assert.equal(logged.length, 21);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
     'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);
@@ -795,27 +796,13 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     moderation: res => void events(res, [partial, { code: 'DataInspectionFailed', message: 'secret-provider-key inappropriate content' }]),
     // An upstream overloaded after the stream began, as the Gate passes Anthropic's error on.
     overloaded: res => void events(res, [partial, { type: 'error', error: { type: 'overloaded_error', message: 'secret-provider-key Overloaded' } }]),
-    // A refusal of the request as too large for the model, as a gateway's first frame (by its words or its code): said
-    // so, with the word that nothing came before it; after some of the answer it is that answer's failure.
+    // A refusal of the request as too large inside the stream, first (by its words or its code) or after some of the
+    // answer or its reasoning, is never the one before any work: it keeps its own code and type, as any frame does.
     'too-long-first': res => void events(res, [{ type: 'error', error: { type: 'invalid_request_error', message: 'secret-provider-key prompt is too long: 213462 tokens > 200000 maximum' } }]),
     'too-long-code': res => void events(res, [{ error: { code: 'context_length_exceeded', message: 'secret-provider-key' } }]),
     'too-long-after': res => void events(res, [partial, { error: { code: 'context_length_exceeded', message: 'secret-provider-key maximum context length is 131072 tokens' } }]),
     'too-long-after-reasoning': res => void events(res, [{ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] },
       { error: { type: 'invalid_request_error', message: 'secret-provider-key prompt is too long' } }]),
-    // Usage that counts something (the provider read the request) is work done too, in its own frame or the error's;
-    // usage that counts nothing is not.
-    'too-long-after-usage': res => void events(res, [{ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } },
-      { error: { code: 'context_length_exceeded' } }]),
-    'too-long-zero-usage': res => void events(res, [{ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } },
-      { error: { code: 'context_length_exceeded' } }]),
-    'too-long-frame-usage': res => void events(res, [{ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 5 } }]),
-    // Usage inside the choice, as some providers send it (Moonshot).
-    'too-long-choice-usage': res => void events(res, [{ choices: [{ index: 0, delta: {}, usage: { prompt_tokens: 4 } }] },
-      { error: { code: 'context_length_exceeded' } }]),
-    // Usage inside the error frame's error, and a choice in the error's own frame (its usage or its text), count too.
-    'too-long-inner-usage': res => void events(res, [{ error: { code: 'context_length_exceeded', usage: { prompt_tokens: 140000 } } }]),
-    'too-long-same-frame-usage': res => void events(res, [{ choices: [{ index: 0, delta: {}, usage: { prompt_tokens: 4 } }], error: { code: 'context_length_exceeded' } }]),
-    'too-long-same-frame-text': res => void events(res, [{ choices: [{ index: 0, delta: { content: 'x' } }], error: { code: 'context_length_exceeded' } }]),
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi', { edgeIdleMs: 400 });
   const socket = 'UND_ERR_SOCKET';
@@ -823,12 +810,8 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     // The gateway's error frame is its refusal inside a 200, as one read whole is (provider:200:<its code or type>).
     ['error-frame', 'provider:200:bad_response_status_code', undefined], ['moderation', 'provider:200:DataInspectionFailed', undefined],
     ['overloaded', 'provider:200:overloaded_error', undefined],
-    ['too-long-first', 'provider:200:context_length_exceeded', 'before-output'], ['too-long-code', 'provider:200:context_length_exceeded', 'before-output'],
+    ['too-long-first', 'provider:200:invalid_request_error', undefined], ['too-long-code', 'provider:200:context_length_exceeded', undefined],
     ['too-long-after', 'provider:200:context_length_exceeded', undefined], ['too-long-after-reasoning', 'provider:200:invalid_request_error', undefined],
-    ['too-long-after-usage', 'provider:200:context_length_exceeded', undefined], ['too-long-zero-usage', 'provider:200:context_length_exceeded', 'before-output'],
-    ['too-long-frame-usage', 'provider:200:context_length_exceeded', undefined], ['too-long-choice-usage', 'provider:200:context_length_exceeded', undefined],
-    ['too-long-inner-usage', 'provider:200:context_length_exceeded', undefined], ['too-long-same-frame-usage', 'provider:200:context_length_exceeded', undefined],
-    ['too-long-same-frame-text', 'provider:200:context_length_exceeded', undefined],
     ['no-finish', 'stream:closed', 'end'], ['unfinished', 'stream:unfinished', undefined],
     ['garbled', 'stream:shape', undefined], ['reset', 'stream:closed', socket], ['idle-reset', 'stream:closed:idle', socket], ['idle-end', 'stream:closed:idle', 'end'],
     ['length', 'answer', 'finish:length'], ['filtered', 'answer', 'finish:content_filter'], ['huge', 'answer', 'size'], ['refusal', 'answer', 'refusal'],
@@ -843,7 +826,7 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
   const finished = await s.send(input({ completion: { messages: [{ role: 'user', content: 'after-finish' }], tools: [tool] } }));
   assert.equal(finished.status, 200);
   assert.equal((await finished.json()).completion.choices[0].message.content, 'Done.');
-  assert.equal(logged.length, 24);
+  assert.equal(logged.length, 17);
   // Each close's silence is on its log line alone (quietMs), never in the reply.
   const closes = logged.filter(line => String(line.reason).startsWith('stream:closed'));
   assert.equal(closes.length, 4);

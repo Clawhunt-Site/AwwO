@@ -46,23 +46,45 @@ def refuses_size(error: BaseException) -> bool:
     return any(context_overflow(text) for text in texts)
 
 
-def stated_usage(error: BaseException) -> list:
-    """The usage a provider's error body states beside its error or inside it, from the response the SDK kept and read
-    (read here, never relayed); none for a body that is not JSON or a response never read."""
+def counts_work(usage) -> bool:
+    """Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level
+    or one object down): the provider read the request."""
+    def positive(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+    return isinstance(usage, dict) and any(positive(v) or (isinstance(v, dict) and any(positive(x) for x in v.values()))
+                                           for v in usage.values())
+
+
+# The parts of an answer a refusal's body could carry (Chat Completions, Responses, Anthropic, Gemini).
+ANSWER_KEYS = ("choices", "output", "content", "candidates")
+
+
+def carries_work(body: dict) -> bool:
+    """Whether a refusal's body carries anything of the work it refused, at its top level or inside any of its fields
+    (its error, a provider's own envelope): usage that counts anything, or any of an answer."""
+    parts = [body, *(v for v in body.values() if isinstance(v, dict))]
+    return any(counts_work(p.get("usage")) or counts_work(p.get("usage_metadata"))
+               or any(p.get(key) not in (None, "", [], {}) for key in ANSWER_KEYS) for p in parts)
+
+
+def refused_before_any_work(error: BaseException) -> bool:
+    """Whether the provider refused the request with an HTTP 400, 413 or 422 answer, before any stream (a refusal inside
+    a stream that answered 200 may follow work: it carries its status in its body, never as the SDK's status_code), in a
+    JSON body (read from the response the SDK kept; never relayed) that carries no work. A body that is not JSON cannot
+    say so."""
+    if getattr(error, "status_code", None) not in (400, 413, 422):
+        return False
     response = getattr(error, "response", None)
     try:
-        whole = response.json() if response is not None else None
-    except Exception:  # noqa: BLE001 - a body that cannot be read states nothing
-        whole = None
-    body = getattr(error, "body", None)
-    return [part.get("usage") for part in (whole, body) if isinstance(part, dict)]
+        body = response.json() if response is not None else None
+    except Exception:  # noqa: BLE001 - a body that cannot be read says nothing
+        return False
+    return isinstance(body, dict) and not carries_work(body)
 
 
-def classify_error(error: BaseException, sizable: bool = True) -> dict:
-    """The wire failure for an error. A provider's refusal of the request as too large is MODEL_CONTEXT_LIMIT only while
-    `sizable` (the model sent nothing yet) and its body states no usage that counts anything (the provider read the
-    request); otherwise it is the refusal it otherwise is."""
-    from provider_observation import counts_work
+def classify_error(error: BaseException) -> dict:
+    """The wire failure for an error. A provider's refusal of the request as too large is MODEL_CONTEXT_LIMIT only when
+    it came before any work (refused_before_any_work); otherwise it is the refusal it otherwise is."""
     from tools import ToolInputError
 
     name = type(error).__name__
@@ -85,7 +107,7 @@ def classify_error(error: BaseException, sizable: bool = True) -> dict:
         inner = body.get("status") if isinstance(body, dict) else None
         if isinstance(inner, int) and not isinstance(inner, bool) and 400 <= inner <= 599:
             status = inner
-    if sizable and status in (400, 413, 422) and refuses_size(error) and not any(counts_work(u) for u in stated_usage(error)):
+    if refuses_size(error) and refused_before_any_work(error):
         return failure_event("MODEL_CONTEXT_LIMIT")
     if status in (401, 403):
         return failure_event("MODEL_AUTHENTICATION")

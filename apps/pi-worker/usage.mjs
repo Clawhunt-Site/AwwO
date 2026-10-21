@@ -7,9 +7,17 @@ export function emptyUsage(status = 'unavailable', reason = 'provider_missing') 
 }
 // Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level or
 // one object down): the provider read the request.
-export function countsWork(usage) {
+function countsWork(usage) {
   const positive = value => typeof value === 'number' && value > 0;
   return Boolean(object(usage) && Object.values(usage).some(value => positive(value) || (object(value) && Object.values(value).some(positive))));
+}
+// Whether a refusal's body carries anything of the work it refused, at its top level or inside any of its fields (its
+// error, a provider's own envelope): usage that counts anything, or any of an answer (Chat Completions, Responses,
+// Anthropic, Gemini).
+function carriesWork(body) {
+  const answer = value => value != null && value !== '' && !(Array.isArray(value) && value.length === 0) && !(object(value) && Object.keys(value).length === 0);
+  return [body, ...Object.values(body).filter(object)].some(part => countsWork(part.usage) || countsWork(part.usage_metadata)
+    || ['choices', 'output', 'content', 'candidates'].some(key => answer(part[key])));
 }
 export function normalizeUsage(raw, protocol, complete = true) {
   if (!object(raw)) return emptyUsage();
@@ -54,11 +62,11 @@ export function normalizeUsage(raw, protocol, complete = true) {
 // the SDK.
 export function createProviderObserver(protocol, { now = () => performance.now(), fetchImpl = globalThis.fetch, acceptedAtNs } = {}) {
   const born = now();
-  let setupMs, started, ended, first, raw, complete = false, invalidFrame = false, workCounted = false;
+  let setupMs, started, ended, first, raw, complete = false, invalidFrame = false;
+  // The call's requests (the agent library retries LLM Gate once), its last answer if that was a refusal (its status,
+  // and whether its body was JSON that carries no work), and the reads of refusal bodies not yet done.
+  let requests = 0, refusal, unsettled = false;
   const reads = [];
-  // Whether usage that counts anything came, anywhere (the stream's, beside or inside an error frame's error, inside a
-  // choice, or a refusal's body): the provider read the request, so a refusal after it is not one before the call began.
-  const counted = (...usages) => { if (usages.some(countsWork)) workCounted = true; };
   function consume(value) {
     if (!object(value)) return;
     let found;
@@ -77,31 +85,30 @@ export function createProviderObserver(protocol, { now = () => performance.now()
     } else {
       if (value.choices?.some(choice => typeof choice.delta?.content === 'string' && choice.delta.content.length)) first ??= now();
       if (object(value.usage)) raw = value.usage;
-      if (Array.isArray(value.choices)) counted(...value.choices.map(choice => choice?.usage));
     }
-    counted(raw, object(value.error) ? value.error.usage : undefined);
   }
-  // A refusal's body (any type: the SDK reads any as JSON it can) is read to its end beside the SDK, through a tee
-  // whose other half the SDK reads unchanged, at most 64 KiB of it kept and never relayed, for the usage it may state
-  // beside its error or inside it, which the agent library drops; a body past 64 KiB, which cannot be read whole, counts
-  // too. settled() waits for these reads.
+  // A refusal's body (any type: the SDK reads any as JSON it can) is read to its end beside the SDK, through a tee whose
+  // other half the SDK reads unchanged, at most 64 KiB of it kept and never relayed: refusal says whether it was JSON
+  // that carries no work (a body past 64 KiB, or not JSON, cannot say so). settled() waits for these reads.
   function readRefusal(response) {
     const [mine, theirs] = response.body.tee();
+    const answer = refusal = { status: response.status, clean: false };
     reads.push((async () => {
       const reader = mine.getReader(), decoder = new TextDecoder();
       let text = '';
       try {
         for (let next = await reader.read(); !next.done; next = await reader.read()) {
-          if ((text += decoder.decode(next.value, { stream: true })).length > 65_536) { workCounted = true; await reader.cancel(); return; }
+          if ((text += decoder.decode(next.value, { stream: true })).length > 65_536) { await reader.cancel(); return; }
         }
         const value = JSON.parse(text + decoder.decode());
-        counted(value?.usage, value?.error?.usage);
-      } catch { /* a body that is not JSON, or breaks off, states nothing */ }
+        answer.clean = object(value) && !carriesWork(value);
+      } catch { /* a body that is not JSON, or breaks off, says nothing */ }
     })());
     return new Response(theirs, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   function observe(response) {
     if (!response.ok && response.body) { ended ??= now(); return readRefusal(response); }
+    refusal = undefined;
     if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) { ended ??= now(); return response; }
     const decoder = new TextDecoder();
     let line = '', skipping = false, skipLF = false;
@@ -155,6 +162,7 @@ export function createProviderObserver(protocol, { now = () => performance.now()
   }
   return {
     async fetch(input, init) {
+      requests += 1;
       if (started === undefined) {
         started = now();
         setupMs = typeof acceptedAtNs === 'string' && /^[0-9]{1,30}$/.test(acceptedAtNs) ? Math.max(0, Number((process.hrtime.bigint() - BigInt(acceptedAtNs)) / 1_000_000n)) : Math.max(0, Math.floor(started - born));
@@ -164,14 +172,17 @@ export function createProviderObserver(protocol, { now = () => performance.now()
       try { return observe(await fetchImpl(input, { ...init, headers, redirect: 'error' })); }
       catch (error) { ended ??= now(); throw error; }
     },
-    // Whether usage that counts anything came anywhere (counted, readRefusal). Read after settled().
-    workCounted() { return workCounted; },
-    // Waits for every refusal body's read (readRefusal), at most 2 s: one still unread then counts (it cannot be told).
+    // Whether the call was refused before any work: its one request answered with a 400, 413 or 422 (never a stream:
+    // work may come before a refusal inside one), in a body that was JSON and carries no work. Read after settled().
+    refusedBeforeAnyWork() {
+      return requests === 1 && !unsettled && refusal?.clean === true && [400, 413, 422].includes(refusal.status);
+    },
+    // Waits for every refusal body's read (readRefusal), at most 2 s: one still unread then cannot say it carries no work.
     async settled() {
       let timer;
       const read = await Promise.race([Promise.all(reads).then(() => true), new Promise(resolve => { timer = setTimeout(resolve, 2000, false); })]);
       clearTimeout(timer);
-      if (!read) workCounted = true;
+      if (!read) unsettled = true;
     },
     snapshot(outcome) {
       let usage = normalizeUsage(raw, protocol, complete);

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 import httpx2
-from openai import BadRequestError, RateLimitError
+from openai import APIError, BadRequestError, InternalServerError, RateLimitError
 
 from context_overflow import context_overflow
 from errors import classify_error
@@ -38,16 +38,31 @@ class ContextOverflowTest(unittest.TestCase):
         self.assertEqual(classify_error(by_code)["code"], "MODEL_CONTEXT_LIMIT")
         event = classify_error(by_message)
         self.assertNotIn("131072", json.dumps(event))
-        # After the model began it is the refusal of the request it otherwise is, and so it is when its body states usage
-        # that counts something, beside its error or inside it (zero usage states nothing).
-        self.assertEqual(classify_error(by_code, sizable=False)["code"], "MODEL_REQUEST_REJECTED")
+        # Only an HTTP refusal whose JSON body carries no work: usage that counts something (beside its error, inside it,
+        # under usage_metadata) or any of an answer makes it the refusal of the request it otherwise is; zero usage, an
+        # empty list or an empty text carries nothing.
         for body, code in [
             ({"error": {"code": "context_length_exceeded"}, "usage": {"prompt_tokens": 11, "completion_tokens": 9}}, "MODEL_REQUEST_REJECTED"),
             ({"error": {"code": "context_length_exceeded", "usage": {"input_tokens": 0, "cache": {"read": 3}}}}, "MODEL_REQUEST_REJECTED"),
-            ({"error": {"code": "context_length_exceeded"}, "usage": {"prompt_tokens": 0, "completion_tokens": 0}}, "MODEL_CONTEXT_LIMIT"),
+            ({"error": {"code": "context_length_exceeded"}, "usage_metadata": {"promptTokenCount": 7}}, "MODEL_REQUEST_REJECTED"),
+            ({"error": {"code": "context_length_exceeded"}, "choices": [{"message": {"content": "answer"}}]}, "MODEL_REQUEST_REJECTED"),
+            ({"error": {"code": "context_length_exceeded", "output": [{"type": "reasoning"}]}}, "MODEL_REQUEST_REJECTED"),
+            ({"error": {"code": "context_length_exceeded"}, "usage": {"prompt_tokens": 0, "completion_tokens": 0}, "choices": []}, "MODEL_CONTEXT_LIMIT"),
         ]:
             with self.subTest(body=body):
                 self.assertEqual(classify_error(provider_error(BadRequestError, 400, body))["code"], code)
+        # A body that is not JSON cannot say it carries no work.
+        unreadable = BadRequestError("Error code: 400 - prompt is too long", response=httpx2.Response(
+            400, request=httpx2.Request("POST", "https://gate.invalid/v1/chat/completions"),
+            content=b'{"error":{"code":"context_length_exceeded"},"usage":{"prompt_tokens":11}'), body=None)
+        self.assertEqual(classify_error(unreadable)["code"], "MODEL_REQUEST_REJECTED")
+        # Nor does another status naming the context (an outage's, a rate limit's).
+        self.assertEqual(classify_error(provider_error(InternalServerError, 500, {"error": {"code": "context_length_exceeded"}}))["code"], "MODEL_UNAVAILABLE")
+        self.assertEqual(classify_error(provider_error(RateLimitError, 429, {"error": {"code": "context_length_exceeded"}}))["code"], "MODEL_RATE_LIMIT")
+        # Nor does a refusal inside a stream that answered 200 (its status in its body, not the SDK's status_code).
+        streamed = APIError("This model's maximum context length is 131072 tokens.", httpx2.Request("POST", "https://gate.invalid/v1/chat/completions"),
+                            body={"code": "context_length_exceeded", "status": 400})
+        self.assertEqual(classify_error(streamed)["code"], "MODEL_REQUEST_REJECTED")
         # Another refusal of the request, and a rate limit that names the context, are not.
         self.assertEqual(classify_error(provider_error(BadRequestError, 400, {"error": {"message": "messages: text content blocks must be non-empty"}}))["code"],
                          "MODEL_REQUEST_REJECTED")

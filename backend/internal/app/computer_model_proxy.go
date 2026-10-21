@@ -493,11 +493,11 @@ func (a *App) logComputerCall(lease *computerLease, call, status int, body []byt
 // computerSizeRefusal says whether the worker answered that the call's provider refused it as larger than its model's
 // window before any work (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error
 // there, and the Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let
-// through but the model did not take. Only a refusal of the request (400, 413, 422, or inside a 200) or AWS's, never a
-// rate limit, and a provider's only with the detail before-output, the worker's word that nothing else came back (no
-// part of the answer before it, no usage that counts anything beside it); a provider's own code without it (after some
-// of the answer, beside usage, or an older worker's label) is a call that did work. AWS's refusal comes before its
-// stream begins (a refusal after is stream:error:…) in a body the bridge writes itself, which states no usage.
+// through but the model did not take. Only a refusal of the request with a status 400, 413 or 422, before any stream (a
+// refusal inside a 200 may follow work no one sees), never a rate limit: a provider's only with the detail
+// before-output, the worker's word that its body carries no work (no usage that counts anything, none of an answer); a
+// provider's own code without it (beside work, inside a 200, or an older worker's label) is a call that did work. AWS's
+// refusal comes before its stream begins (a refusal after is stream:error:…) in a body the bridge writes itself.
 func computerSizeRefusal(status int, body []byte) bool {
 	code, reason, detail := computerWorkerError(body)
 	if status != 502 || code != "PROVIDER_ERROR" {
@@ -506,7 +506,7 @@ func computerSizeRefusal(status int, body []byte) bool {
 	switch reason {
 	case "bedrock:400:context_length_exceeded":
 		return true
-	case "provider:200:context_length_exceeded", "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded":
+	case "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded":
 		return detail == "before-output"
 	}
 	return false
@@ -754,9 +754,12 @@ func (a *App) computerModelProxy(w http.ResponseWriter, r *http.Request) {
 				lease.noteRefusal("computer_context_limit")
 			}
 			// Its provider refused it as larger than its model's window, before any work: the same end, and a call
-			// that never began, so it never counts.
+			// that never began, so it never counts, when it came back within moments (quickRefusal: a refusal after a
+			// while may follow work its worker could not see).
 			if computerSizeRefusal(response.StatusCode, data) {
-				facts.Admission = "rejected_before_start"
+				if facts.unseen(facts.Ended) < quickRefusal {
+					facts.Admission = "rejected_before_start"
+				}
 				lease.noteRefusal("computer_context_limit")
 			}
 		}

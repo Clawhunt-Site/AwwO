@@ -1178,12 +1178,13 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 // provider (the worker's MODEL_CONTEXT_LIMIT: apps/context-overflow.ts and the Python worker's context_overflow.py read
 // the provider's own words) or by the worker's own measure after its stream began (the Python worker's CONTEXT_LIMIT), a
 // request the API's estimate let through but the model or its worker did not take. With no output, no reasoning and no
-// usage the provider reported (a report says it read the request), such a call never began, so it settles as refused
-// before it started (not counted, not paid for), and its run fails as context_limit, which a canvas node does not run
-// again (graph_retry.go) and the reader is told is too large.
+// usage the provider reported (a report says it read the request), and within moments of the stream's start
+// (quickRefusal: a refusal after a while may follow work its worker could not see), such a call never began, so it
+// settles as refused before it started (not counted, not paid for). Its run fails as context_limit either way (its
+// caller maps the code), which a canvas node does not run again (graph_retry.go) and the reader is told is too large.
 func sizeRefusal(facts *invocationFacts) bool {
 	return (facts.WorkerCode == "MODEL_CONTEXT_LIMIT" || facts.WorkerCode == "CONTEXT_LIMIT") && facts.OutputBytes == 0 && facts.HiddenTokens == 0 &&
-		facts.Usage.Status != "reported" && facts.Usage.Status != "partial"
+		facts.Usage.Status != "reported" && facts.Usage.Status != "partial" && facts.unseen(time.Now()) < quickRefusal
 }
 
 // runContextOutcome reports how a run ended when its own context is what stopped it. Once the
