@@ -59,7 +59,7 @@ func withPlannerPersonalization(r *http.Request, text string, at int) *http.Requ
 // personalizedPrompt is the prompt with the asker's settings in their place, or the prompt as it was.
 func personalizedPrompt(r *http.Request, prompt string) string {
 	p, ok := r.Context().Value(plannerPersonalKey{}).(plannerPersonal)
-	if !ok || p.at < 0 || p.at > len(prompt) || len(prompt)+len(p.text) > 128000 {
+	if !ok || p.at < 0 || p.at > len(prompt) || utf16Len(prompt)+utf16Len(p.text) > maxRunPromptUnits {
 		return prompt
 	}
 	return prompt[:p.at] + p.text + prompt[p.at:]

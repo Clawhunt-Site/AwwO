@@ -479,4 +479,30 @@ describe('accepted planner run recovery', () => {
     expect(planContextCondensed(plan)).toBeUndefined();
     expect((applyCanvasPlan(doc, plan, 'en').doc.nodes[0] as { persona?: string }).persona).toBe('A new brief');
   });
+
+  it('sends a hosted canvas whole while it fits the bounds in characters, as its workers count them, and no view past them', async () => {
+    const sized = (persona: string) => ({ ...emptyDocument(), nodes: [{ ...createAgentTemplate('frontend', { x: 0, y: 0 }), id: 'long', persona }] });
+    const contexts: string[] = [];
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/plan')) {
+        contexts.push(JSON.parse(String(init?.body)).context);
+        return json({ ...run, id: `plan-${contexts.length}` }, 202);
+      }
+      return url.endsWith('/events') ? events({ type: 'completed', text: JSON.stringify(proposal) }) : json(run);
+    });
+    vi.stubGlobal('fetch', fetch);
+    // 50,000 Chinese characters are 150,000 bytes, past the 120,000 the bounds once counted: the canvas goes whole, its
+    // conversation too (a shortened view would cut a turn this long).
+    const wide = sized('很长的职责说明。'.repeat(6_250));
+    const turns = [{ id: 'turn', role: 'user' as const, content: '很长的一轮对话。'.repeat(250) }];
+    expect(planContextCondensed(await requestCanvasPlan('整理这个项目', wide, turns, new AbortController().signal, 'zh'))).toBeUndefined();
+    expect(contexts[0]).toBe(buildPlanningContext(wide, turns, 'zh'));
+    expect(new TextEncoder().encode(contexts[0]).length).toBeGreaterThan(150_000);
+    // 130,000 characters are past them: the view sent is within them, and the plan knows it was made from one.
+    const wider = sized('很长的职责说明。'.repeat(16_250));
+    const shortened = await requestCanvasPlan('整理这个项目', wider, [], new AbortController().signal, 'zh');
+    expect(planContextCondensed(shortened)?.get('long')).toEqual(new Set(['persona']));
+    expect(contexts[1].length).toBeLessThanOrEqual(120_000 - 256);
+    expect(contexts).toHaveLength(2);
+  });
 });

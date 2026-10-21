@@ -41,7 +41,7 @@ const (
 	uploadDirName        = "uploads"
 	uploadRequestTimeout = 20 * time.Minute
 	maxRunAttachments    = 10
-	// A message's quoted file text stays well inside the 128 000-byte prompt bound.
+	// A message's quoted file text stays well inside the prompt's bound of 128 000 UTF-16 code units (maxRunPromptUnits).
 	maxAttachmentFileText  = 24 << 10
 	maxAttachmentTotalText = 48 << 10
 	// Office documents are unpacked only up to this size, and only their text is read.

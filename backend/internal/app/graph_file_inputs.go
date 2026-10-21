@@ -150,7 +150,7 @@ func graphTextFilePrompt(ctx context.Context, tx graphInputReader, tid, gid, nid
 		return "", false, err
 	}
 	result := prompt + "\n\n" + graphFileDataMarker + string(encoded)
-	if len(result) > 128000 {
+	if utf16Len(result) > maxRunPromptUnits {
 		return "", false, errors.New("context_limit")
 	}
 	return result, true, nil

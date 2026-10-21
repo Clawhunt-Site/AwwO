@@ -369,8 +369,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if b.OperationID == "" {
 		b.OperationID = r.Header.Get("Idempotency-Key")
 	}
-	if b.SessionID == "" || strings.TrimSpace(b.Prompt) == "" || len(b.Prompt) > 128000 || len(b.OperationID) < 8 || len(b.OperationID) > 200 || len(b.AttachmentText) > 128000 {
-		fail(w, 400, "invalid_input", "Session, prompt (up to 128000 bytes) and operationId (8–200 bytes) required")
+	if b.SessionID == "" || strings.TrimSpace(b.Prompt) == "" || utf16Len(b.Prompt) > maxRunPromptUnits || len(b.OperationID) < 8 || len(b.OperationID) > 200 || utf16Len(b.AttachmentText) > maxRunPromptUnits {
+		fail(w, 400, "invalid_input", "Session, prompt (up to 128000 UTF-16 code units) and operationId (8–200 bytes) required")
 		return
 	}
 	body, _ := json.Marshal(struct {
@@ -677,8 +677,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
 	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
 	instructionsFit := (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
-	// The prompt's own bound is in bytes; the model's budget counts estimated tokens at its prose rate, as its worker does.
-	promptExcess := len(framedPrompt) - maxRunPromptBytes
+	// The prompt's own bound counts UTF-16 code units and the model's budget estimated tokens at its prose rate, each as
+	// its worker counts it.
+	promptExcess := utf16Len(framedPrompt) - maxRunPromptUnits
 	modelExcess := snapshot.tokens(framedPrompt) + snapshot.tokens(framedInstructions) + overhead - budget
 	if team == nil && (promptExcess > 0 || modelExcess > 0 || !instructionsFit) {
 		// A plan the canvas assistant asked for learns how much of its canvas context would fit (planning.go), with
@@ -687,7 +688,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		if c := plannerContextOf(r); kind == "planner" && c.bytes > 0 {
 			room := 0
 			if instructionsFit {
-				room = min(planContextRoom(c.bytes, promptExcess+c.droppedPersonal), planContextRoom(c.bytes, c.bytesFor(modelExcess+c.droppedPersonal, snapshot.ProseRate)))
+				room = min(planContextRoom(c.bytes, c.bytesForUnits(promptExcess+utf16Len(c.dropped))),
+					planContextRoom(c.bytes, c.bytesFor(modelExcess+snapshot.tokens(c.dropped), snapshot.ProseRate)))
 				if plannerRefusal == plannerInputTooLarge && a.plannerModelTakes(r.Context(), runtime, instructions, team) {
 					room = max(room, a.plannerModelRoom(c, len(b.Prompt), len(instructions)))
 				}

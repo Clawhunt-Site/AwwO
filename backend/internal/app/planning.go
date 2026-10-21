@@ -34,13 +34,17 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	// near the run's size limit is planned without them rather than refused; the room a refusal gives leaves space for
 	// them, as a request that shorter carries them again.
 	personal := a.plannerPersonalization(r.Context(), currentUser(r).ID)
-	if max(len(b.Context)-maxPlanContextBytes, len(prompt)-maxRunPromptBytes) > 0 {
-		failPlanContext(w, planContextRoom(len(b.Context), max(len(b.Context)-maxPlanContextBytes, len(prompt)+len(personal)-maxRunPromptBytes)))
+	// These bounds count UTF-16 code units, as the workers' transport does (utf16Len); the room a refusal gives is in
+	// bytes of the context, which the page fits (plannerContext.bytesForUnits).
+	strict, prose := textCost(b.Context)
+	c := plannerContext{bytes: len(b.Context), units: utf16Len(b.Context), strict: strict, prose: prose}
+	promptUnits, personalUnits := utf16Len(prompt), utf16Len(personal)
+	if max(c.units-maxPlanContextUnits, promptUnits-maxRunPromptUnits) > 0 {
+		failPlanContext(w, planContextRoom(c.bytes, c.bytesForUnits(max(c.units-maxPlanContextUnits, promptUnits+personalUnits-maxRunPromptUnits))))
 		return
 	}
-	dropped := 0
-	if len(prompt)+len(personal) > maxRunPromptBytes {
-		personal, dropped = "", len(personal)
+	if promptUnits+personalUnits > maxRunPromptUnits {
+		personal, c.dropped = "", personal
 	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
 	tx, e := a.db.Begin(r.Context())
@@ -98,8 +102,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs, AttachmentText: b.Prompt})
 	// Only this request may run on the operator's planner model (planner_model.go).
-	strict, prose := textCost(b.Context)
-	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context)), plannerContext{len(b.Context), dropped, strict, prose})
+	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), personal, len(b.Context)), c)
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")
@@ -110,18 +113,33 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 // these bounds or for its model's budget (createRun) is refused with how many bytes that context may take for the
 // same request to fit (details.contextRoom), so the page sends a shorter view of the same canvas instead of failing:
 // 0 when no shorter context fits, the request, the files it names or the selected knowledge taking the room themselves.
+// The bounds count UTF-16 code units, as the workers' transport does (Pi's promptChars is 128,000 of them): a run's
+// prompt (maxRunPromptUnits, createRun), and a plan's context within it.
 const (
-	maxPlanContextBytes   = 120000
-	maxRunPromptBytes     = 128000
+	maxPlanContextUnits   = 120000
+	maxRunPromptUnits     = 128000
 	planContextRoomMargin = 256
 )
 
 type plannerContextKey struct{}
 
-// plannerContext is what createRun needs of a plan's context for a refusal's room: its size in the prompt planCanvas
-// hands it, its strict and prose bytes (context_estimate.go), and the personal settings left out of that prompt for
-// its size, which a shorter request carries again.
-type plannerContext struct{ bytes, droppedPersonal, strict, prose int }
+// plannerContext is what createRun needs of a plan's context for a refusal's room: its size in bytes and UTF-16 code
+// units in the prompt planCanvas hands it, its strict and prose bytes (context_estimate.go), and the personal settings
+// left out of that prompt for its size, which a shorter request carries again.
+type plannerContext struct {
+	bytes, units, strict, prose int
+	dropped                     string
+}
+
+// bytesForUnits is how many bytes of the context come out to save units UTF-16 code units: the context's own bytes per
+// unit (three for Chinese, one for ASCII), rounded up, as bytesFor turns a token excess into bytes. An excess of 0 or
+// less needs none.
+func (c plannerContext) bytesForUnits(units int) int {
+	if units <= 0 || c.units <= 0 {
+		return units
+	}
+	return (units*c.bytes + c.units - 1) / c.units
+}
 
 // bytesFor is how many bytes of the context come out to save tokens estimated tokens at rate: the context's own bytes
 // per estimated token, so a shorter view of the same canvas takes about what the model can read (a shorter view that
@@ -156,7 +174,7 @@ func planContextRoom(contextBytes, excess int) int {
 // a context short enough for its input bound runs on it, whose budget may take what the default model cannot. promptBytes
 // and instructionBytes are the refused request's, with its personal settings.
 func (a *App) plannerModelRoom(c plannerContext, promptBytes, instructionBytes int) int {
-	return planContextRoom(c.bytes, promptBytes+c.droppedPersonal+instructionBytes-a.cfg.PlannerMaxInputBytes)
+	return planContextRoom(c.bytes, promptBytes+len(c.dropped)+instructionBytes-a.cfg.PlannerMaxInputBytes)
 }
 
 func failPlanContext(w http.ResponseWriter, room int) {

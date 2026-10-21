@@ -183,6 +183,154 @@ func TestPostgresProseRateAdmitsWhatTheModelReads(t *testing.T) {
 	h.request(t, c, "POST", prefix+"/runs", map[string]string{"sessionId": sid, "prompt": strings.Repeat("界", 9000), "operationId": "rate-too-much"}, 413)
 }
 
+// A run's prompt is bounded in UTF-16 code units, as its worker's transport counts it: 50,000 Chinese characters
+// (150,000 bytes, past the 128,000 the bound once counted) are admitted and run, an emoji counts two, and the bound
+// still holds for ASCII.
+func TestPostgresPromptBoundCountsUnits(t *testing.T) {
+	var budget atomic.Int64
+	budget.Store(100000)
+	h := newHarness(t, rateWorker(t, &budget, 3).URL)
+	c, tid, _ := h.register(t, "prompt-units@awwo.invalid")
+	execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	_, _, sid := h.fixture(t, c, tid)
+	run := func(prompt, operation string, status int) map[string]any {
+		t.Helper()
+		return h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": prompt, "operationId": operation}, status)
+	}
+	h.awaitRun(t, c, tid, run(strings.Repeat("界", 50000), "units-chinese", 202)["id"].(string), "completed")
+	// The part of a prompt whose files go with the run is bounded the same way.
+	attached := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": strings.Repeat("界", 50000),
+		"attachmentText": strings.Repeat("界", 50000), "operationId": "units-attachment"}, 202)
+	h.awaitRun(t, c, tid, attached["id"].(string), "completed")
+	for name, prompt := range map[string]string{"ascii": strings.Repeat("a", maxRunPromptUnits+1), "emoji": strings.Repeat("😀", maxRunPromptUnits/2+1)} {
+		if refused := run(prompt, "units-over-"+name, 400); refused["error"].(map[string]any)["code"] != "invalid_input" {
+			t.Fatalf("%s past the bound: %#v", name, refused)
+		}
+	}
+	// 64,000 emoji are 128,000 units, within the bound, and 256,000 strict estimated tokens, past the model's budget.
+	if refused := run(strings.Repeat("😀", maxRunPromptUnits/2), "units-emoji-budget", 413); refused["error"].(map[string]any)["code"] != "context_limit" {
+		t.Fatalf("emoji at the bound: %#v", refused)
+	}
+}
+
+// A plan's context is bounded in UTF-16 code units too: a Chinese canvas past the 120,000 bytes the bound once counted
+// is planned whole, and one past 120,000 units is told a room in bytes, at the context's own bytes per unit, that is
+// then planned.
+func TestPostgresPlanBoundsCountUnits(t *testing.T) {
+	var budget atomic.Int64
+	budget.Store(200000)
+	h := newHarness(t, rateWorker(t, &budget, 3).URL)
+	c, tid, _ := h.register(t, "plan-units@awwo.invalid")
+	execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	h.request(t, c, "PUT", "/auth/preferences", map[string]any{"version": 0, "preferences": map[string]any{"personalization": map[string]any{
+		"enabled": true, "aboutMe": "PLAN-UNITS-ABOUT", "instructions": "Keep it short."}}}, 200)
+	cid := h.request(t, c, "POST", "/tenants/"+tid+"/canvases", map[string]any{"name": "Plan", "document": map[string]any{"nodes": []any{}}}, 201)["id"].(string)
+	plan := func(context, operation string, status int) map[string]any {
+		t.Helper()
+		return h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan",
+			map[string]string{"prompt": "Build a data product", "context": context, "operationId": operation}, status)
+	}
+	whole := plan(strings.Repeat("界", 50000), "plan-units-1", 202)["id"].(string)
+	h.awaitRun(t, c, tid, whole, "completed")
+	// Its personal settings are within the bound in units too, and go with it.
+	var prompt string
+	if e := h.db.QueryRow(context.Background(), "SELECT prompt FROM runs WHERE tenant_id=$1 AND id=$2", tid, whole).Scan(&prompt); e != nil || !strings.Contains(prompt, "PLAN-UNITS-ABOUT") {
+		t.Fatalf("the plan lost its personal settings (%v)", e)
+	}
+	// 130,000 characters, 10,000 units past the bound: 30,000 bytes of it come out, and the margin.
+	r := roomOf(t, plan(strings.Repeat("界", 130000), "plan-units-2", 413))
+	if r != 3*130000-30000-planContextRoomMargin {
+		t.Fatalf("room %d", r)
+	}
+	h.awaitRun(t, c, tid, plan(strings.Repeat("界", r/3), "plan-units-3", 202)["id"].(string), "completed")
+}
+
+// A plan its selected knowledge takes past the prompt's bound, whose personal settings its size left out, is told a room
+// that leaves their units too: a context of that size is admitted with them.
+func TestPostgresPlanRoomLeavesUnitsForPersonalSettings(t *testing.T) {
+	var budget atomic.Int64
+	budget.Store(200000)
+	h := newHarness(t, rateWorker(t, &budget, 3).URL)
+	c, tid, _ := h.register(t, "plan-units-personal@awwo.invalid")
+	execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+	h.request(t, c, "PUT", "/auth/preferences", map[string]any{"version": 0, "preferences": map[string]any{"personalization": map[string]any{
+		"enabled": true, "aboutMe": "PLAN-UNITS-PERSONAL " + strings.Repeat("p", 900), "instructions": strings.Repeat("q", 1500)}}}, 200)
+	source := h.request(t, c, "POST", "/tenants/"+tid+"/knowledge/sources", map[string]string{"title": "Evidence", "content": "SELECTED-EVIDENCE " + strings.Repeat("e", 100), "operationId": "units-personal-source"}, 201)
+	cid := h.request(t, c, "POST", "/tenants/"+tid+"/canvases", map[string]any{"name": "Plan", "document": map[string]any{"nodes": []any{}}}, 201)["id"].(string)
+	plan := func(context, operation string, status int) map[string]any {
+		t.Helper()
+		return h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/plan", map[string]any{"prompt": strings.Repeat("r", 8000), "context": context,
+			"knowledgeRevisionIds": []string{source["currentRevisionId"].(string)}, "operationId": operation}, status)
+	}
+	// Context and request take 127,916 units: within the bound, without the settings; the knowledge takes it past.
+	room := roomOf(t, plan(strings.Repeat("a", 119900), "units-personal-1", 413))
+	id := plan(strings.Repeat("a", room), "units-personal-2", 202)["id"].(string)
+	h.awaitRun(t, c, tid, id, "completed")
+	var prompt string
+	if e := h.db.QueryRow(context.Background(), "SELECT prompt FROM runs WHERE tenant_id=$1 AND id=$2", tid, id).Scan(&prompt); e != nil || !strings.Contains(prompt, "PLAN-UNITS-PERSONAL") {
+		t.Fatalf("the plan of the room it was told lost its personal settings (%v)", e)
+	}
+}
+
+// A canvas node's prompt is bounded in UTF-16 code units too: a brief of 50,000 Chinese characters (150,000 bytes)
+// reaches its model whole.
+func TestPostgresGraphPromptBoundCountsUnits(t *testing.T) {
+	brief := strings.Repeat("界", 50000)
+	var whole atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test",
+				"limits": map[string]any{"maxContextTextBytes": 200000, "messageOverheadBytes": 32, "proseBytesPerToken": 3}})
+			return
+		}
+		if r.Method == "DELETE" {
+			w.WriteHeader(202)
+			return
+		}
+		var call observedPiCall
+		if json.NewDecoder(r.Body).Decode(&call) == nil && strings.Contains(call.Prompt, brief) {
+			whole.Add(1)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		completePi(w, `{"result":"done"}`)
+	}))
+	t.Cleanup(server.Close)
+	h := newHarness(t, server.URL)
+	c, tid, _ := h.register(t, "graph-units@awwo.invalid")
+	prefix := "/tenants/" + tid
+	aid := h.request(t, c, "POST", prefix+"/agents", map[string]string{"name": "Brief", "adapterType": "pi", "model": "test-model", "instructions": "Summarise the brief."}, 201)["id"].(string)
+	n := graphNode{ID: "only", Kind: "session", Title: "Brief", Contract: &graphContract{Version: 1,
+		Inputs: []graphField{{ID: "brief", Type: "text", Value: brief}}, Outputs: []graphField{{ID: "result", Type: "text", Required: true}}}}
+	n.Binding = &struct {
+		CompanyID string `json:"companyId"`
+		AgentID   string `json:"agentId"`
+	}{CompanyID: tid, AgentID: aid}
+	cid := h.request(t, c, "POST", prefix+"/canvases", map[string]any{"name": "Units", "document": graphDocument{Nodes: []graphNode{n}, Edges: []graphEdge{}}}, 201)["id"].(string)
+	base := prefix + "/canvases/" + cid + "/graph-runs"
+	accepted := h.request(t, c, "POST", base, map[string]string{"operationId": "graph-units-operation"}, 202)
+	awaitGraph(t, h, c, base+"/"+accepted["id"].(string), "completed")
+	if whole.Load() != 1 {
+		t.Fatalf("%d calls carried the whole brief", whole.Load())
+	}
+}
+
+func TestPlannerContextBytesForUnits(t *testing.T) {
+	c := plannerContext{bytes: 300, units: 100}
+	for units, want := range map[int]int{10: 30, 1: 3, 0: 0, -5: -5} {
+		if got := c.bytesForUnits(units); got != want {
+			t.Errorf("bytesForUnits(%d) = %d, want %d", units, got, want)
+		}
+	}
+	// Rounded up: a byte short would leave a view that still does not fit.
+	if got := (plannerContext{bytes: 10, units: 3}).bytesForUnits(1); got != 4 {
+		t.Errorf("rounded %d", got)
+	}
+	if got := (plannerContext{}).bytesForUnits(7); got != 7 {
+		t.Errorf("an empty context %d", got)
+	}
+}
+
 // A plan's room counts the model's rate: a Chinese canvas the byte rule refused is planned whole, one past the estimate
 // is told a room of Chinese that does fit, and a dense canvas gets the byte rule's room.
 func TestPostgresPlanRoomCountsTheRate(t *testing.T) {

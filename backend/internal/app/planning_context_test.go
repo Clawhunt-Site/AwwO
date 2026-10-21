@@ -94,8 +94,8 @@ func TestPostgresPlanTooLargeSaysHowMuchContextFits(t *testing.T) {
 	fits := plan(strings.Repeat("a", r), "plan-room-4", 202)["id"].(string)
 	h.awaitRun(t, c, tid, fits, "completed")
 
-	// Past the plan's own bounds (120,000 bytes of context) it is refused the same way before a model is chosen.
-	if big := room("over the plan bounds", plan(strings.Repeat("a", 130000), "plan-room-5", 413)); big != maxPlanContextBytes-planContextRoomMargin {
+	// Past the plan's own bounds (120,000 UTF-16 code units of context) it is refused the same way before a model is chosen.
+	if big := room("over the plan bounds", plan(strings.Repeat("a", 130000), "plan-room-5", 413)); big != maxPlanContextUnits-planContextRoomMargin {
 		t.Fatalf("room %d over the plan bounds", big)
 	}
 	// A model too small for the request and the instructions alone leaves no room for any context.

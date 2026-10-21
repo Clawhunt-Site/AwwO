@@ -154,6 +154,19 @@ func TestGraphTextFilePromptPreservesExactStoredBytesAndReferences(t *testing.T)
 	}
 }
 
+// A node's prompt with its files is bounded in UTF-16 code units, as its worker's transport counts it: Chinese past
+// 128,000 bytes is sent, ASCII of the same size is not.
+func TestGraphTextFilePromptCountsUnits(t *testing.T) {
+	prompt, attached, err := graphTextFilePrompt(context.Background(), newGraphFileReader(t, []byte(strings.Repeat("页", 21000))), "tenant", "graph", "review", strings.Repeat("审", 23000))
+	if err != nil || !attached || len(prompt) <= maxRunPromptUnits || utf16Len(prompt) > maxRunPromptUnits {
+		t.Fatal(err, attached, len(prompt))
+	}
+	_, _, err = graphTextFilePrompt(context.Background(), newGraphFileReader(t, []byte(strings.Repeat("x", 63000))), "tenant", "graph", "review", strings.Repeat("a", 69000))
+	if err == nil || err.Error() != "context_limit" {
+		t.Fatal("ASCII past the bound", err)
+	}
+}
+
 func TestGraphTextFilePromptFailsClosed(t *testing.T) {
 	for _, scenario := range []string{"unavailable", "hash mismatch", "not ready", "external URL", "non UTF-8", "binary NUL", "oversize", "JSON expansion"} {
 		t.Run(scenario, func(t *testing.T) {

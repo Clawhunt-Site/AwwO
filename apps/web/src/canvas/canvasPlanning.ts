@@ -382,14 +382,15 @@ export function utf8Bytes(text: string): number {
  *  all (the conversation's included), which is what makes a plan made from it one made from a shortened view. */
 export interface FittedPlanningContext { context: string; condensed: PlanContextCondensed; shortened: boolean }
 
-/** The fullest view of the canvas whose context takes at most `room` UTF-8 bytes; null when even the shortest does not
- *  fit. Every node, field and connection is still there, only long texts are cut. */
+/** The fullest view of the canvas whose context takes at most `room` UTF-8 bytes and `units` UTF-16 code units (a
+ *  hosted plan's own bounds); null when even the shortest does not fit. Every node, field and connection is still there,
+ *  only long texts are cut. */
 export function fitPlanningContext(doc: CanvasDocument, messages: PlanningMessage[], locale: UiLocale, mediaKinds: ReadonlyArray<MediaKind>,
-  extras: PlanningExtras, room: number, focus: ReadonlySet<string> = new Set()): FittedPlanningContext | null {
+  extras: PlanningExtras, room: number, focus: ReadonlySet<string> = new Set(), units = Infinity): FittedPlanningContext | null {
   for (const level of FIT_LEVELS) {
     const view: PlanningView = { cap: id => (focus.has(id) ? level.focusCap : level.cap), turns: level.turns, turnCap: level.turnCap, condensed: new Map() };
     const context = planningContext(doc, messages, locale, mediaKinds, extras, view);
-    if (utf8Bytes(context) <= room) return { context, condensed: view.condensed!, shortened: view.shortened ?? false };
+    if (context.length <= units && utf8Bytes(context) <= room) return { context, condensed: view.condensed!, shortened: view.shortened ?? false };
   }
   return null;
 }
@@ -518,11 +519,12 @@ export async function cancelCanvasPlanRecovery(operationId: string, signal?: Abo
 /** `mediaKinds`: the media nodes the workspace can generate, which the planner may then add. `selected`: the nodes the
  *  reader selected, whose texts a shortened view of the canvas keeps whole the longest (planningFocus). */
 export type PlanRequestOptions = { recoveryOperationId?: string; mediaKinds?: ReadonlyArray<MediaKind>; selected?: ReadonlyArray<string> } & PlanningExtras;
-// A hosted plan's own bounds (planning.go maxPlanContextBytes, maxRunPromptBytes and planContextRoomMargin): a larger
-// context is never sent whole there. The desktop gateway takes its own (apps/gateway/src/canvas/routes.ts).
-const MAX_PLAN_CONTEXT_BYTES = 120_000;
-const MAX_PLAN_PROMPT_BYTES = 128_000;
-const PLAN_REQUEST_JOIN_BYTES = utf8Bytes('\n\nUser request:\n');
+// A hosted plan's own bounds (planning.go maxPlanContextUnits, maxRunPromptUnits and planContextRoomMargin), in UTF-16
+// code units as its workers' transport counts them, one a Chinese character: a larger context is never sent whole there,
+// and no view of it is sent larger. The desktop gateway takes its own (apps/gateway/src/canvas/routes.ts).
+const MAX_PLAN_CONTEXT_UNITS = 120_000;
+const MAX_PLAN_PROMPT_UNITS = 128_000;
+const PLAN_REQUEST_JOIN_UNITS = '\n\nUser request:\n'.length;
 const PLAN_CONTEXT_MARGIN = 256;
 /** Shorter views a plan refused as too large may be asked again with, each shorter: a shorter request can also move to
  *  the operator's planner model (planner_model.go), with a budget of its own. */
@@ -533,16 +535,15 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   const saas = scope !== null;
   const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
   const extras: PlanningExtras = { models: options?.models, runs: options?.runs };
-  const fit = (room: number) => fitPlanningContext(doc, messages, locale, options?.mediaKinds ?? [], extras, room, planningFocus(doc, prompt, extras, options?.selected));
+  const units = saas ? Math.min(MAX_PLAN_CONTEXT_UNITS, MAX_PLAN_PROMPT_UNITS - PLAN_REQUEST_JOIN_UNITS - prompt.length) - PLAN_CONTEXT_MARGIN : Infinity;
+  const fit = (room: number) => fitPlanningContext(doc, messages, locale, options?.mediaKinds ?? [], extras, room, planningFocus(doc, prompt, extras, options?.selected), units);
   // The canvas alone is too large, or the room the request, its files and the selected knowledge leave is too small.
   const contextFull = () => new PlanFailure(canvasText(locale, 'planning.contextFull'), 'context_limit');
   const contextCrowded = () => new PlanFailure(canvasText(locale, 'planning.contextCrowded'), 'context_limit');
   const whole = buildPlanningContext(doc, messages, locale, options?.mediaKinds, extras);
-  const wholeBytes = utf8Bytes(whole), promptBytes = utf8Bytes(prompt);
-  const wholeFits = !saas || (wholeBytes <= MAX_PLAN_CONTEXT_BYTES && wholeBytes + PLAN_REQUEST_JOIN_BYTES + promptBytes <= MAX_PLAN_PROMPT_BYTES);
+  const wholeFits = !saas || (whole.length <= MAX_PLAN_CONTEXT_UNITS && whole.length + PLAN_REQUEST_JOIN_UNITS + prompt.length <= MAX_PLAN_PROMPT_UNITS);
   // A recovery replays its run's own request, which the host keeps (plannerRecovery.ts): it is sent as it was.
-  const first: PlanView | null = options?.recoveryOperationId !== undefined || wholeFits ? { context: whole }
-    : fit(Math.min(MAX_PLAN_CONTEXT_BYTES, MAX_PLAN_PROMPT_BYTES - PLAN_REQUEST_JOIN_BYTES - promptBytes) - PLAN_CONTEXT_MARGIN);
+  const first: PlanView | null = options?.recoveryOperationId !== undefined || wholeFits ? { context: whole } : fit(Infinity);
   if (!first) throw contextFull();
   let view: PlanView = first;
   let shrinks = 0;
