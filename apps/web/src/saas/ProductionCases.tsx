@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { agentCount, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, type ProductionCase } from './productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import { LazyBoundary } from './LazyBoundary';
 import { reloadAfterSaving } from './staleBuild';
+import { registerCaseOpener, takeCaseLink } from './caseLink';
 import './production-cases.css';
 
 const ProductionShowcase = lazy(() => import('./ProductionShowcase'));
@@ -73,7 +74,7 @@ function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: bool
   return <li className={`production-card${item.recording ? ' is-real' : ''}`}>
     <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} excerpt={item.excerpt} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div>
     <div className="production-card-copy">
-      <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={`${id}-label ${id}-brief`}
+      <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={`${id}-label ${id}-brief`} data-case-id={item.id}
         onClick={event => onOpen(item, event.currentTarget)}>{item.title}</button></h3>
       <p id={`${id}-brief`} className="production-brief">{quote(item.brief)}</p>
       <ol role="list" className="production-team" aria-label="Agent team, by stage">
@@ -144,6 +145,10 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
   const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState<ProductionCase | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  /** A case opened from outside its card: the card to come back to once it closes. */
+  const revealed = useRef<string | null>(null);
+  /** A case was open: the focus goes back only when one closes, not when the library first shows. */
+  const wasOpen = useRef(false);
   const titleId = useId();
   const listId = useId();
   const items = compact && !expanded ? PRODUCTION_CASES.slice(0, COMPACT_CASE_COUNT) : PRODUCTION_CASES;
@@ -152,8 +157,29 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
   const illustrated = PRODUCTION_CASES.some(item => !item.recording);
   const excerpts = PRODUCTION_CASES.some(item => item.excerpt);
   const close = () => setOpen(null);
+  // A case opened from elsewhere (the Academy, a ?case= link) shows every case, so that its card is there to come back to.
+  const reveal = useCallback((id: string) => {
+    const item = PRODUCTION_CASES.find(value => value.id === id);
+    if (!item) return false;
+    if (compact) setExpanded(true);
+    trigger.current = null;
+    revealed.current = item.id;
+    setOpen(item);
+    return true;
+  }, [compact]);
+  useEffect(() => registerCaseOpener(reveal), [reveal]);
+  // A link is followed once, when the library first shows.
+  useEffect(() => { const id = takeCaseLink(); if (id !== null) reveal(id); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Back to the card that opened the case, once the dialog is gone and the page is no longer inert.
-  useEffect(() => { if (!open && trigger.current?.isConnected) trigger.current.focus(); }, [open]);
+  useEffect(() => {
+    if (open) { wasOpen.current = true; return; }
+    if (!wasOpen.current) return;
+    wasOpen.current = false;
+    const card = trigger.current?.isConnected ? trigger.current
+      : revealed.current ? document.querySelector<HTMLButtonElement>(`button.production-card-open[data-case-id="${revealed.current}"]`) : null;
+    revealed.current = null;
+    card?.focus();
+  }, [open]);
   // The section reads in English in both interface languages, as the cases do (owner 2026-10-14).
   return <section className={`production-cases${compact ? ' is-compact' : ''}`} lang="en" aria-labelledby={titleId}>
     <div className="production-heading">
@@ -169,7 +195,7 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
       {compact && <button type="button" className="production-toggle" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Show fewer' : `See all ${PRODUCTION_CASES.length} cases`}</button>}
     </div>
-    <ul role="list" id={listId} className="production-grid">{items.map(item => <CaseCard key={item.id} item={item} active={!open} onOpen={(value, button) => { trigger.current = button; setOpen(value); }} />)}</ul>
+    <ul role="list" id={listId} className="production-grid">{items.map(item => <CaseCard key={item.id} item={item} active={!open} onOpen={(value, button) => { trigger.current = button; revealed.current = null; setOpen(value); }} />)}</ul>
     {open && <CaseDialog item={open} onClose={close} onReuse={onReuse} onCopyRecorded={onCopyRecorded} />}
   </section>;
 }

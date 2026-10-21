@@ -49,11 +49,18 @@ export async function confirmSaaSPlanningCancellation(signal: AbortSignal): Prom
   await pending;
   return true;
 }
-export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; }
+/** Parts of the page drawn outside the canvas that show something only while one is open (the Academy's "Open the case"). */
+const scopeListeners = new Set<() => void>();
+export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; for (const listener of scopeListeners) listener(); }
 export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
-export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; }
+export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; for (const listener of scopeListeners) listener(); }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
+/** For useSyncExternalStore with currentSaaSCanvas: told when a canvas opens or closes. */
+export function subscribeSaaSCanvas(listener: () => void): () => void {
+  scopeListeners.add(listener);
+  return () => { scopeListeners.delete(listener); };
+}
 /** Whether an editable canvas is open and saving: false while it loads, while its local drafts await review (they stay on
  * this device through a reload) and for a read-only canvas. */
 export function canFlushSaaSCanvas(): boolean { return saveCanvas !== null; }

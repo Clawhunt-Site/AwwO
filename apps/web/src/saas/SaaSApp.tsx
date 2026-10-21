@@ -48,6 +48,7 @@ import { AccountPreferencesProvider } from './accountPreferences';
 import { AppearanceScope } from './SaaSAppearance';
 import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
+import { AcademyLauncher, AcademyProvider } from './Academy';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
@@ -92,8 +93,9 @@ function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: str
 function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: React.ReactNode }) {
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
 }
-// Every page, signed in or not, can say that AwwO was updated after it opened and part of it is gone (staleBuild.ts).
-export function SaaSApp() { return <SaaSPreferencesProvider><AuthenticatedApp /><StaleBuildNotice /></SaaSPreferencesProvider>; }
+// Every page, signed in or not, can say that AwwO was updated after it opened and part of it is gone (staleBuild.ts),
+// and can open the Academy, its tutorial videos (Academy.tsx).
+export function SaaSApp() { return <SaaSPreferencesProvider><AcademyProvider><AuthenticatedApp /><StaleBuildNotice /></AcademyProvider></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));
@@ -293,7 +295,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
-  return <main className="saas-login"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
+  return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
     : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><a className="saas-sso-signup" href={clawHuntStartURL(location.search, { signup: true })}>{t('没有账号？注册 ClawHunt 账号', 'New here? Create a ClawHunt account')}</a><small>{t('还没开通 AwwO？注册或登录后会弹出邀请码输入框，输入后即可进入。', 'No access yet? After you sign up or sign in, a box asks for your invite code and you go straight in.')}</small></section>}
@@ -325,14 +327,16 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
-  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
+  // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options.
+  const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy />;
+  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
-  return <main className="saas-dashboard saas-home"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header>
+  return <main className="saas-dashboard saas-home"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header>
     <WorkspaceHome key={identity.user.id + ':' + tenant.id + ':' + tenant.role} identity={identity} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
   </main>;
 }
-function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void }) {
+function WorkspaceControls({ identity, tenant, onProfile, academy = false }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void; academy?: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const [error, setError] = useState('');
   const [managementTenant, setManagementTenant] = useState<string | null>(tenant?.id || null);
@@ -345,12 +349,13 @@ function WorkspaceControls({ identity, tenant, onProfile }: { identity: Identity
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi,
         ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {}) }} />
+    {academy && <AcademyLauncher />}
     <ThemePicker />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
       <a href={accountURL('general')}><Settings2 size={16}/>{t('设置', 'Settings')}</a>
       <LanguageSwitch variant="menu" />
       <UiModeSwitch onSwitched={close} />
-      <TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
+      <AcademyLauncher variant="menu" onLaunch={close} /><TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <LicensesLink icon />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
       {identity.authentication === 'clawhunt' && <a href={accountURL('invites')}><Gift size={16}/>{t('邀请好友', 'Invite friends')}</a>}

@@ -73,16 +73,17 @@
 
   /* ── Pressing answers immediately ───────────────────────────────────────────────────────── */
   /* Controls dip while pressed; large cards dip less, so the page doesn't seem to jump. A button whose
-     click area is a stretched ::after (the case cards) never scales: a scaled element becomes the containing
-     block of its positioned pseudo-elements, which would shrink the click area mid-press and drop the
-     click. Its card dips instead. The full-width examples row doesn't dip. */
-  :is(.saas-login, .saas-dashboard, .saas-card, .saas-native-dialog) button:not(:disabled, .production-card-open, .saas-case-pick, .saas-home-examples-toggle):active,
+     click area is a stretched ::after (the case cards, the Academy's videos) never scales: a scaled element
+     becomes the containing block of its positioned pseudo-elements, which would shrink the click area
+     mid-press and drop the click. Its card dips instead. The full-width examples row doesn't dip. */
+  :is(.saas-login, .saas-dashboard, .saas-card, .saas-native-dialog) button:not(:disabled, .production-card-open, .academy-card-open, .saas-case-pick, .saas-home-examples-toggle):active,
   button.saas-primary:not(:disabled):active, a.saas-primary:active, .saas-sso-action:active,
   html:root .saas-canvas-shell :is(.canvas-run-btn, .canvas-run-timeline-toggle, .awwo-primary, .awwo-secondary, .awwo-assistant-send, .awwo-view-tools button, .awwo-icon-button):not(:disabled):active {
     scale: .97;
   }
   :is(.saas-login, .saas-dashboard) .saas-canvas-open:not(:disabled):active,
   :is(.saas-login, .saas-dashboard) .production-card:has(.production-card-open:active),
+  .academy-dialog .academy-card:has(.academy-card-open:active),
   :is(.saas-login, .saas-dashboard) .saas-case-card:has(.saas-case-pick:not(:disabled):active) {
     scale: .99;
   }

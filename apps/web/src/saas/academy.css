@@ -1,0 +1,148 @@
+/* The AwwO Academy (Academy.tsx, AcademyDialog.tsx): the tutorial videos, in a dialog. Rules are two classes deep, as
+   the cases' are: `.saas-native-dialog button` and `.saas-native-dialog p` (design/system.css) would otherwise restyle
+   them. */
+.academy-dialog { --academy-line: var(--saas-hairline, var(--saas-border)); color: var(--saas-text); }
+.academy-dialog * { box-sizing: border-box; }
+.academy-dialog.saas-native-dialog { width: min(1180px, 94vw); max-width: 94vw; max-height: 92dvh; padding: 0; overflow: hidden; }
+/* Only while open: a closed dialog keeps the browser's display: none. */
+.academy-dialog[open] { display: flex; flex-direction: column; }
+/* The dialog that takes its loading frame's place does not come in again (design/motion.css animates every opening). */
+dialog.academy-dialog.is-replacing[open], dialog.academy-dialog.is-replacing[open]::backdrop { animation: none; }
+.academy-shell { display: flex; flex-direction: column; min-height: 0; max-height: 92dvh; }
+
+/* The header: a wash of the accent from its corner, as the home page's welcome glows. */
+.academy-header { position: relative; display: flex; flex-shrink: 0; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 24px 24px 18px; overflow: hidden;
+  border-bottom: 1px solid var(--academy-line);
+  background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--saas-accent) 13%, transparent) 0%, transparent 55%), var(--saas-card); }
+.academy-header.is-playing { padding-bottom: 16px; }
+.academy-header > div { min-width: 0; }
+.academy-eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--saas-accent); font: 650 11px/1 var(--saas-font); letter-spacing: .14em; text-transform: uppercase; }
+.academy-dialog h2 { margin: 9px 0 0; font: 690 26px/1.2 var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: -.02em; text-wrap: balance; }
+/* The title takes the focus when the view changes (it is not a control). */
+.academy-dialog h2:focus { outline: none; }
+.academy-dialog p.academy-loading { margin: 0; padding: 28px 0 36px; color: var(--saas-muted); font-size: var(--saas-text-md); }
+.academy-dialog button.academy-close { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; min-height: 36px; padding: 0;
+  border: 1px solid var(--academy-line); border-radius: 10px; background: var(--saas-card); color: var(--saas-muted); }
+.academy-dialog button.academy-close:not(:disabled):hover { background: var(--saas-soft); color: var(--saas-text); }
+.academy-body { min-height: 0; overflow: auto; padding: 18px 24px 28px; overscroll-behavior: contain; }
+
+/* the library */
+.academy-dialog p.academy-lead { max-width: 760px; margin: 10px 0 0; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.7; }
+.academy-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.academy-dialog .academy-filters button { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 13px; border: 1px solid var(--saas-border); border-radius: var(--saas-radius-pill);
+  background: var(--saas-card); color: var(--saas-muted); font: 600 var(--saas-text-sm)/1 var(--saas-font); }
+.academy-dialog .academy-filters button:not(:disabled):hover { border-color: var(--saas-border-strong); background: var(--saas-soft); color: var(--saas-text); }
+.academy-dialog .academy-filters button[aria-pressed='true'], .academy-dialog .academy-filters button[aria-pressed='true']:not(:disabled):hover {
+  border-color: var(--saas-text); background: var(--saas-text); color: var(--saas-card); }
+.academy-filters button span { font-variant-numeric: tabular-nums; opacity: .72; }
+.academy-section { margin-top: 26px; }
+.academy-section > header { display: grid; gap: 4px; }
+.academy-dialog .academy-section h3 { margin: 0; font: 650 17px/1.35 var(--saas-font); }
+.academy-dialog .academy-section > header p { max-width: 780px; margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6; }
+.academy-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 14px 0 0; padding: 0; list-style: none; }
+.academy-section.is-start .academy-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.academy-card { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--academy-line); border-radius: var(--saas-radius-lg, 18px);
+  background: var(--saas-card); transition: border-color var(--saas-dur-2) var(--saas-ease), box-shadow var(--saas-dur-2) var(--saas-ease); }
+.academy-card:hover, .academy-card:focus-within { border-color: var(--saas-border); box-shadow: var(--saas-shadow-lg); }
+.academy-card-media { position: relative; flex-shrink: 0; aspect-ratio: 16 / 9; overflow: hidden; background: var(--saas-soft); }
+.academy-card-media img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform var(--saas-dur-3) var(--saas-ease); }
+.academy-card:hover .academy-card-media img { transform: scale(1.03); }
+/* The play button shows over the poster where it is pointed at (always on a touch screen); the length always shows. */
+.academy-card-play { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
+  background: var(--saas-accent); color: #fff; box-shadow: 0 8px 24px #0b122059; opacity: 0; transform: scale(.85);
+  transition: opacity var(--saas-dur-2) var(--saas-ease), transform var(--saas-dur-2) var(--saas-ease); }
+.academy-card-play svg { margin-left: 2px; fill: currentColor; }
+.academy-card:hover .academy-card-play, .academy-card:focus-within .academy-card-play { opacity: 1; transform: scale(1); }
+@media (hover: none) { .academy-card-play { opacity: .94; transform: scale(1); } }
+.academy-card-duration { position: absolute; right: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 6px; background: #0b1220d0; color: #fff;
+  font: 600 11.5px/1.3 var(--saas-font); font-variant-numeric: tabular-nums; }
+.academy-card-duration svg { fill: currentColor; }
+.academy-card-copy { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 14px 14px; }
+.academy-card-case, .academy-dialog p.academy-player-case { color: var(--saas-muted); font: 650 11px/1.4 var(--saas-font); letter-spacing: .05em; text-transform: uppercase; }
+.academy-dialog .academy-card h4 { margin: 0; font: 600 15px/1.4 var(--saas-font); }
+.academy-dialog button.academy-card-open { min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.academy-dialog button.academy-card-open:not(:disabled):hover { border: 0; background: none; }
+.academy-card-open::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.academy-dialog button.academy-card-open:focus-visible { outline: none; }
+.academy-card-open:focus-visible::after { outline: 2px solid var(--saas-focus); outline-offset: -2px; border-radius: var(--saas-radius-lg, 18px); }
+.academy-dialog p.academy-card-summary { display: -webkit-box; overflow: hidden; margin: 0; color: var(--saas-muted); font-size: 12.5px; line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+
+/* a video, opened */
+.academy-player-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.academy-dialog button.academy-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 13px 0 10px; }
+.academy-position { color: var(--saas-muted); font-size: var(--saas-text-sm); font-variant-numeric: tabular-nums; }
+/* The video beside what it shows and what comes next; stacked where the dialog is narrow. */
+.academy-player-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.academy-stage { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 14px; background: #000; }
+.academy-video { display: block; width: 100%; height: 100%; background: #000; }
+.academy-video-failed { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; color: #e2e8f0; text-align: center; }
+.academy-dialog .academy-video-failed p { margin: 0; color: inherit; }
+.academy-dialog .academy-video-failed button { display: inline-flex; align-items: center; gap: 7px; }
+.academy-player-copy { display: grid; gap: 9px; align-content: start; min-width: 0; }
+.academy-dialog p.academy-player-case { margin: 0; }
+.academy-dialog p.academy-player-meta { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6; }
+.academy-dialog p.academy-player-summary { margin: 0; color: var(--saas-text); font-size: var(--saas-text-md); line-height: 1.7; }
+.academy-dialog p.academy-player-how { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.7; }
+.academy-player-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.academy-dialog .academy-open-case { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 18px; text-decoration: none; }
+.academy-up-next { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--academy-line); }
+.academy-dialog .academy-up-next h3 { margin: 0 0 10px; color: var(--saas-muted); font: 650 11px/1.4 var(--saas-font); letter-spacing: .08em; text-transform: uppercase; }
+.academy-up-next ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.academy-dialog .academy-up-next button { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 10px; width: 100%; min-height: 0; padding: 6px;
+  border: 1px solid transparent; border-radius: 12px; background: none; text-align: left; font: 600 13px/1.4 var(--saas-font); color: var(--saas-text); }
+.academy-dialog .academy-up-next button:not(:disabled):hover { border-color: var(--academy-line); background: var(--saas-soft); }
+.academy-up-next-poster { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: var(--saas-soft); }
+.academy-up-next-poster img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.academy-up-next-poster span { position: absolute; right: 4px; bottom: 4px; padding: 1px 5px; border-radius: 5px; background: #0b1220d0; color: #fff; font: 600 10px/1.4 var(--saas-font);
+  font-variant-numeric: tabular-nums; }
+.academy-up-next-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+
+/* in place of the dialog, when its part of the site does not load */
+.academy-unavailable.saas-native-dialog { width: min(460px, 92vw); }
+.academy-unavailable-body { display: grid; gap: 12px; padding: 24px; }
+.academy-unavailable h2 { margin: 0; font-size: var(--saas-text-xl); }
+.academy-unavailable p { margin: 0; color: var(--saas-muted); line-height: 1.7; }
+.academy-unavailable-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.academy-unavailable-actions button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* the buttons that open it */
+.saas-academy-launch svg { flex-shrink: 0; }
+.saas-login > .saas-preferences .saas-academy-launch { display: inline-flex; align-items: center; gap: 7px; }
+
+@media (max-width: 1050px) {
+  .academy-grid, .academy-section.is-start .academy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .academy-player-grid { grid-template-columns: 1fr; }
+  .academy-player-copy { max-width: 760px; }
+}
+@media (max-width: 760px) {
+  /* The top bar keeps its icons only, as it does for the account and the appearance. */
+  .saas-dashboard .saas-account-actions .saas-academy-launch { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
+  .saas-dashboard .saas-account-actions .saas-academy-launch span { display: none; }
+}
+@media (max-width: 700px) {
+  .academy-dialog.saas-native-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  .academy-shell { height: 100%; max-height: 100dvh; }
+  .academy-header { padding: 16px 16px 12px; }
+  .academy-dialog h2 { font-size: 21px; }
+  .academy-body { padding: 14px 16px 24px; }
+  .academy-section { margin-top: 22px; }
+}
+@media (max-width: 560px) {
+  /* A list to scan: the poster beside its title, the summary left to the video itself. */
+  .academy-grid, .academy-section.is-start .academy-grid { grid-template-columns: 1fr; gap: 10px; }
+  .academy-card { flex-direction: row; align-items: stretch; border-radius: var(--saas-radius, 14px); }
+  .academy-card-media { width: 132px; }
+  .academy-card-play { width: 34px; height: 34px; margin: -17px 0 0 -17px; }
+  .academy-card-play svg { width: 14px; height: 14px; }
+  .academy-card-duration { right: 5px; bottom: 5px; padding: 2px 5px; font-size: 10.5px; }
+  .academy-card-copy { justify-content: center; gap: 3px; padding: 8px 12px; }
+  .academy-dialog .academy-card h4 { font-size: 14px; }
+  .academy-dialog p.academy-card-summary { display: none; }
+  .academy-card-open:focus-visible::after { border-radius: var(--saas-radius, 14px); }
+  .academy-player-actions > * { flex: 1 1 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .academy-card, .academy-card-media img, .academy-card-play { transition: none; }
+  .academy-card:hover .academy-card-media img { transform: none; }
+}

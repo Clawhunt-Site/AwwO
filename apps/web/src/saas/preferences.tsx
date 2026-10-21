@@ -71,9 +71,10 @@ export function LanguageSwitch({ variant = 'button' }: { variant?: 'button' | 'm
   if (variant === 'menu') return <button type="button" className="saas-language-row" aria-label={label} onClick={toggle}><Languages size={16} aria-hidden="true" />{locale === 'zh' ? 'English' : '中文'}</button>;
   return <button type="button" aria-label={label} onClick={toggle}>{locale === 'zh' ? 'EN' : '中'}</button>;
 }
-/** The language switch and the appearance-style button, for pages whose header has no account controls. */
-export function PreferenceControls({ appearance = true }: { appearance?: boolean } = {}) {
-  return <div className="saas-preferences"><LanguageSwitch />{appearance && <ThemePicker />}</div>;
+/** The language switch and the appearance-style button, for pages whose header has no account controls; `children`
+ * come first (the landing page's Academy button). */
+export function PreferenceControls({ appearance = true, children }: { appearance?: boolean; children?: ReactNode } = {}) {
+  return <div className="saas-preferences">{children}<LanguageSwitch />{appearance && <ThemePicker />}</div>;
 }
 
 /**
