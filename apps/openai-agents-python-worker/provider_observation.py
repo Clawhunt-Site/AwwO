@@ -12,6 +12,17 @@ TOKEN_FIELDS = ("inputTokens", "outputTokens", "cachedInputTokens", "cacheWriteT
                 "reasoningTokens", "providerTotalTokens", "computedTotalTokens")
 MAX_FRAME = 1 << 20
 MAX_INTEGER = 9007199254740991
+# A Responses stream's events before anything of the answer (and its error event): the rest are the model's work.
+OPENING_EVENTS = frozenset({"response.created", "response.in_progress", "response.queued", "error"})
+
+
+def counts_work(usage) -> bool:
+    """Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level
+    or one object down): the provider read the request."""
+    def positive(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+    return isinstance(usage, dict) and any(positive(v) or (isinstance(v, dict) and any(positive(x) for x in v.values()))
+                                           for v in usage.values())
 
 
 def empty_usage(status="unavailable", reason="provider_missing"):
@@ -66,6 +77,10 @@ class ProviderObservation:
         self.finish_reason = None
         self.complete = False
         self.failure = None
+        # Whether the stream carried anything of the model's work (its text, its reasoning, a tool call, a refusal, usage
+        # that counts something), seen here in the bytes before the SDK reads them: the SDK drops what it has queued
+        # when the call fails, so its events alone cannot tell a refusal before the call began from a failure after.
+        self.produced = False
         self._decoder = codecs.getincrementaldecoder("utf-8")("strict")
         self._line = ""
         self._data = []
@@ -102,6 +117,7 @@ class ProviderObservation:
         if self.protocol == "chat_completions":
             if "usage" in value and value["usage"] is not None:
                 self.usage = normalize_usage(value["usage"], self.protocol)
+                self.produced = self.produced or counts_work(value["usage"])
             choices = value.get("choices", [])
             if not isinstance(choices, list):
                 self._reject()
@@ -111,6 +127,8 @@ class ProviderObservation:
                     self._reject()
                     continue
                 delta = choice.get("delta")
+                if isinstance(delta, dict) and any(key != "role" and part is not None and part != "" for key, part in delta.items()):
+                    self.produced = True
                 if isinstance(delta, dict) and isinstance(delta.get("content"), str) and delta["content"]:
                     if self.first is None:
                         self.first = self.clock()
@@ -127,6 +145,8 @@ class ProviderObservation:
                         self._reject()
         else:
             kind = value.get("type")
+            if kind not in OPENING_EVENTS:
+                self.produced = True
             if kind == "response.output_text.delta" and isinstance(value.get("delta"), str) and value["delta"]:
                 if self.first is None:
                     self.first = self.clock()

@@ -293,6 +293,9 @@ export async function gatherChatStream(source: AsyncIterable<Uint8Array>): Promi
     if (!data) return;
     if (data === '[DONE]') { done = true; return; }
     const chunk = jsonObject(data, 'shape');
+    // Usage that counts anything says the provider read the request: work done, as anything the model sent is (read
+    // before the frame's own error, which may carry it).
+    if (countsWork(chunk.usage)) produced = true;
     if (chunk.error != null || (chunk.choices == null && (chunk.code != null || chunk.message != null))) {
       const error = object(chunk.error) ? chunk.error : chunk.error != null ? {} : { code: chunk.code, message: chunk.message };
       const type = kind(error.type) ? error.type : kind(error.code) ? error.code : undefined;
@@ -409,15 +412,23 @@ function streamClosed(error: unknown, quietMs: number, idleMs: number): { reason
     detail: network === undefined ? 'end' : network === 'network' ? 'broken' : network.slice('network:'.length) };
 }
 
+/** Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level or
+ *  one object down): the provider read the request, so what follows it is never a refusal before the call began. */
+function countsWork(usage: unknown): boolean {
+  const positive = (value: unknown) => typeof value === 'number' && value > 0;
+  return object(usage) && Object.values(usage).some(value => positive(value) || (object(value) && Object.values(value).some(positive)));
+}
+
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
  *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
  *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed), which carries
  *  the label an OpenAI-compatible provider gives it whatever this one calls it, and inside a 200 (an error read whole,
  *  or a gateway's error frame that came before anything else: `sizable`) the detail `before-output`, without which the
- *  API never takes a 200's label for that refusal: a call that streamed some of its answer did work. */
+ *  API never takes a 200's label for that refusal: a call that streamed some of its answer did work. A body whose usage
+ *  counts anything (countsWork) is never that refusal: the provider read the request. */
 function refusal(status: number, body: ObjectValue = {}, sizable = true): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if (sizable && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
+  if (sizable && !countsWork(body.usage) && [200, 400, 413, 422].includes(status) && (error.code === 'context_length_exceeded' || error.sized === true || contextOverflow(error.message))) {
     return { reason: `provider:${status}:context_length_exceeded`, ...(status === 200 ? { detail: 'before-output' } : {}) };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));

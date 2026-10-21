@@ -83,10 +83,23 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             return web.Response()
         if self.mode == "redirect":
             return web.Response(status=307, headers={"Location": "/elsewhere/v1/chat/completions"})
+        too_long = {"message": "This model's maximum context length is 131072 tokens.", "type": "invalid_request_error",
+                    "code": "context_length_exceeded"}
+        if self.mode == "too_long":
+            return web.json_response({"error": too_long}, status=400)
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         if self.compress:
             response.enable_compression()
         await response.prepare(request)
+        if self.mode.startswith("too_long_"):
+            # The same refusal as a frame inside the stream (with its status, as the Bedrock bridge sends one): first,
+            # or after the model began (its reasoning, or usage that counts something), in the same write as it.
+            before = {"too_long_after_reasoning": {"id": "chatcmpl_1", "object": "chat.completion.chunk", "created": 1, "model": "mock-model",
+                                                   "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": REASONING_TEXT[:12]}, "finish_reason": None}]},
+                      "too_long_after_usage": {"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 9, "total_tokens": 20}}}.get(self.mode)
+            frames = ([before] if before else []) + [{"error": {**too_long, "status": 400}}]
+            await response.write("".join(f"data: {json.dumps(frame)}\n\n" for frame in frames).encode())
+            return response
         delta = {"role": "assistant", "content": self.answer}
         finish = self.finish_reason
         chunks = [(delta, None), ({}, finish)]
@@ -227,6 +240,20 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["observability"]["usage"]["status"], "reported")
         self.assertEqual(events[-1]["observability"]["usage"]["reasoningTokens"], 2)
         self.assertEqual(len(self.calls), 1)
+
+    async def test_a_size_refusal_is_its_own_code_only_before_the_model_began(self):
+        # Before anything (a 400, or the stream's first frame): the refusal; after the model's reasoning (which an
+        # ordinary caller never sees) or usage that counts something: the refusal of the request it otherwise is, which
+        # the API counts. Its words never cross the worker.
+        for mode, code in [("too_long", "MODEL_CONTEXT_LIMIT"), ("too_long_first", "MODEL_CONTEXT_LIMIT"),
+                           ("too_long_after_reasoning", "MODEL_REQUEST_REJECTED"), ("too_long_after_usage", "MODEL_REQUEST_REJECTED")]:
+            with self.subTest(mode=mode):
+                self.mode = mode
+                events = await self.collect()
+                self.assertEqual(events[-1]["type"], "failed", events)
+                self.assertEqual(events[-1]["code"], code, events)
+                self.assertNotIn("131072", json.dumps(events))
+                self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
 
     async def test_chat_terminal_failures_cover_same_chunk_empty_and_missing_finish(self):
         for text, finish, done, code in [

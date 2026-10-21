@@ -481,6 +481,11 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     mismatch: res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [call] }, finish_reason: 'stop' }] })),
     'bad-args': res => res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ ...call, function: { name: 'workspace_exec', arguments: '{"command":' } }] }, finish_reason: 'tool_calls' }] })),
     'two-choices': res => res.end(JSON.stringify({ choices: [{ message: { content: 'a' }, finish_reason: 'stop' }, { message: { content: 'b' }, finish_reason: 'stop' }] })),
+    // A refusal of the request as too large, in a 200 read whole: before anything, unless its usage counts something
+    // (the provider read the request), at its top level or one object down.
+    'gate-200-too-long': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error' } })),
+    'gate-200-too-long-usage': res => res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error' }, usage: { prompt_tokens: 11, completion_tokens: 9 } })),
+    'anthropic-too-long-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'secret-provider-key: prompt is too long: 213462 tokens > 200000 maximum' }, usage: { input_tokens: 0, cache: { read: 7 } } })); },
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
@@ -489,6 +494,9 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     ['edge-524', 'provider:524', undefined], ['gate-200-error', 'provider:200:new_api_error', undefined], ['not-json', 'body', undefined],
     ['empty', 'answer', 'empty'], ['filtered', 'answer', 'finish:content_filter'], ['refused', 'answer', 'refusal'], ['unfinished', 'answer', 'finish:none'],
     ['mismatch', 'answer', 'tools-mismatch'], ['bad-args', 'answer', 'tool-args'], ['two-choices', 'answer', 'choices'],
+    ['gate-200-too-long', 'provider:200:context_length_exceeded', 'before-output'],
+    ['gate-200-too-long-usage', 'provider:200:invalid_request_error', undefined],
+    ['anthropic-too-long-usage', 'provider:400:invalid_request_error', undefined],
   ] as const) {
     const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
     assert.equal(response.status, 502, scenario);
@@ -499,7 +507,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 15);
+  assert.equal(logged.length, 18);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
     'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);
@@ -789,6 +797,13 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     'too-long-after': res => void events(res, [partial, { error: { code: 'context_length_exceeded', message: 'secret-provider-key maximum context length is 131072 tokens' } }]),
     'too-long-after-reasoning': res => void events(res, [{ choices: [{ index: 0, delta: { reasoning_content: 'thinking' } }] },
       { error: { type: 'invalid_request_error', message: 'secret-provider-key prompt is too long' } }]),
+    // Usage that counts something (the provider read the request) is work done too, in its own frame or the error's;
+    // usage that counts nothing is not.
+    'too-long-after-usage': res => void events(res, [{ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } },
+      { error: { code: 'context_length_exceeded' } }]),
+    'too-long-zero-usage': res => void events(res, [{ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } },
+      { error: { code: 'context_length_exceeded' } }]),
+    'too-long-frame-usage': res => void events(res, [{ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 5 } }]),
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi', { edgeIdleMs: 400 });
   const socket = 'UND_ERR_SOCKET';
@@ -798,6 +813,8 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
     ['overloaded', 'provider:200:overloaded_error', undefined],
     ['too-long-first', 'provider:200:context_length_exceeded', 'before-output'], ['too-long-code', 'provider:200:context_length_exceeded', 'before-output'],
     ['too-long-after', 'provider:200:context_length_exceeded', undefined], ['too-long-after-reasoning', 'provider:200:invalid_request_error', undefined],
+    ['too-long-after-usage', 'provider:200:context_length_exceeded', undefined], ['too-long-zero-usage', 'provider:200:context_length_exceeded', 'before-output'],
+    ['too-long-frame-usage', 'provider:200:context_length_exceeded', undefined],
     ['no-finish', 'stream:closed', 'end'], ['unfinished', 'stream:unfinished', undefined],
     ['garbled', 'stream:shape', undefined], ['reset', 'stream:closed', socket], ['idle-reset', 'stream:closed:idle', socket], ['idle-end', 'stream:closed:idle', 'end'],
     ['length', 'answer', 'finish:length'], ['filtered', 'answer', 'finish:content_filter'], ['huge', 'answer', 'size'], ['refusal', 'answer', 'refusal'],
@@ -812,7 +829,7 @@ test('a Gate stream that breaks is a failed call named by kind, never a partial 
   const finished = await s.send(input({ completion: { messages: [{ role: 'user', content: 'after-finish' }], tools: [tool] } }));
   assert.equal(finished.status, 200);
   assert.equal((await finished.json()).completion.choices[0].message.content, 'Done.');
-  assert.equal(logged.length, 17);
+  assert.equal(logged.length, 20);
   // Each close's silence is on its log line alone (quietMs), never in the reply.
   const closes = logged.filter(line => String(line.reason).startsWith('stream:closed'));
   assert.equal(closes.length, 4);

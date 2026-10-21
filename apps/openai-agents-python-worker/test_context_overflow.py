@@ -38,6 +38,8 @@ class ContextOverflowTest(unittest.TestCase):
         self.assertEqual(classify_error(by_code)["code"], "MODEL_CONTEXT_LIMIT")
         event = classify_error(by_message)
         self.assertNotIn("131072", json.dumps(event))
+        # After the model began it is the refusal of the request it otherwise is.
+        self.assertEqual(classify_error(by_code, sizable=False)["code"], "MODEL_REQUEST_REJECTED")
         # Another refusal of the request, and a rate limit that names the context, are not.
         self.assertEqual(classify_error(provider_error(BadRequestError, 400, {"error": {"message": "messages: text content blocks must be non-empty"}}))["code"],
                          "MODEL_REQUEST_REJECTED")

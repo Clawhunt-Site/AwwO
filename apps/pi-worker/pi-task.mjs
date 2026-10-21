@@ -17,6 +17,15 @@ function codePoints(text) {
   return count;
 }
 
+// Whether a failed call got anything back: a part of an answer (text, reasoning, a tool call, even an empty one) or usage
+// that counts anything (a token read or written, a cost, one object down).
+function answered(message) {
+  const positive = (value) => typeof value === 'number' && value > 0;
+  const usage = message.usage && typeof message.usage === 'object' ? Object.values(message.usage) : [];
+  return (Array.isArray(message.content) && message.content.length > 0)
+    || usage.some((value) => positive(value) || (value && typeof value === 'object' && Object.values(value).some(positive)));
+}
+
 function emit(event) {
   return new Promise((resolve) => {
     if (!process.connected) return resolve();
@@ -213,9 +222,11 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
-    if (finalMessage?.stopReason === 'error' && !text) {
-      // A provider's refusal of the request as larger than its model's window, read from its message here and never
-      // relayed (context-overflow.ts; loaded only on a failure).
+    if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted && !answered(finalMessage)) {
+      // A provider's refusal of the request as larger than its model's window, said only of a call that got nothing
+      // back (its reasoning, which an ordinary caller never sees, counts: the API cannot tell a call that did work from
+      // one that never began without this worker); read from its message here and never relayed (context-overflow.ts;
+      // loaded only on a failure).
       const { contextOverflow } = await import('../context-overflow.ts');
       if (contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
     }

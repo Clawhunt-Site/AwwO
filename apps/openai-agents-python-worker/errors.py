@@ -46,7 +46,9 @@ def refuses_size(error: BaseException) -> bool:
     return any(context_overflow(text) for text in texts)
 
 
-def classify_error(error: BaseException) -> dict:
+def classify_error(error: BaseException, sizable: bool = True) -> dict:
+    """The wire failure for an error. A provider's refusal of the request as too large is MODEL_CONTEXT_LIMIT only while
+    `sizable` (the model sent nothing yet); after that it is the refusal it otherwise is."""
     from tools import ToolInputError
 
     name = type(error).__name__
@@ -69,7 +71,7 @@ def classify_error(error: BaseException) -> dict:
         inner = body.get("status") if isinstance(body, dict) else None
         if isinstance(inner, int) and not isinstance(inner, bool) and 400 <= inner <= 599:
             status = inner
-    if status in (400, 413, 422) and refuses_size(error):
+    if sizable and status in (400, 413, 422) and refuses_size(error):
         return failure_event("MODEL_CONTEXT_LIMIT")
     if status in (401, 403):
         return failure_event("MODEL_AUTHENTICATION")
