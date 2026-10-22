@@ -24,8 +24,9 @@ import (
 // its generation instead, in order: the same model where the other provider has it, then the nearest one of the same
 // kind. One backup is tried at most: the first of these that can make the run as it stands.
 var mediaBackupModels = map[string][]string{
-	// Seedream 5.0 Pro; RunningHub's makes square pictures only (mediaImplied), so a picture of another shape goes to
-	// Nano Banana 2.
+	// 图片 · 高清, which names the flash model of the 全能图片 5.0 family since 2026-10-22 and not the Seedream 5.0 Pro
+	// its id is spelled after (xtasy.go). Its backups are RunningHub's sharpest pictures: Seedream's makes square ones
+	// only (mediaImplied), so a picture of another shape goes to Nano Banana 2.
 	"xt.seedream-5-pro":         {"rh.seedream-v5-pro", "rh.nano-banana-2"},
 	"xt.gemini-3-1-flash-image": {"rh.nano-banana-2"},
 	"xt.gpt-image-2-5":          {"rh.gpt-image-2"},

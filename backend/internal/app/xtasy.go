@@ -99,24 +99,39 @@ func xtasyModels() []*mediaModel {
 	ratios := []string{"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"}
 	videoRatios := []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}
 	prompt := mediaPrompt{MinLength: 1, MaxLength: 32000}
-	// Verified: every model generated once at these defaults with the operator's key on 2026-10-10 (TestXtasyLiveEveryModel).
+	// Verified: every model generated once at these defaults with the operator's key (TestXtasyLiveEveryModel) on
+	// 2026-10-10, except where verifiedOn names a later day.
 	// Users see a generic name in their language, never the provider's or the model family's (owner decisions
-	// 2026-10-11): what a model is good for, by the facts below (2K by default, up to 4K, several pictures a run).
+	// 2026-10-11): what a model is good for, by the facts below (how sharp, and whether it makes several at a time).
 	model := func(id string, label [2]string, kind, remote string, params ...mediaParam) *mediaModel {
 		return &mediaModel{ID: id, Name: label[0], Label: label, Vendor: mediaVendorShown, Kind: kind, Mode: "text-to-" + kind,
 			Endpoint: xtasyEndpoints[kind], Version: remote, Prompt: prompt, Params: params, Docs: xtasyDocs, Verified: "2026-10-10",
 			Provider: mediaProviderXtasy, References: xtasyReferenceModels[id]}
 	}
+	verifiedOn := func(m *mediaModel, day string) *mediaModel { m.Verified = day; return m }
 	return []*mediaModel{
-		model("xt.seedream-5-pro", [2]string{"图片 · 高清", "Image · HD"}, mediaKindImage, "model_db5a9f8c-6421-5dd4-8ede-8e1e9b545110",
-			ratio("1:1", ratios...), resolution("2K", "2K", "1K")),
+		// 图片 · 高清 keeps its id, so the nodes already saved on it keep generating, but since 2026-10-22 the id names
+		// another model: the one it named (model_db5a9f8c-…, the Seedream 5.0 Pro of 2026-10-10) is not in the operator's
+		// account any more. It went with the key that was revoked that day, and every generation on it failed
+		// media_provider_unauthorized while that key was in place, then media_provider_unavailable once the key was
+		// replaced (5 runs on production between 07:52Z and 08:10Z). It now names the flash model of the same family as
+		// 图片 · 全能 below. Only 2K is offered: the model's own list also names 4K, but the generation is then refused
+		// (GEN_INVALID_PARAMETER, "image area must be at most 4624220 pixels" - 4K at 1:1 is four times that, and 2K at
+		// 1:1 fits), and a setting that cannot generate is not offered. The 1K of the old model is gone with it; of the
+		// 61 nodes saved on this id, 36 hold 2K and 25 hold no resolution at all, and every run since 2026-10-01 asked
+		// for 2K, so no saved node loses its setting.
+		verifiedOn(model("xt.seedream-5-pro", [2]string{"图片 · 高清", "Image · HD"}, mediaKindImage, "model_0c50c8be-1468-5599-9532-e592efa7b84e",
+			ratio("1:1", ratios...), resolution("2K", "2K")), "2026-10-22"),
 		model("xt.gemini-3-1-flash-image", [2]string{"图片 · 超清", "Image · Ultra HD"}, mediaKindImage, "model_740b5a45-d90d-531f-9dba-f51dd4e71254",
 			ratio("1:1", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "1:8", "4:1", "8:1"),
 			resolution("1K", "512px", "1K", "2K", "4K")),
 		model("xt.gpt-image-2-5", [2]string{"图片 · 超清多张 Pro", "Image · Ultra HD batch Pro"}, mediaKindImage, "model_6fe4cc38-b598-5a88-ad7e-b4cefa0a9e51",
 			ratio("auto", "auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"), images(4), resolution("1K", "1K", "2K", "4K")),
-		model("xt.xtasy-3", [2]string{"图片 · 标准多张", "Image · Standard batch"}, mediaKindImage, "model_0641b8b9-f39e-5bd5-bccb-104b84988282",
-			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
+		// Generated again on 2026-10-22, in the same run as 图片 · 高清 above: it charged 16 at these defaults, not the
+		// 9.6 of 2026-10-10, so its price is no longer three times what it costs (mediaBaseCredits says so and leaves
+		// it). Its date is that run's, so the oldest date here is not read as covering it.
+		verifiedOn(model("xt.xtasy-3", [2]string{"图片 · 标准多张", "Image · Standard batch"}, mediaKindImage, "model_0641b8b9-f39e-5bd5-bccb-104b84988282",
+			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative), "2026-10-22"),
 		model("xt.xtasy-3-pro", [2]string{"图片 · 标准多张 Pro", "Image · Standard batch Pro"}, mediaKindImage, "model_52c32c2d-aecc-564d-84d6-c5549ff349c9",
 			ratio("1:1", ratios...), images(6), resolution("1K", "1K", "2K"), negative),
 		model("xt.omni-image-5-pro", [2]string{"图片 · 全能", "Image · All-round"}, mediaKindImage, "model_5cb47bcb-5ce8-57d2-804c-8f382dedc9fe",

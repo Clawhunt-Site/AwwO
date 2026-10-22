@@ -66,6 +66,75 @@ func TestXtasyModelsAreInTheCatalogAndClosed(t *testing.T) {
 	}
 }
 
+// TestXtasyImageHDNamesTheModelTheAccountHas pins what 2026-10-22 decided for 图片 · 高清, whose remote model left the
+// operator's account with the key revoked that day (xtasy.go): the id and the label stay, so the 61 nodes saved on it
+// and the stored official and epic workflows keep their model, while the id names another model of the platform's own
+// catalogue. Only 2K is offered, because the model's list names 4K but refuses to generate it ("image area must be at
+// most 4624220 pixels"), and a setting that cannot generate is not offered; and its price is three times the 4 it
+// charged at that default, taken to the floor of 30.
+func TestXtasyImageHDNamesTheModelTheAccountHas(t *testing.T) {
+	m, ok := builtinMediaCatalog.model("xt.seedream-5-pro")
+	if !ok {
+		t.Fatal("图片 · 高清 is not in the catalog")
+	}
+	if m.Version != "model_0c50c8be-1468-5599-9532-e592efa7b84e" {
+		t.Fatal("图片 · 高清 must name the model the operator's account lists", m.Version)
+	}
+	if m.Label != [2]string{"图片 · 高清", "Image · HD"} || m.Kind != mediaKindImage {
+		t.Fatal("its label and kind stay, so a saved node keeps its model", m.Label, m.Kind)
+	}
+	// The model db5a9f8c of 2026-10-10 is in no account of the operator's any more: naming it anywhere would fail
+	// every generation with media_provider_unavailable, as 5 runs did on production between 07:52Z and 08:10Z.
+	for _, every := range builtinMediaCatalog.List() {
+		if strings.Contains(every.Version, "db5a9f8c") {
+			t.Fatal("a model the account does not have is still named", every.ID, every.Version)
+		}
+	}
+	params := map[string]*mediaParam{}
+	for i := range m.Params {
+		params[m.Params[i].Name] = &m.Params[i]
+	}
+	if len(params) != 2 || params["resolution"] == nil || params["aspectRatio"] == nil {
+		t.Fatal("it offers the ratio and the resolution, and nothing it cannot send", len(m.Params))
+	}
+	if got := params["resolution"]; len(got.Values) != 1 || got.Values[0] != "2K" || got.Default != "2K" {
+		t.Fatal("only 2K generates; 4K is refused by the model's own area limit", got.Values, got.Default)
+	}
+	// Each of these eight generated at 2K on 2026-10-22, charging the same 4 credits: the area limit that refuses 4K
+	// does not reach 2K at any of them, the widest and the tallest included.
+	if got := params["aspectRatio"]; got.Default != "1:1" ||
+		strings.Join(got.Values, ",") != "1:1,4:3,3:4,16:9,9:16,3:2,2:3,21:9" {
+		t.Fatal("the eight ratios generated on this model", got.Values, got.Default)
+	}
+	// One reference picture, proved on this model and not taken from its listing: the same run generated from an
+	// uploaded picture in img2img (the listing alone is not enough - it offers 4K, which the model refuses).
+	if m.References != 1 || xtasyFixed[m.ID]["mode"] != "txt2img" {
+		t.Fatal("it still edits one reference picture, from text by default", m.References, xtasyFixed[m.ID])
+	}
+	// Its defaults must be a request the model accepts: 2K, which is what every run since 2026-10-01 asked for.
+	chosen, err := m.resolveMediaParams(nil)
+	if err != nil || chosen["resolution"] != "2K" {
+		t.Fatal("its default resolution", chosen, err)
+	}
+	if credits := mediaCreditsFor(m.ID, m.Kind, chosen); credits != 30 {
+		t.Fatal("three times the 4 it charged at 2K, at the floor of 30", credits)
+	}
+	// 4K cannot be asked for through the catalog at all, so the price can never double for a resolution the model
+	// refuses: the one it rejects is refused here, before any generation is paid for.
+	if _, err := m.resolveMediaParams(json.RawMessage(`{"resolution":"4K"}`)); err == nil {
+		t.Fatal("4K must be refused by the catalog, not by the provider after it is charged for")
+	}
+	// A new image node starts on the first X-tasy image model, so it must be one the account has.
+	for _, every := range builtinMediaCatalog.List() {
+		if every.Kind == mediaKindImage && every.Provider == mediaProviderXtasy {
+			if every.ID != "xt.seedream-5-pro" {
+				t.Fatal("the first X-tasy image model", every.ID)
+			}
+			break
+		}
+	}
+}
+
 func TestXtasyRequestUsesWireNamesFixedValuesAndTheRun(t *testing.T) {
 	video, _ := builtinMediaCatalog.model("xt.omni-video")
 	params, err := video.resolveMediaParams(json.RawMessage(`{"duration":8,"generateAudio":false}`))

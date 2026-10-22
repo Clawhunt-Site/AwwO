@@ -46,7 +46,10 @@ func TestMediaBackupParamsCarryTheRunsSettingsOrRefuse(t *testing.T) {
 	}{
 		{"xt.seedream-5-pro", nil, "rh.seedream-v5-pro", `{"outputFormat":"jpeg","resolution":"2k"}`},
 		{"xt.seedream-5-pro", map[string]any{"aspectRatio": "16:9"}, "rh.seedream-v5-pro", ""},
-		{"xt.seedream-5-pro", map[string]any{"aspectRatio": "16:9", "resolution": "1K"}, "rh.nano-banana-2", `{"aspectRatio":"16:9","resolution":"1k"}`},
+		// 2K, not the 1K this model offered until 2026-10-22: the model it names now has no 1K (xtasy.go), so a run
+		// could not ask for one. What the case shows is the same - a picture of another shape goes to Nano Banana 2,
+		// carrying its shape and its sharpness.
+		{"xt.seedream-5-pro", map[string]any{"aspectRatio": "16:9", "resolution": "2K"}, "rh.nano-banana-2", `{"aspectRatio":"16:9","resolution":"2k"}`},
 		{"xt.gemini-3-1-flash-image", map[string]any{"aspectRatio": "21:9", "resolution": "4K"}, "rh.nano-banana-2", `{"aspectRatio":"21:9","resolution":"4k"}`},
 		{"xt.gemini-3-1-flash-image", map[string]any{"resolution": "512px"}, "rh.nano-banana-2", ""},
 		{"xt.gemini-3-1-flash-image", map[string]any{"aspectRatio": "1:4"}, "rh.nano-banana-2", ""},
@@ -67,9 +70,12 @@ func TestMediaBackupParamsCarryTheRunsSettingsOrRefuse(t *testing.T) {
 			`{"aspectRatio":"adaptive","duration":12,"generateAudio":true,"resolution":"720p"}`},
 		{"rh.seedance-2-multimodal", map[string]any{"realPersonMode": true}, "xt.omni-video", ""},
 		{"rh.seedance-2-multimodal", map[string]any{"seed": 42}, "xt.omni-video", ""},
-		// RunningHub's Seedream makes square pictures, which X-tasy's makes when asked; a lossless PNG it cannot.
-		{"rh.seedream-v5-pro", map[string]any{"resolution": "1k"}, "xt.seedream-5-pro", `{"aspectRatio":"1:1","resolution":"1K"}`},
-		{"rh.seedream-v5-pro", map[string]any{"resolution": "1k", "outputFormat": "png"}, "xt.seedream-5-pro", ""},
+		// RunningHub's Seedream makes square pictures, which X-tasy's 图片 · 高清 makes when asked, at 2K.
+		{"rh.seedream-v5-pro", map[string]any{"resolution": "2k"}, "xt.seedream-5-pro", `{"aspectRatio":"1:1","resolution":"2K"}`},
+		// A 1k picture has no backup since 2026-10-22, when 图片 · 高清 came to make 2K alone (xtasy.go): a backup
+		// makes what the run asked for, and a sharper picture is not that (it would cost its provider more, too).
+		{"rh.seedream-v5-pro", map[string]any{"resolution": "1k"}, "xt.seedream-5-pro", ""},
+		{"rh.seedream-v5-pro", map[string]any{"resolution": "2k", "outputFormat": "png"}, "xt.seedream-5-pro", ""},
 		{"rh.gpt-image-2", map[string]any{"aspectRatio": "4:5"}, "xt.gpt-image-2-5", ""},
 		{"rh.gpt-image-2", map[string]any{"aspectRatio": "16:9"}, "xt.gpt-image-2-5", `{"aspectRatio":"16:9","imageNum":1,"resolution":"1K"}`},
 		// A high quality, which also doubles the price, is one X-tasy's GPT Image 2.5 is not known to make.

@@ -411,7 +411,13 @@ var mediaBaseCredits = map[string]int{
 	// Pro 2K 12, Xtasy 3.0 Pro 1K 12, Xtasy 3.0 1K 9.6, GPT Image 2.5 1.3; videos for five seconds at 720p with
 	// sound: 全能视频 91.5, 全能视频 v2.5 139.8. Videos are priced per five seconds. Xtasy V3 and GPT Image 2 left the
 	// catalog on 2026-10-15, when X-tasy's model list for the operator's new key no longer had them.
-	"xt.seedream-5-pro": 40, "xt.gemini-3-1-flash-image": 40, "xt.omni-image-5-pro": 40, "xt.xtasy-3-pro": 40,
+	// Measured again on 2026-10-22, after another key of the operator's was revoked and replaced: 图片 · 高清 names the
+	// flash model of the 全能图片 5.0 family since that day (xtasy.go), which charged 4 at its 2K default, so its price is
+	// the floor of 30 rather than the 40 the model it replaced earned. In the same run Xtasy 3.0 1K charged 16, not the
+	// 9.6 of 2026-10-10: three times that would be 50, so its 30 below is no longer three times what it costs. It still
+	// earns more than it costs (30 credits is $0.30 at a paid plan's rate, the generation $0.16) and is left for the
+	// owner to decide with the rest of the catalog, whose prices this measurement did not revisit.
+	"xt.seedream-5-pro": 30, "xt.gemini-3-1-flash-image": 40, "xt.omni-image-5-pro": 40, "xt.xtasy-3-pro": 40,
 	"xt.xtasy-3": 30, "xt.gpt-image-2-5": 30,
 	"xt.omni-video": 280, "xt.omni-video-2-5": 420,
 	// Audio, per call whatever its settings (mediaCreditsFor).
