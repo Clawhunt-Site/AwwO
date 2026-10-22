@@ -44,8 +44,11 @@ export const RUNTIME_FILES = Object.freeze([
   'scripts/awwo-local-module-guard.cjs',
   'apps/web/scripts/staged-showcase.mjs',
 ]);
-/** What the workers import beside their folders (deploy/saas/pi.Dockerfile, openai-agents.Dockerfile). */
-export const SHARED_WORKER_FILES = Object.freeze(['user-models.ts', 'computer-model.ts', 'bedrock-bridge.ts', 'bedrock-catalog.ts', 'bedrock-models.json']);
+/** What the workers import beside their folders, in apps/ (the package test reads their imports to keep this whole). */
+export const SHARED_WORKER_FILES = Object.freeze([
+  'user-models.ts', 'computer-model.ts', 'bedrock-bridge.ts', 'bedrock-catalog.ts', 'bedrock-models.json', 'context-estimate.ts',
+  'context-overflow.ts',
+]);
 /** A path longer than this under the payload would pass Windows' 260 characters below a long user profile folder
  *  (C:\Users\<name>\AppData\Local\AwwO Local\payload\ is about 60 to 80). */
 export const MAX_RELATIVE_PATH = 170;

@@ -11,8 +11,9 @@ import {
   missingImports, nodeFilter, nodeMayLoad, outsideSettingsRemoved, peImports, prepareBuild, privateFiles, privateName, prunePackages,
   pruneUnloadedBuilds, relativeImports, replaceableOut, unmetImports, unusedAtRunTime, vcRuntimeNeeded, workerFilter, chooseVcRuntime, postgresLeftOut,
   collectCrateLicences, forThisMachine, pruneOtherPlatforms, pruneLeftOut, goNoticeGaps, collectNpmLicences, collectPostgresLicences,
-  MANIFEST_FORMAT, keptPayloadProblem, testInstallerName, libdirGaps,
+  MANIFEST_FORMAT, keptPayloadProblem, testInstallerName, libdirGaps, PACKAGED_WORKERS,
 } from './awwo-local-package.mjs';
+import { repoRoot } from './awwo-local-lib.mjs';
 import { linkedCrates } from './awwo-crate-licences.mjs';
 import { createHash } from 'node:crypto';
 
@@ -513,6 +514,31 @@ test('the smoke runs the payload\'s runtime without the settings that would chan
 test('the payload names the runtime\'s files and what the workers import beside them', () => {
   assert.ok(RUNTIME_FILES.includes('scripts/awwo-local.mjs') && RUNTIME_FILES.includes('apps/web/scripts/staged-showcase.mjs'));
   assert.ok(SHARED_WORKER_FILES.includes('bedrock-models.json'));
+});
+
+test('the payload copies every file the packaged workers import from apps/ beside their folders', () => {
+  // A new module there (context-estimate.ts did it) fails here, before an installer is packaged without it.
+  const apps = path.join(repoRoot, 'apps');
+  const imported = new Set();
+  const read = file => {
+    for (const specifier of relativeImports(readFileSync(file, 'utf8'))) {
+      const target = path.resolve(path.dirname(file), specifier);
+      if (path.dirname(target) !== apps || imported.has(path.basename(target))) continue;
+      imported.add(path.basename(target));
+      read(target);
+    }
+  };
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+      else if (/\.[cm]?[jt]s$/.test(entry.name) && !/\.test\.[cm]?[jt]s$/.test(entry.name)) read(path.join(dir, entry.name));
+    }
+  };
+  for (const worker of [...PACKAGED_WORKERS, 'openmaus-worker']) walk(path.join(apps, worker));
+  assert.ok(imported.has('context-estimate.ts') && imported.has('user-models.ts'), [...imported].join(', '));
+  assert.deepEqual([...imported].filter(name => !SHARED_WORKER_FILES.includes(name)), []);
+  for (const name of SHARED_WORKER_FILES) assert.ok(existsSync(path.join(apps, name)), name);
 });
 
 test('an assembled payload is checked for what its own scripts import and it does not hold', () => {
