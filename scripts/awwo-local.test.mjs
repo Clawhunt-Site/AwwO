@@ -12,9 +12,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, dockerEnvironment,
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
-  PASSWORD_RESET_PENDING, passwordResetApplied, postgresPort, postgresSettings, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
+  PASSWORD_RESET_PENDING, passwordResetApplied, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
   resolvePostgresBin, serviceEnvironments, writeOwnerCredentials,
-  stagedShowcaseFiles, systemEnvironment, withPostgresInclude, workspaceImageTag,
+  stagedShowcaseFiles, systemEnvironment, windowsShortPath, withPostgresInclude, workspaceImageTag,
 } from './awwo-local-lib.mjs';
 import { acquireLock, holdBuild, parseArguments, removeInstanceContainers } from './awwo-local.mjs';
 import { INSTALL_FLAGS, NODE_RELEASE, POSTGRES_WINDOWS, holdBuildExclusively, workspaceSourceHash } from './awwo-local-setup.mjs';
@@ -493,6 +493,66 @@ test('a running server\'s port is read from its postmaster.pid', () => {
   assert.equal(postgresPort('4242\n/d\n1\nnot-a-port\n'), 0);
 });
 
+test('PostgreSQL is given a path that is not ASCII in its short form, a file under its folder\'s', () => {
+  const asked = [];
+  const shortPath = folder => { asked.push(folder); return { 'C:\\Users\\한글\\AwwO Local\\pgsql\\bin': 'C:\\Users\\D55C~1\\AWWOLO~1\\pgsql\\bin', 'C:\\Users\\한글\\state': 'C:\\Users\\D55C~1\\state' }[folder] || null; };
+  const isFolder = file => !/\.(exe|log)$|postgres$/.test(file);
+  const given = file => postgresPath(file, { platform: 'win32', shortPath, isFolder });
+  assert.equal(given('C:\\Users\\Ann\\AwwO Local\\pgsql\\bin'), 'C:\\Users\\Ann\\AwwO Local\\pgsql\\bin', 'ASCII as it is');
+  assert.equal(postgresPath('/home/한글/pgsql/bin', { platform: 'linux', shortPath, isFolder }), '/home/한글/pgsql/bin', 'elsewhere as it is');
+  assert.deepEqual(asked, [], 'without asking cmd');
+  assert.equal(given('C:\\Users\\한글\\AwwO Local\\pgsql\\bin'), 'C:\\Users\\D55C~1\\AWWOLO~1\\pgsql\\bin');
+  // The database's folder before initdb has made it, and a log not yet written, go under their folder's short form.
+  assert.equal(given('C:\\Users\\한글\\state\\postgres'), 'C:\\Users\\D55C~1\\state\\postgres');
+  assert.equal(given('C:\\Users\\한글\\state\\logs\\postgres.log'), 'C:\\Users\\한글\\state\\logs\\postgres.log', 'no short form: as it is');
+  assert.equal(given('C:\\Users\\测试\\nowhere'), 'C:\\Users\\测试\\nowhere');
+});
+
+test('a path PostgreSQL\'s shell would read (cmd\'s % and !, sh\'s $ ` " \\) is named; others are not', () => {
+  assert.equal(postgresShellUnsafe('C:\\Users\\Ann\\AppData\\Local\\%TEMP%\\AwwO Local\\payload\\build\\pgsql\\bin', 'win32'), '%');
+  assert.equal(postgresShellUnsafe('C:\\Users\\Ann\\A!B!%P~1\\state\\postgres', 'win32'), '! %');
+  assert.equal(postgresShellUnsafe('C:\\Users\\测试安~1\\AwwO Local (1) & co ^ 2\\bin', 'win32'), '', 'cmd takes these as they are inside quotes');
+  assert.equal(postgresShellUnsafe('/Users/ann/$HOME/`x`/"q"/a\\b', 'darwin'), '$ ` " \\');
+  assert.equal(postgresShellUnsafe('/Users/ann/100%!/AwwO', 'linux'), '');
+});
+
+test('a PostgreSQL that did not start from paths that are not ASCII, on Windows, tells the person what to do', () => {
+  const note = postgresPathNote(['C:\\Users\\D55C~1\\bin', 'C:\\Users\\한글\\state\\postgres'], ['C:\\Users\\한글\\AwwO Local\\bin', 'C:\\Users\\한글\\state\\postgres'], 'win32');
+  assert.match(note, /^\nIts folders' paths have characters other than English letters and digits \(C:\\Users\\한글\\AwwO Local\\bin, C:\\Users\\한글\\state\\postgres\)/);
+  assert.match(note, /English letters, digits and spaces only\.$/);
+  assert.equal(postgresPathNote(['C:\\Users\\Ann\\bin', 'C:\\Users\\Ann\\state\\postgres'], ['a', 'b'], 'win32'), '', 'ASCII: no note');
+  assert.equal(postgresPathNote(['/home/한글/bin'], ['/home/한글/bin'], 'linux'), '', 'elsewhere: no note');
+});
+
+test('a folder\'s short path is cmd\'s, in UTF-16, only when it leads back to the folder', () => {
+  const calls = [];
+  const answer = (stdout, status = 0) => (command, args, options) => { calls.push({ command, args, options }); return { status, stdout: Buffer.from(stdout, 'utf16le') }; };
+  const real = file => ({ 'C:\\Users\\D55C~1\\AWWOLO~1': 'C:\\Users\\한글\\AwwO Local', 'C:\\Users\\한글\\AwwO Local': 'C:\\Users\\한글\\AwwO Local', 'C:\\Windows': 'C:\\Windows' }[file] ?? (() => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); })());
+  const env = { SystemRoot: 'C:\\Windows' };
+  assert.equal(windowsShortPath('C:\\Users\\한글\\AwwO Local', { run: answer('C:\\Users\\D55C~1\\AWWOLO~1\r\n'), env, real }), 'C:\\Users\\D55C~1\\AWWOLO~1');
+  assert.equal(calls[0].command, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(calls[0].args, ['/d', '/e:on', '/v:off', '/u', '/s', '/c', '"for %I in (.) do @echo %~sI"']);
+  assert.equal(calls[0].options.cwd, 'C:\\Users\\한글\\AwwO Local');
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);
+  // cmd starts in C:\Windows when it cannot start in a UNC folder: what does not lead back is no short path of it.
+  assert.equal(windowsShortPath('C:\\Users\\한글\\AwwO Local', { run: answer('C:\\Windows\r\n'), env, real }), null);
+  assert.equal(windowsShortPath('C:\\Users\\한글\\AwwO Local', { run: answer('', 1), env, real }), null);
+  assert.equal(windowsShortPath('C:\\Users\\한글\\AwwO Local', { run: answer('nothing\r\n'), env, real }), null);
+  assert.equal(windowsShortPath('C:\\Users\\한글\\AwwO Local', { run: answer('C:\\gone\r\n'), env, real }), null);
+});
+
+test('on Windows, a folder named in characters the code page has not gets a short path that leads back to it', { skip: process.platform !== 'win32' && 'Windows only' }, () => {
+  // With what cmd would expand or take as an operator on a command line: the folder reaches it as its working folder.
+  const folder = path.join(scratch(), '한글 😀 a!b!%PATH%&c^d');
+  mkdirSync(folder);
+  const short = windowsShortPath(folder);
+  // The volume may keep no short names (cmd then gives the folder's own path), never another folder.
+  if (short !== null) assert.equal(realpathSync.native(short).toLowerCase(), realpathSync.native(folder).toLowerCase());
+  const given = postgresPath(folder);
+  assert.equal(realpathSync.native(given).toLowerCase(), realpathSync.native(folder).toLowerCase(), given);
+  if (given !== folder && /^[\x00-\x7f]*$/.test(path.dirname(folder))) assert.match(given, /^[\x00-\x7f]*$/, 'a short name of what the code page has not is ASCII');
+});
+
 test('PostgreSQL is found only where all five of its programs are', () => {
   const layout = localLayout({ resources: '/r', build: '/r/build', platform: 'linux' });
   const complete = new Set(['initdb', 'pg_ctl', 'postgres', 'psql', 'createdb'].map(name => path.join('/opt/pg/bin', name)));
@@ -566,6 +626,17 @@ test('arguments: flags, and the Mac shell\'s positional contract', () => {
   assert.throws(() => parseArguments(['--state']), /needs a value/);
   assert.throws(() => parseArguments(['--bogus']), /Unknown option/);
   assert.throws(() => parseArguments(['/a', '/b']), /usage/);
+});
+
+test('arguments: a Windows folder written with the verbatim prefix is taken without it, as PostgreSQL needs', { skip: process.platform !== 'win32' && 'Windows paths' }, () => {
+  // Tauri canonicalizes the window's own path: its resource folder comes as \\?\C:\Users\…\AwwO Local.
+  const parsed = parseArguments(['--resources', '\\\\?\\C:\\Users\\a b\\AwwO Local\\payload\\app', '--build', '\\\\?\\D:\\x\\build', '--state', 'C:\\data\\state']);
+  assert.equal(parsed.resources, 'C:\\Users\\a b\\AwwO Local\\payload\\app');
+  assert.equal(parsed.build, 'D:\\x\\build');
+  assert.equal(parsed.state, 'C:\\data\\state');
+  // A verbatim UNC path (\\?\UNC\server\share) is not a drive path and is left as given.
+  assert.equal(parseArguments(['--state', '\\\\?\\UNC\\server\\share\\state']).state, '\\\\?\\UNC\\server\\share\\state');
+  assert.equal(parseArguments(['\\\\?\\C:\\app', '\\\\?\\C:\\state', '9']).resources, 'C:\\app');
 });
 
 test('the operating system\'s lock: one exclusive holder, or any number of shared ones, never both', async () => {

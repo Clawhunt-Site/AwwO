@@ -10,14 +10,14 @@
 // What this computer cannot run is left out, and the app shows it as not ready, as the hosted site would: the
 // managed execution (直接执行) without Docker, renders without Chrome and ffmpeg.
 import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { port as validPort } from './awwo-saas-lib.mjs';
 import {
   allocatePorts, apiEnvironment, browserCandidates, dockerEnvironment, findOnPath, instanceContainerQuery, loadLocalProfile,
-  localLayout, localOrigin, localState, osLock, portIsFree, postgresPort, postgresSettings, protectStateDirectory,
+  localLayout, localOrigin, localState, osLock, portIsFree, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, protectStateDirectory,
   PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
   windowsTool, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
 } from './awwo-local-lib.mjs';
@@ -37,13 +37,18 @@ const PUBLIC_SITE = 'https://awwo.clawhunt.store';
 /** Services without which the app does not work: one that stops ends the runtime. */
 const REQUIRED = new Set(['pi', 'agents', 'api']);
 
+/** A folder named on the command line, made absolute, without the verbatim prefix of a Windows path (\\?\C:\…), which
+ *  a launcher that canonicalized its own path passes (the Windows window does, from Tauri): PostgreSQL's tools find
+ *  each other by the path they were started with, and none starts from a path written so. */
+export const folderArgument = value => path.resolve(/^\\\\\?\\[A-Za-z]:\\/.test(value) ? value.slice(4) : value);
+
 export function parseArguments(argv) {
   const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false, resetPassword: false };
   if (argv.length && !argv[0].startsWith('--')) {
     // The Mac shell's contract: <resources> <state> <parent pid>, events on stdout.
     const [resources, state, parent] = argv;
     if (!resources || !state || !parent || argv.length > 3) throw new Error('usage: awwo-local.mjs <resources> <state> <parent pid>');
-    return { ...options, resources: path.resolve(resources), state: path.resolve(state), parentPid: positive(parent, 'parent pid'), events: true };
+    return { ...options, resources: folderArgument(resources), state: folderArgument(state), parentPid: positive(parent, 'parent pid'), events: true };
   }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -52,9 +57,9 @@ export function parseArguments(argv) {
       if (next === undefined) throw new Error(`${arg} needs a value`);
       return next;
     };
-    if (arg === '--state') options.state = path.resolve(value());
-    else if (arg === '--resources') options.resources = path.resolve(value());
-    else if (arg === '--build') options.build = path.resolve(value());
+    if (arg === '--state') options.state = folderArgument(value());
+    else if (arg === '--resources') options.resources = folderArgument(value());
+    else if (arg === '--build') options.build = folderArgument(value());
     else if (arg === '--parent-pid') options.parentPid = positive(value(), '--parent-pid');
     else if (arg === '--events') options.events = true;
     else if (arg === '--no-docker') options.docker = false;
@@ -127,38 +132,58 @@ function runTool(command, args, { env, input, timeout = 120_000, quiet = false }
 }
 const lastLines = result => String(result.stderr || result.stdout || '').trim().split(/\r?\n/).slice(-6).join('\n');
 
-async function startPostgres({ bin, state, port, password, env, report }) {
-  const data = state.postgres;
+async function startPostgres({ bin: binFolder, state, port, password, env: environment, report }) {
+  // The tools report in English: in the system's language they write in its ANSI code page (GBK on a Chinese Windows),
+  // which a UTF-8 reader of their output, and the window that shows it, turn into mojibake.
+  const env = { ...environment, LC_MESSAGES: 'C' };
+  // Their paths, in a form they can be given (postgresPath: a Chinese account's %LOCALAPPDATA% on a Windows set to
+  // another language); the person is shown each as it is.
+  const bin = postgresPath(binFolder);
+  const data = postgresPath(state.postgres);
+  // Their share and lib folders are bin's siblings, and the log and the password file are in the data folder's. The
+  // programs that start another through their shell (initdb and pg_ctl start postgres) are checked where they really
+  // are too: elsewhere than on Windows they find themselves by their real path, which goes into that command.
+  const real = file => { try { return realpathSync.native(file); } catch { return file; } };
+  const programs = ['initdb', 'pg_ctl', 'postgres'].map(name => [real(tool(bin, name)), binFolder]);
+  for (const [given, shown] of [[bin, binFolder], ...programs, [data, state.postgres]]) {
+    const unsafe = postgresShellUnsafe(given);
+    if (unsafe) throw new Error(`PostgreSQL cannot be started from ${shown}: its path holds ${unsafe}, which the shell PostgreSQL starts its server through (${process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'}) does not take as it is. AwwO 本地版 needs folders whose paths hold none of ${process.platform === 'win32' ? '% !' : '$ ` " \\'} (its installation, its data folder).`);
+  }
+  const pathNote = postgresPathNote([bin, data], [binFolder, state.postgres]);
   const pgEnv = { ...env, PGHOST: '127.0.0.1', PGPORT: String(port), PGUSER: 'awwo', PGPASSWORD: password, PGCONNECT_TIMEOUT: '10' };
-  const log = path.join(state.logs, 'postgres.log');
+  const logFile = path.join(state.logs, 'postgres.log');
   // initdb reads the password from a file, removed once it has run, or here, after a start that ended meanwhile.
   const passwordFile = path.join(state.dir, '.initdb-password');
   await rm(passwordFile, { force: true });
-  if (!existsSync(path.join(data, 'PG_VERSION'))) {
+  if (!existsSync(path.join(state.postgres, 'PG_VERSION'))) {
     report.info('Creating the local database (first start)...');
     await writeFileAtomic(passwordFile, `${password}\n`);
     try {
-      const init = runTool(tool(bin, 'initdb'), ['-D', data, '-U', 'awwo', '--auth-host=scram-sha-256', '--auth-local=scram-sha-256', '--encoding=UTF8', '--locale=C', '--pwfile', passwordFile], { env, timeout: 300_000 });
-      if (init.status !== 0) throw new Error(`initdb failed:\n${lastLines(init)}`);
+      // The cluster's own databases (template1, postgres) are SQL_ASCII, and AwwO's is made UTF-8 below: initdb writes
+      // its share folder's path into SQL it runs (a COPY of sql_features.txt), which a UTF-8 database refuses unless
+      // that path is ASCII ("invalid byte sequence for encoding "UTF8""), and a Chinese account's is not, nor its short
+      // form (a Chinese Windows keeps Chinese in short names).
+      const init = runTool(tool(bin, 'initdb'), ['-D', data, '-U', 'awwo', '--auth-host=scram-sha-256', '--auth-local=scram-sha-256', '--encoding=SQL_ASCII', '--locale=C', '--pwfile', postgresPath(passwordFile)], { env, timeout: 300_000 });
+      if (init.status !== 0) throw new Error(`initdb failed:\n${lastLines(init)}${pathNote}`);
     } finally {
       await rm(passwordFile, { force: true });
     }
   }
-  const conf = path.join(data, 'postgresql.conf');
+  const conf = path.join(state.postgres, 'postgresql.conf');
   const included = withPostgresInclude(readFileSync(conf, 'utf8'));
   if (included !== null) await writeFileAtomic(conf, included);
-  await writeFile(path.join(data, 'awwo-local.conf'), postgresSettings(port));
+  await writeFile(path.join(state.postgres, 'awwo-local.conf'), postgresSettings(port));
   const stop = (mode = 'fast') => {
     const stopped = runTool(tool(bin, 'pg_ctl'), ['-D', data, '-m', mode, '-w', '-t', '120', 'stop'], { env, timeout: 180_000 });
     // Not running at all is stopped too; anything else is checked against the server's own status.
     if (stopped.status === 0 || runTool(tool(bin, 'pg_ctl'), ['-D', data, 'status'], { env }).status === 3) return;
-    throw new Error(`PostgreSQL did not stop (${data}):\n${lastLines(stopped)}`);
+    throw new Error(`PostgreSQL did not stop (${state.postgres}):\n${lastLines(stopped)}`);
   };
   // A server left by a runtime that ended without stopping it is restarted on this start's settings, once what of
   // that run still uses it (an API finishing its own stop) has let go of it, or after a minute.
   if (runTool(tool(bin, 'pg_ctl'), ['-D', data, 'status'], { env }).status === 0) {
     let leftover = 0;
-    try { leftover = postgresPort(readFileSync(path.join(data, 'postmaster.pid'), 'utf8')); } catch { /* gone meanwhile */ }
+    try { leftover = postgresPort(readFileSync(path.join(state.postgres, 'postmaster.pid'), 'utf8')); } catch { /* gone meanwhile */ }
     const clients = "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()";
     for (let second = 0; leftover && second < 60; second += 1) {
       let count = 0;
@@ -172,13 +197,19 @@ async function startPostgres({ bin, state, port, password, env, report }) {
     }
     stop();
   }
-  const start = runTool(tool(bin, 'pg_ctl'), ['-D', data, '-l', log, '-w', '-t', '120', 'start'], { env, timeout: 180_000, quiet: true });
-  if (start.status !== 0) throw new Error(`PostgreSQL did not start; see ${log}`);
-  const found = runTool(tool(bin, 'psql'), ['-d', 'postgres', '-Atc', "SELECT 1 FROM pg_database WHERE datname = 'awwo'"], { env: pgEnv });
+  const start = runTool(tool(bin, 'pg_ctl'), ['-D', data, '-l', postgresPath(logFile), '-w', '-t', '120', 'start'], { env, timeout: 180_000, quiet: true });
+  if (start.status !== 0) throw new Error(`PostgreSQL did not start; see ${logFile}${pathNote}`);
+  // AwwO's database is UTF-8, as the hosted one is, whatever its cluster's (above): made so from template0, the one
+  // template a database of another encoding can be made from, and checked so at every start.
+  const found = runTool(tool(bin, 'psql'), ['-d', 'postgres', '-Atc', "SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = 'awwo'"], { env: pgEnv });
   if (found.status !== 0) { stop(); throw new Error(`Cannot read the local database:\n${lastLines(found)}`); }
-  if (found.stdout.trim() !== '1') {
-    const created = runTool(tool(bin, 'createdb'), ['awwo'], { env: pgEnv });
+  const encoding = found.stdout.trim();
+  if (!encoding) {
+    const created = runTool(tool(bin, 'createdb'), ['--encoding=UTF8', '--locale=C', '--template=template0', 'awwo'], { env: pgEnv });
     if (created.status !== 0) { stop(); throw new Error(`Cannot create the local database:\n${lastLines(created)}`); }
+  } else if (encoding !== 'UTF8') {
+    stop();
+    throw new Error(`The local database is not UTF-8 (${encoding}): AwwO 本地版 runs only on a UTF-8 one (${state.postgres}).`);
   }
   return { stop };
 }

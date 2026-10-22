@@ -244,6 +244,45 @@ export function loadProviders(state) {
  *  which take other arguments. */
 export const windowsTool = (name, env = process.env) => path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', `${name}.exe`);
 
+/** A folder's short (8.3) path, as cmd gives it (FOR's %~s, written in UTF-16 with /u), or null: when it gives none,
+ *  or one that does not lead back to the folder (cmd starts in another when it cannot start in this one, a UNC path). */
+export function windowsShortPath(folder, { run = spawnSync, env = process.env, real = realpathSync.native } = {}) {
+  const result = run(windowsTool('cmd', env), ['/d', '/e:on', '/v:off', '/u', '/s', '/c', '"for %I in (.) do @echo %~sI"'], { cwd: folder, windowsHide: true, windowsVerbatimArguments: true, timeout: 20_000 });
+  const short = result.status === 0 && result.stdout ? Buffer.from(result.stdout).toString('utf16le').trim() : '';
+  if (!short || !path.win32.isAbsolute(short)) return null;
+  try { return real(short).toLowerCase() === real(folder).toLowerCase() ? short : null; } catch { return null; }
+}
+
+/** A path as PostgreSQL's programs are given it. On Windows they are programs of the system's ANSI code page: a path
+ *  reaches them in it, a character it has not (a Hangul account name on a Chinese Windows, an emoji) as "?", and none
+ *  of them finds anything by a path so changed (initdb: "invalid binary …\?? ??\…"). A path that is not ASCII is given
+ *  in its short (8.3) form, whose characters the code page has, when the volume keeps one (the system's does unless it
+ *  was told not to); as it is when it does not. A file, or a folder yet to be made (the database's, before initdb), is
+ *  given under its folder's. */
+export function postgresPath(file, { platform = process.platform, shortPath = windowsShortPath, isFolder = folderExists } = {}) {
+  if (platform !== 'win32' || /^[\x00-\x7f]*$/.test(file)) return file;
+  if (isFolder(file)) return shortPath(file) || file;
+  const folder = shortPath(path.win32.dirname(file));
+  return folder ? path.win32.join(folder, path.win32.basename(file)) : file;
+}
+const folderExists = file => { try { return statSync(file).isDirectory(); } catch { return false; } };
+
+/** What of a path PostgreSQL is given its programs would not keep as it is: they start the server (pg_ctl) and their
+ *  bootstrap (initdb) through the system's shell, cmd.exe on Windows, which reads % and ! even inside quotes (%NAME%,
+ *  and !NAME! where delayed expansion is on), /bin/sh elsewhere, which reads $, `, " and \ inside them. The characters
+ *  found, or ''. */
+export function postgresShellUnsafe(file, platform = process.platform) {
+  return [...new Set(String(file).match(platform === 'win32' ? /[%!]/g : /[$`"\\]/g) || [])].join(' ');
+}
+
+/** A line for the person when PostgreSQL did not start from folders whose paths, as given, are not ASCII: on Windows,
+ *  where the code page lacks one of their characters and the drive keeps no short names, its programs find nothing
+ *  there. '' otherwise. */
+export function postgresPathNote(given, shown, platform = process.platform) {
+  if (platform !== 'win32' || !given.some(file => /[^\x00-\x7f]/.test(file))) return '';
+  return `\nIts folders' paths have characters other than English letters and digits (${shown.join(', ')}). Where Windows' code page for programs that are not Unicode lacks one of them, and the drive keeps no short (8.3) names, PostgreSQL's programs find nothing there (their message shows "?" for it): AwwO 本地版 then needs folders whose paths have English letters, digits and spaces only.`;
+}
+
 /** One path's access list as readAcl prints it: `owner|protected|entry;entry…`, each entry
  *  `type,inherited,inheritance flags,propagation flags,rights,SID`. Every SID is written in full: SDDL would write some
  *  as aliases (this computer's own Administrator account as LA), and account names are translated. */
