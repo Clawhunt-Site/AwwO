@@ -225,7 +225,7 @@ SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、
 | --- | --- | --- |
 | POST /canvases/{id}/graph-runs | operationId, documentVersion?, scope? | 新建 202，幂等回放 200；前端先保存并提交确认的 documentVersion，版本陈旧 409 |
 | GET /canvases/{id}/graph-runs | operationId? | `{items}`，最近 50 个运行的摘要（状态、范围、时间与各节点 state，重试过的节点另带 attempts；不含受理时的 document 与节点输出）；可按操作 ID 找回响应丢失的提交，再按 graphId 读取整图 |
-| GET /canvases/{id}/graph-runs/{graphId} | 无 | 权威整图状态、受理时 document/documentVersion/scope 和 nodes |
+| GET /canvases/{id}/graph-runs/{graphId} | document? | 权威整图状态、受理时 document/documentVersion/scope 和 nodes；`?document=false` 时只省去受理时冻结的 document，其余不变（document 受理后不再改写，已读过它的读者如画布对进行中运行的轮询、运行记录面板的重读只需读一次），`true` 同默认，其他取值、重复给出或查询串无法解析时 400 |
 | POST /canvases/{id}/graph-runs/{graphId}/cancel | 空对象 | 幂等取消；保留已完成及部分输出，回读确认最终状态 |
 | POST /canvases/{id}/graph-runs/operations/{operationId}/cancel | 空对象 | 写入取消墓碑并与创建互斥；即使创建响应丢失也可阻止延迟提交，返回 confirmed/status 及可选 graphId |
 

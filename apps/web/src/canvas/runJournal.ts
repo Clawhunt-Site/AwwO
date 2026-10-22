@@ -4,7 +4,7 @@ import type { RunNodeState, RunNodeStatus } from './runGraph';
 import { validateNodeOutput, type RunSummary } from './runGraph';
 import type { CanvasNode } from './canvasDoc';
 import { fetchConversationOperation } from '../canvasAgentChat';
-import { observeCloudGraph, validGraphCollaboration, type GraphCollaborationSnapshot, type GraphCollaborationPhase, type GraphRunSnapshot } from '../saas/graphRuns';
+import { observeCloudGraph, validGraphCollaboration, type GraphCollaborationSnapshot, type GraphCollaborationPhase, type GraphObservation, type GraphRunSnapshot } from '../saas/graphRuns';
 
 export const CANVAS_RUN_JOURNAL_KEY = 'awwo.canvas.active-run.v1';
 
@@ -165,10 +165,12 @@ export function journalSummary(journal: CanvasRunJournal): RunSummary {
     ...(journal.review ? { review: { rounds: journal.review.round, outcome: journal.review.outcome === 'running' ? 'interrupted' as const : journal.review.outcome } } : {}) };
 }
 
-/** One read-only recovery pass. A missing identity or network failure always keeps the lock. */
-export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: ReadonlyArray<CanvasNode>, base: string, signal?: AbortSignal): Promise<CanvasRunJournal> {
+/** One read-only recovery pass. A missing identity or network failure always keeps the lock. An observer that makes one
+ *  pass after another passes the same `observation` each time: a cloud graph's run is then read whole once, and without
+ *  the canvas it froze at admission after that (observeCloudGraph). */
+export async function reconcileRunJournal(journal: CanvasRunJournal, nodes: ReadonlyArray<CanvasNode>, base: string, signal?: AbortSignal, observation?: GraphObservation): Promise<CanvasRunJournal> {
   if (journal.serverGraph) {
-    try { return await observeCloudGraph(journal, signal); }
+    try { return await observeCloudGraph(journal, signal, observation); }
     catch { return journal; } // Network/auth uncertainty cannot turn an accepted graph green.
   }
   let next = journal;

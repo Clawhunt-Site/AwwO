@@ -378,6 +378,109 @@ func TestPostgresGraphRunListLeavesOutTheFrozenDocumentAndOutputs(t *testing.T) 
 		}
 	}
 }
+
+// A reader that holds a run's frozen canvas reads the run again without it (?document=false): the canvas page observes
+// its active run every 2.5 s for as long as it goes on, and a film's frozen canvas is about a megabyte, which the
+// database read back out of TOAST for every read. The option leaves out the document and nothing else, the database
+// plans that read without the column, and the default and ?document=true read the run whole as they always did. Any
+// other value is refused, and a cancellation, which has committed by the time it answers, answers with the run whole
+// whatever its query says.
+func TestPostgresGraphRunReadWithoutItsDocumentLeavesOutThatAlone(t *testing.T) {
+	pi := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) {
+		completePi(w, "RESULT")
+	})
+	defer pi.Close()
+	h := newHarness(t, pi.URL)
+	c, tid, _ := h.register(t, "graph-run-without-document@example.test")
+	cid, _ := graphFixture(t, h, c, tid)
+	base := "/tenants/" + tid + "/canvases/" + cid + "/graph-runs"
+	plain := h.request(t, c, "POST", base, map[string]any{"operationId": "graph-read-plain", "documentVersion": 1}, 202)["id"].(string)
+	awaitGraph(t, h, c, base+"/"+plain, "completed")
+	collaboration := h.request(t, c, "POST", base, map[string]any{"operationId": "graph-read-collaboration", "scope": []string{"a", "b"}, "documentVersion": 1,
+		"collaboration": collaborationPolicy{Goal: "READ-GOAL", Rounds: 1, SynthesizerNodeID: "a"}}, 202)["id"].(string)
+	awaitGraph(t, h, c, base+"/"+collaboration, "completed", 20*time.Second)
+	read := func(path string) ([]byte, map[string]any) {
+		t.Helper()
+		resp, body := h.raw(t, c, path)
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, body)
+		}
+		run := map[string]any{}
+		if e := json.Unmarshal(body, &run); e != nil {
+			t.Fatal(e)
+		}
+		return body, run
+	}
+	for _, id := range []string{plain, collaboration} {
+		path := base + "/" + id
+		wholeBody, whole := read(path)
+		explicitBody, _ := read(path + "?document=true")
+		lightBody, light := read(path + "?document=false")
+		// The document's nodes carry their agentKind, which nothing else in a run does.
+		document, _ := whole["document"].(map[string]any)
+		if nodes, _ := document["nodes"].([]any); len(nodes) != 3 || !strings.Contains(string(wholeBody), "agentKind") {
+			t.Fatalf("%s: the run read whole lost its frozen document: %v", id, whole["document"])
+		}
+		if string(explicitBody) != string(wholeBody) {
+			t.Fatalf("%s: ?document=true reads %s, the default %s", id, explicitBody, wholeBody)
+		}
+		if _, ok := light["document"]; ok || strings.Contains(string(lightBody), "agentKind") {
+			t.Fatalf("%s: ?document=false still carries the document: %.600s", id, lightBody)
+		}
+		delete(whole, "document")
+		if !reflect.DeepEqual(light, whole) {
+			t.Fatalf("%s: without its document the run reads %v, whole %v", id, light, whole)
+		}
+		if id == collaboration {
+			policy, _ := light["collaboration"].(map[string]any)
+			if turns, _ := policy["turns"].([]any); len(turns) != 5 {
+				t.Fatalf("the collaboration read without its document lost its turns: %v", light["collaboration"])
+			}
+		}
+	}
+	// The database plans the read without the column at all; the run read whole names it.
+	ctx := context.Background()
+	plan := func(document bool) string {
+		rows, e := h.db.Query(ctx, "EXPLAIN (VERBOSE, COSTS OFF) SELECT "+h.a.graphRunJSON(document)+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.id=$3", tid, cid, plain)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer rows.Close()
+		lines := []string{}
+		for rows.Next() {
+			var line string
+			if e = rows.Scan(&line); e != nil {
+				t.Fatal(e)
+			}
+			lines = append(lines, line)
+		}
+		if e = rows.Err(); e != nil {
+			t.Fatal(e)
+		}
+		return strings.ReplaceAll(strings.Join(lines, "\n"), "g.document_version", "")
+	}
+	if whole, light := plan(true), plan(false); !strings.Contains(whole, "g.document") || strings.Contains(light, "g.document") {
+		t.Fatalf("the run read whole should read g.document and the read without it should not:\n%s\n--\n%s", whole, light)
+	}
+	// A malformed pair (a bad escape, a ";") is refused too: Go's own reading of the query would drop it.
+	for _, query := range []string{"?document=", "?document=no", "?document=0", "?document=False", "?document=false&document=false",
+		"?document=true&document=false", "?document=%zz", "?document=false;x", "?document=false&document=%zz", "?other=%zz"} {
+		resp, body := h.raw(t, c, base+"/"+plain+query)
+		if resp.StatusCode != 400 || !strings.Contains(string(body), "invalid_input") {
+			t.Fatalf("%s: %d %s", query, resp.StatusCode, body)
+		}
+	}
+	// A well-formed query that does not name the option reads the run whole, as every query did.
+	if otherBody, _ := read(base + "/" + plain + "?other=1"); !strings.Contains(string(otherBody), "agentKind") {
+		t.Fatalf("?other=1 did not read the run whole: %.300s", otherBody)
+	}
+	h.request(t, c, "GET", base+"/missing-graph?document=false", nil, 404)
+	cancelled := h.request(t, c, "POST", base+"/"+plain+"/cancel?document=nonsense", map[string]any{}, 200)
+	document, _ := cancelled["document"].(map[string]any)
+	if nodes, _ := document["nodes"].([]any); cancelled["status"] != "completed" || len(nodes) != 3 {
+		t.Fatalf("a cancellation answered with %v", cancelled)
+	}
+}
 func TestPostgresGraphScopeCancellationAndTombstone(t *testing.T) {
 	var calls atomic.Int32
 	entered := make(chan struct{}, 8)

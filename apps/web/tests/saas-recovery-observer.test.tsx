@@ -9,6 +9,7 @@ import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, co
 import { graphRecoveryJournal, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { graphRunWithoutDocument } from './saas-graph-run-summary-fixture';
 
 const tenant = { id: 'observer-workspace', name: 'Observer workspace', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -34,12 +35,41 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
+// The run's own route reads it whole, or with ?document=false all but the canvas it froze at admission (graph_runs.go),
+// which the observer asks for once it holds that canvas.
+const lightRead = (url: unknown) => String(url).endsWith('/graph-runs/graph-a?document=false');
+const runRead = (url: unknown) => String(url).endsWith('/graph-runs/graph-a') || lightRead(url);
+const withoutDocument = async (response: Response) => {
+  const body = await response.json();
+  return json(response.ok ? graphRunWithoutDocument(body) : body, response.status);
+};
 function fetchGraph(reply: () => Promise<Response>) {
-  const fetcher = vi.fn((url: unknown, _init?: RequestInit) => String(url).endsWith('/graph-runs/graph-a')
-    ? reply() : Promise.resolve(json({ items: [], models: [] })));
+  const fetcher = vi.fn((url: unknown, _init?: RequestInit) => lightRead(url) ? reply().then(withoutDocument)
+    : runRead(url) ? reply() : Promise.resolve(json({ items: [], models: [] })));
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
+
+// The canvas observes a run that goes on every 2.5 s, for hours for a film, and the canvas the run froze at admission
+// (about a megabyte, for a film) never changes after it: the observer reads the run whole at its first poll, then
+// without that canvas at every poll until the run settles, and publishes what each read says.
+it('reads an observed run whole at its first poll and without its frozen canvas at every poll after, until it settles', async () => {
+  const doc = document(); seed(doc); saveRunJournal(journalFor(doc));
+  const timeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, ms?: number, ...args: unknown[]) =>
+    timeout(callback, ms === 2500 ? 30 : ms, ...args)) as typeof setTimeout);
+  let reads = 0;
+  const fetcher = fetchGraph(async () => json(++reads > 3 ? snapshot(doc) : { ...snapshot(doc), status: 'running',
+    nodes: [{ nodeId: 'a', state: 'done', output: 'Delivered a' }, { nodeId: 'b', state: 'running' }] }));
+  renderCanvas();
+  await waitFor(() => expect(loadRunJournal()).toBeNull(), { timeout: 6000 });
+  expect(fetcher.mock.calls.map(([url]) => String(url)).filter(runRead).map(url => url.slice(url.lastIndexOf('/') + 1)))
+    .toEqual(['graph-a', 'graph-a?document=false', 'graph-a?document=false', 'graph-a?document=false']);
+  const saved = JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!);
+  expect(saved.nodes.map((node: any) => node.lastOutput?.text)).toEqual(['Delivered a', 'Delivered b']);
+  expect(screen.queryByText(/Historical results were retained|This page has an older canvas/)).toBeNull();
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
 
 it('keeps a stale empty tab from poisoning or clearing another tab’s run, even after the owner finishes', async () => {
   seed(sanitizeDocument(emptyDocument()));
@@ -155,7 +185,7 @@ it('does not clear a same-operation Stop update that arrives while terminal hist
   const doc = { ...document(), nodes: document().nodes.map(node => ({ ...node, issueId: `session-${node.id}` })) };
   seed(doc); saveRunJournal(journalFor(doc));
   let resolveHistory!: (value: Response) => void;
-  vi.stubGlobal('fetch', vi.fn((url: unknown) => String(url).endsWith('/graph-runs/graph-a') ? Promise.resolve(json(snapshot(doc)))
+  vi.stubGlobal('fetch', vi.fn((url: unknown) => runRead(url) ? Promise.resolve(json(lightRead(url) ? graphRunWithoutDocument(snapshot(doc)) : snapshot(doc)))
     : String(url).endsWith('/messages') ? new Promise<Response>(resolve => { resolveHistory = resolve; })
     : Promise.resolve(json({ items: [], models: [] }))));
   renderCanvas();
@@ -184,7 +214,7 @@ it('accepts the fresh durable base created by first-run initialization before re
       admitted = { ...snapshot(ready), operationId: request.operationId };
       return json(admitted);
     }
-    if (String(url).endsWith('/graph-runs/graph-a')) return json(admitted);
+    if (runRead(url)) return json(lightRead(url) && admitted ? graphRunWithoutDocument(admitted) : admitted);
     return json({ items: [], models: [] });
   });
   vi.stubGlobal('fetch', fetcher); renderCanvas();

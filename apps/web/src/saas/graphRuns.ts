@@ -192,13 +192,23 @@ export function subscribeGraphRuns(tenantId: string, canvasId: string, listener:
   return () => { feed.listeners.delete(listener); };
 }
 export const graphPath = (tenantId: string, canvasId: string) => tenantPath(tenantId, `/canvases/${encodeURIComponent(canvasId)}/graph-runs`);
-/** One run as its own route reads it (GET …/graph-runs/{id}): with the canvas it froze at admission and every node's
- *  output, which the list leaves out. */
-export async function readGraphRun(tenantId: string, canvasId: string, graphId: string, signal?: AbortSignal): Promise<GraphRunSnapshot> {
-  const run = await api<unknown>(`${graphPath(tenantId, canvasId)}/${encodeURIComponent(graphId)}`, { signal });
+/** One run's own route (GET …/graph-runs/{id}): the run whole, or, for a reader that already holds the canvas it froze at
+ *  admission, all but that canvas (?document=false). The server writes a run's frozen canvas once, when it admits the
+ *  run (graph_runs.go), and a film's is about a megabyte, which the reads again of a run that goes on for hours need not
+ *  carry each time. */
+const graphRunPath = (tenantId: string, canvasId: string, graphId: string, withoutDocument: boolean) =>
+  `${graphPath(tenantId, canvasId)}/${encodeURIComponent(graphId)}${withoutDocument ? '?document=false' : ''}`;
+/** One run as its own route reads it: with the canvas it froze at admission and every node's output, which the list
+ *  leaves out. A reader that already holds that canvas passes it as `frozen`: the run is then read without it and
+ *  carries the one held. */
+export async function readGraphRun(tenantId: string, canvasId: string, graphId: string, signal?: AbortSignal, frozen?: CanvasDocument): Promise<GraphRunSnapshot> {
+  const run = await api<unknown>(graphRunPath(tenantId, canvasId, graphId, Boolean(frozen)), { signal });
   if (!validGraphRun(run) || run.id !== graphId) throw new Error('Invalid graph run response');
-  return run;
+  return frozen ? { ...run, document: frozen } : run;
 }
+/** What one observer of a cloud graph keeps from one read to the next (observeCloudGraph): the canvas its run froze at
+ *  admission, as the run's first read gave it, and the run it belongs to, by workspace, canvas and id. */
+export interface GraphObservation { run?: string; document?: CanvasDocument }
 export function hasCloudGraphRuntime(): boolean { return currentSaaSCanvas() !== null; }
 export class GraphNotSubmittedError extends Error {}
 export function graphAdmissionRejected(error: unknown): boolean {
@@ -225,7 +235,15 @@ export async function submitCloudGraph(operationId: string, scope: readonly stri
   });
 }
 
-export async function observeCloudGraph(journal: CanvasRunJournal, signal?: AbortSignal): Promise<CanvasRunJournal> {
+/** One read of the journal's cloud graph, merged into it. An observer that reads it again and again (the canvas's poll,
+ *  every 2.5 s while the run goes on: hours, for a film) passes the same `observation` each time: its first read of a
+ *  run is whole, and keeps the canvas the run froze at admission; its later reads of that run leave the canvas out
+ *  (?document=false) and merge the one kept. That canvas never changes once the run is admitted, so the merge sees what
+ *  a whole read would give, and still checks a collaboration's document against its admission and finds a cached
+ *  ancestor's node in it. Only a read the merge accepted is kept: until one is, every read of the run is whole, as it
+ *  always was; after that, the reads of that run leave the canvas out whatever their outcome, since the canvas they
+ *  merge stays the run's. */
+export async function observeCloudGraph(journal: CanvasRunJournal, signal?: AbortSignal, observation?: GraphObservation): Promise<CanvasRunJournal> {
   const graph = journal.serverGraph;
   if (!graph) return journal;
   let known = graph.id;
@@ -239,13 +257,19 @@ export async function observeCloudGraph(journal: CanvasRunJournal, signal?: Abor
   }
   const base = graphPath(graph.tenantId, graph.canvasId);
   // Without the run's id (its POST's response was lost), the list finds it by the operation; the list carries no outputs,
-  // so the run is then read whole by its id, as when the journal knows it.
+  // so the run is then read by its id, as when the journal knows it.
   const id = known
     || (await api<{ items: GraphRunSummary[] }>(`${base}?operationId=${encodeURIComponent(journal.id)}`, { signal })).items.find(item => item.operationId === journal.id)?.id;
   // A missing response is not proof that an in-flight POST failed. Retain the lock and
   // recover by the same operation identity; observation never submits another model call.
   if (!id) return journal;
-  return mergeGraphSnapshot(journal, await api<GraphRunSnapshot>(`${base}/${encodeURIComponent(id)}`, { signal }));
+  const run = JSON.stringify([graph.tenantId, graph.canvasId, id]);
+  const frozen = observation?.run === run ? observation.document : undefined;
+  const read = await api<GraphRunSnapshot>(graphRunPath(graph.tenantId, graph.canvasId, id, Boolean(frozen)), { signal });
+  const snapshot = frozen ? { ...read, document: frozen } : read;
+  const merged = mergeGraphSnapshot(journal, snapshot);
+  if (observation && !frozen && snapshot.document) { observation.run = run; observation.document = snapshot.document; }
+  return merged;
 }
 
 /** A server timestamp as epoch milliseconds, or nothing for a missing or unreadable one. */

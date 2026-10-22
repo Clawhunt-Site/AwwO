@@ -8,3 +8,10 @@ export function graphRunSummary(run: GraphRunSnapshot): GraphRunSummary {
     status: run.status, error: run.error ?? '', createdAt: run.createdAt, ...(run.updatedAt ? { updatedAt: run.updatedAt } : {}),
     nodes: run.nodes.map(({ nodeId, state, attempts }) => ({ nodeId, state, ...(attempts ? { attempts } : {}) })) };
 }
+
+/** A run as its own route sends it with ?document=false (graphRunJSON in graph_runs.go): everything but the canvas it
+ *  froze at admission. */
+export function graphRunWithoutDocument(run: GraphRunSnapshot): Omit<GraphRunSnapshot, 'document'> {
+  const { document: _frozen, ...rest } = run;
+  return rest;
+}

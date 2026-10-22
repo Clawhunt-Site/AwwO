@@ -10,7 +10,7 @@ import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { readCapabilities } from '../saas/capabilitiesApi';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
-import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy } from '../saas/graphRuns';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -1371,6 +1371,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const withCanvasRunOwnership = (run: () => Promise<void>, refused: () => void) => withLaneOwnership(lane, run, refused);
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    // A server graph's run is read whole at this observer's first poll, which keeps the canvas it froze at admission, and
+    // without that canvas at every poll after (observeCloudGraph): a film's is about a megabyte, polled every 2.5 s.
+    const observation: GraphObservation = {};
     const capturedDocumentKey = canvasStorageKey(CANVAS_STORAGE_KEY);
     const observerIsActive = () => !controller.signal.aborted && !outdatedObserver.current && mounted.current
       && currentSaaSCanvas() === cloudScope && canvasStorageKey(CANVAS_STORAGE_KEY) === capturedDocumentKey;
@@ -1460,7 +1463,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setReviewRound(durable.review?.round ?? 0);
       if (!journal.current) return;
       const observed = journal.current;
-      const reconciled = await reconcileRunJournal(observed, docRef.current.nodes, gatewayApiBase(), controller.signal);
+      const reconciled = await reconcileRunJournal(observed, docRef.current.nodes, gatewayApiBase(), controller.signal, observation);
       if (!observerIsActive()) return;
       // A Stop confirmation may have landed while this read was in flight. Never overwrite it
       // with a response based on the old snapshot; reconcile the new journal in the next pass.

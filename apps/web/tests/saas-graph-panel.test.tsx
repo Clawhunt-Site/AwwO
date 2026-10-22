@@ -7,13 +7,17 @@ import type { GraphRunSnapshot, TeamTurn } from '../src/saas/graphRuns';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { runErrorText } from '../src/saas/canvasErrors';
-import { graphRunSummary } from './saas-graph-run-summary-fixture';
+import { graphRunSummary, graphRunWithoutDocument } from './saas-graph-run-summary-fixture';
 
 const base = '/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
-// The list sends each run's summary; a run's own route sends it whole, with its frozen canvas and its nodes' outputs.
-const runs = (url: string, ...items: GraphRunSnapshot[]) => url === base ? { items: items.map(graphRunSummary) }
-  : items.find(item => url === `${base}/${item.id}`) ?? null;
+// The list sends each run's summary; a run's own route sends it whole, with its frozen canvas and its nodes' outputs, or
+// with ?document=false all but that canvas.
+const runs = (url: string, ...items: GraphRunSnapshot[]) => {
+  if (url === base) return { items: items.map(graphRunSummary) };
+  const run = items.find(item => url === `${base}/${item.id}` || url === `${base}/${item.id}?document=false`);
+  return run && url.endsWith('?document=false') ? graphRunWithoutDocument(run) : run ?? null;
+};
 const flushTimers = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 const runRecord = (url: string) => /\/runs\/run-[ab]$/.test(url)
   ? { id: url.endsWith('run-a') ? 'run-a' : 'run-b', tenantId: 'tenant-a', status: url.endsWith('run-a') ? 'completed' : 'running' } : null;
@@ -122,6 +126,10 @@ it('sends an explicit Stop for the selected graph and displays the authoritative
   expect(writes).toHaveLength(1); expect(writes[0]![0]).toBe(`${base}/graph-a/cancel`);
   expect(writes[0]![1]).toMatchObject({ body: '{}', credentials: 'include' });
   expect(screen.getByText('Research consensus from the server')).toBeVisible();
+  // Read again after Stop, the run leaves out the canvas it froze, which the panel holds: its steps keep their titles.
+  expect(fetcher.mock.calls.map(([url]) => url).filter(url => url.startsWith(`${base}/graph-a`) && !url.endsWith('/cancel')))
+    .toEqual([`${base}/graph-a`, `${base}/graph-a?document=false`]);
+  expect(screen.getByRole('button', { name: 'Delivery team · Cancelled' })).toBeVisible();
 });
 
 it('keeps a running graph visible after a rejected Stop instead of reporting cancellation', async () => {
@@ -232,7 +240,8 @@ it('wraps run-history Tab focus through the controls in both directions', async 
 
 // The list carries no run's canvas or outputs (graph_runs.go). The panel polls it alone while closed, reads the run it
 // shows whole when it opens (its steps' titles and outputs come from that read), and again only when the list says the
-// run changed: a node's output moves only with its state, so a run that goes on is not read on every poll.
+// run changed: a node's output moves only with its state, so a run that goes on is not read on every poll. Read again,
+// the run leaves out the canvas it froze, which the panel holds from its whole read: its steps keep their titles.
 it('polls the light list alone while closed and reads the run it shows whole once opened, again only when the list says it changed', async () => {
   vi.useFakeTimers();
   let settled = false;
@@ -258,9 +267,10 @@ it('polls the light list alone while closed and reads the run it shows whole onc
   // It goes on, and the list says nothing new of it: the list alone.
   await flushTimers(2000); await flushTimers(2000);
   expect(reads(5)).toEqual(['list', 'list']);
-  // A step settles: the list says so, and the run is read again, with that step's output.
+  // A step settles: the list says so, and the run is read again, with that step's output, and without the canvas it
+  // froze: the step's title is the canvas held.
   settled = true; await flushTimers(2000);
-  expect(reads(7)).toEqual(['list', 'graph-a']);
+  expect(reads(7)).toEqual(['list', 'graph-a?document=false']);
   fireEvent.click(panel.getByRole('button', { name: 'Delivery team · Completed' }));
   expect(panel.getByText('Delivery from the server')).toBeVisible();
   // Settled, with nothing new in the list: the list alone.
@@ -307,18 +317,20 @@ it('reads a collaboration that goes on at every poll, and no more once it has se
   expect(reads(1)).toEqual(['list', 'graph-a']);
   const panel = within(screen.getByRole('dialog'));
   expect(panel.getByText('Turn 1 of the plan')).toBeInTheDocument();
-  // Its turns go on where the list says nothing: each poll reads it.
+  // Its turns go on where the list says nothing: each poll reads it, without the canvas it froze.
   await flushTimers(2000);
-  expect(reads(3)).toEqual(['list', 'graph-a']);
+  expect(reads(3)).toEqual(['list', 'graph-a?document=false']);
   expect(panel.getByText('Turn 2 of the plan')).toBeInTheDocument();
   await flushTimers(2000);
-  expect(reads(5)).toEqual(['list', 'graph-a']);
+  expect(reads(5)).toEqual(['list', 'graph-a?document=false']);
   // Settled: read once more, as the list says it changed, then the list alone.
   await flushTimers(2000);
-  expect(reads(7)).toEqual(['list', 'graph-a']);
+  expect(reads(7)).toEqual(['list', 'graph-a?document=false']);
   await flushTimers(2000); await flushTimers(2000);
   expect(reads(9)).toEqual(['list', 'list']);
   expect(panel.getByText('Completed', { selector: 'strong' })).toBeVisible();
+  // The synthesizer's title is the canvas held from the first read.
+  expect(panel.getByText(/Synthesizer: Research team/)).toBeInTheDocument();
 });
 
 // A retry takes a node from running back to running with a new run, after a wait no poll need see (a sleeping laptop, a
@@ -340,7 +352,7 @@ it('reads the run again for a retry the list shows only by its attempts', async 
   expect(reads(3)).toEqual(['list']);
   // Between two polls the node failed, waited and began its next attempt: running before and after.
   attempts = 1; await flushTimers(2000);
-  expect(reads(4)).toEqual(['list', 'graph-a']);
+  expect(reads(4)).toEqual(['list', 'graph-a?document=false']);
   await flushTimers(2000);
   expect(reads(6)).toEqual(['list']);
 });

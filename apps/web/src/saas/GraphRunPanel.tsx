@@ -20,8 +20,9 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
   const [items, setItems] = useState<GraphRunSummary[]>([]);
-  // The run the panel shows as its own route last read it, whole: the canvas it froze and every node's output, which the
-  // list leaves out. Only the open panel reads it; `read` holds the same for the poll that decides whether to read again.
+  // The run the panel shows as its own route last read it: the canvas it froze (from its whole read) and every node's
+  // output, which the list leaves out. Only the open panel reads it; `read` holds the same for the poll that decides
+  // whether to read again.
   const [shown, setShown] = useState<GraphRunSnapshot | null>(null);
   const read = useRef<GraphRunSnapshot | null>(null);
   const [selected, setSelected] = useState('');
@@ -56,10 +57,13 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
         setItems(result.items); publishGraphRuns(tenantId, canvasId, result.items);
         // The list holds no run's canvas or outputs (whole, a film canvas's last 50 runs came to 20-55 MB a poll). The open
         // panel reads the run it shows whole when it opens and when another run is picked, then again only when the list
-        // says it changed, or on every poll while it is a collaboration going on (stale, below).
+        // says it changed, or on every poll while it is a collaboration going on (stale, below). Read again, the run
+        // leaves out the canvas it froze at admission, which never changes and which the panel already holds from its
+        // whole read (a film's is about a megabyte): it carries the one held.
         const target = open ? result.items.find(item => item.id === selected) || result.items[0] : undefined;
         if (target && (!fresh || stale(read.current, target))) {
-          const run = await readGraphRun(tenantId, canvasId, target.id, controller.signal);
+          const frozen = read.current?.id === target.id ? read.current.document ?? undefined : undefined;
+          const run = await readGraphRun(tenantId, canvasId, target.id, controller.signal, frozen);
           if (controller.signal.aborted) return;
           fresh = true; read.current = run; setShown(run);
         }
@@ -128,12 +132,12 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   </div>;
 }
 
-/** Whether the run the panel shows, as last read whole, may be behind what the list now says of it. A node's output, run
- *  and detail change only with its state or its attempts (graph_runs.go's setGraphNode, a cancellation's reconcile, a
- *  retry, which goes from running back to running with a new run after a wait no poll need see), so a run is read again
- *  when the list has another status, last update, or node's state or attempts than the read: a film's run of hours is
- *  read once a step, not once a poll, its frozen canvas being a megabyte. A collaboration's turns, which the list does not
- *  carry, go on with no node's state moving: it is read again on every poll while it goes on. */
+/** Whether the run the panel shows, as last read, may be behind what the list now says of it. A node's output, run and
+ *  detail change only with its state or its attempts (graph_runs.go's setGraphNode, a cancellation's reconcile, a retry,
+ *  which goes from running back to running with a new run after a wait no poll need see), so a run is read again when
+ *  the list has another status, last update, or node's state or attempts than the read: a film's run of hours is read
+ *  once a step, not once a poll, and without its frozen canvas, a megabyte. A collaboration's turns, which the list does
+ *  not carry, go on with no node's state moving: it is read again on every poll while it goes on. */
 function stale(shown: GraphRunSnapshot | null, listed: GraphRunSummary): boolean {
   return !shown || shown.id !== listed.id || (Boolean(shown.collaboration) && (graphIsActive(shown) || graphIsActive(listed)))
     || shown.status !== listed.status || shown.updatedAt !== listed.updatedAt || shown.nodes.length !== listed.nodes.length

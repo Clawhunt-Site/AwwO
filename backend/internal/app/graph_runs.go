@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,22 @@ import (
 // the execution timeline draws each node's bar from recorded times on any device; a node with no run (cached, or not
 // reached) has neither, a node still in flight has no endedAt, and one waiting for its next attempt shows no start (its
 // run is the failed one). A collaboration node's turns are its runs: its first turn's start and, settled, its last end.
-func (a *App) graphJSON() string {
-	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log,'startedAt',CASE WHEN n.state<>'waiting' OR g.collaboration IS NOT NULL THEN tm.started END,'endedAt',CASE WHEN n.state IN ('done','failed','cancelled') AND NOT tm.live THEN tm.ended END) ORDER BY n.ordinal) FROM graph_run_nodes n LEFT JOIN LATERAL (SELECT min(r.created_at) AS started,max(r.updated_at) AS ended,COALESCE(bool_or(r.status IN ('queued','running')),false) AS live FROM (SELECT n.run_id AS id UNION ALL SELECT t.run_id FROM graph_collaboration_turns t WHERE t.graph_id=n.graph_id AND t.node_id=n.node_id) ids JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=ids.id) tm ON true WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
+func (a *App) graphJSON() string { return a.graphRunJSON(true) }
+
+// graphRunJSON is graphJSON with or without the canvas the run froze at admission (g.document), and nothing else left
+// out. createGraphRun writes that canvas when it admits the run and nothing writes it again, so a reader that has read
+// it once can ask for the run without it (GET .../graph-runs/{id}?document=false, getGraphRun) and keep what it read: a
+// canvas page observes its active run by its id every 2.5 s for as long as the run goes on, hours for a film
+// (observeCloudGraph), and a film's frozen canvas is 0.4 MB at 116 nodes and about 1 MB at 300, which the database read
+// back out of TOAST for every read. Without it, the query does not name the column, so the database does not read it
+// (dropping the key from the whole object, `- 'document'`, would read it first). With it, the query is graphJSON's as it
+// always was.
+func (a *App) graphRunJSON(document bool) string {
+	frozen := ""
+	if document {
+		frozen = `'document',g.document,`
+	}
+	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,` + frozen + `'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log,'startedAt',CASE WHEN n.state<>'waiting' OR g.collaboration IS NOT NULL THEN tm.started END,'endedAt',CASE WHEN n.state IN ('done','failed','cancelled') AND NOT tm.live THEN tm.ended END) ORDER BY n.ordinal) FROM graph_run_nodes n LEFT JOIN LATERAL (SELECT min(r.created_at) AS started,max(r.updated_at) AS ended,COALESCE(bool_or(r.status IN ('queued','running')),false) AS live FROM (SELECT n.run_id AS id UNION ALL SELECT t.run_id FROM graph_collaboration_turns t WHERE t.graph_id=n.graph_id AND t.node_id=n.node_id) ids JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=ids.id) tm ON true WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
 }
 
 // graphSummaryJSON is a graph run as the canvas's run list reads it (GET .../graph-runs): what the run is and how it
@@ -41,8 +56,34 @@ func (a *App) listGraphRuns(w http.ResponseWriter, r *http.Request) {
 	v, e := rowsJSON(r.Context(), a.db, "SELECT "+graphSummaryJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
 	a.replyList(w, v, e)
 }
+
+// getGraphRun reads one run whole, or with ?document=false without the canvas it froze at admission (graphRunJSON), for
+// a reader that already holds that canvas: the canvas page's observer of its active run and the open run panel's reads
+// again of the run it shows. ?document=true is the default, the run whole; any other value, or the option twice, is
+// refused rather than read as either. So is a query that does not parse, as the artifact and tenant lists refuse
+// theirs: r.URL.Query() drops a malformed pair (a bad escape, a ";") and would read the run as though no one had asked.
 func (a *App) getGraphRun(w http.ResponseWriter, r *http.Request) {
-	v, e := oneJSON(r.Context(), a.db, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.id=$3", r.PathValue("tenantId"), r.PathValue("canvasId"), r.PathValue("id"))
+	query, e := url.ParseQuery(r.URL.RawQuery)
+	if e != nil {
+		fail(w, 400, "invalid_input", "Invalid query")
+		return
+	}
+	document := true
+	if values, ok := query["document"]; ok {
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			fail(w, 400, "invalid_input", "document must be true or false")
+			return
+		}
+		document = values[0] == "true"
+	}
+	a.replyGraphRun(w, r, document)
+}
+
+// replyGraphRun answers with the run the request's path names, whole or without its frozen canvas. A cancellation
+// answers with the run whole whatever its query says: it has already committed when it replies, and a refusal then would
+// read as though it had not.
+func (a *App) replyGraphRun(w http.ResponseWriter, r *http.Request, document bool) {
+	v, e := oneJSON(r.Context(), a.db, "SELECT "+a.graphRunJSON(document)+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND g.id=$3", r.PathValue("tenantId"), r.PathValue("canvasId"), r.PathValue("id"))
 	a.replyOne(w, v, e, 200)
 }
 func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
@@ -1053,7 +1094,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 	for _, rid := range ids {
 		a.cancelExecution(rid)
 	}
-	a.getGraphRun(w, r)
+	a.replyGraphRun(w, r, true)
 }
 func (a *App) recoverGraphs(ctx context.Context) error {
 	rows, e := a.db.Query(ctx, "SELECT tenant_id,id FROM graph_runs WHERE status IN ('queued','running')")

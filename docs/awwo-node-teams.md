@@ -148,7 +148,7 @@ Go 固定团队及 Agent 指令/模型快照，每次成员调用解析空值继
 | `GET T/runs/{id}/turns` | `{items: [...]}`，按 `ordinal` 排序，最多受该次团队 64 调用上限约束；普通单 Agent 无成员记录 |
 | `POST T/canvases/{canvasId}/graph-runs` | `{operationId, scope?, documentVersion?}`；首次受理 `202`，相同幂等请求返回原任务 `200` |
 | `GET T/canvases/{canvasId}/graph-runs` | `{items: [...]}`，按创建时间倒序最多 50 条，可用 `?operationId=...` 查询；每条只是摘要（`id, canvasId, operationId, documentVersion, scope, status, error, createdAt, updatedAt` 与各节点的 `nodeId, state`，重试过的节点另带 `attempts`），不含受理时冻结的 document 和任何节点输出，整图按 id 读取；当前无游标分页，不作为完整历史导出 |
-| `GET T/canvases/{canvasId}/graph-runs/{id}` | 返回一个固定文档快照及节点状态集合 |
+| `GET T/canvases/{canvasId}/graph-runs/{id}` | 返回一个固定文档快照及节点状态集合；`?document=false` 只省去受理时冻结的 document（受理后不再改写），供已读过它的读者重复读取 |
 | `POST T/canvases/{canvasId}/graph-runs/{id}/cancel` | body `{}`；停止活动图及其等待/活动节点，返回图快照；已终态任务保持原终态 |
 | `POST T/canvases/{canvasId}/graph-runs/operations/{operationId}/cancel` | body `{}`；返回 `{confirmed, status, graphId?}`；尚无 graphId 时仍可按操作身份取消 |
 

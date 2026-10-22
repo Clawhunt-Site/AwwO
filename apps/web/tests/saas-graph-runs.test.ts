@@ -5,8 +5,9 @@ import { clearRunJournal, journalSummary, loadRunJournal, reconcileRunJournal, s
 import { applyRecoveredDocument, recoveryJournalForDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import { SaaSApiError, type Tenant } from '../src/saas/api';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave, configureCanvasKnowledge, canvasKnowledgeRevisionIds } from '../src/saas/canvasBridge';
-import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph, type GraphRunSnapshot } from '../src/saas/graphRuns';
-import { graphRunSummary } from './saas-graph-run-summary-fixture';
+import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph,
+  type GraphCollaborationTurn, type GraphObservation, type GraphRunSnapshot } from '../src/saas/graphRuns';
+import { graphRunSummary, graphRunWithoutDocument } from './saas-graph-run-summary-fixture';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -213,6 +214,104 @@ describe('durable cloud graph identity and recovery', () => {
     ] }));
     expect(withoutProof.nodes.upstream).toBeUndefined();
     expect(journalSummary(withoutProof)).toMatchObject({ total: 2, cached: 0 });
+  });
+
+  // The canvas observes a run that goes on every 2.5 s (hours, for a film), and the canvas the run froze at admission (a
+  // megabyte, for a film) never changes after it: an observer reads it with the run once, then reads the run without it
+  // and merges the one it kept, which still names a cached ancestor's node.
+  it('reads its run whole once per observer, then without the canvas it froze, merging the one it kept', async () => {
+    const served: Record<string, GraphRunSnapshot> = { 'graph-a': snapshot(), 'graph-b': snapshot({ id: 'graph-b', operationId: 'operation-b' }) };
+    const reads: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const [path, query] = url.split('?');
+      const id = path!.slice('/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/'.length);
+      reads.push(query ? `${id}?${query}` : id);
+      const run = served[id];
+      if (!run || (query && query !== 'document=false')) return json({ error: { code: 'not_found', message: 'Not found' } }, 404);
+      return json(query ? graphRunWithoutDocument(run) : run);
+    }));
+    const observation: GraphObservation = {};
+    const admitted = served['graph-a']!;
+    const first = await observeCloudGraph(graphRecoveryJournal(admitted, tenant.id, admitted.document!), undefined, observation);
+    expect(observation).toEqual({ run: JSON.stringify(['tenant-a', 'canvas-a', 'graph-a']), document: admitted.document });
+    // A journal that holds only the nodes it executes, as a scoped run's does when it is submitted: the read without the
+    // canvas lists the cached ancestor, and the merge finds its node in the canvas kept.
+    const { upstream: _upstream, ...executed } = first.nodes;
+    served['graph-a'] = snapshot({ nodes: [{ nodeId: 'a', state: 'done', runId: 'run-a', sessionId: 'session-a', output: 'Final A' },
+      { nodeId: 'b', state: 'running', runId: 'run-b' }, { nodeId: 'upstream', state: 'cached', output: 'Published source' }] });
+    const second = await observeCloudGraph({ ...first, nodes: executed }, undefined, observation);
+    expect(second.nodes.a).toMatchObject({ state: 'done', output: 'Final A', runId: 'run-a' });
+    expect(second.nodes.upstream).toMatchObject({ state: 'cached', output: 'Published source', threadId: 'thread-upstream', runId: null });
+    expect(second.scope).toEqual(['b', 'a']);
+    await observeCloudGraph(second, undefined, observation);
+    // Another run in the same observer is read whole, and its canvas is kept in place of the first's.
+    const other = graphRecoveryJournal(served['graph-b']!, tenant.id, document());
+    await observeCloudGraph(other, undefined, observation);
+    await observeCloudGraph(other, undefined, observation);
+    // Without an observation (a single pass), every read is whole.
+    await observeCloudGraph(second);
+    await reconcileRunJournal(second, document().nodes, '/unused');
+    expect(reads).toEqual(['graph-a', 'graph-a?document=false', 'graph-a?document=false', 'graph-b', 'graph-b?document=false', 'graph-a', 'graph-a']);
+  });
+
+  it('still checks a collaboration’s frozen canvas against its admission on the reads that leave it out', async () => {
+    const policy = { goal: 'Agree on one plan', rounds: 1, synthesizerNodeId: 'a' };
+    const run = (turns: GraphCollaborationTurn[]) => snapshot({ scope: ['a', 'b'],
+      collaboration: { ...policy, maxModelCalls: 5, phase: 'proposal', round: 1, turns },
+      nodes: [{ nodeId: 'a', state: turns.length ? 'running' : 'waiting', ...(turns.length ? { runId: 'run-a1', sessionId: 'session-a' } : {}) },
+        { nodeId: 'b', state: 'waiting' }] });
+    let served = run([]);
+    const reads: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      reads.push(url.slice(url.lastIndexOf('/') + 1));
+      return json(url.endsWith('?document=false') ? graphRunWithoutDocument(served) : served);
+    }));
+    const observation: GraphObservation = {};
+    const journal = graphRecoveryJournal(served, tenant.id, document());
+    expect(journal.inputFingerprint).toBe(runInputFingerprint(document(), ['a', 'b']));
+    const observed = await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation);
+    // The run goes on; read without its canvas, it still merges against the canvas kept.
+    served = run([{ ordinal: 1, nodeId: 'a', phase: 'proposal', round: 1, status: 'running', runId: 'run-a1', sessionId: 'session-a' }]);
+    const next = await reconcileRunJournal(observed, document().nodes, '/unused', undefined, observation);
+    expect(next.collaboration?.turns).toHaveLength(1);
+    expect(next.nodes.a).toMatchObject({ state: 'running', runId: 'run-a1' });
+    // A journal admitted on other inputs than the canvas the run froze is refused on those reads as on a whole one.
+    const changed = structuredClone(document()); (changed.nodes[0] as SessionNode).persona = 'Changed after admission';
+    const foreign = { ...observed, inputFingerprint: runInputFingerprint(changed, ['a', 'b']) };
+    await expect(observeCloudGraph(foreign, undefined, observation)).rejects.toThrow('Collaboration document changed after admission');
+    expect(await reconcileRunJournal(foreign, document().nodes, '/unused', undefined, observation)).toEqual(foreign);
+    expect(reads).toEqual(['graph-a', 'graph-a?document=false', 'graph-a?document=false', 'graph-a?document=false']);
+  });
+
+  it('reads the run whole until the merge accepts a read, and without its canvas after that whatever a read’s outcome', async () => {
+    const replies: Array<() => Response> = [
+      () => json(snapshot({ canvasId: 'canvas-b' })), // another canvas's run: the merge refuses it
+      () => { throw new TypeError('Failed to fetch'); },
+      () => json({ ...snapshot(), id: 'graph-b' }), // not the run asked for
+      () => json(snapshot()),
+      () => json(graphRunWithoutDocument(snapshot())),
+      () => { throw new TypeError('Failed to fetch'); },
+      () => json(graphRunWithoutDocument(snapshot({ canvasId: 'canvas-b' }))),
+      () => json(graphRunWithoutDocument(snapshot({ status: 'completed', nodes: [{ nodeId: 'a', state: 'done', output: 'Final A' },
+        { nodeId: 'b', state: 'done', output: 'Final B' }, { nodeId: 'upstream', state: 'cached', output: 'Published source' }] }))),
+    ];
+    const fetcher = vi.fn(async (_url: string) => replies.shift()!());
+    vi.stubGlobal('fetch', fetcher);
+    const observation: GraphObservation = {};
+    const journal = graphRecoveryJournal(snapshot(), tenant.id, document());
+    for (let i = 0; i < 3; i++) expect(await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation)).toEqual(journal);
+    expect(observation).toEqual({});
+    await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation);
+    const kept = { ...observation };
+    expect(kept.run).toBe(JSON.stringify(['tenant-a', 'canvas-a', 'graph-a']));
+    await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation);
+    // Kept, the run's canvas stays the observer's through a read that fails and one the merge refuses.
+    for (let i = 0; i < 2; i++) expect(await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation)).toEqual(journal);
+    expect(observation).toEqual(kept);
+    const settled = await reconcileRunJournal(journal, document().nodes, '/unused', undefined, observation);
+    expect(settled.nodes.a).toMatchObject({ state: 'done', output: 'Final A' });
+    expect(fetcher.mock.calls.map(([url]) => url.slice(url.lastIndexOf('/') + 1))).toEqual(['graph-a', 'graph-a', 'graph-a', 'graph-a',
+      'graph-a?document=false', 'graph-a?document=false', 'graph-a?document=false', 'graph-a?document=false']);
   });
 
   it.each(['offline', 'unauthenticated', 'foreign-canvas', 'foreign-operation'])('preserves the recovery lock and evidence on %s', async scenario => {
