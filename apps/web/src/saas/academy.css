@@ -16,7 +16,8 @@ dialog.academy-dialog.is-replacing[open], dialog.academy-dialog.is-replacing[ope
   background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--saas-accent) 13%, transparent) 0%, transparent 55%), var(--saas-card); }
 .academy-header.is-playing { padding-bottom: 16px; }
 .academy-header > div { min-width: 0; }
-.academy-eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--saas-accent); font: 650 11px/1 var(--saas-font); letter-spacing: .14em; text-transform: uppercase; }
+/* The brand's own casing ("AwwO Academy", never "AWWO"): no uppercase, a little tracking. */
+.academy-eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--saas-accent); font: 650 12px/1 var(--saas-font); letter-spacing: .04em; }
 .academy-dialog h2 { margin: 9px 0 0; font: 690 26px/1.2 var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: -.02em; text-wrap: balance; }
 /* The title takes the focus when the view changes (it is not a control). */
 .academy-dialog h2:focus { outline: none; }

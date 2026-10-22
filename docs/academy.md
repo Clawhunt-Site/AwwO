@@ -2,7 +2,10 @@
 
 The Academy is AwwO's tutorial videos, in a dialog any page of the hosted app can open (2026-10-21; owner: 「在awwO做一个分页，
 上线教程页面，把我们的Academy的东西装修好，并且做成弹窗」). Every video was recorded on the live AwwO, with Chinese and English
-subtitles burned in.
+subtitles burned in. Since 2026-10-22 every video plays its motion version (owner: 「按照这个动效标准，全把现有的单个教程加一些
+这样的动效处理」): the same recording, narration and length, with an animated title, a chapter opener for each step and a
+chapter tracker, spotlights, click ripples, a time-lapse sign with the run's clock, a recap that comes in with its
+narration, and quiet sound effects under the narration.
 
 | Section | Videos | Narration | What they show |
 | --- | --- | --- | --- |
@@ -36,10 +39,10 @@ takes out of the address (`caseLink.ts`). That link works on its own too, so a c
 
 ## The videos are staged, not released
 
-The files (1.39 GB) are too large for a release. Each is staged once on the host, outside every release, under
-`/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256 and never overwritten; the site
-serves it for any `/showcase/` path the live release lacks, as it serves a film case's film. Locally, the dev server serves
-them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
+The files (1.70 GB; the first cut's, 1.39 GB, stay staged) are too large for a release. Each is staged once on the host,
+outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
+and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
+film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
 
 To add or replace a video: stage the new file first (a new sha256 gives a new name, so a page that loaded the old catalog keeps
 playing the old file), then change its entry in `academyCatalog.ts` (sha256, bytes, seconds, `src`) and release the web app. A
