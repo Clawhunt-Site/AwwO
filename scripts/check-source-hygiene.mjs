@@ -9,14 +9,21 @@
 // with a reason.
 //
 // Usage: node scripts/check-source-hygiene.mjs [--root <dir>] [--json] [paths...]
-//   no paths   walk the default roots under --root (default: the repository this script is in)
-//   paths      scan only these files or directories, resolved from the current directory
+//   no paths   scan the default roots under --root (default: the repository this script is in). In a git
+//              checkout (--root holds its own .git) these are the files git lists there: tracked ones, and
+//              untracked ones it does not ignore, so ignored output such as apps/openmaus-worker/.runtime/
+//              is never read; when git cannot list them all (it fails or warns, or a root is behind a link),
+//              the check stops with exit 2. Any other root, such as a `git archive` tree, is walked, skipping
+//              SKIP_DIRECTORIES.
+//   paths      scan only these files or directories, resolved from the current directory, by the same walk
 // Lines and columns are 1-based; a column counts Unicode code points, not bytes or UTF-16 units.
 // Exit codes: 0 clean or fully allowlisted, 1 findings not allowlisted, 2 usage, setup or read error.
 //
-// Dependency-free on purpose, so it runs before `npm ci` and in any worktree. Every character it looks for
-// is written as an escape here, so this file never needs an allowlist entry of its own.
+// Dependency-free on purpose (a checkout's list of files comes from git itself), so it runs before `npm ci`
+// and in any worktree. Every character it looks for is written as an escape here, so this file never needs an
+// allowlist entry of its own.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +33,7 @@ export const DEFAULT_ROOTS = Object.freeze([
   'backend', 'apps/web/src', 'apps/web/tests', 'apps/pi-worker', 'apps/openai-agents-worker',
   'apps/openai-agents-python-worker', 'apps/render-worker', 'apps/openmaus-worker', 'scripts', 'docs',
 ]);
+/** Directory names the walk never enters; a git listing leaves out what git ignores instead. */
 export const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '__pycache__']);
 export const TEXT_EXTENSIONS = new Set([
   '.go', '.sql', '.ts', '.tsx', '.mjs', '.cjs', '.js', '.json', '.md', '.css', '.html', '.py', '.sh',
@@ -35,6 +43,28 @@ export const CATEGORIES = Object.freeze(['cr', 'control', 'zero-width', 'bidi', 
 export const ALLOWLIST_PATH = 'scripts/source-hygiene-allow.json';
 /** Findings printed per file in text mode; --json always lists every finding. */
 export const SHOWN_PER_FILE = 20;
+// The variables that tie git to one repository, as `git rev-parse --local-env-vars` lists them (Git 2.43 to 2.50):
+// git clears them itself before it works in another repository. A hook or alias may export them (`git -c` exports
+// GIT_CONFIG_PARAMETERS), so they are left out of git's environment: git lists the checkout at --root, by its own
+// settings. GIT_CONFIG_COUNT (with GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n) stays: no git exports it, so it is a
+// setting someone made on purpose, as a container's safe.directory.
+export const GIT_REPOSITORY_VARIABLES = Object.freeze([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR',
+  'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+]);
+// The variables that change how git reads a pathspec (GIT_LITERAL_PATHSPECS=1 turns the listing's pathspec magic
+// into a name nothing matches) or where its output goes (Git for Windows' GIT_REDIRECT_STDERR=off would hide the
+// warnings the listing fails on); every GIT_TRACE* is left out too, as tracing writes to stderr.
+export const GIT_LISTING_VARIABLES = Object.freeze([
+  'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS',
+  'GIT_REDIRECT_STDIN', 'GIT_REDIRECT_STDOUT', 'GIT_REDIRECT_STDERR',
+]);
+// What keeps git's stderr for warnings alone: no advice (GIT_ADVICE, where git knows it), and none of the three
+// trace2 targets, which a configuration can turn on too (trace2.normalTarget and the like).
+const GIT_QUIET = Object.freeze({ GIT_ADVICE: '0', GIT_TRACE2: '0', GIT_TRACE2_PERF: '0', GIT_TRACE2_EVENT: '0' });
+/** The most output read from git: far more than the list of paths of any checkout. */
+const GIT_OUTPUT_LIMIT = 256 * 1024 * 1024;
 
 // The characters reported, as inclusive [first, last, category] code point ranges; tab (0x09) and LF (0x0a)
 // are allowed. The classifier and the fast path are both built from this one table, and the ranges are
@@ -132,22 +162,200 @@ function isDirectory(target) {
   }
 }
 
+function isLink(target) {
+  try {
+    return fs.lstatSync(target).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether root is the top of a git checkout: its own .git is there (a directory, or a file in a worktree). */
+export function isGitCheckout(root) {
+  return fs.existsSync(path.join(root, '.git'));
+}
+
+/** An environment for git without GIT_REPOSITORY_VARIABLES, GIT_LISTING_VARIABLES and GIT_TRACE*. */
+export function gitEnvironment(environment = process.env) {
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => {
+    // Windows reads variable names in any case.
+    const upper = name.toUpperCase();
+    return !GIT_REPOSITORY_VARIABLES.includes(upper) && !GIT_LISTING_VARIABLES.includes(upper)
+      && !upper.startsWith('GIT_TRACE');
+  }));
+}
+
+/** A text with each character this check reports written as its code point, so no message carries one. */
+function visible(text) {
+  return [...text].map(character => (classifyCodePoint(character.codePointAt(0))
+    ? `<${formatCodePoint(character.codePointAt(0))}>` : character)).join('');
+}
+
 /**
- * The files to scan. Without paths: the default roots under root (a missing root is listed, not an error).
- * With paths: each named file (if it has a text extension) or directory. A named path that does not exist
- * is a usage error, so a typo can never pass as a clean scan.
+ * git's raw output for args, run in root. A failure, or any warning (git warns and still exits 0 when it cannot
+ * open a directory), is a setup error: the checkout's files could not all be listed. Advice and tracing are
+ * turned off (GIT_QUIET), since they are no warnings, and the sparse index's hint by name as well, which Git 2.50
+ * prints on stderr when a pathspec reaches past a sparse checkout.
+ */
+function runGit(root, args) {
+  const result = spawnSync('git', ['-C', root, '-c', 'advice.sparseIndexExpanded=false', ...args], {
+    env: { ...gitEnvironment(), ...GIT_QUIET }, maxBuffer: GIT_OUTPUT_LIMIT, stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  const said = String(result.stderr ?? '').split(/\r?\n/).map(line => line.trim()).find(Boolean);
+  const problem = result.error ? (result.error.code === 'ENOENT' ? 'git is not available' : result.error.message)
+    : result.status !== 0 ? said || `exit ${result.status ?? result.signal}` : said;
+  if (problem) throw new UsageError(`cannot list the files of the git checkout ${root}: ${visible(problem)}`);
+  return result.stdout;
+}
+
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * The text paths in git's NUL-separated output, each entry whole (ls-files -t's tag included). An entry is kept by
+ * its extension before it is decoded, so a file this check never reads cannot stop it; a kept one that is not UTF-8
+ * (possible on POSIX) cannot be named to the file system again, so it is a setup error, not a file left unread.
+ */
+function decodeTextPaths(output) {
+  const paths = [];
+  for (let start = 0; start < output.length;) {
+    let end = output.indexOf(0, start);
+    if (end === -1) end = output.length;
+    const bytes = output.subarray(start, end);
+    start = end + 1;
+    // Every text extension is ASCII, and no byte of another character is.
+    if (!isTextFile(bytes.toString('latin1'))) continue;
+    try {
+      paths.push(UTF8.decode(bytes));
+    } catch {
+      const shown = [...bytes].map(byte => (byte >= 0x20 && byte < 0x7f ? String.fromCharCode(byte)
+        : `\\x${byte.toString(16).padStart(2, '0')}`)).join('');
+      throw new UsageError(`git lists a path that is not UTF-8, which this check cannot read: ${shown}`);
+    }
+  }
+  return paths;
+}
+
+/** Orders repo-relative POSIX paths as the walk visits them: name by name, a directory's files in its place. */
+function compareSegments(a, b) {
+  const left = a.split('/');
+  const right = b.split('/');
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return left.length - right.length;
+}
+
+/** The first directory on a repo-relative directory path, itself included, that is a link or junction, or null. */
+function firstLink(root, directory, links) {
+  const segments = directory.split('/');
+  for (let depth = 1; depth <= segments.length; depth += 1) {
+    const prefix = segments.slice(0, depth).join('/');
+    if (!links.has(prefix)) links.set(prefix, isLink(path.join(root, ...segments.slice(0, depth))));
+    if (links.get(prefix)) return prefix;
+  }
+  return null;
+}
+
+/** How lstat finds a listed path: 'file', 'missing' (ENOENT, ENOTDIR), 'other' (a directory, a link) or 'unknown'. */
+function lstatState(file) {
+  try {
+    return fs.lstatSync(file).isFile() ? 'file' : 'other';
+  } catch (error) {
+    return error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'missing' : 'unknown';
+  }
+}
+
+/**
+ * The repo-relative text paths git lists under the named directories of the checkout at root: tracked files, and
+ * untracked ones git does not ignore. A named directory reached through a link is a setup error, as git lists the
+ * link, not the files behind it.
+ */
+function gitListing(root, names, pathspecs, links) {
+  const [inside, prefix] = runGit(root, ['rev-parse', '--is-inside-work-tree', '--show-prefix'])
+    .toString('utf8').split(/\r?\n/);
+  if (inside !== 'true' || prefix) throw new UsageError(`git does not take ${root} for the top of its checkout`);
+  for (const name of names) {
+    const link = firstLink(root, name, links);
+    if (link) {
+      throw new UsageError(`default root ${name} goes through the link ${link}: git lists the link, not the files `
+        + 'behind it (name the root as a path to walk it)');
+    }
+  }
+  return new Set(decodeTextPaths(runGit(root, [
+    'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...pathspecs,
+  ])));
+}
+
+/**
+ * The tracked paths git itself says are not in the working tree, and need not be: deleted from it (git's tag R)
+ * or left out of a sparse checkout (S, skip-worktree, which `--deleted` alone does not list).
+ */
+function absentByGit(root, pathspecs) {
+  const absent = new Set();
+  const tagged = runGit(root, ['ls-files', '-z', '-t', '--cached', '--deleted', '--', ...pathspecs]);
+  for (const entry of decodeTextPaths(tagged)) {
+    if (entry.startsWith('R ') || entry.startsWith('S ')) absent.add(entry.slice(2));
+  }
+  return absent;
+}
+
+/**
+ * The text files git lists under the named directories of the checkout at root, in the walk's order. Like the
+ * walk, it reads nothing through a symbolic link or junction below the names, although Git for Windows lists
+ * files through a junction. Only a tracked file git itself says is absent (absentByGit) is passed over when it
+ * cannot be found: any other listed path that cannot be (a name the file system spells otherwise) is kept, so that
+ * reading it fails the scan. Git for Windows spells a lone surrogate in a name as U+FFFD, so such a file fails it
+ * unless something really spelled with U+FFFD sits beside it, which git, and so this check, reads in its place; git
+ * cannot add that file either, so the repository can never hold it.
+ */
+export function listGitFiles(root, names) {
+  // No pathspec would list the whole checkout.
+  if (names.length === 0) return [];
+  // Literal, and blind to case as Windows and macOS are when they find a root spelled otherwise in the index; on
+  // a case-sensitive file system this can only add a sibling such as DOCS/.
+  const pathspecs = names.map(name => `:(literal,icase)${name}`);
+  const links = new Map();
+  const groups = new Map([...names, ''].map(name => [name, []]));
+  for (const relative of gitListing(root, names, pathspecs, links)) {
+    // Matched as the pathspecs are, whatever the case; a path under no name at all is still scanned, after them.
+    const lower = relative.toLowerCase();
+    groups.get(names.find(name => lower.startsWith(`${name.toLowerCase()}/`)) ?? '').push(relative);
+  }
+  let absent = null;
+  const files = [];
+  for (const group of groups.values()) {
+    for (const relative of group.sort(compareSegments)) {
+      if (firstLink(root, path.posix.dirname(relative), links)) continue;
+      const file = path.join(root, ...relative.split('/'));
+      const state = lstatState(file);
+      if (state === 'missing') {
+        // Asked once, and only when a listed file is missing: a present file is read whatever git's tag says.
+        absent ??= absentByGit(root, pathspecs);
+        if (absent.has(relative)) continue;
+      }
+      if (state !== 'other') files.push(file);
+    }
+  }
+  return files;
+}
+
+/**
+ * The files to scan and how they were found (listing: git, walk or paths). Without paths: the default roots
+ * under root (a missing root is listed, not an error), as git lists them in a git checkout and as the walk
+ * finds them elsewhere. With paths: each named file (if it has a text extension) or directory, walked. A named
+ * path that does not exist is a usage error, so a typo can never pass as a clean scan.
  */
 export function resolveTargets(root, paths = [], cwd = process.cwd()) {
   const files = new Set();
   const missingRoots = [];
   const skipped = [];
   if (paths.length === 0) {
-    for (const name of DEFAULT_ROOTS) {
-      const full = path.join(root, name);
-      if (isDirectory(full)) for (const file of collectFiles(full)) files.add(file);
-      else missingRoots.push(name);
-    }
-    return { files: [...files], missingRoots, skipped };
+    const present = [];
+    for (const name of DEFAULT_ROOTS) (isDirectory(path.join(root, name)) ? present : missingRoots).push(name);
+    if (isGitCheckout(root)) return { files: listGitFiles(root, present), missingRoots, skipped, listing: 'git' };
+    for (const name of present) for (const file of collectFiles(path.join(root, name))) files.add(file);
+    return { files: [...files], missingRoots, skipped, listing: 'walk' };
   }
   for (const given of paths) {
     const full = path.resolve(cwd, given);
@@ -161,7 +369,7 @@ export function resolveTargets(root, paths = [], cwd = process.cwd()) {
     else if (stat.isFile() && isTextFile(full)) files.add(full);
     else skipped.push(given);
   }
-  return { files: [...files], missingRoots, skipped };
+  return { files: [...files], missingRoots, skipped, listing: 'paths' };
 }
 
 function isRepoRelativePosix(value) {
@@ -255,6 +463,7 @@ export function checkHygiene({ root = REPO_ROOT, paths = [], cwd = process.cwd()
   const notAllowed = findings.filter(finding => !finding.allowed);
   return {
     root,
+    listing: targets.listing,
     filesScanned: targets.files.length,
     missingRoots: targets.missingRoots,
     skipped: targets.skipped,
@@ -292,11 +501,16 @@ function countByCategory(findings) {
   return [...counts].map(([category, count]) => `${category} x${count}`).join(', ');
 }
 
+const LISTING_NOTES = Object.freeze({
+  git: ' (as git lists them: tracked, or untracked and not ignored)',
+  walk: ' (not a git checkout: a directory walk)',
+});
+
 /** The human-readable report: unallowed findings first, then what the allowlist covered, then the verdict. */
 export function formatReport(report) {
   const lines = [];
   const absent = report.missingRoots.length ? ` (not present: ${report.missingRoots.join(', ')})` : '';
-  lines.push(`source hygiene: ${report.filesScanned} files under ${report.root}${absent}`);
+  lines.push(`source hygiene: ${report.filesScanned} files under ${report.root}${LISTING_NOTES[report.listing] ?? ''}${absent}`);
   if (report.skipped.length) lines.push(`skipped (not a text extension): ${report.skipped.join(', ')}`);
   for (const error of report.errors) lines.push(`ERROR ${error.path}: cannot read (${error.error})`);
   for (const [file, group] of groupByPath(report.findings.filter(finding => !finding.allowed))) {
@@ -325,6 +539,7 @@ export function formatReport(report) {
 
 export const USAGE = `Usage: node scripts/check-source-hygiene.mjs [--root <dir>] [--json] [paths...]
 Reports CR, control, zero-width, bidi and tag characters in source files.
+Without paths, a git checkout's default roots are scanned as git lists them, so ignored files are not read.
 Exit codes: 0 clean or fully allowlisted, 1 findings not allowlisted, 2 usage, setup or read error.
 `;
 
