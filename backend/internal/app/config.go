@@ -96,6 +96,8 @@ type Config struct {
 	mediaSettings
 	// The web reader and the motion renderer (capability_config.go); off unless configured.
 	capabilitySettings
+	// The local edition and closed registration (edition.go); unset is the hosted site.
+	editionSettings
 	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
 	// bought; subscriptions already taken still count.
 	BillingCheckoutEnabled bool
@@ -235,6 +237,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.observabilityFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.editionFromEnv(); err != nil {
+		return c, err
+	}
 	return c, c.Validate()
 }
 func env(k, d string) string {
@@ -281,6 +286,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateBilling(); err != nil {
+		return err
+	}
+	if err := c.validateEdition(); err != nil {
 		return err
 	}
 	if err := validateMediaExposure(c); err != nil {

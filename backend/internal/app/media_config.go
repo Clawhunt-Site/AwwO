@@ -416,10 +416,16 @@ func validateMediaStorage(c Config) error {
 
 var resultHostName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
-// loopbackOrigin is exactly http://127.0.0.1:<port>: no credentials, path, query or fragment.
+// loopbackOrigin is exactly http://127.0.0.1:<port>: a port of 1–65535 written without leading zeros (the dial
+// checks compare it as text), and no credentials, path, query or fragment.
 func loopbackOrigin(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "http" && u.User == nil && u.Opaque == "" && u.Hostname() == "127.0.0.1" && u.Port() != "" &&
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(u.Port())
+	return u.Scheme == "http" && u.User == nil && u.Opaque == "" && u.Hostname() == "127.0.0.1" &&
+		err == nil && port >= 1 && port <= 65535 && strconv.Itoa(port) == u.Port() &&
 		u.Path == "" && u.RawQuery == "" && u.Fragment == "" && !strings.HasSuffix(raw, "?") && !strings.HasSuffix(raw, "#")
 }
 

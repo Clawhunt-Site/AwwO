@@ -109,6 +109,7 @@ func New(db *pgxpool.Pool, c Config) *App {
 	a.typesafe.authorize = a.verifyTypeSafeAccess
 	a.mailSlots = make(chan struct{}, 8)
 	a.registry = newSkillRegistry()
+	a.registry.proxy, a.registry.local = c.webReaderProxy(), c.Edition == editionLocal
 	a.obs = newObservability(a)
 	return a
 }
@@ -283,9 +284,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/billing", a.auth(a.billingView))
 	m.HandleFunc("POST /api/v1/billing/checkout", a.auth(a.billingCheckout))
 	m.HandleFunc("POST /api/v1/billing/portal", a.auth(a.billingPortal))
-	m.HandleFunc("GET /api/v1/auth/options", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"passwordRecovery": !a.clawHuntEnabled() && a.cfg.SMTPHost != "", "clawhuntSSO": a.clawHuntEnabled(), "localAuth": !a.clawHuntEnabled(), "clawhuntSiteURL": a.cfg.ClawHuntURL})
-	})
+	m.HandleFunc("GET /api/v1/auth/options", a.authOptions)
 	m.HandleFunc("GET /api/v1/appearance", a.auth(a.appearance))
 	m.HandleFunc("PUT /api/v1/appearance", a.auth(a.updateAppearance))
 	m.HandleFunc("GET /api/v1/appearance/export", a.auth(a.exportAppearance))
@@ -377,6 +376,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}", a.tenant(a.getGraphRun, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}/cancel", a.tenant(a.cancelGraphRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/operations/{operationId}/cancel", a.tenant(a.cancelGraphOperation, 2))
+	m.HandleFunc("GET /api/v1/local", a.admin(a.localComputer))
 	m.HandleFunc("GET /api/v1/admin/summary", a.admin(a.adminSummary))
 	for _, kind := range []string{"tenants", "users", "runs", "audit", "interests", "deletions"} {
 		m.HandleFunc("GET /api/v1/admin/"+kind, a.admin(a.adminList(kind)))

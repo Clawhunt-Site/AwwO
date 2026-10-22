@@ -16,8 +16,9 @@ import (
 )
 
 // The skill registry's way out (skill_registry.go): requests to two fixed hosts, skills.sh and GitHub's API, through
-// the web reader's client (public addresses only, checked as each connection is made, no proxy, no cookies), with an
-// honest user agent, bounded bodies, caches and rate limits, so AwwO stays a reasonable user of both services.
+// the web reader's client (public addresses only, checked as each connection is made, no cookies, and no proxy unless
+// AWWO_WEB_READER_PROXY names one on this computer), with an honest user agent, bounded bodies, caches and rate
+// limits, so AwwO stays a reasonable user of both services.
 
 const skillRegistryUserAgent = "AwwO-Skills/1.0 (+https://awwo.clawhunt.store)"
 
@@ -62,6 +63,11 @@ type skillRegistry struct {
 	repositoryCache registryCache[registryRepository]
 	auditCache      registryCache[[]registryAudit]
 	now             func() time.Time
+	// proxy is the web reader's proxy (AWWO_WEB_READER_PROXY), nil for none.
+	proxy *url.URL
+	// local is the local edition (edition.go), whose person can change what keeps skills.sh out of reach (its proxy,
+	// its DNS), so a refusal of the reader's own says what it was rather than "try again later".
+	local bool
 }
 
 type registryWindow struct {
@@ -296,7 +302,7 @@ func (g *skillRegistry) once(ctx context.Context, target *url.URL, accept string
 		return "", err
 	}
 	defer release()
-	opt := webread.Options{UserAgent: skillRegistryUserAgent}
+	opt := webread.Options{UserAgent: skillRegistryUserAgent, Proxy: g.proxy}
 	if skillRegistryTestOptions != nil {
 		skillRegistryTestOptions(&opt)
 	}
@@ -308,7 +314,7 @@ func (g *skillRegistry) once(ctx context.Context, target *url.URL, accept string
 	req.Header.Set("Accept", accept)
 	resp, err := webread.Client(opt).Do(req)
 	if err != nil {
-		return "", registryTransportFailure(ctx, err)
+		return "", registryTransportFailure(ctx, err, g.local)
 	}
 	defer resp.Body.Close()
 	if isRedirect(resp.StatusCode) {
@@ -320,7 +326,7 @@ func (g *skillRegistry) once(ctx context.Context, target *url.URL, accept string
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
-		return "", registryTransportFailure(ctx, err)
+		return "", registryTransportFailure(ctx, err, g.local)
 	}
 	if int64(len(body)) > maxBytes {
 		return "", skillError{502, "skill_registry_answer_too_large", fmt.Sprintf("The answer from %s is larger than the %d KiB AwwO reads", target.Hostname(), maxBytes>>10)}
@@ -332,10 +338,18 @@ func isRedirect(status int) bool {
 	return status == 301 || status == 302 || status == 303 || status == 307 || status == 308
 }
 
-func registryTransportFailure(ctx context.Context, err error) error {
+func registryTransportFailure(ctx context.Context, err error, local bool) error {
 	var netErr net.Error
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+	var refused *webread.Error
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) ||
+		(errors.As(err, &refused) && refused.Code == "timeout") {
 		return registryTimeout()
+	}
+	// In the local edition, the web reader's own refusal (an address that is not public or cannot be checked, a proxy
+	// on this computer that did not connect) is something its person can change, and trying again later does not help:
+	// it says what to look at instead. The hosted site keeps its own answer.
+	if local && refused != nil {
+		return skillError{502, "skill_registry_network", "skills.sh was not reached from this computer: " + refused.Message}
 	}
 	return registryUnreachable()
 }

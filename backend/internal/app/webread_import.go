@@ -276,7 +276,7 @@ func (a *App) importWebSource(w http.ResponseWriter, r *http.Request) {
 	// Whatever happens below, the read ends settled: a read saved with its document is already ok, and the update
 	// only touches a read still marked started.
 	defer a.settleWebRead(tid, readID, "failed", "not_saved", 0, "")
-	opts := webread.Options{UserAgent: webReaderUserAgent, Timeout: 20 * time.Second, MaxBodyBytes: 5 << 20, MaxTextBytes: maxKnowledgeContent - 1024, MaxRedirects: 5, Robots: sharedWebRobots()}
+	opts := webread.Options{UserAgent: webReaderUserAgent, Timeout: 20 * time.Second, MaxBodyBytes: 5 << 20, MaxTextBytes: maxKnowledgeContent - 1024, MaxRedirects: 5, Robots: sharedWebRobots(), Proxy: a.cfg.webReaderProxy()}
 	if webReadTestOptions != nil {
 		webReadTestOptions(&opts)
 	}

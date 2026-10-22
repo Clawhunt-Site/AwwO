@@ -77,6 +77,9 @@ func (a *App) BootstrapAdmin(ctx context.Context) error {
 		if role != "admin" {
 			return errors.New("bootstrap email belongs to non-admin account; refusing privilege escalation")
 		}
+		if a.cfg.AdminPasswordReset != "" {
+			return a.resetBootstrapPassword(ctx, email)
+		}
 		return nil
 	}
 	if !noRows(e) {
@@ -94,6 +97,13 @@ func (a *App) BootstrapAdmin(ctx context.Context) error {
 	if e = audit(ctx, tx, id, "", "admin.bootstrap", id); e != nil {
 		return e
 	}
+	// A reset asked before the account first existed (a first start that failed) is the password it is made with: its
+	// id is recorded as applied, so a later start that still carries it does not apply it again (edition.go).
+	if a.cfg.AdminPasswordReset != "" {
+		if e = audit(ctx, tx, id, "", "admin.password_reset", a.cfg.AdminPasswordReset); e != nil {
+			return e
+		}
+	}
 	return tx.Commit(ctx)
 }
 func (a *App) sessionCookie(w http.ResponseWriter, token string, maxAge int) {
@@ -106,6 +116,10 @@ func (a *App) createLogin(ctx context.Context, tx pgx.Tx, userID string) (string
 }
 func (a *App) register(w http.ResponseWriter, r *http.Request) {
 	if !a.localAuthentication(w) {
+		return
+	}
+	if a.cfg.RegistrationClosed {
+		fail(w, 403, "registration_closed", "This AwwO takes no new accounts")
 		return
 	}
 	var b struct {
@@ -271,7 +285,7 @@ func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status 
 	if linked, _ := r.Context().Value(clawHuntSessionKey{}).(bool); linked {
 		method = "clawhunt"
 	}
-	out := map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials, "authentication": method, "clawhuntSiteURL": a.cfg.ClawHuntURL}
+	out := map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials, "authentication": method, "clawhuntSiteURL": a.cfg.ClawHuntURL, "edition": a.cfg.editionName()}
 	if redirect, ok := r.Context().Value(clawHuntReturnKey{}).(string); ok {
 		out["redirectURL"] = redirect
 	}

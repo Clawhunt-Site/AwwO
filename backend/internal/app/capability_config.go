@@ -13,9 +13,13 @@ import (
 // motion renderer (renders.go) and edits (edits.go, on the same render worker). All are off unless configured: the
 // reader needs AWWO_WEB_READER=on, the registry AWWO_SKILL_REGISTRY=on, the renderer and edits the worker's URL and token.
 type capabilitySettings struct {
-	WebReaderEnabled     bool
-	WebReadsPerDay       int
-	WebReadsSitePerDay   int
+	WebReaderEnabled   bool
+	WebReadsPerDay     int
+	WebReadsSitePerDay int
+	// WebReaderProxy is a proxy on this computer that the web reader and the skill registry read through
+	// (AWWO_WEB_READER_PROXY, exactly http://127.0.0.1:<port>, development only, as the local edition runs); empty
+	// connects to the sites directly. No proxy variable is ever read.
+	WebReaderProxy       string
 	SkillRegistryEnabled bool
 	RenderURL            string
 	RenderToken          string
@@ -63,6 +67,7 @@ func (c *Config) capabilityFromEnv() error {
 	if c.WebReadsSitePerDay, err = positiveEnvInt("AWWO_WEB_READS_SITE_PER_DAY", 2000, 1000000); err != nil {
 		return err
 	}
+	c.WebReaderProxy = strings.TrimSpace(os.Getenv("AWWO_WEB_READER_PROXY"))
 	c.RenderURL, c.RenderToken = strings.TrimSpace(os.Getenv("AWWO_RENDER_URL")), os.Getenv("AWWO_RENDER_TOKEN")
 	if c.RendersPerDay, err = positiveEnvInt("AWWO_RENDERS_PER_DAY", 20, 10000); err != nil {
 		return err
@@ -105,7 +110,23 @@ func envDuration(key string, fallback, min, max time.Duration) (time.Duration, e
 	return v, nil
 }
 
+// webReaderProxy is the proxy the web reader and the skill registry read through, nil for none (validateCapabilities
+// has checked it).
+func (c Config) webReaderProxy() *url.URL {
+	if c.WebReaderProxy == "" {
+		return nil
+	}
+	u, err := url.Parse(c.WebReaderProxy)
+	if err != nil {
+		return nil
+	}
+	return u
+}
+
 func (c Config) validateCapabilities() error {
+	if c.WebReaderProxy != "" && (c.Env != "development" || !loopbackOrigin(c.WebReaderProxy)) {
+		return errors.New("AWWO_WEB_READER_PROXY is a development setting and must be http://127.0.0.1:<port>")
+	}
 	if (c.RenderURL == "") != (c.RenderToken == "") {
 		return errors.New("AWWO_RENDER_URL and AWWO_RENDER_TOKEN must be configured together")
 	}
