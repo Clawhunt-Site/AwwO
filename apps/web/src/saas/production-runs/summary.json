@@ -213,16 +213,16 @@
     "runtime": "openai-agents"
   },
   "the-long-chord": {
-    "completed": 5,
-    "total": 5,
-    "seconds": 135163,
+    "completed": 16,
+    "total": 16,
+    "seconds": 239301,
     "delivered": true,
-    "capturedOn": "2026-10-21",
-    "model": "Claude Opus 4.8 (the two editors)",
+    "capturedOn": "2026-10-22",
+    "model": "Claude Opus 4.8 (the six editors)",
     "runtime": "openai-agents",
     "media": {
-      "completed": 104,
-      "total": 104
+      "completed": 282,
+      "total": 282
     }
   },
   "umber-photo": {

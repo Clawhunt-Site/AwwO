@@ -34,7 +34,7 @@ const CASES = Object.keys(WORKFLOWS);
 const RECORDED = CASES.filter(id => !WORKFLOWS[id].media?.length);
 const records = new Map<string, ProductionRunRecord>();
 // The film case: a recorded canvas, stored beside its record rather than compiled from a workflow.
-const FILM = 'the-long-chord', FILM_TITLE = 'THE LONG CHORD · Episode I, Act I';
+const FILM = 'the-long-chord', FILM_TITLE = 'THE LONG CHORD · Episode I';
 const copyOf = (id: string) => createProductionCopyDocument(WORKFLOWS[id], records.get(id)!, null);
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const identity: Identity = { user: { id: 'copy-user', name: 'Copy user', email: 'copy@example.invalid', platformRole: 'user' }, tenants: [tenant] };
@@ -409,7 +409,7 @@ it('copies a film case from the workspace home as the canvas that ran, with noth
   render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
   const setup = await openCopy(FILM_TITLE);
   expect(setup).toHaveAttribute('lang', 'en');
-  expect(within(setup).getByText(/^Keep all 109 nodes and their wires with the texts and settings the real run on 2026-10-21 used: .* so its first run makes all 104 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the act’s own timeline were measured on the case run’s clips, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
+  expect(within(setup).getByText(/^Keep all 298 nodes and their wires with the texts and settings the real run on 2026-10-22 used: .* so its first run makes all 282 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the edits’ own timelines were measured on the case run’s clips and films, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
   fireEvent.click(within(setup).getByRole('button', { name: 'Create draft' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
   expect(posts).toHaveLength(1);

@@ -65,14 +65,15 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       [ASSEMBLY_ROLE], ['Test'], [ASSEMBLY_ROLE], ['Second test'], [REVIEW]],
     deliverable: 'An open-world action game in the browser',
   },
-  // The epic film (a recorded canvas, recordedCanvas.ts): its pictures, clips, voices and score made on one canvas, two
-  // reels cut by editor agents and joined by edit nodes, which run no model.
+  // The epic film (a recorded canvas, recordedCanvas.ts): its pictures, clips, voices and score made on one canvas, six
+  // reels cut by editor agents, joined by edit nodes, which run no model, into three acts and the episode.
   {
     id: 'the-long-chord', kind: 'film', recording: true, excerpt: true, footage: 'long-chord-real',
-    title: 'THE LONG CHORD · Episode I, Act I',
-    brief: 'An original space-opera film: on Corrow, a world sealed for twenty years, a girl who can still hear the ringing of the universe is found out by the woman who came to silence it. Every picture, clip, voice and score cue made on one canvas, two reels cut by two editor agents, and the act joined with dialogue in sync, score and subtitles.',
-    stages: [[MEDIA], [MEDIA], ['Reel 1 editor', 'Reel 2 editor'], [EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE]],
-    deliverable: 'Act I of Episode I: a film with dialogue, score and subtitles',
+    title: 'THE LONG CHORD · Episode I',
+    brief: 'An original space-opera film in three acts: on Corrow, a world sealed for twenty years, a girl who can still hear the ringing of the universe is found out by the woman who came to silence it, taken up into the ring that seals her world, and rings it open. Every picture, clip, voice and score cue made on one canvas, six reels cut by six editor agents, and the acts and the episode joined with dialogue in sync, score, subtitles and end cards.',
+    stages: [[MEDIA], [MEDIA], ['Reel 1 editor', 'Reel 2 editor', 'Reel 3 editor', 'Reel 4 editor', 'Reel 5 editor', 'Reel 6 editor'],
+      [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE]],
+    deliverable: 'Episode I: a film in three acts with dialogue, score, subtitles and end cards',
   },
   // The flagship cases (flagshipWorkflows.ts): large systems written in a clean room by agents that work in sandbox
   // computers, assembled with no model and tested in a real browser.

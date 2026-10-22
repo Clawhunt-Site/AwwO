@@ -40,16 +40,18 @@ A published run must have used exactly the canvas text in `productionWorkflows.t
 
 ## Film cases (recorded canvases)
 
-THE LONG CHORD, Episode I, Act I (2026-10-20) is the first case that delivers a film, and the first whose canvas is
-*recorded*: the run's own document, not a workflow compiled from tasks. Its canvas (image, video and audio nodes, two
-editor agents and three edit nodes) was built and run by the operator's scripts on production, over 33 scoped graph runs,
-and its texts name files by node id (an editor's brief lists `vid_s05_04/video-1.mp4`; the last edit's own timeline names
-`edit_R1/r1.mp4`), while a video numbers its pictures by where their nodes sit. A compiled copy, with fresh ids and its own
-layout, would not be the canvas that ran.
+THE LONG CHORD, Episode I (2026-10-22; its Act I alone from 2026-10-20) is the first case that delivers a film, and the
+first whose canvas is *recorded*: the run's own document, not a workflow compiled from tasks. Its canvas (image, video and
+audio nodes, six editor agents and ten edit nodes, 298 nodes in all) was built and run by the operator's scripts on
+production, over 93 graph runs (each after the first scoped to the nodes it named), and its texts name files by node id (an editor's brief lists
+`vid_s05_04/video-1.mp4`; an act's own timeline names `edit_R1/r1.mp4`, the episode's `edit_act1/act-1.mp4`), while a
+video numbers its pictures by where their nodes sit. A compiled copy, with fresh ids and its own layout, would not be the
+canvas that ran. Its three acts are on one canvas because a generation reads pictures only from its own canvas and an
+edit only its own canvas's files.
 
 - **Raw record.** The operator reads the live canvas (outside the repo: every graph run with its frozen document, the run
   that made each output, each node's run and an agent's model calls, and every file those outputs name, downloaded by
-  artifact id with its SHA-256 and checked against the canvas's whole artifact listing, AwwO's own SHA-256 and size of
+  artifact id with its SHA-256 and checked against the canvas's whole artifact listing (read page by page to its end), AwwO's own SHA-256 and size of
   each file, which the read keeps beside it). It must show the film's lineage: for every wire, the output its source had
   in the document its target's run started from is the source's published output. Any gap means making that node again.
 - **Publish.** `node scripts/showcase/publish-recorded-run.mjs <raw.json> <notes.json>` (the same notes as above, plus

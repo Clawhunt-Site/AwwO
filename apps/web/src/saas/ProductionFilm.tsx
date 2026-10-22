@@ -196,7 +196,7 @@ function NodeDetail({ node }: { node: ProductionRunNode }) {
     {film && <p className="production-made-work">{`${clock(film.seconds)} · ${film.frames.toLocaleString('en')} frames at ${film.fps} fps · ${film.width}×${film.height} · ${megabytes(film.bytes)}${film.loudness ? ` · ${film.loudness.integratedLUFS} LUFS, true peak ${film.loudness.truePeakDb} dB` : ''}`}</p>}
     {film && <p className="production-made-handoff"><ArrowDown size={13} aria-hidden="true" />{'from' in film.timeline
       ? 'Its timeline is the answer of the agent wired into it, as delivered.'
-      : 'Its timeline was written on the node by the operator’s script once both reels existed (their lengths and subtitles), and is shown below.'}</p>}
+      : 'Its timeline was written on the node by the operator’s script once the films it joins existed (their lengths and subtitles), and is shown below.'}</p>}
     {film && film.warnings.length > 0 && <p className="production-made-work">{`The edit's warnings: ${film.warnings.join(', ')}`}</p>}
     {node.tokens?.output !== undefined && <p className="production-made-work">{`${node.calls ? `${node.calls} model calls · ` : ''}${node.tokens.output.toLocaleString('en')} output tokens`}</p>}
     {node.brief && <details className="production-made-source"><summary>{`Its brief, as it ran (${node.brief.length.toLocaleString('en')} characters)`}</summary><pre><code>{node.brief}</code></pre></details>}

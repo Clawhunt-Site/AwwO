@@ -5,13 +5,13 @@ const record: ProductionRunRecord = {
   "caseId": "the-long-chord",
   "edition": "The live AwwO (awwo.clawhunt.store), in the operator’s own account and workspace, on the API and runtime then in production",
   "runtime": "openai-agents",
-  "model": "Claude Opus 4.8 (the two editors)",
-  "capturedOn": "2026-10-21",
-  "seconds": 135163,
-  "runs": 34,
-  "activeSeconds": 12852,
-  "completed": 5,
-  "total": 5,
+  "model": "Claude Opus 4.8 (the six editors)",
+  "capturedOn": "2026-10-22",
+  "seconds": 239301,
+  "runs": 93,
+  "activeSeconds": 30885,
+  "completed": 16,
+  "total": 16,
   "limits": {
     "contextWindow": 200000,
     "maxOutputTokens": 32000,
@@ -20,24 +20,59 @@ const record: ProductionRunRecord = {
     "thinking": true
   },
   "source": {
-    "api": "54668167be470f1edbc1eb6ec79ba80f07efd946",
+    "api": "19fef2a840564327b88f54f7e7ac87e20bd4a69b",
     "worker": "c5ce5c4c0c62",
     "runs": [
       {
         "api": "54668167be470f1edbc1eb6ec79ba80f07efd946",
         "worker": "d56a4198bf58",
         "nodes": [
-          "ed_R1",
-          "ed_R2"
+          "ed_R1"
         ]
       },
       {
         "api": "54668167be470f1edbc1eb6ec79ba80f07efd946",
         "worker": "c5ce5c4c0c62",
         "nodes": [
-          "edit_R1",
+          "edit_R1"
+        ]
+      },
+      {
+        "api": "cf40ebd41221abcc8aa5bf4c8d748e7bef8737af",
+        "worker": "28dcf2304224",
+        "nodes": [
+          "ed_R4",
+          "ed_R5",
+          "ed_R6"
+        ]
+      },
+      {
+        "api": "cf40ebd41221abcc8aa5bf4c8d748e7bef8737af",
+        "worker": "c5ce5c4c0c62",
+        "nodes": [
+          "edit_R4",
+          "edit_R5",
+          "edit_R6",
+          "edit_act3"
+        ]
+      },
+      {
+        "api": "19fef2a840564327b88f54f7e7ac87e20bd4a69b",
+        "worker": "28dcf2304224",
+        "nodes": [
+          "ed_R2",
+          "ed_R3"
+        ]
+      },
+      {
+        "api": "19fef2a840564327b88f54f7e7ac87e20bd4a69b",
+        "worker": "c5ce5c4c0c62",
+        "nodes": [
           "edit_R2",
-          "edit_act1"
+          "edit_R3",
+          "edit_act1",
+          "edit_act2",
+          "edit_ep1"
         ]
       }
     ],
@@ -130,7 +165,6 @@ const record: ProductionRunRecord = {
           "vid_s07_02",
           "vid_s08_01",
           "vid_s08_02",
-          "vid_s08_04",
           "vid_s08_05",
           "vid_s08_07",
           "vid_s08_08",
@@ -157,16 +191,215 @@ const record: ProductionRunRecord = {
           "vid_s06_02",
           "vid_s06_03",
           "vid_s08_03",
-          "vid_s08_06",
-          "vid_s09_03"
+          "vid_s08_06"
+        ]
+      },
+      {
+        "api": "3d18d9e47d19",
+        "nodes": [
+          "kf_s10_01",
+          "kf_s10_02",
+          "kf_s13_03",
+          "kf_s13_04",
+          "kf_s13_05",
+          "kf_s16_01",
+          "kf_s16_02",
+          "kf_s17_03",
+          "sheet_ch_ilse",
+          "sheet_ch_kesh",
+          "sheet_lo_answer_cockpit",
+          "sheet_lo_bar_cell",
+          "sheet_lo_bar_chamber",
+          "sheet_lo_bar_core",
+          "sheet_lo_bar_corridor",
+          "sheet_pr_collar",
+          "tts_s12_02",
+          "tts_s12_03",
+          "tts_s12_04",
+          "tts_s12_05",
+          "tts_s12_06",
+          "tts_s12_07",
+          "tts_s12_08",
+          "tts_s12_09",
+          "tts_s12_10",
+          "tts_s13_02",
+          "tts_s14_03",
+          "tts_s14_04",
+          "tts_s14_05",
+          "tts_s15_02",
+          "tts_s15_04",
+          "tts_s15_06",
+          "tts_s15_07",
+          "tts_s17_02",
+          "tts_s17_03",
+          "mus_m08_the_bar",
+          "mus_m09_launch",
+          "mus_m10_cell",
+          "mus_m11_core_echo",
+          "mus_m12_quieting",
+          "vid_s10_01",
+          "vid_s10_02",
+          "vid_s11_01",
+          "vid_s11_02",
+          "vid_s11_03",
+          "vid_s11_04",
+          "vid_s12_01",
+          "vid_s12_02",
+          "vid_s12_03",
+          "vid_s12_04",
+          "vid_s12_05",
+          "vid_s12_06",
+          "vid_s12_07",
+          "vid_s12_08",
+          "vid_s12_09",
+          "vid_s12_10",
+          "vid_s13_02",
+          "vid_s13_03",
+          "vid_s13_04",
+          "vid_s13_05",
+          "vid_s14_01",
+          "vid_s14_02",
+          "vid_s14_03",
+          "vid_s14_04",
+          "vid_s14_05",
+          "vid_s15_01",
+          "vid_s15_02",
+          "vid_s15_03",
+          "vid_s15_04",
+          "vid_s15_05",
+          "vid_s15_06",
+          "vid_s15_07",
+          "vid_s16_01",
+          "vid_s16_02",
+          "vid_s17_01",
+          "vid_s17_02",
+          "vid_s17_03"
+        ]
+      },
+      {
+        "api": "78e3056dd5a4",
+        "nodes": [
+          "kf_s18_05",
+          "kf_s19_01",
+          "kf_s19_02",
+          "kf_s19_03",
+          "kf_s19_04",
+          "kf_s20_01",
+          "kf_s20_02",
+          "kf_s20_03",
+          "kf_s20_05",
+          "kf_s22_01",
+          "kf_s22_02",
+          "kf_s22_03",
+          "kf_s22_05",
+          "kf_s22_06",
+          "kf_s24_01",
+          "kf_s24_02",
+          "kf_s25_04",
+          "kf_s26_01",
+          "kf_s26_02",
+          "kf_s26_03",
+          "kf_s26_05",
+          "kf_s27_02",
+          "sheet_lo_weir",
+          "sheet_pr_sandplate",
+          "sheet_sh_carillon",
+          "tts_s18_03",
+          "tts_s18_06",
+          "tts_s21_01",
+          "tts_s21_02",
+          "tts_s21_06",
+          "tts_s21_07",
+          "tts_s22_04",
+          "tts_s23_01",
+          "tts_s23_03",
+          "tts_s23_04",
+          "tts_s23_05",
+          "tts_s25_04",
+          "tts_s26_03",
+          "tts_s26_04",
+          "tts_s26_05",
+          "tts_s26_06",
+          "tts_s27_03",
+          "mus_m13_the_strike",
+          "mus_m14_hold_the_note",
+          "mus_m15_escape",
+          "mus_m16_seren_hears",
+          "mus_m17_the_weir",
+          "mus_m18_new_note",
+          "mus_m19_end_cards",
+          "vid_s18_01",
+          "vid_s18_02",
+          "vid_s18_03",
+          "vid_s18_04",
+          "vid_s18_05",
+          "vid_s18_06",
+          "vid_s19_01",
+          "vid_s19_02",
+          "vid_s19_03",
+          "vid_s19_04",
+          "vid_s20_01",
+          "vid_s20_02",
+          "vid_s20_03",
+          "vid_s20_04",
+          "vid_s20_05",
+          "vid_s21_01",
+          "vid_s21_02",
+          "vid_s21_05",
+          "vid_s21_07",
+          "vid_s22_01",
+          "vid_s22_02",
+          "vid_s22_03",
+          "vid_s22_04",
+          "vid_s22_05",
+          "vid_s22_06",
+          "vid_s23_01",
+          "vid_s23_02",
+          "vid_s23_03",
+          "vid_s23_04",
+          "vid_s23_05",
+          "vid_s24_01",
+          "vid_s24_02",
+          "vid_s25_01",
+          "vid_s25_02",
+          "vid_s25_03",
+          "vid_s25_04",
+          "vid_s26_01",
+          "vid_s26_02",
+          "vid_s26_03",
+          "vid_s26_04",
+          "vid_s26_05",
+          "vid_s26_06",
+          "vid_s27_01",
+          "vid_s27_02",
+          "vid_s27_03"
+        ]
+      },
+      {
+        "api": "55dbe537f03b",
+        "nodes": [
+          "tts_s21_03",
+          "tts_s21_04",
+          "vid_s21_03",
+          "vid_s21_04",
+          "vid_s21_06",
+          "vid_s27_04"
+        ]
+      },
+      {
+        "api": "19fef2a84056",
+        "nodes": [
+          "vid_s08_04",
+          "vid_s09_03",
+          "vid_s13_01"
         ]
       }
     ]
   },
-  "canvasSHA256": "55f90f9ddf0f8592d100e5a512e099d914dffdf9d4266ee7e7c4c9c86dfd005c",
+  "canvasSHA256": "26d3ce6f6eda627939834f12466330d715fc63d77eede0e299101e77cc6e4ede",
   "canvas": "recorded",
-  "artifactNodeId": "edit_act1",
-  "artifactSHA256": "8bdb2de30fda702c7516ac6e87813a07031547b9e0b739ad71b131f8a8f6b6b6",
+  "artifactNodeId": "edit_ep1",
+  "artifactSHA256": "33773bc470e0c4679ade146758d656304e372fa599236a6b2cfe443e8dd39957",
   "nodes": [
     {
       "id": "ed_R1",
@@ -189,13 +422,73 @@ const record: ProductionRunRecord = {
       "column": 2,
       "row": 1,
       "status": "done",
-      "seconds": 33,
+      "seconds": 32,
       "outputType": "markdown",
-      "output": "Let me work through the cue runs and voice-over details.\n\nMusic runs:\n- m04_answer: s06_01–s06_06 = 8+10+6+8+7+6 = 45\n- m05_caesura: s07_01–s07_02 = 15+10 = 25\n- m06_census: s08_01–s08_03 (7+7+6=20), then s08_04/s08_05 none, resumes s08_07–s08_10 (7+6+6+6=25). Each run is one item. First run anchor s08_01 out 20; second run anchor s08_07 out 25.\n- m07_resolve: s09_01–s09_03 = 10+7+8 = 25\n\nVoice-overs: s06_05 (1.0 off-screen), s08_10 (1.0 off-screen).\n\n```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r2\",\n  \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8},\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s06_01\", \"source\": \"vid_s06_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_02\", \"source\": \"vid_s06_02/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_03\", \"source\": \"vid_s06_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_04\", \"source\": \"vid_s06_04/video-1.mp4\", \"in\": 0, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_05\", \"source\": \"vid_s06_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_06\", \"source\": \"vid_s06_06/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s07_01\", \"source\": \"vid_s07_01/video-1.mp4\", \"in\": 0.2, \"out\": 14.8, \"clipAudioDb\": null},\n      {\"id\": \"s07_02\", \"source\": \"vid_s07_02/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_01\", \"source\": \"vid_s08_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_02\", \"source\": \"vid_s08_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_03\", \"source\": \"vid_s08_03/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_04\", \"source\": \"vid_s08_04/video-1.mp4\", \"in\": 0.2, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_05\", \"source\": \"vid_s08_05/video-1.mp4\", \"in\": 0.2, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_06\", \"source\": \"vid_s08_06/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_07\", \"source\": \"vid_s08_07/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_08\", \"source\": \"vid_s08_08/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_09\", \"source\": \"vid_s08_09/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_10\", \"source\": \"vid_s08_10/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_01\", \"source\": \"vid_s09_01/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_02\", \"source\": \"vid_s09_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_03\", \"source\": \"vid_s09_03/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s06_03_1\", \"source\": \"tts_s06_03/audio-1.mp3\", \"anchor\": \"s06_03\", \"offset\": 4.33, \"in\": 0.13, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_04_1\", \"source\": \"tts_s06_04/audio-1.mp3\", \"anchor\": \"s06_04\", \"offset\": 0.93, \"in\": 0.23, \"out\": 3.65, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_05\", \"source\": \"tts_s06_05/audio-1.mp3\", \"anchor\": \"s06_05\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_06_1\", \"source\": \"tts_s06_06/audio-1.mp3\", \"anchor\": \"s06_06\", \"offset\": 3.7, \"in\": 0.13, \"out\": 2.25, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_06_1\", \"source\": \"tts_s08_06/audio-1.mp3\", \"anchor\": \"s08_06\", \"offset\": 2.51, \"in\": 0.06, \"out\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_07_1\", \"source\": \"tts_s08_07/audio-1.mp3\", \"anchor\": \"s08_07\", \"offset\": 0.4, \"in\": 0.12, \"out\": 4.55, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_08_1\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 0.4, \"in\": 0.07, \"out\": 1.75, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_08_2\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 2.5, \"in\": 1.84, \"out\": 2.8, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_09_1\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 1.37, \"in\": 0.12, \"out\": 1.1, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_09_2\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 3.25, \"in\": 1.44, \"out\": 3.7, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_10\", \"source\": \"tts_s08_10/audio-1.mp3\", \"anchor\": \"s08_10\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"}\n    ],\n    \"music\": [\n      {\"id\": \"m04_answer\", \"source\": \"mus_m04_answer/audio-1.mp3\", \"anchor\": \"s06_01\", \"offset\": 0, \"out\": 45, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m05_caesura\", \"source\": \"mus_m05_caesura/audio-1.mp3\", \"anchor\": \"s07_01\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m06_census\", \"source\": \"mus_m06_census/audio-1.mp3\", \"anchor\": \"s08_01\", \"offset\": 0, \"out\": 20, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m06_census\", \"source\": \"mus_m06_census/audio-1.mp3\", \"anchor\": \"s08_07\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m07_resolve\", \"source\": \"mus_m07_resolve/audio-1.mp3\", \"anchor\": \"s09_01\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s06_03\", \"offset\": 4.43, \"seconds\": 1.87, \"text\": \"You built a ship.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s06_04\", \"offset\": 1.03, \"seconds\": 1.52, \"text\": \"Twenty years.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_04\", \"offset\": 2.65, \"seconds\": 2.8, \"text\": \"One scrap at a time.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_05\", \"offset\": 1.0, \"seconds\": 3.6, \"text\": \"She has never sung. Not once.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_06\", \"offset\": 3.8, \"seconds\": 2.5, \"text\": \"Bram. It's coming from her.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s08_06\", \"offset\": 2.61, \"seconds\": 2.0, \"text\": \"There you are.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_07\", \"offset\": 0.5, \"seconds\": 2.4, \"text\": \"She's a tuner's girl.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s08_07\", \"offset\": 3.23, \"seconds\": 2.0, \"text\": \"She hears nothing.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s08_08\", \"offset\": 0.5, \"seconds\": 2.0, \"text\": \"Everyone hears nothing here.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_08\", \"offset\": 2.6, \"seconds\": 2.4, \"text\": \"That is the point.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_09\", \"offset\": 1.47, \"seconds\": 1.6, \"text\": \"Little bird.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_09\", \"offset\": 3.35, \"seconds\": 2.95, \"text\": \"There is no air left here to sing in.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_10\", \"offset\": 1.0, \"seconds\": 1.6, \"text\": \"I'll find you.\", \"speaker\": \"BRAM\"}\n    ]\n  },\n  \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}\n}\n```",
+      "output": "Re-rendered. Clip byte sizes differ for s08_04 and s09_03, but filenames are unchanged, so the timeline is identical.\n\n```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r2\",\n  \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8},\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s06_01\", \"source\": \"vid_s06_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_02\", \"source\": \"vid_s06_02/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_03\", \"source\": \"vid_s06_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_04\", \"source\": \"vid_s06_04/video-1.mp4\", \"in\": 0, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_05\", \"source\": \"vid_s06_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s06_06\", \"source\": \"vid_s06_06/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s07_01\", \"source\": \"vid_s07_01/video-1.mp4\", \"in\": 0.2, \"out\": 14.8, \"clipAudioDb\": null},\n      {\"id\": \"s07_02\", \"source\": \"vid_s07_02/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_01\", \"source\": \"vid_s08_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_02\", \"source\": \"vid_s08_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_03\", \"source\": \"vid_s08_03/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_04\", \"source\": \"vid_s08_04/video-1.mp4\", \"in\": 0.2, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_05\", \"source\": \"vid_s08_05/video-1.mp4\", \"in\": 0.2, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_06\", \"source\": \"vid_s08_06/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_07\", \"source\": \"vid_s08_07/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_08\", \"source\": \"vid_s08_08/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_09\", \"source\": \"vid_s08_09/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s08_10\", \"source\": \"vid_s08_10/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_01\", \"source\": \"vid_s09_01/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_02\", \"source\": \"vid_s09_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s09_03\", \"source\": \"vid_s09_03/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s06_03_1\", \"source\": \"tts_s06_03/audio-1.mp3\", \"anchor\": \"s06_03\", \"offset\": 4.33, \"in\": 0.13, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_04_1\", \"source\": \"tts_s06_04/audio-1.mp3\", \"anchor\": \"s06_04\", \"offset\": 0.93, \"in\": 0.23, \"out\": 3.65, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_05\", \"source\": \"tts_s06_05/audio-1.mp3\", \"anchor\": \"s06_05\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s06_06_1\", \"source\": \"tts_s06_06/audio-1.mp3\", \"anchor\": \"s06_06\", \"offset\": 3.7, \"in\": 0.13, \"out\": 2.25, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_06_1\", \"source\": \"tts_s08_06/audio-1.mp3\", \"anchor\": \"s08_06\", \"offset\": 2.51, \"in\": 0.06, \"out\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_07_1\", \"source\": \"tts_s08_07/audio-1.mp3\", \"anchor\": \"s08_07\", \"offset\": 0.4, \"in\": 0.12, \"out\": 4.55, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_08_1\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 0.4, \"in\": 0.07, \"out\": 1.75, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_08_2\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 2.5, \"in\": 1.84, \"out\": 2.8, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_09_1\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 1.37, \"in\": 0.12, \"out\": 1.1, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_09_2\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 3.25, \"in\": 1.44, \"out\": 3.7, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s08_10\", \"source\": \"tts_s08_10/audio-1.mp3\", \"anchor\": \"s08_10\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"}\n    ],\n    \"music\": [\n      {\"id\": \"m04_answer\", \"source\": \"mus_m04_answer/audio-1.mp3\", \"anchor\": \"s06_01\", \"offset\": 0, \"out\": 45, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m05_caesura\", \"source\": \"mus_m05_caesura/audio-1.mp3\", \"anchor\": \"s07_01\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m06_census\", \"source\": \"mus_m06_census/audio-1.mp3\", \"anchor\": \"s08_01\", \"offset\": 0, \"out\": 20, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m06_census\", \"source\": \"mus_m06_census/audio-1.mp3\", \"anchor\": \"s08_07\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m07_resolve\", \"source\": \"mus_m07_resolve/audio-1.mp3\", \"anchor\": \"s09_01\", \"offset\": 0, \"out\": 25, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s06_03\", \"offset\": 4.43, \"seconds\": 1.87, \"text\": \"You built a ship.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s06_04\", \"offset\": 1.03, \"seconds\": 1.52, \"text\": \"Twenty years.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_04\", \"offset\": 2.65, \"seconds\": 2.8, \"text\": \"One scrap at a time.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_05\", \"offset\": 1.0, \"seconds\": 3.6, \"text\": \"She has never sung. Not once.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s06_06\", \"offset\": 3.8, \"seconds\": 2.5, \"text\": \"Bram. It's coming from her.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s08_06\", \"offset\": 2.61, \"seconds\": 2.0, \"text\": \"There you are.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_07\", \"offset\": 0.5, \"seconds\": 2.4, \"text\": \"She's a tuner's girl.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s08_07\", \"offset\": 3.23, \"seconds\": 2.0, \"text\": \"She hears nothing.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s08_08\", \"offset\": 0.5, \"seconds\": 2.0, \"text\": \"Everyone hears nothing here.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_08\", \"offset\": 2.6, \"seconds\": 2.4, \"text\": \"That is the point.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_09\", \"offset\": 1.47, \"seconds\": 1.6, \"text\": \"Little bird.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_09\", \"offset\": 3.35, \"seconds\": 2.95, \"text\": \"There is no air left here to sing in.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s08_10\", \"offset\": 1.0, \"seconds\": 1.6, \"text\": \"I'll find you.\", \"speaker\": \"BRAM\"}\n    ]\n  },\n  \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}\n}\n```",
       "brief": "You are the editor of THE LONG CHORD, Episode I: FORETONE, an original space-opera film. You cut reel R2\n(SC06-SC09, 21 shots) by writing the reel's timeline for the edit node, which renders it with ffmpeg.\n\nYour inputs list the files the canvas made, one block per node: the clips (vid_<shot>, generated at the shot's length,\nwithout sound), the voice takes (tts_<shot>) and the score cues (mus_<cue>). Name every file exactly as its block lists\nit (\"<node id>/<file name>\"); never invent a name. If a block says its file was not made, leave that file out.\n\nThe reel, in order:\n\n| shot | scene | seconds | clip node | score cue | dialogue |\n|---|---|---|---|---|---|\n| s06_01 | sc06 | 8 | vid_s06_01 | m04_answer | — |\n| s06_02 | sc06 | 10 | vid_s06_02 | m04_answer | — |\n| s06_03 | sc06 | 6 | vid_s06_03 | m04_answer | LARK: \"You built a ship.\" (IN SYNC: placed by the sync sheet) → tts_s06_03 |\n| s06_04 | sc06 | 8 | vid_s06_04 | m04_answer | BRAM: \"Twenty years. One scrap at a time.\" (IN SYNC: placed by the sync sheet) → tts_s06_04 |\n| s06_05 | sc06 | 7 | vid_s06_05 | m04_answer | BRAM: \"She has never sung. Not once.\" (voice-over) → tts_s06_05 |\n| s06_06 | sc06 | 6 | vid_s06_06 | m04_answer | LARK: \"Bram. It's coming from her.\" (IN SYNC: placed by the sync sheet) → tts_s06_06 |\n| s07_01 | sc07 | 15 | vid_s07_01 | m05_caesura | — |\n| s07_02 | sc07 | 10 | vid_s07_02 | m05_caesura | — |\n| s08_01 | sc08 | 7 | vid_s08_01 | m06_census | — |\n| s08_02 | sc08 | 7 | vid_s08_02 | m06_census | — |\n| s08_03 | sc08 | 6 | vid_s08_03 | m06_census | — |\n| s08_04 | sc08 | 5 | vid_s08_04 | — | — |\n| s08_05 | sc08 | 5 | vid_s08_05 | — | — |\n| s08_06 | sc08 | 5 | vid_s08_06 | — | SEREN: \"There you are.\" (IN SYNC: placed by the sync sheet) → tts_s08_06 |\n| s08_07 | sc08 | 7 | vid_s08_07 | m06_census | BRAM: \"She's a tuner's girl. She hears nothing.\" (IN SYNC: placed by the sync sheet) → tts_s08_07 |\n| s08_08 | sc08 | 6 | vid_s08_08 | m06_census | SEREN: \"Everyone hears nothing here. That is the point.\" (IN SYNC: placed by the sync sheet) → tts_s08_08 |\n| s08_09 | sc08 | 6 | vid_s08_09 | m06_census | SEREN: \"Little bird. There is no air left here to sing in.\" (IN SYNC: placed by the sync sheet) → tts_s08_09 |\n| s08_10 | sc08 | 6 | vid_s08_10 | m06_census | BRAM: \"I'll find you.\" (voice-over) → tts_s08_10 |\n| s09_01 | sc09 | 10 | vid_s09_01 | m07_resolve | — |\n| s09_02 | sc09 | 7 | vid_s09_02 | m07_resolve | — |\n| s09_03 | sc09 | 8 | vid_s09_03 | m07_resolve | — |\n\nWrite the timeline exactly to this schema (awwo.timeline/1; anything else is refused):\n- \"schema\": \"awwo.timeline/1\", \"name\": \"r2\".\n- \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8}.\n- \"tracks.video\": the clips in shot order. A clip item is {\"id\": \"<shot id>\",\n  \"source\": \"<clip file>\", \"in\": 0.2, \"out\": <seconds − 0.2>, \"clipAudioDb\": null}, with no \"at\" and no \"transition\" (straight cuts),\n  EXCEPT a shot whose line is IN SYNC: its item has \"in\": 0, \"out\": <seconds − 0.2>, or, when the sync sheet gives that shot a\n  video item, exactly that item (the sheet's offsets count from the shot's first frame).\n- \"tracks.dialogue\": for an IN SYNC line, the sync sheet's dialogue items, copied exactly as written (below). For a voice-over,\n  one item per take: {\"id\": \"d_<shot id>\", \"source\": \"<take file>\", \"anchor\": \"<shot id>\", \"offset\": <s>, \"gainDb\": 0, \"fx\": \"dry\"},\n  starting 0.6 s into its shot (1.0 s for an off-screen line); two lines in one shot never overlap.\n- \"tracks.music\": one item per score cue (m04_answer, m05_caesura, m06_census, m07_resolve), each starting with the first shot that names it:\n  {\"id\": \"<cue>\", \"source\": \"<cue file>\", \"anchor\": \"<first shot id>\", \"offset\": 0, \"out\": <the summed length of the items it runs\n  under, s>, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}: a cue never stops dead; it fades out over its last 2.5 s.\n  A shot that names no cue is silent of music.\n- Every track (\"video\", \"dialogue\", \"music\", \"subtitles\") is a JSON list, even with one item.\n- \"tracks.subtitles\": for an IN SYNC line, the sync sheet's subtitle items, copied exactly as written. For a voice-over, one per\n  line: {\"anchor\": \"<shot id>\", \"offset\": <the take's offset>, \"seconds\": <0.4 s per word + 0.8 s, at most 4.5>, \"text\": \"<the line,\n  without any pause mark>\", \"speaker\": \"<NAME>\"}.\n- \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}.\n\nThe sync sheet. The clips were made with the line's take as their voice, but the model puts a line where the action allows\n(after a look, a step, a focus pull) and paces its sentences its own way; these numbers were measured from the clips (where\nthe lips move; in s04_03, where the black liquid rises). Each take is cut at its pauses into pieces: a piece plays the take\nfrom \"in\" to \"out\" (seconds in the take file), starting \"offset\" seconds into its shot. A \"video\" line is that shot's item in\ntracks.video. Copy every item below as written, in this order; change nothing (if a block lists another file name for a\ntake or a clip, use that name and change nothing else).\ns06_03:\n  dialogue {\"id\": \"d_s06_03_1\", \"source\": \"tts_s06_03/audio-1.mp3\", \"anchor\": \"s06_03\", \"offset\": 4.33, \"in\": 0.13, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s06_03\", \"offset\": 4.43, \"seconds\": 1.87, \"text\": \"You built a ship.\", \"speaker\": \"LARK\"}\ns06_04:\n  dialogue {\"id\": \"d_s06_04_1\", \"source\": \"tts_s06_04/audio-1.mp3\", \"anchor\": \"s06_04\", \"offset\": 0.93, \"in\": 0.23, \"out\": 3.65, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s06_04\", \"offset\": 1.03, \"seconds\": 1.52, \"text\": \"Twenty years.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s06_04\", \"offset\": 2.65, \"seconds\": 2.8, \"text\": \"One scrap at a time.\", \"speaker\": \"BRAM\"}\ns06_06:\n  dialogue {\"id\": \"d_s06_06_1\", \"source\": \"tts_s06_06/audio-1.mp3\", \"anchor\": \"s06_06\", \"offset\": 3.7, \"in\": 0.13, \"out\": 2.25, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s06_06\", \"offset\": 3.8, \"seconds\": 2.5, \"text\": \"Bram. It's coming from her.\", \"speaker\": \"LARK\"}\ns08_06:\n  dialogue {\"id\": \"d_s08_06_1\", \"source\": \"tts_s08_06/audio-1.mp3\", \"anchor\": \"s08_06\", \"offset\": 2.51, \"in\": 0.06, \"out\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s08_06\", \"offset\": 2.61, \"seconds\": 2.0, \"text\": \"There you are.\", \"speaker\": \"SEREN\"}\ns08_07:\n  dialogue {\"id\": \"d_s08_07_1\", \"source\": \"tts_s08_07/audio-1.mp3\", \"anchor\": \"s08_07\", \"offset\": 0.4, \"in\": 0.12, \"out\": 4.55, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s08_07\", \"offset\": 0.5, \"seconds\": 2.4, \"text\": \"She's a tuner's girl.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s08_07\", \"offset\": 3.23, \"seconds\": 2.0, \"text\": \"She hears nothing.\", \"speaker\": \"BRAM\"}\ns08_08:\n  dialogue {\"id\": \"d_s08_08_1\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 0.4, \"in\": 0.07, \"out\": 1.75, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s08_08_2\", \"source\": \"tts_s08_08/audio-1.mp3\", \"anchor\": \"s08_08\", \"offset\": 2.5, \"in\": 1.84, \"out\": 2.8, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s08_08\", \"offset\": 0.5, \"seconds\": 2.0, \"text\": \"Everyone hears nothing here.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s08_08\", \"offset\": 2.6, \"seconds\": 2.4, \"text\": \"That is the point.\", \"speaker\": \"SEREN\"}\ns08_09:\n  dialogue {\"id\": \"d_s08_09_1\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 1.37, \"in\": 0.12, \"out\": 1.1, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s08_09_2\", \"source\": \"tts_s08_09/audio-1.mp3\", \"anchor\": \"s08_09\", \"offset\": 3.25, \"in\": 1.44, \"out\": 3.7, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s08_09\", \"offset\": 1.47, \"seconds\": 1.6, \"text\": \"Little bird.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s08_09\", \"offset\": 3.35, \"seconds\": 2.95, \"text\": \"There is no air left here to sing in.\", \"speaker\": \"SEREN\"}\n\nAnswer with the timeline only: one JSON object in one ```json fenced block, nothing before or after it.",
       "tokens": {
-        "input": 10403,
-        "output": 3909
+        "input": 20520,
+        "output": 3705
+      }
+    },
+    {
+      "id": "ed_R3",
+      "title": "Editor · R3",
+      "column": 2,
+      "row": 2,
+      "status": "done",
+      "seconds": 37,
+      "outputType": "markdown",
+      "output": "```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r3\",\n  \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8},\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s10_01\", \"source\": \"vid_s10_01/video-1.mp4\", \"in\": 0.2, \"out\": 11.8, \"clipAudioDb\": null},\n      {\"id\": \"s10_02\", \"source\": \"vid_s10_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s11_01\", \"source\": \"vid_s11_01/video-1.mp4\", \"in\": 0.2, \"out\": 8.8, \"clipAudioDb\": null},\n      {\"id\": \"s11_02\", \"source\": \"vid_s11_02/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s11_03\", \"source\": \"vid_s11_03/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s11_04\", \"source\": \"vid_s11_04/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_01\", \"source\": \"vid_s12_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_02\", \"source\": \"vid_s12_02/video-1.mp4\", \"in\": 0.0, \"out\": 6.05, \"clipAudioDb\": null},\n      {\"id\": \"s12_03\", \"source\": \"vid_s12_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_04\", \"source\": \"vid_s12_04/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_05\", \"source\": \"vid_s12_05/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_06\", \"source\": \"vid_s12_06/video-1.mp4\", \"in\": 0.2, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_07\", \"source\": \"vid_s12_07/video-1.mp4\", \"in\": 0, \"out\": 3.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_08\", \"source\": \"vid_s12_08/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_09\", \"source\": \"vid_s12_09/video-1.mp4\", \"in\": 0, \"out\": 3.8, \"clipAudioDb\": null},\n      {\"id\": \"s12_10\", \"source\": \"vid_s12_10/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s13_01\", \"source\": \"vid_s13_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s13_02\", \"source\": \"vid_s13_02/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s13_03\", \"source\": \"vid_s13_03/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s13_04\", \"source\": \"vid_s13_04/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s13_05\", \"source\": \"vid_s13_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s12_02_1\", \"source\": \"tts_s12_02/audio-1.mp3\", \"anchor\": \"s12_02\", \"offset\": 1.15, \"in\": 0.15, \"out\": 2.58, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_02_2\", \"source\": \"tts_s12_02/audio-1.mp3\", \"anchor\": \"s12_02\", \"offset\": 4.02, \"in\": 2.94, \"out\": 5.5, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_03_1\", \"source\": \"tts_s12_03/audio-1.mp3\", \"anchor\": \"s12_03\", \"offset\": 0.44, \"in\": 0.06, \"out\": 1.66, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_03_2\", \"source\": \"tts_s12_03/audio-1.mp3\", \"anchor\": \"s12_03\", \"offset\": 2.04, \"in\": 1.82, \"out\": 4.31, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_04_1\", \"source\": \"tts_s12_04/audio-1.mp3\", \"anchor\": \"s12_04\", \"offset\": 2.46, \"in\": 0.0, \"out\": 1.34, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_05_1\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": -0.07, \"in\": 0.25, \"out\": 3.19, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_05_2\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 2.88, \"in\": 3.52, \"out\": 5.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_05_3\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 5.21, \"in\": 5.91, \"out\": 6.65, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_05_4\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 5.95, \"in\": 6.75, \"out\": 7.61, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_06\", \"source\": \"tts_s12_06/audio-1.mp3\", \"anchor\": \"s12_06\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_07_1\", \"source\": \"tts_s12_07/audio-1.mp3\", \"anchor\": \"s12_07\", \"offset\": 2.81, \"in\": 0.22, \"out\": 1.14, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_08_1\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 0.19, \"in\": 0.12, \"out\": 1.66, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_08_2\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 2.5, \"in\": 2.33, \"out\": 4.54, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_08_3\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 4.89, \"in\": 4.96, \"out\": 6.14, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_09_1\", \"source\": \"tts_s12_09/audio-1.mp3\", \"anchor\": \"s12_09\", \"offset\": 2.26, \"in\": 0.19, \"out\": 1.3, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s12_10_1\", \"source\": \"tts_s12_10/audio-1.mp3\", \"anchor\": \"s12_10\", \"offset\": 3.16, \"in\": 0.11, \"out\": 1.5, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s13_02_1\", \"source\": \"tts_s13_02/audio-1.mp3\", \"anchor\": \"s13_02\", \"offset\": 3.15, \"in\": 0.24, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s13_02_2\", \"source\": \"tts_s13_02/audio-1.mp3\", \"anchor\": \"s13_02\", \"offset\": 4.89, \"in\": 1.66, \"out\": 4.22, \"gainDb\": 0, \"fx\": \"dry\"}\n    ],\n    \"music\": [\n      {\"id\": \"m08_the_bar-1\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s10_01\", \"offset\": 0, \"in\": 0, \"out\": 19.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"bed-s11_01\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s11_01\", \"offset\": 0, \"in\": 0, \"out\": 28.4, \"loop\": true, \"gainDb\": -16, \"fadeIn\": 1.5, \"fadeOut\": 1.5},\n      {\"id\": \"m08_the_bar-3\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s12_01\", \"offset\": 0, \"in\": 0, \"out\": 52.85, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m09_launch-4\", \"source\": \"mus_m09_launch/audio-1.mp3\", \"anchor\": \"s13_01\", \"offset\": 0, \"in\": 0, \"out\": 33.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s12_02\", \"offset\": 1.25, \"seconds\": 2.77, \"text\": \"The Chord is dying, Lark.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_02\", \"offset\": 4.12, \"seconds\": 2.43, \"text\": \"Every year it rings softer.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_03\", \"offset\": 0.54, \"seconds\": 4.5, \"text\": \"We hold what is left, so someone can still cross the dark.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_04\", \"offset\": 2.55, \"seconds\": 2.75, \"text\": \"By shutting us in it.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s12_05\", \"offset\": 0.03, \"seconds\": 2.81, \"text\": \"Tomorrow this ring closes Corrow's still.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_05\", \"offset\": 2.94, \"seconds\": 2.27, \"text\": \"Gently, if a Hearer guides it.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_05\", \"offset\": 5.31, \"seconds\": 1.99, \"text\": \"Badly, if not.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_06\", \"offset\": 1.0, \"seconds\": 3.2, \"text\": \"Where did you get that fork?\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_07\", \"offset\": 2.91, \"seconds\": 1.39, \"text\": \"My mother.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s12_08\", \"offset\": 0.75, \"seconds\": 1.6, \"text\": \"Ilse Anwen.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_08\", \"offset\": 2.6, \"seconds\": 2.29, \"text\": \"She heard more than any of us.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_08\", \"offset\": 4.99, \"seconds\": 1.31, \"text\": \"It broke her.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s12_09\", \"offset\": 2.36, \"seconds\": 1.94, \"text\": \"You broke her.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s12_10\", \"offset\": 3.26, \"seconds\": 2.04, \"text\": \"I made her quiet.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s13_02\", \"offset\": 3.25, \"seconds\": 1.64, \"text\": \"Come on, girl.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s13_02\", \"offset\": 4.99, \"seconds\": 1.25, \"text\": \"Fly first.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s13_02\", \"offset\": 6.34, \"seconds\": 0.96, \"text\": \"Sing later.\", \"speaker\": \"BRAM\"}\n    ]\n  },\n  \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}\n}\n```",
+      "brief": "You are the editor of THE LONG CHORD, Episode I: FORETONE, an original space-opera film. You cut reel R3 (SC10-SC13,\n21 shots) by writing the reel's timeline for the edit node, which renders it with ffmpeg.\n\nYour inputs list the files the canvas made, one block per node: the clips (vid_<shot>, generated at the shot's length; their\nown sound is not used), the voice takes (tts_<shot>) and the score cues (mus_<cue>). Name every file exactly as its block\nlists it (\"<node id>/<file name>\"); never invent a name. The sheets below name the files the canvas made; if a block lists\nanother name for one of them, use the block's name and change nothing else.\n\nThe reel, in order:\n\n| shot | scene | seconds | clip node | dialogue |\n|---|---|---|---|---|\n| s10_01 | sc10 | 12 | vid_s10_01 | — |\n| s10_02 | sc10 | 8 | vid_s10_02 | — |\n| s11_01 | sc11 | 9 | vid_s11_01 | — |\n| s11_02 | sc11 | 6 | vid_s11_02 | — |\n| s11_03 | sc11 | 7 | vid_s11_03 | — |\n| s11_04 | sc11 | 8 | vid_s11_04 | — |\n| s12_01 | sc12 | 7 | vid_s12_01 | — |\n| s12_02 | sc12 | 6 | vid_s12_02 | SEREN: \"The Chord is dying, Lark. Every year it rings softer.\" (IN SYNC) |\n| s12_03 | sc12 | 6 | vid_s12_03 | SEREN: \"We hold what is left, so someone can still cross the dark.\" (IN SYNC) |\n| s12_04 | sc12 | 5 | vid_s12_04 | LARK: \"By shutting us in it.\" (IN SYNC) |\n| s12_05 | sc12 | 7 | vid_s12_05 | SEREN: \"Tomorrow this ring closes Corrow's still. Gently, if a Hearer guides it. Badly, if not.\" (IN SYNC) |\n| s12_06 | sc12 | 5 | vid_s12_06 | SEREN: \"Where did you get that fork?\" (voice-over) |\n| s12_07 | sc12 | 4 | vid_s12_07 | LARK: \"My mother.\" (IN SYNC) |\n| s12_08 | sc12 | 6 | vid_s12_08 | SEREN: \"Ilse Anwen. She heard more than any of us. It broke her.\" (IN SYNC) |\n| s12_09 | sc12 | 4 | vid_s12_09 | LARK: \"You broke her.\" (IN SYNC) |\n| s12_10 | sc12 | 5 | vid_s12_10 | SEREN: \"I made her quiet.\" (IN SYNC) |\n| s13_01 | sc13 | 7 | vid_s13_01 | — |\n| s13_02 | sc13 | 7 | vid_s13_02 | BRAM: \"Come on, girl. Fly first. Sing later.\" (IN SYNC) |\n| s13_03 | sc13 | 7 | vid_s13_03 | — |\n| s13_04 | sc13 | 7 | vid_s13_04 | — |\n| s13_05 | sc13 | 7 | vid_s13_05 | — |\n\nWrite the timeline exactly to this schema (awwo.timeline/1; anything else is refused):\n- \"schema\": \"awwo.timeline/1\", \"name\": \"r3\".\n- \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8}.\n- \"tracks.video\": the clips in shot order, one item each. A clip item is {\"id\": \"<shot id>\", \"source\": \"<clip file>\", \"in\": 0.2,\n  \"out\": <seconds − 0.2>, \"clipAudioDb\": null}, with no \"at\" and no \"transition\" (straight cuts), EXCEPT a shot whose line is\n  IN SYNC: its item has \"in\": 0, \"out\": <seconds − 0.2>, or, when the sync sheet gives that shot a video item, exactly that item.\n- \"tracks.dialogue\": the sync sheet's and the voice-over sheet's dialogue items, copied exactly as written, in shot order.\n- \"tracks.music\": the music sheet's items, copied exactly as written, in that order. Every second of the reel has sound\n  under it: a cue under the shots that name it, and under shots that name none, the cue before at 16 dB down (a bed).\n- \"tracks.subtitles\": the sync sheet's and the voice-over sheet's subtitle items, copied exactly as written, in shot order.\n- Every track (\"video\", \"dialogue\", \"music\", \"subtitles\") is a JSON list, even with one item.\n- \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}.\n\nThe sync sheet. The clips with a line IN SYNC were made with their line's take as their voice; the model puts a line where\nthe action allows and paces it its own way, so these numbers were measured from each clip's own sound: each take is cut at\nits pauses into pieces, a piece plays the take from \"in\" to \"out\" (seconds in the take file), starting \"offset\" seconds into\nits shot. A \"video\" line is that shot's item in tracks.video. Copy every item as written, in this order; change nothing.\ns12_02:\n  video {\"id\": \"s12_02\", \"source\": \"vid_s12_02/video-1.mp4\", \"in\": 0.0, \"out\": 6.05, \"clipAudioDb\": null}\n  dialogue {\"id\": \"d_s12_02_1\", \"source\": \"tts_s12_02/audio-1.mp3\", \"anchor\": \"s12_02\", \"offset\": 1.15, \"in\": 0.15, \"out\": 2.58, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_02_2\", \"source\": \"tts_s12_02/audio-1.mp3\", \"anchor\": \"s12_02\", \"offset\": 4.02, \"in\": 2.94, \"out\": 5.5, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_02\", \"offset\": 1.25, \"seconds\": 2.77, \"text\": \"The Chord is dying, Lark.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s12_02\", \"offset\": 4.12, \"seconds\": 2.43, \"text\": \"Every year it rings softer.\", \"speaker\": \"SEREN\"}\ns12_03:\n  dialogue {\"id\": \"d_s12_03_1\", \"source\": \"tts_s12_03/audio-1.mp3\", \"anchor\": \"s12_03\", \"offset\": 0.44, \"in\": 0.06, \"out\": 1.66, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_03_2\", \"source\": \"tts_s12_03/audio-1.mp3\", \"anchor\": \"s12_03\", \"offset\": 2.04, \"in\": 1.82, \"out\": 4.31, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_03\", \"offset\": 0.54, \"seconds\": 4.5, \"text\": \"We hold what is left, so someone can still cross the dark.\", \"speaker\": \"SEREN\"}\ns12_04:\n  dialogue {\"id\": \"d_s12_04_1\", \"source\": \"tts_s12_04/audio-1.mp3\", \"anchor\": \"s12_04\", \"offset\": 2.46, \"in\": 0.0, \"out\": 1.34, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_04\", \"offset\": 2.55, \"seconds\": 2.75, \"text\": \"By shutting us in it.\", \"speaker\": \"LARK\"}\ns12_05:\n  dialogue {\"id\": \"d_s12_05_1\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": -0.07, \"in\": 0.25, \"out\": 3.19, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_05_2\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 2.88, \"in\": 3.52, \"out\": 5.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_05_3\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 5.21, \"in\": 5.91, \"out\": 6.65, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_05_4\", \"source\": \"tts_s12_05/audio-1.mp3\", \"anchor\": \"s12_05\", \"offset\": 5.95, \"in\": 6.75, \"out\": 7.61, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_05\", \"offset\": 0.03, \"seconds\": 2.81, \"text\": \"Tomorrow this ring closes Corrow's still.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s12_05\", \"offset\": 2.94, \"seconds\": 2.27, \"text\": \"Gently, if a Hearer guides it.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s12_05\", \"offset\": 5.31, \"seconds\": 1.99, \"text\": \"Badly, if not.\", \"speaker\": \"SEREN\"}\ns12_07:\n  dialogue {\"id\": \"d_s12_07_1\", \"source\": \"tts_s12_07/audio-1.mp3\", \"anchor\": \"s12_07\", \"offset\": 2.81, \"in\": 0.22, \"out\": 1.14, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_07\", \"offset\": 2.91, \"seconds\": 1.39, \"text\": \"My mother.\", \"speaker\": \"LARK\"}\ns12_08:\n  dialogue {\"id\": \"d_s12_08_1\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 0.19, \"in\": 0.12, \"out\": 1.66, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_08_2\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 2.5, \"in\": 2.33, \"out\": 4.54, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s12_08_3\", \"source\": \"tts_s12_08/audio-1.mp3\", \"anchor\": \"s12_08\", \"offset\": 4.89, \"in\": 4.96, \"out\": 6.14, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_08\", \"offset\": 0.75, \"seconds\": 1.6, \"text\": \"Ilse Anwen.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s12_08\", \"offset\": 2.6, \"seconds\": 2.29, \"text\": \"She heard more than any of us.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s12_08\", \"offset\": 4.99, \"seconds\": 1.31, \"text\": \"It broke her.\", \"speaker\": \"SEREN\"}\ns12_09:\n  dialogue {\"id\": \"d_s12_09_1\", \"source\": \"tts_s12_09/audio-1.mp3\", \"anchor\": \"s12_09\", \"offset\": 2.26, \"in\": 0.19, \"out\": 1.3, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_09\", \"offset\": 2.36, \"seconds\": 1.94, \"text\": \"You broke her.\", \"speaker\": \"LARK\"}\ns12_10:\n  dialogue {\"id\": \"d_s12_10_1\", \"source\": \"tts_s12_10/audio-1.mp3\", \"anchor\": \"s12_10\", \"offset\": 3.16, \"in\": 0.11, \"out\": 1.5, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_10\", \"offset\": 3.26, \"seconds\": 2.04, \"text\": \"I made her quiet.\", \"speaker\": \"SEREN\"}\ns13_02:\n  dialogue {\"id\": \"d_s13_02_1\", \"source\": \"tts_s13_02/audio-1.mp3\", \"anchor\": \"s13_02\", \"offset\": 3.15, \"in\": 0.24, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s13_02_2\", \"source\": \"tts_s13_02/audio-1.mp3\", \"anchor\": \"s13_02\", \"offset\": 4.89, \"in\": 1.66, \"out\": 4.22, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s13_02\", \"offset\": 3.25, \"seconds\": 1.64, \"text\": \"Come on, girl.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s13_02\", \"offset\": 4.99, \"seconds\": 1.25, \"text\": \"Fly first.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s13_02\", \"offset\": 6.34, \"seconds\": 0.96, \"text\": \"Sing later.\", \"speaker\": \"BRAM\"}\n\nThe voice-over sheet (lines not in sync: the take whole, a subtitle per sentence where the take says it):\ns12_06:\n  dialogue {\"id\": \"d_s12_06\", \"source\": \"tts_s12_06/audio-1.mp3\", \"anchor\": \"s12_06\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s12_06\", \"offset\": 1.0, \"seconds\": 3.2, \"text\": \"Where did you get that fork?\", \"speaker\": \"SEREN\"}\n\nThe music sheet:\n  music {\"id\": \"m08_the_bar-1\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s10_01\", \"offset\": 0, \"in\": 0, \"out\": 19.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"bed-s11_01\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s11_01\", \"offset\": 0, \"in\": 0, \"out\": 28.4, \"loop\": true, \"gainDb\": -16, \"fadeIn\": 1.5, \"fadeOut\": 1.5}\n  music {\"id\": \"m08_the_bar-3\", \"source\": \"mus_m08_the_bar/audio-1.mp3\", \"anchor\": \"s12_01\", \"offset\": 0, \"in\": 0, \"out\": 52.85, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m09_launch-4\", \"source\": \"mus_m09_launch/audio-1.mp3\", \"anchor\": \"s13_01\", \"offset\": 0, \"in\": 0, \"out\": 33.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n\nAnswer with the timeline only: one JSON object in one ```json fenced block, nothing before or after it.",
+      "tokens": {
+        "input": 21901,
+        "output": 4515
+      }
+    },
+    {
+      "id": "ed_R4",
+      "title": "Editor · R4",
+      "column": 2,
+      "row": 3,
+      "status": "done",
+      "seconds": 33,
+      "outputType": "markdown",
+      "output": "```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r4\",\n  \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8},\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s14_01\", \"source\": \"vid_s14_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s14_02\", \"source\": \"vid_s14_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s14_03\", \"source\": \"vid_s14_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s14_04\", \"source\": \"vid_s14_04/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s14_05\", \"source\": \"vid_s14_05/video-1.mp4\", \"in\": 0, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_01\", \"source\": \"vid_s15_01/video-1.mp4\", \"in\": 0.2, \"out\": 9.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_02\", \"source\": \"vid_s15_02/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_03\", \"source\": \"vid_s15_03/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_04\", \"source\": \"vid_s15_04/video-1.mp4\", \"in\": 0.2, \"out\": 8.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_05\", \"source\": \"vid_s15_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_06\", \"source\": \"vid_s15_06/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s15_07\", \"source\": \"vid_s15_07/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s16_01\", \"source\": \"vid_s16_01/video-1.mp4\", \"in\": 0.2, \"out\": 11.8, \"clipAudioDb\": null},\n      {\"id\": \"s16_02\", \"source\": \"vid_s16_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s17_01\", \"source\": \"vid_s17_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s17_02\", \"source\": \"vid_s17_02/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s17_03\", \"source\": \"vid_s17_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s14_03_1\", \"source\": \"tts_s14_03/audio-1.mp3\", \"anchor\": \"s14_03\", \"offset\": 4.84, \"in\": 0.21, \"out\": 1.11, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s14_04_1\", \"source\": \"tts_s14_04/audio-1.mp3\", \"anchor\": \"s14_04\", \"offset\": 4.1, \"in\": 0.16, \"out\": 1.11, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s14_05_1\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 0.41, \"in\": 0.3, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s14_05_2\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 1.76, \"in\": 1.08, \"out\": 2.07, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s14_05_3\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 3.61, \"in\": 3.11, \"out\": 4.5, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s14_05_4\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 6.22, \"in\": 4.72, \"out\": 5.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s15_02_1\", \"source\": \"tts_s15_02/audio-1.mp3\", \"anchor\": \"s15_02\", \"offset\": 1.21, \"in\": 0.12, \"out\": 2.3, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s15_02_2\", \"source\": \"tts_s15_02/audio-1.mp3\", \"anchor\": \"s15_02\", \"offset\": 3.7, \"in\": 2.29, \"out\": 3.83, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s15_04\", \"source\": \"tts_s15_04/audio-1.mp3\", \"anchor\": \"s15_04\", \"offset\": 0.6, \"gainDb\": 0, \"fx\": \"echo\"},\n      {\"id\": \"d_s15_06_1\", \"source\": \"tts_s15_06/audio-1.mp3\", \"anchor\": \"s15_06\", \"offset\": 2.88, \"in\": 0.03, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s15_06_2\", \"source\": \"tts_s15_06/audio-1.mp3\", \"anchor\": \"s15_06\", \"offset\": 5.18, \"in\": 1.53, \"out\": 2.52, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s15_07_1\", \"source\": \"tts_s15_07/audio-1.mp3\", \"anchor\": \"s15_07\", \"offset\": 3.5, \"in\": 0.18, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s17_02_1\", \"source\": \"tts_s17_02/audio-1.mp3\", \"anchor\": \"s17_02\", \"offset\": 0.12, \"in\": 0.12, \"out\": 0.92, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s17_02_2\", \"source\": \"tts_s17_02/audio-1.mp3\", \"anchor\": \"s17_02\", \"offset\": 1.4, \"in\": 1.31, \"out\": 3.64, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s17_03_1\", \"source\": \"tts_s17_03/audio-1.mp3\", \"anchor\": \"s17_03\", \"offset\": 0.44, \"in\": 0.03, \"out\": 1.72, \"gainDb\": 0, \"fx\": \"radio\"}\n    ],\n    \"music\": [\n      {\"id\": \"m10_cell-1\", \"source\": \"mus_m10_cell/audio-1.mp3\", \"anchor\": \"s14_01\", \"offset\": 0, \"in\": 0, \"out\": 33.6, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m11_core_echo-2\", \"source\": \"mus_m11_core_echo/audio-1.mp3\", \"anchor\": \"s15_01\", \"offset\": 0, \"in\": 0, \"out\": 52.8, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m12_quieting-3\", \"source\": \"mus_m12_quieting/audio-1.mp3\", \"anchor\": \"s16_01\", \"offset\": 0, \"in\": 0, \"out\": 38.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s14_03\", \"offset\": 4.94, \"seconds\": 1.36, \"text\": \"What is that?\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s14_04\", \"offset\": 4.2, \"seconds\": 2.1, \"text\": \"You can hear it?\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s14_05\", \"offset\": 0.51, \"seconds\": 1.2, \"text\": \"No.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s14_05\", \"offset\": 1.86, \"seconds\": 1.75, \"text\": \"I can see it.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s14_05\", \"offset\": 3.71, \"seconds\": 2.51, \"text\": \"I was born on a bell-ship.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s14_05\", \"offset\": 6.32, \"seconds\": 1.98, \"text\": \"I remember bells.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s15_02\", \"offset\": 1.31, \"seconds\": 0.89, \"text\": \"Listen.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s15_02\", \"offset\": 2.3, \"seconds\": 4.4, \"text\": \"Tell me its note, and we close it gently.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s15_04\", \"offset\": 0.6, \"seconds\": 2.0, \"text\": \"It isn't fading.\", \"speaker\": \"ILSE\"},\n      {\"anchor\": \"s15_04\", \"offset\": 2.96, \"seconds\": 2.4, \"text\": \"They are drinking it.\", \"speaker\": \"ILSE\"},\n      {\"anchor\": \"s15_06\", \"offset\": 2.98, \"seconds\": 2.2, \"text\": \"You're not saving the Chord.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s15_06\", \"offset\": 5.28, \"seconds\": 2.0, \"text\": \"You're drinking it.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s15_07\", \"offset\": 3.6, \"seconds\": 2.8, \"text\": \"Tell me the note, Lark.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s17_02\", \"offset\": 0.22, \"seconds\": 1.2, \"text\": \"Primate.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s17_02\", \"offset\": 1.87, \"seconds\": 3.6, \"text\": \"Corrow will be quiet within the hour.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s17_03\", \"offset\": 0.54, \"seconds\": 2.0, \"text\": \"Let nothing ring.\", \"speaker\": \"PRIMATE\"}\n    ]\n  },\n  \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}\n}\n```",
+      "brief": "You are the editor of THE LONG CHORD, Episode I: FORETONE, an original space-opera film. You cut reel R4 (SC14-SC17,\n17 shots) by writing the reel's timeline for the edit node, which renders it with ffmpeg.\n\nYour inputs list the files the canvas made, one block per node: the clips (vid_<shot>, generated at the shot's length; their\nown sound is not used), the voice takes (tts_<shot>) and the score cues (mus_<cue>). Name every file exactly as its block\nlists it (\"<node id>/<file name>\"); never invent a name. The sheets below name the files the canvas made; if a block lists\nanother name for one of them, use the block's name and change nothing else.\n\nThe reel, in order:\n\n| shot | scene | seconds | clip node | dialogue |\n|---|---|---|---|---|\n| s14_01 | sc14 | 7 | vid_s14_01 | — |\n| s14_02 | sc14 | 8 | vid_s14_02 | — |\n| s14_03 | sc14 | 6 | vid_s14_03 | KESH: \"What is that?\" (IN SYNC) |\n| s14_04 | sc14 | 6 | vid_s14_04 | LARK: \"You can hear it?\" (IN SYNC) |\n| s14_05 | sc14 | 8 | vid_s14_05 | KESH: \"No. I can see it.\"; KESH: \"I was born on a bell-ship. I remember bells.\" (IN SYNC) |\n| s15_01 | sc15 | 10 | vid_s15_01 | — |\n| s15_02 | sc15 | 7 | vid_s15_02 | SEREN: \"Listen. Tell me its note, and we close it gently.\" (IN SYNC) |\n| s15_03 | sc15 | 8 | vid_s15_03 | — |\n| s15_04 | sc15 | 9 | vid_s15_04 | ILSE: \"It isn't fading.\"; ILSE: \"They are drinking it.\" (voice-over) |\n| s15_05 | sc15 | 7 | vid_s15_05 | — |\n| s15_06 | sc15 | 7 | vid_s15_06 | LARK: \"You're not saving the Chord. You're drinking it.\" (IN SYNC) |\n| s15_07 | sc15 | 7 | vid_s15_07 | SEREN: \"Tell me the note, Lark.\" (IN SYNC) |\n| s16_01 | sc16 | 12 | vid_s16_01 | — |\n| s16_02 | sc16 | 8 | vid_s16_02 | — |\n| s17_01 | sc17 | 7 | vid_s17_01 | — |\n| s17_02 | sc17 | 7 | vid_s17_02 | SEREN: \"Primate. Corrow will be quiet within the hour.\" (IN SYNC) |\n| s17_03 | sc17 | 6 | vid_s17_03 | PRIMATE: \"Let nothing ring.\" (IN SYNC) |\n\nWrite the timeline exactly to this schema (awwo.timeline/1; anything else is refused):\n- \"schema\": \"awwo.timeline/1\", \"name\": \"r4\".\n- \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8}.\n- \"tracks.video\": the clips in shot order, one item each. A clip item is {\"id\": \"<shot id>\", \"source\": \"<clip file>\", \"in\": 0.2,\n  \"out\": <seconds − 0.2>, \"clipAudioDb\": null}, with no \"at\" and no \"transition\" (straight cuts), EXCEPT a shot whose line is\n  IN SYNC: its item has \"in\": 0, \"out\": <seconds − 0.2>, or, when the sync sheet gives that shot a video item, exactly that item.\n- \"tracks.dialogue\": the sync sheet's and the voice-over sheet's dialogue items, copied exactly as written, in shot order.\n- \"tracks.music\": the music sheet's items, copied exactly as written, in that order. Every second of the reel has sound\n  under it: a cue under the shots that name it, and under shots that name none, the cue before at 16 dB down (a bed).\n- \"tracks.subtitles\": the sync sheet's and the voice-over sheet's subtitle items, copied exactly as written, in shot order.\n- Every track (\"video\", \"dialogue\", \"music\", \"subtitles\") is a JSON list, even with one item.\n- \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}.\n\nThe sync sheet. The clips with a line IN SYNC were made with their line's take as their voice; the model puts a line where\nthe action allows and paces it its own way, so these numbers were measured from each clip's own sound: each take is cut at\nits pauses into pieces, a piece plays the take from \"in\" to \"out\" (seconds in the take file), starting \"offset\" seconds into\nits shot. A \"video\" line is that shot's item in tracks.video. Copy every item as written, in this order; change nothing.\ns14_03:\n  dialogue {\"id\": \"d_s14_03_1\", \"source\": \"tts_s14_03/audio-1.mp3\", \"anchor\": \"s14_03\", \"offset\": 4.84, \"in\": 0.21, \"out\": 1.11, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s14_03\", \"offset\": 4.94, \"seconds\": 1.36, \"text\": \"What is that?\", \"speaker\": \"KESH\"}\ns14_04:\n  dialogue {\"id\": \"d_s14_04_1\", \"source\": \"tts_s14_04/audio-1.mp3\", \"anchor\": \"s14_04\", \"offset\": 4.1, \"in\": 0.16, \"out\": 1.11, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s14_04\", \"offset\": 4.2, \"seconds\": 2.1, \"text\": \"You can hear it?\", \"speaker\": \"LARK\"}\ns14_05:\n  dialogue {\"id\": \"d_s14_05_1\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 0.41, \"in\": 0.3, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s14_05_2\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 1.76, \"in\": 1.08, \"out\": 2.07, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s14_05_3\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 3.61, \"in\": 3.11, \"out\": 4.5, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s14_05_4\", \"source\": \"tts_s14_05/audio-1.mp3\", \"anchor\": \"s14_05\", \"offset\": 6.22, \"in\": 4.72, \"out\": 5.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s14_05\", \"offset\": 0.51, \"seconds\": 1.2, \"text\": \"No.\", \"speaker\": \"KESH\"}\n  subtitle {\"anchor\": \"s14_05\", \"offset\": 1.86, \"seconds\": 1.75, \"text\": \"I can see it.\", \"speaker\": \"KESH\"}\n  subtitle {\"anchor\": \"s14_05\", \"offset\": 3.71, \"seconds\": 2.51, \"text\": \"I was born on a bell-ship.\", \"speaker\": \"KESH\"}\n  subtitle {\"anchor\": \"s14_05\", \"offset\": 6.32, \"seconds\": 1.98, \"text\": \"I remember bells.\", \"speaker\": \"KESH\"}\ns15_02:\n  dialogue {\"id\": \"d_s15_02_1\", \"source\": \"tts_s15_02/audio-1.mp3\", \"anchor\": \"s15_02\", \"offset\": 1.21, \"in\": 0.12, \"out\": 2.3, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s15_02_2\", \"source\": \"tts_s15_02/audio-1.mp3\", \"anchor\": \"s15_02\", \"offset\": 3.7, \"in\": 2.29, \"out\": 3.83, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s15_02\", \"offset\": 1.31, \"seconds\": 0.89, \"text\": \"Listen.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s15_02\", \"offset\": 2.3, \"seconds\": 4.4, \"text\": \"Tell me its note, and we close it gently.\", \"speaker\": \"SEREN\"}\ns15_06:\n  dialogue {\"id\": \"d_s15_06_1\", \"source\": \"tts_s15_06/audio-1.mp3\", \"anchor\": \"s15_06\", \"offset\": 2.88, \"in\": 0.03, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s15_06_2\", \"source\": \"tts_s15_06/audio-1.mp3\", \"anchor\": \"s15_06\", \"offset\": 5.18, \"in\": 1.53, \"out\": 2.52, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s15_06\", \"offset\": 2.98, \"seconds\": 2.2, \"text\": \"You're not saving the Chord.\", \"speaker\": \"LARK\"}\n  subtitle {\"anchor\": \"s15_06\", \"offset\": 5.28, \"seconds\": 2.0, \"text\": \"You're drinking it.\", \"speaker\": \"LARK\"}\ns15_07:\n  dialogue {\"id\": \"d_s15_07_1\", \"source\": \"tts_s15_07/audio-1.mp3\", \"anchor\": \"s15_07\", \"offset\": 3.5, \"in\": 0.18, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s15_07\", \"offset\": 3.6, \"seconds\": 2.8, \"text\": \"Tell me the note, Lark.\", \"speaker\": \"SEREN\"}\ns17_02:\n  dialogue {\"id\": \"d_s17_02_1\", \"source\": \"tts_s17_02/audio-1.mp3\", \"anchor\": \"s17_02\", \"offset\": 0.12, \"in\": 0.12, \"out\": 0.92, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s17_02_2\", \"source\": \"tts_s17_02/audio-1.mp3\", \"anchor\": \"s17_02\", \"offset\": 1.4, \"in\": 1.31, \"out\": 3.64, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s17_02\", \"offset\": 0.22, \"seconds\": 1.2, \"text\": \"Primate.\", \"speaker\": \"SEREN\"}\n  subtitle {\"anchor\": \"s17_02\", \"offset\": 1.87, \"seconds\": 3.6, \"text\": \"Corrow will be quiet within the hour.\", \"speaker\": \"SEREN\"}\ns17_03:\n  dialogue {\"id\": \"d_s17_03_1\", \"source\": \"tts_s17_03/audio-1.mp3\", \"anchor\": \"s17_03\", \"offset\": 0.44, \"in\": 0.03, \"out\": 1.72, \"gainDb\": 0, \"fx\": \"radio\"}\n  subtitle {\"anchor\": \"s17_03\", \"offset\": 0.54, \"seconds\": 2.0, \"text\": \"Let nothing ring.\", \"speaker\": \"PRIMATE\"}\n\nThe voice-over sheet (lines not in sync: the take whole, a subtitle per sentence where the take says it):\ns15_04:\n  dialogue {\"id\": \"d_s15_04\", \"source\": \"tts_s15_04/audio-1.mp3\", \"anchor\": \"s15_04\", \"offset\": 0.6, \"gainDb\": 0, \"fx\": \"echo\"}\n  subtitle {\"anchor\": \"s15_04\", \"offset\": 0.6, \"seconds\": 2.0, \"text\": \"It isn't fading.\", \"speaker\": \"ILSE\"}\n  subtitle {\"anchor\": \"s15_04\", \"offset\": 2.96, \"seconds\": 2.4, \"text\": \"They are drinking it.\", \"speaker\": \"ILSE\"}\n\nThe music sheet:\n  music {\"id\": \"m10_cell-1\", \"source\": \"mus_m10_cell/audio-1.mp3\", \"anchor\": \"s14_01\", \"offset\": 0, \"in\": 0, \"out\": 33.6, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m11_core_echo-2\", \"source\": \"mus_m11_core_echo/audio-1.mp3\", \"anchor\": \"s15_01\", \"offset\": 0, \"in\": 0, \"out\": 52.8, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m12_quieting-3\", \"source\": \"mus_m12_quieting/audio-1.mp3\", \"anchor\": \"s16_01\", \"offset\": 0, \"in\": 0, \"out\": 38.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n\nAnswer with the timeline only: one JSON object in one ```json fenced block, nothing before or after it.",
+      "tokens": {
+        "input": 10122,
+        "output": 3810
+      }
+    },
+    {
+      "id": "ed_R5",
+      "title": "Editor · R5",
+      "column": 2,
+      "row": 4,
+      "status": "done",
+      "seconds": 28,
+      "outputType": "markdown",
+      "output": "```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r5\",\n  \"output\": {\n    \"width\": 1680,\n    \"height\": 720,\n    \"fit\": \"cover\",\n    \"fps\": 24,\n    \"crf\": 18,\n    \"loudnessLUFS\": -16,\n    \"truePeakDb\": -1,\n    \"stillsEverySeconds\": 8\n  },\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s18_01\", \"source\": \"vid_s18_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s18_02\", \"source\": \"vid_s18_02/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s18_03\", \"source\": \"vid_s18_03/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s18_04\", \"source\": \"vid_s18_04/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s18_05\", \"source\": \"vid_s18_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s18_06\", \"source\": \"vid_s18_06/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s19_01\", \"source\": \"vid_s19_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s19_02\", \"source\": \"vid_s19_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s19_03\", \"source\": \"vid_s19_03/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s19_04\", \"source\": \"vid_s19_04/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s20_01\", \"source\": \"vid_s20_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s20_02\", \"source\": \"vid_s20_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s20_03\", \"source\": \"vid_s20_03/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s20_04\", \"source\": \"vid_s20_04/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s20_05\", \"source\": \"vid_s20_05/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_01\", \"source\": \"vid_s21_01/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_02\", \"source\": \"vid_s21_02/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_03\", \"source\": \"vid_s21_03/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_04\", \"source\": \"vid_s21_04/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_05\", \"source\": \"vid_s21_05/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_06\", \"source\": \"vid_s21_06/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s21_07\", \"source\": \"vid_s21_07/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s18_03_1\", \"source\": \"tts_s18_03/audio-1.mp3\", \"anchor\": \"s18_03\", \"offset\": 2.59, \"in\": 0.21, \"out\": 0.95, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s18_06_1\", \"source\": \"tts_s18_06/audio-1.mp3\", \"anchor\": \"s18_06\", \"offset\": 5.81, \"in\": 0.03, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_01\", \"source\": \"tts_s21_01/audio-1.mp3\", \"anchor\": \"s21_01\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_02_1\", \"source\": \"tts_s21_02/audio-1.mp3\", \"anchor\": \"s21_02\", \"offset\": 0.8, \"in\": 0.05, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_02_2\", \"source\": \"tts_s21_02/audio-1.mp3\", \"anchor\": \"s21_02\", \"offset\": 4.12, \"in\": 1.37, \"out\": 2.68, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_03_1\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 2.59, \"in\": 0.22, \"out\": 1.69, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_03_2\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 4.47, \"in\": 2.0, \"out\": 2.55, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_03_3\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 5.34, \"in\": 2.84, \"out\": 4.25, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_04_1\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 1.87, \"in\": 0.06, \"out\": 0.76, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_04_2\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 2.62, \"in\": 0.76, \"out\": 1.3, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_04_3\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 3.92, \"in\": 1.72, \"out\": 3.58, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_06_1\", \"source\": \"tts_s21_06/audio-1.mp3\", \"anchor\": \"s21_06\", \"offset\": 4.64, \"in\": 0.13, \"out\": 2.04, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s21_07_1\", \"source\": \"tts_s21_07/audio-1.mp3\", \"anchor\": \"s21_07\", \"offset\": 4.7, \"in\": 0.24, \"out\": 2.3, \"gainDb\": 0, \"fx\": \"dry\"}\n    ],\n    \"music\": [\n      {\"id\": \"m13_the_strike-1\", \"source\": \"mus_m13_the_strike/audio-1.mp3\", \"anchor\": \"s18_01\", \"offset\": 0, \"in\": 0, \"out\": 99.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m14_hold_the_note-2\", \"source\": \"mus_m14_hold_the_note/audio-1.mp3\", \"anchor\": \"s21_01\", \"offset\": 0, \"in\": 0, \"out\": 43.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s18_03\", \"offset\": 2.69, \"seconds\": 1.6, \"text\": \"Do it.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s18_06\", \"offset\": 5.91, \"seconds\": 1.2, \"text\": \"No!\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s21_01\", \"offset\": 1.26, \"seconds\": 1.2, \"text\": \"Lark!\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_02\", \"offset\": 0.9, \"seconds\": 4.5, \"text\": \"If I let go, it closes again.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s21_03\", \"offset\": 2.69, \"seconds\": 1.78, \"text\": \"Then I won't let go.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_03\", \"offset\": 4.57, \"seconds\": 0.77, \"text\": \"Go.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_03\", \"offset\": 5.44, \"seconds\": 1.86, \"text\": \"She's waiting for you.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_04\", \"offset\": 1.97, \"seconds\": 1.95, \"text\": \"Ring her, Lark.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_04\", \"offset\": 4.02, \"seconds\": 2.28, \"text\": \"She was always yours.\", \"speaker\": \"BRAM\"},\n      {\"anchor\": \"s21_06\", \"offset\": 4.74, \"seconds\": 2.4, \"text\": \"That is Ilse's fork.\", \"speaker\": \"SEREN\"},\n      {\"anchor\": \"s21_07\", \"offset\": 4.8, \"seconds\": 2.5, \"text\": \"And that's her daughter's note.\", \"speaker\": \"BRAM\"}\n    ]\n  },\n  \"mix\": {\n    \"levels\": {\"dialogue\": -20, \"music\": -26},\n    \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}\n  }\n}\n```",
+      "brief": "You are the editor of THE LONG CHORD, Episode I: FORETONE, an original space-opera film. You cut reel R5 (SC18-SC21,\n22 shots) by writing the reel's timeline for the edit node, which renders it with ffmpeg.\n\nYour inputs list the files the canvas made, one block per node: the clips (vid_<shot>, generated at the shot's length; their\nown sound is not used), the voice takes (tts_<shot>) and the score cues (mus_<cue>). Name every file exactly as its block\nlists it (\"<node id>/<file name>\"); never invent a name. The sheets below name the files the canvas made; if a block lists\nanother name for one of them, use the block's name and change nothing else.\n\nThe reel, in order:\n\n| shot | scene | seconds | clip node | dialogue |\n|---|---|---|---|---|\n| s18_01 | sc18 | 7 | vid_s18_01 | — |\n| s18_02 | sc18 | 6 | vid_s18_02 | — |\n| s18_03 | sc18 | 5 | vid_s18_03 | KESH: \"Do it.\" (IN SYNC) |\n| s18_04 | sc18 | 8 | vid_s18_04 | — |\n| s18_05 | sc18 | 7 | vid_s18_05 | — |\n| s18_06 | sc18 | 7 | vid_s18_06 | SEREN: \"No!\" (IN SYNC) |\n| s19_01 | sc19 | 8 | vid_s19_01 | — |\n| s19_02 | sc19 | 8 | vid_s19_02 | — |\n| s19_03 | sc19 | 7 | vid_s19_03 | — |\n| s19_04 | sc19 | 7 | vid_s19_04 | — |\n| s20_01 | sc20 | 7 | vid_s20_01 | — |\n| s20_02 | sc20 | 8 | vid_s20_02 | — |\n| s20_03 | sc20 | 7 | vid_s20_03 | — |\n| s20_04 | sc20 | 7 | vid_s20_04 | — |\n| s20_05 | sc20 | 6 | vid_s20_05 | — |\n| s21_01 | sc21 | 6 | vid_s21_01 | BRAM: \"Lark!\" (voice-over) |\n| s21_02 | sc21 | 6 | vid_s21_02 | LARK: \"If I let go, it closes again.\" (IN SYNC) |\n| s21_03 | sc21 | 7 | vid_s21_03 | BRAM: \"Then I won't let go. Go. She's waiting for you.\" (IN SYNC) |\n| s21_04 | sc21 | 6 | vid_s21_04 | BRAM: \"Ring her, Lark. She was always yours.\" (IN SYNC) |\n| s21_05 | sc21 | 6 | vid_s21_05 | — |\n| s21_06 | sc21 | 7 | vid_s21_06 | SEREN: \"That is Ilse's fork.\" (IN SYNC) |\n| s21_07 | sc21 | 7 | vid_s21_07 | BRAM: \"And that's her daughter's note.\" (IN SYNC) |\n\nWrite the timeline exactly to this schema (awwo.timeline/1; anything else is refused):\n- \"schema\": \"awwo.timeline/1\", \"name\": \"r5\".\n- \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8}.\n- \"tracks.video\": the clips in shot order, one item each. A clip item is {\"id\": \"<shot id>\", \"source\": \"<clip file>\", \"in\": 0.2,\n  \"out\": <seconds − 0.2>, \"clipAudioDb\": null}, with no \"at\" and no \"transition\" (straight cuts), EXCEPT a shot whose line is\n  IN SYNC: its item has \"in\": 0, \"out\": <seconds − 0.2>, or, when the sync sheet gives that shot a video item, exactly that item.\n- \"tracks.dialogue\": the sync sheet's and the voice-over sheet's dialogue items, copied exactly as written, in shot order.\n- \"tracks.music\": the music sheet's items, copied exactly as written, in that order. Every second of the reel has sound\n  under it: a cue under the shots that name it, and under shots that name none, the cue before at 16 dB down (a bed).\n- \"tracks.subtitles\": the sync sheet's and the voice-over sheet's subtitle items, copied exactly as written, in shot order.\n- Every track (\"video\", \"dialogue\", \"music\", \"subtitles\") is a JSON list, even with one item.\n- \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}.\n\nThe sync sheet. The clips with a line IN SYNC were made with their line's take as their voice; the model puts a line where\nthe action allows and paces it its own way, so these numbers were measured from each clip's own sound: each take is cut at\nits pauses into pieces, a piece plays the take from \"in\" to \"out\" (seconds in the take file), starting \"offset\" seconds into\nits shot. A \"video\" line is that shot's item in tracks.video. Copy every item as written, in this order; change nothing.\ns18_03:\n  dialogue {\"id\": \"d_s18_03_1\", \"source\": \"tts_s18_03/audio-1.mp3\", \"anchor\": \"s18_03\", \"offset\": 2.59, \"in\": 0.21, \"out\": 0.95, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s18_03\", \"offset\": 2.69, \"seconds\": 1.6, \"text\": \"Do it.\", \"speaker\": \"KESH\"}\ns18_06:\n  dialogue {\"id\": \"d_s18_06_1\", \"source\": \"tts_s18_06/audio-1.mp3\", \"anchor\": \"s18_06\", \"offset\": 5.81, \"in\": 0.03, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s18_06\", \"offset\": 5.91, \"seconds\": 1.2, \"text\": \"No!\", \"speaker\": \"SEREN\"}\ns21_02:\n  dialogue {\"id\": \"d_s21_02_1\", \"source\": \"tts_s21_02/audio-1.mp3\", \"anchor\": \"s21_02\", \"offset\": 0.8, \"in\": 0.05, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s21_02_2\", \"source\": \"tts_s21_02/audio-1.mp3\", \"anchor\": \"s21_02\", \"offset\": 4.12, \"in\": 1.37, \"out\": 2.68, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_02\", \"offset\": 0.9, \"seconds\": 4.5, \"text\": \"If I let go, it closes again.\", \"speaker\": \"LARK\"}\ns21_03:\n  dialogue {\"id\": \"d_s21_03_1\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 2.59, \"in\": 0.22, \"out\": 1.69, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s21_03_2\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 4.47, \"in\": 2.0, \"out\": 2.55, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s21_03_3\", \"source\": \"tts_s21_03/audio-1.mp3\", \"anchor\": \"s21_03\", \"offset\": 5.34, \"in\": 2.84, \"out\": 4.25, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_03\", \"offset\": 2.69, \"seconds\": 1.78, \"text\": \"Then I won't let go.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s21_03\", \"offset\": 4.57, \"seconds\": 0.77, \"text\": \"Go.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s21_03\", \"offset\": 5.44, \"seconds\": 1.86, \"text\": \"She's waiting for you.\", \"speaker\": \"BRAM\"}\ns21_04:\n  dialogue {\"id\": \"d_s21_04_1\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 1.87, \"in\": 0.06, \"out\": 0.76, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s21_04_2\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 2.62, \"in\": 0.76, \"out\": 1.3, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s21_04_3\", \"source\": \"tts_s21_04/audio-1.mp3\", \"anchor\": \"s21_04\", \"offset\": 3.92, \"in\": 1.72, \"out\": 3.58, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_04\", \"offset\": 1.97, \"seconds\": 1.95, \"text\": \"Ring her, Lark.\", \"speaker\": \"BRAM\"}\n  subtitle {\"anchor\": \"s21_04\", \"offset\": 4.02, \"seconds\": 2.28, \"text\": \"She was always yours.\", \"speaker\": \"BRAM\"}\ns21_06:\n  dialogue {\"id\": \"d_s21_06_1\", \"source\": \"tts_s21_06/audio-1.mp3\", \"anchor\": \"s21_06\", \"offset\": 4.64, \"in\": 0.13, \"out\": 2.04, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_06\", \"offset\": 4.74, \"seconds\": 2.4, \"text\": \"That is Ilse's fork.\", \"speaker\": \"SEREN\"}\ns21_07:\n  dialogue {\"id\": \"d_s21_07_1\", \"source\": \"tts_s21_07/audio-1.mp3\", \"anchor\": \"s21_07\", \"offset\": 4.7, \"in\": 0.24, \"out\": 2.3, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_07\", \"offset\": 4.8, \"seconds\": 2.5, \"text\": \"And that's her daughter's note.\", \"speaker\": \"BRAM\"}\n\nThe voice-over sheet (lines not in sync: the take whole, a subtitle per sentence where the take says it):\ns21_01:\n  dialogue {\"id\": \"d_s21_01\", \"source\": \"tts_s21_01/audio-1.mp3\", \"anchor\": \"s21_01\", \"offset\": 1.0, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s21_01\", \"offset\": 1.26, \"seconds\": 1.2, \"text\": \"Lark!\", \"speaker\": \"BRAM\"}\n\nThe music sheet:\n  music {\"id\": \"m13_the_strike-1\", \"source\": \"mus_m13_the_strike/audio-1.mp3\", \"anchor\": \"s18_01\", \"offset\": 0, \"in\": 0, \"out\": 99.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m14_hold_the_note-2\", \"source\": \"mus_m14_hold_the_note/audio-1.mp3\", \"anchor\": \"s21_01\", \"offset\": 0, \"in\": 0, \"out\": 43.2, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n\nAnswer with the timeline only: one JSON object in one ```json fenced block, nothing before or after it.",
+      "tokens": {
+        "input": 9846,
+        "output": 3556
+      }
+    },
+    {
+      "id": "ed_R6",
+      "title": "Editor · R6",
+      "column": 2,
+      "row": 5,
+      "status": "done",
+      "seconds": 38,
+      "outputType": "markdown",
+      "output": "```json\n{\n  \"schema\": \"awwo.timeline/1\",\n  \"name\": \"r6\",\n  \"output\": {\n    \"width\": 1680,\n    \"height\": 720,\n    \"fit\": \"cover\",\n    \"fps\": 24,\n    \"crf\": 18,\n    \"loudnessLUFS\": -16,\n    \"truePeakDb\": -1,\n    \"stillsEverySeconds\": 8\n  },\n  \"tracks\": {\n    \"video\": [\n      {\"id\": \"s22_01\", \"source\": \"vid_s22_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s22_02\", \"source\": \"vid_s22_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s22_03\", \"source\": \"vid_s22_03/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s22_04\", \"source\": \"vid_s22_04/video-1.mp4\", \"in\": 0, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s22_05\", \"source\": \"vid_s22_05/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s22_06\", \"source\": \"vid_s22_06/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s23_01\", \"source\": \"vid_s23_01/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s23_02\", \"source\": \"vid_s23_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s23_03\", \"source\": \"vid_s23_03/video-1.mp4\", \"in\": 0, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s23_04\", \"source\": \"vid_s23_04/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s23_05\", \"source\": \"vid_s23_05/video-1.mp4\", \"in\": 0, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s24_01\", \"source\": \"vid_s24_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s24_02\", \"source\": \"vid_s24_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s25_01\", \"source\": \"vid_s25_01/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s25_02\", \"source\": \"vid_s25_02/video-1.mp4\", \"in\": 0.2, \"out\": 6.8, \"clipAudioDb\": null},\n      {\"id\": \"s25_03\", \"source\": \"vid_s25_03/video-1.mp4\", \"in\": 0.2, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s25_04\", \"source\": \"vid_s25_04/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_01\", \"source\": \"vid_s26_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_02\", \"source\": \"vid_s26_02/video-1.mp4\", \"in\": 0.2, \"out\": 8.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_03\", \"source\": \"vid_s26_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_04\", \"source\": \"vid_s26_04/video-1.mp4\", \"in\": 0, \"out\": 4.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_05\", \"source\": \"vid_s26_05/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s26_06\", \"source\": \"vid_s26_06/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s27_01\", \"source\": \"vid_s27_01/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s27_02\", \"source\": \"vid_s27_02/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null},\n      {\"id\": \"s27_03\", \"source\": \"vid_s27_03/video-1.mp4\", \"in\": 0, \"out\": 5.8, \"clipAudioDb\": null},\n      {\"id\": \"s27_04\", \"source\": \"vid_s27_04/video-1.mp4\", \"in\": 0.2, \"out\": 7.8, \"clipAudioDb\": null}\n    ],\n    \"dialogue\": [\n      {\"id\": \"d_s22_04_1\", \"source\": \"tts_s22_04/audio-1.mp3\", \"anchor\": \"s22_04\", \"offset\": 3.71, \"in\": 0.21, \"out\": 1.37, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s22_04_2\", \"source\": \"tts_s22_04/audio-1.mp3\", \"anchor\": \"s22_04\", \"offset\": 5.37, \"in\": 1.56, \"out\": 3.48, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_01_1\", \"source\": \"tts_s23_01/audio-1.mp3\", \"anchor\": \"s23_01\", \"offset\": 4.41, \"in\": 0.14, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_03_1\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 3.09, \"in\": 0.0, \"out\": 1.08, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_03_2\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 4.47, \"in\": 1.85, \"out\": 3.29, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_03_3\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 6.17, \"in\": 3.57, \"out\": 4.5, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_04_1\", \"source\": \"tts_s23_04/audio-1.mp3\", \"anchor\": \"s23_04\", \"offset\": 3.87, \"in\": 0.19, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s23_05_1\", \"source\": \"tts_s23_05/audio-1.mp3\", \"anchor\": \"s23_05\", \"offset\": 2.14, \"in\": 0.16, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s25_04_1\", \"source\": \"tts_s25_04/audio-1.mp3\", \"anchor\": \"s25_04\", \"offset\": 0.45, \"in\": 0.11, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s25_04_2\", \"source\": \"tts_s25_04/audio-1.mp3\", \"anchor\": \"s25_04\", \"offset\": 1.66, \"in\": 1.65, \"out\": 2.71, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s26_03_1\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 0.69, \"in\": 0.16, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s26_03_2\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 2.4, \"in\": 1.08, \"out\": 3.19, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s26_03_3\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 4.67, \"in\": 3.26, \"out\": 4.06, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s26_04_1\", \"source\": \"tts_s26_04/audio-1.mp3\", \"anchor\": \"s26_04\", \"offset\": 4.1, \"in\": 0.09, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s26_05_1\", \"source\": \"tts_s26_05/audio-1.mp3\", \"anchor\": \"s26_05\", \"offset\": 2.49, \"in\": 0.09, \"out\": 2.36, \"gainDb\": 0, \"fx\": \"radio\"},\n      {\"id\": \"d_s26_06_1\", \"source\": \"tts_s26_06/audio-1.mp3\", \"anchor\": \"s26_06\", \"offset\": 4.76, \"in\": 0.25, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"dry\"},\n      {\"id\": \"d_s27_03_1\", \"source\": \"tts_s27_03/audio-1.mp3\", \"anchor\": \"s27_03\", \"offset\": 4.92, \"in\": 0.03, \"out\": 1.08, \"gainDb\": 0, \"fx\": \"dry\"}\n    ],\n    \"music\": [\n      {\"id\": \"m15_escape-1\", \"source\": \"mus_m15_escape/audio-1.mp3\", \"anchor\": \"s22_01\", \"offset\": 0, \"in\": 0, \"out\": 85.8, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m16_seren_hears-2\", \"source\": \"mus_m16_seren_hears/audio-1.mp3\", \"anchor\": \"s25_01\", \"offset\": 0, \"in\": 0, \"out\": 23.6, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"m17_the_weir-3\", \"source\": \"mus_m17_the_weir/audio-1.mp3\", \"anchor\": \"s26_01\", \"offset\": 0, \"in\": 0, \"out\": 38.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5},\n      {\"id\": \"bed-s27_01\", \"source\": \"mus_m17_the_weir/audio-1.mp3\", \"anchor\": \"s27_01\", \"offset\": 0, \"in\": 0, \"out\": 7.6, \"loop\": true, \"gainDb\": -16, \"fadeIn\": 1.5, \"fadeOut\": 1.5},\n      {\"id\": \"m18_new_note-5\", \"source\": \"mus_m18_new_note/audio-1.mp3\", \"anchor\": \"s27_02\", \"offset\": 0, \"in\": 0, \"out\": 21.0, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n    ],\n    \"subtitles\": [\n      {\"anchor\": \"s22_04\", \"offset\": 3.81, \"seconds\": 1.56, \"text\": \"They aim for the bell.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s22_04\", \"offset\": 5.47, \"seconds\": 1.83, \"text\": \"They want it quiet, not broken.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s23_01\", \"offset\": 4.51, \"seconds\": 1.79, \"text\": \"I've never rung a ship.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s23_03\", \"offset\": 3.19, \"seconds\": 1.28, \"text\": \"That's my note.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s23_03\", \"offset\": 4.57, \"seconds\": 1.6, \"text\": \"It was never in my head.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s23_03\", \"offset\": 6.27, \"seconds\": 2.0, \"text\": \"It was her.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s23_04\", \"offset\": 3.97, \"seconds\": 1.33, \"text\": \"Then ring her!\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s23_05\", \"offset\": 2.24, \"seconds\": 1.6, \"text\": \"Ring out.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s25_04\", \"offset\": 0.55, \"seconds\": 1.11, \"text\": \"Provost.\", \"speaker\": \"PRIMATE\"},\n      {\"anchor\": \"s25_04\", \"offset\": 1.76, \"seconds\": 2.0, \"text\": \"Find the girl.\", \"speaker\": \"PRIMATE\"},\n      {\"anchor\": \"s26_03\", \"offset\": 0.79, \"seconds\": 3.88, \"text\": \"Unknown bell, you rang in on an unscored note.\", \"speaker\": \"IMRE\"},\n      {\"anchor\": \"s26_03\", \"offset\": 4.77, \"seconds\": 1.53, \"text\": \"Where from?\", \"speaker\": \"IMRE\"},\n      {\"anchor\": \"s26_04\", \"offset\": 4.2, \"seconds\": 1.1, \"text\": \"Corrow.\", \"speaker\": \"LARK\"},\n      {\"anchor\": \"s26_05\", \"offset\": 2.59, \"seconds\": 2.8, \"text\": \"Nobody rings out of Corrow.\", \"speaker\": \"IMRE\"},\n      {\"anchor\": \"s26_06\", \"offset\": 4.86, \"seconds\": 1.44, \"text\": \"She just did.\", \"speaker\": \"KESH\"},\n      {\"anchor\": \"s27_03\", \"offset\": 5.02, \"seconds\": 1.28, \"text\": \"There's another one.\", \"speaker\": \"LARK\"}\n    ]\n  },\n  \"mix\": {\n    \"levels\": {\"dialogue\": -20, \"music\": -26},\n    \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}\n  }\n}\n```",
+      "brief": "You are the editor of THE LONG CHORD, Episode I: FORETONE, an original space-opera film. You cut reel R6 (SC22-SC27,\n27 shots) by writing the reel's timeline for the edit node, which renders it with ffmpeg.\n\nYour inputs list the files the canvas made, one block per node: the clips (vid_<shot>, generated at the shot's length; their\nown sound is not used), the voice takes (tts_<shot>) and the score cues (mus_<cue>). Name every file exactly as its block\nlists it (\"<node id>/<file name>\"); never invent a name. The sheets below name the files the canvas made; if a block lists\nanother name for one of them, use the block's name and change nothing else.\n\nThe reel, in order:\n\n| shot | scene | seconds | clip node | dialogue |\n|---|---|---|---|---|\n| s22_01 | sc22 | 7 | vid_s22_01 | — |\n| s22_02 | sc22 | 7 | vid_s22_02 | — |\n| s22_03 | sc22 | 6 | vid_s22_03 | — |\n| s22_04 | sc22 | 7 | vid_s22_04 | KESH: \"They aim for the bell. They want it quiet, not broken.\" (IN SYNC) |\n| s22_05 | sc22 | 7 | vid_s22_05 | — |\n| s22_06 | sc22 | 6 | vid_s22_06 | — |\n| s23_01 | sc23 | 6 | vid_s23_01 | LARK: \"I've never rung a ship.\" (IN SYNC) |\n| s23_02 | sc23 | 8 | vid_s23_02 | — |\n| s23_03 | sc23 | 8 | vid_s23_03 | LARK: \"That's my note.\"; LARK: \"It was never in my head. It was her.\" (IN SYNC) |\n| s23_04 | sc23 | 5 | vid_s23_04 | KESH: \"Then ring her!\" (IN SYNC) |\n| s23_05 | sc23 | 8 | vid_s23_05 | LARK: \"Ring out.\" (IN SYNC) |\n| s24_01 | sc24 | 8 | vid_s24_01 | — |\n| s24_02 | sc24 | 7 | vid_s24_02 | — |\n| s25_01 | sc25 | 7 | vid_s25_01 | — |\n| s25_02 | sc25 | 7 | vid_s25_02 | — |\n| s25_03 | sc25 | 6 | vid_s25_03 | — |\n| s25_04 | sc25 | 5 | vid_s25_04 | PRIMATE: \"Provost. Find the girl.\" (IN SYNC) |\n| s26_01 | sc26 | 8 | vid_s26_01 | — |\n| s26_02 | sc26 | 9 | vid_s26_02 | — |\n| s26_03 | sc26 | 6 | vid_s26_03 | IMRE: \"Unknown bell, you rang in on an unscored note. Where from?\" (IN SYNC) |\n| s26_04 | sc26 | 5 | vid_s26_04 | LARK: \"Corrow.\" (IN SYNC) |\n| s26_05 | sc26 | 6 | vid_s26_05 | IMRE: \"Nobody rings out of Corrow.\" (IN SYNC) |\n| s26_06 | sc26 | 6 | vid_s26_06 | KESH: \"She just did.\" (IN SYNC) |\n| s27_01 | sc27 | 8 | vid_s27_01 | — |\n| s27_02 | sc27 | 8 | vid_s27_02 | — |\n| s27_03 | sc27 | 6 | vid_s27_03 | LARK: \"There's another one.\" (IN SYNC) |\n| s27_04 | sc27 | 8 | vid_s27_04 | — |\n\nWrite the timeline exactly to this schema (awwo.timeline/1; anything else is refused):\n- \"schema\": \"awwo.timeline/1\", \"name\": \"r6\".\n- \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 8}.\n- \"tracks.video\": the clips in shot order, one item each. A clip item is {\"id\": \"<shot id>\", \"source\": \"<clip file>\", \"in\": 0.2,\n  \"out\": <seconds − 0.2>, \"clipAudioDb\": null}, with no \"at\" and no \"transition\" (straight cuts), EXCEPT a shot whose line is\n  IN SYNC: its item has \"in\": 0, \"out\": <seconds − 0.2>, or, when the sync sheet gives that shot a video item, exactly that item.\n- \"tracks.dialogue\": the sync sheet's and the voice-over sheet's dialogue items, copied exactly as written, in shot order.\n- \"tracks.music\": the music sheet's items, copied exactly as written, in that order. Every second of the reel has sound\n  under it: a cue under the shots that name it, and under shots that name none, the cue before at 16 dB down (a bed).\n- \"tracks.subtitles\": the sync sheet's and the voice-over sheet's subtitle items, copied exactly as written, in shot order.\n- Every track (\"video\", \"dialogue\", \"music\", \"subtitles\") is a JSON list, even with one item.\n- \"mix\": {\"levels\": {\"dialogue\": -20, \"music\": -26}, \"ducking\": {\"music\": -9, \"sfx\": -6, \"attack\": 0.12, \"release\": 0.5}}.\n\nThe sync sheet. The clips with a line IN SYNC were made with their line's take as their voice; the model puts a line where\nthe action allows and paces it its own way, so these numbers were measured from each clip's own sound: each take is cut at\nits pauses into pieces, a piece plays the take from \"in\" to \"out\" (seconds in the take file), starting \"offset\" seconds into\nits shot. A \"video\" line is that shot's item in tracks.video. Copy every item as written, in this order; change nothing.\ns22_04:\n  dialogue {\"id\": \"d_s22_04_1\", \"source\": \"tts_s22_04/audio-1.mp3\", \"anchor\": \"s22_04\", \"offset\": 3.71, \"in\": 0.21, \"out\": 1.37, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s22_04_2\", \"source\": \"tts_s22_04/audio-1.mp3\", \"anchor\": \"s22_04\", \"offset\": 5.37, \"in\": 1.56, \"out\": 3.48, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s22_04\", \"offset\": 3.81, \"seconds\": 1.56, \"text\": \"They aim for the bell.\", \"speaker\": \"KESH\"}\n  subtitle {\"anchor\": \"s22_04\", \"offset\": 5.47, \"seconds\": 1.83, \"text\": \"They want it quiet, not broken.\", \"speaker\": \"KESH\"}\ns23_01:\n  dialogue {\"id\": \"d_s23_01_1\", \"source\": \"tts_s23_01/audio-1.mp3\", \"anchor\": \"s23_01\", \"offset\": 4.41, \"in\": 0.14, \"out\": 1.56, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s23_01\", \"offset\": 4.51, \"seconds\": 1.79, \"text\": \"I've never rung a ship.\", \"speaker\": \"LARK\"}\ns23_03:\n  dialogue {\"id\": \"d_s23_03_1\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 3.09, \"in\": 0.0, \"out\": 1.08, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s23_03_2\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 4.47, \"in\": 1.85, \"out\": 3.29, \"gainDb\": 0, \"fx\": \"dry\"}\n  dialogue {\"id\": \"d_s23_03_3\", \"source\": \"tts_s23_03/audio-1.mp3\", \"anchor\": \"s23_03\", \"offset\": 6.17, \"in\": 3.57, \"out\": 4.5, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s23_03\", \"offset\": 3.19, \"seconds\": 1.28, \"text\": \"That's my note.\", \"speaker\": \"LARK\"}\n  subtitle {\"anchor\": \"s23_03\", \"offset\": 4.57, \"seconds\": 1.6, \"text\": \"It was never in my head.\", \"speaker\": \"LARK\"}\n  subtitle {\"anchor\": \"s23_03\", \"offset\": 6.27, \"seconds\": 2.0, \"text\": \"It was her.\", \"speaker\": \"LARK\"}\ns23_04:\n  dialogue {\"id\": \"d_s23_04_1\", \"source\": \"tts_s23_04/audio-1.mp3\", \"anchor\": \"s23_04\", \"offset\": 3.87, \"in\": 0.19, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s23_04\", \"offset\": 3.97, \"seconds\": 1.33, \"text\": \"Then ring her!\", \"speaker\": \"KESH\"}\ns23_05:\n  dialogue {\"id\": \"d_s23_05_1\", \"source\": \"tts_s23_05/audio-1.mp3\", \"anchor\": \"s23_05\", \"offset\": 2.14, \"in\": 0.16, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s23_05\", \"offset\": 2.24, \"seconds\": 1.6, \"text\": \"Ring out.\", \"speaker\": \"LARK\"}\ns25_04:\n  dialogue {\"id\": \"d_s25_04_1\", \"source\": \"tts_s25_04/audio-1.mp3\", \"anchor\": \"s25_04\", \"offset\": 0.45, \"in\": 0.11, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"radio\"}\n  dialogue {\"id\": \"d_s25_04_2\", \"source\": \"tts_s25_04/audio-1.mp3\", \"anchor\": \"s25_04\", \"offset\": 1.66, \"in\": 1.65, \"out\": 2.71, \"gainDb\": 0, \"fx\": \"radio\"}\n  subtitle {\"anchor\": \"s25_04\", \"offset\": 0.55, \"seconds\": 1.11, \"text\": \"Provost.\", \"speaker\": \"PRIMATE\"}\n  subtitle {\"anchor\": \"s25_04\", \"offset\": 1.76, \"seconds\": 2.0, \"text\": \"Find the girl.\", \"speaker\": \"PRIMATE\"}\ns26_03:\n  dialogue {\"id\": \"d_s26_03_1\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 0.69, \"in\": 0.16, \"out\": 1.05, \"gainDb\": 0, \"fx\": \"radio\"}\n  dialogue {\"id\": \"d_s26_03_2\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 2.4, \"in\": 1.08, \"out\": 3.19, \"gainDb\": 0, \"fx\": \"radio\"}\n  dialogue {\"id\": \"d_s26_03_3\", \"source\": \"tts_s26_03/audio-1.mp3\", \"anchor\": \"s26_03\", \"offset\": 4.67, \"in\": 3.26, \"out\": 4.06, \"gainDb\": 0, \"fx\": \"radio\"}\n  subtitle {\"anchor\": \"s26_03\", \"offset\": 0.79, \"seconds\": 3.88, \"text\": \"Unknown bell, you rang in on an unscored note.\", \"speaker\": \"IMRE\"}\n  subtitle {\"anchor\": \"s26_03\", \"offset\": 4.77, \"seconds\": 1.53, \"text\": \"Where from?\", \"speaker\": \"IMRE\"}\ns26_04:\n  dialogue {\"id\": \"d_s26_04_1\", \"source\": \"tts_s26_04/audio-1.mp3\", \"anchor\": \"s26_04\", \"offset\": 4.1, \"in\": 0.09, \"out\": 0.82, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s26_04\", \"offset\": 4.2, \"seconds\": 1.1, \"text\": \"Corrow.\", \"speaker\": \"LARK\"}\ns26_05:\n  dialogue {\"id\": \"d_s26_05_1\", \"source\": \"tts_s26_05/audio-1.mp3\", \"anchor\": \"s26_05\", \"offset\": 2.49, \"in\": 0.09, \"out\": 2.36, \"gainDb\": 0, \"fx\": \"radio\"}\n  subtitle {\"anchor\": \"s26_05\", \"offset\": 2.59, \"seconds\": 2.8, \"text\": \"Nobody rings out of Corrow.\", \"speaker\": \"IMRE\"}\ns26_06:\n  dialogue {\"id\": \"d_s26_06_1\", \"source\": \"tts_s26_06/audio-1.mp3\", \"anchor\": \"s26_06\", \"offset\": 4.76, \"in\": 0.25, \"out\": 1.27, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s26_06\", \"offset\": 4.86, \"seconds\": 1.44, \"text\": \"She just did.\", \"speaker\": \"KESH\"}\ns27_03:\n  dialogue {\"id\": \"d_s27_03_1\", \"source\": \"tts_s27_03/audio-1.mp3\", \"anchor\": \"s27_03\", \"offset\": 4.92, \"in\": 0.03, \"out\": 1.08, \"gainDb\": 0, \"fx\": \"dry\"}\n  subtitle {\"anchor\": \"s27_03\", \"offset\": 5.02, \"seconds\": 1.28, \"text\": \"There's another one.\", \"speaker\": \"LARK\"}\n\nThe voice-over sheet (lines not in sync: the take whole, a subtitle per sentence where the take says it):\n(none in this reel)\n\nThe music sheet:\n  music {\"id\": \"m15_escape-1\", \"source\": \"mus_m15_escape/audio-1.mp3\", \"anchor\": \"s22_01\", \"offset\": 0, \"in\": 0, \"out\": 85.8, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m16_seren_hears-2\", \"source\": \"mus_m16_seren_hears/audio-1.mp3\", \"anchor\": \"s25_01\", \"offset\": 0, \"in\": 0, \"out\": 23.6, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"m17_the_weir-3\", \"source\": \"mus_m17_the_weir/audio-1.mp3\", \"anchor\": \"s26_01\", \"offset\": 0, \"in\": 0, \"out\": 38.4, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n  music {\"id\": \"bed-s27_01\", \"source\": \"mus_m17_the_weir/audio-1.mp3\", \"anchor\": \"s27_01\", \"offset\": 0, \"in\": 0, \"out\": 7.6, \"loop\": true, \"gainDb\": -16, \"fadeIn\": 1.5, \"fadeOut\": 1.5}\n  music {\"id\": \"m18_new_note-5\", \"source\": \"mus_m18_new_note/audio-1.mp3\", \"anchor\": \"s27_02\", \"offset\": 0, \"in\": 0, \"out\": 21.0, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 2, \"fadeOut\": 2.5}\n\nAnswer with the timeline only: one JSON object in one ```json fenced block, nothing before or after it.",
+      "tokens": {
+        "input": 13034,
+        "output": 4832
       }
     },
     {
@@ -239,8 +532,8 @@ const record: ProductionRunRecord = {
       "outputType": "video",
       "film": {
         "name": "r2.mp4",
-        "bytes": 58532361,
-        "sha256": "27b8238c85426fa44b42371ab3db3bd32e510941cb23addbb2c68543aa191309",
+        "bytes": 59126148,
+        "sha256": "ea568fea90ccc52bdd715667cd9bfc8751d8bdb9def15fcb9f846ef4ee887bb7",
         "seconds": 147.70833333333334,
         "frames": 3545,
         "fps": 24,
@@ -261,6 +554,130 @@ const record: ProductionRunRecord = {
       }
     },
     {
+      "id": "edit_R3",
+      "title": "Edit · R3",
+      "column": 3,
+      "row": 2,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "r3.mp4",
+        "bytes": 63872049,
+        "sha256": "bef1b4b64eef98654e19cbdc77ce52e0ed914182de171feeb4a904cdd10811f9",
+        "seconds": 133.375,
+        "frames": 3201,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.16,
+          "truePeakDb": -0.91,
+          "rangeLU": 16.8
+        },
+        "warnings": [
+          "audio_cut_at_end:m09_launch-4"
+        ],
+        "stillsEverySeconds": 8,
+        "timeline": {
+          "from": "ed_R3"
+        }
+      }
+    },
+    {
+      "id": "edit_R4",
+      "title": "Edit · R4",
+      "column": 3,
+      "row": 3,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "r4.mp4",
+        "bytes": 54207190,
+        "sha256": "6faa7dc5e1a8ec2e915dc0644b2da210e82265a714fcfdf062a50bbd4e2810e5",
+        "seconds": 124.58333333333333,
+        "frames": 2990,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.2,
+          "truePeakDb": -0.99,
+          "rangeLU": 10
+        },
+        "warnings": [
+          "audio_cut_at_end:m12_quieting-3"
+        ],
+        "stillsEverySeconds": 8,
+        "timeline": {
+          "from": "ed_R4"
+        }
+      }
+    },
+    {
+      "id": "edit_R5",
+      "title": "Edit · R5",
+      "column": 3,
+      "row": 4,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "r5.mp4",
+        "bytes": 84303847,
+        "sha256": "839ea6d5cfa5f44b2d40145c266ec6d24e6cc6957447b3120e4241ee27ff5fd7",
+        "seconds": 142.29166666666666,
+        "frames": 3415,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -15.77,
+          "truePeakDb": -0.45,
+          "rangeLU": 14.4
+        },
+        "warnings": [
+          "audio_cut_at_end:m14_hold_the_note-2"
+        ],
+        "stillsEverySeconds": 8,
+        "timeline": {
+          "from": "ed_R5"
+        }
+      }
+    },
+    {
+      "id": "edit_R6",
+      "title": "Edit · R6",
+      "column": 3,
+      "row": 5,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "r6.mp4",
+        "bytes": 96814550,
+        "sha256": "2b252d47cd91258353d66c19e65097a31dbd9b236431f4adce8a09316878d41f",
+        "seconds": 176.04166666666666,
+        "frames": 4225,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.05,
+          "truePeakDb": -0.91,
+          "rangeLU": 14.5
+        },
+        "warnings": [
+          "audio_cut_at_end:m18_new_note-5"
+        ],
+        "stillsEverySeconds": 8,
+        "timeline": {
+          "from": "ed_R6"
+        }
+      }
+    },
+    {
       "id": "edit_act1",
       "title": "Edit · Act I",
       "column": 4,
@@ -270,8 +687,8 @@ const record: ProductionRunRecord = {
       "outputType": "video",
       "film": {
         "name": "act-1.mp4",
-        "bytes": 151033687,
-        "sha256": "8bdb2de30fda702c7516ac6e87813a07031547b9e0b739ad71b131f8a8f6b6b6",
+        "bytes": 151460574,
+        "sha256": "9e565fccc9687f194edd899cc6485f8e12f33ef2b8bcc3e2132570e9258f3640",
         "seconds": 343.375,
         "frames": 8241,
         "fps": 24,
@@ -288,6 +705,93 @@ const record: ProductionRunRecord = {
           "own": "{\"schema\": \"awwo.timeline/1\", \"name\": \"act-1\", \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 15}, \"tracks\": {\"video\": [{\"id\": \"R1\", \"source\": \"edit_R1/r1.mp4\", \"in\": 0, \"out\": 195.647, \"clipAudioDb\": 0}, {\"id\": \"R2\", \"source\": \"edit_R2/r2.mp4\", \"in\": 0, \"out\": 147.688, \"clipAudioDb\": 0}], \"dialogue\": [], \"music\": [{\"id\": \"bed_sc08\", \"source\": \"mus_m06_census/audio-1.mp3\", \"anchor\": \"R2\", \"offset\": 85.792, \"in\": 18.5, \"out\": 34.208, \"gainDb\": -16, \"fadeIn\": 1.5, \"fadeOut\": 1.5}], \"subtitles\": [{\"anchor\": \"R1\", \"offset\": 57.5, \"seconds\": 1.6, \"text\": \"Another one.\"}, {\"anchor\": \"R1\", \"offset\": 64.603, \"seconds\": 2.0, \"text\": \"It's louder today.\"}, {\"anchor\": \"R1\", \"offset\": 73.175, \"seconds\": 2.22, \"text\": \"Nothing is louder here.\"}, {\"anchor\": \"R1\", \"offset\": 75.495, \"seconds\": 2.4, \"text\": \"Not for twenty years.\"}, {\"anchor\": \"R1\", \"offset\": 79.667, \"seconds\": 3.6, \"text\": \"Then why can I still hear it?\"}, {\"anchor\": \"R1\", \"offset\": 137.267, \"seconds\": 2.0, \"text\": \"People of Corrow.\"}, {\"anchor\": \"R1\", \"offset\": 139.567, \"seconds\": 2.4, \"text\": \"The Chord is dying.\"}, {\"anchor\": \"R1\", \"offset\": 143.017, \"seconds\": 2.45, \"text\": \"We keep what is left.\"}, {\"anchor\": \"R1\", \"offset\": 145.958, \"seconds\": 4.0, \"text\": \"At dawn, Corrow will be quieted.\"}, {\"anchor\": \"R1\", \"offset\": 168.008, \"seconds\": 1.2, \"text\": \"Quieted.\"}, {\"anchor\": \"R1\", \"offset\": 169.468, \"seconds\": 1.54, \"text\": \"What does that even mean?\"}, {\"anchor\": \"R1\", \"offset\": 172.5, \"seconds\": 1.98, \"text\": \"It means gone.\"}, {\"anchor\": \"R1\", \"offset\": 174.58, \"seconds\": 1.49, \"text\": \"No ship in.\"}, {\"anchor\": \"R1\", \"offset\": 176.17, \"seconds\": 1.57, \"text\": \"No ship out.\"}, {\"anchor\": \"R1\", \"offset\": 177.84, \"seconds\": 0.96, \"text\": \"Ever.\"}, {\"anchor\": \"R1\", \"offset\": 179.332, \"seconds\": 2.26, \"text\": \"They can't close a whole world.\"}, {\"anchor\": \"R1\", \"offset\": 182.083, \"seconds\": 2.4, \"text\": \"They closed your mother's.\"}, {\"anchor\": \"R1\", \"offset\": 194.535, \"seconds\": 1.132, \"text\": \"Then we leave tonight.\"}, {\"anchor\": \"R2\", \"offset\": 21.597, \"seconds\": 1.87, \"text\": \"You built a ship.\"}, {\"anchor\": \"R2\", \"offset\": 23.988, \"seconds\": 1.52, \"text\": \"Twenty years.\"}, {\"anchor\": \"R2\", \"offset\": 25.608, \"seconds\": 2.8, \"text\": \"One scrap at a time.\"}, {\"anchor\": \"R2\", \"offset\": 31.75, \"seconds\": 3.6, \"text\": \"She has never sung. Not once.\"}, {\"anchor\": \"R2\", \"offset\": 41.133, \"seconds\": 2.5, \"text\": \"Bram. It's coming from her.\"}, {\"anchor\": \"R2\", \"offset\": 97.818, \"seconds\": 2.0, \"text\": \"There you are.\"}, {\"anchor\": \"R2\", \"offset\": 100.5, \"seconds\": 2.4, \"text\": \"She's a tuner's girl.\"}, {\"anchor\": \"R2\", \"offset\": 103.23, \"seconds\": 2.0, \"text\": \"She hears nothing.\"}, {\"anchor\": \"R2\", \"offset\": 107.292, \"seconds\": 2.0, \"text\": \"Everyone hears nothing here.\"}, {\"anchor\": \"R2\", \"offset\": 109.392, \"seconds\": 2.4, \"text\": \"That is the point.\"}, {\"anchor\": \"R2\", \"offset\": 114.053, \"seconds\": 1.6, \"text\": \"Little bird.\"}, {\"anchor\": \"R2\", \"offset\": 115.933, \"seconds\": 2.95, \"text\": \"There is no air left here to sing in.\"}, {\"anchor\": \"R2\", \"offset\": 119.375, \"seconds\": 1.6, \"text\": \"I'll find you.\"}]}, \"mix\": {\"levels\": {\"music\": -26}}}"
         }
       }
+    },
+    {
+      "id": "edit_act2",
+      "title": "Edit · Act II",
+      "column": 4,
+      "row": 1,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "act-2.mp4",
+        "bytes": 115395851,
+        "sha256": "00478c2466c4ceb808a9d9f472caa888a60979d74eca24115461c964e27c9602",
+        "seconds": 257.9583333333333,
+        "frames": 6191,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.1,
+          "truePeakDb": -0.94,
+          "rangeLU": 9.6
+        },
+        "warnings": [],
+        "stillsEverySeconds": 15,
+        "timeline": {
+          "own": "{\"schema\": \"awwo.timeline/1\", \"name\": \"act-2\", \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 15}, \"tracks\": {\"video\": [{\"id\": \"edit_R3\", \"source\": \"edit_R3/r3.mp4\", \"in\": 0, \"out\": 133.355, \"clipAudioDb\": 0}, {\"id\": \"edit_R4\", \"source\": \"edit_R4/r4.mp4\", \"in\": 0, \"out\": 124.563, \"clipAudioDb\": 0}], \"dialogue\": [], \"music\": [], \"subtitles\": [{\"anchor\": \"edit_R3\", \"offset\": 55.333, \"seconds\": 2.77, \"text\": \"The Chord is dying, Lark.\"}, {\"anchor\": \"edit_R3\", \"offset\": 58.203, \"seconds\": 2.43, \"text\": \"Every year it rings softer.\"}, {\"anchor\": \"edit_R3\", \"offset\": 60.665, \"seconds\": 4.5, \"text\": \"We hold what is left, so someone can still cross the dark.\"}, {\"anchor\": \"edit_R3\", \"offset\": 68.467, \"seconds\": 2.75, \"text\": \"By shutting us in it.\"}, {\"anchor\": \"edit_R3\", \"offset\": 70.738, \"seconds\": 2.81, \"text\": \"Tomorrow this ring closes Corrow's still.\"}, {\"anchor\": \"edit_R3\", \"offset\": 73.648, \"seconds\": 2.27, \"text\": \"Gently, if a Hearer guides it.\"}, {\"anchor\": \"edit_R3\", \"offset\": 76.018, \"seconds\": 1.99, \"text\": \"Badly, if not.\"}, {\"anchor\": \"edit_R3\", \"offset\": 78.5, \"seconds\": 3.2, \"text\": \"Where did you get that fork?\"}, {\"anchor\": \"edit_R3\", \"offset\": 84.993, \"seconds\": 1.39, \"text\": \"My mother.\"}, {\"anchor\": \"edit_R3\", \"offset\": 86.625, \"seconds\": 1.6, \"text\": \"Ilse Anwen.\"}, {\"anchor\": \"edit_R3\", \"offset\": 88.475, \"seconds\": 2.29, \"text\": \"She heard more than any of us.\"}, {\"anchor\": \"edit_R3\", \"offset\": 90.865, \"seconds\": 1.31, \"text\": \"It broke her.\"}, {\"anchor\": \"edit_R3\", \"offset\": 94.027, \"seconds\": 1.94, \"text\": \"You broke her.\"}, {\"anchor\": \"edit_R3\", \"offset\": 98.718, \"seconds\": 2.04, \"text\": \"I made her quiet.\"}, {\"anchor\": \"edit_R3\", \"offset\": 110.083, \"seconds\": 1.64, \"text\": \"Come on, girl.\"}, {\"anchor\": \"edit_R3\", \"offset\": 111.823, \"seconds\": 1.25, \"text\": \"Fly first.\"}, {\"anchor\": \"edit_R3\", \"offset\": 113.173, \"seconds\": 0.96, \"text\": \"Sing later.\"}, {\"anchor\": \"edit_R4\", \"offset\": 19.107, \"seconds\": 1.36, \"text\": \"What is that?\"}, {\"anchor\": \"edit_R4\", \"offset\": 24.158, \"seconds\": 2.1, \"text\": \"You can hear it?\"}, {\"anchor\": \"edit_R4\", \"offset\": 26.26, \"seconds\": 1.2, \"text\": \"No.\"}, {\"anchor\": \"edit_R4\", \"offset\": 27.61, \"seconds\": 1.75, \"text\": \"I can see it.\"}, {\"anchor\": \"edit_R4\", \"offset\": 29.46, \"seconds\": 2.51, \"text\": \"I was born on a bell-ship.\"}, {\"anchor\": \"edit_R4\", \"offset\": 32.07, \"seconds\": 1.98, \"text\": \"I remember bells.\"}, {\"anchor\": \"edit_R4\", \"offset\": 44.435, \"seconds\": 0.89, \"text\": \"Listen.\"}, {\"anchor\": \"edit_R4\", \"offset\": 45.425, \"seconds\": 4.4, \"text\": \"Tell me its note, and we close it gently.\"}, {\"anchor\": \"edit_R4\", \"offset\": 58.1, \"seconds\": 2.0, \"text\": \"It isn't fading.\"}, {\"anchor\": \"edit_R4\", \"offset\": 60.46, \"seconds\": 2.4, \"text\": \"They are drinking it.\"}, {\"anchor\": \"edit_R4\", \"offset\": 75.647, \"seconds\": 2.2, \"text\": \"You're not saving the Chord.\"}, {\"anchor\": \"edit_R4\", \"offset\": 77.947, \"seconds\": 2.0, \"text\": \"You're drinking it.\"}, {\"anchor\": \"edit_R4\", \"offset\": 83.058, \"seconds\": 2.8, \"text\": \"Tell me the note, Lark.\"}, {\"anchor\": \"edit_R4\", \"offset\": 112.22, \"seconds\": 1.2, \"text\": \"Primate.\"}, {\"anchor\": \"edit_R4\", \"offset\": 113.87, \"seconds\": 3.6, \"text\": \"Corrow will be quiet within the hour.\"}, {\"anchor\": \"edit_R4\", \"offset\": 119.332, \"seconds\": 2.0, \"text\": \"Let nothing ring.\"}]}}"
+        }
+      }
+    },
+    {
+      "id": "edit_act3",
+      "title": "Edit · Act III",
+      "column": 4,
+      "row": 2,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "act-3.mp4",
+        "bytes": 172462296,
+        "sha256": "5c161635d11cf7e04858e3bf02207d515b0fd085f8393897cbb1099320ff8e0e",
+        "seconds": 318.3333333333333,
+        "frames": 7640,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.1,
+          "truePeakDb": -0.93,
+          "rangeLU": 14.5
+        },
+        "warnings": [],
+        "stillsEverySeconds": 15,
+        "timeline": {
+          "own": "{\"schema\": \"awwo.timeline/1\", \"name\": \"act-3\", \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -1, \"stillsEverySeconds\": 15}, \"tracks\": {\"video\": [{\"id\": \"edit_R5\", \"source\": \"edit_R5/r5.mp4\", \"in\": 0, \"out\": 142.272, \"clipAudioDb\": 0}, {\"id\": \"edit_R6\", \"source\": \"edit_R6/r6.mp4\", \"in\": 0, \"out\": 176.022, \"clipAudioDb\": 0}], \"dialogue\": [], \"music\": [], \"subtitles\": [{\"anchor\": \"edit_R5\", \"offset\": 14.857, \"seconds\": 1.6, \"text\": \"Do it.\"}, {\"anchor\": \"edit_R5\", \"offset\": 37.035, \"seconds\": 1.2, \"text\": \"No!\"}, {\"anchor\": \"edit_R5\", \"offset\": 100.427, \"seconds\": 1.2, \"text\": \"Lark!\"}, {\"anchor\": \"edit_R5\", \"offset\": 105.65, \"seconds\": 4.5, \"text\": \"If I let go, it closes again.\"}, {\"anchor\": \"edit_R5\", \"offset\": 113.232, \"seconds\": 1.78, \"text\": \"Then I won't let go.\"}, {\"anchor\": \"edit_R5\", \"offset\": 115.112, \"seconds\": 0.77, \"text\": \"Go.\"}, {\"anchor\": \"edit_R5\", \"offset\": 115.982, \"seconds\": 1.86, \"text\": \"She's waiting for you.\"}, {\"anchor\": \"edit_R5\", \"offset\": 119.303, \"seconds\": 1.95, \"text\": \"Ring her, Lark.\"}, {\"anchor\": \"edit_R5\", \"offset\": 121.353, \"seconds\": 2.28, \"text\": \"She was always yours.\"}, {\"anchor\": \"edit_R5\", \"offset\": 133.448, \"seconds\": 2.4, \"text\": \"That is Ilse's fork.\"}, {\"anchor\": \"edit_R5\", \"offset\": 140.3, \"seconds\": 1.992, \"text\": \"And that's her daughter's note.\"}, {\"anchor\": \"edit_R6\", \"offset\": 22.56, \"seconds\": 1.56, \"text\": \"They aim for the bell.\"}, {\"anchor\": \"edit_R6\", \"offset\": 24.22, \"seconds\": 1.83, \"text\": \"They want it quiet, not broken.\"}, {\"anchor\": \"edit_R6\", \"offset\": 42.218, \"seconds\": 1.79, \"text\": \"I've never rung a ship.\"}, {\"anchor\": \"edit_R6\", \"offset\": 54.273, \"seconds\": 1.28, \"text\": \"That's my note.\"}, {\"anchor\": \"edit_R6\", \"offset\": 55.653, \"seconds\": 1.6, \"text\": \"It was never in my head.\"}, {\"anchor\": \"edit_R6\", \"offset\": 57.353, \"seconds\": 2.0, \"text\": \"It was her.\"}, {\"anchor\": \"edit_R6\", \"offset\": 62.845, \"seconds\": 1.33, \"text\": \"Then ring her!\"}, {\"anchor\": \"edit_R6\", \"offset\": 65.907, \"seconds\": 1.6, \"text\": \"Ring out.\"}, {\"anchor\": \"edit_R6\", \"offset\": 104.925, \"seconds\": 1.11, \"text\": \"Provost.\"}, {\"anchor\": \"edit_R6\", \"offset\": 106.135, \"seconds\": 2.0, \"text\": \"Find the girl.\"}, {\"anchor\": \"edit_R6\", \"offset\": 126.123, \"seconds\": 3.88, \"text\": \"Unknown bell, you rang in on an unscored note.\"}, {\"anchor\": \"edit_R6\", \"offset\": 130.103, \"seconds\": 1.53, \"text\": \"Where from?\"}, {\"anchor\": \"edit_R6\", \"offset\": 135.325, \"seconds\": 1.1, \"text\": \"Corrow.\"}, {\"anchor\": \"edit_R6\", \"offset\": 138.507, \"seconds\": 2.8, \"text\": \"Nobody rings out of Corrow.\"}, {\"anchor\": \"edit_R6\", \"offset\": 146.568, \"seconds\": 1.44, \"text\": \"She just did.\"}, {\"anchor\": \"edit_R6\", \"offset\": 167.687, \"seconds\": 1.28, \"text\": \"There's another one.\"}]}}"
+        }
+      }
+    },
+    {
+      "id": "edit_ep1",
+      "title": "Edit · Episode I",
+      "column": 5,
+      "row": 0,
+      "status": "done",
+      "kind": "edit",
+      "outputType": "video",
+      "film": {
+        "name": "episode-1.mp4",
+        "bytes": 270243384,
+        "sha256": "33773bc470e0c4679ade146758d656304e372fa599236a6b2cfe443e8dd39957",
+        "seconds": 951.6666666666666,
+        "frames": 22840,
+        "fps": 24,
+        "width": 1680,
+        "height": 720,
+        "loudness": {
+          "integratedLUFS": -16.17,
+          "truePeakDb": -1.86,
+          "rangeLU": 8.9
+        },
+        "warnings": [],
+        "stillsEverySeconds": 30,
+        "timeline": {
+          "own": "{\"schema\": \"awwo.timeline/1\", \"name\": \"episode-1\", \"output\": {\"width\": 1680, \"height\": 720, \"fit\": \"cover\", \"fps\": 24, \"crf\": 18, \"loudnessLUFS\": -16, \"truePeakDb\": -2, \"stillsEverySeconds\": 30}, \"tracks\": {\"video\": [{\"id\": \"edit_act1\", \"source\": \"edit_act1/act-1.mp4\", \"in\": 0, \"out\": 343.355, \"clipAudioDb\": 0}, {\"id\": \"edit_act2\", \"source\": \"edit_act2/act-2.mp4\", \"in\": 0, \"out\": 257.938, \"clipAudioDb\": 0}, {\"id\": \"edit_act3\", \"source\": \"edit_act3/act-3.mp4\", \"in\": 0, \"out\": 318.313, \"clipAudioDb\": 0}, {\"id\": \"end\", \"card\": \"<!doctype html>\\n<html>\\n<head>\\n<meta charset=\\\"utf-8\\\">\\n<style>\\n  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\\n  body { font-family: Georgia, \\\"Times New Roman\\\", serif; color: #f4f7ff; }\\n  .card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;\\n          opacity: 0; text-align: center; }\\n  /* The first end card (16 s): the figure no chart has shown (SC27), a ring inside a ring broken by one bright gap, drawn\\n     in one white line; then the title. The second card (end-cards-2) has what comes next and the credits. */\\n  .figure { animation: show 0s linear 0s forwards, hide 1.2s ease-in 7.2s forwards; }\\n  .figure svg { width: 34vh; height: 34vh; }\\n  .figure circle { fill: none; stroke: #f4f7ff; stroke-width: 1.4; stroke-linecap: round; }\\n  .outer { stroke-dasharray: 600; stroke-dashoffset: 600; animation: draw 3.2s ease-in-out 0.4s forwards; }\\n  .inner { stroke-dasharray: 360 400; stroke-dashoffset: 400; animation: draw-gap 2.6s ease-in-out 2.4s forwards; }\\n  .gap { fill: #f4f7ff; opacity: 0; animation: glow 1.6s ease-in-out 4.8s forwards; }\\n  .title { animation: show 1.4s ease-out 8.4s forwards, hide 1.2s ease-in 14.6s forwards; }\\n  .title h1 { font-weight: 300; font-size: 7.4vh; letter-spacing: 0.42em; margin: 0 0 0 0.42em; }\\n  @keyframes show { from { opacity: 0; } to { opacity: 1; } }\\n  @keyframes hide { from { opacity: 1; } to { opacity: 0; } }\\n  @keyframes draw { to { stroke-dashoffset: 0; } }\\n  @keyframes draw-gap { to { stroke-dashoffset: 40; } }\\n  @keyframes glow { 0% { opacity: 0; } 60% { opacity: 1; } 100% { opacity: 0.85; } }\\n</style>\\n</head>\\n<body>\\n  <div class=\\\"card figure\\\">\\n    <svg viewBox=\\\"0 0 220 220\\\" aria-hidden=\\\"true\\\">\\n      <circle class=\\\"outer\\\" cx=\\\"110\\\" cy=\\\"110\\\" r=\\\"95\\\"></circle>\\n      <circle class=\\\"inner\\\" cx=\\\"110\\\" cy=\\\"110\\\" r=\\\"63\\\" transform=\\\"rotate(-62 110 110)\\\"></circle>\\n      <circle class=\\\"gap\\\" cx=\\\"139.6\\\" cy=\\\"54.4\\\" r=\\\"3.2\\\"></circle>\\n    </svg>\\n  </div>\\n  <div class=\\\"card title\\\"><h1>THE LONG CHORD</h1></div>\\n</body>\\n</html>\\n\", \"seconds\": 16}, {\"id\": \"end-2\", \"card\": \"<!doctype html>\\n<html>\\n<head>\\n<meta charset=\\\"utf-8\\\">\\n<style>\\n  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }\\n  body { font-family: Georgia, \\\"Times New Roman\\\", serif; color: #f4f7ff; }\\n  .card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;\\n          opacity: 0; text-align: center; }\\n  /* The second end card (16 s): what comes next, then the credits, which count the film's own lineage. */\\n  .next { animation: show 1.4s ease-out 0.4s forwards, hide 1.2s ease-in 6.2s forwards; }\\n  .next p { font-size: 2.6vh; letter-spacing: 0.5em; margin: 0 0 2.4vh 0.5em; opacity: 0.7; }\\n  .next h2 { font-weight: 300; font-size: 4.6vh; letter-spacing: 0.3em; margin: 0 0 0 0.3em; }\\n  .credits { animation: show 1.4s ease-out 7.8s forwards, hide 1.6s ease-in 14.2s forwards; }\\n  .credits p { font-size: 2.5vh; line-height: 1.9; letter-spacing: 0.08em; margin: 0; opacity: 0.86; }\\n  .credits .lead { font-size: 3vh; letter-spacing: 0.24em; margin-bottom: 2.2vh; opacity: 1; }\\n  @keyframes show { from { opacity: 0; } to { opacity: 1; } }\\n  @keyframes hide { from { opacity: 1; } to { opacity: 0; } }\\n</style>\\n</head>\\n<body>\\n  <div class=\\\"card next\\\"><p>NEXT</p><h2>II · THE LISTENING HOUSE</h2></div>\\n  <div class=\\\"card credits\\\">\\n    <p class=\\\"lead\\\">MADE ON AWWO</p>\\n    <p>One canvas made every picture, clip, voice and score cue: 74 pictures, 132 clips, 76 voices and cues</p>\\n    <p>6 editor agents wrote the reels' timelines; 10 edit nodes cut the film</p>\\n    <p>An original story; its screenplay and shot list were written for it first</p>\\n  </div>\\n</body>\\n</html>\\n\", \"seconds\": 16}], \"dialogue\": [], \"music\": [{\"id\": \"m19\", \"source\": \"mus_m19_end_cards/audio-1.mp3\", \"anchor\": \"end\", \"offset\": 0, \"in\": 0, \"out\": 32, \"loop\": true, \"gainDb\": 0, \"fadeIn\": 1.5, \"fadeOut\": 3}], \"subtitles\": [{\"anchor\": \"edit_act1\", \"offset\": 57.5, \"seconds\": 1.6, \"text\": \"Another one.\"}, {\"anchor\": \"edit_act1\", \"offset\": 64.603, \"seconds\": 2.0, \"text\": \"It's louder today.\"}, {\"anchor\": \"edit_act1\", \"offset\": 73.175, \"seconds\": 2.22, \"text\": \"Nothing is louder here.\"}, {\"anchor\": \"edit_act1\", \"offset\": 75.495, \"seconds\": 2.4, \"text\": \"Not for twenty years.\"}, {\"anchor\": \"edit_act1\", \"offset\": 79.667, \"seconds\": 3.6, \"text\": \"Then why can I still hear it?\"}, {\"anchor\": \"edit_act1\", \"offset\": 137.267, \"seconds\": 2.0, \"text\": \"People of Corrow.\"}, {\"anchor\": \"edit_act1\", \"offset\": 139.567, \"seconds\": 2.4, \"text\": \"The Chord is dying.\"}, {\"anchor\": \"edit_act1\", \"offset\": 143.017, \"seconds\": 2.45, \"text\": \"We keep what is left.\"}, {\"anchor\": \"edit_act1\", \"offset\": 145.958, \"seconds\": 4.0, \"text\": \"At dawn, Corrow will be quieted.\"}, {\"anchor\": \"edit_act1\", \"offset\": 168.008, \"seconds\": 1.2, \"text\": \"Quieted.\"}, {\"anchor\": \"edit_act1\", \"offset\": 169.468, \"seconds\": 1.54, \"text\": \"What does that even mean?\"}, {\"anchor\": \"edit_act1\", \"offset\": 172.5, \"seconds\": 1.98, \"text\": \"It means gone.\"}, {\"anchor\": \"edit_act1\", \"offset\": 174.58, \"seconds\": 1.49, \"text\": \"No ship in.\"}, {\"anchor\": \"edit_act1\", \"offset\": 176.17, \"seconds\": 1.57, \"text\": \"No ship out.\"}, {\"anchor\": \"edit_act1\", \"offset\": 177.84, \"seconds\": 0.96, \"text\": \"Ever.\"}, {\"anchor\": \"edit_act1\", \"offset\": 179.332, \"seconds\": 2.26, \"text\": \"They can't close a whole world.\"}, {\"anchor\": \"edit_act1\", \"offset\": 182.083, \"seconds\": 2.4, \"text\": \"They closed your mother's.\"}, {\"anchor\": \"edit_act1\", \"offset\": 194.535, \"seconds\": 1.132, \"text\": \"Then we leave tonight.\"}, {\"anchor\": \"edit_act1\", \"offset\": 217.264, \"seconds\": 1.87, \"text\": \"You built a ship.\"}, {\"anchor\": \"edit_act1\", \"offset\": 219.655, \"seconds\": 1.52, \"text\": \"Twenty years.\"}, {\"anchor\": \"edit_act1\", \"offset\": 221.275, \"seconds\": 2.8, \"text\": \"One scrap at a time.\"}, {\"anchor\": \"edit_act1\", \"offset\": 227.417, \"seconds\": 3.6, \"text\": \"She has never sung. Not once.\"}, {\"anchor\": \"edit_act1\", \"offset\": 236.8, \"seconds\": 2.5, \"text\": \"Bram. It's coming from her.\"}, {\"anchor\": \"edit_act1\", \"offset\": 293.485, \"seconds\": 2.0, \"text\": \"There you are.\"}, {\"anchor\": \"edit_act1\", \"offset\": 296.167, \"seconds\": 2.4, \"text\": \"She's a tuner's girl.\"}, {\"anchor\": \"edit_act1\", \"offset\": 298.897, \"seconds\": 2.0, \"text\": \"She hears nothing.\"}, {\"anchor\": \"edit_act1\", \"offset\": 302.959, \"seconds\": 2.0, \"text\": \"Everyone hears nothing here.\"}, {\"anchor\": \"edit_act1\", \"offset\": 305.059, \"seconds\": 2.4, \"text\": \"That is the point.\"}, {\"anchor\": \"edit_act1\", \"offset\": 309.72, \"seconds\": 1.6, \"text\": \"Little bird.\"}, {\"anchor\": \"edit_act1\", \"offset\": 311.6, \"seconds\": 2.95, \"text\": \"There is no air left here to sing in.\"}, {\"anchor\": \"edit_act1\", \"offset\": 315.042, \"seconds\": 1.6, \"text\": \"I'll find you.\"}, {\"anchor\": \"edit_act2\", \"offset\": 55.333, \"seconds\": 2.77, \"text\": \"The Chord is dying, Lark.\"}, {\"anchor\": \"edit_act2\", \"offset\": 58.203, \"seconds\": 2.43, \"text\": \"Every year it rings softer.\"}, {\"anchor\": \"edit_act2\", \"offset\": 60.665, \"seconds\": 4.5, \"text\": \"We hold what is left, so someone can still cross the dark.\"}, {\"anchor\": \"edit_act2\", \"offset\": 68.467, \"seconds\": 2.75, \"text\": \"By shutting us in it.\"}, {\"anchor\": \"edit_act2\", \"offset\": 70.738, \"seconds\": 2.81, \"text\": \"Tomorrow this ring closes Corrow's still.\"}, {\"anchor\": \"edit_act2\", \"offset\": 73.648, \"seconds\": 2.27, \"text\": \"Gently, if a Hearer guides it.\"}, {\"anchor\": \"edit_act2\", \"offset\": 76.018, \"seconds\": 1.99, \"text\": \"Badly, if not.\"}, {\"anchor\": \"edit_act2\", \"offset\": 78.5, \"seconds\": 3.2, \"text\": \"Where did you get that fork?\"}, {\"anchor\": \"edit_act2\", \"offset\": 84.993, \"seconds\": 1.39, \"text\": \"My mother.\"}, {\"anchor\": \"edit_act2\", \"offset\": 86.625, \"seconds\": 1.6, \"text\": \"Ilse Anwen.\"}, {\"anchor\": \"edit_act2\", \"offset\": 88.475, \"seconds\": 2.29, \"text\": \"She heard more than any of us.\"}, {\"anchor\": \"edit_act2\", \"offset\": 90.865, \"seconds\": 1.31, \"text\": \"It broke her.\"}, {\"anchor\": \"edit_act2\", \"offset\": 94.027, \"seconds\": 1.94, \"text\": \"You broke her.\"}, {\"anchor\": \"edit_act2\", \"offset\": 98.718, \"seconds\": 2.04, \"text\": \"I made her quiet.\"}, {\"anchor\": \"edit_act2\", \"offset\": 110.083, \"seconds\": 1.64, \"text\": \"Come on, girl.\"}, {\"anchor\": \"edit_act2\", \"offset\": 111.823, \"seconds\": 1.25, \"text\": \"Fly first.\"}, {\"anchor\": \"edit_act2\", \"offset\": 113.173, \"seconds\": 0.96, \"text\": \"Sing later.\"}, {\"anchor\": \"edit_act2\", \"offset\": 152.482, \"seconds\": 1.36, \"text\": \"What is that?\"}, {\"anchor\": \"edit_act2\", \"offset\": 157.533, \"seconds\": 2.1, \"text\": \"You can hear it?\"}, {\"anchor\": \"edit_act2\", \"offset\": 159.635, \"seconds\": 1.2, \"text\": \"No.\"}, {\"anchor\": \"edit_act2\", \"offset\": 160.985, \"seconds\": 1.75, \"text\": \"I can see it.\"}, {\"anchor\": \"edit_act2\", \"offset\": 162.835, \"seconds\": 2.51, \"text\": \"I was born on a bell-ship.\"}, {\"anchor\": \"edit_act2\", \"offset\": 165.445, \"seconds\": 1.98, \"text\": \"I remember bells.\"}, {\"anchor\": \"edit_act2\", \"offset\": 177.81, \"seconds\": 0.89, \"text\": \"Listen.\"}, {\"anchor\": \"edit_act2\", \"offset\": 178.8, \"seconds\": 4.4, \"text\": \"Tell me its note, and we close it gently.\"}, {\"anchor\": \"edit_act2\", \"offset\": 191.475, \"seconds\": 2.0, \"text\": \"It isn't fading.\"}, {\"anchor\": \"edit_act2\", \"offset\": 193.835, \"seconds\": 2.4, \"text\": \"They are drinking it.\"}, {\"anchor\": \"edit_act2\", \"offset\": 209.022, \"seconds\": 2.2, \"text\": \"You're not saving the Chord.\"}, {\"anchor\": \"edit_act2\", \"offset\": 211.322, \"seconds\": 2.0, \"text\": \"You're drinking it.\"}, {\"anchor\": \"edit_act2\", \"offset\": 216.433, \"seconds\": 2.8, \"text\": \"Tell me the note, Lark.\"}, {\"anchor\": \"edit_act2\", \"offset\": 245.595, \"seconds\": 1.2, \"text\": \"Primate.\"}, {\"anchor\": \"edit_act2\", \"offset\": 247.245, \"seconds\": 3.6, \"text\": \"Corrow will be quiet within the hour.\"}, {\"anchor\": \"edit_act2\", \"offset\": 252.707, \"seconds\": 2.0, \"text\": \"Let nothing ring.\"}, {\"anchor\": \"edit_act3\", \"offset\": 14.857, \"seconds\": 1.6, \"text\": \"Do it.\"}, {\"anchor\": \"edit_act3\", \"offset\": 37.035, \"seconds\": 1.2, \"text\": \"No!\"}, {\"anchor\": \"edit_act3\", \"offset\": 100.427, \"seconds\": 1.2, \"text\": \"Lark!\"}, {\"anchor\": \"edit_act3\", \"offset\": 105.65, \"seconds\": 4.5, \"text\": \"If I let go, it closes again.\"}, {\"anchor\": \"edit_act3\", \"offset\": 113.232, \"seconds\": 1.78, \"text\": \"Then I won't let go.\"}, {\"anchor\": \"edit_act3\", \"offset\": 115.112, \"seconds\": 0.77, \"text\": \"Go.\"}, {\"anchor\": \"edit_act3\", \"offset\": 115.982, \"seconds\": 1.86, \"text\": \"She's waiting for you.\"}, {\"anchor\": \"edit_act3\", \"offset\": 119.303, \"seconds\": 1.95, \"text\": \"Ring her, Lark.\"}, {\"anchor\": \"edit_act3\", \"offset\": 121.353, \"seconds\": 2.28, \"text\": \"She was always yours.\"}, {\"anchor\": \"edit_act3\", \"offset\": 133.448, \"seconds\": 2.4, \"text\": \"That is Ilse's fork.\"}, {\"anchor\": \"edit_act3\", \"offset\": 140.3, \"seconds\": 1.992, \"text\": \"And that's her daughter's note.\"}, {\"anchor\": \"edit_act3\", \"offset\": 164.852, \"seconds\": 1.56, \"text\": \"They aim for the bell.\"}, {\"anchor\": \"edit_act3\", \"offset\": 166.512, \"seconds\": 1.83, \"text\": \"They want it quiet, not broken.\"}, {\"anchor\": \"edit_act3\", \"offset\": 184.51, \"seconds\": 1.79, \"text\": \"I've never rung a ship.\"}, {\"anchor\": \"edit_act3\", \"offset\": 196.565, \"seconds\": 1.28, \"text\": \"That's my note.\"}, {\"anchor\": \"edit_act3\", \"offset\": 197.945, \"seconds\": 1.6, \"text\": \"It was never in my head.\"}, {\"anchor\": \"edit_act3\", \"offset\": 199.645, \"seconds\": 2.0, \"text\": \"It was her.\"}, {\"anchor\": \"edit_act3\", \"offset\": 205.137, \"seconds\": 1.33, \"text\": \"Then ring her!\"}, {\"anchor\": \"edit_act3\", \"offset\": 208.199, \"seconds\": 1.6, \"text\": \"Ring out.\"}, {\"anchor\": \"edit_act3\", \"offset\": 247.217, \"seconds\": 1.11, \"text\": \"Provost.\"}, {\"anchor\": \"edit_act3\", \"offset\": 248.427, \"seconds\": 2.0, \"text\": \"Find the girl.\"}, {\"anchor\": \"edit_act3\", \"offset\": 268.415, \"seconds\": 3.88, \"text\": \"Unknown bell, you rang in on an unscored note.\"}, {\"anchor\": \"edit_act3\", \"offset\": 272.395, \"seconds\": 1.53, \"text\": \"Where from?\"}, {\"anchor\": \"edit_act3\", \"offset\": 277.617, \"seconds\": 1.1, \"text\": \"Corrow.\"}, {\"anchor\": \"edit_act3\", \"offset\": 280.799, \"seconds\": 2.8, \"text\": \"Nobody rings out of Corrow.\"}, {\"anchor\": \"edit_act3\", \"offset\": 288.86, \"seconds\": 1.44, \"text\": \"She just did.\"}, {\"anchor\": \"edit_act3\", \"offset\": 309.979, \"seconds\": 1.28, \"text\": \"There's another one.\"}]}}"
+        }
+      }
     }
   ],
   "edges": [
@@ -302,6 +806,26 @@ const record: ProductionRunRecord = {
       "label": "Timeline"
     },
     {
+      "from": "ed_R3",
+      "to": "edit_R3",
+      "label": "Timeline"
+    },
+    {
+      "from": "ed_R4",
+      "to": "edit_R4",
+      "label": "Timeline"
+    },
+    {
+      "from": "ed_R5",
+      "to": "edit_R5",
+      "label": "Timeline"
+    },
+    {
+      "from": "ed_R6",
+      "to": "edit_R6",
+      "label": "Timeline"
+    },
+    {
       "from": "edit_R1",
       "to": "edit_act1",
       "label": "Clip"
@@ -309,6 +833,41 @@ const record: ProductionRunRecord = {
     {
       "from": "edit_R2",
       "to": "edit_act1",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_R3",
+      "to": "edit_act2",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_R4",
+      "to": "edit_act2",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_R5",
+      "to": "edit_act3",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_R6",
+      "to": "edit_act3",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_act1",
+      "to": "edit_ep1",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_act2",
+      "to": "edit_ep1",
+      "label": "Clip"
+    },
+    {
+      "from": "edit_act3",
+      "to": "edit_ep1",
       "label": "Clip"
     },
     {
@@ -372,6 +931,156 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "kf_s10_01",
+      "to": "vid_s10_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s10_02",
+      "to": "vid_s10_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s13_03",
+      "to": "vid_s13_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s13_04",
+      "to": "vid_s13_04",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s13_05",
+      "to": "vid_s13_05",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s16_01",
+      "to": "vid_s16_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s16_02",
+      "to": "vid_s16_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s17_03",
+      "to": "vid_s17_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s18_05",
+      "to": "vid_s18_05",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s19_01",
+      "to": "vid_s19_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s19_02",
+      "to": "vid_s19_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s19_03",
+      "to": "vid_s19_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s19_04",
+      "to": "vid_s19_04",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s20_01",
+      "to": "vid_s20_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s20_02",
+      "to": "vid_s20_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s20_03",
+      "to": "vid_s20_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s20_05",
+      "to": "vid_s20_05",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s22_01",
+      "to": "vid_s22_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s22_02",
+      "to": "vid_s22_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s22_03",
+      "to": "vid_s22_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s22_05",
+      "to": "vid_s22_05",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s22_06",
+      "to": "vid_s22_06",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s24_01",
+      "to": "vid_s24_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s24_02",
+      "to": "vid_s24_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s25_04",
+      "to": "vid_s25_04",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s26_01",
+      "to": "vid_s26_01",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s26_02",
+      "to": "vid_s26_02",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s26_03",
+      "to": "vid_s26_03",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s26_05",
+      "to": "vid_s26_05",
+      "label": "Picture"
+    },
+    {
+      "from": "kf_s27_02",
+      "to": "vid_s27_02",
+      "label": "Picture"
+    },
+    {
       "from": "mus_m01_cold_open",
       "to": "ed_R1",
       "label": "Input"
@@ -437,6 +1146,121 @@ const record: ProductionRunRecord = {
       "label": "Sound"
     },
     {
+      "from": "mus_m08_the_bar",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m08_the_bar",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m09_launch",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m09_launch",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m10_cell",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m10_cell",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m11_core_echo",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m11_core_echo",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m12_quieting",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m12_quieting",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m13_the_strike",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m13_the_strike",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m14_hold_the_note",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m14_hold_the_note",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m15_escape",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m15_escape",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m16_seren_hears",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m16_seren_hears",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m17_the_weir",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m17_the_weir",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m18_new_note",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "mus_m18_new_note",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "mus_m19_end_cards",
+      "to": "edit_ep1",
+      "label": "Sound"
+    },
+    {
       "from": "sheet_ch_bram",
       "to": "vid_s02_04",
       "label": "Picture"
@@ -494,6 +1318,121 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_ch_bram",
       "to": "vid_s09_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s13_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s13_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s21_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s21_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s21_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s21_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_bram",
+      "to": "vid_s25_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_ilse",
+      "to": "vid_s15_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s11_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s11_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s11_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s12_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s14_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s14_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s14_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s15_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s18_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s18_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s18_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s21_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s22_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s23_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_kesh",
+      "to": "vid_s26_06",
       "label": "Picture"
     },
     {
@@ -587,6 +1526,166 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_ch_lark",
+      "to": "vid_s11_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s11_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s11_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s12_09",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s14_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s14_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s14_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s15_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s15_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s15_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s15_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s18_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s18_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s18_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s21_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s21_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s21_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s21_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s22_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s23_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s23_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s23_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s23_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s26_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s27_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s27_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_lark",
+      "to": "vid_s27_04",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_ch_mute",
       "to": "vid_s04_02",
       "label": "Picture"
@@ -604,6 +1703,11 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_ch_mute",
       "to": "vid_s08_10",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_mute",
+      "to": "vid_s25_01",
       "label": "Picture"
     },
     {
@@ -632,6 +1736,91 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_08",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s12_10",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s15_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s15_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s15_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s17_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s17_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s18_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s18_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s21_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s25_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_ch_seren",
+      "to": "vid_s25_03",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_ch_townsfolk",
       "to": "vid_s04_02",
       "label": "Picture"
@@ -652,6 +1841,11 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_ch_townsfolk",
+      "to": "vid_s20_04",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_gx_figures",
       "to": "vid_s02_05",
       "label": "Picture"
@@ -664,6 +1858,256 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_gx_figures",
       "to": "vid_s06_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s14_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s15_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s20_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s23_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s24_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_gx_figures",
+      "to": "vid_s27_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s13_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s22_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s23_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s23_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s23_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s23_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s23_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s26_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s26_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s26_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s27_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s27_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_answer_cockpit",
+      "to": "vid_s27_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_cell",
+      "to": "vid_s14_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_cell",
+      "to": "vid_s14_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_cell",
+      "to": "vid_s14_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_cell",
+      "to": "vid_s14_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_08",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_chamber",
+      "to": "vid_s12_09",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s15_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s17_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s18_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s18_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s18_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s18_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s18_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s21_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s21_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s21_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s21_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_core",
+      "to": "vid_s25_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_corridor",
+      "to": "vid_s11_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_corridor",
+      "to": "vid_s11_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_corridor",
+      "to": "vid_s11_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_corridor",
+      "to": "vid_s11_04",
       "label": "Picture"
     },
     {
@@ -699,6 +2143,66 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_lo_bar_exterior",
       "to": "vid_s09_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s10_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s10_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s13_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s16_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s16_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s19_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s19_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s19_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s20_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s22_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s22_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_bar_exterior",
+      "to": "vid_s22_05",
       "label": "Picture"
     },
     {
@@ -757,6 +2261,21 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_lo_brineholt",
+      "to": "vid_s20_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_brineholt",
+      "to": "vid_s20_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_brineholt",
+      "to": "vid_s20_05",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_lo_corrow_orbit",
       "to": "vid_s01_01",
       "label": "Picture"
@@ -779,6 +2298,36 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_lo_corrow_orbit",
       "to": "vid_s07_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s10_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s16_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s19_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s19_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s19_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_corrow_orbit",
+      "to": "vid_s24_02",
       "label": "Picture"
     },
     {
@@ -842,6 +2391,26 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_lo_pipes",
+      "to": "vid_s13_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_pipes",
+      "to": "vid_s13_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_pipes",
+      "to": "vid_s20_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_pipes",
+      "to": "vid_s20_03",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_lo_seacave",
       "to": "vid_s06_01",
       "label": "Picture"
@@ -853,12 +2422,47 @@ const record: ProductionRunRecord = {
     },
     {
       "from": "sheet_lo_seacave",
-      "to": "vid_s09_03",
+      "to": "vid_s13_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_seacave",
+      "to": "vid_s13_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_weir",
+      "to": "vid_s26_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_weir",
+      "to": "vid_s26_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_lo_weir",
+      "to": "vid_s27_04",
       "label": "Picture"
     },
     {
       "from": "sheet_pr_bell",
       "to": "vid_s04_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_bell",
+      "to": "vid_s20_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_collar",
+      "to": "vid_s12_10",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_collar",
+      "to": "vid_s25_02",
       "label": "Picture"
     },
     {
@@ -872,8 +2476,58 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_pr_fork",
+      "to": "vid_s12_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s12_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s18_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s21_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s21_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s21_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s21_07",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_fork",
+      "to": "vid_s25_01",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_pr_nullfork",
       "to": "vid_s08_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_sandplate",
+      "to": "vid_s26_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_sandplate",
+      "to": "vid_s26_05",
       "label": "Picture"
     },
     {
@@ -884,6 +2538,31 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_pr_well",
       "to": "vid_s04_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_well",
+      "to": "vid_s12_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_well",
+      "to": "vid_s17_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_well",
+      "to": "vid_s17_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_well",
+      "to": "vid_s17_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_pr_well",
+      "to": "vid_s25_04",
       "label": "Picture"
     },
     {
@@ -917,6 +2596,66 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_sh_answer",
+      "to": "vid_s13_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s13_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s13_04",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s13_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s16_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s16_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s22_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s22_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s22_05",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s24_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s26_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_answer",
+      "to": "vid_s27_04",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_sh_caesura",
       "to": "vid_s07_01",
       "label": "Picture"
@@ -924,6 +2663,26 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_sh_caesura",
       "to": "vid_s07_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_caesura",
+      "to": "vid_s19_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_caesura",
+      "to": "vid_s22_06",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_carillon",
+      "to": "vid_s26_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_carillon",
+      "to": "vid_s27_04",
       "label": "Picture"
     },
     {
@@ -952,6 +2711,21 @@ const record: ProductionRunRecord = {
       "label": "Picture"
     },
     {
+      "from": "sheet_sh_mute_fighter",
+      "to": "vid_s22_02",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_mute_fighter",
+      "to": "vid_s22_03",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_mute_fighter",
+      "to": "vid_s24_01",
+      "label": "Picture"
+    },
+    {
       "from": "sheet_sh_pall",
       "to": "vid_s08_01",
       "label": "Picture"
@@ -964,6 +2738,16 @@ const record: ProductionRunRecord = {
     {
       "from": "sheet_sh_pall",
       "to": "vid_s09_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_pall",
+      "to": "vid_s10_01",
+      "label": "Picture"
+    },
+    {
+      "from": "sheet_sh_pall",
+      "to": "vid_s10_02",
       "label": "Picture"
     },
     {
@@ -1242,6 +3026,561 @@ const record: ProductionRunRecord = {
       "label": "Sound"
     },
     {
+      "from": "tts_s12_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_02",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_02",
+      "to": "vid_s12_02",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_03",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_03",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_03",
+      "to": "vid_s12_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_04",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_04",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_04",
+      "to": "vid_s12_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_05",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_05",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_05",
+      "to": "vid_s12_05",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_06",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_06",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_07",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_07",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_07",
+      "to": "vid_s12_07",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_08",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_08",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_08",
+      "to": "vid_s12_08",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_09",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_09",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_09",
+      "to": "vid_s12_09",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s12_10",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s12_10",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s12_10",
+      "to": "vid_s12_10",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s13_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s13_02",
+      "to": "edit_R3",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s13_02",
+      "to": "vid_s13_02",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s14_03",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s14_03",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s14_03",
+      "to": "vid_s14_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s14_04",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s14_04",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s14_04",
+      "to": "vid_s14_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s14_05",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s14_05",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s14_05",
+      "to": "vid_s14_05",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s15_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s15_02",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s15_02",
+      "to": "vid_s15_02",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s15_04",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s15_04",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s15_06",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s15_06",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s15_06",
+      "to": "vid_s15_06",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s15_07",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s15_07",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s15_07",
+      "to": "vid_s15_07",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s17_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s17_02",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s17_02",
+      "to": "vid_s17_02",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s17_03",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s17_03",
+      "to": "edit_R4",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s17_03",
+      "to": "vid_s17_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s18_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s18_03",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s18_03",
+      "to": "vid_s18_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s18_06",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s18_06",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s18_06",
+      "to": "vid_s18_06",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s21_01",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_01",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_02",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_02",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_02",
+      "to": "vid_s21_02",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s21_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_03",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_03",
+      "to": "vid_s21_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s21_04",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_04",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_04",
+      "to": "vid_s21_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s21_06",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_06",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_06",
+      "to": "vid_s21_06",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s21_07",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s21_07",
+      "to": "edit_R5",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s21_07",
+      "to": "vid_s21_07",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s22_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s22_04",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s22_04",
+      "to": "vid_s22_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s23_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s23_01",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s23_01",
+      "to": "vid_s23_01",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s23_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s23_03",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s23_03",
+      "to": "vid_s23_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s23_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s23_04",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s23_04",
+      "to": "vid_s23_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s23_05",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s23_05",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s23_05",
+      "to": "vid_s23_05",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s25_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s25_04",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s25_04",
+      "to": "vid_s25_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s26_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s26_03",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s26_03",
+      "to": "vid_s26_03",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s26_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s26_04",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s26_04",
+      "to": "vid_s26_04",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s26_05",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s26_05",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s26_05",
+      "to": "vid_s26_05",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s26_06",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s26_06",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s26_06",
+      "to": "vid_s26_06",
+      "label": "Voice"
+    },
+    {
+      "from": "tts_s27_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "tts_s27_03",
+      "to": "edit_R6",
+      "label": "Sound"
+    },
+    {
+      "from": "tts_s27_03",
+      "to": "vid_s27_03",
+      "label": "Voice"
+    },
+    {
       "from": "vid_s01_01",
       "to": "ed_R1",
       "label": "Input"
@@ -1689,6 +4028,876 @@ const record: ProductionRunRecord = {
     {
       "from": "vid_s09_03",
       "to": "edit_R2",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s10_01",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s10_01",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s10_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s10_02",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s11_01",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s11_01",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s11_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s11_02",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s11_03",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s11_03",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s11_04",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s11_04",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_01",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_01",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_02",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_03",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_03",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_04",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_04",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_05",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_05",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_06",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_06",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_07",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_07",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_08",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_08",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_09",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_09",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s12_10",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s12_10",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s13_01",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s13_01",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s13_02",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s13_02",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s13_03",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s13_03",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s13_04",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s13_04",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s13_05",
+      "to": "ed_R3",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s13_05",
+      "to": "edit_R3",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s14_01",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s14_01",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s14_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s14_02",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s14_03",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s14_03",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s14_04",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s14_04",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s14_05",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s14_05",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_01",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_01",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_02",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_03",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_03",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_04",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_04",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_05",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_05",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_06",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_06",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s15_07",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s15_07",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s16_01",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s16_01",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s16_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s16_02",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s17_01",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s17_01",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s17_02",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s17_02",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s17_03",
+      "to": "ed_R4",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s17_03",
+      "to": "edit_R4",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_01",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_01",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_02",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_02",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_03",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_04",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_04",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_05",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_05",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s18_06",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s18_06",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s19_01",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s19_01",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s19_02",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s19_02",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s19_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s19_03",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s19_04",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s19_04",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s20_01",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s20_01",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s20_02",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s20_02",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s20_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s20_03",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s20_04",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s20_04",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s20_05",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s20_05",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_01",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_01",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_02",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_02",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_03",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_03",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_04",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_04",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_05",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_05",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_06",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_06",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s21_07",
+      "to": "ed_R5",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s21_07",
+      "to": "edit_R5",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_03",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_04",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_05",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_05",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s22_06",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s22_06",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s23_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s23_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s23_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s23_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s23_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s23_03",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s23_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s23_04",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s23_05",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s23_05",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s24_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s24_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s24_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s24_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s25_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s25_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s25_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s25_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s25_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s25_03",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s25_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s25_04",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_03",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_04",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_05",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_05",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s26_06",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s26_06",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s27_01",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s27_01",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s27_02",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s27_02",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s27_03",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s27_03",
+      "to": "edit_R6",
+      "label": "Clip"
+    },
+    {
+      "from": "vid_s27_04",
+      "to": "ed_R6",
+      "label": "Input"
+    },
+    {
+      "from": "vid_s27_04",
+      "to": "edit_R6",
       "label": "Clip"
     }
   ],
@@ -1850,6 +5059,396 @@ const record: ProductionRunRecord = {
       "words": "A colossal black disc on its edge with a thin bone-white rim hangs beside a thin black ring around a slate-blue ocean planet, seen from high orbit. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 600mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
     },
     {
+      "id": "kf_s10_01",
+      "title": "Keyframe · s10_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 61,
+      "files": [
+        "kf_s10_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 12,
+      "words": "From high above a slate-blue planet, the inner face of a colossal matte-black ring rises like an endless cliff of pyramidal black wedges, its curve vanishing into haze; a tiny white capsule climbs toward it. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, low angle, tilting up, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s10_02",
+      "title": "Keyframe · s10_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 43,
+      "files": [
+        "kf_s10_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 13,
+      "words": "A narrow vertical slot of white light cut into a wall of matte-black pyramid wedges, a bone-white capsule approaching it. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: MS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s13_03",
+      "title": "Keyframe · s13_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 66,
+      "files": [
+        "kf_s13_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 14,
+      "words": "Close on the flared bronze bell-mouth of the ship in a dark cave, four small brass nozzles around its rim beginning to glow orange. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: CU, low angle, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s13_04",
+      "title": "Keyframe · s13_04",
+      "kind": "image",
+      "status": "done",
+      "seconds": 42,
+      "files": [
+        "kf_s13_04/image-1.png"
+      ],
+      "column": 0,
+      "row": 15,
+      "words": "From outside at night, the dark mouth of a sea cave in basalt cliffs, an amber-glowing bronze bell-ship emerging low over black water. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: WS, eye level, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s13_05",
+      "title": "Keyframe · s13_05",
+      "kind": "image",
+      "status": "done",
+      "seconds": 66,
+      "files": [
+        "kf_s13_05/image-1.png"
+      ],
+      "column": 0,
+      "row": 16,
+      "words": "Night sky over a black sea, a vast black band arching overhead across the stars, a tiny amber light climbing steeply toward it. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: WS, low angle, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s16_01",
+      "title": "Keyframe · s16_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 41,
+      "files": [
+        "kf_s16_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 17,
+      "words": "From orbit, the curved limb of a slate-blue planet with grey clouds, a vast black ring arching above it, and a tiny bronze bell-shaped ship climbing on a thin orange thread of thrust. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s16_02",
+      "title": "Keyframe · s16_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 42,
+      "files": [
+        "kf_s16_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 18,
+      "words": "The Answer flies along an immense wall of matte black pyramid wedges, its small thrusters glowing. The ship is the Answer, a 38-metre bronze bell-ship seen side-on: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles glowing orange on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: MS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s17_03",
+      "title": "Keyframe · s17_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 42,
+      "files": [
+        "kf_s17_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 19,
+      "words": "Close-up of glossy black liquid in a bowl rising into a crown of tall, sharp needle spikes. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Shot: INSERT, high angle, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s18_05",
+      "title": "Keyframe · s18_05",
+      "kind": "image",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "kf_s18_05/image-1.png"
+      ],
+      "column": 0,
+      "row": 20,
+      "words": "The vast shaft with its column of white light, concentric rings of brighter light beginning to pulse outward along it. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, low angle, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s19_01",
+      "title": "Keyframe · s19_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "kf_s19_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 21,
+      "words": "From high orbit, the slate-blue planet encircled by its thin black ring; at one point on the ring a brilliant white flare of light is erupting. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 600mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s19_02",
+      "title": "Keyframe · s19_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 240,
+      "files": [
+        "kf_s19_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 22,
+      "words": "Close on the black wedge cliff face of the ring, long cracks opening across it with white light pouring out. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: MS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s19_03",
+      "title": "Keyframe · s19_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 127,
+      "files": [
+        "kf_s19_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 23,
+      "words": "The black ring splitting into separate drifting arcs with white light streaming from the gaps; a colossal black disc with a white rim in the foreground. The flagship is the Caesura: a colossal black disc 1,600 metres across standing on its edge, its faces a field of matte anechoic wedges, its rim a thin bone-white band, three long white needles trailing beneath. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s19_04",
+      "title": "Keyframe · s19_04",
+      "kind": "image",
+      "status": "done",
+      "seconds": 87,
+      "files": [
+        "kf_s19_04/image-1.png"
+      ],
+      "column": 0,
+      "row": 24,
+      "words": "The curved limb of the planet at dawn, rings of white light falling into the atmosphere and spreading as shimmering aurora curtains over the clouds. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s20_01",
+      "title": "Keyframe · s20_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 97,
+      "files": [
+        "kf_s20_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 25,
+      "words": "Wide dawn aerial over the basalt organ-pipe coast and the sea as colour returns: deep green-blue water with the first glints of sunlight sparkling on the waves. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: EWS, aerial, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s20_02",
+      "title": "Keyframe · s20_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 68,
+      "files": [
+        "kf_s20_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 26,
+      "words": "The weathered stone bell tower at dawn in warm light, the great bronze bell's grey felt wrapping splitting along its white cords. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: WS, low angle, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s20_03",
+      "title": "Keyframe · s20_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 67,
+      "files": [
+        "kf_s20_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 27,
+      "words": "Close on the flat tops of towering basalt columns at dawn, spray and black sand lifting off them in the wind, warm light. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: MS, eye level, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s20_05",
+      "title": "Keyframe · s20_05",
+      "kind": "image",
+      "status": "done",
+      "seconds": 127,
+      "files": [
+        "kf_s20_05/image-1.jpg"
+      ],
+      "column": 0,
+      "row": 28,
+      "words": "Wide of the slate-roofed harbour town at dawn under a sky crossed by drifting broken black arcs glowing white at their edges, gulls rising. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Shot: EWS, eye level, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s22_01",
+      "title": "Keyframe · s22_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 107,
+      "files": [
+        "kf_s22_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 29,
+      "words": "A bronze bell-ship breaking away from a shattered black spoke of the ring, white light streaming from the cracks behind it. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s22_02",
+      "title": "Keyframe · s22_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 168,
+      "files": [
+        "kf_s22_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 30,
+      "words": "Three felt-grey teardrop interceptors diving in formation out of the black ring's shadow, white slit noses, white light behind them. The interceptors are Mute interceptors: 9-metre flattened felt-grey teardrops with no engines or exhaust glow, one thin white slit at the nose and two white harpoon tubes beneath. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s22_03",
+      "title": "Keyframe · s22_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 47,
+      "files": [
+        "kf_s22_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 31,
+      "words": "From behind the fleeing bronze bell-ship, white harpoon tethers streak toward its flared bell-mouth. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. The interceptors are Mute interceptors: 9-metre flattened felt-grey teardrops with no engines or exhaust glow, one thin white slit at the nose and two white harpoon tubes beneath. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: MS, from behind, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s22_05",
+      "title": "Keyframe · s22_05",
+      "kind": "image",
+      "status": "done",
+      "seconds": 137,
+      "files": [
+        "kf_s22_05/image-1.png"
+      ],
+      "column": 0,
+      "row": 32,
+      "words": "The bronze bell-ship rolling hard between drifting arcs of the broken black ring, harpoon cables slashing past it. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s22_06",
+      "title": "Keyframe · s22_06",
+      "kind": "image",
+      "status": "done",
+      "seconds": 89,
+      "files": [
+        "kf_s22_06/image-1.png"
+      ],
+      "column": 0,
+      "row": 33,
+      "words": "A colossal black disc with a bone-white rim turning toward camera, its white needles swinging, against white light from the broken ring. The flagship is the Caesura: a colossal black disc 1,600 metres across standing on its edge, its faces a field of matte anechoic wedges, its rim a thin bone-white band, three long white needles trailing beneath. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s24_01",
+      "title": "Keyframe · s24_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 137,
+      "files": [
+        "kf_s24_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 34,
+      "words": "The bronze bell-ship in space, its flared bell-mouth glowing blue-white, three grey interceptors closing behind it. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. The interceptors are Mute interceptors: 9-metre flattened felt-grey teardrops with no engines or exhaust glow, one thin white slit at the nose and two white harpoon tubes beneath. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s24_02",
+      "title": "Keyframe · s24_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "kf_s24_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 35,
+      "words": "In black space, a slowly spreading ring of glittering frost dust beginning to form a delicate geometric pattern above the slate-blue planet. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Shot: WS, eye level, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s25_04",
+      "title": "Keyframe · s25_04",
+      "kind": "image",
+      "status": "done",
+      "seconds": 168,
+      "files": [
+        "kf_s25_04/image-1.jpg"
+      ],
+      "column": 0,
+      "row": 36,
+      "words": "Close-up of the black liquid in a bowl on a pedestal rising into tall needle spikes, dim white embers behind. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Shot: INSERT, high angle, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s26_01",
+      "title": "Keyframe · s26_01",
+      "kind": "image",
+      "status": "done",
+      "seconds": 122,
+      "files": [
+        "kf_s26_01/image-1.png"
+      ],
+      "column": 0,
+      "row": 37,
+      "words": "A colossal ring of turquoise ice boulders around a teal-and-white banded gas giant in deep space; a blue-white ripple of light blooming among the ice. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. Turquoise ice (#3FC1C9), teal and white banded gas giant (#1E6F7A), warm amber bell lights (#FFB347), crisp starlight, saturated colour, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s26_02",
+      "title": "Keyframe · s26_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 70,
+      "files": [
+        "kf_s26_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 38,
+      "words": "A 640-metre ship like a flying carillon, a long oxidised-bronze lattice spine hung with dozens of bronze bells of many sizes with warm amber light glowing in their mouths, anchored among turquoise ice boulders. The carrier is the Carillon: a 640-metre oxidised-bronze lattice spine with more than forty bells of every size hanging beneath it, amber light glowing in every bell-mouth, three habitat rings at the bow and copper-mesh sails along the top. Turquoise ice (#3FC1C9), teal and white banded gas giant (#1E6F7A), warm amber bell lights (#FFB347), crisp starlight, saturated colour, anamorphic widescreen 2.39:1, fine grain. Shot: EWS, eye level, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s26_03",
+      "title": "Keyframe · s26_03",
+      "kind": "image",
+      "status": "done",
+      "seconds": 68,
+      "files": [
+        "kf_s26_03/image-1.png"
+      ],
+      "column": 0,
+      "row": 39,
+      "words": "Close-up of a round brass plate on a cockpit console covered in fine pale sand, amber light, turquoise glow from the window. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Shot: INSERT, high angle, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s26_05",
+      "title": "Keyframe · s26_05",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "kf_s26_05/image-1.png"
+      ],
+      "column": 0,
+      "row": 40,
+      "words": "Close-up of the round brass sand plate, its pale sand frozen in a geometric figure of concentric rings broken by radial spokes, like ripples on water (no star, no triangles), turquoise light. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Shot: INSERT, high angle, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "kf_s27_02",
+      "title": "Keyframe · s27_02",
+      "kind": "image",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "kf_s27_02/image-1.png"
+      ],
+      "column": 0,
+      "row": 41,
+      "words": "Close-up of frosted amber cockpit glass with turquoise ice beyond it, a new frost figure beginning to grow on the glass. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Shot: INSERT, eye level, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
       "id": "sheet_lo_corrow_orbit",
       "title": "Sheet · Corrow from orbit",
       "kind": "image",
@@ -1859,7 +5458,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_corrow_orbit/image-1.png"
       ],
       "column": 0,
-      "row": 12,
+      "row": 42,
       "words": "Environment reference sheet of Corrow from space: a slate-blue cold ocean planet with grey cloud bands and dark basalt archipelagos, encircled by the Bar, a thin, perfectly matte-black ring that hides the stars behind it. Panels: full disc from high orbit, the limb with a thin atmosphere line, a long-lens view of the ring crossing the planet, and the limb with white aurora curtains after the release. Deep black space, single hard white star key, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), no lens flares, 2.39:1 frames. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1872,7 +5471,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_bar_exterior/image-1.png"
       ],
       "column": 0,
-      "row": 13,
+      "row": 43,
       "words": "Environment reference sheet of the Bar, an 18,000 km black ring around Corrow: from afar a thin matte-black line hiding the stars; up close its 40 km inner face is an endless cliff of black pyramidal wedges whose curve vanishes into haze, with a vertical slot door of white light and dark maintenance spokes. Also seen from the ground as a black band cutting an overcast sky in half, and in its broken state as drifting arcs with white light pouring from the cracks. Panels in 2.39:1, matte black #0B0B0D, no reflections, single hard star key light. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1885,7 +5484,7 @@ const record: ProductionRunRecord = {
         "sheet_sh_linnet/image-1.png"
       ],
       "column": 0,
-      "row": 14,
+      "row": 44,
       "words": "Orthographic reference sheet of the Linnet, a 12 m Free Bell courier: a single brass bell with its mouth aft, a small round glass pod at the crown, three slender outrigger tines, warm amber running lights and one porthole. Side, top, front, rear and three-quarter views with a human figure for scale, plus a second side view in its damped state with dead lights and flat grey bronze. Neutral grey background, soft studio light. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1898,7 +5497,7 @@ const record: ProductionRunRecord = {
         "sheet_sh_mute_fighter/image-1.png"
       ],
       "column": 0,
-      "row": 15,
+      "row": 45,
       "words": "Orthographic reference sheet of a Mute interceptor: a 9 m flattened teardrop with no engines or exhaust, one thin white slit at the nose and two white harpoon tubes underneath, skinned in matte felt-grey quilted panels. Top, side, front, rear and three-quarter views plus a diagram of three flying in a tight triangle formation, with a human figure for scale, on a neutral grey background, flat soft light, no specular highlights. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1911,7 +5510,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_pipes/image-1.png"
       ],
       "column": 0,
-      "row": 16,
+      "row": 46,
       "words": "Environment reference sheet of the Pipes: towering hexagonal basalt columns up to 120 m like organ pipes above a black-sand beach and a cold grey sea, a sea-cave mouth at the cliff foot. Panels: wide clifftop at dusk with the black band across the sky, beach level between the columns, column tops close, and the same wide at dawn unsealed with a deep green-blue sea (#1F5F6B), wet sheen and warm sun glints (#FFC98A). Sealed panels: soft overcast, matte, desaturated basalt #2B2F33. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1924,7 +5523,7 @@ const record: ProductionRunRecord = {
         "sheet_ch_lark/image-1.png"
       ],
       "column": 0,
-      "row": 17,
+      "row": 47,
       "words": "Character reference sheet of Lark Anwen, a 19-year-old woman: slight and wiry, olive skin, freckles, dark brown eyes, cropped black hair with one long copper-wrapped braid behind the left ear. She wears an oxblood wool work coat with brass toggles, a grey knit collar, canvas trousers, worn leather boots and a bronze tuning fork on a leather cord at her neck. Full-body turnaround (front, three-quarter, left side, back) plus head close-ups (front, left profile showing the braid, three-quarter) on a neutral mid-grey background, soft overcast studio light, matte surfaces, realistic cinematic style. Small inset: her wrists bound in grey felt cuffs. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1937,7 +5536,7 @@ const record: ProductionRunRecord = {
         "sheet_ch_bram/image-1.png"
       ],
       "column": 0,
-      "row": 18,
+      "row": 48,
       "words": "Character reference sheet of Bram Hask, a 61-year-old bellwright: heavyset, bald, white stubble beard, kind grey eyes, half-moon brass spectacles, burn-scarred forearms with sleeves pushed up. He wears a moss-green wool sweater, dark work trousers, boots and a long leather apron; add a second full-body front view without apron and spectacles, his look from the night launch onward. Full-body turnaround (front, three-quarter, side, back) and head close-ups (front, three-quarter, profile) on a neutral mid-grey background, soft overcast light with a warm orange forge rim from one side, realistic cinematic style. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1950,7 +5549,7 @@ const record: ProductionRunRecord = {
         "sheet_gx_figures/image-1.png"
       ],
       "column": 0,
-      "row": 19,
+      "row": 49,
       "words": "Graphic reference sheet of standing-wave figures as they appear in water, sand, frost and dust: Corrow's figure (six petals inside two concentric rings), simple concentric lines creeping through black sand, a frost version spreading on amber glass, and the unknown figure, a ring inside a ring broken by one bright gap. Each figure is shown as a clean white line drawing on black and as a photoreal material sample (water in a tin cup, black sand on wet basalt, frost on amber glass, glittering dust in space). Evenly lit, centred, no text or labels. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1963,7 +5562,7 @@ const record: ProductionRunRecord = {
         "sheet_ch_mute/image-1.png"
       ],
       "column": 0,
-      "row": 20,
+      "row": 50,
       "words": "Character reference sheet of a Mute, a faceless Compact guard: a full head covering of grey felt with one thin white horizontal visor slit, charcoal-grey quilted padded fabric armour from neck to boots, padded gloves, a small closed-ring emblem on the chest, no other markings. Full-body turnaround (front, three-quarter, side, back) plus a lineup of three identical Mutes for height reference, on a neutral mid-grey background, flat overcast light, completely matte quilted fabric with no shine, realistic cinematic style. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1976,7 +5575,7 @@ const record: ProductionRunRecord = {
         "sheet_ch_seren/image-1.png"
       ],
       "column": 0,
-      "row": 21,
+      "row": 51,
       "words": "Character reference sheet of Provost Seren Cadmaron, 52: very tall, gaunt and pale, cropped silver-white hair, pale grey eyes, long pale fingers. A matte black rigid damper collar seals her throat from collarbone to just under the chin, and she wears a long floor-length white quilted robe ridged like an anechoic wall. Full-body turnaround (front, three-quarter, side, back) and head close-ups (front, three-quarter, profile) on a neutral mid-grey background under hard white top-light, matte, no reflections, realistic cinematic style. Extra head close-up with the collar removed, bare pale throat, for her final scene. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -1989,7 +5588,7 @@ const record: ProductionRunRecord = {
         "sheet_ch_townsfolk/image-1.png"
       ],
       "column": 0,
-      "row": 22,
+      "row": 52,
       "words": "Group reference sheet of six townsfolk of Brineholt, mixed ages and ethnicities: an old bearded man, a woman with a long knitted scarf, a fisherman in an oilskin cap, a middle-aged woman, a young man and an elderly woman. All wear dark wool coats, scarves and knit caps in slate, charcoal and faded navy, worn and practical. Front lineup and back lineup on a neutral mid-grey background, soft overcast light, matte desaturated fabrics, realistic cinematic style. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2002,7 +5601,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_brineholt/image-1.png"
       ],
       "column": 0,
-      "row": 23,
+      "row": 53,
       "words": "Environment reference sheet of Brineholt, a harbour town of slate roofs and wet cobbles: the square with a black stone plinth holding a speaking well, a weathered stone bell tower with an open belfry, and the harbour beyond. Panels: wide square, low angle up the tower, reverse toward the harbour, and the square and roofs at dawn unsealed in warm light. Sealed panels: soft overcast light, matte, desaturated slate palette (#2B2F33, #59636B, #A9B3B8). No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2015,7 +5614,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_foundry/image-1.png"
       ],
       "column": 0,
-      "row": 24,
+      "row": 54,
       "words": "Three photographs side by side on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). Bram's foundry cut into a cliff: rough stone walls, hanging chains and bronze plates, a glowing forge and crucible, sand moulds, a workbench with leather mallets, and a low door at the back. Left, the wide; centre, the reverse toward the low door; right, the bench in detail. Warm orange forge light (#E0662B) against slate shadow (#3A3F44), matte bronze (#B58A3C), smoke haze, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
     },
     {
@@ -2028,7 +5627,7 @@ const record: ProductionRunRecord = {
         "sheet_lo_seacave/image-1.png"
       ],
       "column": 0,
-      "row": 25,
+      "row": 55,
       "words": "Three photographs side by side on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). The sea-cave hangar under the cliffs: a vast basalt cavern with seawater sucking at its mouth, a rope-and-pulley rig, a sail-sized stained canvas tarp, room for a 38 m ship. Left, wide from inside toward the grey mouth by day; centre, the same at night lit only by a hand lantern on the rocks; right, the exterior of the cave mouth at the cliff foot at dusk. Overcast, matte, desaturated, the warm lantern the only accent, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
     },
     {
@@ -2041,7 +5640,7 @@ const record: ProductionRunRecord = {
         "sheet_pr_bell/image-1.png"
       ],
       "column": 0,
-      "row": 26,
+      "row": 56,
       "words": "Prop reference sheet of Brineholt's great tower bell, about 2 m tall, in bronze: one set of views fully wrapped in grey felt and bound with white cord, one set bare, weathered bronze with verdigris, hanging in its timber yoke. Front, side and three-quarter views of each state on a neutral grey background; matte overcast light for the wrapped state, warm dawn light with glints for the bare state. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2054,7 +5653,7 @@ const record: ProductionRunRecord = {
         "sheet_pr_fork/image-1.png"
       ],
       "column": 0,
-      "row": 27,
+      "row": 57,
       "words": "Prop reference sheet of Ilse's tuning fork: a hand-length bronze tuning fork with a slightly worn stem, hung on a knotted leather cord. Front, side and three-quarter views, a view held in a young woman's hand and one in a heavy scarred man's hand, plus a ringing state with blurred tines and a faint ring of rippling air. Neutral grey background, soft studio light, warm bronze. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2067,7 +5666,7 @@ const record: ProductionRunRecord = {
         "sheet_pr_nullfork/image-1.png"
       ],
       "column": 0,
-      "row": 28,
+      "row": 58,
       "words": "Prop reference sheet of a null fork: a slim matte black tuning fork, slightly longer than a standard fork, with a bone-white grip band, used by the Compact to test for Hearers. Front, side and three-quarter views, held in a pale long-fingered hand in a white quilted sleeve, plus a struck state with blurred tines. Neutral grey background, flat light, no reflections. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2080,7 +5679,7 @@ const record: ProductionRunRecord = {
         "sheet_pr_well/image-1.png"
       ],
       "column": 0,
-      "row": 29,
+      "row": 59,
       "words": "Prop reference sheet of a speaking well: a wide, shallow bowl of glossy black ferrofluid, shown on a black stone plinth (town version) and on a slender bone-white pedestal (Bar version). Panels show the still mirror surface, a soft crown rising, rhythmic crowns of spikes, and a tall crown of needle spikes. Front, side and top views on a neutral grey background under hard top-light. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2093,7 +5692,7 @@ const record: ProductionRunRecord = {
         "sheet_sh_answer/image-1.png"
       ],
       "column": 0,
-      "row": 30,
+      "row": 60,
       "words": "Orthographic reference sheet of the Answer, a 38-metre bell-ship: a great bronze bell lying on its side with a 14 m flared mouth at the stern, an 18 m spine running forward from the bell's crown to a 5 m faceted amber-glass cockpit bud, two swept-back 7 m forked fins like tuning-fork tines top and bottom, four nozzles on the bell rim and two stubby landing struts. Patched bronze and verdigris copper plates, rivets, hammered texture, concentric tuning grooves inside the mouth and a six-petal two-ring figure etched on both flanks. Side, top, front, rear (into the bell-mouth) and three-quarter views with a 1.8 m human figure for scale, neutral grey background, soft even studio light. Small inset of the hull ringing, blue-white (#CFE8FF) rings of light blooming from the mouth. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2106,7 +5705,7 @@ const record: ProductionRunRecord = {
         "sheet_sh_caesura/image-1.png"
       ],
       "column": 0,
-      "row": 31,
+      "row": 61,
       "words": "Orthographic reference sheet of the Caesura, the Compact flagship: a 1,600 m disc standing on its edge with a lens-shaped profile 280 m thick, both faces covered in a fractal grid of matte black anechoic wedges, a 20 m bone-white rim with a lit slit gallery along the top, and three thin white listening needles 2-3 km long trailing below. No engines and no lights except the rim slit. Face-on, edge-on side, top and three-quarter views with a 38 m bell-ship silhouette for scale, neutral dark-grey background, single hard white key light, no reflections. No text, letters, numbers or labels anywhere on the sheet."
     },
     {
@@ -2119,8 +5718,151 @@ const record: ProductionRunRecord = {
         "sheet_sh_pall/image-1.png"
       ],
       "column": 0,
-      "row": 32,
+      "row": 62,
       "words": "Orthographic reference sheet of the Pall, the Provost's lander: a 22 m vertical bone-white capsule with a skirt of hanging felt-grey vanes around its lower half like a lampshade of strips, and one tall slit door that lowers as a ramp. Front with the door closed, front with the ramp lowered, side, top and three-quarter views with a human figure for scale, on a neutral grey background, soft overcast light, matte surfaces. No text, letters, numbers or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_ch_ilse",
+      "title": "Sheet · Ilse Anwen (echo)",
+      "kind": "image",
+      "status": "done",
+      "seconds": 41,
+      "files": [
+        "sheet_ch_ilse/image-1.png"
+      ],
+      "column": 0,
+      "row": 63,
+      "words": "Character reference sheet of Ilse Anwen at 33, photographed for a live-action film: a real woman with the same face as her daughter Lark (olive skin, freckles, dark brown eyes) but older and softer, a long black braid over one shoulder, an ochre wool shawl. Head turnaround (front, three-quarter, profile) and a half-body front view on a black background, soft studio light, real photography shot with a cinema camera (not a painting, an illustration, a drawing or a render), natural skin texture. Repeat the front head as a luminous apparition formed from drifting white light motes inside a column of cold white light (#F4F7FF), eyes closed and then open, exactly as she appears on screen. The sheet has no words at all: no title, caption, label, heading, letters or numbers."
+    },
+    {
+      "id": "sheet_ch_kesh",
+      "title": "Sheet · Kesh Morrow",
+      "kind": "image",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "sheet_ch_kesh/image-1.png"
+      ],
+      "column": 0,
+      "row": 64,
+      "words": "Character reference sheet of Kesh Morrow, a 26-year-old Compact guard: lean and pale, shaved head with dark stubble, tired hazel eyes, a small closed-ring tattoo on the left side of his neck. He wears the same charcoal-grey quilted padded armour as the faceless Mute guards, faceplate removed and clipped at his hip, padded grey gloves. Full-body turnaround (front, three-quarter, side, back) and head close-ups (front, left profile showing the tattoo, three-quarter) on a neutral mid-grey background, hard white top-light, matte fabric, realistic cinematic style. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_lo_answer_cockpit",
+      "title": "Sheet · The Answer, cockpit",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "sheet_lo_answer_cockpit/image-1.png"
+      ],
+      "column": 0,
+      "row": 65,
+      "words": "Four photographs in a two-by-two grid on a plain dark ground, real photographs from a live-action film set, shot with a cinema camera (not a painting, an illustration, concept art or a render). The Answer's cockpit: a cramped five-metre bud of faceted amber glass, brass levers and two throttles, heavy brass switches, a polished bronze rail curving through the cabin, a round brass sand plate on the console, and two seats. Top left, the wide from behind the seats toward the glass; top right, the reverse toward the seats; bottom left, the console in detail with its sand plate; bottom right, the amber glass frosted over with fine standing-wave figures of rings and petals. Warm amber panel glow plus outside light through the glass, natural film grain. The sheet has no words at all: no title, caption, label, heading, letters or numbers."
+    },
+    {
+      "id": "sheet_lo_bar_cell",
+      "title": "Sheet · The Bar, holding cell",
+      "kind": "image",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "sheet_lo_bar_cell/image-1.png"
+      ],
+      "column": 0,
+      "row": 66,
+      "words": "Three photographs side by side on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). A holding cell inside the Bar: a small bone-white quilted room, a cold dark window beaded with condensation, a narrow bench, and a glass door with a corridor of black wedges beyond. Left, the wide; centre, the reverse through the glass door; right, the window in detail. Hard white top-light, matte, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_lo_bar_chamber",
+      "title": "Sheet · The Bar, Provost's chamber",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "sheet_lo_bar_chamber/image-1.png"
+      ],
+      "column": 0,
+      "row": 67,
+      "words": "Three photographs side by side on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). The Provost's chamber: a round bone-white room (#E9E4DA) with ribbed, quilted walls, a speaking well (a wide shallow bowl of glossy black liquid) on a slender pedestal at the centre, and a tall slit window showing the grey planet Corrow small and far below. Left, the wide from the door; centre, the reverse from the window; right, the window in detail. Hard white slit top-light, symmetrical, matte, no reflections, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_lo_bar_core",
+      "title": "Sheet · The Bar, held-note core and gallery",
+      "kind": "image",
+      "status": "done",
+      "seconds": 37,
+      "files": [
+        "sheet_lo_bar_core/image-1.png"
+      ],
+      "column": 0,
+      "row": 68,
+      "words": "Four photographs in a two-by-two grid on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). The held-note core: a bottomless cylindrical shaft lined with black wedges, a trembling column of white light (#F4F7FF) caged in rows of wedges down its centre, a thin bone-white gallery with a rail jutting over the drop, a pedestal speaking well and a round maintenance hatch. Top left, the high vertigo view straight down the shaft; top right, the gallery at eye level; bottom left, a low angle up the shaft; bottom right, the same gallery ruined, its wedges cracked and the light down to dim white embers. Lit from below, deep blacks, symmetrical, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_lo_bar_corridor",
+      "title": "Sheet · The Bar, anechoic corridor",
+      "kind": "image",
+      "status": "done",
+      "seconds": 57,
+      "files": [
+        "sheet_lo_bar_corridor/image-1.png"
+      ],
+      "column": 0,
+      "row": 69,
+      "words": "Three photographs side by side on a plain dark ground: location stills for a live-action film, real photography shot with a cinema camera (not a painting, an illustration, concept art or a render). The anechoic corridor inside the Bar: a long straight corridor lined floor to ceiling with matte black pyramidal acoustic wedges (#0E0E10), one strip of hard white light overhead and a small white doorway at the far end. Left, the one-point-perspective wide down the corridor; centre, the reverse angle; right, a detail of the wall's wedges. Perfect symmetry, no reflections, natural film grain. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_pr_collar",
+      "title": "Sheet · Damper collar",
+      "kind": "image",
+      "status": "done",
+      "seconds": 67,
+      "files": [
+        "sheet_pr_collar/image-1.png"
+      ],
+      "column": 0,
+      "row": 70,
+      "words": "Prop reference sheet of a Compact damper collar: a rigid matte black collar covering the throat from collarbone to just under the chin, with faint quilted ridges and a hidden clasp at the back of the neck. Front, side, back (clasp) and open views, and worn on a pale gaunt woman's neck. Neutral grey background, hard white top-light, no reflections. No text, letters, numbers, captions or labels anywhere on the sheet."
+    },
+    {
+      "id": "sheet_lo_weir",
+      "title": "Sheet · The Weir (ice ring of Mereth)",
+      "kind": "image",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "sheet_lo_weir/image-1.png"
+      ],
+      "column": 0,
+      "row": 71,
+      "words": "Environment reference sheet of the Weir: a colossal ring of turquoise ice boulders (#3FC1C9) around the teal-and-white banded gas giant Mereth (#1E6F7A), with small amber-lit craft moving among the ice. Panels: wide of the ring and planet, a close field of drifting bergs, and an anchorage among the ice for a large carrier. Crisp starlight, warm bell amber (#FFB347), saturated colour, 2.39:1 frames. The sheet has no words at all: no title, caption, label, heading, letters or numbers."
+    },
+    {
+      "id": "sheet_pr_sandplate",
+      "title": "Sheet · Sand plate",
+      "kind": "image",
+      "status": "done",
+      "seconds": 32,
+      "files": [
+        "sheet_pr_sandplate/image-1.png"
+      ],
+      "column": 0,
+      "row": 72,
+      "words": "Four photographs side by side on a plain dark ground, real photographs of a prop from a live-action film set, shot with a cinema camera (not a painting, an illustration, concept art or a render): a sand plate, a round brass plate about 30 cm across set into a cockpit console, covered with fine pale sand that draws geometric standing-wave figures as a voice speaks. Left, the top view at rest; centre left, a figure of rings and petals forming in the sand; centre right, a figure of three interlocking rings forming; right, a side view showing the brass rim set into the console. Warm amber cockpit light, natural film grain. The sheet has no words at all: no title, caption, label, heading, scale bar, letters or numbers."
+    },
+    {
+      "id": "sheet_sh_carillon",
+      "title": "Sheet · The Carillon (Free Bell carrier)",
+      "kind": "image",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "sheet_sh_carillon/image-1.png"
+      ],
+      "column": 0,
+      "row": 73,
+      "words": "Orthographic reference sheet of the Carillon, a 640-metre Free Bell carrier, photographed as a studio miniature for a live-action film: a long oxidised-bronze lattice spine with more than forty bells of five to sixty metres hanging beneath it as hangars and habitats, three habitat rings at the bow and copper-mesh sails along the top; warm amber light glows in every bell-mouth. Side, top, front and three-quarter views on a neutral dark background, crisp starlight key with amber practical lights, real photography (not a painting, an illustration or a render). The sheet has no words at all: no title, caption, label, heading, scale bar, letters or numbers."
     },
     {
       "id": "vid_s02_02",
@@ -2132,7 +5874,7 @@ const record: ProductionRunRecord = {
         "vid_s02_02/video-1.mp4"
       ],
       "column": 0,
-      "row": 33,
+      "row": 74,
       "words": "Over the shoulder of a 19-year-old woman with cropped black hair and a long copper-wrapped braid behind her left ear, in an oxblood wool work coat, sitting on top of a towering hexagonal basalt column above a grey sea at dusk, looking up at the overcast sky, which a thin, perfectly black band cuts in half; a tiny amber spark beside the band fades out. A heavyset bald man of 61 with white stubble, half-moon brass spectacles, a moss-green wool sweater and a long leather apron hauls himself up onto the column beside her, breathing hard, and looks up too, his face in profile. Mouths closed. Low angle toward the sky, 50mm, slight handheld settle. Cold overcast dusk light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no glints, anamorphic widescreen, 35mm film grain. Avoid: text, letters, logos, watermarks, subtitles, lens flares, extra fingers, deformed hands, cartoon style."
     },
     {
@@ -2145,7 +5887,7 @@ const record: ProductionRunRecord = {
         "mus_m01_cold_open/audio-1.mp3"
       ],
       "column": 0,
-      "row": 34,
+      "row": 75,
       "words": "Near-silent cold open: one high pure violin harmonic held alone, then an open-fifth low-string drone and a distant wordless choir hum, bowed vibraphone glints, 50 BPM, dry and close with no reverb, short decays, vast and aching, ending on a sudden cut."
     },
     {
@@ -2158,7 +5900,7 @@ const record: ProductionRunRecord = {
         "tts_s02_02/audio-1.mp3"
       ],
       "column": 0,
-      "row": 35,
+      "row": 76,
       "words": "Another one."
     },
     {
@@ -2171,7 +5913,7 @@ const record: ProductionRunRecord = {
         "tts_s02_03/audio-1.mp3"
       ],
       "column": 0,
-      "row": 36,
+      "row": 77,
       "words": "It's louder today.<#1.2#>"
     },
     {
@@ -2184,7 +5926,7 @@ const record: ProductionRunRecord = {
         "tts_s02_04/audio-1.mp3"
       ],
       "column": 0,
-      "row": 37,
+      "row": 78,
       "words": "Nothing is louder here. Not for twenty years."
     },
     {
@@ -2197,7 +5939,7 @@ const record: ProductionRunRecord = {
         "tts_s02_05/audio-1.mp3"
       ],
       "column": 0,
-      "row": 38,
+      "row": 79,
       "words": "Then why can I still hear it?"
     },
     {
@@ -2210,7 +5952,7 @@ const record: ProductionRunRecord = {
         "tts_s04_03/audio-1.mp3"
       ],
       "column": 0,
-      "row": 39,
+      "row": 80,
       "words": "People of Corrow. The Chord is dying. We keep what is left."
     },
     {
@@ -2223,7 +5965,7 @@ const record: ProductionRunRecord = {
         "tts_s04_04/audio-1.mp3"
       ],
       "column": 0,
-      "row": 40,
+      "row": 81,
       "words": "At dawn, Corrow will be quieted."
     },
     {
@@ -2236,7 +5978,7 @@ const record: ProductionRunRecord = {
         "tts_s05_02/audio-1.mp3"
       ],
       "column": 0,
-      "row": 41,
+      "row": 82,
       "words": "Quieted. What does that even mean?<#1.2#>"
     },
     {
@@ -2249,7 +5991,7 @@ const record: ProductionRunRecord = {
         "tts_s05_03/audio-1.mp3"
       ],
       "column": 0,
-      "row": 42,
+      "row": 83,
       "words": "It means gone. No ship in. No ship out. Ever."
     },
     {
@@ -2262,7 +6004,7 @@ const record: ProductionRunRecord = {
         "tts_s05_04/audio-1.mp3"
       ],
       "column": 0,
-      "row": 43,
+      "row": 84,
       "words": "They can't close a whole world.<#1.2#>"
     },
     {
@@ -2275,7 +6017,7 @@ const record: ProductionRunRecord = {
         "tts_s05_05/audio-1.mp3"
       ],
       "column": 0,
-      "row": 44,
+      "row": 85,
       "words": "They closed your mother's."
     },
     {
@@ -2288,7 +6030,7 @@ const record: ProductionRunRecord = {
         "tts_s05_06/audio-1.mp3"
       ],
       "column": 0,
-      "row": 45,
+      "row": 86,
       "words": "Then we leave tonight.<#1.2#>"
     },
     {
@@ -2301,7 +6043,7 @@ const record: ProductionRunRecord = {
         "tts_s06_03/audio-1.mp3"
       ],
       "column": 0,
-      "row": 46,
+      "row": 87,
       "words": "You built a ship.<#1.2#>"
     },
     {
@@ -2314,7 +6056,7 @@ const record: ProductionRunRecord = {
         "tts_s06_04/audio-1.mp3"
       ],
       "column": 0,
-      "row": 47,
+      "row": 88,
       "words": "Twenty years. One scrap at a time."
     },
     {
@@ -2327,7 +6069,7 @@ const record: ProductionRunRecord = {
         "tts_s06_05/audio-1.mp3"
       ],
       "column": 0,
-      "row": 48,
+      "row": 89,
       "words": "She has never sung. Not once."
     },
     {
@@ -2340,7 +6082,7 @@ const record: ProductionRunRecord = {
         "tts_s06_06/audio-1.mp3"
       ],
       "column": 0,
-      "row": 49,
+      "row": 90,
       "words": "Bram. It's coming from her.<#1.2#>"
     },
     {
@@ -2353,7 +6095,7 @@ const record: ProductionRunRecord = {
         "tts_s08_06/audio-1.mp3"
       ],
       "column": 0,
-      "row": 50,
+      "row": 91,
       "words": "There you are.<#1.2#>"
     },
     {
@@ -2366,7 +6108,7 @@ const record: ProductionRunRecord = {
         "tts_s08_07/audio-1.mp3"
       ],
       "column": 0,
-      "row": 51,
+      "row": 92,
       "words": "She's a tuner's girl. She hears nothing."
     },
     {
@@ -2379,7 +6121,7 @@ const record: ProductionRunRecord = {
         "tts_s08_08/audio-1.mp3"
       ],
       "column": 0,
-      "row": 52,
+      "row": 93,
       "words": "Everyone hears nothing here. That is the point."
     },
     {
@@ -2392,7 +6134,7 @@ const record: ProductionRunRecord = {
         "tts_s08_09/audio-1.mp3"
       ],
       "column": 0,
-      "row": 53,
+      "row": 94,
       "words": "Little bird. There is no air left here to sing in."
     },
     {
@@ -2405,8 +6147,502 @@ const record: ProductionRunRecord = {
         "tts_s08_10/audio-1.mp3"
       ],
       "column": 0,
-      "row": 54,
+      "row": 95,
       "words": "I'll find you."
+    },
+    {
+      "id": "tts_s12_02",
+      "title": "Voice · SEREN · s12_02",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 234,
+      "files": [
+        "tts_s12_02/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 96,
+      "words": "The Chord is dying, Lark. Every year it rings softer."
+    },
+    {
+      "id": "tts_s12_03",
+      "title": "Voice · SEREN · s12_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 52,
+      "files": [
+        "tts_s12_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 97,
+      "words": "We hold what is left, so someone can still cross the dark."
+    },
+    {
+      "id": "tts_s12_04",
+      "title": "Voice · LARK · s12_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 235,
+      "files": [
+        "tts_s12_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 98,
+      "words": "By shutting us in it.<#1.2#>"
+    },
+    {
+      "id": "tts_s12_05",
+      "title": "Voice · SEREN · s12_05",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 21,
+      "files": [
+        "tts_s12_05/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 99,
+      "words": "Tomorrow this ring closes Corrow's still. Gently, if a Hearer guides it. Badly, if not."
+    },
+    {
+      "id": "tts_s12_06",
+      "title": "Voice · SEREN · s12_06",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 229,
+      "files": [
+        "tts_s12_06/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 100,
+      "words": "Where did you get that fork?"
+    },
+    {
+      "id": "tts_s12_07",
+      "title": "Voice · LARK · s12_07",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 46,
+      "files": [
+        "tts_s12_07/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 101,
+      "words": "My mother.<#1.2#>"
+    },
+    {
+      "id": "tts_s12_08",
+      "title": "Voice · SEREN · s12_08",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 57,
+      "files": [
+        "tts_s12_08/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 102,
+      "words": "Ilse Anwen. She heard more than any of us. It broke her."
+    },
+    {
+      "id": "tts_s12_09",
+      "title": "Voice · LARK · s12_09",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 21,
+      "files": [
+        "tts_s12_09/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 103,
+      "words": "You broke her.<#1.2#>"
+    },
+    {
+      "id": "tts_s12_10",
+      "title": "Voice · SEREN · s12_10",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 229,
+      "files": [
+        "tts_s12_10/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 104,
+      "words": "I made her quiet.<#1.2#>"
+    },
+    {
+      "id": "tts_s13_02",
+      "title": "Voice · BRAM · s13_02",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 230,
+      "files": [
+        "tts_s13_02/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 105,
+      "words": "Come on, girl. Fly first. Sing later."
+    },
+    {
+      "id": "tts_s14_03",
+      "title": "Voice · KESH · s14_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 229,
+      "files": [
+        "tts_s14_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 106,
+      "words": "What is that?<#1.2#>"
+    },
+    {
+      "id": "tts_s14_04",
+      "title": "Voice · LARK · s14_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 229,
+      "files": [
+        "tts_s14_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 107,
+      "words": "You can hear it?<#1.2#>"
+    },
+    {
+      "id": "tts_s14_05",
+      "title": "Voice · KESH · s14_05",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 51,
+      "files": [
+        "tts_s14_05/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 108,
+      "words": "No. I can see it. <#0.6#> I was born on a bell-ship. I remember bells."
+    },
+    {
+      "id": "tts_s15_02",
+      "title": "Voice · SEREN · s15_02",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 11,
+      "files": [
+        "tts_s15_02/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 109,
+      "words": "Listen. Tell me its note, and we close it gently."
+    },
+    {
+      "id": "tts_s15_04",
+      "title": "Voice · ILSE · s15_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 239,
+      "files": [
+        "tts_s15_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 110,
+      "words": "It isn't fading. <#0.6#> They are drinking it."
+    },
+    {
+      "id": "tts_s15_06",
+      "title": "Voice · LARK · s15_06",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 21,
+      "files": [
+        "tts_s15_06/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 111,
+      "words": "You're not saving the Chord. You're drinking it."
+    },
+    {
+      "id": "tts_s15_07",
+      "title": "Voice · SEREN · s15_07",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 26,
+      "files": [
+        "tts_s15_07/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 112,
+      "words": "Tell me the note, Lark.<#1.2#>"
+    },
+    {
+      "id": "tts_s17_02",
+      "title": "Voice · SEREN · s17_02",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 62,
+      "files": [
+        "tts_s17_02/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 113,
+      "words": "Primate. Corrow will be quiet within the hour."
+    },
+    {
+      "id": "tts_s17_03",
+      "title": "Voice · PRIMATE · s17_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 229,
+      "files": [
+        "tts_s17_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 114,
+      "words": "Let nothing ring.<#1.2#>"
+    },
+    {
+      "id": "tts_s18_03",
+      "title": "Voice · KESH · s18_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s18_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 115,
+      "words": "Do it.<#1.2#>"
+    },
+    {
+      "id": "tts_s18_06",
+      "title": "Voice · SEREN · s18_06",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s18_06/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 116,
+      "words": "No!<#1.2#>"
+    },
+    {
+      "id": "tts_s21_01",
+      "title": "Voice · BRAM · s21_01",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s21_01/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 117,
+      "words": "Lark!"
+    },
+    {
+      "id": "tts_s21_02",
+      "title": "Voice · LARK · s21_02",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s21_02/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 118,
+      "words": "If I let go, it closes again."
+    },
+    {
+      "id": "tts_s21_03",
+      "title": "Voice · BRAM · s21_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s21_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 119,
+      "words": "Then I won't let go. Go. She's waiting for you."
+    },
+    {
+      "id": "tts_s21_04",
+      "title": "Voice · BRAM · s21_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 21,
+      "files": [
+        "tts_s21_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 120,
+      "words": "Ring her, Lark. She was always yours."
+    },
+    {
+      "id": "tts_s21_06",
+      "title": "Voice · SEREN · s21_06",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s21_06/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 121,
+      "words": "That is Ilse's fork.<#1.2#>"
+    },
+    {
+      "id": "tts_s21_07",
+      "title": "Voice · BRAM · s21_07",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s21_07/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 122,
+      "words": "And that's her daughter's note.<#1.2#>"
+    },
+    {
+      "id": "tts_s22_04",
+      "title": "Voice · KESH · s22_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s22_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 123,
+      "words": "They aim for the bell. They want it quiet, not broken."
+    },
+    {
+      "id": "tts_s23_01",
+      "title": "Voice · LARK · s23_01",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 6,
+      "files": [
+        "tts_s23_01/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 124,
+      "words": "I've never rung a ship.<#1.2#>"
+    },
+    {
+      "id": "tts_s23_03",
+      "title": "Voice · LARK · s23_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s23_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 125,
+      "words": "That's my note. <#0.6#> It was never in my head. It was her."
+    },
+    {
+      "id": "tts_s23_04",
+      "title": "Voice · KESH · s23_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 36,
+      "files": [
+        "tts_s23_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 126,
+      "words": "Then ring her!<#1.2#>"
+    },
+    {
+      "id": "tts_s23_05",
+      "title": "Voice · LARK · s23_05",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s23_05/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 127,
+      "words": "Ring out.<#1.2#>"
+    },
+    {
+      "id": "tts_s25_04",
+      "title": "Voice · PRIMATE · s25_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s25_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 128,
+      "words": "Provost. Find the girl.<#1.2#>"
+    },
+    {
+      "id": "tts_s26_03",
+      "title": "Voice · IMRE · s26_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 10,
+      "files": [
+        "tts_s26_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 129,
+      "words": "Unknown bell, you rang in on an unscored note. Where from?"
+    },
+    {
+      "id": "tts_s26_04",
+      "title": "Voice · LARK · s26_04",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 16,
+      "files": [
+        "tts_s26_04/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 130,
+      "words": "Corrow.<#1.2#>"
+    },
+    {
+      "id": "tts_s26_05",
+      "title": "Voice · IMRE · s26_05",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s26_05/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 131,
+      "words": "Nobody rings out of Corrow.<#1.2#>"
+    },
+    {
+      "id": "tts_s26_06",
+      "title": "Voice · KESH · s26_06",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s26_06/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 132,
+      "words": "She just did.<#1.2#>"
+    },
+    {
+      "id": "tts_s27_03",
+      "title": "Voice · LARK · s27_03",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 56,
+      "files": [
+        "tts_s27_03/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 133,
+      "words": "There's another one.<#1.2#>"
     },
     {
       "id": "mus_m03_corrow",
@@ -2418,7 +6654,7 @@ const record: ProductionRunRecord = {
         "mus_m03_corrow/audio-1.mp3"
       ],
       "column": 0,
-      "row": 55,
+      "row": 134,
       "words": "Sealed-world chamber cue: a lone violin harmonic and a hesitant rising four-note figure on piano and dulcimer that never resolves, a soft cello and euphonium hymn beneath, low anvil taps, 60 BPM, bone dry, no reverb, short decays, stubborn and lonely."
     },
     {
@@ -2431,7 +6667,7 @@ const record: ProductionRunRecord = {
         "mus_m04_answer/audio-1.mp3"
       ],
       "column": 0,
-      "row": 56,
+      "row": 135,
       "words": "Hidden bell-ship reveal: cello and euphonium hymn swelling slowly over an open-fifth low-string drone, celesta and dulcimer hinting at a rising four-note figure, 56 BPM, still dry and close with short decays, warm awe held back."
     },
     {
@@ -2444,7 +6680,7 @@ const record: ProductionRunRecord = {
         "mus_m05_caesura/audio-1.mp3"
       ],
       "column": 0,
-      "row": 57,
+      "row": 136,
       "words": "Airless ceremonial dread: muted brass chords cut abruptly to silence, prepared piano clusters, soft breath textures, a deep sub-bass pulse, 40 BPM, completely dry, no reverb, vast and cold."
     },
     {
@@ -2457,7 +6693,7 @@ const record: ProductionRunRecord = {
         "mus_m06_census/audio-1.mp3"
       ],
       "column": 0,
-      "row": 58,
+      "row": 137,
       "words": "Tense ceremonial census: prepared piano ticks, a breathy alto flute and glass harmonica phrase, muted brass swells cut to silence, low sub-bass, 52 BPM, dry and close, grieving control, quiet and restrained throughout."
     },
     {
@@ -2470,8 +6706,164 @@ const record: ProductionRunRecord = {
         "mus_m07_resolve/audio-1.mp3"
       ],
       "column": 0,
-      "row": 59,
+      "row": 138,
       "words": "Quiet resolve: solo cello and euphonium hymn over a slow anvil heartbeat, 54 BPM, dry and close with short decays, warm steadfast grief hardening into decision, ending on an unresolved held note."
+    },
+    {
+      "id": "mus_m08_the_bar",
+      "title": "Score · m08_the_bar",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 128,
+      "files": [
+        "mus_m08_the_bar/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 139,
+      "words": "Inside the anechoic ring: prepared piano, muted brass chords cut to silence, a breathy alto flute and glass harmonica motif, faint breath textures and sub-bass, 44 BPM, completely dry, no reverb, airless and ceremonial."
+    },
+    {
+      "id": "mus_m09_launch",
+      "title": "Score · m09_launch",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 128,
+      "files": [
+        "mus_m09_launch/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 140,
+      "words": "Scrappy launch: cello and euphonium hymn quickening over a driving anvil rhythm and frame drum, 96 BPM, dry and close with short decays, sputtering starts then rising, steadfast courage."
+    },
+    {
+      "id": "mus_m10_cell",
+      "title": "Score · m10_cell",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 128,
+      "files": [
+        "mus_m10_cell/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 141,
+      "words": "Intimate cell scene: a low clarinet phrase over a soft frame-drum heartbeat, a single violin harmonic answering it, 58 BPM, dry and close, sparse, haunted tenderness."
+    },
+    {
+      "id": "mus_m11_core_echo",
+      "title": "Score · m11_core_echo",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 235,
+      "files": [
+        "mus_m11_core_echo/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 142,
+      "words": "Held-note core: bowed vibraphone shimmer over an open-fifth low-string drone, a distant wordless choir like an echo, breathy alto flute, 46 BPM, close but haunted by faint echoes, eerie grieving revelation."
+    },
+    {
+      "id": "mus_m12_quieting",
+      "title": "Score · m12_quieting",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 320,
+      "files": [
+        "mus_m12_quieting/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 143,
+      "words": "Closing machine: a low frame-drum pulse and cello ostinato against muted brass chords and prepared piano, sub-bass slowly rising, 84 BPM, dry, ominous and tightening, ending cut to silence."
+    },
+    {
+      "id": "mus_m13_the_strike",
+      "title": "Score · m13_the_strike",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 163,
+      "files": [
+        "mus_m13_the_strike/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 144,
+      "words": "The release: a single pure violin harmonic blooms into a rising four-note figure on piano, celesta and dulcimer, then full strings, wordless choir and tuned bells burst open in cathedral reverb, 72 BPM building to triumph, colour and joy."
+    },
+    {
+      "id": "mus_m14_hold_the_note",
+      "title": "Score · m14_hold_the_note",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 122,
+      "files": [
+        "mus_m14_hold_the_note/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 145,
+      "words": "Bittersweet farewell: cello and euphonium hymn carrying the rising four-note figure over an open-fifth string drone and wordless choir, cathedral reverb, 66 BPM, tender and steadfast, tears and resolve."
+    },
+    {
+      "id": "mus_m15_escape",
+      "title": "Score · m15_escape",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 97,
+      "files": [
+        "mus_m15_escape/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 146,
+      "words": "Chase and ring-out: driving frame drums, fiddles and handbells at 132 BPM, low clarinet heartbeat, the rising four-note figure on piano and celesta climbing into a bright choral bloom, cathedral reverb, ending in a sudden void."
+    },
+    {
+      "id": "mus_m16_seren_hears",
+      "title": "Score · m16_seren_hears",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 158,
+      "files": [
+        "mus_m16_seren_hears/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 147,
+      "words": "Grief unsealed: breathy alto flute and glass harmonica over a soft open-fifth drone, the reverb opening slowly from dry to wide, 48 BPM, aching and controlled, ending on one long held note."
+    },
+    {
+      "id": "mus_m17_the_weir",
+      "title": "Score · m17_the_weir",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 93,
+      "files": [
+        "mus_m17_the_weir/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 148,
+      "words": "Arrival among free bells: handbells, tuned bells, fiddles and frame drums over an open-fifth drone, 88 BPM, wide cathedral reverb, warm, communal and defiant, a welcome."
+    },
+    {
+      "id": "mus_m18_new_note",
+      "title": "Score · m18_new_note",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 108,
+      "files": [
+        "mus_m18_new_note/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 149,
+      "words": "Mystery coda: a new low, vast tone beneath bowed vibraphone shimmer and a distant wordless choir, the rising four-note figure answered by an unfamiliar falling interval, 40 BPM, wide reverb, awe and unease."
+    },
+    {
+      "id": "mus_m19_end_cards",
+      "title": "Score · m19_end_cards",
+      "kind": "audio",
+      "status": "done",
+      "seconds": 138,
+      "files": [
+        "mus_m19_end_cards/audio-1.mp3"
+      ],
+      "column": 0,
+      "row": 150,
+      "words": "End cards: the rising four-note figure on piano and celesta over an open-fifth string drone and wordless choir, handbells joining, 70 BPM, wide reverb, hopeful and vast, ending on a gentle bell decay."
     },
     {
       "id": "vid_s01_01",
@@ -2920,13 +7312,13 @@ const record: ProductionRunRecord = {
       "title": "Clip · s08_04",
       "kind": "video",
       "status": "done",
-      "seconds": 216,
+      "seconds": 338,
       "files": [
         "vid_s08_04/video-1.mp4"
       ],
       "column": 1,
       "row": 34,
-      "words": "Close-up of a pale long-fingered hand in a white quilted sleeve holding a matte black tuning fork, about to strike it against the other palm. @Image 1 strikes the black fork @Image 2 against her palm; the tines blur with vibration but there is no sound at all; the air around the tines ripples faintly. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: INSERT, eye level, locked, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+      "words": "Close-up of a pale long-fingered hand in a white quilted sleeve holding a matte black tuning fork, about to strike it against the other palm, outdoors in the wet grey stone square of Brineholt under an overcast sky, townsfolk standing blurred far behind. One continuous photographic frame filling the whole screen. @Image 1 strikes the black fork @Image 2 against her palm; the tines blur with vibration but there is no sound at all; the air around the tines ripples faintly. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: INSERT, eye level, locked, 100mm lens. Avoid: split screens, diptychs, triptychs, panels, grids, collages, contact sheets, photo borders, plain studio backdrops, text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
     },
     {
       "id": "vid_s08_05",
@@ -3037,16 +7429,1147 @@ const record: ProductionRunRecord = {
       "title": "Clip · s09_03",
       "kind": "video",
       "status": "done",
-      "seconds": 292,
+      "seconds": 274,
       "files": [
         "vid_s09_03/video-1.mp4"
       ],
       "column": 1,
       "row": 43,
-      "words": "Wide of a dark sea-cave mouth at the foot of basalt cliffs at dusk, grey water at its lip, a heavyset man walking toward it. @Image 1 strides toward the cave mouth @Image 2, pulls his leather apron over his head and drops it on the rocks without looking back; the darkness swallows him. Locked camera. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Photorealistic live-action footage, like the rest of the film: real people with real skin, real stone and real fire, shot on 35mm film; not animation, not an illustration, not painterly. Camera: WS, eye level, locked, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+      "words": "Wide of the dark mouth of a sea cave at the foot of tall basalt-column cliffs at dusk, grey sea water washing at its lip, a heavyset bald man in a moss-green sweater and a leather apron walking toward it, small in the frame. One continuous photographic frame filling the whole screen. @Image 1 strides toward the cave mouth, pulls his leather apron over his head and drops it on the rocks without looking back; the darkness of the cave swallows him. Locked camera. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Photorealistic live-action footage, like the rest of the film: real people with real skin, real stone and real fire, shot on 35mm film; not animation, not an illustration, not painterly. Camera: WS, eye level, locked, 32mm lens. Avoid: split screens, diptychs, triptychs, panels, grids, collages, contact sheets, photo borders, plain studio backdrops, text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s10_01",
+      "title": "Clip · s10_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 351,
+      "files": [
+        "vid_s10_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 44,
+      "words": "From @Image 1: the tiny white lander @Image 4 rises toward the wedge cliff of @Image 3, shrinking against the immense black surface; the camera tilts up slowly to follow, revealing the ring's endless curve. Silent and vast. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, low angle, tilting up, slow tilt up, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s10_02",
+      "title": "Clip · s10_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 349,
+      "files": [
+        "vid_s10_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 45,
+      "words": "From @Image 1: the lander @Image 3 slides into the white slot in the black wedge wall @Image 2; the slot narrows and closes behind it like an eye. Locked camera. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, locked, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s11_01",
+      "title": "Clip · s11_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 263,
+      "files": [
+        "vid_s11_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 46,
+      "words": "Symmetrical one-point perspective down a long corridor lined floor to ceiling with matte black pyramidal anechoic wedges under a strip of white light; the young woman in an oxblood coat walks toward camera with grey felt cuffs on her wrists, a pale shaved-head guard in charcoal quilted armour behind her. @Image 1 walks slowly toward camera down the corridor @Image 3, followed by @Image 2; the camera dollies back at their pace, perfectly centred. No sound at all. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, one-point perspective, dolly back, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s11_02",
+      "title": "Clip · s11_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 382,
+      "files": [
+        "vid_s11_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 47,
+      "words": "Medium shot of the young woman's hands bound in grey felt cuffs raised in front of her chest, black wedge walls behind her. @Image 1 claps her bound hands together sharply, twice; there is no sound and no echo; she stares at her hands. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s11_03",
+      "title": "Clip · s11_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 364,
+      "files": [
+        "vid_s11_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 48,
+      "words": "Medium close-up of a lean pale young man with a shaved head, tired hazel eyes and a small closed-ring tattoo on the side of his neck, charcoal quilted collar, black wedges behind. @Image 1 glances down at her hands; something flickers in his eyes; then he looks straight ahead again and keeps walking. The camera tracks with him. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, tracking, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s11_04",
+      "title": "Clip · s11_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 381,
+      "files": [
+        "vid_s11_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 49,
+      "words": "From behind, two figures walk away down an endless corridor of black wedges toward a small white doorway. @Image 1 and @Image 2 walk away from camera toward the white doorway of @Image 3; the camera holds still and centred as they shrink. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: WS, from behind, locked, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_01",
+      "title": "Clip · s12_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 244,
+      "files": [
+        "vid_s12_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 50,
+      "words": "Wide of a round bone-white chamber with ribbed quilted walls, a bowl of glossy black liquid on a slender pedestal at the centre, a tall slit window showing a small grey-blue planet; a very tall gaunt woman in a white quilted robe stands at the window. @Image 2 stands at the slit window of @Image 4 with her back to the room; @Image 1 is led in by @Image 3, who stops at the door. Slow push-in, hard white top-light. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, slow push-in, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_02",
+      "title": "Clip · s12_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 437,
+      "files": [
+        "vid_s12_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 51,
+      "words": "Medium close-up of the gaunt woman with cropped silver-white hair and a black collar turning from a slit window, cold white light on her face. @Image 1 turns from the window and says the line in @Audio 1, lips in sync, slow and precise. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_03",
+      "title": "Clip · s12_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 314,
+      "files": [
+        "vid_s12_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 52,
+      "words": "Close on a pale hand hovering over a bowl of glossy black liquid, its surface perfectly still and mirror-like. the hand of @Image 1 passes slowly over the bowl @Image 2; the black liquid rises in a soft crown under her palm in rhythm with the voice in @Audio 1, then falls flat. Locked macro. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, high angle, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_04",
+      "title": "Clip · s12_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 356,
+      "files": [
+        "vid_s12_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 53,
+      "words": "Medium close-up of the young woman in an oxblood coat, wrists cuffed in grey felt, defiant, cold white light, white quilted wall behind. @Image 1 lifts her chin and says the line in @Audio 1, lips in sync, contempt in her eyes. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_05",
+      "title": "Clip · s12_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 446,
+      "files": [
+        "vid_s12_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 54,
+      "words": "Over the young woman's shoulder, the gaunt woman in white stands beside the black bowl, the slit window with the small grey planet behind her. over the shoulder of @Image 1, @Image 2 steps closer past the bowl and says the line in @Audio 1, lips in sync, calm and terrible; behind her the small planet glows in the slit. Slow push-in. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: OTS, eye level, slow push-in, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_06",
+      "title": "Clip · s12_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 277,
+      "files": [
+        "vid_s12_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 55,
+      "words": "Close-up of the young woman's cuffed hands closing around a bronze tuning fork on a leather cord at her collar. the cuffed fingers of @Image 1 tighten around the bronze fork @Image 3; a pale hand reaches into frame toward it, then stops. Locked macro. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, eye level, locked, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_07",
+      "title": "Clip · s12_07",
+      "kind": "video",
+      "status": "done",
+      "seconds": 398,
+      "files": [
+        "vid_s12_07/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 56,
+      "words": "Medium close-up of the young woman pulling back, eyes hard, the bronze fork clutched at her collar, white quilted wall behind. @Image 1 pulls the fork away and says the line in @Audio 1, lips in sync, quiet and hard. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_08",
+      "title": "Clip · s12_08",
+      "kind": "video",
+      "status": "done",
+      "seconds": 220,
+      "files": [
+        "vid_s12_08/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 57,
+      "words": "Medium close-up of the gaunt woman, something old and painful moving behind her pale eyes, black collar, cold white light. @Image 1 looks at the fork, then at the girl, and says the line in @Audio 1, lips in sync, slow, almost tender. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_09",
+      "title": "Clip · s12_09",
+      "kind": "video",
+      "status": "done",
+      "seconds": 180,
+      "files": [
+        "vid_s12_09/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 58,
+      "words": "Medium close-up of the young woman, tears standing in her eyes, jaw clenched, cold white light, white quilted wall behind. @Image 1 says the line in @Audio 1, lips in sync, voice breaking with anger. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s12_10",
+      "title": "Clip · s12_10",
+      "kind": "video",
+      "status": "done",
+      "seconds": 304,
+      "files": [
+        "vid_s12_10/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 59,
+      "words": "Medium close-up of the gaunt woman touching the matte black collar at her throat with two pale fingers, face unreadable. @Image 1 touches her collar @Image 2 and says the line in @Audio 1, lips in sync, very quietly. Slow push-in. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, slow push-in, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s13_01",
+      "title": "Clip · s13_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 300,
+      "files": [
+        "vid_s13_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 60,
+      "words": "Night inside a sea cave walled with black basalt columns, its mouth open on a dark sea, a hand lantern on the rocks throwing warm light on a bronze bell-shaped ship; a heavyset bald man drags the last canvas tarp off its spine. One continuous photographic frame filling the whole screen. All of it inside the cave, at night. @Image 1 drags the last tarp off @Image 2 and lets it slide into the black water; lantern light trembles on matte bronze. Locked wide. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: WS, eye level, locked, 24mm lens. Avoid: split screens, diptychs, triptychs, panels, grids, collages, contact sheets, photo borders, plain studio backdrops, text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s13_02",
+      "title": "Clip · s13_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 293,
+      "files": [
+        "vid_s13_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 61,
+      "words": "Inside a cramped cockpit of amber faceted glass and brass levers at night, the heavyset bald man in a moss-green sweater grips two brass throttle levers, amber panel glow on his face. @Image 1 flips three heavy brass switches; amber lights stutter on across @Image 2; he grips the levers and says the line in @Audio 1, lips in sync, to the ship. Locked camera. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s13_03",
+      "title": "Clip · s13_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 236,
+      "files": [
+        "vid_s13_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 62,
+      "words": "From @Image 1: the rim nozzles of @Image 3 cough, sputter, then ignite into short dry orange flames; spray kicks up from the water; the hull shudders. Low handheld. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: CU, low angle, handheld, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s13_04",
+      "title": "Clip · s13_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 253,
+      "files": [
+        "vid_s13_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 63,
+      "words": "From @Image 1: @Image 4 slides out of the cave mouth @Image 3, skimming low over black water, thruster glow dull on the waves, spray plumes behind it. Locked wide. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: WS, eye level, locked, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s13_05",
+      "title": "Clip · s13_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 484,
+      "files": [
+        "vid_s13_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 64,
+      "words": "From @Image 1: the amber point of @Image 4 climbs steeply from the sea toward the black band @Image 2, its thruster trail thin and dry; the camera tilts up to follow. Silent awe. Cold overcast light, desaturated slate palette (#2B2F33, #59636B, #A9B3B8), matte surfaces with no specular highlights or glints, still air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: WS, low angle, tilt up, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s14_01",
+      "title": "Clip · s14_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 551,
+      "files": [
+        "vid_s14_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 65,
+      "words": "A small bone-white cell with quilted walls and a cold dark window beaded with condensation; the young woman sits against the wall; beyond a glass door a pale shaved-head guard stands watch. @Image 1 sits motionless, then rises and goes to the cold window of @Image 3; beyond the glass door @Image 2 shifts his weight. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, locked, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s14_02",
+      "title": "Clip · s14_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 281,
+      "files": [
+        "vid_s14_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 66,
+      "words": "Close-up of a fogged, condensation-beaded dark window, the young woman's lips close to the glass, her breath clouding it. @Image 1 breathes on the glass; in the fog fine lines draw themselves into a delicate standing-wave figure of rings and petals like @Image 2, glowing faintly in the cold light. Locked macro. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, eye level, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s14_03",
+      "title": "Clip · s14_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 315,
+      "files": [
+        "vid_s14_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 67,
+      "words": "Medium close-up of the pale shaved-head young man staring through a glass door, a faint glowing figure reflected in the glass between them. @Image 1 steps closer to the glass, staring, and says the line in @Audio 1, lips in sync, barely above a murmur. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s14_04",
+      "title": "Clip · s14_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 416,
+      "files": [
+        "vid_s14_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 68,
+      "words": "Medium close-up of the young woman turning from a fogged window toward camera, startled, cold white light. @Image 1 turns from the window toward him, startled, and says the line in @Audio 1, lips in sync. Locked camera. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s14_05",
+      "title": "Clip · s14_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 274,
+      "files": [
+        "vid_s14_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 69,
+      "words": "Medium close-up of the pale young man behind the glass door, eyes on the fading figure in the fog, a memory surfacing on his face. @Image 1 shakes his head slightly and says the lines in @Audio 1, lips in sync, slow and hoarse, eyes on the figure, not on her. Slow push-in. Matte black anechoic pyramid wedges (#0E0E10), bone-white quilted surfaces (#E9E4DA), hard white slit top-light, symmetrical centred composition, no reflections, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, slow push-in, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_01",
+      "title": "Clip · s15_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 250,
+      "files": [
+        "vid_s15_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 70,
+      "words": "Vertigo view down an immense cylindrical shaft lined with black pyramidal wedges, a column of trembling white light running down its centre into darkness, a thin bone-white gallery jutting out with three tiny figures at its rail. slow crane down past the gallery of @Image 4 into the shaft; the column of white light trembles and ripples like a plucked string; the three tiny figures stand at the rail. Awe, silence. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, high angle, crane down, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_02",
+      "title": "Clip · s15_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 416,
+      "files": [
+        "vid_s15_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 71,
+      "words": "Medium close-up of the gaunt woman at a rail, lit from below by cold white light, black collar, cropped silver-white hair. @Image 1 gestures down toward the light and says the line in @Audio 1, lips in sync, almost tender. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, low angle, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_03",
+      "title": "Clip · s15_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 286,
+      "files": [
+        "vid_s15_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 72,
+      "words": "Medium shot of the young woman stepping up to a bone-white rail, white light rising from below onto her face, eyes closing. @Image 1 grips the rail and closes her eyes; below, the white light quivers and drifting motes arrange into slow concentric rings like @Image 2 around the column. Slow push-in. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, slow push-in, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_04",
+      "title": "Clip · s15_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 346,
+      "files": [
+        "vid_s15_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 73,
+      "words": "Inside a trembling column of white light, the faint luminous outline of a woman's face, an older likeness of the young woman with a long black braid, formed from drifting motes of light, eyes closed. in the column of light the luminous face of @Image 1 forms from drifting motes and slowly opens its eyes, then dissolves into rings of light. Ethereal, slow push-in. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: CU, eye level, slow push-in, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_05",
+      "title": "Clip · s15_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 264,
+      "files": [
+        "vid_s15_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 74,
+      "words": "Extreme close-up of the young woman's dark eyes opening, wet with tears, white light reflected in them. the eyes of @Image 1 open; a tear runs; her breath catches; the light on her face pulses. Locked macro. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: ECU, eye level, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_06",
+      "title": "Clip · s15_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 284,
+      "files": [
+        "vid_s15_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 75,
+      "words": "Medium close-up of the young woman turning from the rail toward frame left, white underlight, tears on her cheeks, anger rising. @Image 1 turns to face the Provost and says the line in @Audio 1, lips in sync, voice shaking with anger. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s15_07",
+      "title": "Clip · s15_07",
+      "kind": "video",
+      "status": "done",
+      "seconds": 336,
+      "files": [
+        "vid_s15_07/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 76,
+      "words": "Medium close-up of the gaunt woman, face perfectly still, cold white underlight, black collar, black wedges looming behind. @Image 1 does not blink; she says the line in @Audio 1, lips in sync, very quiet. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s16_01",
+      "title": "Clip · s16_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 387,
+      "files": [
+        "vid_s16_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 77,
+      "words": "From @Image 1: @Image 4 climbs out of the atmosphere toward the black ring @Image 3, its thrust trail thin and flickering; the planet @Image 2 turns slowly below. Long lens, slow drift. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, slow drift, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s16_02",
+      "title": "Clip · s16_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 278,
+      "files": [
+        "vid_s16_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 78,
+      "words": "From @Image 1: the camera tracks alongside @Image 3 as it skims the black wedge cliff of @Image 2, banking toward a dark maintenance spoke jutting from the wall. Smooth and tense. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, tracking, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s17_01",
+      "title": "Clip · s17_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 257,
+      "files": [
+        "vid_s17_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 79,
+      "words": "Inside the vast shaft, rows of black pyramid wedges around the column of white light slide inward like slow teeth; the gaunt woman in white stands at a pedestal bowl on the gallery. behind @Image 1, the wedge rows of @Image 3 slide inward toward the column of light with grinding slowness; the light narrows and dims. Locked wide. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, locked, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s17_02",
+      "title": "Clip · s17_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 293,
+      "files": [
+        "vid_s17_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 80,
+      "words": "Medium close-up of the gaunt woman bowing her head over a bowl of black liquid on a pedestal, cold white light from below. @Image 1 bows toward the bowl @Image 2 and says the line in @Audio 1, lips in sync; the black liquid stirs. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s17_03",
+      "title": "Clip · s17_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 234,
+      "files": [
+        "vid_s17_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 81,
+      "words": "From @Image 1: the black liquid of @Image 2 surges into a crown of tall needle spikes that pulse with the deep voice in @Audio 1, then collapse flat. Locked macro. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, high angle, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_01",
+      "title": "Clip · s18_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 223,
+      "files": [
+        "vid_s18_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 82,
+      "words": "Medium shot on the gallery: the young woman at the rail with grey felt cuffs, the pale guard behind her, and far in the background the woman in white bent over the black bowl; closing wedges below. @Image 1 watches the closing wedges below; @Image 3 behind her looks from the wedges to her, then to the back of @Image 2. Slow push-in, tension. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, slow push-in, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_02",
+      "title": "Clip · s18_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 224,
+      "files": [
+        "vid_s18_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 83,
+      "words": "Close-up of a pale hand in a charcoal quilted sleeve sliding a slim white key into grey felt cuffs on a young woman's wrists. @Image 2 turns the key; the grey felt cuffs on the wrists of @Image 1 fall open and drop away without a sound. Locked macro. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, eye level, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_03",
+      "title": "Clip · s18_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 216,
+      "files": [
+        "vid_s18_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 84,
+      "words": "Medium close-up of the pale shaved-head young man, white underlight, resolve settling on his face. @Image 1 meets her eyes and says the line in @Audio 1, lips in sync, quietly. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_04",
+      "title": "Clip · s18_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 293,
+      "files": [
+        "vid_s18_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 85,
+      "words": "Close-up of the young woman's hand raising a bronze tuning fork above a bone-white rail, white light rising from below. @Image 1 strikes the bronze fork @Image 2 against the rail; the tines blur and a ring of rippling air expands from them; the fork keeps singing, a pure sustained tone, while her hand trembles. Slight push-in. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: CU, eye level, slight push-in, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_05",
+      "title": "Clip · s18_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 253,
+      "files": [
+        "vid_s18_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 86,
+      "words": "From @Image 1: the column of light in @Image 2 shudders; bright concentric rings race up and down its length; the closing wedges halt and begin to crack apart. The camera tilts slowly up the shaft. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, low angle, slow tilt up, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s18_06",
+      "title": "Clip · s18_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 233,
+      "files": [
+        "vid_s18_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 87,
+      "words": "Medium close-up of the gaunt woman spinning round from the bowl, eyes wide, white light flaring across her face from below. @Image 1 spins toward camera and says the line in @Audio 1, lips in sync; white light floods her face from below. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, low angle, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s19_01",
+      "title": "Clip · s19_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 263,
+      "files": [
+        "vid_s19_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 88,
+      "words": "From @Image 1: from the flare on @Image 3, rings of white light race along the black ring in both directions around the planet @Image 2, like fire along a fuse. Locked camera, vast. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, locked, 600mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s19_02",
+      "title": "Clip · s19_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 253,
+      "files": [
+        "vid_s19_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 89,
+      "words": "From @Image 1: cracks spider across the black wedges of @Image 2; white light pours out in slow billowing plumes like breath on cold air; wedge fragments drift away. Slow push-in. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, slow push-in, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s19_03",
+      "title": "Clip · s19_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 445,
+      "files": [
+        "vid_s19_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 90,
+      "words": "From @Image 1: the ring @Image 3 splits into drifting arcs, white light streaming from the gaps; the black disc @Image 4 in the foreground tilts as its white needles swing. Locked wide. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, locked, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s19_04",
+      "title": "Clip · s19_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 281,
+      "files": [
+        "vid_s19_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 91,
+      "words": "From @Image 1: rings of white light fall from the broken ring into the atmosphere of @Image 2 and bloom into shimmering aurora curtains that sweep across the clouds; colour begins to return to the seas. Slow drift. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, slow drift, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s20_01",
+      "title": "Clip · s20_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 337,
+      "files": [
+        "vid_s20_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 92,
+      "words": "From @Image 1: colour floods across @Image 2 like a wave; the sea turns deep green-blue, sun glints sparkle on every wave, the basalt gains a wet sheen. Slow aerial drift forward. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: EWS, aerial, slow aerial drift forward, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s20_02",
+      "title": "Clip · s20_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 327,
+      "files": [
+        "vid_s20_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 93,
+      "words": "From @Image 1: the felt on @Image 3 tears open and falls away in strips; the bare bronze bell swings and strikes; a visible ripple of air rings out from the tower of @Image 2. Low angle, slow push-in. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: WS, low angle, slow push-in, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s20_03",
+      "title": "Clip · s20_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 301,
+      "files": [
+        "vid_s20_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 94,
+      "words": "From @Image 1: wind pours across the basalt columns of @Image 2 and they sing; sand and spray on their tops leap into trembling geometric standing-wave patterns like @Image 3. Camera rises slowly. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MS, eye level, crane up, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s20_04",
+      "title": "Clip · s20_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 350,
+      "files": [
+        "vid_s20_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 95,
+      "words": "Medium shot of five townsfolk in wool coats in the harbour square at dawn, faces lifted to the sky, warm light, tears on their cheeks. @Image 1 lift their faces to the sky; an old man laughs and weeps; a woman presses her hand to her mouth; warm sunlight sweeps across them. Slow dolly. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MS, eye level, slow dolly, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s20_05",
+      "title": "Clip · s20_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 320,
+      "files": [
+        "vid_s20_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 96,
+      "words": "From @Image 1: over @Image 3 the broken arcs of the ring @Image 2 drift apart in the sky, their edges glowing; gulls rise from the roofs. Locked wide. Dawn light (#FFC98A), saturated deep green-blue sea (#1F5F6B), sparkling glints and wet specular highlights, crisp air, anamorphic widescreen 2.39:1, 35mm film grain. Camera: EWS, eye level, locked, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_01",
+      "title": "Clip · s21_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 410,
+      "files": [
+        "vid_s21_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 97,
+      "words": "Wide of a shaking gallery over a shaft of roaring white light, the young woman pressing a singing bronze fork to the rail, and a heavyset bald man bursting through a round hatch behind her. @Image 2 bursts through the hatch and runs toward @Image 1, who holds the fork against the rail; light surges upward; debris falls. Handheld. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, handheld, 24mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_02",
+      "title": "Clip · s21_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 354,
+      "files": [
+        "vid_s21_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 98,
+      "words": "Medium close-up of the young woman holding a singing bronze fork to a rail, white light roaring up around her, desperate. @Image 1 keeps the singing fork pressed to the rail and says the line in @Audio 1, lips in sync, desperate. The gallery shakes. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, handheld, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_03",
+      "title": "Clip · s21_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 286,
+      "files": [
+        "vid_s21_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 99,
+      "words": "Medium close-up of the heavyset bald man taking a bronze fork from the young woman's hand and pressing it to the rail himself, white light on his face. @Image 2 closes his scarred hand over hers, takes the fork and presses it to the rail, then says the line in @Audio 1, lips in sync, steady and kind. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, handheld, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_04",
+      "title": "Clip · s21_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 219,
+      "files": [
+        "vid_s21_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 100,
+      "words": "Medium close-up of the heavyset bald man, tears in his eyes and a smile, white light from below, holding the fork to the rail. @Image 1 smiles through tears and says the line in @Audio 1, lips in sync. Light roars around him. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_05",
+      "title": "Clip · s21_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 400,
+      "files": [
+        "vid_s21_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 101,
+      "words": "Medium shot of the pale guard pulling the young woman by the arm toward a round hatch, her face turned back toward the light. @Image 2 pulls @Image 1 toward the hatch; she resists, looks back toward the light, then runs with him through the hatch. Handheld. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MS, eye level, handheld, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_06",
+      "title": "Clip · s21_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 278,
+      "files": [
+        "vid_s21_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 102,
+      "words": "Medium close-up of the gaunt woman in white stepping onto the shaking gallery, white light pouring up between her and the camera, her eyes on a two-pronged bronze tuning fork pressed to the rail. @Image 1 stops at the edge of the light, stares at the fork @Image 2, and says the line in @Audio 1, lips in sync, stunned. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: tridents, spears, three-pronged forks, text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s21_07",
+      "title": "Clip · s21_07",
+      "kind": "video",
+      "status": "done",
+      "seconds": 253,
+      "files": [
+        "vid_s21_07/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 103,
+      "words": "Medium close-up of the heavyset bald man holding a singing bronze fork against the rail, calm and proud, white light roaring around him. @Image 1 holds the singing fork @Image 2 to the rail and says the line in @Audio 1, lips in sync, calm and proud. Slow push-in. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, slow push-in, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_01",
+      "title": "Clip · s22_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 235,
+      "files": [
+        "vid_s22_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 104,
+      "words": "From @Image 1: @Image 3 tears free from the broken spoke of @Image 2 in a spray of black wedge fragments and dives along the cracking ring, nozzles flaring orange. Tracking camera. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, tracking, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_02",
+      "title": "Clip · s22_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 326,
+      "files": [
+        "vid_s22_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 105,
+      "words": "From @Image 1: the three interceptors @Image 3 drop from the shadow of @Image 2 and swing into pursuit, silent and smooth, closing the distance. The camera pans with them. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, pan, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_03",
+      "title": "Clip · s22_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 321,
+      "files": [
+        "vid_s22_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 106,
+      "words": "From @Image 1: white harpoons streak past @Image 3; one glances off the rim of its bell-mouth in a spray of sparks, its cable whipping; another misses by a metre. Handheld chase. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: MS, from behind, handheld chase, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_04",
+      "title": "Clip · s22_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 277,
+      "files": [
+        "vid_s22_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 107,
+      "words": "Inside the amber glass cockpit, the pale shaved-head young man at the brass controls, the young woman beside him gripping a rail, white light flashing past outside. @Image 2 hauls the levers and says the line in @Audio 1, lips in sync, eyes on the window; @Image 1 braces as the cockpit @Image 3 lurches. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MS, eye level, handheld, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_05",
+      "title": "Clip · s22_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 291,
+      "files": [
+        "vid_s22_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 108,
+      "words": "From @Image 1: @Image 3 rolls hard; two harpoon cables slash past and tangle with each other; it dives through a gap between the drifting arcs of @Image 2. Dynamic tracking. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, dynamic tracking, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s22_06",
+      "title": "Clip · s22_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 361,
+      "files": [
+        "vid_s22_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 109,
+      "words": "From @Image 1: @Image 2 slowly turns its vast wedge face toward camera; its white rim brightens; dozens of tiny white harpoon ports open along it. Ominous and slow. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, locked, 300mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s23_01",
+      "title": "Clip · s23_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 201,
+      "files": [
+        "vid_s23_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 110,
+      "words": "Medium close-up of the young woman in the shaking amber glass cockpit, afraid, staring at a polished bronze rail that curves through the cabin. @Image 1 looks at the bronze rail of @Image 2 and says the line in @Audio 1, lips in sync, afraid. The cockpit shakes. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, handheld, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s23_02",
+      "title": "Clip · s23_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 442,
+      "files": [
+        "vid_s23_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 111,
+      "words": "Close-up of the young woman's palm laid on a curved polished bronze rail inside an amber glass cockpit. as @Image 1 lays her palm on the rail, the bronze trembles; across the amber glass of @Image 3 frost blooms in rings and petals like @Image 2, spreading fast. Slow push-in. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: CU, eye level, slow push-in, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s23_03",
+      "title": "Clip · s23_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 306,
+      "files": [
+        "vid_s23_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 112,
+      "words": "Medium close-up of the young woman in the cockpit, frost spreading on the amber glass behind her, realisation and wonder breaking across her face. @Image 1 lifts her head as the hum settles on one pure tone and says the lines in @Audio 1, lips in sync, wonder turning to joy. Frost glitters behind her. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s23_04",
+      "title": "Clip · s23_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 323,
+      "files": [
+        "vid_s23_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 113,
+      "words": "Medium close-up of the pale shaved-head young man at the brass levers, frost spreading on the glass, glancing sideways with the first grin of his life. @Image 1 glances at her, grinning for the first time, and says the line in @Audio 1, lips in sync. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s23_05",
+      "title": "Clip · s23_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 285,
+      "files": [
+        "vid_s23_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 114,
+      "words": "Medium close-up of the young woman in the amber cockpit, eyes closing, blue-white light beginning to glow through the frosted glass. @Image 1 says the line in @Audio 1, lips in sync, softly; blue-white light floods through the frosted glass and rings of light pass over her face. Slow push-in. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, slow push-in, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s24_01",
+      "title": "Clip · s24_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 297,
+      "files": [
+        "vid_s24_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 115,
+      "words": "From @Image 1: blue-white concentric rings of light bloom from the bell-mouth of @Image 3; the ship flashes and is gone; a white harpoon flies through the empty space where it was, past @Image 2. Locked camera. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, locked, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s24_02",
+      "title": "Clip · s24_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 303,
+      "files": [
+        "vid_s24_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 116,
+      "words": "Continue from @Image 1: the glittering frost dust slowly settles into the six-petal, two-ring figure of @Image 3, turning gently in the light of the planet @Image 2 below. Locked camera. Deep black space, single hard white star key light, the slate-blue ocean planet Corrow and its thin matte-black ring, long-lens telescope compression, no lens flares, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, locked, 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s25_01",
+      "title": "Clip · s25_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 285,
+      "files": [
+        "vid_s25_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 117,
+      "words": "The ruined gallery in dim embers of white light, the heavyset bald man on his knees held by two padded grey guards, a silent bronze fork in his hand. the light fades to slow embers; @Image 1 kneels, breathing hard, held by @Image 2; the fork @Image 3 slips from his fingers onto the gallery. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, locked, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s25_02",
+      "title": "Clip · s25_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 197,
+      "files": [
+        "vid_s25_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 118,
+      "words": "Medium close-up of the gaunt woman's pale hands at the clasp of her matte black collar, dim white embers behind her. @Image 1 unlatches the collar @Image 2; it falls away from her throat; she stands exposed, breathing. Locked camera. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: MCU, eye level, locked, 75mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s25_03",
+      "title": "Clip · s25_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 183,
+      "files": [
+        "vid_s25_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 119,
+      "words": "Extreme close-up of the gaunt woman's face, eyes closed, a single tear, faint warm light now on her skin. slow push-in to the face of @Image 1 as she hears the Chord for the first time in twenty years: her eyes close, her lips part, a tear runs down. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: ECU, eye level, slow push-in, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s25_04",
+      "title": "Clip · s25_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 175,
+      "files": [
+        "vid_s25_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 120,
+      "words": "From @Image 1: the black liquid of @Image 2 surges into tall spikes pulsing to the deep voice in @Audio 1. Locked macro. Bottomless shaft of black wedges lit from below by a trembling column of cold white light (#F4F7FF), deep blacks, symmetrical, anamorphic widescreen 2.39:1, fine grain. Camera: INSERT, high angle, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_01",
+      "title": "Clip · s26_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 396,
+      "files": [
+        "vid_s26_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 121,
+      "words": "From @Image 1: blue-white rings of light bloom among the drifting ice of @Image 3 and the bronze bell-ship @Image 2 rings in, emerging between the bergs. Slow push. Saturated colour. Turquoise ice (#3FC1C9), teal and white banded gas giant (#1E6F7A), warm amber bell lights (#FFB347), crisp starlight, saturated colour, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, slow push, 32mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_02",
+      "title": "Clip · s26_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 254,
+      "files": [
+        "vid_s26_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 122,
+      "words": "Continue from @Image 1: the camera drifts past the ice toward @Image 3, revealing its full length; small craft move between its bells; amber light pulses gently in the bell-mouths. Majestic. Turquoise ice (#3FC1C9), teal and white banded gas giant (#1E6F7A), warm amber bell lights (#FFB347), crisp starlight, saturated colour, anamorphic widescreen 2.39:1, fine grain. Camera: EWS, eye level, drift toward, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_03",
+      "title": "Clip · s26_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 265,
+      "files": [
+        "vid_s26_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 123,
+      "words": "From @Image 1: the sand on the brass plate @Image 3 hisses and dances into a shifting geometric figure in rhythm with the woman's voice in @Audio 1. Locked macro. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: INSERT, high angle, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_04",
+      "title": "Clip · s26_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 213,
+      "files": [
+        "vid_s26_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 124,
+      "words": "Medium close-up of the young woman in the amber cockpit, turquoise light from the window, exhausted and proud. @Image 1 leans toward the plate and says the line in @Audio 1, lips in sync, with a tired smile. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_05",
+      "title": "Clip · s26_05",
+      "kind": "video",
+      "status": "done",
+      "seconds": 248,
+      "files": [
+        "vid_s26_05/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 125,
+      "words": "From @Image 1: the sand on @Image 2 freezes, then scatters into a new figure as the voice in @Audio 1 speaks, slower now. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: INSERT, high angle, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s26_06",
+      "title": "Clip · s26_06",
+      "kind": "video",
+      "status": "done",
+      "seconds": 275,
+      "files": [
+        "vid_s26_06/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 126,
+      "words": "Medium close-up of the pale shaved-head young man in the amber cockpit, turquoise light on his face, a slow proud half-smile. @Image 1 glances toward her and says the line in @Audio 1, lips in sync, with a slow proud smile. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s27_01",
+      "title": "Clip · s27_01",
+      "kind": "video",
+      "status": "done",
+      "seconds": 219,
+      "files": [
+        "vid_s27_01/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 127,
+      "words": "Medium close-up of the young woman in the amber cockpit touching her left ear with its copper-wrapped braid, turquoise light from the window, puzzled. @Image 1 touches her ear, listens, and her face slowly opens into wonder at the silence; she almost smiles. Locked camera. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s27_02",
+      "title": "Clip · s27_02",
+      "kind": "video",
+      "status": "done",
+      "seconds": 208,
+      "files": [
+        "vid_s27_02/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 128,
+      "words": "From @Image 1: on the glass of @Image 3, frost draws a figure no chart shows, a ring inside a ring broken by one bright gap, like @Image 2, glinting. Locked macro. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: INSERT, eye level, locked, macro 100mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s27_03",
+      "title": "Clip · s27_03",
+      "kind": "video",
+      "status": "done",
+      "seconds": 225,
+      "files": [
+        "vid_s27_03/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 129,
+      "words": "Medium close-up of the young woman looking at the frost figure on the glass, awe and resolve, turquoise light. @Image 1 looks at the frost figure and says the line in @Audio 1, lips in sync, softly. Cramped cockpit of faceted amber glass and polished brass, warm amber panel glow, outside light through the glass, anamorphic widescreen 2.39:1, 35mm film grain. Camera: MCU, eye level, locked, 50mm lens. Avoid: text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
+    },
+    {
+      "id": "vid_s27_04",
+      "title": "Clip · s27_04",
+      "kind": "video",
+      "status": "done",
+      "seconds": 288,
+      "files": [
+        "vid_s27_04/video-1.mp4"
+      ],
+      "column": 1,
+      "row": 130,
+      "words": "Wide shot from outside: the small bronze bell-ship @Image 2 hangs beside the vast bell-hung carrier @Image 4 among the turquoise ice of @Image 3 in deep dark space; through the bell-ship's small faceted amber-glass cockpit the young woman @Image 1 is visible, looking past camera into the dark, listening. The bell-ship is the Answer, a 38-metre bronze bell-ship: a great bronze bell lying on its side, its wide flared mouth at the stern with four small nozzles on the rim, a slender spine running forward from the bell's crown to a small faceted amber-glass cockpit, and two swept-back forked fins like tuning-fork tines above and below. The carrier is the Carillon: a 640-metre oxidised-bronze lattice spine with more than forty bells of every size hanging beneath it, amber light glowing in every bell-mouth, three habitat rings at the bow and copper-mesh sails along the top. Slow pull-back revealing both ships among the ice. Turquoise ice (#3FC1C9), teal and white banded gas giant (#1E6F7A), warm amber bell lights (#FFB347), crisp starlight, saturated colour, anamorphic widescreen 2.39:1, fine grain. Camera: WS, eye level, slow pull-back, 50mm lens. Avoid: round pods, saucers, cars, portholes, text, letters, logos, watermarks, subtitles, glowing energy blades, laser beams, white plastic armour, triangular wedge-shaped capital ships, lens flares, crowds, extra fingers, deformed hands, cartoon style."
     }
   ],
-  "note": "Run on the live AwwO, in the operator’s own account and workspace, as 34 graph runs of one canvas from 2026-10-19 13:50 to 2026-10-21 03:23 UTC; each run after the first ran only the nodes it named, on the kept outputs of the rest. The cold open (SC01 and SC02, ten shots) ran on 2026-10-19, and the rest of Act I, 35 shots, on 2026-10-20, after AwwO’s video node learned, late on 2026-10-19, to take a voice and lip-sync to it. Image nodes made 21 reference sheets and 12 keyframes, speech nodes the 20 takes and music nodes the 6 score cues, and video nodes the 45 clips, each from its sheets, its keyframe or its words alone, and from its take where a line is spoken in sync. Three cold-open close-ups were refused at first for showing photoreal faces: one was made from words alone, and the two with lines were made again on 2026-10-20 from their sheets and takes, with the video node’s real-person switch on; a run that started 37 clips at once ran the API out of memory (2026-10-20 03:14 UTC: it restarted and nothing was charged), and after a release that uploads at most four clips’ references at a time the clips ran five at a time. The video model puts a line where the action order of its words puts it (“looks at her, then says the line”) and paces it its own way, so the operator measured where each line is spoken, by the lips frame by frame in clips made without sound and by the clip’s own sound in clips made again with it, and wrote a sync sheet into each editor’s brief: every take cut at its pauses into pieces, each placed where the lips move. Those measurements were made outside AwwO, by the operator’s scripts; the editors copied them as written. Two location sheets had come out as painted concept art, and the clips made from them looked painted too: the sheets were made again as photographs, and the nine clips made from them and one more close-up of Lark were made again (the reveal of the ship now with the ship’s sheet wired in), and so were one take, at a faster pace, and its clip. Two editor agents (Claude Opus 4.8, one model call each) wrote the timelines of the two reels from the canvas’s files and their briefs; edit nodes, with no model, cut reel 1 (3 min 16 s) and reel 2 (2 min 28 s) and joined them into Act I (5 min 43 s, 1680×720 at 24 fps). The act’s own timeline, which joins the two reels and carries their 31 subtitles, was written on its edit node by the operator’s script once both reels existed. On 2026-10-21 the operator added to it, and wired into the act’s edit, the census cue as a quiet bed, about 23 dB under that cue as it is heard in the scene, under SC08’s beat without music (4:41 to 4:57), where the act’s sound had been digital silence for 10.4 s and then 1.4 s (every clip’s own sound is muted and the reel gives that beat no cue); only the act’s edit ran again, the 34th graph run, and the reels are as their editors delivered them.",
-  "verification": "Before publishing, the record’s lineage was proved for all 109 nodes that make the film: for every wire, the output its source had in the document its target’s run started from is the source’s published output. Every file those nodes delivered, 178 of them, is the bytes AwwO stored for it: its SHA-256 and size match the canvas’s own artifact listing. In both reels every dialogue piece was found in the film’s sound where its timeline puts it (normalised correlation 0.84 to 0.99 against its take, within 5 ms), and the reels’ frames are the clips’ own frames at the offsets the sync sheet counts from; the act’s sound is the two reels’ sound, the second from 3:15.67, with the census cue’s quiet bed under SC08’s beat without music, about 23 dB under that cue as heard in the scene; no stretch of it is digital silence (nothing below −80 dB for 0.3 s). The act is −16.2 LUFS integrated with a true peak of −1 dB, and no score cue stops dead: each fades out over its last 2.5 s (the cold open’s over 5 s; the bed crossfades over 1.5 s at each end), and the cold open’s runs under the title card. Its web copy (1280 px wide), staged on this site, played in Chrome with its sound from the start, from 2:50, from 4:41 and from 5:30, every frame it played decoded; its frames match the delivered film’s at 41 to 43 dB PSNR, its 31 English subtitles show at their times, and the download is the file the last edit delivered, byte for byte. Not right yet: lines the video model said faster than their take (s05_05’s, s02_04’s) run on up to half a second past the lips; in s05_04 the clip’s lips move for three seconds before the line, so that shot starts four seconds into its clip; Lark is a stylised CG figure beside the photographic Bram and Seren, as her reference sheet is; the reveal of the ship ends on a close-up of Lark that its clip made by itself; and the cold open’s cue fades out from 1:33 to 1:38, past the title card’s end at 1:34, so its last 3.75 s play under the first shot of SC03, where that scene’s cue fades in."
+  "note": "Run on the live AwwO, in the operator’s own account and workspace, as 93 graph runs of one canvas from 2026-10-19 13:50 to 2026-10-22 08:19 UTC; each run after the first ran only the nodes it named, on the kept outputs of the rest. The screenplay, its 132 shots and every node’s words were written for the film beforehand, outside AwwO, by the operator; what is seen and heard was made by the canvas’s nodes. Act I (SC01 to SC09, 45 shots) was made on 2026-10-19 and 2026-10-20, Act II (SC10 to SC17, 38 shots) on 2026-10-21, and Act III (SC18 to SC27, 49 shots) on 2026-10-22, after an API release that day let a canvas hold 400 nodes, not 200; two of Act I’s clips and one of Act II’s were made again on 2026-10-22 (see below). Acts II and III are to the right of Act I on the same canvas: a generation reads pictures only from its own canvas, and an edit only its own canvas’s files, so the three acts could be cut together only on one canvas. Image nodes made 32 reference sheets and 42 keyframes, speech nodes the 58 takes, music nodes the 18 score cues, and video nodes the 132 clips, each from its sheets, its keyframe or its words alone, and from its take where a line is spoken in sync. The video model puts a line where the action order of its words puts it and paces it its own way, so the operator measured where each clip says each phrase, outside AwwO, with the operator’s scripts (in Act I by the lips frame by frame and by the clip’s own sound; in Acts II and III by each clip’s own sound: a speech recogniser’s words to match the phrases, and their starts from a voice-activity detector and the speech band together), and wrote a sync sheet into each editor’s brief: every take cut at its pauses into pieces, each placed where the clip says it. Six editor agents (Claude Opus 4.8, one model call for each timeline published; some were run again after a remake or a new brief) wrote the six reels’ timelines from the canvas’s files and their briefs (for reels 3 to 6 the operator also wrote the music and the voice-over lines into the briefs as sheets, which the editors copied); edit nodes, with no model, cut the reels and joined them into Act I (5 min 43 s), Act II (4 min 18 s) and Act III (5 min 18 s). Each act’s own timeline, which joins its two reels and carries their subtitles, and the episode’s, which joins the three acts and adds 32 s of end cards (two HTML cards the renderer plays, over the end-card cue), were written on their edit nodes by the operator’s scripts. Made again along the way: in Act I, three cold-open close-ups first refused for showing photoreal faces (made again with the video node’s real-person switch on), two location sheets that came out as painted concept art and the nine clips made from them, one more close-up, and one take with its clip (2026-10-19 and 2026-10-20), and on 2026-10-21 a quiet bed of the census cue laid under SC08’s beat without music, where the act had been digital silence; in Act II, two sheets (Ilse as an illustration, the cockpit with a caption) and a keyframe (a pod for the bell-ship) before their clips, and 18 clips the video provider failed while it was down (2026-10-21 15:43 to 16:15 UTC, nothing charged); in Act III, the sand plate’s sheet (an illustration, then a six-pointed star), the carrier’s sheet (with scale lettering) and a keyframe (a six-pointed star) before their clips, then two of Bram’s takes at a faster pace with their clips, a clip in which Seren stared at a trident instead of Ilse’s fork (the fork’s sheet now wired in) and the last shot, which showed a dark pod for the Answer. Before the episode was published, a check of every take against the pieces cut from it found that Act II’s first cut (2026-10-22 02:10 to 02:30 UTC) had left 15 stretches of speech out, most of them the ends of phrases (such as “hour” in “within the hour”): its sync was measured again and its reels cut again with every word, one shot (s12_02) held to its clip’s end, 0.25 s past its planned cut, so that Seren’s next line does not start under her last. And a look at every clip found three that had copied a reference sheet’s layout instead of filming the scene: Act I’s last shot (s09_03) was the sea-cave sheet itself, three photographs on a grey ground; Act II’s s13_01 showed the cave’s interior with the cliff beside it; and Act I’s close-up of the null fork (s08_04) stood on its sheet’s plain grey ground. They were made again on 2026-10-22 (the sea-cave sheet no longer wired to the two cave shots), and the reels, acts and episode made from them were cut again, the editors writing the same timelines as before.",
+  "verification": "Before publishing, the record’s lineage was proved for all 298 nodes that make the film: for every wire, 821 of them, the output its source had in the document its target’s run started from is the source’s published output. Every file those nodes delivered, 520 of them, is the bytes AwwO stored for it: its SHA-256 and size match the canvas’s own artifact listing, read page by page to its end. In the episode’s film every dialogue piece of the six reels, 94 of them, is heard where the timelines put it (the farthest 0.005 s off; normalised correlation 0.85 to 1.00 against its take, 0.28 to 0.83 for the voices heard through the speaking well, the sand plate or the light, which the film filters); every word each take of Acts II and III says reaches a piece (each take checked against the speech a voice-activity detector finds in it); no stretch of the film is digital silence (nothing below −80 dB for 0.3 s); it is −16.2 LUFS integrated with a true peak of −0.6 dBFS, measured on the delivered file (the renderer’s own figures, −16.17 LUFS and −1.86 dB, are of its mix before the AAC encoding, whose overshoot the timeline’s −2 dB leaves room for). Its web copy (1280 px wide), staged on this site, played in Chrome with its sound from the start, from 5:43 and 10:01 (into Acts II and III), from 12:40 (in Act III) and from 15:25 (the first end card), every frame it played decoded and none dropped; its frames match the delivered film’s at 45 dB PSNR (63 dB on the end cards), its 91 English subtitles are the film’s own, given to the player as WebVTT at the times its subtitle file gives them, and the download is the file the last edit delivered, byte for byte. Not right yet: lines the video model said faster than their take run on up to half a second past the lips (Act I’s s05_05 and s02_04, Act III’s s21_06), and a few run past their shot’s cut into the next shot (Act II’s s12_02 and s13_02 and Act III’s s22_04, by 0.4 to 0.5 s, where the next shot has no line yet); in Act I’s s05_04 the clip’s lips move for three seconds before the line, so that shot starts four seconds into its clip; Lark is a stylised CG figure beside the photographic Bram and Seren, as her reference sheet is; the cold open’s cue fades out past the title card’s end, under the first shot of SC03; the reveal of the ship ends on a close-up of Lark that its clip made by itself; in s27_04 the Answer’s cockpit window is in its bell’s mouth, at the stern, not at its prow; and Ilse’s fork lies along the rail in s21_06, longer than it is in Bram’s hand."
 };
 export default record;

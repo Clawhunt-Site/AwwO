@@ -94,3 +94,21 @@ test('refuses notes without the API releases in order, or without the run settin
   assert.match(publish(RAW, { ...NOTES, limits: { ...NOTES.limits, concurrency: 0 } }).stderr, /notes\.limits needs positive integers/);
   assert.match(publish({ ...RAW, locale: 'zh' }, NOTES).stderr, /not en/);
 });
+
+test('refuses a provider named in what a node was asked, even inside another word, but not an English word that holds one', () => {
+  // One picture node whose run is in the read: the scan of its words runs before any file is needed.
+  const node = words => ({ id: 'kf', kind: 'session', agentKind: 'image', title: 'Keyframe', model: 'm', runtime: '', x: 0, y: 0, w: 1, h: 1,
+    activeThreadId: 'default', threads: [{ id: 'default', title: 'Session 1', draft: words }], lastOutput: { text: 'out' } });
+  const raw = words => ({ ...RAW, root: 'kf', nodes: ['kf'], producedBy: { kf: { graph: 'g1' } },
+    graphs: [{ id: 'g1', createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:01:00Z', document: { nodes: [node(words)], edges: [] },
+      nodes: [{ nodeId: 'kf', state: 'done', output: 'out' }] }],
+    canvas: { id: 'c', version: 1, document: { nodes: [node(words)], edges: [] } } });
+  for (const [words, name] of [['A coast at dawn, made with Kling.', 'Kling'], ['Rendered by kling2.1 at dusk.', 'kling'], ['Seedance-made.', 'Seedance'],
+    ['Styled like KlingAI samples.', 'Kling'], ['See klingai.com.', 'kling'], ['A MiniMaxAI voice.', 'MiniMax'], ['Cut on SuperKling.', 'Kling'],
+    ['A sparkling Kling clip.', 'Kling'], ['See sparklingai.com.', 'kling']]) {
+    assert.match(publish(raw(words), NOTES).stderr, new RegExp(`kf[.]draft names a provider: “${name}”`), words);
+  }
+  for (const words of ['A sparkling sea at dawn, the Twinkling of lamps.', 'Geminid meteors over the bay.', 'A camera on a tripod, the darkling plain.', 'The weakling, tickling a duckling.']) {
+    assert.doesNotMatch(publish(raw(words), NOTES).stderr, /names a provider/, words);
+  }
+});

@@ -21,6 +21,12 @@ const FILMS = Object.entries(CANVASES).map(([file, canvas]) => {
 const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 // The providers behind AwwO's media models, which the site never names (publish-recorded-run.mjs scans the same).
 const MARKS = /tripo|x-?tasy|runninghub|bytedance|dreamina|jimeng|kuaishou|midjourney|pixverse|shengshu|seedance|seedream|minimax|nano.?banana|gemini|hailuo|kling/i;
+// The English words that hold a name ("sparkling", "a tripod", the Geminids) are set aside first; any other word that holds
+// one is refused ("KlingAI", "klingai.com").
+const HARMLESS = /(?<![a-z])(?:(?:buc|cac|chuc|crac|crin|dar|duc|frec|hac|hec|in|knuc|pic|pric|ran|roc|shac|sic|spac|spar|spec|sprin|stic|suc|tac|tic|tin|tric|twin|wea|wrin)klings?|tripods?|geminids?)(?![a-z])/gi;
+const unnamed = (text: string) => text.replace(HARMLESS, ' ');
+// What each film case delivers: a record rooted at another edit would show another film.
+const DELIVERED: Readonly<Record<string, string>> = { 'the-long-chord': 'episode-1.mp4' };
 const isMedia = (node: CanvasNode) => node.kind === 'session' && ['image', 'video', 'audio', 'model3d'].includes(node.agentKind);
 
 let ProductionFilm: typeof import('../src/saas/ProductionFilm').default;
@@ -93,9 +99,13 @@ it('stores the canvas as it ran and nothing private: no binding, conversation, o
     // No provider is named in what the canvas says; the media models' ids stay in their settings, never displayed.
     for (const node of canvas.nodes) {
       const said = node.kind === 'edit' ? [node.title, node.timeline] : node.kind === 'session' ? [node.title, node.persona, ...(node.threads ?? []).map(thread => thread.draft)] : [];
-      for (const value of said) expect(value, `${id}/${node.id}`).not.toMatch(MARKS);
+      for (const value of said) expect(unnamed(value ?? ''), `${id}/${node.id}`).not.toMatch(MARKS);
     }
   }
+  // The publisher scans with these two patterns: a word set aside in one file only would make the two disagree.
+  const publisher = readFileSync(path.resolve(WEB, '..', '..', 'scripts', 'showcase', 'publish-recorded-run.mjs'), 'utf8');
+  expect(publisher).toContain(`const MARKS = ${MARKS};`);
+  expect(publisher).toContain(`const HARMLESS = ${HARMLESS};`);
 });
 
 it('wires every node as it ran: each wire joins two of its nodes, there is no cycle, and every file a brief or timeline names is wired in', () => {
@@ -174,7 +184,8 @@ it('shows a film case: the film from its staged URL with English subtitles, no s
     expect([made.at(-1)!.type, made.at(-1)!.size]).toEqual(['text/vtt', vtt.bytes]);
     expect(player.querySelector('track')).toHaveAttribute('srclang', 'en');
     expect(document.querySelector('iframe')).toBeNull();
-    expect(screen.getByRole('link', { name: /^Download act-1\.mp4 as delivered/ })).toHaveAttribute('href', film.original!.src);
+    expect(delivery.film!.name, id).toBe(DELIVERED[id]);
+    expect(screen.getByRole('link', { name: name => name.startsWith(`Download ${DELIVERED[id]} as delivered`) })).toHaveAttribute('href', film.original!.src);
     // The heading counts agents, media nodes and edits apart.
     const agents = record.nodes.filter(node => node.kind !== 'edit').length, edits = record.nodes.filter(node => node.kind === 'edit').length;
     expect(screen.getByRole('heading', { level: 3, name: new RegExp(`^${agents} agents, ${record.media!.length} media nodes, ${edits} edits, `) })).toBeVisible();

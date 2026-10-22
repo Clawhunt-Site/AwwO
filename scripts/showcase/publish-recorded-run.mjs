@@ -129,7 +129,10 @@ const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 // No provider of a media model may be named in what the case shows; the models' ids stay in the canvas data, as the
 // published workflows keep theirs (tripo.p1, xt.seedream-5-pro), and are never displayed.
 const MARKS = /tripo|x-?tasy|runninghub|bytedance|dreamina|jimeng|kuaishou|midjourney|pixverse|shengshu|seedance|seedream|minimax|nano.?banana|gemini|hailuo|kling/i;
-const scan = (where, text) => { const hit = MARKS.exec(text || ''); if (hit) throw new Error(`${where} names a provider: “${hit[0]}”`); };
+// The English words that hold a name are set aside before the scan ("sparkling", "a tripod", the Geminids); any other word
+// that holds one is refused ("KlingAI", "klingai.com", "MiniMaxAI"), so a word this list lacks stops the publish, never slips by.
+const HARMLESS = /(?<![a-z])(?:(?:buc|cac|chuc|crac|crin|dar|duc|frec|hac|hec|in|knuc|pic|pric|ran|roc|shac|sic|spac|spar|spec|sprin|stic|suc|tac|tic|tin|tric|twin|wea|wrin)klings?|tripods?|geminids?)(?![a-z])/gi;
+const scan = (where, text) => { const hit = MARKS.exec((text || '').replace(HARMLESS, ' ')); if (hit) throw new Error(`${where} names a provider: “${hit[0]}”`); };
 for (const node of canvasNodes) {
   scan(`${node.id}.title`, node.title); scan(`${node.id}.persona`, node.persona);
   for (const thread of node.threads || []) scan(`${node.id}.draft`, thread.draft);

@@ -1,159 +1,213 @@
 {
- "edit_act1/act-1.mp4": {
-  "src": "/showcase/staged/the-long-chord/5269e52f5f1e404e.mp4",
+ "edit_ep1/episode-1.mp4": {
+  "src": "/showcase/staged/the-long-chord/f24f86d9b45adfa6.mp4",
   "type": "video/mp4",
-  "bytes": 43688983,
-  "sha256": "5269e52f5f1e404e2397fb338e0c6676f3bb4563a87a4f5d0735351628ba727a",
+  "bytes": 129908711,
+  "sha256": "f24f86d9b45adfa694644ff5d3cbe82d7a8e5a2c5e9202ec0104c1a4ad4c8ec1",
   "staged": true,
   "original": {
-   "src": "/showcase/staged/the-long-chord/8bdb2de30fda702c.mp4",
-   "bytes": 151033687,
-   "sha256": "8bdb2de30fda702c7516ac6e87813a07031547b9e0b739ad71b131f8a8f6b6b6"
+   "src": "/showcase/staged/the-long-chord/33773bc470e0c467.mp4",
+   "bytes": 270243384,
+   "sha256": "33773bc470e0c4679ade146758d656304e372fa599236a6b2cfe443e8dd39957"
   }
  },
- "edit_act1/act-1.vtt": {
-  "src": "/showcase/media/the-long-chord/f4a71a16b9d2a566.vtt",
+ "edit_ep1/episode-1.vtt": {
+  "src": "/showcase/media/the-long-chord/102d9ef5ceb9c466.vtt",
   "type": "text/vtt",
-  "bytes": 1613,
-  "sha256": "f4a71a16b9d2a5667166daa55112cb2d36aaa80befd5dffc0ea4c838c8c4e42e"
+  "bytes": 4682,
+  "sha256": "102d9ef5ceb9c46616340e5496ed312c5d795fbe92faba5e7093732be17b8523"
  },
- "edit_act1/still-001.jpg": {
-  "src": "/showcase/media/the-long-chord/a7b906862978e400.jpg",
+ "edit_ep1/still-001.jpg": {
+  "src": "/showcase/media/the-long-chord/30c1671fe131957b.jpg",
   "type": "image/jpeg",
-  "bytes": 21901,
-  "sha256": "a7b906862978e400feaceaec2772fd80e2f84d5a9dd0d66caa0e4e4afc04d55e"
+  "bytes": 14297,
+  "sha256": "30c1671fe131957b1a783a48f270f324f64df65518ccd538f38ebcf5097e7504"
  },
- "edit_act1/still-002.jpg": {
-  "src": "/showcase/media/the-long-chord/a76c23f21e306304.jpg",
+ "edit_ep1/still-002.jpg": {
+  "src": "/showcase/media/the-long-chord/3b99b85f04b6b14d.jpg",
   "type": "image/jpeg",
-  "bytes": 38615,
-  "sha256": "a76c23f21e3063049fe3b13c500de9231af8285efbeaf3a4ca55b561353622a5"
+  "bytes": 30742,
+  "sha256": "3b99b85f04b6b14daa0d48c4c69825f2358c44d2da0b5913ee71b7c005f1f50f"
  },
- "edit_act1/still-003.jpg": {
-  "src": "/showcase/media/the-long-chord/cdf7168653a9188a.jpg",
+ "edit_ep1/still-003.jpg": {
+  "src": "/showcase/media/the-long-chord/b12eac2f5b5abe3b.jpg",
   "type": "image/jpeg",
-  "bytes": 30320,
-  "sha256": "cdf7168653a9188a544e2a62ddaf9660f539901f6a8904d706c09f77a6a6e1b2"
+  "bytes": 25659,
+  "sha256": "b12eac2f5b5abe3b29151ff5141143a4344fdd88a91350df3a4e52f856c467d3"
  },
- "edit_act1/still-004.jpg": {
-  "src": "/showcase/media/the-long-chord/32cb70d106746f8f.jpg",
+ "edit_ep1/still-004.jpg": {
+  "src": "/showcase/media/the-long-chord/15295de436f38b2a.jpg",
   "type": "image/jpeg",
-  "bytes": 42722,
-  "sha256": "32cb70d106746f8f6e77e97e189b0a5fbe70f0d792b77056fbc44846773c0b83"
+  "bytes": 30244,
+  "sha256": "15295de436f38b2a79bd2efaea8e1361f6d3ba05469f5dd13b8b85dfa9227f60"
  },
- "edit_act1/still-005.jpg": {
-  "src": "/showcase/media/the-long-chord/83a9b72ac8a4a8d5.jpg",
+ "edit_ep1/still-005.jpg": {
+  "src": "/showcase/media/the-long-chord/205afa07172dc88b.jpg",
   "type": "image/jpeg",
-  "bytes": 27853,
-  "sha256": "83a9b72ac8a4a8d55aca312d322feec14087f54ea221f3a48ae60fd47a9e4e38"
+  "bytes": 66968,
+  "sha256": "205afa07172dc88b14290102393808e196f0ee94cefefb65c56309427aa5ea75"
  },
- "edit_act1/still-006.jpg": {
-  "src": "/showcase/media/the-long-chord/f1c0b63173809b91.jpg",
+ "edit_ep1/still-006.jpg": {
+  "src": "/showcase/media/the-long-chord/1954917818ab2e69.jpg",
   "type": "image/jpeg",
-  "bytes": 40243,
-  "sha256": "f1c0b63173809b9149b86fa59f42187160e8da4542185b65e2fceea8c7204fa8"
+  "bytes": 38871,
+  "sha256": "1954917818ab2e694edd9501a9f892695b4be45aad12725eee64f18d8ae8c36e"
  },
- "edit_act1/still-007.jpg": {
-  "src": "/showcase/media/the-long-chord/153cfc5fd2aea66f.jpg",
+ "edit_ep1/still-007.jpg": {
+  "src": "/showcase/media/the-long-chord/f182c9393e1139c9.jpg",
   "type": "image/jpeg",
-  "bytes": 45021,
-  "sha256": "153cfc5fd2aea66f3f6b5c1b362d53ec4fe19b250a35176b3d77e2eecce10c7a"
+  "bytes": 30788,
+  "sha256": "f182c9393e1139c9afd3e12e42c5d5bf69ac6dec5e8cdbc4eaa0aacdd9b012a4"
  },
- "edit_act1/still-008.jpg": {
-  "src": "/showcase/media/the-long-chord/51e6b6eb587dd23b.jpg",
+ "edit_ep1/still-008.jpg": {
+  "src": "/showcase/media/the-long-chord/f64ef4cceefe2b6f.jpg",
   "type": "image/jpeg",
-  "bytes": 28492,
-  "sha256": "51e6b6eb587dd23bf9c2622b1623f3bdb1321c646d5c67ce4f179583a5a395ab"
+  "bytes": 35712,
+  "sha256": "f64ef4cceefe2b6ff8fe66688893115ace6426b5b84fcf68e889aa40ef3a337b"
  },
- "edit_act1/still-009.jpg": {
-  "src": "/showcase/media/the-long-chord/10aee6733a0b989d.jpg",
+ "edit_ep1/still-009.jpg": {
+  "src": "/showcase/media/the-long-chord/43fdc47f7aa6d620.jpg",
   "type": "image/jpeg",
-  "bytes": 43148,
-  "sha256": "10aee6733a0b989d39fddb46c6988c2eda3fafef95dfd64d09799dda21a9ffa3"
+  "bytes": 35627,
+  "sha256": "43fdc47f7aa6d6208f26eae254e2673a7b5f87cf29f2a15eae007fb1ac059f53"
  },
- "edit_act1/still-010.jpg": {
-  "src": "/showcase/media/the-long-chord/bae85276e5571588.jpg",
+ "edit_ep1/still-010.jpg": {
+  "src": "/showcase/media/the-long-chord/44e9887277c585ec.jpg",
   "type": "image/jpeg",
-  "bytes": 22907,
-  "sha256": "bae85276e55715880ced5984bddf42e42b3c311200db2e0650c45d5e398ccd5b"
+  "bytes": 30490,
+  "sha256": "44e9887277c585ec31b8adb6689b739691667bc750d18568d90d106c6d3f004e"
  },
- "edit_act1/still-011.jpg": {
-  "src": "/showcase/media/the-long-chord/30a1c58d72275e58.jpg",
+ "edit_ep1/still-011.jpg": {
+  "src": "/showcase/media/the-long-chord/ab0cdbd2b511d954.jpg",
   "type": "image/jpeg",
-  "bytes": 68129,
-  "sha256": "30a1c58d72275e580ff74d10c14fa7dd57e06bf0a338a63d30d31cba7807f3b6"
+  "bytes": 35603,
+  "sha256": "ab0cdbd2b511d954bd102262868204553a35ddf57eb88cac32bbb878637093e1"
  },
- "edit_act1/still-012.jpg": {
-  "src": "/showcase/media/the-long-chord/b783a7c65eb88753.jpg",
+ "edit_ep1/still-012.jpg": {
+  "src": "/showcase/media/the-long-chord/f88d75c0ed4bf903.jpg",
   "type": "image/jpeg",
-  "bytes": 43952,
-  "sha256": "b783a7c65eb8875396c9820f0d9045b8d4798f28cbd42df9e07f9bf6c362cdde"
+  "bytes": 19928,
+  "sha256": "f88d75c0ed4bf903a5fdddbb4714ee98eba9d9f11965e6f967d0fa8659ababd2"
  },
- "edit_act1/still-013.jpg": {
-  "src": "/showcase/media/the-long-chord/b0a29b6b53010b10.jpg",
+ "edit_ep1/still-013.jpg": {
+  "src": "/showcase/media/the-long-chord/dbb7576dd2bbec36.jpg",
   "type": "image/jpeg",
-  "bytes": 44774,
-  "sha256": "b0a29b6b53010b106a043d1b84111e38c13a7b80a0bb33d68b77058148d8e7d5"
+  "bytes": 45338,
+  "sha256": "dbb7576dd2bbec3688489500b7b51928cc4db32289d865a8facf487779a1cc13"
  },
- "edit_act1/still-014.jpg": {
-  "src": "/showcase/media/the-long-chord/76bee3d18565131c.jpg",
+ "edit_ep1/still-014.jpg": {
+  "src": "/showcase/media/the-long-chord/9f115c23be4595f2.jpg",
   "type": "image/jpeg",
-  "bytes": 24265,
-  "sha256": "76bee3d18565131c5a64e1c42b9a3f3dd9b155a7fe07781020a4e2fcd0a94497"
+  "bytes": 39883,
+  "sha256": "9f115c23be4595f2452e6192f4f35d18cd1b162911f832f3e228eb4cb27299f9"
  },
- "edit_act1/still-015.jpg": {
-  "src": "/showcase/media/the-long-chord/d86dc17c3e4e8900.jpg",
+ "edit_ep1/still-015.jpg": {
+  "src": "/showcase/media/the-long-chord/4aa8634983dd8f2e.jpg",
   "type": "image/jpeg",
-  "bytes": 23777,
-  "sha256": "d86dc17c3e4e890047a9f2ccc938f0626e1c3c4535abe084bd7698a06880494f"
+  "bytes": 26336,
+  "sha256": "4aa8634983dd8f2e05b9e1ecb07c0f8450115789a3abcd9148765f414daa309c"
  },
- "edit_act1/still-016.jpg": {
-  "src": "/showcase/media/the-long-chord/7a77d8f5fd16e827.jpg",
+ "edit_ep1/still-016.jpg": {
+  "src": "/showcase/media/the-long-chord/655bf505b858d180.jpg",
   "type": "image/jpeg",
-  "bytes": 25919,
-  "sha256": "7a77d8f5fd16e827642a89b5e433840a3df4ec94611c12bf013725300e0aada5"
+  "bytes": 35210,
+  "sha256": "655bf505b858d180f4ff906b49ca85304f2cb3bc34e45dc4b2f90563785a666b"
  },
- "edit_act1/still-017.jpg": {
-  "src": "/showcase/media/the-long-chord/ee53ea90012720a0.jpg",
+ "edit_ep1/still-017.jpg": {
+  "src": "/showcase/media/the-long-chord/5db424a014a32998.jpg",
   "type": "image/jpeg",
-  "bytes": 18500,
-  "sha256": "ee53ea90012720a067b3c68582c16bf7185270b0d1d8729ab22c4cbdeda75d42"
+  "bytes": 47786,
+  "sha256": "5db424a014a32998d7f4bbb8a88ced4eb86b0aa0853a29c7845f4200486137a8"
  },
- "edit_act1/still-018.jpg": {
-  "src": "/showcase/media/the-long-chord/d33719be388a366b.jpg",
+ "edit_ep1/still-018.jpg": {
+  "src": "/showcase/media/the-long-chord/c94a31b96efe0c59.jpg",
   "type": "image/jpeg",
-  "bytes": 36577,
-  "sha256": "d33719be388a366b57ba8268609511281030f74b1871e3664f46c2c51ae512fb"
+  "bytes": 39628,
+  "sha256": "c94a31b96efe0c5996b36c03f80ddf4f75940c84ecaf1c1e932b66b8ea99ebc4"
  },
- "edit_act1/still-019.jpg": {
-  "src": "/showcase/media/the-long-chord/aadf6ecddbf1bee0.jpg",
+ "edit_ep1/still-019.jpg": {
+  "src": "/showcase/media/the-long-chord/a319f87790962b2c.jpg",
   "type": "image/jpeg",
-  "bytes": 44834,
-  "sha256": "aadf6ecddbf1bee0f5549a520e1f2857fbb8e127b09519889b9f0727be38727b"
+  "bytes": 39115,
+  "sha256": "a319f87790962b2c014f7eb1b3d0a0a91e50b7dc2dbc7935540fdf592bc53b4c"
  },
- "edit_act1/still-020.jpg": {
-  "src": "/showcase/media/the-long-chord/27d0422a42977953.jpg",
+ "edit_ep1/still-020.jpg": {
+  "src": "/showcase/media/the-long-chord/b58ea09bece712f3.jpg",
   "type": "image/jpeg",
-  "bytes": 29906,
-  "sha256": "27d0422a4297795343cec013b042f2577bd2b0dc0598614b27e1167948a5a42b"
+  "bytes": 40401,
+  "sha256": "b58ea09bece712f3e2c450f55de42cc9ec0b0b540b89fd14c72c77fa6ac0aa7e"
  },
- "edit_act1/still-021.jpg": {
-  "src": "/showcase/media/the-long-chord/34283d55ae566e07.jpg",
+ "edit_ep1/still-021.jpg": {
+  "src": "/showcase/media/the-long-chord/eb51643cf524dc67.jpg",
   "type": "image/jpeg",
-  "bytes": 28820,
-  "sha256": "34283d55ae566e07695a5d9c551e8d824720009cdd6fe1b6db0fb2573faa8c5e"
+  "bytes": 41834,
+  "sha256": "eb51643cf524dc6734a673cf61da980e2865ff6928038e46d5b7de1891f2d54d"
  },
- "edit_act1/still-022.jpg": {
-  "src": "/showcase/media/the-long-chord/37518a94d9f6b13a.jpg",
+ "edit_ep1/still-022.jpg": {
+  "src": "/showcase/media/the-long-chord/ff09032240c29add.jpg",
   "type": "image/jpeg",
-  "bytes": 36726,
-  "sha256": "37518a94d9f6b13af4bc0afab15b1d521ff9c08d1b47644c321e2c8f1db8c6bc"
+  "bytes": 31053,
+  "sha256": "ff09032240c29add5d5f90bf2710d5482cdcd8ae352debbda323fcc6bd7db495"
  },
- "edit_act1/still-023.jpg": {
-  "src": "/showcase/media/the-long-chord/c31e4fe9b7ebd4fd.jpg",
+ "edit_ep1/still-023.jpg": {
+  "src": "/showcase/media/the-long-chord/4e1ea9acb36a6785.jpg",
   "type": "image/jpeg",
-  "bytes": 49789,
-  "sha256": "c31e4fe9b7ebd4fd7e09fcda36b1c6ae44d1de0124e3f439524d843d16161c9c"
+  "bytes": 63448,
+  "sha256": "4e1ea9acb36a6785efb1243e824bc195e9e6851750120261ed5fa51816df993a"
+ },
+ "edit_ep1/still-024.jpg": {
+  "src": "/showcase/media/the-long-chord/196f0e34f1edd356.jpg",
+  "type": "image/jpeg",
+  "bytes": 46632,
+  "sha256": "196f0e34f1edd356853113745ae1d2ced5348a9cd18e21f64b4a4b7826b81b5c"
+ },
+ "edit_ep1/still-025.jpg": {
+  "src": "/showcase/media/the-long-chord/d58f0a7d8e258595.jpg",
+  "type": "image/jpeg",
+  "bytes": 38469,
+  "sha256": "d58f0a7d8e258595267f026bbc150fd45a45a32611a4e1479d885fb1f63de03f"
+ },
+ "edit_ep1/still-026.jpg": {
+  "src": "/showcase/media/the-long-chord/86ec5383ec9eeb37.jpg",
+  "type": "image/jpeg",
+  "bytes": 51857,
+  "sha256": "86ec5383ec9eeb37c2e82e2c20ca6222e9dfbe3d3280310328616e4fd2de25fa"
+ },
+ "edit_ep1/still-027.jpg": {
+  "src": "/showcase/media/the-long-chord/e0d3dee289e42122.jpg",
+  "type": "image/jpeg",
+  "bytes": 72691,
+  "sha256": "e0d3dee289e4212217fda397bd930c2cdde199130f62841a40b58cc1287687d1"
+ },
+ "edit_ep1/still-028.jpg": {
+  "src": "/showcase/media/the-long-chord/7e5ab484393d06ba.jpg",
+  "type": "image/jpeg",
+  "bytes": 50482,
+  "sha256": "7e5ab484393d06ba1bb6f780e0348fb1b47d443362e9280761f26c67a06dc62f"
+ },
+ "edit_ep1/still-029.jpg": {
+  "src": "/showcase/media/the-long-chord/3d611e669a57dfd9.jpg",
+  "type": "image/jpeg",
+  "bytes": 45933,
+  "sha256": "3d611e669a57dfd92c8e0e3a830c5377ded7efbdc11c948e3c40d72b0909879e"
+ },
+ "edit_ep1/still-030.jpg": {
+  "src": "/showcase/media/the-long-chord/999655b1632362dd.jpg",
+  "type": "image/jpeg",
+  "bytes": 72734,
+  "sha256": "999655b1632362ddac6d01a3eae0af848f370feeb5df195bf033f724fa9e7e6b"
+ },
+ "edit_ep1/still-031.jpg": {
+  "src": "/showcase/media/the-long-chord/fb598cec0452795a.jpg",
+  "type": "image/jpeg",
+  "bytes": 64855,
+  "sha256": "fb598cec0452795a764e87c918162985abb1975017a997bf0c312e276ad6ac2c"
+ },
+ "edit_ep1/still-032.jpg": {
+  "src": "/showcase/media/the-long-chord/880d6f674f02e04b.jpg",
+  "type": "image/jpeg",
+  "bytes": 11861,
+  "sha256": "880d6f674f02e04b545bccdb0bb1202683f964a32afa9da9e368750dd9c6cd4f"
  },
  "kf_s01_01/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/558ae5f2e270619e.webp",
@@ -227,11 +281,203 @@
   "bytes": 4504,
   "sha256": "25d65d2fe41849927fb13ae2090eab6e7f29c0b476f6db499a4304ec758e6b89"
  },
+ "kf_s10_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/674d8d0b9fdee7fa.webp",
+  "type": "image/webp",
+  "bytes": 3708,
+  "sha256": "674d8d0b9fdee7fa815de6a66d942f27e2c5a081328a1a08f177aa95869d8492"
+ },
+ "kf_s10_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/44cadfd692439f9a.webp",
+  "type": "image/webp",
+  "bytes": 4848,
+  "sha256": "44cadfd692439f9af040e8e636d486378c39b9db3ce7448a5febe5a7239ca139"
+ },
+ "kf_s13_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/cd56a97800ef4aa8.webp",
+  "type": "image/webp",
+  "bytes": 6668,
+  "sha256": "cd56a97800ef4aa832242c2344a9b5dfffa27aed9f18eb67412ef99707a865b5"
+ },
+ "kf_s13_04/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/c6c81f117c184e1c.webp",
+  "type": "image/webp",
+  "bytes": 4664,
+  "sha256": "c6c81f117c184e1c2954123d6447308d1fd1d3405f261ec1a9013f4ea7556371"
+ },
+ "kf_s13_05/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/b5a3268f8b794b04.webp",
+  "type": "image/webp",
+  "bytes": 2206,
+  "sha256": "b5a3268f8b794b045076cee5bb6d7e985cbc4503bb6db395f1e502eba308792c"
+ },
+ "kf_s16_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/05efcff14dbdee5b.webp",
+  "type": "image/webp",
+  "bytes": 3616,
+  "sha256": "05efcff14dbdee5b9c9d8e39a6007ae296231b94b86ef8701adacfca60033fc9"
+ },
+ "kf_s16_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/3f2825b778e61006.webp",
+  "type": "image/webp",
+  "bytes": 10148,
+  "sha256": "3f2825b778e6100686972e937e5fbb7ebbee3e7ddff50aa27d503aaf5c696ff4"
+ },
+ "kf_s17_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/f0fcf03e65ae5e20.webp",
+  "type": "image/webp",
+  "bytes": 7292,
+  "sha256": "f0fcf03e65ae5e201a62bb6b45309d8e207668caae2df971808302d52fac56c4"
+ },
+ "kf_s18_05/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/8feebfc6de875710.webp",
+  "type": "image/webp",
+  "bytes": 7402,
+  "sha256": "8feebfc6de875710fd514872f8ee66829772f1b25249daf05121eecb7575950d"
+ },
+ "kf_s19_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/7c62bef3c2c9a1ee.webp",
+  "type": "image/webp",
+  "bytes": 1854,
+  "sha256": "7c62bef3c2c9a1eebccd205a2adc4fc0ecef9fcae3ff39eaf3be36142a896abb"
+ },
+ "kf_s19_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/74768463e63f6364.webp",
+  "type": "image/webp",
+  "bytes": 4216,
+  "sha256": "74768463e63f6364ba58ebeb0bcbe9d0ffd8f825892e14e92cd02bdbcb560c43"
+ },
+ "kf_s19_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/5b8ce019029fc444.webp",
+  "type": "image/webp",
+  "bytes": 5736,
+  "sha256": "5b8ce019029fc444d94ec57fccd18d396f975e96994dde30685b848c2eb72387"
+ },
+ "kf_s19_04/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/4d44f8706c5afebb.webp",
+  "type": "image/webp",
+  "bytes": 4030,
+  "sha256": "4d44f8706c5afebb6296653ed154622779b8363b9aa14b4f1459c764e1c187ea"
+ },
+ "kf_s20_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/fdb4d5dfbf841ae2.webp",
+  "type": "image/webp",
+  "bytes": 22470,
+  "sha256": "fdb4d5dfbf841ae26a68ea04a62bc2fd5ba7ca71c1077308891ad90d18d9eecd"
+ },
+ "kf_s20_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/5ce493cccb2c3099.webp",
+  "type": "image/webp",
+  "bytes": 17016,
+  "sha256": "5ce493cccb2c3099dbe47b9d2f9228561963f1f59800650ffe6330c32400e22d"
+ },
+ "kf_s20_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/343e55e98ba972f0.webp",
+  "type": "image/webp",
+  "bytes": 23216,
+  "sha256": "343e55e98ba972f0e7c6859e7d951ac511c41ba04827336af327947b39798458"
+ },
+ "kf_s20_05/image-1.jpg#poster": {
+  "src": "/showcase/media/the-long-chord/b9c6122dbc9a4e6a.webp",
+  "type": "image/webp",
+  "bytes": 17610,
+  "sha256": "b9c6122dbc9a4e6abe6ad2b8157303088796e56b19bac309bbe97418b03182f9"
+ },
+ "kf_s22_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/128b7cece0bcd77c.webp",
+  "type": "image/webp",
+  "bytes": 9288,
+  "sha256": "128b7cece0bcd77c5fd681c495bc7e5d82c985ab07a45d1f62d34537072e6ee7"
+ },
+ "kf_s22_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/140ea20bb0815a60.webp",
+  "type": "image/webp",
+  "bytes": 3734,
+  "sha256": "140ea20bb0815a607828bde188dfa62504a8fa1b25e02450ed5cbbbd3caa16d6"
+ },
+ "kf_s22_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/a84a316e2078a687.webp",
+  "type": "image/webp",
+  "bytes": 7738,
+  "sha256": "a84a316e2078a687f094f96225afd02e9bef31685dcba80f8fd5dc6b8f5038dc"
+ },
+ "kf_s22_05/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/684be17799c0b87e.webp",
+  "type": "image/webp",
+  "bytes": 8048,
+  "sha256": "684be17799c0b87e9a6c235c1b7c2c874ba4119e76e0928c6328360780d70095"
+ },
+ "kf_s22_06/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/60d9a88e36d5e1da.webp",
+  "type": "image/webp",
+  "bytes": 4106,
+  "sha256": "60d9a88e36d5e1da236d15470ffe7f261b05e27bba4949a156dc70c5b01cc1bf"
+ },
+ "kf_s24_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/11173745d4aad3ca.webp",
+  "type": "image/webp",
+  "bytes": 5446,
+  "sha256": "11173745d4aad3caf2f3a29bbb05afb8b9c4e216ffd842397d03424eed9e7f5b"
+ },
+ "kf_s24_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/fc3d3d15ecd01e95.webp",
+  "type": "image/webp",
+  "bytes": 9794,
+  "sha256": "fc3d3d15ecd01e9516696e090bcfa313a123c28f6989965eac74a36c2346825b"
+ },
+ "kf_s25_04/image-1.jpg#poster": {
+  "src": "/showcase/media/the-long-chord/27ad21b2fbeec52b.webp",
+  "type": "image/webp",
+  "bytes": 10698,
+  "sha256": "27ad21b2fbeec52b9e036551841793e0261d4dee631faeea7b36045e8153d3c8"
+ },
+ "kf_s26_01/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/7062804766840475.webp",
+  "type": "image/webp",
+  "bytes": 17138,
+  "sha256": "70628047668404758278771d8e75ea52f1dce054d2b0719d0df8ada4cf2810b8"
+ },
+ "kf_s26_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/c2b2a80193dda39b.webp",
+  "type": "image/webp",
+  "bytes": 21472,
+  "sha256": "c2b2a80193dda39b6e2b3077010c59c2455a288a9ba7b185ccd34fc55b421c74"
+ },
+ "kf_s26_03/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/54edd862a738f444.webp",
+  "type": "image/webp",
+  "bytes": 18804,
+  "sha256": "54edd862a738f4444c9faa2153971589ddc450c9e698a06821a740e4b0cd5d90"
+ },
+ "kf_s26_05/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/7009ca9841ba57a3.webp",
+  "type": "image/webp",
+  "bytes": 17196,
+  "sha256": "7009ca9841ba57a36984a27aedd8ca75cd9c7395ab8ccb0a24aaa0a13cc2fc3f"
+ },
+ "kf_s27_02/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/62a7bb5924dba721.webp",
+  "type": "image/webp",
+  "bytes": 18508,
+  "sha256": "62a7bb5924dba721c0d9a176e7890a5eb27a21355941b7e1b947ac7b714e058f"
+ },
  "sheet_ch_bram/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/1ad3b23c0793f993.webp",
   "type": "image/webp",
   "bytes": 11264,
   "sha256": "1ad3b23c0793f99310c935731526d03d000ea93db4fb509a167015b3961f1f13"
+ },
+ "sheet_ch_ilse/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/db7e6e56d1a88240.webp",
+  "type": "image/webp",
+  "bytes": 10884,
+  "sha256": "db7e6e56d1a88240d79c969193bb93d5cef6ee47ec433b108a2fc5ca35418036"
+ },
+ "sheet_ch_kesh/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/8fba51beeeaae936.webp",
+  "type": "image/webp",
+  "bytes": 12224,
+  "sha256": "8fba51beeeaae936481c9b8504e456da957ebd435641421c4d4ac6d659c3e73d"
  },
  "sheet_ch_lark/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/ddf2da46ebabc8c8.webp",
@@ -262,6 +508,36 @@
   "type": "image/webp",
   "bytes": 17940,
   "sha256": "9615fc3be94a458ed472408752271705d77fb0c7b215a523ed03dcf85acdf718"
+ },
+ "sheet_lo_answer_cockpit/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/2418baf81aa311e6.webp",
+  "type": "image/webp",
+  "bytes": 20118,
+  "sha256": "2418baf81aa311e675fbf82d287840e80ab1a0ea31c4748f6a1c599c733b997e"
+ },
+ "sheet_lo_bar_cell/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/c8b310d00c592a4a.webp",
+  "type": "image/webp",
+  "bytes": 6860,
+  "sha256": "c8b310d00c592a4a96e16a3836dda7ceb324f57a6d9c0deab03ce529b511c1b0"
+ },
+ "sheet_lo_bar_chamber/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/57577bf7da2ffa09.webp",
+  "type": "image/webp",
+  "bytes": 5636,
+  "sha256": "57577bf7da2ffa098add187e714e1db276dd697703708ed97d8f30d6ac698add"
+ },
+ "sheet_lo_bar_core/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/a53a87720754376c.webp",
+  "type": "image/webp",
+  "bytes": 9408,
+  "sha256": "a53a87720754376cc2fa732b5e7d8768a652c0c861cbbb07be08b245820a2d92"
+ },
+ "sheet_lo_bar_corridor/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/09dbb30f712d8da9.webp",
+  "type": "image/webp",
+  "bytes": 5944,
+  "sha256": "09dbb30f712d8da9ef3eb58720a29f609ec41251cf6028da94699df6f2889bf3"
  },
  "sheet_lo_bar_exterior/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/dd3234a9bfde6d39.webp",
@@ -299,11 +575,23 @@
   "bytes": 8424,
   "sha256": "d4e766e6d653fd3c2d980ec155420360469f0db28929fbdfdcad6b61bc0b80c4"
  },
+ "sheet_lo_weir/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/55cf48a0a9c0275d.webp",
+  "type": "image/webp",
+  "bytes": 13194,
+  "sha256": "55cf48a0a9c0275db0071985832946618100aa8ed7e9738c4a23c1fbb282f590"
+ },
  "sheet_pr_bell/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/f97c08ed3306ae02.webp",
   "type": "image/webp",
   "bytes": 9852,
   "sha256": "f97c08ed3306ae026f55a5f2cda21503624862b3ab5970045d49f967b29c6820"
+ },
+ "sheet_pr_collar/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/fbd6d1c9e24de7be.webp",
+  "type": "image/webp",
+  "bytes": 3994,
+  "sha256": "fbd6d1c9e24de7be4d3c4f80b158654fdb500dd36dac607047e50886779c4ab4"
  },
  "sheet_pr_fork/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/48a49e46e0e2e2f0.webp",
@@ -316,6 +604,12 @@
   "type": "image/webp",
   "bytes": 5438,
   "sha256": "25c620a582d0db199697f3a7f958852373cb8e0d7d31a19d5ef817ac0bd1da54"
+ },
+ "sheet_pr_sandplate/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/79d38fca4804a88e.webp",
+  "type": "image/webp",
+  "bytes": 11152,
+  "sha256": "79d38fca4804a88eb0fc534ebf8a4646520fc6d6febda0f68692c2dba40fab0e"
  },
  "sheet_pr_well/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/13a3ca257c1ba93a.webp",
@@ -334,6 +628,12 @@
   "type": "image/webp",
   "bytes": 7262,
   "sha256": "1a207b76dc3f3757be21647785fdab1acee68ccd83e27b990bdfa6d41d20fd25"
+ },
+ "sheet_sh_carillon/image-1.png#poster": {
+  "src": "/showcase/media/the-long-chord/c217b1043ed8df79.webp",
+  "type": "image/webp",
+  "bytes": 13036,
+  "sha256": "c217b1043ed8df795a3e98dd22f6035dfc2c2fb113c1e8b4b93e6085d1ea68c1"
  },
  "sheet_sh_linnet/image-1.png#poster": {
   "src": "/showcase/media/the-long-chord/4ead29e06fa0dcff.webp",
@@ -564,10 +864,10 @@
   "sha256": "23f0ea462ac4699f22a55123a06ac88a7cfa633c1db665580193dafebe41848b"
  },
  "vid_s08_04/video-1.mp4#poster": {
-  "src": "/showcase/media/the-long-chord/1f1e686799729371.webp",
+  "src": "/showcase/media/the-long-chord/5d6bda0cb1918f7b.webp",
   "type": "image/webp",
-  "bytes": 3938,
-  "sha256": "1f1e6867997293717927239e6d28fa93bcffff83555d6b5f75fcbc016632bc45"
+  "bytes": 7618,
+  "sha256": "5d6bda0cb1918f7b35443e052efd3b215e3b83985e6bf947cec83c054a02a047"
  },
  "vid_s08_05/video-1.mp4#poster": {
   "src": "/showcase/media/the-long-chord/15277ab3a20c97c3.webp",
@@ -618,9 +918,531 @@
   "sha256": "249895c0c3fa0d83cca4cee9dbc0e41f5db07cadb0a2841af5d21bd96dacad2f"
  },
  "vid_s09_03/video-1.mp4#poster": {
-  "src": "/showcase/media/the-long-chord/bfd87f4058331054.webp",
+  "src": "/showcase/media/the-long-chord/8e47d731a2e2ac0c.webp",
   "type": "image/webp",
-  "bytes": 10208,
-  "sha256": "bfd87f4058331054abf2907344cf56da9af7ef3edf42bbb4f9dec5b20209f184"
+  "bytes": 8668,
+  "sha256": "8e47d731a2e2ac0cb755b68091a33156ebd52fd7f0b23c0bd2f3b56e3fe6d148"
+ },
+ "vid_s10_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/1a496d46dca84a62.webp",
+  "type": "image/webp",
+  "bytes": 3976,
+  "sha256": "1a496d46dca84a626ffc4620d1091feafa673d50db8875cb168c211a5efe44c5"
+ },
+ "vid_s10_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/d23b23a8627d70af.webp",
+  "type": "image/webp",
+  "bytes": 5926,
+  "sha256": "d23b23a8627d70af6c9861b3c3a35740a7a342cafa4e9e92027e10421705d38c"
+ },
+ "vid_s11_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/f4e39c6f8150f883.webp",
+  "type": "image/webp",
+  "bytes": 10006,
+  "sha256": "f4e39c6f8150f883fc2a1ee53bc0fac20b45359faef0f673761018f955fd6b11"
+ },
+ "vid_s11_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/4f3230c64a726fdc.webp",
+  "type": "image/webp",
+  "bytes": 11042,
+  "sha256": "4f3230c64a726fdce7692b23ee36a39901fee4ef365e0662894790ef66a856c8"
+ },
+ "vid_s11_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/8480e0b3c82892f3.webp",
+  "type": "image/webp",
+  "bytes": 9494,
+  "sha256": "8480e0b3c82892f311ba57a859bd29e56190cb758d4c87a1836602fe994e9ce0"
+ },
+ "vid_s11_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a4b9f29d4e6f08f5.webp",
+  "type": "image/webp",
+  "bytes": 11154,
+  "sha256": "a4b9f29d4e6f08f54c3808b2e01b600b24c6206e6787444beb711646470dea05"
+ },
+ "vid_s12_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/25808a82c999ea9f.webp",
+  "type": "image/webp",
+  "bytes": 8928,
+  "sha256": "25808a82c999ea9f4fa122f6ab557eb0e37076bf72c3c9b433d354175c03fc8e"
+ },
+ "vid_s12_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/6fb43f89ce71aff9.webp",
+  "type": "image/webp",
+  "bytes": 8362,
+  "sha256": "6fb43f89ce71aff9d930cff2600fa77a042136b70c4365cf57df8ac69eb4e5d6"
+ },
+ "vid_s12_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/0ff11c9f22f94f5d.webp",
+  "type": "image/webp",
+  "bytes": 9708,
+  "sha256": "0ff11c9f22f94f5d8f95791dc4b49fa03cdc754a087c668a07da21c6d74f4e2f"
+ },
+ "vid_s12_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/5585dd5262bb145f.webp",
+  "type": "image/webp",
+  "bytes": 7132,
+  "sha256": "5585dd5262bb145f91da9f6d7cd7a813480c627f19f492c5c8f2e2aa46afa7dd"
+ },
+ "vid_s12_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/30ac9f16f30244cf.webp",
+  "type": "image/webp",
+  "bytes": 7542,
+  "sha256": "30ac9f16f30244cfb7d47fe51f3cd35cb5287a24bf585bae442f9d8fd071820a"
+ },
+ "vid_s12_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/e502a8c40a5f12e3.webp",
+  "type": "image/webp",
+  "bytes": 9534,
+  "sha256": "e502a8c40a5f12e387c3767e18f544703f5d0b3c8f2f609c7e15e016e67d66ab"
+ },
+ "vid_s12_07/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/ea789b7fd8912caa.webp",
+  "type": "image/webp",
+  "bytes": 8286,
+  "sha256": "ea789b7fd8912caafcb404fee31e4c1441bb39760861d1b3348a7a262af0c989"
+ },
+ "vid_s12_08/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/5b22ae50d8c4055e.webp",
+  "type": "image/webp",
+  "bytes": 5392,
+  "sha256": "5b22ae50d8c4055ed2a97423c675e99718e4aebc406b5a0709874cea1c616181"
+ },
+ "vid_s12_09/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/4fb9eabeeaf522c6.webp",
+  "type": "image/webp",
+  "bytes": 8360,
+  "sha256": "4fb9eabeeaf522c6cb3ea46cf3e7fa3451754b132dd8507d36601a05843c5e67"
+ },
+ "vid_s12_10/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a3e1ba4259e99439.webp",
+  "type": "image/webp",
+  "bytes": 9724,
+  "sha256": "a3e1ba4259e9943993323e67defa3e568117219364821b18b3b8b67e7966436e"
+ },
+ "vid_s13_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/2444260f874f3b81.webp",
+  "type": "image/webp",
+  "bytes": 7336,
+  "sha256": "2444260f874f3b81bae35cf80cc7b61c045e5338bb0461c4430b5ce3bce5c75b"
+ },
+ "vid_s13_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/dcaace7ca7947580.webp",
+  "type": "image/webp",
+  "bytes": 10864,
+  "sha256": "dcaace7ca7947580cd7453abe874ca50aa9b3cd41156d60689ef4bd717249df0"
+ },
+ "vid_s13_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/4e0266c2759b594c.webp",
+  "type": "image/webp",
+  "bytes": 8966,
+  "sha256": "4e0266c2759b594c3b0bb4db743b2b4c45adfe5fb208aba8a595b1e6127ff2a8"
+ },
+ "vid_s13_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/75568dcec5fc55ad.webp",
+  "type": "image/webp",
+  "bytes": 6902,
+  "sha256": "75568dcec5fc55ad6dad57a8aeefa92aab88476a8e7bfe7839bd9e64453eaa01"
+ },
+ "vid_s13_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/3bf806427fad0394.webp",
+  "type": "image/webp",
+  "bytes": 2782,
+  "sha256": "3bf806427fad03942da8308ec74de16824263bd3fd52ab768bbbe0d5b22a0e71"
+ },
+ "vid_s14_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/3e72d79fc0148ba1.webp",
+  "type": "image/webp",
+  "bytes": 12350,
+  "sha256": "3e72d79fc0148ba1b811e452b7f64ad2a064c2fa0e203b49e4dca2b874bd793c"
+ },
+ "vid_s14_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/537c302540349def.webp",
+  "type": "image/webp",
+  "bytes": 6224,
+  "sha256": "537c302540349defaaf522ba607eb42f8d118c92de380651a2a04f5862e9b934"
+ },
+ "vid_s14_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/be873dd2ae7cd420.webp",
+  "type": "image/webp",
+  "bytes": 10678,
+  "sha256": "be873dd2ae7cd420936619baa1795dc5203a6187edaf69eb65bae1330b8e5dbe"
+ },
+ "vid_s14_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/46fa20864842f9b0.webp",
+  "type": "image/webp",
+  "bytes": 9570,
+  "sha256": "46fa20864842f9b06df13dd3ea9fdd7e22a1bb3ab598abda76507a130b2bbb07"
+ },
+ "vid_s14_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/0e1d2a448454aa29.webp",
+  "type": "image/webp",
+  "bytes": 9556,
+  "sha256": "0e1d2a448454aa29ad89aa0e18217941cbace3474d71b2d072df5d2b54933796"
+ },
+ "vid_s15_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/ff220afedba70a59.webp",
+  "type": "image/webp",
+  "bytes": 10598,
+  "sha256": "ff220afedba70a59ae00e5e8e124122b73956a13994622d4a84d260a0077858b"
+ },
+ "vid_s15_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/53790d834317774b.webp",
+  "type": "image/webp",
+  "bytes": 11346,
+  "sha256": "53790d834317774bf00a2beaf13e050cc83d4b2776427b84303c73d155ddddbe"
+ },
+ "vid_s15_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/8cc034e5720ff9d4.webp",
+  "type": "image/webp",
+  "bytes": 12294,
+  "sha256": "8cc034e5720ff9d4ff354c779255f03077ed6d8945bd453f20975c40c9333374"
+ },
+ "vid_s15_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/41691952a33faacf.webp",
+  "type": "image/webp",
+  "bytes": 8420,
+  "sha256": "41691952a33faacf41f1d280f3c8ec531c353375cf8e8fa87b1b3573d9ba9c52"
+ },
+ "vid_s15_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a7d6689a11c69935.webp",
+  "type": "image/webp",
+  "bytes": 3740,
+  "sha256": "a7d6689a11c69935b2dafa9993545ee15eb2de82e8e76eb5b2ec073c22c0acfd"
+ },
+ "vid_s15_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/686db1f991b68a56.webp",
+  "type": "image/webp",
+  "bytes": 10194,
+  "sha256": "686db1f991b68a568bc7a544ebec31ebca2ab967bfe465960216afd4c757e228"
+ },
+ "vid_s15_07/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/047e71d8fc25e732.webp",
+  "type": "image/webp",
+  "bytes": 7548,
+  "sha256": "047e71d8fc25e7327d3e073c2aa600d38173b3441ad7fe98b29c26d407bf2f2a"
+ },
+ "vid_s16_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/088ec279bc3c69d7.webp",
+  "type": "image/webp",
+  "bytes": 5224,
+  "sha256": "088ec279bc3c69d79c131e6b80c6d5a347dad5a09974a6db49fa4b766f93be5b"
+ },
+ "vid_s16_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/53ab3baef93d0846.webp",
+  "type": "image/webp",
+  "bytes": 10796,
+  "sha256": "53ab3baef93d08467cd7bbc749740fd8823426f1bdd373361a91aff5f60a4620"
+ },
+ "vid_s17_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/892c904f224c5091.webp",
+  "type": "image/webp",
+  "bytes": 10738,
+  "sha256": "892c904f224c5091151710a1781e328cd13114686f2c6cbc5db08104feca65c4"
+ },
+ "vid_s17_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a01fa1f911fe9aba.webp",
+  "type": "image/webp",
+  "bytes": 7842,
+  "sha256": "a01fa1f911fe9aba70a7b17487d8eb9a900ab2422f0ba8264a0c3a812a61da54"
+ },
+ "vid_s17_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/e6a2043c7d33b1e5.webp",
+  "type": "image/webp",
+  "bytes": 8536,
+  "sha256": "e6a2043c7d33b1e50f751f199f9b920cd1e2fe142170852b669f4258b907747c"
+ },
+ "vid_s18_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/b79ff91cecfe32de.webp",
+  "type": "image/webp",
+  "bytes": 11554,
+  "sha256": "b79ff91cecfe32de7e633bd2d42843947cfff403836542bef4086050d0665a4f"
+ },
+ "vid_s18_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/766bf5b5d0a2a394.webp",
+  "type": "image/webp",
+  "bytes": 6228,
+  "sha256": "766bf5b5d0a2a394c39b4f1a24c8915e5773ae5054854969040e0294aa6db838"
+ },
+ "vid_s18_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/6fefae83da557d63.webp",
+  "type": "image/webp",
+  "bytes": 10492,
+  "sha256": "6fefae83da557d63fe4c2f855695c853fe40bde24e67fa5ccd57d628d6fde40f"
+ },
+ "vid_s18_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/cc2f3ac538d8a577.webp",
+  "type": "image/webp",
+  "bytes": 8786,
+  "sha256": "cc2f3ac538d8a577c22c725b2b825e7e679f155e35f2bbbb74d3621763aa34f8"
+ },
+ "vid_s18_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/531ed47e0ec5f9b9.webp",
+  "type": "image/webp",
+  "bytes": 9432,
+  "sha256": "531ed47e0ec5f9b9ee5550a48153f560ce5d83095ee83dedd6f3ccda36b1c9af"
+ },
+ "vid_s18_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/2d94e4a25ff53291.webp",
+  "type": "image/webp",
+  "bytes": 6882,
+  "sha256": "2d94e4a25ff5329128e3a181e49a557db18a6e4c93efe9a38b88e4e1c7570307"
+ },
+ "vid_s19_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/f9fb8426e92b8a3b.webp",
+  "type": "image/webp",
+  "bytes": 4184,
+  "sha256": "f9fb8426e92b8a3b29f2d43bcbcaf471a82322e2baf6d410764894b531b5f0a7"
+ },
+ "vid_s19_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/eac75005012e0a84.webp",
+  "type": "image/webp",
+  "bytes": 4540,
+  "sha256": "eac75005012e0a848c246fafa4152587d63f67e1f5e9950a812a96e36ad1ab51"
+ },
+ "vid_s19_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/8b59a200a216bcc6.webp",
+  "type": "image/webp",
+  "bytes": 5928,
+  "sha256": "8b59a200a216bcc6e86a34a33bf57ac1f88006e3c37a6a5f510dabfaa5521193"
+ },
+ "vid_s19_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/62babd13cfb855f7.webp",
+  "type": "image/webp",
+  "bytes": 4052,
+  "sha256": "62babd13cfb855f714361c985bd36ae2e529d1c0807eeb204e40bcc51db4a28c"
+ },
+ "vid_s20_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/028a040420c1b3e6.webp",
+  "type": "image/webp",
+  "bytes": 20640,
+  "sha256": "028a040420c1b3e68d754cdd33e5bbab7774893c2dc11569e9dcf59028426bfc"
+ },
+ "vid_s20_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/dc42e24534a24fd5.webp",
+  "type": "image/webp",
+  "bytes": 15860,
+  "sha256": "dc42e24534a24fd5cc2f1dde4d53321bba702696427fe6dc4ce937336e7fb584"
+ },
+ "vid_s20_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/c1d8b4ca84757944.webp",
+  "type": "image/webp",
+  "bytes": 21910,
+  "sha256": "c1d8b4ca84757944d3821d882f29915a84a1cd619315ccf7c7d680d9374c9179"
+ },
+ "vid_s20_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a0dac47a24594cfe.webp",
+  "type": "image/webp",
+  "bytes": 12812,
+  "sha256": "a0dac47a24594cfe86d01282bab7515408a6a57806eb23da9ac7231c80606674"
+ },
+ "vid_s20_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/fbed0f66d96ad85d.webp",
+  "type": "image/webp",
+  "bytes": 18152,
+  "sha256": "fbed0f66d96ad85da2cf1a69c7deccabf1fd4aa9436dd0df37f15b01fa846825"
+ },
+ "vid_s21_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/98d274342572894b.webp",
+  "type": "image/webp",
+  "bytes": 11942,
+  "sha256": "98d274342572894bc82a1b07300bfa57a4dda73fae729e564f048dd1231e15ad"
+ },
+ "vid_s21_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/464cd42f93ae53b6.webp",
+  "type": "image/webp",
+  "bytes": 7592,
+  "sha256": "464cd42f93ae53b69bdbcbfcd88d809b60a6f3b9e6a9a10f891d2b8c2d46531e"
+ },
+ "vid_s21_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/3682b3c8e8b12ce3.webp",
+  "type": "image/webp",
+  "bytes": 8642,
+  "sha256": "3682b3c8e8b12ce329576e865655c4b335b2c8c73bd7533be99d32c38d89cee5"
+ },
+ "vid_s21_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/24b74d458051cef3.webp",
+  "type": "image/webp",
+  "bytes": 10790,
+  "sha256": "24b74d458051cef37ae8d125cff53bc1c0434c59e206d550d690d23359a0255e"
+ },
+ "vid_s21_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/633b779dc3318ac8.webp",
+  "type": "image/webp",
+  "bytes": 7994,
+  "sha256": "633b779dc3318ac89c8a94077d2460838affeeae0b289dbe4885dbf82bdb40ba"
+ },
+ "vid_s21_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a3227219d366a099.webp",
+  "type": "image/webp",
+  "bytes": 8210,
+  "sha256": "a3227219d366a09926a558d312dfb7fe4dea2c258616c37f20d27a35d24d9a09"
+ },
+ "vid_s21_07/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/0c73c83660fbd50e.webp",
+  "type": "image/webp",
+  "bytes": 8634,
+  "sha256": "0c73c83660fbd50e974c77f96ec7782b4ebaa3a94e094d430199b3c6c3932d63"
+ },
+ "vid_s22_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/c96a9f7f6128569a.webp",
+  "type": "image/webp",
+  "bytes": 9708,
+  "sha256": "c96a9f7f6128569a2a147015c30310debc2b257d9664ffa3f13be4bf3aefa8e3"
+ },
+ "vid_s22_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/b39984d11b203119.webp",
+  "type": "image/webp",
+  "bytes": 3508,
+  "sha256": "b39984d11b203119530c7b9ffd5106007832cd31dd7da96b4a44f878ab793628"
+ },
+ "vid_s22_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/c33eb1b4188a4056.webp",
+  "type": "image/webp",
+  "bytes": 6962,
+  "sha256": "c33eb1b4188a405626c22cbf60eb1c55d21b3664e979c17f22b7122a96f3acd1"
+ },
+ "vid_s22_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/81a9b6f6cdc4493b.webp",
+  "type": "image/webp",
+  "bytes": 13278,
+  "sha256": "81a9b6f6cdc4493b4b82d42f158f7f80547278a554b6b78ad3ce613a088285ce"
+ },
+ "vid_s22_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/6b6c0c06999d6b76.webp",
+  "type": "image/webp",
+  "bytes": 8412,
+  "sha256": "6b6c0c06999d6b7684cbab2e643b452e131d45d077babe2dbae3fa3b3376e63c"
+ },
+ "vid_s22_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/afb3a7e961f464e5.webp",
+  "type": "image/webp",
+  "bytes": 4564,
+  "sha256": "afb3a7e961f464e52dcd0461d0bf9b225684a5d15c5bcd1e73b8b695239ded33"
+ },
+ "vid_s23_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/3a0eb74979c81385.webp",
+  "type": "image/webp",
+  "bytes": 10594,
+  "sha256": "3a0eb74979c81385f60f47cd7f7d5dac0ea4f79b38ed503a4f0a3fd35e0010ef"
+ },
+ "vid_s23_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/90376f62a06d0afe.webp",
+  "type": "image/webp",
+  "bytes": 12790,
+  "sha256": "90376f62a06d0afef32277eaca18306f82e8e21cd4a3bda0409ac3d786d54000"
+ },
+ "vid_s23_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/6ad2862d1b1fe0c2.webp",
+  "type": "image/webp",
+  "bytes": 18946,
+  "sha256": "6ad2862d1b1fe0c26026868c6d6159dd5f3da28451ad8413198321a12e5fd9ea"
+ },
+ "vid_s23_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/8fe8989940595f4d.webp",
+  "type": "image/webp",
+  "bytes": 17014,
+  "sha256": "8fe8989940595f4d8a7561037cb2be70f11a5b0f845f0df30019df3c29a28b66"
+ },
+ "vid_s23_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/eeaba10b49037540.webp",
+  "type": "image/webp",
+  "bytes": 18152,
+  "sha256": "eeaba10b490375404847d023e8a282bfb99d9d70c7da49a86d85630108fded15"
+ },
+ "vid_s24_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/a077d31eaa45ee9e.webp",
+  "type": "image/webp",
+  "bytes": 7076,
+  "sha256": "a077d31eaa45ee9efca2837a4e2cea987c29ec6c7b02c34e9a46084fd351e431"
+ },
+ "vid_s24_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/02567c924b4ff6bd.webp",
+  "type": "image/webp",
+  "bytes": 10078,
+  "sha256": "02567c924b4ff6bd3353d4bf9cce949eecf663db5ea2811e26969b8e3a8d91ce"
+ },
+ "vid_s25_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/7801097b4cd70c0a.webp",
+  "type": "image/webp",
+  "bytes": 11488,
+  "sha256": "7801097b4cd70c0a1ad2e4dfaee1a78e0e8da2c550370c4571ea9864add31612"
+ },
+ "vid_s25_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/09759459da26bce0.webp",
+  "type": "image/webp",
+  "bytes": 7080,
+  "sha256": "09759459da26bce053d7d2fd46a88a187182b26571be326af62f37c7da2eee74"
+ },
+ "vid_s25_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/cf429ddfa3586b2a.webp",
+  "type": "image/webp",
+  "bytes": 6210,
+  "sha256": "cf429ddfa3586b2a6d44ca988faa50c6662b0bd15a89b547559eabdc091a7e48"
+ },
+ "vid_s25_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/673cada85e984a4e.webp",
+  "type": "image/webp",
+  "bytes": 13990,
+  "sha256": "673cada85e984a4e8b6811d377ec7e4fd63721e195b6c3e05c13fb4c3bb8c2f9"
+ },
+ "vid_s26_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/e40955a5f16ca959.webp",
+  "type": "image/webp",
+  "bytes": 12820,
+  "sha256": "e40955a5f16ca95955dc079b1d7e1668609ec3ab2dfdced5eaf20c9a208fd351"
+ },
+ "vid_s26_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/ad0bc92aa5ea68ea.webp",
+  "type": "image/webp",
+  "bytes": 14358,
+  "sha256": "ad0bc92aa5ea68ea1d3568fe784ffb86a20f8374b5ce5825318cf7d5c8c6d49e"
+ },
+ "vid_s26_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/3c54f78e9f7a7b67.webp",
+  "type": "image/webp",
+  "bytes": 20484,
+  "sha256": "3c54f78e9f7a7b67d0acd86d4a2572525530a709a3ff10651a5380673db976e7"
+ },
+ "vid_s26_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/c6bf9cdf184139f7.webp",
+  "type": "image/webp",
+  "bytes": 16240,
+  "sha256": "c6bf9cdf184139f7ff57a3bb2c4f379115082c92f6a5a81a349b7b1b81f71c46"
+ },
+ "vid_s26_05/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/80066e9ba21450ea.webp",
+  "type": "image/webp",
+  "bytes": 16764,
+  "sha256": "80066e9ba21450eabbfe7072e79c3e54446d4ac36f0451caabe9d842a6120259"
+ },
+ "vid_s26_06/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/92235cc739442bd5.webp",
+  "type": "image/webp",
+  "bytes": 11954,
+  "sha256": "92235cc739442bd50bc4fd9e91c92b954e7138b22b882ddc8a4a7cc730f85c74"
+ },
+ "vid_s27_01/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/0c2f1e9d92d36a1c.webp",
+  "type": "image/webp",
+  "bytes": 17186,
+  "sha256": "0c2f1e9d92d36a1c54e1dfd90252107c25e5a9dd63e17e032d5e5054e599b066"
+ },
+ "vid_s27_02/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/463f1708cb1bf46e.webp",
+  "type": "image/webp",
+  "bytes": 21390,
+  "sha256": "463f1708cb1bf46e0db317928dcca671d456d55368f8a4b404124c48ba3f9cec"
+ },
+ "vid_s27_03/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/56a1c4533c1bdfd4.webp",
+  "type": "image/webp",
+  "bytes": 14798,
+  "sha256": "56a1c4533c1bdfd49e298ae7a8e998c7b7aeaae0970435157ddf34ba72df6dfe"
+ },
+ "vid_s27_04/video-1.mp4#poster": {
+  "src": "/showcase/media/the-long-chord/b1358f17fd70c7cd.webp",
+  "type": "image/webp",
+  "bytes": 13642,
+  "sha256": "b1358f17fd70c7cdf10ad9767b22e51f322b1868077af1f9970ed89990db01e8"
  }
 }
