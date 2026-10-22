@@ -4,7 +4,41 @@ AwwO 本地版在一台电脑上运行与线上版**同一套代码**：Go API�
 
 它不是旧的本地开发入口（`npm run dev`，Paperclip 控制面与网关）的延续；那条线没有线上版此后增加的能力（首页案例、画布助手、媒体与剪辑节点、直接执行、设置中心、技能库等）。本地版直接运行线上版的服务，所以线上有的，本地版基本都有；例外见下文「本地版没有的」。
 
-## 快速开始
+## Windows 安装包
+
+普通使用者装 **AwwO Local**（`apps/windows-local`，NSIS，只装给当前账号）即可，不需要代码库、Node.js 或数据库：安装包带着本地版的全部程序（它自己的 Node.js 24、PostgreSQL 18.4 和它需要的 Visual C++ 运行库、API、网页和执行服务）。打开「AwwO 本地版」窗口，它在后台启动本地版（下文的运行时），显示启动进度，就绪后直接打开 AwwO；第一次启动完成时，它还打开 `admin-credentials.txt`，里面是本机账号和初始密码。关闭窗口时它先有序停止本地版再退出。数据放在 `%LOCALAPPDATA%\store.clawhunt.awwo.local\state`，与安装目录分开：升级、卸载都不动它（卸载时勾选「删除应用程序数据」，并在随后说明会删除哪些数据的提示中确认，才会删除；静默卸载从不删除）。安装包不会装到更新的版本上面（不能降级）。窗口的「AwwO」菜单可以重新启动、在浏览器中打开、打开数据目录、打开日志（`%LOCALAPPDATA%\store.clawhunt.awwo.local\logs` 中的 `runtime.log` 是运行时自己的日志，那个目录里没有任何密钥；各个服务的日志在数据目录的 `logs` 中），以及重置登录密码（以 `--reset-password` 重新启动，并打开新的 `admin-credentials.txt`）。本地版自己停下时，窗口显示它停下前报告的错误。窗口以 `--shell windows` 启动运行时，应用里原本提示运行 npm 命令的地方（登录页的密码重置、「设置 → 本机」）因此改为指向这个菜单。
+
+升级或卸载时，安装程序先请正在运行的窗口退出（`--quit`），窗口照常有序停止本地版；没有窗口在运行时，`--quit` 会停下之前被强制结束的运行留下的数据库。安装程序等到安装目录下的程序都已结束（最多六分钟，等不到时提示重试），再整个移走旧的程序文件，所以升级不会留下旧版本的文件。数据目录不受影响。安装位置的路径不能超过 80 个字符（payload 里最深的路径有 170 个字符，加起来不能超过 Windows 的 260 个），并且必须在使用者自己的用户目录或 `%LOCALAPPDATA%` 之内（默认的 `%LOCALAPPDATA%\AwwO Local` 就是）：别处的文件夹沿用磁盘根目录的权限，这台电脑上的其他账号可能改动其中的程序，而这些程序握着本账号的密钥；被拒绝时安装程序删掉它刚建的空文件夹。窗口每次启动本地版、在运行 payload 里的任何程序（运行时、pg_ctl）之前，还会按真实路径（junction 指向的位置）读取安装目录、payload、代码与构建目录的权限：除本账号、SYSTEM、Administrators（以及域的 Domain Admins 与 Enterprise Admins）、TrustedInstaller、CREATOR OWNER 与 OWNER RIGHTS（以及本账号自己的沙盒应用）之外还有谁能改动其中的文件，目录的所有者不是其中之一，或目录没有访问列表（人人都能改），就拒绝启动并说明。payload 里任何一层出现链接（junction 或符号链接）也拒绝启动：安装程序不建链接，打包也拒绝带链接的 payload；把文件夹挪到别的磁盘的工具会留下 junction，它指向的位置没人检查过。读权限的 whoami 与 PowerShell 各限 60 秒，超时同样拒绝；检查通过后，本次运行不再重复，没通过时下次启动（菜单「重新启动」）会重新检查。安装位置的路径也不能含 `%` 或 `!`：PostgreSQL 经 cmd.exe 启动服务器，cmd.exe 即使在引号里也会把它们读作变量。
+
+窗口停止本地版超过四分钟仍未停完时，会强制结束它，并停下它留下的数据库。
+
+安装包没有签名，Windows 可能提示发布者未知（「更多信息 → 仍要运行」）。安装包里没有：Python 执行器（由 JS 执行器代替）、Academy 的视频（从线上公开副本播放）、ffmpeg（没有它渲染服务不开）、直接执行的工作区镜像（在安装版里构建它属于后续工作，直接执行暂时不开）。
+
+打包（在 Windows 上，先 `npm run setup:local`，Docker 运行时构建直接执行的核心；再 `npm ci --prefix apps/desktop` 装 Tauri CLI；需要 Rust 与 Visual Studio C++ 构建工具）：
+
+```sh
+npm run package:local -- --smoke
+```
+
+`scripts/awwo-local-package.mjs` 先组装 payload：线上镜像运行的那些文件，按代码库的结构放（`app/` 是代码、`build/` 是程序）。执行器的依赖按它们镜像的方式 `npm ci --omit=dev --ignore-scripts` 安装，再去掉 Node.js 不会加载的类型声明和 source map、为其他系统或处理器构建的依赖（`package.json` 的 `os`/`cpu` 不含 Windows x64 的），以及没有任何执行器用到的编程代理剪贴板 `@mariozechner/clipboard`（原生插件；代理只在它存在时加载，线上的 Linux 执行器没有显示器也从不加载它）；某个依赖的 ES 模块构建 `dist-es` 路径过长（安装到用户目录下会超过 Windows 的 260 个字符）、而它的 `exports` 让 Node.js 只加载 CommonJS 构建时，去掉这个 `dist-es`，并用 payload 的 Node.js 以 import 和 require 加载该依赖的每个导出来确认；其他过长的路径会让打包失败。payload 不含任何数据和密钥：执行器目录里的点文件（`.env` 等）不进入 payload，组装后再检查一遍，发现 `.env`、`.npmrc`、私钥或证书文件就停止打包；payload 自己的脚本引用、而 payload 里没有的文件也会让打包停止。
+
+PostgreSQL 只带服务器自己用的部分：程序、它们的库和数据文件；`lib` 里只留服务器自己加载的模块（PL/pgSQL、Snowball 词干、编码转换、复制模块与事件日志的消息）。不带任何扩展（contrib 与 EDB 的模块及其 control / SQL 文件：AwwO 的迁移不创建扩展，其中几个还带着别人按各自条款授权的代码，如 uuid-ossp 的 OSSP uuid、fuzzystrmatch 按 Perl 条款授权的 dmetaphone、pgcrypto 的一些部分），也不带 contrib 的两个程序 oid2name 与 vacuumlo、各程序的翻译（`share/locale`：运行时让它们用英文报告）、Perl / Python / Tcl 过程语言、编译扩展用的 `.lib`、`.a` 与 pgxs、EDB 的 StackBuilder 和只有它用的 wxWidgets 与 curl、ICU 的测试插件；`share` 里的目录文件（initdb 载入的，以及留下的 PL/pgSQL 扩展文件）提到的每个 `$libdir` 模块都要在 `lib` 里，否则打包停止。它的程序需要的 Visual C++ 运行库放在它旁边：取本机 Visual Studio 可再分发目录（`VC\Redist\MSVC\<版本>\x64\Microsoft.VC14x.CRT`，Visual Studio 的许可允许应用随带这里的文件）中不低于编译 PostgreSQL 的工具版本（读它们 PE 头里的链接器版本；PostgreSQL 18.4 要 14.44，即 Visual Studio 2022 17.14）的那份。都不够新时打包停止：只能加 `--test-build` 打一个测试用的包，它带系统里（别的软件装进 System32）的那份，不得发布：它的安装程序名为 `…_x64-setup-TEST.exe`，与发布用的分开，`LIBRARIES.md` 也写明它是测试包；更新 Visual Studio 的 C++ 构建工具后再打发布用的包。payload 里每个 x64 程序、库和 Node.js 插件导入的 DLL 都要在它会被找到的位置（加载它的程序旁边、它自己旁边，或 System32 中 Windows 自带的部分），否则打包停止。
+
+许可证随 payload 一起放，缺了哪一份打包就停止，不会漏掉，也不会替谁编写文本：
+
+- `licenses/`：AwwO 的 LICENSE 与 THIRD_PARTY_NOTICES.md，以及其中提到的每个许可证文件（与线上发布包相同，`scripts/awwo-saas-release.ts` 的 `noticePaths`；Go 模块的许可证会与 payload 里 API 实际链接的模块核对）。
+- `licenses/npm/`：执行器的 npm 包。`NPM.md` 列出每个包（每个版本一次）的许可证（须是宽松许可证，否则打包停止）和许可证文件；包里没有许可证文件时，用它 README 里附带的许可证全文，或 `third_party/npm-packages` 里从它的仓库取来的许可证文件。
+- `licenses/apps/windows-local/`：窗口程序的 Rust 代码。Rust 标准库的版权说明与许可证取自构建它的工具链自带的文档；每个链入的依赖包的许可证在 `crates/<名称>-<版本>/`，取自包本身，包里没有时取自 `third_party/rust-crates`；webview2-com-sys 链入了微软的 WebView2 加载器，因此附带它所带 SDK 版本的 WebView2 SDK 许可证；MPL-2.0 的包都附 `SOURCE.txt` 注明源码位置。
+- `build/pgsql/`：PostgreSQL 的 `server_license.txt` 与 EDB 的 `commandlinetools_3rd_party_licenses.txt`（setup 一并解压）；PostgreSQL 自己源码里别人的代码（正则引擎、pg_dump、Snowball 词干、Unicode 表、Ryu、md5 / sha1 / sha2、`src/port` 里 BSD 与 ISC 授权的文件等）的完整版权说明：Debian postgresql-18 软件包的 `debian/copyright`（固定到一个提交），以及 `NOTICES.txt`——从 PostgreSQL 18.4 源码发布包（按 postgresql.org 公布的 SHA-256 核对）里每个带别人版权或授权文字的文件头摘出；以及 `LIBRARIES.md`：PostgreSQL 带的每个库（ICU、libxml2、libxslt、zlib、lz4、zstd、OpenSSL、winpthreads 等）自己的许可证文件在 `licenses/`，取自各库对应版本的发布（`third_party/postgres-windows`；EDB 的说明里没有 ICU 的许可证，zstd 的缺版权行）；LGPL 的 libintl（gettext 0.19.8）与 libiconv（1.18）构建所用的 GNU 源码发布包在 `sources/`，setup 在 Windows 上下载并核对 SHA-256。名单记着每个 DLL 的 SHA-256：bin 目录里出现名单之外的 DLL、名单上的 DLL 字节不同（另一个构建，许可证与源码未必对得上）、lib 目录里有不是 PostgreSQL 自己的模块（版本信息不写 PostgreSQL Global Development Group），或 `postgres.exe -V` 报的不是名单的版本，打包都会停止，要先更新 `scripts/awwo-postgres-licences.mjs` 的名单。postgres.exe、pg_dump 等程序和 lib 里的 pgcrypto 内置了 zlib；libintl、libiconv 与 libwinpthread 由 MinGW-w64 的 GCC 构建，链入了 MinGW-w64 的运行库（其中有 gdtoa 等需要附带说明的部分），它的许可说明（运行库 5 与 10 两个版本）也在 `licenses/`，`LIBRARIES.md` 一并写明。`third_party/` 下的文件与 `PROVENANCE.json` 记录的不一致时，打包也会停止。
+- Node.js 的 LICENSE 在它的目录里。
+
+`third_party/` 下这三个目录分别由 `node scripts/awwo-npm-licences.mjs`、`awwo-crate-licences.mjs`、`awwo-postgres-licences.mjs` 取来：npm 包与 Rust 包取自发布它的那次提交（npm 的注册表没记提交时，取版本标签，再没有就取默认分支当天的提交并如实记下），PostgreSQL 的库取自对应版本的标签。只接受与包声明的许可证一致的文件，在 `PROVENANCE.json` 记下来源地址与 SHA-256；各自的 `--check` 检查是否齐全、与记录是否一致。
+
+`--smoke` 用这份 payload 自己的运行时在临时数据目录上启动一次再停止（不带打包环境里的 `NODE_*`、`npm_*`、`AWWO_*` 设置），然后用 Tauri 构建 NSIS 安装包，并给出它的 SHA-256。组装期间持有 setup 的代码锁和构建锁（共享），setup 不会在这期间替换文件。
+
+makensis 按完整路径读取每个文件，超过 260 个字符就失败，所以代码库所在的路径太深时（例如 `.claude/worktrees/…` 下的工作树），打包会提示改用 `--out`：`npm run package:local -- --out D:\awwo-local` 在这个目录里复制窗口的源文件，把 payload 组装在其中的 `payload`，并在那里构建安装包（也适合换到更快的磁盘）。这个目录须是空的，或是之前打包时建立的。`--no-installer` 只组装 payload；`--keep-payload` 用之前组装好的 payload 只构建安装包，但只接受由当前打包脚本、在同一提交且代码库没有改动时组装的 payload（各项检查都在组装时做）。
+
+## 从代码库运行
 
 ```sh
 npm run setup:local
@@ -85,6 +119,8 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 | `media/` | 上传、媒体节点和渲染生成的文件。 |
 | `logs/` | 每个服务的日志。 |
 
+数据库与线上一样是 UTF-8：AwwO 用的 `awwo` 库以 UTF-8（`--locale=C`）从 template0 建立，每次启动都核对，不是 UTF-8 时运行时拒绝启动。PostgreSQL 集群自己的库（template1、postgres）则是 SQL_ASCII：initdb 会把它 `share` 目录的路径写进它执行的 SQL（导入 `sql_features.txt` 的 COPY），UTF-8 的库不收不是 ASCII 的路径，而中文账号的 `%LOCALAPPDATA%`（默认的安装目录和数据目录都在其中）就不是。PostgreSQL 的程序按系统的 ANSI 代码页（「非 Unicode 程序的语言」）接收路径，代码页里没有的字符（例如中文 Windows 上的韩文账号名、emoji）到它们那里会变成「?」，所以在 Windows 上，运行时（和窗口停下残留数据库时）把不是 ASCII 的路径换成它的短名（8.3）再交给它们；中文 Windows 的短名仍保留中文，这些字符代码页里都有。路径里有代码页没有的字符、所在的卷又不保留短名（系统盘默认保留）时，PostgreSQL 无法启动，运行时的错误会说明这一点。PostgreSQL 经系统的 shell 启动服务器与 initdb 的引导（Windows 上是 cmd.exe，其他系统上是 /bin/sh），所以交给它的路径在 Windows 上不能含 `%` 或 `!`，在其他系统上不能含 `$`、`` ` ``、`"` 或 `\`：有这些字符时运行时在启动数据库之前就拒绝，并说明是哪个目录。
+
 模型的 API Key 在应用的「我的引擎」中添加，加密保存在数据库中；每次运行由 API 交给执行器，只用于该次调用。本地版不附带任何平台 Key。
 
 媒体服务只提供给本机账号（平台管理员）拥有的工作区（API 的 `mediaEntitled`：管理员拥有的工作区即运营方自己的工作区）。本地版不打开「所有工作区可用媒体」的开关，所以即使有人在这台电脑上另注册账号，也用不了 `providers.env` 中的媒体 Key。
@@ -100,10 +136,13 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 
 - `--events`：标准输出每行一个 JSON：`{"event":"status","step":…}`、`{"event":"ready","url":…,"stateDir":…,"services":{…}}`（`url` 是这个数据目录自己的地址）、`{"event":"error","message":…}`，以及停完时的 `{"event":"stopped","code":…}`；日志写到标准错误。
 - `--parent-pid <pid>`：该进程结束时停止；`--stop-on-stdin-close`：标准输入关闭时停止。
-- `--state <dir>`、`--resources <dir>`、`--build <dir>`：数据目录、代码目录与构建目录。
+- `--state <dir>`、`--resources <dir>`、`--build <dir>`：数据目录、代码目录与构建目录。Windows 路径的 `\\?\` 前缀（规范化了自己路径的启动程序会这样传，例如 Tauri）会被去掉：PostgreSQL 的程序按启动它们的路径互相查找，从这样写的路径启动不了。
+- `--shell windows`：由 AwwO Local 的窗口启动（API 得到 `AWWO_LOCAL_SHELL=windows`，`/auth/options` 与 `/api/v1/local` 中的 `shell`），应用据此提示窗口的菜单，而不是 npm 命令。
 - `node scripts/awwo-local.mjs <resources> <state> <parent pid>`：`apps/macos/AwwOLocal.swift` 已实现的本机工作区协议（等同于 `--events`）。该外壳目前只接受 `127.0.0.1` / `localhost` 的 `ready` 地址，重新启用 Mac 本机模式时需改为接受 `*.localhost`。
 
 每个服务由 `scripts/awwo-local-reaper.mjs` 启动，运行时握着它的标准输入：要停止某个服务时，运行时在其中写入 `stop` 再关闭。管道没有 `stop` 就关闭了，说明运行时已经不在（被强制结束或崩溃）：服务及其启动的进程立即结束，端口随之释放，这样同一数据目录上接着启动的运行时不会遇到还在工作的旧服务。服务自己退出时，它启动、仍在运行的进程也随之结束（其他系统上是它的进程组；Windows 上是它启动的进程，Node.js 本身会结束自己的子进程，其他程序不会）。必需的服务（Pi、OpenAI Agents、API）在任何时候停止都会结束整个运行时，启动期间也一样。
+
+每个 Node.js 服务，以及它启动的 Node.js 程序，最先加载 `scripts/awwo-local-module-guard.cjs`（继承服务环境的程序经 `NODE_OPTIONS`；执行器另起的运行进程、托管执行的核心和我们给它的 MCP 进程 `awwo_workspace` 不带父进程的 Node 选项，由执行器按 `AWWO_LOCAL_MODULE_GUARD` 显式带上这一项，线上没有这个设置，一切照旧；核心自己另起的 Node.js 程序还没有，直接执行目前不在安装版里）。Node.js 找包时会一路查到磁盘根目录，依赖缺了某个可选包（编程代理的剪贴板、ws 的 bufferutil）也会这样找，而电脑上任何账号都能建 `C:\node_modules`；没有这道检查，别的账号放在那里的代码会在握着本账号密钥的服务里运行。规则只有一条：真实路径不在本地版自己的目录（代码、构建和数据目录，都只属于本账号）里的模块，一律当作找不到。本地版运行的东西都不从别处加载代码，所以没有例外：不管模块是怎么找到的（本地版目录之上的包、那里指向别处的 junction、`main` 指到包外的 `package.json`、包的 imports 映射、自引用），只看它的文件实际在哪里。数据目录里工作区自己的 `node_modules` 照常可用。目录以 JSON 数组传给它（路径里可以有 `;`），读不懂时服务不启动。服务的环境里本来就不带使用者自己的 `NODE_OPTIONS`。
 
 停止（Ctrl-C、标准输入关闭、父进程结束或信号）按以下顺序进行，在 Windows 上和其他系统上相同：
 
@@ -124,12 +163,12 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 npm run test:local
 ```
 
-运行 `scripts/awwo-local.test.mjs`（运行时、包装进程、锁与 setup）和 `scripts/awwo-local-web.test.mjs`（网页服务与代理）。其中一项测试用构建好的 API 程序检查本地版生成的设置在各种可选服务与媒体 Key 组合下都能被 API 接受。
+运行 `scripts/awwo-local.test.mjs`（运行时、包装进程、模块检查、锁与 setup）、`scripts/awwo-local-web.test.mjs`（网页服务与代理）、`scripts/awwo-local-package.test.mjs`（Windows 安装包的 payload）和 `scripts/awwo-local-licences.test.mjs`（安装包带的许可证）。其中一项测试用构建好的 API 程序检查本地版生成的设置在各种可选服务与媒体 Key 组合下都能被 API 接受。
 
 ## 后续
 
 1. 为沙箱接通个人 Key（经 API 的模型代理，见「本地版没有的」）。
-2. Windows 安装包：用 `apps/windows` 的窗口壳启动本运行时（上文协议），NSIS 安装，数据放在 `%LOCALAPPDATA%\AwwO Local`；窗口直接打开 `ready` 给出的本目录地址。
+2. Windows 安装版里构建直接执行的工作区镜像（Docker 运行时），并带上 ffmpeg 或说明安装方法。
 3. Mac：重新打开 `AwwOLocal.swift` 中的本机工作区：接受 `*.localhost` 的 `ready` 地址；只向运行时本身发信号（它的强制清理会向各个包装进程发 SIGTERM，那在包装进程是「立即结束」）；把停止期限从 20 秒放宽到有序停止所需的时间（API 最多 55 秒、执行器 30 秒、数据库最多 120 秒）；升级与备份。
 4. Linux 与 macOS：托管核心（OpenMaus）由直接执行的服务以独立进程组启动，那个服务崩溃或被强制结束时，核心不会随包装进程结束（工作区容器仍按标签移除）。
 5. 工作区出网代理在 Docker 的 Linux 环境中运行，使直接执行的工作区可以联网。

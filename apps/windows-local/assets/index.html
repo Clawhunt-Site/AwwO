@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AwwO 本地版</title>
+<link rel="stylesheet" href="status.css">
+</head>
+<body>
+<main>
+  <h1>AwwO 本地版</h1>
+  <p class="lead">正在这台电脑上启动 AwwO。第一次启动要建立数据库，可能需要一两分钟。<br><span lang="en">Starting AwwO on this computer. The first start sets up its database and can take a minute or two.</span></p>
+  <ol class="steps" aria-live="polite">
+    <li data-step="database">数据库 <span lang="en">Database</span></li>
+    <li data-step="workers">执行服务 <span lang="en">Workers</span></li>
+    <li data-step="api">AwwO 服务 <span lang="en">AwwO service</span></li>
+  </ol>
+  <p id="message" role="status"></p>
+  <p class="hint">菜单「AwwO」里可以重新启动、打开数据目录和日志、在浏览器中打开，或重置登录密码。<br><span lang="en">The AwwO menu restarts it, opens the data folder and the logs, opens AwwO in your browser, or resets the sign-in password.</span></p>
+</main>
+<script src="status.js"></script>
+</body>
+</html>

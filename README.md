@@ -45,6 +45,8 @@ npm run local
 
 打开 `http://awwo.localhost:5199`（会跳转到这个数据目录自己的地址），用 `.local/awwo-local/state/admin-credentials.txt` 中的账号登录。数据目录、媒体服务与各项本机服务的状态在「设置 → 本机」；线上导出的数据可以在「设置 → 数据管理」导入。说明见 [AwwO 本地版](docs/awwo-local-edition.md)。
 
+Windows 上不需要代码库也能用：**AwwO Local** 安装包（[`apps/windows-local`](apps/windows-local/README.md)）带着本地版的全部程序，安装后打开窗口即可；在 Windows 上 `npm run package:local -- --smoke` 构建它。
+
 ## 本地启动完整服务
 
 需要 Node.js 24 LTS、Go 1.27.1+、PostgreSQL 16+，以及 PATH 中的 `initdb`、`pg_ctl`、`psql`、`createdb`。

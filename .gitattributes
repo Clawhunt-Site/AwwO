@@ -22,3 +22,8 @@ docs/superpowers/evidence/** -text
 examples/knowledge-workbench/docs/contracts/** -text
 # Go module license files, compared byte for byte with the module cache (scripts/awwo-go-licences.ts --check).
 third_party/go-modules/** -text
+# Licence files fetched for AwwO 本地版's Windows installer, checked byte for byte against the SHA-256 their
+# PROVENANCE.json records (scripts/awwo-crate-licences.mjs, awwo-npm-licences.mjs, awwo-postgres-licences.mjs --check).
+third_party/rust-crates/** -text
+third_party/npm-packages/** -text
+third_party/postgres-windows/** -text

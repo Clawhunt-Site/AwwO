@@ -13,6 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveCommand } from './awwo-saas-lib.mjs';
 import { findOnPath, localLayout, osLock, resolvePostgresBin, stagedShowcaseFiles, workspaceImageTag } from './awwo-local-lib.mjs';
+import { POSTGRES_LIBRARIES } from './awwo-postgres-licences.mjs';
 
 const PUBLIC_SITE = 'https://awwo.clawhunt.store';
 /** Node.js for the services, from nodejs.org, checked against SHASUMS256.txt of the release. */
@@ -89,19 +90,39 @@ async function ensureNode(layout, report) {
   report('Node.js 24', `installed ${NODE_RELEASE.version}`);
 }
 
+/** PostgreSQL's licence and those of the libraries its programs ship with, beside them in the archive: they travel with
+ *  every copy of PostgreSQL, the Windows installer's too (scripts/awwo-local-package.mjs). */
+export const POSTGRES_LICENCES = Object.freeze(['server_license.txt', 'commandlinetools_3rd_party_licenses.txt']);
+
 async function ensurePostgres(layout, report) {
-  if (resolvePostgresBin(layout)) return report('PostgreSQL', 'present');
+  const present = resolvePostgresBin(layout);
+  const unpacked = path.dirname(layout.pgBin);
+  // One this setup unpacked before it took the licences gets them now, from the same archive.
+  if (present === layout.pgBin && process.platform === 'win32' && POSTGRES_LICENCES.some(name => !existsSync(path.join(unpacked, name)))) {
+    const archive = await download(POSTGRES_WINDOWS.url, path.join(layout.build, 'downloads', POSTGRES_WINDOWS.name), POSTGRES_WINDOWS.sha256);
+    run(tarCommand(), ['-xf', archive, '-C', path.dirname(unpacked), ...POSTGRES_LICENCES.map(name => `pgsql/${name}`)]);
+    return report('PostgreSQL', 'present; its licences added');
+  }
+  if (present) return report('PostgreSQL', 'present');
   if (process.platform !== 'win32') throw new Error('PostgreSQL 16 or newer is needed: put initdb, pg_ctl, postgres, psql and createdb on PATH, or set AWWO_LOCAL_PG_BIN');
   const archive = await download(POSTGRES_WINDOWS.url, path.join(layout.build, 'downloads', POSTGRES_WINDOWS.name), POSTGRES_WINDOWS.sha256);
   const unpack = path.join(layout.build, 'pgsql-unpack');
   await rm(unpack, { recursive: true, force: true });
   await mkdir(unpack, { recursive: true });
-  // Only the server, its libraries and its data files: not pgAdmin, the documentation or the headers.
-  run(tarCommand(), ['-xf', archive, '-C', unpack, 'pgsql/bin', 'pgsql/lib', 'pgsql/share']);
+  // Only the server, its libraries, its data files and their licences: not pgAdmin, the documentation or the headers.
+  run(tarCommand(), ['-xf', archive, '-C', unpack, 'pgsql/bin', 'pgsql/lib', 'pgsql/share', ...POSTGRES_LICENCES.map(name => `pgsql/${name}`)]);
   await rm(path.join(layout.build, 'pgsql'), { recursive: true, force: true });
   await rename(path.join(unpack, 'pgsql'), path.join(layout.build, 'pgsql'));
   await rm(unpack, { recursive: true, force: true });
   report('PostgreSQL', `installed ${POSTGRES_WINDOWS.version}`);
+}
+
+/** The source releases of the LGPL libraries PostgreSQL's Windows programs load (POSTGRES_LIBRARIES), which the
+ *  Windows installer carries beside them: downloaded beside the archive, checked against their SHA-256s. */
+async function ensurePostgresSources(layout, report) {
+  const sources = POSTGRES_LIBRARIES.libraries.filter(library => library.source).map(library => library.source);
+  for (const source of sources) await download(source.url, path.join(layout.build, 'downloads', source.name), source.sha256);
+  report('PostgreSQL libraries\' sources', sources.map(source => source.name).join(', '));
 }
 
 /** npm of the Node.js the services run on. */
@@ -289,6 +310,8 @@ async function setupWith(layout, options) {
   };
   await ensureNode(layout, report);
   await ensurePostgres(layout, report);
+  // Only the Windows installer needs them (scripts/awwo-local-package.mjs), so running without them is fine.
+  if (process.platform === 'win32') await optional('PostgreSQL libraries\' sources', () => ensurePostgresSources(layout, report));
   for (const app of ['web', 'pi-worker', 'openai-agents-worker']) await installPackages(layout, app, report);
   // The managed execution's broker has no packages of its own to run (only its type checker).
   await optional('render-worker packages', () => installPackages(layout, 'render-worker', report));

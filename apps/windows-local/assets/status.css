@@ -1,0 +1,18 @@
+:root { color-scheme: light dark; --text: #1d2433; --muted: #5d6677; --accent: #2f6bff; --error: #c62f3a; --bg: #f6f7fb; }
+@media (prefers-color-scheme: dark) { :root { --text: #e8ebf2; --muted: #9aa3b5; --accent: #7aa2ff; --error: #ff7a85; --bg: #12151c; } }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.6 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 12vh 32px 32px; }
+h1 { margin: 0 0 12px; font-size: 28px; }
+.lead, .hint { color: var(--muted); }
+.hint { font-size: 13px; margin-top: 32px; }
+[lang="en"] { font-size: 0.9em; }
+.steps { list-style: none; margin: 28px 0; padding: 0; display: grid; gap: 10px; }
+.steps li { display: flex; gap: 10px; align-items: baseline; color: var(--muted); }
+.steps li::before { content: "○"; width: 1.2em; }
+.steps li.is-current { color: var(--text); font-weight: 600; }
+.steps li.is-current::before { content: "◔"; color: var(--accent); }
+.steps li.is-done::before { content: "●"; color: var(--accent); }
+#message { min-height: 1.6em; white-space: pre-wrap; }
+#message.is-error { color: var(--error); font-weight: 600; }
+/* Once the runtime has failed, or while it stops or restarts, what it was starting no longer applies. */
+body.is-stopped .lead, body.is-stopped .steps { display: none; }
