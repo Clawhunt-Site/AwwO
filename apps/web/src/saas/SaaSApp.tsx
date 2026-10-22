@@ -29,7 +29,7 @@ import { StaleBuildNotice } from './StaleBuildNotice';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
-import { LocalEdition, isLocalEdition } from './edition';
+import { LocalEdition, inLocalWindow, isLocalEdition } from './edition';
 import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
@@ -321,7 +321,9 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
       {canRegister && <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>}
-      {isLocalEdition(options) && <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中。忘记了改过的密码时，停止 AwwO 本地版，再运行 npm run local -- --reset-password，新密码会写进这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder. If you forget a password you changed, stop AwwO Local and run npm run local -- --reset-password: the new one is written to that file.')}</small>}
+      {isLocalEdition(options) && (inLocalWindow(options)
+        ? <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中（菜单「AwwO → 打开数据目录」）。忘记了改过的密码时，用菜单「AwwO → 重置登录密码」：本地版重新启动，并打开写着新密码的这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder (AwwO → Open the data folder). If you forget a password you changed, use AwwO → Reset the sign-in password: AwwO Local restarts and opens that file with the new one.')}</small>
+        : <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中。忘记了改过的密码时，停止 AwwO 本地版，再运行 npm run local -- --reset-password，新密码会写进这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder. If you forget a password you changed, stop AwwO Local and run npm run local -- --reset-password: the new one is written to that file.')}</small>)}
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
     </div>}<ProductionCases />

@@ -18,7 +18,7 @@ import { port as validPort } from './awwo-saas-lib.mjs';
 import {
   allocatePorts, apiEnvironment, browserCandidates, dockerEnvironment, findOnPath, instanceContainerQuery, loadLocalProfile,
   localLayout, localOrigin, localState, osLock, portIsFree, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, protectStateDirectory,
-  PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
+  LOCAL_SHELLS, PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
   windowsTool, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
 } from './awwo-local-lib.mjs';
 import { createLocalWebServer } from './awwo-local-web.mjs';
@@ -43,7 +43,7 @@ const REQUIRED = new Set(['pi', 'agents', 'api']);
 export const folderArgument = value => path.resolve(/^\\\\\?\\[A-Za-z]:\\/.test(value) ? value.slice(4) : value);
 
 export function parseArguments(argv) {
-  const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false, resetPassword: false };
+  const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false, resetPassword: false, shell: '' };
   if (argv.length && !argv[0].startsWith('--')) {
     // The Mac shell's contract: <resources> <state> <parent pid>, events on stdout.
     const [resources, state, parent] = argv;
@@ -66,6 +66,10 @@ export function parseArguments(argv) {
     else if (arg === '--stop-on-stdin-close') options.stopOnStdinClose = true;
     else if (arg === '--verbose') options.verbose = true;
     else if (arg === '--reset-password') options.resetPassword = true;
+    else if (arg === '--shell') {
+      options.shell = value();
+      if (!LOCAL_SHELLS.includes(options.shell)) throw new Error(`--shell takes ${LOCAL_SHELLS.join(', ')}`);
+    }
     else throw new Error(`Unknown option ${arg}`);
   }
   return options;
@@ -423,7 +427,7 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
       });
       return service;
     };
-    const envs = serviceEnvironments({ profile, ports, state, capabilities, system, resetPassword: reset });
+    const envs = serviceEnvironments({ profile, ports, state, capabilities, system, resetPassword: reset, shell: options.shell });
     report.event({ event: 'status', step: 'workers' });
     await waitHealthy(launch('pi', node, [layout.pi], envs.pi), `http://127.0.0.1:${ports.pi}/health`, { timeout: WORKER_START_MS, accept: unconfiguredOk('pi') });
     let agents = null;

@@ -614,8 +614,10 @@ test('the pinned downloads name their exact files and SHA-256 values; workers in
 
 test('arguments: flags, and the Mac shell\'s positional contract', () => {
   assert.deepEqual(parseArguments(['--state', 'x', '--events', '--parent-pid', '42', '--no-docker']), {
-    state: path.resolve('x'), resources: '', build: '', events: true, parentPid: 42, docker: false, stopOnStdinClose: false, verbose: false, resetPassword: false,
+    state: path.resolve('x'), resources: '', build: '', events: true, parentPid: 42, docker: false, stopOnStdinClose: false, verbose: false, resetPassword: false, shell: '',
   });
+  assert.equal(parseArguments(['--shell', 'windows']).shell, 'windows');
+  assert.throws(() => parseArguments(['--shell', 'mac']), /--shell takes windows/);
   assert.equal(parseArguments(['--reset-password']).resetPassword, true);
   const mac = parseArguments(['/app/Resources', '/state', '77']);
   assert.equal(mac.resources, path.resolve('/app/Resources'));
@@ -841,10 +843,12 @@ test('the API accepts the settings of every optional-service and media-key combi
     'an X-tasy key': { providers: { AWWO_XTASY_API_KEY: 'x'.repeat(32) }, up: [] },
     'every key and service': { providers: { AWWO_RUNNINGHUB_API_KEY: 'r'.repeat(32), AWWO_TRIPO_API_KEY: 't'.repeat(32), AWWO_XTASY_API_KEY: 'x'.repeat(32), AWWO_MEDIA_DEV_PROXY: 'http://127.0.0.1:7897', AWWO_WEB_READER_PROXY: 'http://127.0.0.1:7897' }, up: ['render', 'broker'] },
     'a password reset': { providers: {}, up: [], resetPassword: 'W1tbW1tbW1tbW1tbW1tbW1tbW1tb' },
+    'the Windows window': { providers: {}, up: [], shell: 'windows' },
   };
   const state = { ...localState(scratch()), media };
-  for (const [name, { providers, up, resetPassword = '' }] of Object.entries(cases)) {
-    const envs = serviceEnvironments({ profile: { ...profileFor(providers), AWWO_LOCAL_DB_PASSWORD: 'pw', AWWO_LOCAL_HOSTNAME: 'awwo-0123456789ab.localhost' }, ports: { ...testPorts, database: closed }, state, capabilities: allCapabilities, system: systemEnvironment(), resetPassword });
+  for (const [name, { providers, up, resetPassword = '', shell = '' }] of Object.entries(cases)) {
+    const envs = serviceEnvironments({ profile: { ...profileFor(providers), AWWO_LOCAL_DB_PASSWORD: 'pw', AWWO_LOCAL_HOSTNAME: 'awwo-0123456789ab.localhost' }, ports: { ...testPorts, database: closed }, state, capabilities: allCapabilities, system: systemEnvironment(), resetPassword, shell });
+    if (shell) assert.equal(envs.api.AWWO_LOCAL_SHELL, shell);
     const child = spawn(builtApi, [], { env: apiEnvironment(envs, new Set(up)), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });

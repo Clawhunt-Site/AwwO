@@ -9,6 +9,8 @@ export type AuthOptions = {
   edition?: 'hosted' | 'local';
   /** Whether a new account can be made here; an API that does not say takes them where local sign-in is on. */
   registration?: boolean;
+  /** The window that started the local edition, where one did (edition.ts, inLocalWindow): 'windows', AwwO Local's. */
+  shell?: string;
 };
 
 export type SSOReturn =

@@ -39,6 +39,7 @@ func TestLocalEditionLoadsFromEnv(t *testing.T) {
 		"a reset that is not an id": {"AWWO_BOOTSTRAP_ADMIN_RESET", "true"},
 		"a reset id with a space":   {"AWWO_BOOTSTRAP_ADMIN_RESET", "abcdefgh ijklmnop"},
 		"a relative data folder":    {"AWWO_LOCAL_STATE_DIR", "state"},
+		"a window it does not know": {"AWWO_LOCAL_SHELL", "mac"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			setLocalEditionEnv(t)
@@ -47,6 +48,11 @@ func TestLocalEditionLoadsFromEnv(t *testing.T) {
 				t.Fatal("accepted", change[0], "=", change[1])
 			}
 		})
+	}
+	setLocalEditionEnv(t)
+	t.Setenv("AWWO_LOCAL_SHELL", "windows")
+	if c, err := ConfigFromEnv(); err != nil || c.LocalShell != "windows" {
+		t.Fatal("the Windows window's start must load", err, c.LocalShell)
 	}
 }
 
@@ -83,6 +89,11 @@ func TestLocalEditionRefusesWhatItCannotBe(t *testing.T) {
 	hosted.AdminPasswordReset = "reset-0123456789abcdef"
 	if hosted.validateEdition() == nil {
 		t.Fatal("a password reset at start is the local edition's alone")
+	}
+	windowed := testConfig()
+	windowed.LocalShell = "windows"
+	if windowed.validateEdition() == nil {
+		t.Fatal("a window of the local edition's is the local edition's alone")
 	}
 	reset := local()
 	reset.AdminPasswordReset = "reset-0123456789abcdef"
@@ -214,12 +225,12 @@ func TestLocalComputerAnswersInTheLocalEditionOnly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	c := testConfig()
 	c.Edition, c.LocalStateDir, c.WebReaderEnabled, c.OpenMausURL = editionLocal, dir, true, "http://127.0.0.1:18109"
-	c.WebReaderProxy = "http://127.0.0.1:7897"
+	c.WebReaderProxy, c.LocalShell = "http://127.0.0.1:7897", "windows"
 	code, out := read(c)
 	if code != 200 || out["dataFolder"] != dir || out["providersFile"] != filepath.Join(dir, "providers.env") ||
 		out["managedExecution"] != true || out["render"] != false || out["webReader"] != true || out["media"] != false ||
-		out["webReaderProxy"] != "http://127.0.0.1:7897" {
-		t.Fatal("the local page tells where the data is and what runs", code, out)
+		out["webReaderProxy"] != "http://127.0.0.1:7897" || out["shell"] != "windows" {
+		t.Fatal("the local page tells where the data is, what runs and the window that started it", code, out)
 	}
 	for key := range out {
 		if strings.Contains(strings.ToLower(key), "key") || strings.Contains(strings.ToLower(key), "token") {
@@ -309,6 +320,15 @@ func TestAuthOptionsTellTheEditionAndWhetherAccountsCanBeMade(t *testing.T) {
 	local := read(Config{editionSettings: editionSettings{Edition: editionLocal, RegistrationClosed: true}})
 	if local["edition"] != "local" || local["registration"] != false || local["localAuth"] != true {
 		t.Fatal("the local edition signs its person in and takes no new accounts", local)
+	}
+	if _, named := hosted["shell"]; named {
+		t.Fatal("the hosted site's answer names no window", hosted)
+	}
+	if _, named := local["shell"]; named {
+		t.Fatal("a local edition started from a checkout names no window", local)
+	}
+	if windowed := read(Config{editionSettings: editionSettings{Edition: editionLocal, RegistrationClosed: true, LocalShell: "windows"}}); windowed["shell"] != "windows" {
+		t.Fatal("the Windows window's local edition says so, for the sign-in page to name its menu", windowed)
 	}
 	if sso := read(Config{ClawHuntURL: "https://clawhunt.example"}); sso["registration"] != false {
 		t.Fatal("with ClawHunt sign-in no local account is made here", sso)

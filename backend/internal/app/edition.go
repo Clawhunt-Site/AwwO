@@ -28,6 +28,10 @@ type editionSettings struct {
 	// password changed since. Its person has no mail to recover a forgotten password by; the runtime's --reset-password
 	// gives them a new one. "" for none.
 	AdminPasswordReset string
+	// LocalShell names the window that started the local edition (AWWO_LOCAL_SHELL, the local edition only): "windows"
+	// for the Windows installer's (apps/windows-local), whose person has its menu and no checkout, so the web names the
+	// menu where it would name an npm command. "" when started from a checkout.
+	LocalShell string
 }
 
 // adminResetID is one reset's id: 16–64 letters, digits, - or _ (the runtime makes 24).
@@ -57,6 +61,12 @@ func (c *Config) editionFromEnv() error {
 		}
 		c.AdminPasswordReset = reset
 	}
+	switch shell := os.Getenv("AWWO_LOCAL_SHELL"); shell {
+	case "", "windows":
+		c.LocalShell = shell
+	default:
+		return errors.New("AWWO_LOCAL_SHELL must be windows or unset")
+	}
 	return nil
 }
 
@@ -73,6 +83,8 @@ func (c Config) validateEdition() error {
 			return errors.New("AWWO_LOCAL_STATE_DIR is the local edition's and needs AWWO_EDITION=local")
 		case c.AdminPasswordReset != "":
 			return errors.New("AWWO_BOOTSTRAP_ADMIN_RESET is the local edition's and needs AWWO_EDITION=local")
+		case c.LocalShell != "":
+			return errors.New("AWWO_LOCAL_SHELL is the local edition's and needs AWWO_EDITION=local")
 		}
 		return nil
 	}
@@ -146,18 +158,23 @@ func (a *App) localComputer(w http.ResponseWriter, r *http.Request) {
 	dir := a.cfg.LocalStateDir
 	out := map[string]any{"dataFolder": dir, "providersFile": "", "media": a.cfg.mediaConfigured(),
 		"managedExecution": a.cfg.OpenMausURL != "", "render": a.cfg.RenderURL != "", "webReader": a.cfg.WebReaderEnabled, "webReaderProxy": a.cfg.WebReaderProxy,
-		"skillRegistry": a.cfg.SkillRegistryEnabled, "revision": BuildRevision()}
+		"skillRegistry": a.cfg.SkillRegistryEnabled, "revision": BuildRevision(), "shell": a.cfg.LocalShell}
 	if dir != "" {
 		out["providersFile"] = filepath.Join(dir, "providers.env")
 	}
 	writeJSON(w, 200, out)
 }
 
-// authOptions is what the sign-in page needs to know before anyone signs in.
+// authOptions is what the sign-in page needs to know before anyone signs in. The local edition also names the window
+// that started it, where one did (the hosted site's answer is unchanged).
 func (a *App) authOptions(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{
+	out := map[string]any{
 		"passwordRecovery": !a.clawHuntEnabled() && a.cfg.SMTPHost != "", "clawhuntSSO": a.clawHuntEnabled(),
 		"localAuth": !a.clawHuntEnabled(), "clawhuntSiteURL": a.cfg.ClawHuntURL,
 		"edition": a.cfg.editionName(), "registration": a.registrationOpen(),
-	})
+	}
+	if a.cfg.LocalShell != "" {
+		out["shell"] = a.cfg.LocalShell
+	}
+	writeJSON(w, 200, out)
 }

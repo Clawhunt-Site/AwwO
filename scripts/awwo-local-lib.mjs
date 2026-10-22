@@ -505,6 +505,10 @@ export function systemEnvironment(env = process.env) {
  *  window, and deadlines that end before the API's own (AWWO_RUN_TIMEOUT, 30 minutes). */
 const MODEL_LIMITS = Object.freeze({ contextWindow: '131072', maxTokens: '16384' });
 
+/** The windows that start the runtime and tell the app so (--shell; AWWO_LOCAL_SHELL in edition.go), which then names
+ *  their menu instead of npm commands: windows is AwwO Local, the Windows installer's (apps/windows-local). */
+export const LOCAL_SHELLS = Object.freeze(['windows']);
+
 /**
  * Each service's environment. `capabilities` says which optional services run: python (the OpenAI Agents runtime in
  * Python, as the hosted site runs it; else the JavaScript worker takes its place), docker + image + brokerCore (the
@@ -516,7 +520,7 @@ const MODEL_LIMITS = Object.freeze({ contextWindow: '131072', maxTokens: '16384'
  * owner's own workspaces (a platform administrator owns them) are offered them (media_setup.go mediaEntitled), and an
  * account someone else registers on this computer cannot spend the owner's media keys.
  */
-export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '' }) {
+export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '' }) {
   const loopback = port => `http://127.0.0.1:${port}`;
   const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false' };
   const pi = {
@@ -567,6 +571,7 @@ export function serviceEnvironments({ profile, ports, state, capabilities, syste
     // While a reset --reset-password wrote is pending: the API sets its password on the owner's account, once per id
     // (edition.go).
     ...(resetId(resetPassword) ? { AWWO_BOOTSTRAP_ADMIN_RESET: resetPassword } : {}),
+    ...(LOCAL_SHELLS.includes(shell) ? { AWWO_LOCAL_SHELL: shell } : {}),
     ...profile.providers,
   };
   // What the API is told of each optional service, added only once that service has come up (apiEnvironment).

@@ -104,6 +104,34 @@ it('shows this computer in place of usage and billing, without the administratio
   expect(screen.queryByText(/Pro|Max|升级/)).toBeNull();
 });
 
+it('names the window’s menu, not npm commands, in AwwO Local’s window', async () => {
+  server({ local: { ...computer, managedExecution: false, shell: 'windows' } });
+  open('local', local);
+  expect(await screen.findByText(computer.dataFolder)).toBeVisible();
+  const services = document.querySelector('.saas-local-services')!;
+  const row = (name: string) => within(services as HTMLElement).getByText(name).closest('li')!;
+  expect(row('直接执行')).toHaveTextContent('安装版暂不提供');
+  expect(row('渲染视频与剪辑')).toHaveTextContent('退出 AwwO 本地版（菜单「AwwO → 退出」）再重新打开');
+  expect(screen.getByText(/填写或修改后用菜单「AwwO → 重新启动」即可生效/)).toBeVisible();
+  expect(screen.getByText(/AWWO_WEB_READER_PROXY.*然后用菜单「AwwO → 重新启动」/)).toBeVisible();
+  // From a checkout the same page names the commands.
+  cleanup();
+  server({ local: { ...computer, managedExecution: false } });
+  open('local', local);
+  expect(await screen.findByText(computer.dataFolder)).toBeVisible();
+  expect(within(document.querySelector('.saas-local-services') as HTMLElement).getByText('直接执行').closest('li')).toHaveTextContent('npm run setup:local');
+  expect(screen.queryByText(/菜单「AwwO/)).toBeNull();
+});
+
+it('tells the sign-in page’s person where AwwO Local’s window keeps the password and how its menu resets it', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).endsWith('/auth/options')
+    ? json({ clawhuntSSO: false, localAuth: true, passwordRecovery: false, edition: 'local', registration: false, shell: 'windows' })
+    : json({ error: { code: 'unauthenticated' } }, 401)));
+  render(<SaaSApp />);
+  expect(await screen.findByText(/admin-credentials\.txt 中（菜单「AwwO → 打开数据目录」）.*菜单「AwwO → 重置登录密码」/)).toBeVisible();
+  expect(screen.queryByText(/npm run/)).toBeNull();
+});
+
 it('says why 本机 could not be read', async () => {
   server({ local: json({ error: { code: 'not_found', message: 'Not found' } }, 404) });
   open('local', local);
