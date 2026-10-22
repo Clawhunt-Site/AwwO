@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -182,25 +185,77 @@ func (a *App) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 const artifactListLimit = 500
 
 // listArtifacts reports a canvas's stored deliverables without their bytes, so a member can see
-// what exists and how large it is before downloading. One row beyond the limit is read only to
-// state whether the listing is complete: a silently truncated list would misreport what the
-// workspace holds.
+// what exists and how large it is before downloading: newest first, artifactListLimit to a page.
+// One row beyond the page is read only to state whether the listing is complete: a silently
+// truncated list would misreport what the workspace holds. A page with more after it also carries
+// nextCursor, which ?cursor= takes to the next page, so a canvas that stored more files than a page
+// holds is listed to its end. Like the tenant lists' cursors, it is signed and bound to its reader,
+// this workspace and canvas, and the moment the first page was read: a file stored after that
+// moment is newer than every file listed, so no later page holds it and no page shifts under the
+// reader. A listing is not a snapshot of the table, though: a text deliverable stored again takes
+// the time of that store, and a transaction that began before the listing stores its files at its
+// own start, so a listing under way can miss such a file (a new listing shows it).
 func (a *App) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	tid, canvasID := r.PathValue("tenantId"), r.PathValue("id")
-	rows, e := rowsJSON(r.Context(), a.db,
-		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at) FROM artifacts WHERE tenant_id=$1 AND canvas_id=$2 AND field_id NOT IN ('__workspace_snapshot','upload') ORDER BY created_at DESC, id LIMIT $3",
-		tid, canvasID, artifactListLimit+1)
+	scope, _ := json.Marshal(struct{ Tenant, Canvas string }{tid, canvasID})
+	kind := "tenant:artifacts:" + tokenHash(string(scope))
+	c := adminCursor{Version: 1, Kind: kind, Actor: currentUser(r).ID}
+	query, e := url.ParseQuery(r.URL.RawQuery)
+	if e != nil {
+		fail(w, 400, "invalid_pagination", "Invalid list query")
+		return
+	}
+	values, provided := query["cursor"]
+	if provided {
+		if len(values) != 1 || values[0] == "" {
+			fail(w, 400, "invalid_cursor", "Invalid pagination cursor; restart the listing")
+			return
+		}
+		if c, e = a.decodeCursor(values[0], kind, c.Actor); e != nil {
+			fail(w, 400, "invalid_cursor", "Invalid pagination cursor; restart the listing")
+			return
+		}
+	} else if e = a.db.QueryRow(r.Context(), "SELECT clock_timestamp()").Scan(&c.Snapshot); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	where, args := "tenant_id=$1 AND canvas_id=$2 AND field_id NOT IN ('__workspace_snapshot','upload') AND created_at <= $3", []any{tid, canvasID, c.Snapshot}
+	if provided {
+		where += " AND (created_at,id) < ($4,$5)"
+		args = append(args, c.LastTime, c.LastID)
+	}
+	args = append(args, artifactListLimit+1)
+	rows, e := a.db.Query(r.Context(),
+		"SELECT jsonb_build_object('id',id,'name',name,'size',size,'sha256',sha256,'runId',run_id,'nodeId',node_id,'fieldId',field_id,'createdAt',created_at),created_at,id FROM artifacts WHERE "+where+
+			" ORDER BY created_at DESC,id DESC LIMIT $"+strconv.Itoa(len(args)), args...)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	truncated := len(rows) > artifactListLimit
+	defer rows.Close()
+	items, truncated := []json.RawMessage{}, false
+	for rows.Next() {
+		var item json.RawMessage
+		var at time.Time
+		var id string
+		if e = rows.Scan(&item, &at, &id); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if len(items) == artifactListLimit {
+			truncated = true
+			break
+		}
+		items = append(items, item)
+		c.LastTime, c.LastID = at, id
+	}
+	if e = rows.Err(); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	var next any
 	if truncated {
-		rows = rows[:artifactListLimit]
+		next = a.encodeCursor(c)
 	}
-	items := make([]json.RawMessage, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, json.RawMessage(row))
-	}
-	writeJSON(w, 200, map[string]any{"items": items, "truncated": truncated})
+	writeJSON(w, 200, map[string]any{"items": items, "truncated": truncated, "nextCursor": next})
 }

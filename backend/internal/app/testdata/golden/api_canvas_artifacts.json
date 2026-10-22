@@ -12,6 +12,7 @@
         "size": 38
       }
     ],
+    "nextCursor": null,
     "truncated": false
   },
   "status": 200
