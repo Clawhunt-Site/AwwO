@@ -63,6 +63,24 @@ export interface GraphRunSnapshot {
   /** How many times a node of this graph may run again by itself after a transient failure. */
   nodeRetries?: number;
 }
+/** A node of a run as the run list reads it: where it stands, not what it made, and its attempts once it has been retried
+ *  (a retry takes it from running back to running, with a new run). */
+export interface GraphNodeSummary { nodeId: string; state: RunNodeState; attempts?: number }
+/** A run as the canvas's run list reads it (GET …/graph-runs): what it is and how it stands, without the canvas it froze
+ * at admission or anything its nodes made (a film's frozen canvas alone is a megabyte, and the list holds 50 runs). Its
+ * own route reads one run whole (readGraphRun); a GraphRunSnapshot is a summary too. */
+export interface GraphRunSummary {
+  id: string;
+  operationId: string;
+  canvasId: string;
+  documentVersion: number;
+  scope: string[];
+  status: GraphRunSnapshot['status'];
+  nodes: GraphNodeSummary[];
+  createdAt: string;
+  updatedAt?: string;
+  error?: string;
+}
 
 /** A retry count the server sent, or nothing: retries run from 1 to 5. */
 const retryCount = (value: unknown): number | undefined => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 5 ? Number(value) : undefined;
@@ -133,40 +151,54 @@ export interface TeamRunRecord extends RunExecutionMetadata {
   status: GraphRunSnapshot['status'];
   error?: string;
 }
-export const graphIsActive = (snapshot: GraphRunSnapshot) => snapshot.status === 'queued' || snapshot.status === 'running';
+export const graphIsActive = (snapshot: Pick<GraphRunSummary, 'status'>) => snapshot.status === 'queued' || snapshot.status === 'running';
+/** A run as the list sends it, or nothing; a run its own route sent passes too. */
+function validGraphRunSummary(raw: unknown): raw is GraphRunSummary {
+  if (!raw || typeof raw !== 'object') return false;
+  const item = raw as GraphRunSummary;
+  return typeof item.id === 'string' && typeof item.status === 'string' && typeof item.createdAt === 'string'
+    && (item.updatedAt === undefined || typeof item.updatedAt === 'string') && (item.scope === undefined || Array.isArray(item.scope))
+    && Array.isArray(item.nodes) && item.nodes.every(node => node && typeof node === 'object' && typeof node.nodeId === 'string' && typeof node.state === 'string');
+}
 /** A graph-run list as the server sends it, or nothing: a malformed item never passes as a run. */
-export function validGraphRunList(value: unknown): value is { items: GraphRunSnapshot[] } {
+export function validGraphRunList(value: unknown): value is { items: GraphRunSummary[] } {
   const items = value && typeof value === 'object' ? (value as { items?: unknown }).items : undefined;
-  return Array.isArray(items) && items.every(raw => {
-    if (!raw || typeof raw !== 'object') return false;
-    const item = raw as GraphRunSnapshot;
-    return typeof item.id === 'string' && typeof item.status === 'string' && typeof item.createdAt === 'string'
-      && (item.updatedAt === undefined || typeof item.updatedAt === 'string') && (item.scope === undefined || Array.isArray(item.scope))
-      && Array.isArray(item.nodes) && item.nodes.every(node => node && typeof node === 'object' && typeof node.nodeId === 'string' && typeof node.state === 'string')
-      && (item.document == null || (typeof item.document === 'object' && Array.isArray(item.document.nodes)))
-      && (item.collaboration == null || validGraphCollaboration(item.collaboration, item.scope));
-  });
+  return Array.isArray(items) && items.every(validGraphRunSummary);
+}
+/** A run as its own route sends it, or nothing: a summary's fields, and its frozen canvas and collaboration as they must be. */
+export function validGraphRun(value: unknown): value is GraphRunSnapshot {
+  if (!validGraphRunSummary(value)) return false;
+  const item = value as GraphRunSnapshot;
+  return (item.document == null || (typeof item.document === 'object' && Array.isArray(item.document.nodes)))
+    && (item.collaboration == null || validGraphCollaboration(item.collaboration, item.scope));
 }
 
-// The run panel's latest read of a canvas's runs, shared with the views that show them (the 成果 receipt),
-// so a canvas page reads its runs once per poll, not once per view.
-const runFeeds = new Map<string, { items: GraphRunSnapshot[] | null; listeners: Set<() => void> }>();
+// The run panel's latest read of a canvas's run list, shared with the views that show it (the 成果 receipt),
+// so a canvas page reads the list once per poll, not once per view.
+const runFeeds = new Map<string, { items: GraphRunSummary[] | null; listeners: Set<() => void> }>();
 const runFeed = (tenantId: string, canvasId: string) => {
   const key = JSON.stringify([tenantId, canvasId]);
   let feed = runFeeds.get(key);
   if (!feed) { feed = { items: null, listeners: new Set() }; runFeeds.set(key, feed); }
   return feed;
 };
-export function publishGraphRuns(tenantId: string, canvasId: string, items: GraphRunSnapshot[]): void {
+export function publishGraphRuns(tenantId: string, canvasId: string, items: GraphRunSummary[]): void {
   const feed = runFeed(tenantId, canvasId); feed.items = items;
   for (const listener of [...feed.listeners]) listener();
 }
-export function latestGraphRuns(tenantId: string, canvasId: string): GraphRunSnapshot[] | null { return runFeed(tenantId, canvasId).items; }
+export function latestGraphRuns(tenantId: string, canvasId: string): GraphRunSummary[] | null { return runFeed(tenantId, canvasId).items; }
 export function subscribeGraphRuns(tenantId: string, canvasId: string, listener: () => void): () => void {
   const feed = runFeed(tenantId, canvasId); feed.listeners.add(listener);
   return () => { feed.listeners.delete(listener); };
 }
 export const graphPath = (tenantId: string, canvasId: string) => tenantPath(tenantId, `/canvases/${encodeURIComponent(canvasId)}/graph-runs`);
+/** One run as its own route reads it (GET …/graph-runs/{id}): with the canvas it froze at admission and every node's
+ *  output, which the list leaves out. */
+export async function readGraphRun(tenantId: string, canvasId: string, graphId: string, signal?: AbortSignal): Promise<GraphRunSnapshot> {
+  const run = await api<unknown>(`${graphPath(tenantId, canvasId)}/${encodeURIComponent(graphId)}`, { signal });
+  if (!validGraphRun(run) || run.id !== graphId) throw new Error('Invalid graph run response');
+  return run;
+}
 export function hasCloudGraphRuntime(): boolean { return currentSaaSCanvas() !== null; }
 export class GraphNotSubmittedError extends Error {}
 export function graphAdmissionRejected(error: unknown): boolean {
@@ -196,20 +228,24 @@ export async function submitCloudGraph(operationId: string, scope: readonly stri
 export async function observeCloudGraph(journal: CanvasRunJournal, signal?: AbortSignal): Promise<CanvasRunJournal> {
   const graph = journal.serverGraph;
   if (!graph) return journal;
+  let known = graph.id;
   if (graph.cancelRequested) {
     const result = await cancelCloudGraph(journal);
     if (result.confirmed && result.status === 'cancelled' && !result.graphId) return { ...journal, nodes: Object.fromEntries(Object.entries(journal.nodes).map(([id, node]) => [id,
       node.state === 'waiting' || node.state === 'running' ? { ...node, state: 'cancelled' as const, detail: 'cancelled' } : node,
     ])) };
+    // Stop names the operation's graph when there is one; the snapshot read by it must still be the operation's.
+    if (!known && typeof result.graphId === 'string' && result.graphId) known = result.graphId;
   }
   const base = graphPath(graph.tenantId, graph.canvasId);
-  const snapshot = graph.id
-    ? await api<GraphRunSnapshot>(`${base}/${encodeURIComponent(graph.id)}`, { signal })
-    : (await api<{ items: GraphRunSnapshot[] }>(`${base}?operationId=${encodeURIComponent(journal.id)}`, { signal })).items.find(item => item.operationId === journal.id);
+  // Without the run's id (its POST's response was lost), the list finds it by the operation; the list carries no outputs,
+  // so the run is then read whole by its id, as when the journal knows it.
+  const id = known
+    || (await api<{ items: GraphRunSummary[] }>(`${base}?operationId=${encodeURIComponent(journal.id)}`, { signal })).items.find(item => item.operationId === journal.id)?.id;
   // A missing response is not proof that an in-flight POST failed. Retain the lock and
   // recover by the same operation identity; observation never submits another model call.
-  if (!snapshot) return journal;
-  return mergeGraphSnapshot(journal, snapshot);
+  if (!id) return journal;
+  return mergeGraphSnapshot(journal, await api<GraphRunSnapshot>(`${base}/${encodeURIComponent(id)}`, { signal }));
 }
 
 /** A server timestamp as epoch milliseconds, or nothing for a missing or unreadable one. */

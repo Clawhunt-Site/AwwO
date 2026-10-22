@@ -112,8 +112,10 @@ try {
   console.log(JSON.stringify({ status: 'READY', webURL, apiURL, tenantId: tid, dir, canvases: evidence.canvases }));
   async function collectCanvas(c, wait) {
     const base = `${prefix}/canvases/${c.id}/graph-runs`;
-    let graph = (await request('GET', base)).items[0];
-    if (!graph) return null;
+    // The list sends each run's summary: its outputs and run ids come from the run's own read.
+    const listed = (await request('GET', base)).items[0];
+    if (!listed) return null;
+    let graph = await request('GET', `${base}/${listed.id}`);
     const deadline = Date.now() + 900000;
     while (wait && ['queued', 'running'].includes(graph.status) && Date.now() < deadline) { if (interrupted) throw Error('Acceptance interrupted'); await pause(1000); graph = await request('GET', `${base}/${graph.id}`); }
     const turns = {};
@@ -140,7 +142,7 @@ try {
     } else if (action === 'collect') {
       for (const c of canvases) { const result = await collectCanvas(c, false); if (result) console.log(JSON.stringify({ scenario: c.mode, status: result.graph.status, nodes: result.graph.nodes.map(n => ({ id: n.nodeId, state: n.state })), calls: Object.values(result.turns).reduce((n,v) => n+v.length, 0) })); }
       evidence.history = [];
-      for (const c of canvases) for (const graph of (await request('GET', `${prefix}/canvases/${c.id}/graph-runs`)).items) evidence.history.push({ mode: c.mode, graph });
+      for (const c of canvases) for (const listed of (await request('GET', `${prefix}/canvases/${c.id}/graph-runs`)).items) evidence.history.push({ mode: c.mode, graph: await request('GET', `${prefix}/canvases/${c.id}/graph-runs/${listed.id}`) });
       evidence.runs = (await request('GET', `${prefix}/runs?limit=100`)).items;
       for (const run of evidence.runs) run.turns = (await request('GET', `${prefix}/runs/${run.id}/turns`)).items;
       await save();

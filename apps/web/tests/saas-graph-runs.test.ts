@@ -6,6 +6,7 @@ import { applyRecoveredDocument, recoveryJournalForDocument, runInputFingerprint
 import { SaaSApiError, type Tenant } from '../src/saas/api';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave, configureCanvasKnowledge, canvasKnowledgeRevisionIds } from '../src/saas/canvasBridge';
 import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph, type GraphRunSnapshot } from '../src/saas/graphRuns';
+import { graphRunSummary } from './saas-graph-run-summary-fixture';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -177,14 +178,18 @@ describe('durable cloud graph identity and recovery', () => {
   it('recovers an accepted-before-response operation by exact identity without dispatching again', async () => {
     const original = pending();
     const actual = snapshot();
-    const fetcher = vi.fn(async (_url: string, _init: RequestInit = {}) => json({ items: [snapshot({ id: 'unrelated-graph', operationId: 'unrelated-operation' }), actual] }));
+    // The list finds the operation's run and carries none of its outputs; the run's own read carries them.
+    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url.endsWith('/graph-runs/graph-a') ? actual
+      : { items: [snapshot({ id: 'unrelated-graph', operationId: 'unrelated-operation' }), actual].map(graphRunSummary) }));
     vi.stubGlobal('fetch', fetcher);
     const recovered = await observeCloudGraph(original);
     expect(recovered.serverGraph!.id).toBe('graph-a');
     expect(recovered.nodes.a).toMatchObject({ runId: 'run-a', issueId: 'session-a', state: 'running', output: 'partial A' });
     expect(original.serverGraph!.id).toBeUndefined();
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(fetcher.mock.calls[0]![1].method).toBeUndefined();
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init.method || 'GET'])).toEqual([
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs?operationId=operation-a', 'GET'],
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/graph-a', 'GET'],
+    ]);
   });
 
   it('shows only server-confirmed cached ancestors in a live scoped run without expanding the execution scope', () => {
@@ -242,14 +247,18 @@ describe('durable cloud graph identity and recovery', () => {
       { nodeId: 'a', state: finalStatus === 'completed' ? 'done' : 'failed', output: 'Original durable A', runId: 'run-a', sessionId: 'session-a' },
       { nodeId: 'b', state: finalStatus === 'completed' ? 'done' : 'blocked', output: 'Original durable B' },
     ] });
-    const fetcher = vi.fn(async (_url: string, init: RequestInit = {}) => init.method === 'POST'
-      ? json({ confirmed: true, graphId: 'graph-a', status: finalStatus }) : json({ items: [terminal] }));
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => init.method === 'POST'
+      ? json({ confirmed: true, graphId: 'graph-a', status: finalStatus }) : json(url.endsWith('/graph-runs/graph-a') ? terminal : { items: [graphRunSummary(terminal)] }));
     vi.stubGlobal('fetch', fetcher);
     const recovered = await observeCloudGraph(journal);
     expect(recovered.nodes.a).toMatchObject({ state: finalStatus === 'completed' ? 'done' : 'failed', output: 'Original durable A', runId: 'run-a' });
     expect(recovered.nodes.b.state).toBe(finalStatus === 'completed' ? 'done' : 'blocked');
     expect(recovered.serverGraph).toMatchObject({ id: 'graph-a', cancelRequested: true });
-    expect(fetcher.mock.calls.map(([, init]) => init.method || 'GET')).toEqual(['POST', 'GET']);
+    // Stop named the graph, which is then read whole by its id: there is nothing to find in the list.
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init.method || 'GET'])).toEqual([
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/operations/operation-a/cancel', 'POST'],
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/graph-a', 'GET'],
+    ]);
   });
 
   it('does not clear waiting nodes for an unconfirmed cancellation', async () => {
@@ -266,14 +275,17 @@ describe('durable cloud graph identity and recovery', () => {
       { nodeId: 'a', state: 'done', output: 'Completed before Stop', runId: 'run-a', sessionId: 'session-a' },
       { nodeId: 'b', state: 'cancelled', output: 'Last partial B', runId: 'run-b', sessionId: 'session-b' },
     ] });
-    const fetcher = vi.fn(async (_url: string, init: RequestInit = {}) => init.method === 'POST'
-      ? json({ confirmed: true, graphId: 'graph-a', status: 'cancelled' }) : json({ items: [terminal] }));
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => init.method === 'POST'
+      ? json({ confirmed: true, graphId: 'graph-a', status: 'cancelled' }) : json(url.endsWith('/graph-runs/graph-a') ? terminal : { items: [graphRunSummary(terminal)] }));
     vi.stubGlobal('fetch', fetcher);
     const recovered = await observeCloudGraph(journal);
     expect(recovered.nodes.a).toMatchObject({ state: 'done', output: 'Completed before Stop', runId: 'run-a' });
     expect(recovered.nodes.b).toMatchObject({ state: 'cancelled', output: 'Last partial B', runId: 'run-b' });
     expect(journalSummary(recovered)).toMatchObject({ ok: false, done: 1, cancelled: 1 });
-    expect(fetcher.mock.calls.map(([, init]) => init.method || 'GET')).toEqual(['POST', 'GET']);
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init.method || 'GET'])).toEqual([
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/operations/operation-a/cancel', 'POST'],
+      ['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/graph-a', 'GET'],
+    ]);
   });
 
   it('settles nodes omitted from a terminal snapshot while retaining cached ancestors and partial output', () => {

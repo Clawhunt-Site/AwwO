@@ -5,6 +5,7 @@ import { CanvasList } from '../src/saas/CanvasList';
 import { CanvasRunReceipt } from '../src/saas/CanvasRunReceipt';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { publishGraphRuns, type GraphRunSnapshot } from '../src/saas/graphRuns';
+import { graphRunSummary } from './saas-graph-run-summary-fixture';
 import { createSessionNode, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import type { CanvasRecord, Tenant } from '../src/saas/api';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
@@ -320,13 +321,20 @@ describe('the 成果 view’s run receipt', () => {
     nodes: [{ nodeId: 'design', state: 'cached' }, { nodeId: 'build', state }],
     document: { version: 2, updatedAt: 1, waypoints: [], view: null, edges: [], nodes: [{ ...finalNode, model: 'qwen3.8-27b-p6' }, { ...step('design', '玩法与数值', 'markdown'), model: 'qwen3.8-27b-p6' }] }, ...extra });
   const receipt = (final: CanvasNode | null = finalNode, canvasId = 'canvas-a') => render(<SaaSPreferencesProvider><CanvasRunReceipt tenantId="tenant-a" canvasId={canvasId} final={final} /></SaaSPreferencesProvider>);
+  // The panel's poll publishes the list's summaries; each run's own route answers whole, with the canvas it froze.
+  const publish = (canvasId: string, runs: GraphRunSnapshot[]) => publishGraphRuns('tenant-a', canvasId, runs.map(graphRunSummary));
+  const serve = (...runs: GraphRunSnapshot[]) => vi.fn(async (url: string) => {
+    const found = runs.find(item => url.endsWith(`/graph-runs/${item.id}`));
+    return found ? Response.json(found) : Response.json({ error: { code: 'not_found', message: 'Resource not found' } }, { status: 404 });
+  });
 
   it('reads the run panel’s poll and names the latest run that completed the result’s step, without claiming more', async () => {
-    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-    publishGraphRuns('tenant-a', 'canvas-a', [run('newer-failed', 'failed', { status: 'failed' }), run('done-run-123456', 'done')]);
+    const done = run('done-run-123456', 'done');
+    const fetcher = serve(done); vi.stubGlobal('fetch', fetcher);
+    publish('canvas-a', [run('newer-failed', 'failed', { status: 'failed' }), done]);
     receipt();
     const region = screen.getByRole('region', { name: '运行回执' });
-    expect(within(region).getByText('最近一次完成这一步的运行')).toBeVisible();
+    expect(await within(region).findByText('最近一次完成这一步的运行')).toBeVisible();
     // The whole canvas ran: its two steps are both in scope.
     expect(within(region).getByText('整张画布')).toBeVisible();
     expect(within(region).getByText('完成')).toBeVisible();
@@ -335,11 +343,11 @@ describe('the 成果 view’s run receipt', () => {
     expect(within(region).getByText('qwen3.8-27b-p6（1 步）')).toBeVisible();
     expect(within(region).getByText('done-run-1')).toBeVisible();
     expect(within(region).getByText('运行完成不等于人工验收通过。完整过程见「运行记录」。')).toBeVisible();
-    expect(fetcher).not.toHaveBeenCalled();
+    // The list is the panel's read; the receipt reads only the run it names, for the canvas that run froze.
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs/done-run-123456']);
   });
 
-  it('names a media step’s model only generically and the others by the canvas’s labels, never by a media model’s id', () => {
-    vi.stubGlobal('fetch', vi.fn());
+  it('names a media step’s model only generically and the others by the canvas’s labels, never by a media model’s id', async () => {
     const media = (id: string, kind: 'image' | 'video', model: string): SessionNode =>
       ({ ...createSessionNode(kind, { x: 0, y: 0 }), id, title: id, runtime: 'openai-agents', model });
     const made = run('media-run', 'done', {
@@ -348,7 +356,8 @@ describe('the 成果 view’s run receipt', () => {
       document: { version: 2, updatedAt: 1, waypoints: [], view: null, edges: [], nodes: [{ ...finalNode, runtime: 'pi', model: 'bedrock.claude-opus-5-5' },
         media('clip', 'video', 'xt.xtasy-v3'), media('still-1', 'image', 'xt.seedream-5-pro'), media('still-2', 'image', 'xt.seedream-5-pro')] },
     });
-    publishGraphRuns('tenant-a', 'canvas-media', [made]);
+    vi.stubGlobal('fetch', serve(made));
+    publish('canvas-media', [made]);
     const names = {
       models: [{ key: 'opus', runtime: 'pi' as const, model: 'bedrock.claude-opus-5-5', label: 'Claude Opus 5.5', providerGroup: 'claude' as const, available: true }],
       media: parseMediaCatalogue({ configured: true, available: true, models: [{ id: 'xt.seedream-5-pro', name: 'seedream 5 pro', label: ['图片 · 高清', 'Image · HD'],
@@ -359,7 +368,7 @@ describe('the 成果 view’s run receipt', () => {
     const { rerender } = render(shown(true));
     let region = screen.getByRole('region', { name: '运行回执' });
     // The clip's model is not in this catalogue, so its kind names it; the two pictures share one generic name.
-    expect(within(region).getByText('Claude Opus 5.5（1 步），视频（1 步），图片 · 高清（2 步）')).toBeVisible();
+    expect(await within(region).findByText('Claude Opus 5.5（1 步），视频（1 步），图片 · 高清（2 步）')).toBeVisible();
     expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream|bedrock/i);
     // A host that cannot name models still never shows a media model's id; a chat model keeps its selector, as before.
     rerender(shown(false));
@@ -369,19 +378,49 @@ describe('the 成果 view’s run receipt', () => {
   });
 
   it('reads the runs itself, once, when nothing has read them yet, and follows later polls', async () => {
-    const fetcher = vi.fn(async () => Response.json({ items: [run('first', 'done')] }));
+    const first = run('first', 'done'); const second = run('second-run', 'done');
+    const fetcher = vi.fn(async (url: string) => url.endsWith('/graph-runs') ? Response.json({ items: [graphRunSummary(first)] })
+      : Response.json(url.endsWith('/second-run') ? second : first));
     vi.stubGlobal('fetch', fetcher);
+    const lists = () => fetcher.mock.calls.filter(([url]) => url.endsWith('/graph-runs')).length;
     receipt(finalNode, 'canvas-fresh');
     await screen.findByText('first'.slice(0, 10));
-    expect(fetcher).toHaveBeenCalledOnce();
-    act(() => publishGraphRuns('tenant-a', 'canvas-fresh', [run('second-run', 'done'), run('first', 'done')]));
+    expect(lists()).toBe(1);
+    act(() => publish('canvas-fresh', [second, first]));
     expect(await screen.findByText('second-run')).toBeVisible();
+    expect(lists()).toBe(1);
+  });
+
+  // A run's frozen canvas never changes: the receipt reads it once, however often the panel's poll comes back.
+  it('reads the frozen canvas of the run it names once, not on every poll', async () => {
+    const done = run('read-once', 'done');
+    const fetcher = serve(done); vi.stubGlobal('fetch', fetcher);
+    publish('canvas-once', [done]);
+    receipt(finalNode, 'canvas-once');
+    expect(await screen.findByText('整张画布')).toBeVisible();
+    for (let poll = 0; poll < 3; poll++) act(() => publish('canvas-once', [done]));
+    cleanup();
+    // Shown again on the same page, it is read from what this page has already read.
+    receipt(finalNode, 'canvas-once');
+    expect(screen.getByText('整张画布')).toBeVisible();
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  // Unread, the receipt says only what the list says: the steps in the run's scope, and no models.
+  it('says what the list says of the run when its own read fails, and claims nothing from the canvas it froze', async () => {
+    vi.stubGlobal('fetch', serve());
+    publish('canvas-unread', [run('unread-run', 'done')]);
+    receipt(finalNode, 'canvas-unread');
+    const region = screen.getByRole('region', { name: '运行回执' });
+    expect(await within(region).findByText('2 步')).toBeVisible();
+    expect(within(region).getByText('最近一次完成这一步的运行')).toBeVisible();
+    expect(within(region).queryByText('整张画布')).toBeNull();
+    expect(within(region).queryByText('模型')).toBeNull();
   });
 
   it('says plainly when no run produced the result', async () => {
     vi.stubGlobal('fetch', vi.fn());
-    publishGraphRuns('tenant-a', 'canvas-b', [run('other', 'cached')]);
+    publish('canvas-b', [run('other', 'cached')]);
     const { rerender } = receipt(finalNode, 'canvas-b');
     expect(screen.getByText('最近 1 次运行里没有完成这一步的记录。')).toBeVisible();
     rerender(<SaaSPreferencesProvider><CanvasRunReceipt tenantId="tenant-a" canvasId="canvas-b" final={{ ...finalNode, lastOutput: { ...finalNode.lastOutput!, source: 'manual' } }} /></SaaSPreferencesProvider>);
@@ -392,30 +431,32 @@ describe('the 成果 view’s run receipt', () => {
     expect(screen.queryByText(/没有完成的运行/)).toBeNull();
   });
 
-  it('names the run in which a partial result’s step stopped, and a run that covered only some steps', () => {
-    vi.stubGlobal('fetch', vi.fn());
+  it('names the run in which a partial result’s step stopped, and a run that covered only some steps', async () => {
     const stopped = run('stopped-run', 'failed', { status: 'failed', scope: ['build'] });
-    publishGraphRuns('tenant-a', 'canvas-partial', [stopped]);
+    vi.stubGlobal('fetch', serve(stopped));
+    publish('canvas-partial', [stopped]);
     receipt({ ...finalNode, lastOutput: { ...finalNode.lastOutput!, partial: true } }, 'canvas-partial');
     const region = screen.getByRole('region', { name: '运行回执' });
-    expect(within(region).getByText('最近一次没有完成这一步的运行')).toBeVisible();
+    expect(await within(region).findByText('最近一次没有完成这一步的运行')).toBeVisible();
     expect(within(region).getByText('1 步')).toBeVisible();
     expect(within(region).getByText('显示的是这一步中断前留下的部分内容。完整过程见「运行记录」。')).toBeVisible();
     expect(within(region).queryByText('运行完成不等于人工验收通过。完整过程见「运行记录」。')).toBeNull();
   });
 
   it('claims no run of this workspace for a copied case’s recording', () => {
-    vi.stubGlobal('fetch', vi.fn());
-    publishGraphRuns('tenant-a', 'canvas-case', [run('done-here', 'done')]);
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    publish('canvas-case', [run('done-here', 'done')]);
     receipt({ ...finalNode, lastOutput: { ...finalNode.lastOutput!, source: 'case', model: 'qwen3.8-27b-p6', at: Date.UTC(2026, 9, 3) } }, 'canvas-case');
     const region = screen.getByRole('region', { name: '运行回执' });
     expect(within(region).getByText('这份交付是复制来的案例实录（qwen3.8-27b-p6 · 2026-10-03），没有在这个工作区运行；运行整张图会换成你自己的结果。')).toBeVisible();
     expect(within(region).queryByText('最近一次完成这一步的运行')).toBeNull();
+    // Nor does it read a run it does not name.
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('says when there are no runs at all', () => {
     vi.stubGlobal('fetch', vi.fn());
-    publishGraphRuns('tenant-a', 'canvas-none', []);
+    publish('canvas-none', []);
     const { rerender } = receipt(null, 'canvas-none');
     expect(screen.getByText('还没有运行记录。')).toBeVisible();
     rerender(<SaaSPreferencesProvider><CanvasRunReceipt tenantId="tenant-a" canvasId="canvas-none" final={finalNode} /></SaaSPreferencesProvider>);
@@ -430,7 +471,7 @@ describe('the 成果 view’s run receipt', () => {
   });
 
   it('refuses a run record with a malformed step instead of failing the page', async () => {
-    const broken = { ...run('broken', 'done'), nodes: [null, { nodeId: 'build', state: 'done' }] };
+    const broken = { ...graphRunSummary(run('broken', 'done')), nodes: [null, { nodeId: 'build', state: 'done' }] };
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [broken] })));
     receipt(finalNode, 'canvas-malformed');
     await waitFor(() => expect(screen.getByText('暂时读不到运行记录。')).toBeVisible());

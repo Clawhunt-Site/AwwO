@@ -1,16 +1,17 @@
 // The 成果 view's run receipt: what the run records say about the result shown, and nothing they do not.
 // It names the latest graph run that completed the result's step (a later single-node run or a manual
 // publication may have replaced that step's output since, so it never claims more than "this run
-// completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again.
+// completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again, and the
+// canvas the run it names froze at admission from that run's own read, which the list does not carry.
 import { useEffect, useState } from 'react';
-import { caseRunLabel, type CanvasNode } from '../canvas/canvasDoc';
+import { caseRunLabel, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { nodeModelName, type ModelNameSources } from '../canvas/modelNames';
 import { api } from './api';
-import { graphPath, latestGraphRuns, publishGraphRuns, subscribeGraphRuns, validGraphRunList, type GraphRunSnapshot } from './graphRuns';
+import { graphPath, latestGraphRuns, publishGraphRuns, readGraphRun, subscribeGraphRuns, validGraphRunList, type GraphRunSummary } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
 
 type T = ReturnType<typeof useSaaSPreferences>['t'];
-const statusLabel = (t: T, status: GraphRunSnapshot['status']) => ({ queued: t('排队中', 'Queued'), running: t('运行中', 'Running'),
+const statusLabel = (t: T, status: GraphRunSummary['status']) => ({ queued: t('排队中', 'Queued'), running: t('运行中', 'Running'),
   completed: t('完成', 'Completed'), failed: t('失败', 'Failed'), cancelled: t('已停止', 'Stopped'), interrupted: t('已中断', 'Interrupted') })[status] ?? status;
 function duration(t: T, from: string, to?: string): string {
   const ms = to ? Date.parse(to) - Date.parse(from) : NaN;
@@ -48,11 +49,14 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   const matches = (state: string) => partial ? state === 'failed' || state === 'cancelled' || state === 'blocked' : state === 'done';
   const run = final && runs?.find(item => item.nodes.some(node => node.nodeId === final.id && matches(node.state)));
   const latest = runs?.[0];
+  // The canvas the run froze names the models its steps ran on and tells whether it ran the whole canvas (a copied
+  // case's recording names no run, so none is read for it).
+  const frozen = useFrozenCanvas(tenantId, canvasId, run && output?.source !== 'case' ? run.id : '');
   let body;
   // A copied case's recording ran in the case, not here: no run of this workspace is claimed for it.
   if (output?.source === 'case') body = <p className="awwo-results-receipt-note">{t(`这份交付是复制来的案例实录（${caseRunLabel(output)}），没有在这个工作区运行；运行整张图会换成你自己的结果。`,
     `This delivery is a copied case recording (${caseRunLabel(output)}), not run in this workspace; running the graph replaces it with your own result.`)}</p>;
-  else if (!runs) body = <p className="awwo-results-receipt-note" role="status">{failed ? t('暂时读不到运行记录。', 'The run records cannot be read right now.') : t('正在读取运行记录…', 'Reading the run records…')}</p>;
+  else if (!runs || (run && frozen === undefined)) body = <p className="awwo-results-receipt-note" role="status">{failed ? t('暂时读不到运行记录。', 'The run records cannot be read right now.') : t('正在读取运行记录…', 'Reading the run records…')}</p>;
   else if (run) {
     const counts = { done: 0, cached: 0, failed: 0 };
     for (const node of run.nodes) {
@@ -64,13 +68,13 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
     // model only by its generic name (图片 · 高清), never by the id that says who generates it.
     const ran = new Set(run.nodes.filter(node => node.state === 'done' || node.state === 'failed').map(node => node.nodeId));
     const models = new Map<string, number>();
-    for (const node of run.document?.nodes ?? []) {
+    for (const node of frozen?.nodes ?? []) {
       if (!node || node.kind !== 'session' || !ran.has(node.id) || typeof node.model !== 'string' || !node.model) continue;
       const name = nodeModelName(node, names ?? {}, locale);
       if (name) models.set(name, (models.get(name) ?? 0) + 1);
     }
     const scope = Array.isArray(run.scope) ? run.scope : [];
-    const whole = Boolean(run.document?.nodes.length) && run.document!.nodes.every(node => node && scope.includes(node.id));
+    const whole = Boolean(frozen?.nodes.length) && frozen!.nodes.every(node => node && scope.includes(node.id));
     const took = graphFinished(run) ? duration(t, run.createdAt, run.updatedAt) : '';
     body = <>
       <p className="awwo-results-receipt-lead">{partial ? t('最近一次没有完成这一步的运行', 'The latest run that did not finish this step')
@@ -104,4 +108,33 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   </section>;
 }
 
-const graphFinished = (run: GraphRunSnapshot) => run.status !== 'queued' && run.status !== 'running';
+const graphFinished = (run: GraphRunSummary) => run.status !== 'queued' && run.status !== 'running';
+
+// The canvases runs froze at admission, as their own reads gave them, by tenant, canvas and run. A run's frozen canvas
+// never changes, so a page reads it once; the few kept are the latest read (a film's is a megabyte).
+const frozenCanvases = new Map<string, CanvasDocument | null>();
+const FROZEN_CANVASES_KEPT = 4;
+/** The canvas a run froze at admission (null when it cannot be read, or the run has none), or undefined while it is read. */
+function useFrozenCanvas(tenantId: string, canvasId: string, runId: string): CanvasDocument | null | undefined {
+  const key = JSON.stringify([tenantId, canvasId, runId]);
+  const [read, setRead] = useState<{ key: string; canvas: CanvasDocument | null } | null>(null);
+  useEffect(() => {
+    if (!runId) return;
+    // Held here too: another receipt's later read may push it out of the page's few.
+    if (frozenCanvases.has(key)) { setRead({ key, canvas: frozenCanvases.get(key) ?? null }); return; }
+    const controller = new AbortController();
+    readGraphRun(tenantId, canvasId, runId, controller.signal).then(run => {
+      const canvas = run.document ?? null;
+      frozenCanvases.delete(key); frozenCanvases.set(key, canvas);
+      for (const old of [...frozenCanvases.keys()].slice(0, -FROZEN_CANVASES_KEPT)) frozenCanvases.delete(old);
+      if (!controller.signal.aborted) setRead({ key, canvas });
+    }, () => {
+      // Unread, the receipt says what the list says (the steps in the run's scope, no models); a later visit reads again.
+      if (!controller.signal.aborted) setRead({ key, canvas: null });
+    });
+    return () => controller.abort();
+  }, [tenantId, canvasId, runId, key]);
+  if (!runId) return null;
+  if (frozenCanvases.has(key)) return frozenCanvases.get(key) ?? null;
+  return read?.key === key ? read.canvas : undefined;
+}

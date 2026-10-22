@@ -8,8 +8,10 @@ import type { CanvasRecord, Tenant } from '../src/saas/api';
 import { CANVAS_STORAGE_KEY, createFormNode, createSessionNode, emptyDocument, sanitizeDocument, type CanvasDocument, type NodeOutput } from '../src/canvas/canvasDoc';
 import { canvasStorage } from '../src/canvas/canvasStorage';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
+import { loadLaneJournals } from '../src/canvas/runLanes';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import type { GraphRunSnapshot } from '../src/saas/graphRuns';
+import { graphRunSummary } from './saas-graph-run-summary-fixture';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const record = (i: number): CanvasRecord => ({ id: `canvas-${i}`, tenantId: tenant.id, name: `Canvas ${i}`, version: 1, document: { nodes: [] }, createdAt: '2026-09-07T00:00:00Z', updatedAt: '2026-09-07T00:00:00Z' });
@@ -286,7 +288,7 @@ it('preserves a newer operation journal created while background graph discovery
     if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
     if (url.endsWith('/graph-runs')) {
       if (!discoveryStarted) { discoveryStarted = true; return new Promise<Response>(resolve => { resolveDiscovery = resolve; }); }
-      return json({ items: [snapshot('new-operation')] });
+      return json({ items: [graphRunSummary(snapshot('new-operation'))] });
     }
     if (url.endsWith('/graph-runs/graph-new-operation')) return json(snapshot('new-operation'));
     if (url.endsWith('/graph-runs/graph-old-operation')) return json(snapshot('old-operation'));
@@ -305,10 +307,44 @@ it('preserves a newer operation journal created while background graph discovery
     nodes: { [form.id]: { nodeId: form.id, threadId: 'form', companyId: tenant.id, agentId: null, issueId: null, runId: null, state: 'waiting' } },
   };
   expect(saveRunJournal(newer, storage)).toBe(true);
-  await act(async () => resolveDiscovery(json({ items: [snapshot('old-operation')] })));
+  await act(async () => resolveDiscovery(json({ items: [graphRunSummary(snapshot('old-operation'))] })));
   await screen.findByTestId('canvas-tile-brief');
   expect(loadRunJournal(storage)?.id).toBe('new-operation');
   expect(loadRunJournal(storage)?.serverGraph).toEqual(newer.serverGraph);
+  expect(writes).toEqual([]);
+});
+
+// Opening a canvas reads whole, at once, every run it may recover. As when the list itself could not be read, one that
+// cannot be read recovers none: a lane taken by another would keep the next opening from looking for it at all.
+it('recovers none of the running graphs when one cannot be read, and all of them at the next opening', async () => {
+  const forms = [{ ...createFormNode({ x: 0, y: 0 }), id: 'brief' }, { ...createFormNode({ x: 400, y: 0 }), id: 'notes' }];
+  const document = { ...emptyDocument(), nodes: forms };
+  const cloud = { ...record(0), document };
+  const identity = { user: { id: 'user-a', name: 'Alice', email: 'alice@example.test', platformRole: 'user' }, tenants: [tenant] };
+  const running = (form: string): GraphRunSnapshot => ({ id: `graph-${form}`, operationId: `operation-${form}`, canvasId: cloud.id,
+    documentVersion: cloud.version, document, scope: [form], status: 'running', createdAt: '2026-09-08T00:00:00Z', nodes: [{ nodeId: form, state: 'waiting' }] });
+  let refuse = true;
+  const writes: string[] = [];
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+    if (init.method && init.method !== 'GET') writes.push(init.method);
+    if (url.endsWith('/appearance')) return json(appearanceFixture);
+    if (url.endsWith('/auth/me')) return json(identity);
+    if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
+    if (url.endsWith('/graph-runs')) return json({ items: forms.map(form => graphRunSummary(running(form.id))) });
+    if (url.endsWith('/graph-runs/graph-notes') && refuse) return json({ error: { code: 'bad_gateway', message: 'Upstream unavailable' } }, 502);
+    for (const form of forms) if (url.endsWith(`/graph-runs/graph-${form.id}`)) return json(running(form.id));
+    return json(cloud);
+  }));
+  window.history.replaceState({}, '', `/?tenant=${tenant.id}&canvas=${cloud.id}`);
+  render(<SaaSApp />);
+  // The canvas shows once discovery is over, lanes and all.
+  await screen.findByTestId('canvas-tile-brief');
+  expect(loadLaneJournals(canvasStorage())).toEqual([]);
+  cleanup(); refuse = false;
+  render(<SaaSApp />);
+  await screen.findByTestId('canvas-tile-brief');
+  expect(loadLaneJournals(canvasStorage()).map(({ journal }) => journal.id).sort()).toEqual(['operation-brief', 'operation-notes']);
   expect(writes).toEqual([]);
 });
 
@@ -406,7 +442,8 @@ describe('opening a canvas after its latest run', () => {
       if (url.endsWith('/appearance')) return json(appearanceFixture);
       if (url.endsWith('/auth/me')) return json(identity);
       if (url.endsWith('/runtime')) return json({ available: false, configured: false, models: [] });
-      if (url.endsWith('/graph-runs')) return json({ items: latest ? [latest] : [] });
+      // The list carries no run's frozen canvas or outputs: a recovery reads the run whole by its id.
+      if (url.endsWith('/graph-runs')) return json({ items: latest ? [graphRunSummary(latest)] : [] });
       if (url.endsWith('/graph-runs/graph-latest')) return json(latest);
       return json(cloud);
     }));
@@ -414,7 +451,8 @@ describe('opening a canvas after its latest run', () => {
     render(<SaaSApp />);
     const shown = () => JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY) || '{}').nodes as CanvasDocument['nodes'];
     const discovered = () => reads.some(url => url.endsWith('/graph-runs'));
-    return { writes, saved, journalWrites, shown, discovered, restore: () => spy.mockRestore() };
+    const readWhole = () => reads.some(url => url.endsWith('/graph-runs/graph-latest'));
+    return { writes, saved, journalWrites, shown, discovered, readWhole, restore: () => spy.mockRestore() };
   }
   // Past the run read and the 450 ms autosave a recovery would cause.
   const settle = () => act(() => new Promise(resolve => setTimeout(resolve, 1500)));
@@ -494,6 +532,8 @@ describe('opening a canvas after its latest run', () => {
     let saved: CanvasDocument;
     try {
       await screen.findByText('已从后台恢复运行结果。');
+      // The results came from the run's own read: the list it was found in has none.
+      expect(first.readWhole()).toBe(true);
       expect(first.journalWrites.length).toBeGreaterThan(0);
       await waitFor(() => expect(first.saved).toHaveLength(1));
       await settle();

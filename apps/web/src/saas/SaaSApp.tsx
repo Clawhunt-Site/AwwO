@@ -17,7 +17,7 @@ import { MAX_RUN_LANES, laneStorage, loadLaneJournals, withLaneOwnership } from 
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
 import { supersededGraphNodes } from '../canvas/followupDelivery';
 import { recoverableOutput, runInputFingerprint } from '../canvas/runRecoveryDocument';
-import { graphPath, graphIsActive, graphRecoveryJournal, type GraphRunSnapshot } from './graphRuns';
+import { graphPath, graphIsActive, graphRecoveryJournal, readGraphRun, type GraphRunSummary } from './graphRuns';
 import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
@@ -594,14 +594,21 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           // Cloud execution is discoverable on another browser/device. Local journals are
           // an observation cache; the server owns accepted task and dependency state.
           try {
-            const graphs = await api<{ items: GraphRunSnapshot[] }>(graphPath(tenant.id, canvasId), { signal: controller.signal });
+            const graphs = await api<{ items: GraphRunSummary[] }>(graphPath(tenant.id, canvasId), { signal: controller.signal });
             const items = graphs.items ?? [];
             const latest = items[0];
             // Every graph still running (components run side by side, each in its own lane), and the latest one if it
             // finished with a result this page has not published yet.
             const candidates = [...items.filter(graphIsActive), ...(latest && !graphIsActive(latest) ? [latest] : [])].slice(0, MAX_RUN_LANES);
+            // The list carries neither the canvas a run froze nor its nodes' outputs, which a recovery compares and
+            // publishes: every candidate is read whole, at once. One that cannot be read recovers none (the catch below),
+            // as the list's own failure does, so the next opening tries them all again: a lane taken by another would keep
+            // that opening from looking at all. The others' reads stop then too.
+            const reading = new AbortController();
+            const reads = await Promise.all(candidates.map(listed => readGraphRun(tenant.id, canvasId, listed.id, AbortSignal.any([controller.signal, reading.signal]))))
+              .finally(() => reading.abort());
             let nextLane = 0;
-            for (const graph of candidates) {
+            for (const graph of reads) {
               if (controller.signal.aborted) break;
               const document = sanitizeDocument(value.document);
               const recovered = graphRecoveryJournal(graph, tenant.id, document);

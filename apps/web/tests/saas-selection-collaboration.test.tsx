@@ -8,8 +8,11 @@ import { GraphRunPanel } from '../src/saas/GraphRunPanel';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { graphRecoveryJournal, mergeGraphSnapshot, submitCloudGraph, validGraphCollaboration,
   type GraphCollaborationSnapshot, type GraphRunSnapshot } from '../src/saas/graphRuns';
+import { graphRunSummary } from './saas-graph-run-summary-fixture';
 
 const base = '/api/v1/tenants/tenant-a/canvases/canvas-a/graph-runs';
+// The list sends the run's summary; its own route sends it whole, with its collaboration (graph_runs.go).
+const served = (url: string, run: GraphRunSnapshot) => url === base ? { items: [graphRunSummary(run)] } : url === `${base}/${run.id}` ? run : null;
 const policy = { goal: 'Compare and improve the synthetic proposal', rounds: 1, synthesizerNodeId: 'a' };
 const node = (id: string): SessionNode => ({ ...createSessionNode('llm', { x: 0, y: 0 }), id,
   title: `Agent ${id}`, activeThreadId: `thread-${id}`, issueId: `session-${id}`,
@@ -147,8 +150,8 @@ describe('collaboration output publication', () => {
 describe('durable collaboration details', () => {
   it('keeps ordinary-DAG history readable when the server includes collaboration:null', async () => {
     const data = completed(); data.collaboration = null;
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === base ? { items: [data] }
-      : url.endsWith('/turns') ? { items: [] } : { id: 'run-a3', tenantId: 'tenant-a', status: 'completed' })));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(served(url, data)
+      ?? (url.endsWith('/turns') ? { items: [] } : { id: 'run-a3', tenantId: 'tenant-a', status: 'completed' }))));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     expect(await screen.findByText('Final synthesis')).toBeVisible();
@@ -157,7 +160,7 @@ describe('durable collaboration details', () => {
   });
 
   it('renders actual turns and planned steps distinctly, including original Session and review evidence', async () => {
-    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => { expect(url).toBe(base); return json({ items: [snapshot()] }); });
+    const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => { expect([base, `${base}/graph-a`]).toContain(url); return json(served(url, snapshot())); });
     vi.stubGlobal('fetch', fetcher);
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
@@ -174,7 +177,8 @@ describe('durable collaboration details', () => {
   it('explains a failed turn\'s named failure in the reader\'s language', async () => {
     const failed = collaboration();
     failed.turns = failed.turns.map(turn => turn.ordinal === 3 ? { ...turn, status: 'failed', error: 'provider_rate_limited' } : turn);
-    vi.stubGlobal('fetch', vi.fn(async () => json({ items: [snapshot({ collaboration: failed })] })));
+    const run = snapshot({ collaboration: failed });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(served(url, run) ?? { items: [run] })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" readOnly /></SaaSPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     const region = within(await screen.findByRole('region', { name: 'Selected-node collaboration' }));
@@ -183,7 +187,8 @@ describe('durable collaboration details', () => {
   });
 
   it('labels completed synthesis without claiming another review of the final result', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ items: [completed()] })));
+    const run = completed();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => json(served(url, run) ?? { items: [run] })));
     render(<SaaSPreferencesProvider><GraphRunPanel tenantId="tenant-a" canvasId="canvas-a" /></SaaSPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: /Run history/ }));
     expect(await screen.findByText('Synthesis after peer review is complete. The synthesis has not had an additional independent review.')).toBeVisible();

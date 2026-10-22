@@ -23,8 +23,22 @@ func (a *App) graphJSON() string {
 	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'document',g.document,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log,'startedAt',CASE WHEN n.state<>'waiting' OR g.collaboration IS NOT NULL THEN tm.started END,'endedAt',CASE WHEN n.state IN ('done','failed','cancelled') AND NOT tm.live THEN tm.ended END) ORDER BY n.ordinal) FROM graph_run_nodes n LEFT JOIN LATERAL (SELECT min(r.created_at) AS started,max(r.updated_at) AS ended,COALESCE(bool_or(r.status IN ('queued','running')),false) AS live FROM (SELECT n.run_id AS id UNION ALL SELECT t.run_id FROM graph_collaboration_turns t WHERE t.graph_id=n.graph_id AND t.node_id=n.node_id) ids JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=ids.id) tm ON true WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
 }
 
+// graphSummaryJSON is a graph run as the canvas's run list reads it (GET .../graph-runs): what the run is and how it
+// stands, and each of its nodes by its state, with its attempts once it has been retried. It leaves out the canvas the
+// run froze at admission (g.document: 0.4 MB for a film's canvas of 116 nodes, 1.1 MB at about 310) and everything its
+// nodes made (their outputs, a collaboration's turns), which graphJSON still reads for one run (GET .../graph-runs/{id}).
+// The run panel polls the list on every open canvas page, every 5 s while it is closed and every 2 s while it is open,
+// and the list carried the canvas's last 50 runs in full: 20 to 55 MB a read for a film's canvas (found 2026-10-21 in
+// review of the change that lets a canvas hold 400 nodes). A node's state is what the list's readers use: the run
+// receipt finds the latest run that settled a step by it and counts a run's steps, the panel counts the steps done and
+// reads the run it shows whole again when a node's state moves. A retry moves a node from running back to running with
+// a new run, after a wait no poll need see, so a retried node carries its attempts too (none while it has none). Nor
+// does the list read each node's run for its times (graphJSON's lateral join): only the timeline draws them, from a
+// run's own read.
+const graphSummaryJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('nodeId',n.node_id,'state',n.state,'attempts',NULLIF(n.attempts,0))) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb))`
+
 func (a *App) listGraphRuns(w http.ResponseWriter, r *http.Request) {
-	v, e := rowsJSON(r.Context(), a.db, "SELECT "+a.graphJSON()+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
+	v, e := rowsJSON(r.Context(), a.db, "SELECT "+graphSummaryJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
 	a.replyList(w, v, e)
 }
 func (a *App) getGraphRun(w http.ResponseWriter, r *http.Request) {

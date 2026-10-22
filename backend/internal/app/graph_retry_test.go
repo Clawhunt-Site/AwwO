@@ -425,6 +425,16 @@ func TestPostgresGraphNodeRetriesTransientFailureThenSucceeds(t *testing.T) {
 	if up := graphNodeResult(t, graph, "up"); up["state"] != "running" || up["detail"] != "" {
 		t.Fatal("a running retry still says it is waiting to retry", up)
 	}
+	// The run list tells the retry from the attempt before it, which ran too: by the node's attempts, which a node not
+	// retried does not carry (the run panel reads the run again when they move, graph_runs.go's graphSummaryJSON).
+	listed := map[string]map[string]any{}
+	for _, raw := range h.request(t, c, "GET", base, nil, 200)["items"].([]any)[0].(map[string]any)["nodes"].([]any) {
+		listed[raw.(map[string]any)["nodeId"].(string)] = raw.(map[string]any)
+	}
+	if up, down := listed["up"], listed["down"]; len(listed) != 2 || len(up) != 3 || up["state"] != "running" || up["attempts"] != float64(1) ||
+		len(down) != 2 || down["state"] != "waiting" {
+		t.Fatal("the run list's nodes during a retry", listed)
+	}
 	// The execution timeline's times: a node in flight has begun and not ended; one not reached has neither.
 	if up, down := graphNodeResult(t, graph, "up"), graphNodeResult(t, graph, "down"); up["startedAt"] == nil || up["endedAt"] != nil ||
 		down["startedAt"] != nil || down["endedAt"] != nil {

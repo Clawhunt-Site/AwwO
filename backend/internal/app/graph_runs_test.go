@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -284,6 +286,96 @@ func TestPostgresGraphFanoutFaninDetachedAndImmutable(t *testing.T) {
 	h.request(t, c, "POST", base, body, 200)
 	if calls.Load() != 3 {
 		t.Fatal("completed replay redispatched")
+	}
+}
+
+// The run list reads each run without the canvas it froze at admission and without anything its nodes made (their
+// outputs, a collaboration's turns): the run panel polls it every 2 to 5 s on every open canvas page, and a film's
+// canvas's last 50 runs in full came to 20-55 MB a read. Every other field is the run's own read's, each node is listed by
+// its id and state alone in the run's order, and GET .../graph-runs/{id} still reads the run whole.
+func TestPostgresGraphRunListLeavesOutTheFrozenDocumentAndOutputs(t *testing.T) {
+	// Every answer is 16 KiB: a run's own read carries one per node (and per collaboration turn), the list none.
+	output := "RESULT " + strings.Repeat("x", 16<<10)
+	pi := teamProvider(t, func(w http.ResponseWriter, r *http.Request, b observedPiCall) {
+		completePi(w, output)
+	})
+	defer pi.Close()
+	h := newHarness(t, pi.URL)
+	c, tid, _ := h.register(t, "graph-run-list@example.test")
+	cid, _ := graphFixture(t, h, c, tid)
+	base := "/tenants/" + tid + "/canvases/" + cid + "/graph-runs"
+	plain := h.request(t, c, "POST", base, map[string]any{"operationId": "graph-list-plain", "documentVersion": 1}, 202)["id"].(string)
+	runs := map[string]map[string]any{plain: awaitGraph(t, h, c, base+"/"+plain, "completed")}
+	collaboration := h.request(t, c, "POST", base, map[string]any{"operationId": "graph-list-collaboration", "scope": []string{"a", "b"}, "documentVersion": 1,
+		"collaboration": collaborationPolicy{Goal: "LIST-GOAL", Rounds: 1, SynthesizerNodeID: "a"}}, 202)["id"].(string)
+	runs[collaboration] = awaitGraph(t, h, c, base+"/"+collaboration, "completed", 20*time.Second)
+	for id, run := range runs {
+		document, _ := run["document"].(map[string]any)
+		if nodes, _ := document["nodes"].([]any); len(nodes) != 3 {
+			t.Fatalf("%s: the run's own read lost its frozen document: %v", id, run["document"])
+		}
+		for _, raw := range run["nodes"].([]any) {
+			if node := raw.(map[string]any); node["output"] != output {
+				t.Fatalf("%s: the run's own read lost node %v's output", id, node["nodeId"])
+			}
+		}
+	}
+	if turns, _ := runs[collaboration]["collaboration"].(map[string]any)["turns"].([]any); len(turns) != 5 || turns[0].(map[string]any)["output"] != output {
+		t.Fatalf("the collaboration's own read lost its turns: %v", runs[collaboration]["collaboration"])
+	}
+	for path, want := range map[string][]string{base: {collaboration, plain}, base + "?operationId=graph-list-plain": {plain}} {
+		resp, body := h.raw(t, c, path)
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, body)
+		}
+		// The document's nodes carry their agentKind; a collaboration's policy, its goal.
+		if len(body) > 2048 || strings.Contains(string(body), "RESULT") || strings.Contains(string(body), "agentKind") || strings.Contains(string(body), "LIST-GOAL") {
+			t.Fatalf("%s: the list carries more than the runs' summaries (%d bytes): %.600s", path, len(body), body)
+		}
+		var list struct {
+			Items []map[string]any `json:"items"`
+		}
+		if e := json.Unmarshal(body, &list); e != nil {
+			t.Fatal(e)
+		}
+		listed := []string{}
+		for _, item := range list.Items {
+			id, _ := item["id"].(string)
+			listed = append(listed, id)
+			run := runs[id]
+			if run == nil {
+				t.Fatalf("%s: listed a run no one started: %v", path, item)
+			}
+			keys := []string{}
+			for key := range item {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			if got := strings.Join(keys, ","); got != "canvasId,createdAt,documentVersion,error,id,nodes,operationId,scope,status,updatedAt" {
+				t.Fatalf("%s: a listed run carries %s", id, got)
+			}
+			for _, key := range keys {
+				if key != "nodes" && !reflect.DeepEqual(item[key], run[key]) {
+					t.Fatalf("%s: %s is %v in the list, %v in the run's own read", id, key, item[key], run[key])
+				}
+			}
+			nodes := []any{}
+			for _, raw := range run["nodes"].([]any) {
+				node := raw.(map[string]any)
+				listed := map[string]any{"nodeId": node["nodeId"], "state": node["state"]}
+				// A retried node carries its attempts too (TestPostgresGraphNodeRetriesTransientFailureThenSucceeds).
+				if attempts, _ := node["attempts"].(float64); attempts > 0 {
+					listed["attempts"] = attempts
+				}
+				nodes = append(nodes, listed)
+			}
+			if !reflect.DeepEqual(item["nodes"], nodes) {
+				t.Fatalf("%s: listed nodes %v, want %v", id, item["nodes"], nodes)
+			}
+		}
+		if !reflect.DeepEqual(listed, want) {
+			t.Fatalf("%s: listed %v, want %v (newest first)", path, listed, want)
+		}
 	}
 }
 func TestPostgresGraphScopeCancellationAndTombstone(t *testing.T) {
