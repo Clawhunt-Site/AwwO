@@ -65,7 +65,9 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
   return response;
 }
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
-export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string };
+export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string;
+  /** The deployment: the hosted site, or the local edition (edition.ts). An API that does not say is the hosted site. */
+  edition?: 'hosted' | 'local' };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
  * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
@@ -206,6 +208,7 @@ function serviceCodes(): Record<string, [string, string]> {
     skill_registry_rate_limited: ['一分钟内查找和预览的次数太多，请稍后再试。', 'Too many searches and previews in a minute. Try again shortly.'],
     skill_registry_timeout: ['skills.sh 响应超时，请稍后再试。', 'skills.sh took too long to answer. Try again later.'],
     skill_registry_upstream: ['暂时连不上 skills.sh，或它返回了无法识别的内容，请稍后再试。', 'skills.sh could not be reached or answered unexpectedly. Try again later.'],
+    skill_registry_network: ['这台电脑没有连到 skills.sh：它的地址没有通过检查（解析到非公网地址，或本机 DNS 给出代理的替身地址 fake-IP），或本机代理没有连上。用了本机代理时，检查 providers.env 里的 AWWO_WEB_READER_PROXY；代理的 DNS 处于 fake-IP 模式时，需要改用返回真实地址的模式。', 'This computer did not reach skills.sh: its address did not pass the check (it resolves to an address that is not public, or this computer’s DNS gives the proxy’s stand-in fake-IP address), or the proxy on this computer did not connect. With a local proxy, check AWWO_WEB_READER_PROXY in providers.env; a proxy whose DNS is in fake-IP mode has to return real addresses instead.'],
     skill_registry_not_found: ['skills.sh 上还没有这个技能的副本，可以打开它的 GitHub 仓库查看。', 'skills.sh has no copy of this skill yet. Open its GitHub repository instead.'],
     skill_registry_too_large: ['这个技能的正文超过了工作区技能 12 KiB 的上限，无法导入。', 'This skill’s text is larger than the 12 KiB a workspace skill holds, so it cannot be imported.'],
     skill_registry_unimportable: ['这个技能的文件夹里没有 SKILL.md，没有可导入的文字。', 'This skill’s folder has no SKILL.md, so there is no text to import.'],

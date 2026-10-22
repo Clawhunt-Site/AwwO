@@ -5,6 +5,7 @@ import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
 import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
+import { useLocalEdition } from '../saas/edition';
 import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
@@ -429,6 +430,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; setupRequest.current?.abort(); }; }, []);
   const cloudScope = currentSaaSCanvas();
+  // The local edition sells no plan, so a refusal there never offers one.
+  const localEdition = useLocalEdition();
   const loadWorkspaceAgents = useMemo(() => storageMode === 'cloud' && cloudScope ? workspaceAgentCatalog(cloudScope.tenant.id) : undefined, [storageMode, cloudScope?.tenant.id]);
   const [storage] = useState(canvasStorage);
   const baseStorage = storage;
@@ -3489,7 +3492,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // adds nodes rather than repairing one).
   const assistantCanPlan = !planningUnavailableReason && plannerProvider !== 'jev' && plannerStatus?.available !== false;
   const suggested: NextSteps | null = readOnly || initializing || bindingLocked ? null : canvasNextSteps({
-    nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope),
+    nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope) && !localEdition,
     // A refusal's detail is the run error's own copy (canvasErrors), in whichever language the run was read in, or its
     // code (runRefusals.ts).
     isPremiumRefusal, isQuotaRefusal, upgradeHelps, modelSwitchHelps,

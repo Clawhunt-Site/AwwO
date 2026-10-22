@@ -368,7 +368,7 @@ describe('finding skills on skills.sh', () => {
   it('formats install counts and names every refusal in both languages', () => {
     expect([formatInstalls(7, 'zh'), formatInstalls(9999, 'zh'), formatInstalls(185000, 'zh'), formatInstalls(123456789, 'zh')]).toEqual(['7 次安装', '9999 次安装', '18.5 万次安装', '1.2 亿次安装']);
     expect([formatInstalls(1, 'en'), formatInstalls(999, 'en'), formatInstalls(185000, 'en'), formatInstalls(1500000, 'en')]).toEqual(['1 install', '999 installs', '185K installs', '1.5M installs']);
-    for (const code of ['skill_registry_unavailable', 'skill_registry_busy', 'skill_registry_rate_limited', 'skill_registry_timeout', 'skill_registry_upstream', 'skill_registry_not_found',
+    for (const code of ['skill_registry_unavailable', 'skill_registry_busy', 'skill_registry_rate_limited', 'skill_registry_timeout', 'skill_registry_upstream', 'skill_registry_network', 'skill_registry_not_found',
       'skill_registry_too_large', 'skill_registry_unimportable', 'skill_registry_unreadable', 'skill_registry_empty', 'skill_registry_folder_too_large', 'skill_registry_answer_too_large', 'skill_registry_hidden_text', 'skill_registry_changed', 'skill_registry_license_unconfirmed', 'invalid_skill_registry_request']) {
       const error = new SaaSApiError(400, code, 'server text');
       expect(saasErrorMessage(error, 'zh')).not.toBe('server text');

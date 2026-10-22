@@ -4,6 +4,7 @@ import { FirstRunTour, type FirstRunAction } from './FirstRunTour';
 import { useSaaSPreferences } from './preferences';
 import { mainSiteURL } from './mainSite';
 import type { Identity } from './api';
+import { isLocalEdition } from './edition';
 import { LazyBoundary } from './LazyBoundary';
 import { page, reloadAfterSaving } from './staleBuild';
 import './onboarding-host.css';
@@ -33,8 +34,10 @@ function storageWorks(): boolean {
 }
 
 /** An account counts as new from the creation of the first workspace it owns — the one its
- * registration created, the only per-account date the identity carries. */
+ * registration created, the only per-account date the identity carries. The local edition's one person set it up
+ * themselves: the tutorial is offered once there, never required. */
 export function tutorialRequired(identity: Identity, now = Date.now()): boolean {
+  if (isLocalEdition(identity)) return false;
   const owned = identity.tenants.filter(tenant => tenant.role === 'owner' && typeof tenant.createdAt === 'string')
     .map(tenant => Date.parse(tenant.createdAt!)).filter(Number.isFinite);
   if (!owned.length) return false;

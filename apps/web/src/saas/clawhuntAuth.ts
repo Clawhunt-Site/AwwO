@@ -5,6 +5,10 @@ export type AuthOptions = {
   clawhuntSSO?: boolean;
   localAuth?: boolean;
   clawhuntSiteURL?: string;
+  /** The hosted site or the local edition (edition.ts); unsaid is the hosted site. */
+  edition?: 'hosted' | 'local';
+  /** Whether a new account can be made here; an API that does not say takes them where local sign-in is on. */
+  registration?: boolean;
 };
 
 export type SSOReturn =

@@ -12,6 +12,7 @@ import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
+import { useLocalEdition } from './edition';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
 import { OPUS_MODEL_ID, OpusUpsell, modelRoute, useFreeAllowance } from './OpusUpsell';
 import { withPlanTag } from './runtimeCatalog';
@@ -450,8 +451,10 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   const models = execution.runtime?.models ?? [];
   // The strongest model, offered with the way to it (OpusUpsell.tsx): to a workspace without a paid plan that the server
   // says cannot run it (Pro and Max only, plan_only_models.go), and to a route-limited free one while it still runs there.
+  // The local edition sells no plan, so it never offers one.
   const opus = models.find(model => model.id === OPUS_MODEL_ID);
-  const allowance = useFreeAllowance(execution.tenantId, !execution.readOnly && opus !== undefined);
+  const local = useLocalEdition();
+  const allowance = useFreeAllowance(execution.tenantId, !local && !execution.readOnly && opus !== undefined);
   const invite = opus !== undefined && allowance.usage !== null && (allowance.free || (allowance.unpaid && opus.requiresUpgrade === true));
   const labelCounts = models.reduce<Record<string, number>>((counts, model) => ({ ...counts, [model.label || model.id]: (counts[model.label || model.id] ?? 0) + 1 }), {});
   const optionLabel = (model: typeof models[number]) => withPlanTag(labelCounts[model.label || model.id] > 1 ? `${model.label || model.id} · ${model.runtime}` : (model.label || model.id), model);

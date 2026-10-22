@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { api, API_BASE, SaaSApiError, saasErrorMessage, type Identity } from '../api';
+import { isLocalEdition } from '../edition';
+import { accountURL } from '../PersonalAccount';
 import { useSaaSPreferences } from '../preferences';
 import { SettingsCard, SettingsIntro } from './general';
+import { ImportCard } from './importCard';
 
 // A handled request belongs to an account the operator deleted, so a signed-in person never reads one.
 type DeletionStatus = 'pending' | 'withdrawn' | 'declined';
@@ -118,16 +121,28 @@ function ExportButton() {
   </>;
 }
 
+/** The local edition keeps its one account on this computer: nobody decides a deletion request, the person removes it. */
+function LocalDeletionCard() {
+  const { t } = useSaaSPreferences();
+  return <SettingsCard title={t('删除本机数据', 'Delete the data on this computer')}
+    description={t('AwwO 本地版的账号和数据只保存在这台电脑上，不需要申请删除。要全部删除：先停止 AwwO 本地版，再删除它的数据目录。删除后无法恢复。要留一份，先停止 AwwO 本地版，再复制整个数据目录：上面导出的 JSON 只有设置、工作区和画布，不含生成与上传的文件、运行记录和已保存的 Key。', 'AwwO Local keeps its account and data on this computer only, so there is no deletion request. To delete everything, stop AwwO Local, then delete its data folder. It cannot be restored. To keep a copy, stop AwwO Local and copy the whole data folder: the JSON export above holds only settings, workspaces and canvases, not generated or uploaded files, run records or saved keys.')}>
+    <a href={accountURL('local')}>{t('在「本机」查看数据目录', 'See the data folder in This computer')}</a>
+  </SettingsCard>;
+}
+
 export function DataSettings({ identity }: { identity: Identity }) {
   const { t } = useSaaSPreferences();
+  const local = isLocalEdition(identity);
   return <>
-    <SettingsIntro title={t('数据管理', 'Data management')} intro={t('导出你在 AwwO 的数据，或申请删除账号。', 'Export your AwwO data, or ask for your account to be deleted.')} />
+    <SettingsIntro title={t('数据管理', 'Data management')} intro={local ? t('导出本机的数据，或导入 AwwO 在线版导出的数据。', 'Export the data on this computer, or import what the online AwwO exported.')
+      : t('导出你在 AwwO 的数据，或申请删除账号。', 'Export your AwwO data, or ask for your account to be deleted.')} />
     <div className="saas-settings-stack">
       <SettingsCard title={t('导出我的数据', 'Export my data')}
         description={t('下载一个 JSON 文件：账号资料、设置、配色、所在的工作区，以及你所在的每个正常工作区里的全部画布。不含 API Key、登录会话和其他成员的资料。工作区大时下载会慢一些。每小时最多导出 6 次，一次只能导出一份。','Downloads one JSON file: your profile, settings, colour scheme, the workspaces you belong to, and every canvas of each of them that is active. API keys, sign-in sessions and other members’ details are left out. A large workspace takes longer. At most six exports an hour, one at a time.')}>
         <ExportButton />
       </SettingsCard>
-      <DeletionRequestCard identity={identity} />
+      {local && <ImportCard identity={identity} />}
+      {local ? <LocalDeletionCard /> : <DeletionRequestCard identity={identity} />}
     </div>
   </>;
 }

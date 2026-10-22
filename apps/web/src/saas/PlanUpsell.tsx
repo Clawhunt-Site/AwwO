@@ -1,3 +1,4 @@
+import { useLocalEdition } from './edition';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
 import { recordUpgradeInterest } from './routeUsage';
@@ -16,10 +17,13 @@ export const upsellReason = (code: string): UpsellReason => code === 'quota_exce
 
 /** The upgrade offered at the moment a run is refused for want of a plan, as a small voucher like the plans page's
  * (plan-voucher.css). It opens the plans page in a new tab so the canvas, its draft and this failure stay where they
- * are; a click also records the interest the operator reads from the free allowance's own "I want more calls". */
+ * are; a click also records the interest the operator reads from the free allowance's own "I want more calls". The local
+ * edition sells no plan and shows none. */
 export function PlanUpsell({ tenantId, reason = 'premium' }: { tenantId: string; reason?: UpsellReason }) {
   const { t } = useSaaSPreferences();
+  const local = useLocalEdition();
   const daily = reason === 'daily';
+  if (local) return null;
   return <div className="saas-plan-upsell" role="note">
     <div className="saas-plan-upsell-ticket">
       <div className="saas-plan-upsell-body">

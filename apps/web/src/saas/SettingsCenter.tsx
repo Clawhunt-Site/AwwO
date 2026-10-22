@@ -3,8 +3,9 @@
 // plans, invites, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 邀请好友, 我的引擎)
 // are drawn as they were, inside the centre (settingsFrame.ts); the others live in settings/.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CreditCard, Database, Gift, Info, Keyboard, LogOut, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
+import { ArrowLeft, CreditCard, Database, Gift, Info, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
 import type { Identity } from './api';
+import { isLocalEdition } from './edition';
 import { AccountSecurity, accountURL } from './PersonalAccount';
 import { InviteFriends } from './InviteFriends';
 import { PlansPage } from './PlansPage';
@@ -14,7 +15,17 @@ import { signOut } from './signOut';
 import type { SettingsSection } from './settingsFrame';
 import { AboutSettings, AppearanceSettings, DataSettings, EngineSettings, GeneralSettings, PersonalizationSettings, PlansUsage, ShortcutSettings, SkillSettings, WorkspaceSettings } from './settings/sections';
 import { SettingsIntro } from './settings/general';
+import { LocalComputerSettings } from './settings/local';
 import './settings/settings-center.css';
+
+/**
+ * The page an address opens in this edition. The local edition sells nothing and takes no invited friends, so the links
+ * the app sends to 用量与计费 or 邀请好友 open 本机 there; the hosted site has no 本机 and opens 账号安全 for it.
+ */
+export function editionSection(identity: Identity, section: SettingsSection): SettingsSection {
+  if (isLocalEdition(identity)) return section === 'plans' || section === 'invites' ? 'local' : section;
+  return section === 'local' ? 'security' : section;
+}
 
 const home = () => {
   const query = new URLSearchParams(location.search);
@@ -29,7 +40,8 @@ function navigation(identity: Identity): Group[] {
   return [
     { zh: '账户', en: 'Account', items: [
       { id: 'security', icon: <UserRound size={16} />, zh: '账号安全', en: 'Account security' },
-      { id: 'plans', icon: <CreditCard size={16} />, zh: '用量与计费', en: 'Usage and billing' },
+      isLocalEdition(identity) ? { id: 'local', icon: <Monitor size={16} />, zh: '本机', en: 'This computer' }
+        : { id: 'plans', icon: <CreditCard size={16} />, zh: '用量与计费', en: 'Usage and billing' },
       ...(clawhunt ? [{ id: 'invites' as const, icon: <Gift size={16} />, zh: '邀请好友', en: 'Invite friends' }] : []),
     ] },
     { zh: '设置', en: 'Settings', items: [
@@ -73,7 +85,7 @@ function SettingsNav({ identity, section }: { identity: Identity; section: Setti
         </a>)}</div>
     </div>)}
     <div className="saas-settings-nav-foot">
-      {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={16} aria-hidden="true" />{t('平台管理', 'Administration')}</a>}
+      {identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin"><ShieldCheck size={16} aria-hidden="true" />{t('平台管理', 'Administration')}</a>}
       <button type="button" onClick={async () => { setError(''); const failure = await signOut(identity, t); if (failure) setError(failure); }}>
         <LogOut size={16} aria-hidden="true" />{t('退出登录', 'Sign out')}
       </button>
@@ -95,6 +107,7 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
       <SettingsIntro title={t('邀请好友', 'Invite friends')} intro={t('每个开通了 AwwO 的账号都有 3 个邀请码。把邀请链接发给好友，对方就能用 ClawHunt 账号开通 AwwO。', 'Every account with AwwO access has three invite codes. Send a friend an invite link and they can open AwwO with their ClawHunt account.')} />
       <InviteFriends identity={identity} />
     </>;
+    case 'local': return <LocalComputerSettings />;
     case 'general': return <GeneralSettings identity={identity} />;
     case 'appearance': return <AppearanceSettings />;
     case 'shortcuts': return <ShortcutSettings />;
@@ -107,7 +120,8 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
   }
 }
 
-export default function SettingsCenter({ identity, section, engines, onProfile }: { identity: Identity; section: SettingsSection; engines: ReactNode; onProfile?: (name: string) => void }) {
+export default function SettingsCenter({ identity, section: asked, engines, onProfile }: { identity: Identity; section: SettingsSection; engines: ReactNode; onProfile?: (name: string) => void }) {
+  const section = editionSection(identity, asked);
   return <main className="saas-dashboard saas-personal saas-settings">
     <header>
       <a href="/" className="saas-logo">AwwO</a>

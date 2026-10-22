@@ -29,6 +29,7 @@ import { StaleBuildNotice } from './StaleBuildNotice';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
+import { LocalEdition, isLocalEdition } from './edition';
 import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
@@ -155,7 +156,7 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding></AccountPreferencesProvider></AppearanceScope>;
+  return <LocalEdition.Provider value={isLocalEdition(identity)}><AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding></AccountPreferencesProvider></AppearanceScope></LocalEdition.Provider>;
 }
 /** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
 function SessionEndedNotice({ identity }: { identity: Identity }) {
@@ -290,10 +291,13 @@ function LoginPreview() {
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const { options, optionsError, retryOptions } = useAuthOptions();
-  const [register, setRegister] = useState(false);
+  const [registering, setRegister] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // The local edition takes no new accounts (its person is its first administrator); an API that does not say takes them.
+  const canRegister = options?.registration !== false;
+  const register = registering && canRegister;
   if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
   return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
@@ -306,15 +310,18 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
       catch (error) { setError(error); } finally { setBusy(false); }
     }}>
       <span className="saas-eyebrow">{t('AGENT 工作区', 'AGENT WORKSPACE')}</span><h2>{register ? t('创建你的工作区', 'Create your workspace') : t('欢迎回来', 'Welcome back')}</h2>
-      {invited && <p role="status">{t('请先登录或注册。邀请会保留，登录后由你确认加入；注册时也会建立你自己的工作区。', 'Sign in or register first. Your invitation is preserved for confirmation after sign-in. Registration also creates your own workspace.')}</p>}
+      {invited && <p role="status">{canRegister ? t('请先登录或注册。邀请会保留，登录后由你确认加入；注册时也会建立你自己的工作区。', 'Sign in or register first. Your invitation is preserved for confirmation after sign-in. Registration also creates your own workspace.')
+        : t('请先登录。邀请会保留，登录后由你确认加入。', 'Sign in first. Your invitation is preserved for confirmation after sign-in.')}</p>}
       {register && <><label>{t('姓名', 'Name')}<input name="name" autoComplete="name" required maxLength={100} /></label><label>{t('工作区名称', 'Workspace name')}<input name="tenantName" required maxLength={100} /></label></>}
       <label>{t('邮箱', 'Email')}<input name="email" type="email" autoComplete="email" required /></label>
       <SecretInput key={register ? "register" : "login"} label={t('密码', 'Password')} name="password" minLength={register ? 12 : undefined} maxLength={1024} autoComplete={register ? 'new-password' : 'current-password'} disabled={busy} required />
-      {!register && <button type="button" className="saas-link" disabled={busy} onClick={() => setForgot(true)}>{t('忘记密码？', 'Forgot password?')}</button>}
+      {/* The local edition sends no mail: a forgotten password is replaced by the runtime (--reset-password). */}
+      {!register && !isLocalEdition(options) && <button type="button" className="saas-link" disabled={busy} onClick={() => setForgot(true)}>{t('忘记密码？', 'Forgot password?')}</button>}
       {register && <small>{t('密码至少 12 位。注册后进入工作区，按提示选择模型服务，再创建第一张画布。工作区名称稍后可以修改。', 'Use at least 12 characters. After registering, enter your workspace, choose a model service as prompted, and create your first canvas. You can rename your workspace later.')}</small>}
       {error !== null && <p className="saas-error" role="alert">{saasErrorMessage(error, locale)}</p>}
       <button className="saas-primary" disabled={busy}>{busy ? t('请稍候…', 'Please wait…') : register ? t('注册并创建工作区', 'Register and create workspace') : t('登录', 'Sign in')}</button>
-      <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>
+      {canRegister && <button type="button" className="saas-link" disabled={busy} onClick={() => { setRegister(!register); setError(null); }}>{register ? t('已有账号？登录', 'Already have an account? Sign in') : t('创建账号和工作区', 'Create an account and workspace')}</button>}
+      {isLocalEdition(options) && <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中。忘记了改过的密码时，停止 AwwO 本地版，再运行 npm run local -- --reset-password，新密码会写进这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder. If you forget a password you changed, stop AwwO Local and run npm run local -- --reset-password: the new one is written to that file.')}</small>}
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
     </div>}<ProductionCases />
@@ -329,7 +336,7 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
   // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options.
   const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy />;
-  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
+  if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
   return <main className="saas-dashboard saas-home"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header>
@@ -343,7 +350,7 @@ function WorkspaceControls({ identity, tenant, onProfile, academy = false }: { i
   const [creatingWorkspace, setCreatingWorkspace] = useState(() => new URLSearchParams(window.location.search).get('createWorkspace') === '1');
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
   return <div className="saas-account-actions" data-onboarding="workspace-actions">
-    {tenant && tenant.status === 'active' && <RouteUsageMeter key={tenant.id} tenantId={tenant.id} />}
+    {tenant && tenant.status === 'active' && !isLocalEdition(identity) && <RouteUsageMeter key={tenant.id} tenantId={tenant.id} />}
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
     {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
@@ -360,7 +367,7 @@ function WorkspaceControls({ identity, tenant, onProfile, academy = false }: { i
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
       {identity.authentication === 'clawhunt' && <a href={accountURL('invites')}><Gift size={16}/>{t('邀请好友', 'Invite friends')}</a>}
       <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>
-      {identity.user.platformRole === 'admin' && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
+      {identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
       const failure = await signOut(identity, t);
       if (failure) setError(failure);

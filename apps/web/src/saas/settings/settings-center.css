@@ -231,6 +231,44 @@
 .saas-settings-usage .saas-route-usage {
   max-width: 100%;
 }
+/* 本机 (settings/local.tsx): a folder or file path with its copy button, and the computer's optional services. */
+.saas-local-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+.saas-local-path code {
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--saas-border);
+  border-radius: 8px;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.saas-local-services {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.saas-local-services li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+}
+.saas-local-services span {
+  color: var(--saas-muted);
+  font-size: 13px;
+}
+.saas-local-services small {
+  grid-column: 1 / -1;
+  color: var(--saas-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .saas-settings-themes .saas-theme-choices {
   max-height: none;
 }

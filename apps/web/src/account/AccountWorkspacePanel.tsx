@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, ExternalLink, Gauge, Gift, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { useLocalEdition } from '../saas/edition';
 import { accountApi, AccountApiError } from './accountApi';
 import type {
   AccountApi,
@@ -292,6 +293,7 @@ export function AccountWorkspacePanel({
   externalProfile,
 }: AccountWorkspacePanelProps) {
   const text = accountCopy(locale);
+  const local = useLocalEdition();
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapVersion, setBootstrapVersion] = useState(0);
@@ -705,14 +707,18 @@ export function AccountWorkspacePanel({
 
           {(team.members?.nextCursor !== undefined || memberPages.length > 1) && <AccountListPager locale={locale} label={locale === 'zh' ? '成员分页' : 'Member pages'} page={memberPages.length} busy={team.loading || memberBusyId !== null || inviteBusy} previous={memberPages.length > 1 ? () => changePage('members', memberPages.slice(0, -1)) : undefined} next={team.members?.nextCursor ? () => changePage('members', [...memberPages, team.members!.nextCursor!]) : undefined} refresh={() => { changePage('members', [null]); setTeamVersion(value => value + 1); }}/>}
 
-          {api.addMember && !externalProfile && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
+          {api.addMember && !externalProfile && !local && team.members?.access.canManageMembers && <form className="account-member-add" onSubmit={event => {
             event.preventDefault(); if (activeCompanyId) void memberAction(() => api.addMember!(activeCompanyId, { email: newMemberEmail, role: inviteRole }));
           }}><p>{locale === 'zh' ? '可直接添加已注册邮箱；新用户可使用下方邀请链接。' : 'Add a registered email directly, or invite a new user with a link below.'}</p><label><span>{text.email}</span><input type="email" aria-label={locale === 'zh' ? '成员邮箱' : 'Member email'} required value={newMemberEmail} onChange={event => setNewMemberEmail(event.target.value)} /></label>
             <label><span>{text.role}</span><select aria-label={locale === 'zh' ? '新成员角色' : 'New member role'} value={inviteRole} onChange={event => setInviteRole(event.target.value as HumanCompanyRole)}>{assignableRoles.map(role => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}</select></label>
             <button type="submit" className="account-primary-button" disabled={memberBusyId !== null}>{locale === 'zh' ? '添加成员' : 'Add member'}</button></form>}
           {removeTarget && <div className="account-notice" role="alert"><p>{locale === 'zh' ? `确认移除 ${identityLabel(removeTarget.user, removeTarget.principalId)}？` : `Remove ${identityLabel(removeTarget.user, removeTarget.principalId)}?`}</p><button type="button" disabled={memberBusyId !== null} onClick={() => void memberAction(() => api.removeMember!(activeCompanyId!, removeTarget.principalId))}>{locale === 'zh' ? '确认移除' : 'Confirm removal'}</button><button type="button" onClick={() => setRemoveTarget(null)}>{locale === 'zh' ? '取消' : 'Cancel'}</button></div>}
 
-          <div className="account-invite-panel">
+          {/* AwwO 本地版 takes no new accounts: an invitation would have no one to accept it. */}
+          {local ? <div className="account-invite-panel">
+            <div className="account-invite-heading"><UserPlus size={18} aria-hidden="true" /><strong>{text.invite}</strong></div>
+            <p>{locale === 'zh' ? 'AwwO 本地版只有这台电脑上的一个账号，没有可以邀请的成员。' : 'AwwO Local has one account, on this computer, so there is no one to invite.'}</p>
+          </div> : <div className="account-invite-panel">
             <div className="account-invite-heading"><UserPlus size={18} aria-hidden="true" /><strong>{text.invite}</strong></div>
             {externalProfile && team.canInvite && <p>{locale === 'zh' ? '请创建邀请链接并分享给指定成员，对方使用 ClawHunt 账号确认后加入。' : 'Create an invitation link and share it with the intended member. They join after confirming with their ClawHunt account.'}</p>}
             <label>
@@ -737,7 +743,7 @@ export function AccountWorkspacePanel({
             {(team.inviteNextCursor !== undefined || invitePages.length > 1) && <AccountListPager locale={locale} label={locale === 'zh' ? '邀请分页' : 'Invitation pages'} page={invitePages.length} busy={team.loading || memberBusyId !== null || inviteBusy} previous={invitePages.length > 1 ? () => changePage('invites', invitePages.slice(0, -1)) : undefined} next={team.inviteNextCursor ? () => changePage('invites', [...invitePages, team.inviteNextCursor!]) : undefined} refresh={() => { changePage('invites', [null]); setTeamVersion(value => value + 1); }}/>}
             {api.revokeInvite && team.invites.length > 0 && <div className="account-invite-list"><h3>{locale === 'zh' ? '已创建的邀请' : 'Created invitations'}</h3><p>{locale === 'zh' ? '完整链接仅在创建时显示，请当时复制；已有链接可撤销。' : 'The full link is shown only when created. Copy it then; existing links can be revoked.'}</p>{team.invites.map(item => <article key={item.id} className="account-invite-row"><span>{roleLabel(item.role, locale)} · {text.expires(new Date(item.expiresAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US'))} · {locale === 'zh' ? ({ active: '有效', expired: '已过期', revoked: '已撤销', accepted: '已领取', unavailable: '已失效', suspended: '工作区暂停' }[item.status] || item.status) : item.status}</span>
               {item.status === 'active' && assignableRoles.includes(item.role) && <button type="button" className="account-secondary-button" disabled={inviteBusy} onClick={() => void revokeInvite(item.id)}>{locale === 'zh' ? '撤销邀请' : 'Revoke invitation'}</button>}</article>)}</div>}
-          </div>
+          </div>}
         </section>
       ) : null}
     </main>
