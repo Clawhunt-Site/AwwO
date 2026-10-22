@@ -57,7 +57,7 @@ const CATALOGUE = parseMediaCatalogue({ configured: true, available: true, model
     { name: 'negativePrompt', type: 'text', maxLength: 255, label }, { name: 'autoSize', type: 'boolean', default: false, label }, ...CHAIN_PARAMS] },
   { id: 'xt.seedream-5-pro', name: 'Image', vendor: 'media', kind: 'image', prompt: { minLength: 1, maxLength: 32000 }, references: 1, params: [
     { name: 'aspectRatio', type: 'enum', values: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: '1:1', label },
-    { name: 'resolution', type: 'enum', values: ['2K', '1K'], default: '2K', label }] },
+    { name: 'resolution', type: 'enum', values: ['2K'], default: '2K', label }] },
 ] });
 // The clips each animation set puts on a skeleton, file by file (tripoHumanoidSets, tripoCreaturePresets): the first
 // file carries the model, a later one clips only.
