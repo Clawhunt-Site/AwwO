@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { emptyDocument } from '../src/canvas/canvasDoc';
-import { applyCanvasPlan, canvasPlanRevision, planContextCondensed } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, planContextCondensed, planNewNodeModel } from '../src/canvas/canvasPlan';
 import { canvasStorageKey, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { buildPlanningContext, cancelCanvasPlanRecovery, fitPlanningContext, readCanvasPlanRecovery, requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { canvasFetch, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
@@ -422,6 +422,42 @@ describe('accepted planner run recovery', () => {
     expect(plans).toHaveLength(1);
     expect(planContextCondensed(plan)?.get('long')).toEqual(new Set(['persona']));
   });
+
+  // The planner sized the nodes it adds for the model the request its run was made from named (planning_limits.go), and
+  // the plan says that one ("default" for nodes that run the workspace default), a resume's too, not one the reader chose
+  // since, so its nodes take what they were sized for (CanvasSurface, planComponentModel).
+  it('says the model a plan sized its new nodes for, as its own request named it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) return json(run, 202);
+      if (url.endsWith('/events')) return events({ type: 'running' });
+      return json({ ...run, status: 'completed', terminal: true, output: JSON.stringify(proposal) });
+    }));
+    for (const model of ['qwen', 'default']) {
+      expect(planNewNodeModel(await requestCanvasPlan('Build a report', emptyDocument(), [], new AbortController().signal, 'en', undefined, { newNodeModel: model })))
+        .toBe(model);
+    }
+  });
+
+  it.each([['bedrock.claude-opus-5-5', 'qwen'], ['default', 'bedrock.claude-opus-5-5']])(
+    'says the model a resumed plan sized its new nodes for, as its stored request named it (%s, then %s chosen)', async (asked, since) => {
+      let completed = false;
+      const fetch = vi.fn(async (url: string) => {
+        if (url.endsWith('/plan')) return json(run, 202);
+        if (url.endsWith('/events')) return events({ type: 'running' });
+        return json(completed ? { ...run, status: 'completed', terminal: true, output: JSON.stringify(proposal) } : run);
+      });
+      vi.stubGlobal('fetch', fetch);
+      const models = [{ id: 'qwen', name: 'Qwen' }, { id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5' }];
+      await expect(requestCanvasPlan('Build a report', emptyDocument(), [], new AbortController().signal, 'en', undefined, { models, newNodeModel: asked }))
+        .rejects.toMatchObject({ code: 'planning_recovery_required' });
+      const operationId = plannerRecovery({ tenant, canvasId: 'recovery-canvas' }, []).read()?.operationId;
+      completed = true;
+      const plan = await requestCanvasPlan('Build a report', emptyDocument(), [], new AbortController().signal, 'en', undefined,
+        { models, newNodeModel: since, recoveryOperationId: operationId });
+      expect(plan).toEqual(proposal);
+      expect(planNewNodeModel(plan)).toBe(asked);
+      expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
+    });
 
   it('keeps a set of any size with its request, and refuses one that is not a set before a run is admitted', async () => {
     // A node of 250 inputs, more than the journal once kept for one node: the set used to be dropped, and its plan

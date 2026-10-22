@@ -41,8 +41,9 @@ func isPlannerRequest(r *http.Request) bool {
 	return v
 }
 
-// The asker's personal settings for a plan (preferences.go plannerPersonalization), and where in the prompt they go:
-// after the canvas context, before the request. Only planCanvas sets it; a client cannot.
+// What a plan's prompt gets after its hash (planCanvas): the node limits (planning_limits.go plannerNodeLimits) and the
+// asker's personal settings (preferences.go plannerPersonalization), and where in the prompt they go: after the canvas
+// context, before the request. Only planCanvas sets it; a client cannot.
 type plannerPersonalKey struct{}
 type plannerPersonal struct {
 	text string
@@ -56,7 +57,7 @@ func withPlannerPersonalization(r *http.Request, text string, at int) *http.Requ
 	return r.WithContext(context.WithValue(r.Context(), plannerPersonalKey{}, plannerPersonal{text, at}))
 }
 
-// personalizedPrompt is the prompt with the asker's settings in their place, or the prompt as it was.
+// personalizedPrompt is the prompt with those additions in their place, or the prompt as it was.
 func personalizedPrompt(r *http.Request, prompt string) string {
 	p, ok := r.Context().Value(plannerPersonalKey{}).(plannerPersonal)
 	if !ok || p.at < 0 || p.at > len(prompt) || utf16Len(prompt)+utf16Len(p.text) > maxRunPromptUnits {

@@ -86,6 +86,10 @@ type piModel struct {
 	// ProseBytesPerToken is the model's measured bytes of prose per token, as its worker counts its budget with
 	// (context_estimate.go); absent or invalid, the budget counts one byte a token.
 	ProseBytesPerToken float64 `json:"proseBytesPerToken,omitempty"`
+	// MaxOutputTokens is the most one answer of this model holds, its thinking included, as its worker calls the
+	// provider (/health maxOutputTokens); 0 when the worker does not say, or says something other than a whole number
+	// of tokens (modelOutputTokens). The canvas planner is told it to size each node's task (planning.go plannerNodeLimits).
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 	// ReasoningEfforts is the closed set of reasoning-effort levels a worker
 	// advertises for this model. Empty means the model accepts no explicit level,
 	// so an effort on such a node is refused rather than silently dropped. The
@@ -105,26 +109,44 @@ type piModel struct {
 	structuredOutputMalformed bool
 }
 
-// UnmarshalJSON decodes a catalog model. Only a literal true sets StructuredOutput.
-// Any other value leaves it false instead of failing the decode, so one malformed
-// capability field cannot take down the runtime's whole catalog and every text run
-// on it. Encoding is unchanged, which keeps catalogs and snapshots byte-identical.
+// UnmarshalJSON decodes a catalog model. Only a literal true sets StructuredOutput,
+// and only a whole number of tokens sets MaxOutputTokens (modelOutputTokens). Any other
+// value leaves them unset instead of failing the decode, so one malformed field cannot
+// take down the runtime's whole catalog and every text run on it. Encoding is the
+// struct's own: a snapshot frozen before maxOutputTokens was read decodes with 0 and
+// encodes as it was; one frozen since names each model's limit (omitted when 0).
 func (m *piModel) UnmarshalJSON(b []byte) error {
 	type plain piModel
 	var v struct {
 		plain
 		StructuredOutput json.RawMessage `json:"structuredOutput"`
 		Input            json.RawMessage `json:"input"`
+		MaxOutputTokens  json.RawMessage `json:"maxOutputTokens"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return err
 	}
 	*m = piModel(v.plain)
 	m.Input = modelInputKinds(v.Input)
+	m.MaxOutputTokens = modelOutputTokens(v.MaxOutputTokens)
 	raw := bytes.TrimSpace(v.StructuredOutput)
 	m.StructuredOutput = bytes.Equal(raw, []byte("true"))
 	m.structuredOutputMalformed = len(raw) > 0 && !m.StructuredOutput && !bytes.Equal(raw, []byte("false")) && !bytes.Equal(raw, []byte("null"))
 	return nil
+}
+
+// maxModelOutputTokens bounds what a catalog may say one answer holds; the workers' own caps are far below it (65,536).
+const maxModelOutputTokens = 1 << 20
+
+// modelOutputTokens reads a catalog's maxOutputTokens: a whole number of tokens from 1 to maxModelOutputTokens, else 0
+// (unknown). Anything else is dropped rather than failing the catalog, which would take the runtime down for a field
+// only the planner reads.
+func modelOutputTokens(raw json.RawMessage) int {
+	var n int
+	if len(raw) == 0 || json.Unmarshal(raw, &n) != nil || n < 1 || n > maxModelOutputTokens {
+		return 0
+	}
+	return n
 }
 
 // supportsEffort reports whether model accepts the exact effort level. An empty

@@ -3,6 +3,8 @@ import { AGENT_TEMPLATES, createAgentTemplate } from '../src/canvas/agentTemplat
 import { createFormNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { buildPlanningContext, loadLastPlanDuration, loadPlanningConversation, PLANNING_STORAGE_KEY, readPlannerStatus, requestCanvasPlan,
   saveLastPlanDuration, savePlanningConversation, type PlanningMessage } from '../src/canvas/canvasPlanning';
+import { planNewNodeModel } from '../src/canvas/canvasPlan';
+import { DEFAULT_NEW_NODE_MODEL, newNodeModelOf } from '../src/canvas/planNewNodeModel';
 import { configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { appendTurn, resetAllSessions } from '../src/canvas/sessions';
 
@@ -99,6 +101,26 @@ describe('canvas planner context', () => {
     expect(buildPlanningContext(emptyDocument(), [], 'zh')).not.toContain('超时换模型');
     expect(buildPlanningContext(emptyDocument(), [], 'en')).toContain('an answer too long or out of time → split the work or narrow the delivery;');
     expect(buildPlanningContext(emptyDocument(), [], 'en')).not.toContain('another model;');
+  });
+
+  // A hosted planner sizes each node's task by its model's output limit (planning_limits.go); the nodes a plan adds without
+  // set_model take the model the reader chose for the canvas assistant (withAssistantModel), which it is told by id, a
+  // model only a user may choose too, which the set_model list leaves out but the nodes still take.
+  it('names the model the nodes a plan adds take, apart from the models set_model offers', () => {
+    const models = [{ id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5' }, { id: 'qwen', name: 'Qwen' }];
+    const en = buildPlanningContext(emptyDocument(), [], 'en', [], { models, newNodeModel: 'bedrock.claude-opus-5-5' });
+    expect(en).toContain('\n\nNew Agent nodes you add without set_model run on: "bedrock.claude-opus-5-5"\n\n');
+    expect(contextSection(en, 'Models a node can run (for set_model; "default" is the workspace default):')).toEqual(models);
+    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { models, newNodeModel: 'qwen' }))
+      .toContain('\n\n新增且未用 set_model 指定模型的 Agent 节点使用："qwen"\n\n');
+    expect(buildPlanningContext(emptyDocument(), [], 'en', [], { models, newNodeModel: 'deepseek-flash' }))
+      .toContain('\n\nNew Agent nodes you add without set_model run on: "deepseek-flash"\n\n');
+    // Nodes that run the workspace default say so, by the id the planner's limits give it.
+    expect(buildPlanningContext(emptyDocument(), [], 'en', [], { models, newNodeModel: DEFAULT_NEW_NODE_MODEL }))
+      .toContain('\n\nNew Agent nodes you add without set_model run on: "default"\n\n');
+    for (const extras of [{ models }, { models, newNodeModel: '' }, {}]) {
+      expect(buildPlanningContext(emptyDocument(), [], 'en', [], extras)).not.toContain('New Agent nodes you add');
+    }
   });
 
   it('uses only the last ten planning messages and excludes their local identifiers and extra metadata', () => {
@@ -225,6 +247,49 @@ describe('planning conversation recovery', () => {
     expect(() => savePlanningConversation({ draft: '保留这条草稿', messages: [message(1)] })).not.toThrow();
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('storage disabled'); });
     expect(loadPlanningConversation()).toEqual({ draft: '', messages: [] });
+  });
+});
+
+// The nodes a plan adds take the model its planner sized them for: the one the request its run was made from named, which
+// the host's plan frame says (canvasBridge.ts), a resume's too, whatever the reader chose since.
+describe('the model a plan sized the nodes it adds for', () => {
+  const sseResponse = (frames: unknown[]) => ({
+    ok: true,
+    headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null) },
+    body: new ReadableStream<Uint8Array>({ start(controller) {
+      const encoder = new TextEncoder();
+      for (const frame of frames) controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`));
+      controller.close();
+    } }),
+  });
+  const models = [{ id: 'qwen', name: 'Qwen' }];
+
+  it('is read back from the line a context writes, in either language, and from nothing else', () => {
+    for (const locale of ['en', 'zh'] as const) {
+      expect(newNodeModelOf(buildPlanningContext(emptyDocument(), [], locale, [], { models, newNodeModel: 'deepseek-flash' }))).toBe('deepseek-flash');
+      expect(newNodeModelOf(buildPlanningContext(emptyDocument(), [], locale, [], { models, newNodeModel: DEFAULT_NEW_NODE_MODEL }))).toBe('default');
+      expect(newNodeModelOf(buildPlanningContext(emptyDocument(), [], locale, [], { models }))).toBeUndefined();
+    }
+    expect(newNodeModelOf('New Agent nodes you add without set_model run on: not json')).toBeUndefined();
+    expect(newNodeModelOf(undefined)).toBeUndefined();
+  });
+
+  it('is the one the host’s plan frame names, a resume’s too, and none where no frame names one', async () => {
+    const frames = vi.fn().mockResolvedValueOnce(sseResponse([{ type: 'plan', plan: validPlan, newNodeModel: 'qwen' }]))
+      .mockResolvedValueOnce(sseResponse([{ type: 'plan', plan: validPlan, newNodeModel: 'bedrock.claude-opus-5-5' }]))
+      .mockResolvedValueOnce(sseResponse([{ type: 'plan', plan: validPlan, newNodeModel: DEFAULT_NEW_NODE_MODEL }]))
+      .mockResolvedValueOnce(sseResponse([{ type: 'plan', plan: validPlan }]));
+    vi.stubGlobal('fetch', frames);
+    const resume = { models, newNodeModel: 'qwen', recoveryOperationId: 'operation-1' };
+    expect(planNewNodeModel(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, { models, newNodeModel: 'qwen' }))).toBe('qwen');
+    // A resume's request named the model chosen then, whatever this request names now.
+    expect(planNewNodeModel(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, resume))).toBe('bedrock.claude-opus-5-5');
+    expect(planNewNodeModel(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, resume))).toBe('default');
+    // A request stored before requests named one says nothing: the reader's choice now stands (planComponentModel).
+    expect(planNewNodeModel(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, resume))).toBeUndefined();
+    // A host without plan frames says nothing either, whatever its own request named.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ plan: validPlan }) }));
+    expect(planNewNodeModel(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, { models, newNodeModel: 'qwen' }))).toBeUndefined();
   });
 });
 

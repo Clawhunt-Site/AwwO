@@ -5,9 +5,10 @@ import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import { figureRole } from './figureKit/figureKit';
 import type { CanvasDocument } from './canvasDoc';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, HOSTED_PAGE_TEMPLATE_ID, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS,
-  canvasPlanRevision, condensedFromJSON, condensedMark, condensedToJSON, hostedPageOutputs, markPlanContextCondensed, parseCanvasPlan, sharedRequirements,
-  withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
+  canvasPlanRevision, condensedFromJSON, condensedMark, condensedToJSON, hostedPageOutputs, markPlanContextCondensed, markPlanNewNodeModel, parseCanvasPlan,
+  sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
+import { NEW_NODE_LINE } from './planNewNodeModel';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import type { UiLocale } from '../locale';
@@ -125,8 +126,11 @@ function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = 
 export interface PlanModel { id: string; name: string; efforts?: ReadonlyArray<string>; paid?: boolean }
 /** How a node's last run ended, as the planner is told: its state and, for a failure or a block, the reason shown. */
 export interface PlanRunState { state: string; detail?: string }
-/** What a host can add to the planner's view: the models nodes can run, and each node's last run. */
-export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Readonly<Record<string, PlanRunState | undefined>> }
+/** What a host can add to the planner's view: the models nodes can run, each node's last run, and the model the Agent
+ *  nodes a plan adds without set_model take (the reader's choice for the canvas assistant, assistantModel.ts;
+ *  DEFAULT_NEW_NODE_MODEL where they run the workspace default), which a hosted planner sizes their tasks by
+ *  (planning_limits.go). */
+export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Readonly<Record<string, PlanRunState | undefined>>; newNodeModel?: string }
 
 /** What the planner is told about a node's brief, its requirements and how its last run went: the things a person used
  *  to set by hand in developer mode, which the assistant now sets itself (owner request 2026-10-15). A hosted
@@ -329,6 +333,11 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
     ? ' When the request needs pictures, video or 3D models as assets, add one matching media node per asset with its prompt written, rather than having a text Agent describe the asset or claim a file.'
     : '需要图片、视频或3D模型素材时，为每个素材添加一个对应的媒体节点并写好提示词，不要让文字Agent用描述代替生成或声称已有文件。';
   const modelHeading = locale === 'en' ? 'Models a node can run (for set_model; "default" is the workspace default)' : '节点可用的模型（供 set_model 使用；"default" 为工作区默认模型）';
+  // The model the Agent nodes this plan adds without set_model take, as the host resolved it (only one a node can run,
+  // or "default" for the workspace default): possibly one the model list leaves out, a model only a user may choose
+  // (planModelsOf), which they still take.
+  const newNodeModel = extras.newNodeModel || undefined;
+  const newNodeLine = !newNodeModel ? '' : `${NEW_NODE_LINE[locale === 'en' ? 'en' : 'zh']}${JSON.stringify(newNodeModel)}`;
   const turns = (view.turns > 0 ? messages.slice(-view.turns) : []).map(({ role, content, status }) => ({ role, content: shorten(content, view.turnCap), status }));
   view.shortened = shortened;
   // Said only when a text was shortened, so the whole view's context is as it was.
@@ -341,6 +350,7 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
     `${guidance[4]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(templates)}`,
     ...(models ? [`${modelHeading}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(models.map(({ id, name, efforts, paid }) => ({ id, name,
       ...(efforts?.length ? { efforts } : {}), ...(paid ? { paid: true } : {}) })))}`] : []),
+    ...(newNodeLine ? [newNodeLine] : []),
     ...(shortened ? [shortenedNote] : []),
     `${guidance[5]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(graph)}`,
     `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(turns)}`,
@@ -423,8 +433,8 @@ function malformedPlan(error: unknown): boolean {
  * and returns the single proposal frame. An ended stream without a proposal is a failure, never
  * an empty plan — the canvas must not change on a lost connection. */
 async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale,
-  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown }> {
-  let proposal: { plan: unknown; condensed?: unknown } | null = null;
+  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown; newNodeModel?: string }> {
+  let proposal: { plan: unknown; condensed?: unknown; newNodeModel?: string } | null = null;
   let failure = '';
   let failureCode = '';
   await readSseFrames(body, (_event, frame: any) => {
@@ -432,7 +442,8 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
     if (frame?.type === 'progress') {
       observed.last = observedProgress(frame, observed.last);
       onProgress?.(observed.last);
-    } else if (frame?.type === 'plan') proposal = { plan: frame.plan, ...(Object.hasOwn(frame, 'condensed') ? { condensed: frame.condensed } : {}) };
+    } else if (frame?.type === 'plan') proposal = { plan: frame.plan, ...(Object.hasOwn(frame, 'condensed') ? { condensed: frame.condensed } : {}),
+      ...(typeof frame.newNodeModel === 'string' && frame.newNodeModel ? { newNodeModel: frame.newNodeModel } : {}) };
     else if (frame?.type === 'error') {
       failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
       failureCode = typeof frame.code === 'string' ? frame.code : '';
@@ -453,7 +464,7 @@ type PlanView = Partial<FittedPlanningContext> & { context: string };
  * tab's plan was made from too; undefined where the host does not say (the desktop gateway). */
 async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, signal: AbortSignal,
   locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter,
-  options?: PlanRequestOptions): Promise<{ plan: CanvasPlan; condensed?: PlanContextCondensed | null }> {
+  options?: PlanRequestOptions): Promise<{ plan: CanvasPlan; condensed?: PlanContextCondensed | null; newNodeModel?: string }> {
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
@@ -468,9 +479,11 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   const streaming = response.ok && Boolean(response.body) && (contentType || '').includes('text/event-stream');
   let raw: unknown;
   let condensed: PlanContextCondensed | null | undefined;
+  let newNodeModel: string | undefined;
   if (streaming) {
     const proposal = await readPlanStream(response.body!, locale, observed, onProgress);
     raw = proposal.plan;
+    newNodeModel = proposal.newNodeModel;
     // A set that cannot be read could let the plan write over what its view showed only in part: no plan is applied.
     if (Object.hasOwn(proposal, 'condensed')) {
       condensed = proposal.condensed === null ? null : condensedFromJSON(proposal.condensed);
@@ -497,7 +510,7 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   // operation this workspace does not support, which the prompt already rules out, so it is a decision
   // rather than a slip and asking again would spend another run to be told the same thing.
   if (saas) plan = saasPlan(plan, locale);
-  return { plan, ...(condensed !== undefined ? { condensed } : {}) };
+  return { plan, ...(condensed !== undefined ? { condensed } : {}), ...(newNodeModel ? { newNodeModel } : {}) };
 }
 
 export type CanvasPlanRecovery = { pending: boolean; operationId?: string; prompt?: string; matches?: boolean };
@@ -534,7 +547,7 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   const scope = currentSaaSCanvas();
   const saas = scope !== null;
   const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
-  const extras: PlanningExtras = { models: options?.models, runs: options?.runs };
+  const extras: PlanningExtras = { models: options?.models, runs: options?.runs, newNodeModel: options?.newNodeModel };
   const units = saas ? Math.min(MAX_PLAN_CONTEXT_UNITS, MAX_PLAN_PROMPT_UNITS - PLAN_REQUEST_JOIN_UNITS - prompt.length) - PLAN_CONTEXT_MARGIN : Infinity;
   const fit = (room: number) => fitPlanningContext(doc, messages, locale, options?.mediaKinds ?? [], extras, room, planningFocus(doc, prompt, extras, options?.selected), units);
   // The canvas alone is too large, or the room the request, its files and the selected knowledge leave is too small.
@@ -554,12 +567,16 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   let diagnosis: unknown;
   for (let retried = false; ;) {
     try {
-      const { plan, condensed } = await planOnce(prompt, view, doc, signal, locale, saas, observed, onProgress, options);
+      const { plan, condensed, newNodeModel } = await planOnce(prompt, view, doc, signal, locale, saas, observed, onProgress, options);
       if (signal.aborted || currentSaaSCanvas() !== scope) throw new PlanFailure(canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
       // What the host kept with the request this plan's run was made from comes first, the whole canvas (null) too: a
       // resumed run's, or one another tab started, was made from that request rather than from the view built here.
       const shownInPart = condensed !== undefined ? condensed : view.shortened ? view.condensed : undefined;
       if (shownInPart) markPlanContextCondensed(plan, shownInPart);
+      // So does the model its nodes were sized for, which the host's frame reads from that request (canvasBridge.ts): a
+      // resume's named the one chosen then. A frame that names none (a request stored before requests named one, a host
+      // without frames) leaves the plan unmarked.
+      if (newNodeModel) markPlanNewNodeModel(plan, newNodeModel);
       return plan;
     } catch (error) {
       // A late old-workspace failure must never turn the malformed-plan retry into an admission

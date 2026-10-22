@@ -48,8 +48,9 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, type CanvasPlanMedia } from './canvasPlan';
-import { withAssistantModel } from './assistantModel';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, planNewNodeModel, type CanvasPlanMedia } from './canvasPlan';
+import { componentModelEntry, planComponentModel, withAssistantModel } from './assistantModel';
+import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
 import { planModelsOf } from './userChosenModels';
@@ -440,6 +441,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [palette, setPalette] = useState<Awaited<ReturnType<typeof readModelPalette>> | null>(null);
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
+  // The latest render's host, for handlers that resume after awaiting the server (a plan applied, a routed message).
+  const executionRef = useRef(assistantExecution);
+  executionRef.current = assistantExecution;
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [paletteError, setPaletteError] = useState('');
   const [paletteRefresh, setPaletteRefresh] = useState(0);
@@ -3037,6 +3041,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId) return planModelsOf([]);
     return planModelsOf(live.models);
   };
+  // The model the Agent nodes a plan adds without set_model will take (withAssistantModel), which the planner sizes them
+  // by, once both reads it rests on are in: this canvas's palette and the host's own catalogue ("default" where they run
+  // the workspace default). Until then the request names none, and they take the reader's choice when the plan lands,
+  // as before plans named one; the desktop, which has no palette, names none.
+  const planNewNodeChoice = () => {
+    const live = paletteRef.current; const here = currentSaaSCanvas(); const host = executionRef.current;
+    if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId || (host && !host.componentModelRead)) return undefined;
+    return componentModelEntry(host?.componentModel, live.models)?.model ?? DEFAULT_NEW_NODE_MODEL;
+  };
   // `shown`: the reader's own words for the conversation, where the planner is given more (a hand-over's request).
   const sendPlanningMessage = async (request?: string, resume = false, shown?: string) => {
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
@@ -3083,6 +3096,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds,
           models: automaticEntries(planModels).filter(entry => entry.available).map(entry => ({ id: entry.model, name: entry.name || entry.model,
             ...(entry.efforts?.length ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { paid: true } : {}) })),
+          // The model the nodes it adds without set_model will take (withAssistantModel below), which it sizes them by.
+          newNodeModel: planNewNodeChoice(),
           runs: planRuns, selected: selection });
       if (readOnlyRef.current || controller.signal.aborted || planningRequest.current?.id !== id) return;
       if (revisionOf(docRef.current) !== revision || laneGuard.current.active() || inspectorCloseLocked.current || hasStreamingConversation(docRef.current.nodes)) {
@@ -3092,10 +3107,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       const before = docRef.current;
       const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null);
-      // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own).
-      // ...except a node the plan itself put on a model, the workspace default included.
+      // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own):
+      // the one its request named, which the planner sized them for (a resume's, chosen before the reader changed it;
+      // planComponentModel), against the reader's choice now, which may have changed while it planned; except a node the
+      // plan itself put on a model, the workspace default included.
       const applied = jev ? planned : { ...planned, doc: withAssistantModel(planned.doc,
-        planned.addedNodeIds.filter(id => !planned.modelSetNodeIds.includes(id)), assistantExecution?.componentModel, paletteRef.current?.models ?? []) };
+        planned.addedNodeIds.filter(id => !planned.modelSetNodeIds.includes(id)),
+        planComponentModel(planNewNodeModel(plan), executionRef.current?.componentModel, paletteRef.current?.models ?? []), paletteRef.current?.models ?? []) };
       // Every step skipped (each one said in the adjustments) leaves the canvas as it was: nothing to patch, undo
       // or select, and the reply says so instead of calling it applied.
       const changed = revisionOf(before) !== revisionOf(applied.doc);
@@ -3245,8 +3263,6 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A message joins the conversation once it is handled. Until then the box keeps it and the conversation shows it
   // pending, so a stop, a refusal or leaving the page never strands it.
   const unifiedHost = assistantExecution && routeAssistant ? assistantExecution : undefined;
-  const executionRef = useRef(assistantExecution);
-  executionRef.current = assistantExecution;
   // Handlers resume after awaiting the server; what they read then is the latest render's (set below).
   const assistantLatest = useRef<{ planBlocker: typeof planBlocker; sendPlanningMessage: typeof sendPlanningMessage;
     canUndoPlan: boolean; undo: typeof undo } | null>(null);

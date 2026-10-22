@@ -112,6 +112,7 @@ export function executionHost(execution: ManagedExecution): AssistantExecutionHo
     renderNotices: planAvailable => <ExecutionNotices execution={execution} planAvailable={planAvailable} />,
     settings: <ExecutionSettings execution={execution} />,
     ...(execution.componentModel ? { componentModel: execution.componentModel } : {}),
+    ...(execution.runtime ? { componentModelRead: true } : {}),
     ...(execution.confirmedTasks.length ? { confirmedTasks: execution.confirmedTasks } : {}),
     ...(execution.pendingSubmission ? { pendingOperation: execution.pendingSubmission.operationId } : {}),
     ...(execution.startRefusal ? { startRefusal: execution.startRefusal } : {}),

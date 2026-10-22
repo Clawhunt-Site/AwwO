@@ -68,6 +68,9 @@ export interface AssistantExecutionHost {
   /** The model the reader chose under the composer, once chosen there: the Agent components a plan adds start on it,
    *  as the direct tasks run on it. Absent while the reader keeps the default. */
   componentModel?: { runtime: string; model: string };
+  /** The host has read the models the reader chooses from, so componentModel, there or not, is the reader's choice:
+   *  until then its absence says nothing, and a plan names no model for the components it adds (CanvasSurface). */
+  componentModelRead?: boolean;
   /** The tasks confirmed on this canvas since it was opened, each with the submission it was, once per submission: one a
    *  reconcile pressed in this page found (`here`), whose box goes with it, or one another page of this canvas announced.
    *  Entries keep their identity from list to list, so a new one is an entry the canvas has not seen. */

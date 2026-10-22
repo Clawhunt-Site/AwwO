@@ -1,7 +1,8 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { componentModelEntry, withAssistantModel } from '../src/canvas/assistantModel';
+import { componentModelEntry, planComponentModel, withAssistantModel } from '../src/canvas/assistantModel';
+import { DEFAULT_NEW_NODE_MODEL } from '../src/canvas/planNewNodeModel';
 import { createSessionNode, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { executionHost } from '../src/saas/AssistantExecution';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -51,6 +52,48 @@ describe('the components a canvas-assistant plan adds', () => {
     expect(withAssistantModel(before, ['new'], { runtime: 'pi', model: 'claude-opus-5' }, palette)).toBe(before);
     expect(withAssistantModel(before, ['new'], { runtime: 'pi', model: 'gone' }, palette)).toBe(before);
   });
+
+  it('never start on a model the workspace’s plan does not include now', () => {
+    const locked = palette.map(item => item.model === 'bedrock.claude-opus-5-5' ? { ...item, requiresUpgrade: true } : item);
+    const before = doc([node('new')]);
+    expect(componentModelEntry(opus, locked)).toBeUndefined();
+    expect(withAssistantModel(before, ['new'], opus, locked)).toBe(before);
+  });
+});
+
+// The model a plan's planner sized the nodes it adds for (canvasPlan.ts planNewNodeModel) is the one they take, a
+// resume's chosen before the reader changed it; "default" leaves them on the workspace default; a plan that names none,
+// or names one they cannot take now, leaves the reader's choice now.
+describe('the model the components a plan adds take', () => {
+  const qwen = { runtime: 'pi', model: 'qwen3.8-27b-p6' };
+  const choices = [...palette,
+    { runtime: 'openai-agents', model: 'deepseek-flash', available: true, userChosen: true },
+    { runtime: 'openai-agents', model: 'bedrock.claude-sonnet-5', available: true, requiresUpgrade: true }];
+
+  it('is the model the plan was sized for, on the runtime AwwO runs it on, whatever the reader chose since', () => {
+    expect(planComponentModel('bedrock.claude-opus-5-5', qwen, choices)).toEqual({ runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' });
+    expect(planComponentModel('qwen3.8-27b-p6', opus, choices)).toEqual(qwen);
+    expect(planComponentModel('bedrock.claude-opus-5-5', undefined, choices)).toEqual({ runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' });
+  });
+
+  it('is none for "default", whatever the reader chose since', () => {
+    expect(planComponentModel(DEFAULT_NEW_NODE_MODEL, opus, choices)).toBeUndefined();
+    expect(planComponentModel(DEFAULT_NEW_NODE_MODEL, undefined, choices)).toBeUndefined();
+  });
+
+  it('is the reader’s choice now where the plan names none or one its nodes cannot take now', () => {
+    expect(planComponentModel(undefined, opus, choices)).toBe(opus);
+    expect(planComponentModel(undefined, undefined, choices)).toBeUndefined();
+    // No longer offered, no runtime ready for it, or a model the workspace's plan no longer includes.
+    for (const model of ['gone', 'claude-opus-5', 'bedrock.claude-sonnet-5']) expect(planComponentModel(model, qwen, choices)).toBe(qwen);
+  });
+
+  it('is a model only a user may choose only while the reader still has it chosen', () => {
+    const deepseek = { runtime: 'openai-agents', model: 'deepseek-flash' };
+    expect(planComponentModel('deepseek-flash', deepseek, choices)).toEqual(deepseek);
+    expect(planComponentModel('deepseek-flash', qwen, choices)).toBe(qwen);
+    expect(planComponentModel('deepseek-flash', undefined, choices)).toBeUndefined();
+  });
 });
 
 const KEY = 'awwo.saas:user-a:tenant-a:awwo.assistant.model.v1';
@@ -73,9 +116,12 @@ describe('the canvas assistant’s model', () => {
 
   it('is the service’s first model until the reader chooses one, and only a chosen one goes to new components', async () => {
     const { result, unmount } = opened();
+    // Until the service is read, no choice is known, so a plan names no model for the components it adds.
+    expect(executionHost(result.current).componentModelRead).toBeUndefined();
     await waitFor(() => expect(result.current.choice.model?.id).toBe('qwen3.8-27b-p6'));
     expect(result.current.componentModel).toBeUndefined();
     expect(executionHost(result.current).componentModel).toBeUndefined();
+    expect(executionHost(result.current).componentModelRead).toBe(true);
     act(() => result.current.chooseModel(executionModelKey('pi', 'bedrock.claude-opus-5-5')));
     expect(result.current.componentModel).toEqual({ runtime: 'pi', model: 'bedrock.claude-opus-5-5' });
     expect(executionHost(result.current).componentModel).toEqual({ runtime: 'pi', model: 'bedrock.claude-opus-5-5' });

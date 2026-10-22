@@ -101,6 +101,16 @@ export function markPlanContextCondensed(plan: CanvasPlan, condensed: PlanContex
 export function planContextCondensed(plan: unknown): PlanContextCondensed | undefined {
   return plan !== null && typeof plan === 'object' ? condensedPlans.get(plan) : undefined;
 }
+const sizedPlans = new WeakMap<object, string>();
+/** Say which model a hosted planner sized the Agent nodes a plan adds without set_model for: the one the request its run
+ *  was made from named (planNewNodeModel.ts; "default" for the workspace default), which the host's plan frame says, a
+ *  resume's too (canvasBridge.ts). The host then puts those nodes on it (assistantModel.ts planComponentModel). */
+export function markPlanNewNodeModel(plan: CanvasPlan, model: string): void { sizedPlans.set(plan, model); }
+/** The model markPlanNewNodeModel gave a plan, or undefined where none was given (a request stored before plans said it,
+ *  a host without plan frames). */
+export function planNewNodeModel(plan: unknown): string | undefined {
+  return plan !== null && typeof plan === 'object' ? sizedPlans.get(plan) : undefined;
+}
 export const condensedToJSON = (condensed: PlanContextCondensed): PlanContextCondensedJSON => [...condensed].map(([id, fields]) => [id, [...fields]]);
 /** The set a journal or a host kept, or undefined for anything not shaped as one. Any document's set is one: it names
  *  only nodes and fields its request's context showed, which the journal bounds with that request (plannerRecovery.ts). */

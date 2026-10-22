@@ -7,18 +7,36 @@
 import type { CanvasDocument } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
 import { automaticEntry } from './nodeRuntime';
+import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 
 /** The model the reader chose for the canvas assistant, as its direct tasks name it. */
 export interface AssistantComponentModel { runtime: string; model: string }
 
-/** One chat model the workspace offers a node (the palette's catalogue). */
-export interface ComponentModelChoice { runtime: string; model: string; effort?: string; available: boolean }
+/** One chat model the workspace offers a node (the palette's catalogue): requiresUpgrade, a model the workspace's plan
+ *  does not include; userChosen, one only a user may choose (modelPalette.ts). */
+export interface ComponentModelChoice { runtime: string; model: string; effort?: string; available: boolean; requiresUpgrade?: boolean; userChosen?: boolean }
 
 /** The workspace's entry for the chosen model on a node: the runtime AwwO runs that model on (automaticEntry); none
- *  when the workspace offers it to no node, or no runtime offering it is ready. */
+ *  when the workspace offers it to no node, no runtime offering it is ready, or the workspace's plan does not include it
+ *  now (a run on it would wait for a paid plan). The reader's own choice never names such a model (useManagedExecution);
+ *  a canvas plan resumed after the workspace's paid plan ended may. */
 export function componentModelEntry(chosen: AssistantComponentModel | undefined, choices: ReadonlyArray<ComponentModelChoice>): ComponentModelChoice | undefined {
   if (!chosen?.model) return undefined;
-  return automaticEntry(chosen.model, choices);
+  const entry = automaticEntry(chosen.model, choices);
+  return entry?.requiresUpgrade ? undefined : entry;
+}
+
+/** The model the Agent nodes a plan adds without set_model take (withAssistantModel): the one its planner sized them for
+ *  (canvasPlan.ts planNewNodeModel), the workspace default (none) for "default", and the reader's choice now where the
+ *  plan names none (a request stored before requests named one) or one its nodes cannot take now. A model only a user
+ *  may choose (userChosen, DeepSeek) is taken only while the reader still has it chosen: the privacy clause sends a
+ *  request there only when it is selected, and the reader may have switched away from it since the plan was asked for. */
+export function planComponentModel(sizedFor: string | undefined, current: AssistantComponentModel | undefined,
+  choices: ReadonlyArray<ComponentModelChoice>): AssistantComponentModel | undefined {
+  if (sizedFor === DEFAULT_NEW_NODE_MODEL) return undefined;
+  const entry = sizedFor === undefined ? undefined : componentModelEntry({ runtime: '', model: sizedFor }, choices);
+  if (!entry || (entry.userChosen && current?.model !== sizedFor)) return current;
+  return { runtime: entry.runtime, model: entry.model };
 }
 
 /** The document with the chosen model on the unset Agent nodes among `addedNodeIds`; the same document when there is
