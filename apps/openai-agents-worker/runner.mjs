@@ -28,6 +28,19 @@ export function snapshotFailure(error) {
   return 'other';
 }
 
+/**
+ * AwwO 本地版's module guard (scripts/awwo-local-module-guard.cjs), when the local runtime that started this worker
+ * names it (AWWO_LOCAL_MODULE_GUARD, the folders it guards in AWWO_LOCAL_MODULE_ROOTS): the run's Node.js loads it
+ * first, as this worker's did, so that it loads no module from a node_modules folder above AwwO's own (where Node.js
+ * looks for a package's absent optional dependency, and another account may have put one). It is the one Node option
+ * the child gets, and the one variable beside workerEnvironment's. The hosted site sets neither: its runs start as
+ * before.
+ */
+export function moduleGuardOptions(env = process.env) {
+  if (!env.AWWO_LOCAL_MODULE_GUARD || !env.AWWO_LOCAL_MODULE_ROOTS) return { execArgv: [], env: {} };
+  return { execArgv: ['--require', env.AWWO_LOCAL_MODULE_GUARD], env: { AWWO_LOCAL_MODULE_ROOTS: env.AWWO_LOCAL_MODULE_ROOTS } };
+}
+
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, tracing configuration and the launching user's configuration.
 export function workerEnvironment(directory, executable = process.execPath) {
@@ -70,10 +83,11 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     if (request.workspace) sandbox = await createSandbox(config.workspace, { workspaceId: request.workspace.id, runId: request.runId, inputs: request.workspace.inputs, snapshot: request.workspace.snapshot }, sandboxAbort.signal);
     const provenance = `# Temporary OpenAI Agents execution directory\n\nCreated by AWWO OpenAI Agents worker on ${new Date().toISOString()}.\nScope: one isolated agent run; deleted after the child exits.\n`;
     await writeFile(join(directory, 'creator.md'), provenance, { mode: 0o600 });
+    const guard = moduleGuardOptions();
     child = fork(taskURL, [], {
       cwd: directory,
-      env: workerEnvironment(directory),
-      execArgv: [],
+      env: { ...workerEnvironment(directory), ...guard.env },
+      execArgv: guard.execArgv,
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       serialization: 'json',
     });

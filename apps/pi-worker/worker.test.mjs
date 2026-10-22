@@ -6,7 +6,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
-import { startIsolatedRun, workerEnvironment } from './runner.mjs';
+import { moduleGuardOptions, startIsolatedRun, workerEnvironment } from './runner.mjs';
 import { createPiServer } from './server.mjs';
 
 const TOKEN = 'local-test-service-token-with-32-characters';
@@ -410,6 +410,13 @@ test('child environment omits inherited host credentials and process hooks', () 
   // a forward slash asserts the separator of whichever machine wrote the test rather than that the
   // agent directory sits inside the run's own directory, which is the property that matters.
   assert.equal(env.PI_CODING_AGENT_DIR, join('/isolated-run', 'agent'));
+});
+
+test('in AwwO 本地版 a run loads the runtime\'s module guard first, its one Node option; elsewhere nothing changes', () => {
+  assert.deepEqual(moduleGuardOptions({}), { execArgv: [], env: {} });
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_GUARD: '/a/guard.cjs' }), { execArgv: [], env: {} }, 'with no folders to guard, none');
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_GUARD: '/a/guard.cjs', AWWO_LOCAL_MODULE_ROOTS: '/a/app', NODE_OPTIONS: '--require evil' }),
+    { execArgv: ['--require', '/a/guard.cjs'], env: { AWWO_LOCAL_MODULE_ROOTS: '/a/app' } });
 });
 
 test('planner transport boundary accepts 128000 characters and rejects larger or oversized combined history', () => {

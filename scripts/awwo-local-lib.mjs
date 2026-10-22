@@ -501,6 +501,22 @@ export function systemEnvironment(env = process.env) {
   return Object.fromEntries(Object.entries(env).filter(([key, value]) => SYSTEM_VARIABLES.has(key.toUpperCase()) && value !== undefined));
 }
 
+/** The guard every Node.js service loads first (awwo-local-module-guard.cjs). */
+export const MODULE_GUARD = fileURLToPath(new URL('./awwo-local-module-guard.cjs', import.meta.url));
+
+/** A Node.js service's environment with the module guard loaded first, over AwwO's own folders (the code, the build
+ *  and the data folder): a module whose real path is outside them is refused (awwo-local-module-guard.cjs). NODE_OPTIONS
+ *  loads it into the service and the Node.js programs that inherit its environment; the workers start their runs, the
+ *  managed execution's core and its MCP shim with an environment of their own and no Node options, and pass on
+ *  AWWO_LOCAL_MODULE_GUARD as the one they give (moduleGuardOptions in each). The services' environment holds no
+ *  NODE_OPTIONS of the person's (systemEnvironment). In NODE_OPTIONS the guard's path is written with forward slashes,
+ *  which Windows takes and its quoting leaves as they are (it reads a backslash as an escape); the folders go as a
+ *  JSON array, a folder's name being free to hold the ";" a list would split it at. */
+export function withModuleGuard(env, { resources, build, data }, guard = MODULE_GUARD) {
+  return { ...env, NODE_OPTIONS: `--require "${guard.replaceAll('\\', '/')}"`, AWWO_LOCAL_MODULE_GUARD: guard,
+    AWWO_LOCAL_MODULE_ROOTS: JSON.stringify([resources, build, data].map(folder => path.resolve(folder))) };
+}
+
 /** A node's work and a direct task share the hosted site's limits: answers of up to 16,384 tokens in a 131,072-token
  *  window, and deadlines that end before the API's own (AWWO_RUN_TIMEOUT, 30 minutes). */
 const MODEL_LIMITS = Object.freeze({ contextWindow: '131072', maxTokens: '16384' });

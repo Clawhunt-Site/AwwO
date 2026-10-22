@@ -48,6 +48,16 @@ export function workspaceSoul(config: Pick<WorkerConfig, 'tools'> & { sandbox: P
   return parts.join(' ');
 }
 
+/** AwwO 本地版's module guard (scripts/awwo-local-module-guard.cjs), when the local runtime that started this worker
+ *  names it (AWWO_LOCAL_MODULE_GUARD, the folders it guards in AWWO_LOCAL_MODULE_ROOTS): the core's Node.js and the MCP
+ *  shim it starts load it first, as this worker's did, so that they load no module from a node_modules folder above
+ *  AwwO's own (where Node.js looks for a package's absent optional dependency, and another account may have put one).
+ *  The hosted site sets neither: both start as before. */
+export function moduleGuardOptions(env: NodeJS.ProcessEnv = process.env): { execArgv: string[]; env: Record<string, string> } {
+  if (!env.AWWO_LOCAL_MODULE_GUARD || !env.AWWO_LOCAL_MODULE_ROOTS) return { execArgv: [], env: {} };
+  return { execArgv: ['--require', env.AWWO_LOCAL_MODULE_GUARD], env: { AWWO_LOCAL_MODULE_ROOTS: env.AWWO_LOCAL_MODULE_ROOTS } };
+}
+
 export function coreEnvironment(home: string, port: string, webhookPort: string): NodeJS.ProcessEnv {
   return { PATH: dirname(process.execPath) + ':/usr/bin:/bin', HOME: home, TMPDIR: join(home, 'tmp'),
     OMB_DATA_DIR: home, OMB_PORT: port, OMB_WEBHOOK_PORT: webhookPort, OMB_LOOPBACK_TRUST: 'service', OMB_CLI_OWNER_STDIN: '1',
@@ -184,15 +194,16 @@ export class ManagedRun {
       const owner = randomBytes(32).toString('base64url');
       const [port, webhookPort] = await Promise.all([freePort(), freePort()]);
       this.coreURL = `http://127.0.0.1:${port}`;
+      const guard = moduleGuardOptions();
       const generatedConfig = {
         instances: { awwo: { driver: 'openai-compat', enabled: true, config: { url: transport.url + '/v1', key: transport.token, model: 'awwo-model', managedModels: ['awwo-model'], tools: true, provider: '' } } },
         defaultModelSelection: { instanceId: 'awwo', model: 'awwo-model' },
         features: { browser: false, sharedComputers: false, skillAuthoring: false, autoRecall: false, llmThreadTitles: false, claudeUserMcp: false, cloudOverflow: false },
-        mcpServers: { awwo_workspace: { command: process.execPath, args: [join(WORKER_DIR, 'mcp-shim.ts')], env: { AWWO_WORKSPACE_URL: transport.url + '/mcp', AWWO_WORKSPACE_TOKEN: transport.token }, enabled: true } },
+        mcpServers: { awwo_workspace: { command: process.execPath, args: [...guard.execArgv, join(WORKER_DIR, 'mcp-shim.ts')], env: { AWWO_WORKSPACE_URL: transport.url + '/mcp', AWWO_WORKSPACE_TOKEN: transport.token, ...guard.env }, enabled: true } },
       };
       await writeFile(join(home, 'config.json'), JSON.stringify(generatedConfig), { mode: 0o600 });
       signal.throwIfAborted();
-      child = spawn(process.execPath, [this.config.corePath], { cwd: home, env: coreEnvironment(home, port, webhookPort), detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(process.execPath, [...guard.execArgv, this.config.corePath], { cwd: home, env: { ...coreEnvironment(home, port, webhookPort), ...guard.env }, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
       let exited = false;
       child.on('error', () => { exited = true; }); child.on('exit', () => { exited = true; });
       child.stdout?.resume(); child.stderr?.resume(); child.stdin?.on('error', () => {});

@@ -42,6 +42,31 @@ test('a managed-execution Bedrock call runs in a child that gets the resolved cr
     url: 'https://bedrock-runtime.us-east-1.amazonaws.com/awwo-bedrock-converse/v1/chat/completions', body: JSON.stringify(body) });
 });
 
+test('in AwwO 本地版 the child loads the runtime\'s module guard first, its one Node option, and no module above AwwO\'s folders', async t => {
+  // The layout of an installation: AwwO's folder, and a node_modules another account made above it.
+  const top = await mkdtemp(join(tmpdir(), 'awwo-bedrock-guard-test-'));
+  t.after(() => rm(top, { recursive: true, force: true }));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(top, 'node_modules', 'planted'), { recursive: true });
+  await writeFile(join(top, 'node_modules', 'planted', 'index.js'), "module.exports = 'planted ran';");
+  await mkdir(join(top, 'app'), { recursive: true });
+  await writeFile(join(top, 'app', 'child.mjs'), [
+    "import { createRequire } from 'node:module';",
+    "let planted; try { planted = createRequire(import.meta.url)('planted'); } catch (error) { planted = error.code; }",
+    "process.once('message', () => process.send({ ok: true, raw: { planted, execArgv: process.execArgv, env: Object.keys(process.env) } }, () => process.exit(0)));",
+  ].join('\n'));
+  const guard = join(import.meta.dirname, '..', '..', 'scripts', 'awwo-local-module-guard.cjs');
+  const set = { AWWO_LOCAL_MODULE_GUARD: guard, AWWO_LOCAL_MODULE_ROOTS: JSON.stringify([join(top, 'app')]) };
+  const saved = Object.fromEntries(Object.keys(set).map(key => [key, process.env[key]]));
+  Object.assign(process.env, set);
+  t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const raw = await bedrockComputerCall(model, body, undefined, { auth, childURL: pathToFileURL(join(top, 'app', 'child.mjs')) });
+  assert.deepEqual(raw.execArgv, ['--require', guard]);
+  assert.equal(raw.planted, 'MODULE_NOT_FOUND');
+  assert.equal(raw.env.includes('AWWO_LOCAL_MODULE_ROOTS'), true);
+  assert.equal(raw.env.some(key => ['AWWO_LOCAL_MODULE_GUARD', 'NODE_OPTIONS'].includes(key.toUpperCase())), false, 'the guard reaches the child as its one Node option, not as settings to pass on');
+});
+
 test('a managed call hands its child the model\'s other profile, and logs the child\'s facts, closed labels only', async t => {
   const echo = await fixture(t, `process.once('message', m => process.send({ ok: true, raw: { message: m } }, () => process.exit(0)));`);
   const fallbackModel = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';

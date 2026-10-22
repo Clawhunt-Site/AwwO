@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { authorizeEffort, authorizeOutputContract, authorizeTools, fitsContextBudget, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { deliverySchemaBytes } from './delivery-contract.mjs';
-import { workerEnvironment } from './runner.mjs';
+import { moduleGuardOptions, workerEnvironment } from './runner.mjs';
 import { calculate, executeTool, parseToolArguments, ToolInputError, validateToolNames } from './tools.mjs';
 import { classifyError } from './errors.mjs';
 import { configuration, request } from './test-support.mjs';
@@ -168,6 +168,13 @@ test('a host-served model is only addressable by name, and only where the deploy
 test('child environment carries no parent secrets, user config, Node hooks or tracing credentials', () => {
   const env = workerEnvironment('/private/test-directory', '/runtime/node');
   assert.deepEqual(env, { PATH: '/runtime', TMPDIR: '/private/test-directory', LD_LIBRARY_PATH: '/runtime', OPENAI_AGENTS_DISABLE_TRACING: '1', OPENAI_AGENTS_DONT_LOG_MODEL_DATA: '1', OPENAI_AGENTS_DONT_LOG_TOOL_DATA: '1', NO_COLOR: '1' });
+});
+
+test('in AwwO 本地版 a run loads the runtime\'s module guard first, its one Node option; elsewhere nothing changes', () => {
+  assert.deepEqual(moduleGuardOptions({}), { execArgv: [], env: {} });
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_ROOTS: '/a/app' }), { execArgv: [], env: {} }, 'with no guard named, none');
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_GUARD: '/a/app/scripts/awwo-local-module-guard.cjs', AWWO_LOCAL_MODULE_ROOTS: '/a/app:/a/build', NODE_OPTIONS: '--require evil' }),
+    { execArgv: ['--require', '/a/app/scripts/awwo-local-module-guard.cjs'], env: { AWWO_LOCAL_MODULE_ROOTS: '/a/app:/a/build' } });
 });
 
 test('calculator parses bounded arithmetic without executable syntax', () => {

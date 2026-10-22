@@ -19,7 +19,7 @@ import {
   allocatePorts, apiEnvironment, browserCandidates, dockerEnvironment, findOnPath, instanceContainerQuery, loadLocalProfile,
   localLayout, localOrigin, localState, osLock, portIsFree, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, protectStateDirectory,
   LOCAL_SHELLS, PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
-  windowsTool, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
+  windowsTool, withModuleGuard, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
 } from './awwo-local-lib.mjs';
 import { createLocalWebServer } from './awwo-local-web.mjs';
 
@@ -417,7 +417,9 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     const launch = (name, command, args, env, extra = {}) => {
       // Nothing starts once the runtime is stopping: a service started then would be missed by the stop.
       if (stopping) throw new Error('AwwO 本地版 is stopping');
-      const service = startService({ name, command, args, env, state, cwd: layout.resources, echo: options.verbose && !options.events, ...extra });
+      // A Node.js service loads no module from outside AwwO's own folders (withModuleGuard).
+      const environment = command === node ? withModuleGuard(env, { resources: layout.resources, build: layout.build, data: state.dir }) : env;
+      const service = startService({ name, command, args, env: environment, state, cwd: layout.resources, echo: options.verbose && !options.events, ...extra });
       services.push(service);
       // Watched from its start: a required service that stops at any point ends the runtime, during startup too.
       service.exited.then(code => {

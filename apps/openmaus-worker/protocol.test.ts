@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { boundedText, hash, parseRun, parseAnswer, readBytes, safeEqual, WorkerError } from './protocol.ts';
-import { coreEnvironment, workspaceSoul } from './runtime.ts';
+import { coreEnvironment, moduleGuardOptions, workspaceSoul } from './runtime.ts';
 import { TOOLS } from './transport.ts';
 
 const request = { runId: 'opaque/中文', tenantId: 'tenant', sessionId: 'session', prompt: 'write a file', instructions: '', modelProxyURL: 'http://127.0.0.1:9000/v1', modelProxyToken: 'task-token-123456789', timeoutMs: 1000, maxModelCalls: 2 };
@@ -47,6 +47,12 @@ test('core environment never inherits credentials or host tools; MCP has only si
   assert.deepEqual(TOOLS.map(tool => tool.name), ['list', 'read', 'write', 'exec', 'publish', 'archive']);
   for (const tool of TOOLS) assert.equal(tool.inputSchema.additionalProperties, false);
   delete process.env.AWWO_SENTINEL_SECRET;
+});
+test('in AwwO 本地版 the core and its MCP shim load the runtime\'s module guard first; elsewhere nothing changes', () => {
+  assert.deepEqual(moduleGuardOptions({}), { execArgv: [], env: {} });
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_GUARD: 'C:\\a\\guard.cjs' }), { execArgv: [], env: {} }, 'with no folders to guard, none');
+  assert.deepEqual(moduleGuardOptions({ AWWO_LOCAL_MODULE_GUARD: 'C:\\a\\guard.cjs', AWWO_LOCAL_MODULE_ROOTS: 'C:\\a\\app;C:\\a\\build', NODE_OPTIONS: '--require evil' }),
+    { execArgv: ['--require', 'C:\\a\\guard.cjs'], env: { AWWO_LOCAL_MODULE_ROOTS: 'C:\\a\\app;C:\\a\\build' } });
 });
 test('display truncation counts UTF-8 bytes without splitting Chinese or emoji', () => {
   for (const value of ['中文'.repeat(100), '🙂'.repeat(100)]) {

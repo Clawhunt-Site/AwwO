@@ -13,6 +13,19 @@ export const BEDROCK_CALL_URL = new URL('./bedrock-call.mjs', import.meta.url);
 // Managed-execution calls (server.mjs) are made the same way (bedrockComputerCall).
 export const resolveBedrockAuth = createBedrockAuthResolver(async () => (await import('@aws-sdk/credential-provider-node')).defaultProvider());
 
+/**
+ * AwwO 本地版's module guard (scripts/awwo-local-module-guard.cjs), when the local runtime that started this worker
+ * names it (AWWO_LOCAL_MODULE_GUARD, the folders it guards in AWWO_LOCAL_MODULE_ROOTS): a child's Node.js loads it
+ * first, as this worker's did, so that it loads no module from a node_modules folder above AwwO's own (where Node.js
+ * looks for a package's absent optional dependency, and another account may have put one). It is the one Node option
+ * a child gets, and the one variable beside workerEnvironment's. The hosted site sets neither: its children start as
+ * before.
+ */
+export function moduleGuardOptions(env = process.env) {
+  if (!env.AWWO_LOCAL_MODULE_GUARD || !env.AWWO_LOCAL_MODULE_ROOTS) return { execArgv: [], env: {} };
+  return { execArgv: ['--require', env.AWWO_LOCAL_MODULE_GUARD], env: { AWWO_LOCAL_MODULE_ROOTS: env.AWWO_LOCAL_MODULE_ROOTS } };
+}
+
 // Deliberately exclude HOME, NODE_OPTIONS, provider keys, proxy credentials,
 // npm options, and the launching user's Pi/extension configuration.
 export function workerEnvironment(directory, executable = process.execPath) {
@@ -43,10 +56,11 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
     await mkdir(agentDir, { mode: 0o700 });
     const provenance = `# Temporary Pi execution directory\n\nCreated by AWWO Pi worker on ${new Date().toISOString()}.\nScope: one isolated agent run; deleted after the child exits.\n`;
     await Promise.all([writeFile(join(directory, 'creator.md'), provenance), writeFile(join(agentDir, 'creator.md'), provenance)]);
+    const guard = moduleGuardOptions();
     child = fork(taskURL, [], {
       cwd: directory,
-      env: workerEnvironment(directory),
-      execArgv: [],
+      env: { ...workerEnvironment(directory), ...guard.env },
+      execArgv: guard.execArgv,
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       serialization: 'json',
     });
@@ -167,7 +181,8 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
 /**
  * One managed-execution Bedrock call in an isolated child (bedrock-call.mjs), as a Bedrock run's calls are made: the
  * credentials are resolved here, the child gets them and the request over private IPC, with no Node options and only
- * workerEnvironment's variables, so this process's environment never reaches the AWS SDK. Resolves the gathered Chat
+ * workerEnvironment's variables (AwwO 本地版's module guard aside, moduleGuardOptions), so this process's environment
+ * never reaches the AWS SDK. Resolves the gathered Chat
  * Completions answer; rejects with an Error whose `reason` names what failed. An abort stops the child.
  */
 export async function bedrockComputerCall(model, body, signal, { auth = resolveBedrockAuth, childURL = BEDROCK_CALL_URL, graceMs = 2_000 } = {}) {
@@ -178,7 +193,8 @@ export async function bedrockComputerCall(model, body, signal, { auth = resolveB
   const directory = await mkdtemp(join(tmpdir(), 'awwo-pi-bedrock-'));
   let child;
   try {
-    child = fork(childURL, [], { cwd: directory, env: workerEnvironment(directory), execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'json' });
+    const guard = moduleGuardOptions();
+    child = fork(childURL, [], { cwd: directory, env: { ...workerEnvironment(directory), ...guard.env }, execArgv: guard.execArgv, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'json' });
   } catch {
     await rm(directory, { recursive: true, force: true });
     throw failure('child-start');

@@ -14,7 +14,7 @@ import {
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
   PASSWORD_RESET_PENDING, passwordResetApplied, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
   resolvePostgresBin, serviceEnvironments, writeOwnerCredentials,
-  stagedShowcaseFiles, systemEnvironment, windowsShortPath, withPostgresInclude, workspaceImageTag,
+  stagedShowcaseFiles, systemEnvironment, windowsShortPath, withPostgresInclude, workspaceImageTag, MODULE_GUARD, withModuleGuard,
 } from './awwo-local-lib.mjs';
 import { acquireLock, holdBuild, parseArguments, removeInstanceContainers } from './awwo-local.mjs';
 import { INSTALL_FLAGS, NODE_RELEASE, POSTGRES_WINDOWS, holdBuildExclusively, workspaceSourceHash } from './awwo-local-setup.mjs';
@@ -639,6 +639,72 @@ test('arguments: a Windows folder written with the verbatim prefix is taken with
   // A verbatim UNC path (\\?\UNC\server\share) is not a drive path and is left as given.
   assert.equal(parseArguments(['--state', '\\\\?\\UNC\\server\\share\\state']).state, '\\\\?\\UNC\\server\\share\\state');
   assert.equal(parseArguments(['\\\\?\\C:\\app', '\\\\?\\C:\\state', '9']).resources, 'C:\\app');
+});
+
+test('a Node.js service loads the module guard first, over AwwO\'s own folders', () => {
+  const env = withModuleGuard({ PATH: 'p' }, { resources: path.join('C:\\', 'AwwO Local', 'payload', 'app'), build: path.join('C:\\', 'AwwO Local', 'payload', 'build'), data: path.join('C:\\', 'data') }, 'C:\\AwwO Local\\payload\\app\\scripts\\awwo-local-module-guard.cjs');
+  assert.equal(env.PATH, 'p');
+  assert.equal(env.NODE_OPTIONS, '--require "C:/AwwO Local/payload/app/scripts/awwo-local-module-guard.cjs"', 'forward slashes: NODE_OPTIONS reads a backslash as an escape');
+  assert.equal(env.AWWO_LOCAL_MODULE_GUARD, 'C:\\AwwO Local\\payload\\app\\scripts\\awwo-local-module-guard.cjs', 'for the workers to give their runs');
+  assert.deepEqual(JSON.parse(env.AWWO_LOCAL_MODULE_ROOTS), [path.resolve('C:\\', 'AwwO Local', 'payload', 'app'), path.resolve('C:\\', 'AwwO Local', 'payload', 'build'), path.resolve('C:\\', 'data')], 'a JSON array: a folder may hold ";"');
+  // The services' environment never holds the person's own NODE_OPTIONS, which could load code into them.
+  assert.equal(systemEnvironment({ PATH: 'p', NODE_OPTIONS: '--require evil' }).NODE_OPTIONS, undefined);
+});
+
+test('with the guard, a module in a node_modules folder above AwwO\'s folders is not found; AwwO\'s own and a workspace\'s are', { skip: typeof (await import('node:module')).registerHooks !== 'function' && 'this Node.js has no module.registerHooks' }, async () => {
+  // A folder with a space and Chinese in its name, as an installation or a profile may have (NODE_OPTIONS' quoting),
+  // and the installation's own with a ";" (a list of folders would split it there).
+  const top = mkdtempSync(path.join(os.tmpdir(), 'awwo guard 测试-'));
+  const write = (file, text) => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text); };
+  const installed = path.join(top, 'AwwO Local;x');
+  write(path.join(top, 'node_modules', 'planted', 'index.js'), "module.exports = 'planted ran';");
+  write(path.join(installed, 'node_modules', 'planted-too', 'index.js'), "module.exports = 'planted ran';");
+  // A package whose main leads out of its folder, and one that is a junction to a folder elsewhere: their files are
+  // outside the folder they were found in.
+  write(path.join(top, 'node_modules', 'planted-main', 'package.json'), JSON.stringify({ name: 'planted-main', main: '../../elsewhere/main.js' }));
+  write(path.join(top, 'elsewhere', 'main.js'), "module.exports = 'planted ran';");
+  write(path.join(top, 'elsewhere', 'linked', 'index.js'), "module.exports = 'planted ran';");
+  let junction = true;
+  try { symlinkSync(path.join(top, 'elsewhere', 'linked'), path.join(top, 'node_modules', 'planted-link'), process.platform === 'win32' ? 'junction' : 'dir'); } catch { junction = false; }
+  write(path.join(installed, 'app', 'node_modules', 'own', 'index.js'), "module.exports = 'own';");
+  // A workspace's program in the data folder, which is AwwO's as well, with its own packages; and a package outside
+  // every folder of AwwO's, which nothing of AwwO's loads.
+  const data = path.join(top, 'data');
+  write(path.join(data, 'workspace', 'node_modules', 'theirs', 'index.js'), "module.exports = 'theirs';");
+  write(path.join(data, 'workspace', 'script.cjs'), [
+    "const tryRequire = name => { try { return require(name); } catch (error) { return error.code; } };",
+    `console.log('workspace', tryRequire('theirs'), tryRequire('planted'), tryRequire('planted-main'), tryRequire(${JSON.stringify(path.join(top, 'elsewhere', 'main.js'))}));`,
+  ].join('\n'));
+  mkdirSync(path.join(installed, 'build'), { recursive: true });
+  write(path.join(installed, 'app', 'service.cjs'), [
+    "const tryRequire = name => { try { return require(name); } catch (error) { return error.code; } };",
+    "console.log('require', tryRequire('planted'), tryRequire('planted-too'), tryRequire('planted-main'), tryRequire('own'), require('node:path').sep.length);",
+    `if (${junction}) console.log('junction', tryRequire('planted-link'));`,
+    "import('planted').then(value => console.log('import', value.default), error => console.log('import', error.code));",
+    "require('node:child_process').execFileSync(process.execPath, [require('node:path').join(process.argv[2], 'script.cjs')], { stdio: 'inherit' });",
+  ].join('\n'));
+  const env = withModuleGuard(systemEnvironment(), { resources: path.join(installed, 'app'), build: path.join(installed, 'build'), data }, MODULE_GUARD);
+  const child = spawn(process.execPath, [path.join(installed, 'app', 'service.cjs'), path.join(data, 'workspace')], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  assert.equal(await new Promise(resolve => child.once('exit', resolve)), 0, output);
+  assert.match(output, /require MODULE_NOT_FOUND MODULE_NOT_FOUND MODULE_NOT_FOUND own 1/);
+  if (junction) assert.match(output, /junction MODULE_NOT_FOUND/);
+  assert.match(output, /import ERR_MODULE_NOT_FOUND|import MODULE_NOT_FOUND/);
+  assert.match(output, /workspace theirs MODULE_NOT_FOUND MODULE_NOT_FOUND MODULE_NOT_FOUND/, 'a workspace\'s own packages load in a program a service starts; what lies outside AwwO\'s folders does not, by name or by path');
+  assert.doesNotMatch(output, /planted ran/);
+});
+
+test('the module guard refuses to start on folders it cannot read, rather than guard nothing', { skip: typeof (await import('node:module')).registerHooks !== 'function' && 'this Node.js has no module.registerHooks' }, async () => {
+  for (const roots of ['C:\\a;C:\\b', '["relative"]', '{"a":1}', '[]']) {
+    const child = spawn(process.execPath, ['--require', MODULE_GUARD, '-e', 'console.log("started")'], { env: { ...systemEnvironment(), AWWO_LOCAL_MODULE_ROOTS: roots }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let output = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { output += chunk; });
+    assert.notEqual(await new Promise(resolve => child.once('exit', resolve)), 0, roots);
+    assert.match(output, /AWWO_LOCAL_MODULE_ROOTS must be a JSON array of absolute folders/, roots);
+  }
 });
 
 test('the operating system\'s lock: one exclusive holder, or any number of shared ones, never both', async () => {
