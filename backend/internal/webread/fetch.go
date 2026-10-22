@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -28,10 +29,16 @@ type Options struct {
 	MaxTextBytes int           // extracted text, cut on a character boundary; default 256 KiB
 	MaxRedirects int           // default 5
 	Robots       *RobotsCache  // nil skips robots.txt (production callers always pass one)
+	// Proxy, when set, is a proxy on this computer (http://127.0.0.1:<port>, checked by the caller's configuration)
+	// that every connection goes through, and then the only address dialed: the site's name is resolved here and the
+	// proxy is asked for a tunnel to the public address found (proxyDial), never to the name.
+	Proxy *url.URL
 	// AllowLoopbackForTests lets tests dial servers on 127.0.0.1/::1, and only those; DialAddressForTests (honoured
-	// only together with it) maps a test host name to such a server. Never set in production.
+	// only together with it) maps a test host name to such a server, and LookupForTests (likewise) answers the name
+	// lookup a read through Proxy makes. Never set in production.
 	AllowLoopbackForTests bool
 	DialAddressForTests   func(hostport string) string
+	LookupForTests        func(ctx context.Context, host string) ([]netip.Addr, error)
 	Now                   func() time.Time
 }
 
@@ -91,14 +98,12 @@ type Result struct {
 const pageAccept = "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.7,*/*;q=0.1"
 
 func newClient(opt Options) *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: dialControl(opt.AllowLoopbackForTests)}
-	dial := dialer.DialContext
-	if opt.AllowLoopbackForTests && opt.DialAddressForTests != nil {
-		dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, opt.DialAddressForTests(address))
-		}
+	dial := directDial(opt)
+	if opt.Proxy != nil {
+		dial = proxyDial(opt)
 	}
 	transport := &http.Transport{
+		// No proxy variable is ever read: an explicit Proxy is dialed by proxyDial, which picks the address itself.
 		Proxy:                  nil,
 		DialContext:            dial,
 		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
@@ -112,9 +117,21 @@ func newClient(opt Options) *http.Client {
 	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// directDial connects to the site itself; dialControl checks each address as it is connected.
+func directDial(opt Options) func(ctx context.Context, network, address string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: dialControl(opt.AllowLoopbackForTests, nil)}
+	if opt.AllowLoopbackForTests && opt.DialAddressForTests != nil {
+		return func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, opt.DialAddressForTests(address))
+		}
+	}
+	return dialer.DialContext
+}
+
 // Client is the HTTP client Fetch reads with, for a caller that asks a fixed public API itself (the skill registry,
-// app/skill_registry.go): public addresses only, checked as each connection is made, no proxy, no cookies, TLS 1.2 or
-// newer, and no redirect followed. The caller bounds each request with its context.
+// app/skill_registry.go): public addresses only, checked as each connection is made (through an explicit Proxy, as
+// each tunnel is asked for), no proxy variables, no cookies, TLS 1.2 or newer, and no redirect followed. The caller
+// bounds each request with its context.
 func Client(opt Options) *http.Client { return newClient(opt.withDefaults()) }
 
 func get(ctx context.Context, client *http.Client, target *url.URL, opt Options, accept string) (*http.Response, error) {

@@ -3,6 +3,7 @@ package webread
 import (
 	"errors"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -92,7 +93,7 @@ func TestPublicAddress(t *testing.T) {
 }
 
 func TestDialControlRefusesNonPublicAddresses(t *testing.T) {
-	control := dialControl(false)
+	control := dialControl(false, nil)
 	for _, address := range []string{"127.0.0.1:443", "[::1]:443", "10.0.0.1:80", "169.254.169.254:80", "garbage"} {
 		if errorCode(control("tcp", address, nil)) != "blocked_address" {
 			t.Fatalf("%s was not refused", address)
@@ -101,10 +102,22 @@ func TestDialControlRefusesNonPublicAddresses(t *testing.T) {
 	if err := control("tcp", "8.8.8.8:443", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := dialControl(true)("tcp", "127.0.0.1:8080", nil); err != nil {
+	if err := dialControl(true, nil)("tcp", "127.0.0.1:8080", nil); err != nil {
 		t.Fatal("loopback refused in test mode", err)
 	}
-	if errorCode(dialControl(true)("tcp", "10.0.0.1:80", nil)) != "blocked_address" {
+	if errorCode(dialControl(true, nil)("tcp", "10.0.0.1:80", nil)) != "blocked_address" {
 		t.Fatal("test mode admitted a private address")
+	}
+}
+
+func TestDialControlAdmitsTheExplicitProxyAlone(t *testing.T) {
+	control := dialControl(false, &url.URL{Scheme: "http", Host: "127.0.0.1:7897"})
+	if err := control("tcp", "127.0.0.1:7897", nil); err != nil {
+		t.Fatal("the proxy was refused", err)
+	}
+	for _, address := range []string{"127.0.0.1:7898", "[::1]:7897", "10.0.0.1:7897", "192.168.1.1:80"} {
+		if errorCode(control("tcp", address, nil)) != "blocked_address" {
+			t.Fatalf("%s was admitted beside the proxy", address)
+		}
 	}
 }

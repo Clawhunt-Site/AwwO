@@ -3,6 +3,7 @@ package webread
 import (
 	"net"
 	"net/netip"
+	"net/url"
 	"syscall"
 )
 
@@ -51,16 +52,20 @@ func PublicAddress(a netip.Addr) bool {
 	return true
 }
 
-// dialControl refuses, at connect time, every address that is not public. allowLoopback admits loopback for tests.
-func dialControl(allowLoopback bool) func(network, address string, _ syscall.RawConn) error {
+// dialControl refuses, at connect time, every address that is not public. allowLoopback admits loopback for tests;
+// proxy, when set, is the one other address admitted (Options.Proxy).
+func dialControl(allowLoopback bool, proxy *url.URL) func(network, address string, _ syscall.RawConn) error {
 	return func(network, address string, _ syscall.RawConn) error {
-		host, _, err := net.SplitHostPort(address)
+		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return failure("blocked_address", "The site's address could not be checked")
 		}
 		addr, err := netip.ParseAddr(host)
 		if err != nil {
 			return failure("blocked_address", "The site's address could not be checked")
+		}
+		if proxy != nil && host == proxy.Hostname() && port == proxy.Port() {
+			return nil
 		}
 		if allowLoopback && addr.Unmap().IsLoopback() {
 			return nil
