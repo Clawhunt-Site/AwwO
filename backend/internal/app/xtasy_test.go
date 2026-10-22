@@ -504,6 +504,8 @@ func TestPostgresXtasyRunsResendUnderOneKeyAndRefundFailures(t *testing.T) {
 	mu.Lock()
 	final = map[string]any{"status": "failed", "billing": map[string]any{"status": "released", "charged": "0"}}
 	mu.Unlock()
+	// Without RunningHub there is no backup to make it (media_fallback_test.go has the run that has one).
+	h.a.cfg.RunningHubAPIKey = ""
 	run = h.mediaRun(t, c, tid, sid, "a quiet mountain lake", 202)
 	if _, code := awaitRunRow(t, h, tid, run["id"].(string), "failed"); code != "media_failed" {
 		t.Fatal("failed task", code)

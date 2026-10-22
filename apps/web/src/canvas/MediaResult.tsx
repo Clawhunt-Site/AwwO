@@ -122,6 +122,7 @@ export function MediaResult({ output }: { output: MediaOutput }) {
   }
   return <div className="canvas-media-result" data-testid="media-result">
     <div className="canvas-media-summary">{t(mediaOutputSummaryKey(output), { count: output.items.length })}</div>
+    {output.backup ? <p className="canvas-media-backup" role="note">{t('media.madeByBackup')}</p> : null}
     <div className={`canvas-media-grid canvas-media-grid--${output.kind}`}>
       {output.items.map(item => <MediaItem key={item.artifactId} item={item} kind={output.kind} />)}
     </div>

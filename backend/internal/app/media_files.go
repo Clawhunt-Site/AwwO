@@ -24,7 +24,8 @@ import (
 // and records it as an artifact of the run's canvas node. A file whose bytes are not an image (for
 // an image node), a video (for a video node), MP3 or WAV audio (for an audio node) or a binary glTF model (first, for a
 // 3D node, beside its rendered preview image) is refused, whatever the provider called it.
-func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult, textureMax int) (string, error) {
+// backup says a backup model made them (media_fallback.go), which the record then says.
+func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, results []rhResult, textureMax int, backup bool) (string, error) {
 	results = mediaFileResults(results)
 	if len(results) == 0 {
 		return "", &rhError{Code: "media_no_output"}
@@ -53,12 +54,22 @@ func (a *App) storeMediaResults(ctx context.Context, hub mediaProvider, tid, id,
 		}
 		items = append(items, item)
 	}
+	if backup {
+		return mediaBackupRecord(m, items), nil
+	}
 	return mediaOutputRecord(m, items), nil
 }
 
 // mediaOutputRecord is a run's awwo.media record: the files it kept, in order.
 func mediaOutputRecord(m *mediaModel, items []mediaItem) string {
 	output, _ := json.Marshal(map[string]any{"type": mediaOutputType, "version": 1, "kind": m.Kind, "model": m.ID, "items": items})
+	return string(output)
+}
+
+// mediaBackupRecord is mediaOutputRecord for files a backup made (media_fallback.go): "backup": true says so, without
+// naming the provider, so a canvas can tell its reader, live or long after.
+func mediaBackupRecord(m *mediaModel, items []mediaItem) string {
+	output, _ := json.Marshal(map[string]any{"type": mediaOutputType, "version": 1, "kind": m.Kind, "model": m.ID, "items": items, "backup": true})
 	return string(output)
 }
 

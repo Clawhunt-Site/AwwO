@@ -19,6 +19,8 @@ export interface MediaOutput {
   kind: MediaOutputKind;
   model: string;
   items: MediaOutputItem[];
+  /** A backup model made it, after the node's own model's service failed it (the API's media_fallback.go). */
+  backup?: true;
 }
 
 export const MEDIA_OUTPUT_TYPE = 'awwo.media';
@@ -69,7 +71,8 @@ export function parseMediaOutput(text: unknown): MediaOutput | null {
     }
     items.push(read);
   }
-  return { kind, model: record.model.slice(0, 80), items };
+  if (record.backup !== undefined && record.backup !== true) return null;
+  return { kind, model: record.model.slice(0, 80), items, ...(record.backup ? { backup: true as const } : {}) };
 }
 
 

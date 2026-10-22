@@ -279,6 +279,18 @@ describe('media results', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
+  it('says a backup model made a result, from its record, without naming any service', () => {
+    const backed = mediaText('image', 'image/png').replace('"items"', '"backup":true,"items"');
+    expect(parseMediaOutput(backed)?.backup).toBe(true);
+    expect(parseMediaOutput(mediaText('image', 'image/png'))?.backup).toBeUndefined();
+    expect(parseMediaOutput(mediaText('image', 'image/png').replace('"items"', '"backup":"yes","items"'))).toBeNull();
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
+    const view = render(<TileTranscript mediaResults turns={[agentTurn(backed)]} history="loaded" streaming={false} />);
+    expect(screen.getByRole('note')).toHaveTextContent('主通道暂不可用，这次由备用模型生成。');
+    view.rerender(<TileTranscript mediaResults turns={[agentTurn(mediaText('image', 'image/png'))]} history="loaded" streaming={false} />);
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
   it('reports the provider state while a generation runs', async () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
     configureSaaSCanvasSave(async () => {});
@@ -299,6 +311,30 @@ describe('media results', () => {
     } finally { document.documentElement.lang = lang; }
     for (const status of ['排队等待生成…', '正在生成…', '正在保存结果…']) expect(frames).toContain(`"status":"${status}"`);
     expect(frames).not.toContain('95%');
+    expect(frames).toContain('"event":"done","status":"succeeded"');
+  });
+
+  it('says when a generation moved to a backup model, and whose the states after it are', async () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
+    configureSaaSCanvasSave(async () => {});
+    const record = mediaText('image', 'image/png');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('operationId=')) return new Response(JSON.stringify({ items: [] }));
+      if (url.endsWith('/runs')) return new Response(JSON.stringify({ id: 'run-a', sessionId: 'session-a', status: 'queued' }));
+      if (url.endsWith('/events')) return new Response(['{"type":"running"}', '{"type":"media_status","status":"queued"}', '{"type":"media_status","status":"backup"}',
+        '{"type":"media_status","status":"queued"}', '{"type":"media_status","status":"running"}', '{"type":"media_status","status":"saving"}',
+        JSON.stringify({ type: 'completed', text: record })].map(row => `data: ${row}\n\n`).join(''));
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const lang = document.documentElement.lang;
+    document.documentElement.lang = 'zh-CN';
+    let frames = '';
+    try {
+      const response = await canvasFetch('/gateway-api/conversations/tenant-a/agents/agent-a/messages', { method: 'POST', body: JSON.stringify({ message: 'a red bicycle', operationId: 'op-a', issueId: 'session-a' }) });
+      frames = await response.text();
+    } finally { document.documentElement.lang = lang; }
+    const statuses = [...frames.matchAll(/"status":"([^"]+)"/g)].map(m => m[1]).filter(s => s.endsWith('…'));
+    expect(statuses).toEqual(['排队等待生成…', '主通道暂不可用，已换用备用模型…', '排队等待备用模型生成…', '正在用备用模型生成…', '正在保存结果…']);
     expect(frames).toContain('"event":"done","status":"succeeded"');
   });
 });

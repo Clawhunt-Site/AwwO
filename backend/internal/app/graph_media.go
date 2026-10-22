@@ -328,11 +328,12 @@ func (a *App) admitGraphMedia(ctx context.Context, tx pgx.Tx, tid, gid, nid, sid
 	if !ok || m.Kind != plan.Kind || m.Provider != plan.Provider {
 		return errors.New("snapshot_invalid")
 	}
-	// Frozen when the graph was admitted, which can be long before now: the provider and the workspace's allowlist
-	// are read again, as restamp does for a text node.
+	// Frozen when the graph was admitted, which can be long before now: the provider, the backups (media_fallback.go)
+	// and the workspace's allowlist are read again, as restamp does for a text node.
 	if !a.cfg.mediaProviderConfigured(m.Provider) {
 		return errors.New("media_unavailable")
 	}
+	plan.Backups = a.mediaBackupsFor(m, plan.Params, entitlement)
 	if !a.mediaEntitled(entitlement, plan.Model) {
 		return errors.New("model_not_allowed")
 	}

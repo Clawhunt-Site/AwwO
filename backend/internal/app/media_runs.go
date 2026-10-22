@@ -45,6 +45,9 @@ type mediaPlan struct {
 	References []mediaReference `json:"references,omitempty"`
 	// Motion is a 3D model's rig and animation chain, frozen at admission (tripo_motion.go); nil for every other run.
 	Motion *tripoMotion `json:"motion,omitempty"`
+	// Backups are the other provider's models that may make the generation if its own provider fails it, in order,
+	// frozen at admission (media_fallback.go).
+	Backups []mediaBackup `json:"backups,omitempty"`
 }
 
 type mediaItem struct {
@@ -253,6 +256,7 @@ func (a *App) mediaPlanSnapshot(document []byte, nodeID, model string, entitleme
 		return executionSnapshot{}, setupError{"media_params_invalid", "Node media settings are invalid for its model"}
 	}
 	plan := &mediaPlan{Version: 1, Provider: m.Provider, Model: m.ID, Kind: m.Kind, Params: params}
+	plan.Backups = a.mediaBackupsFor(m, params, entitlement)
 	runtime := runtimeRunningHub
 	switch m.Provider {
 	case mediaProviderTripo:
@@ -539,7 +543,9 @@ func mediaFailureCode(err error) string {
 	return "media_failed"
 }
 
-// executeMedia submits the run once and follows it to a terminal state.
+// executeMedia submits the run once and follows it to a terminal state. A generation its provider fails for a reason
+// on the operator's side is made once more by a backup frozen with the run (media_fallback.go), unless the run has
+// too little time left to send it.
 func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, snapshot executionSnapshot) {
 	plan := snapshot.Media
 	m, ok := builtinMediaCatalog.model(plan.Model)
@@ -547,35 +553,139 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 		a.finish(tid, id, "failed", "", "snapshot_invalid")
 		return
 	}
-	hub := a.mediaProviderFor(m.Provider)
-	if hub == nil {
-		a.finish(tid, id, "failed", "", "media_unavailable")
-		return
-	}
 	// The stored prompt ends with the lines of its reference pictures; the provider gets the words alone.
 	text := strings.TrimSpace(stripAttachmentLines(prompt))
+	a.settleMedia(ctx, tid, id, sid, text, plan, a.generateMedia(ctx, tid, id, sid, text, m, plan, mediaPrior{}))
+}
+
+// mediaOutcome is how one route of a generation ended (generateMedia, awaitMedia). code is "" when the run is
+// settled (completed, or stopped by a cancel or a shutdown), else the code it fails with; backupMay says a backup may
+// make the generation instead, for no task of it can still be charged (media_fallback.go). The rest the caller
+// records, as it settles the generation (settleMedia): refused, the provider refused it outright for a reason on the
+// operator's side, or it was never sent because an upload failed (markMediaRefused, unless a backup is sent); noTask,
+// no task was made (an answer that said so, for whatever reason, or nothing sent); unbilled, the provider ended a task
+// it made without charging for it (unbillMedia, unless a backup is sent, so the plan's credits stay reserved
+// meanwhile); taken, the submission's own answer named that task, which no row records as taken.
+type mediaOutcome struct {
+	code      string
+	backupMay bool
+	refused   bool
+	noTask    bool
+	unbilled  bool
+	taken     bool
+}
+
+// mediaPrior is what a run's first route leaves its backup's (markMediaBackup): whether the first provider took the
+// task (accepted: the generation keeps counting, whatever the backup does) and charged for it (charged: a refund of the
+// backup's task does not take that charge back). backup says the route is a backup (its record says so).
+type mediaPrior struct{ accepted, charged, backup bool }
+
+// settleMedia ends a generation whose first route ended as out: once more on its backup when out allows one and the
+// run can still send it (media_fallback.go), otherwise as out says. What the first route's end gives back, its
+// refusal's free attempt (markMediaRefused) or its refund (unbillMedia), is written only when no backup is sent: until
+// then the generation keeps counting and its plan's credits stay reserved, so no other run can take their place.
+func (a *App) settleMedia(ctx context.Context, tid, id, sid, text string, plan *mediaPlan, out mediaOutcome) {
+	if out.code != "" && out.backupMay && !mediaSendTooLate(ctx, a.cfg.MediaTimeout) {
+		if backup, route, ok := mediaBackupFor(plan, text); ok && a.mediaProviderFor(backup.Provider) != nil {
+			if a.mediaStopped(ctx, id, false) {
+				// A cancel settled the run; a shutdown leaves it to be marked interrupted (nothing is in flight).
+				out.code = ""
+			} else {
+				prior, e := a.markMediaBackup(ctx, tid, id, plan.Model, route, out)
+				switch {
+				case errors.Is(e, errMediaRunEnded):
+					out.code = ""
+				case e != nil:
+					a.log.Warn("media backup not recorded; not sent", "event", "media_backup_unrecorded")
+				default:
+					a.log.Warn("media generation moved to its backup", "event", "media_backup", "run", id, "from", plan.Model, "to", route.Model, "code", out.code)
+					a.mediaStatus(ctx, tid, id, "backup")
+					next := a.generateMedia(ctx, tid, id, sid, text, backup, route, prior)
+					a.settleBackup(ctx, tid, id, out, next, prior)
+					return
+				}
+			}
+		}
+	}
+	if out.refused {
+		a.markMediaRefused(ctx, tid, id)
+	}
+	if out.unbilled {
+		a.unbillMedia(ctx, tid, id)
+	}
+	if out.code != "" {
+		a.finish(tid, id, "failed", "", out.code)
+	}
+}
+
+// settleBackup records what a backup's route ended with (next), after a first route that ended as first and left
+// prior (markMediaBackup), and fails the run when the backup failed:
+//   - a refusal of the backup gives the free attempt back only when the first provider never took the task: one on
+//     the operator's side, or, after the first provider's own was, one of the request the service built for the backup
+//     (never one of the content);
+//   - a refund of the backup's task, or a backup that made no task after the first provider refunded its own, leaves
+//     the generation uncharged (unbillMedia), unless the first provider charged;
+//   - the run fails with what went wrong first, unless the backup refused the content itself: the backup's own code
+//     would speak of settings and switches the reader's node does not have (mediaBackupFailure).
+func (a *App) settleBackup(ctx context.Context, tid, id string, first, next mediaOutcome, prior mediaPrior) {
+	if (next.refused || first.refused && next.noTask && mediaBackupCodes[next.code]) && !prior.accepted {
+		a.markMediaRefused(ctx, tid, id)
+	}
+	if !prior.charged && (next.unbilled || prior.accepted && (next.refused || next.noTask)) {
+		a.unbillMedia(ctx, tid, id)
+	}
+	if next.code != "" {
+		a.finish(tid, id, "failed", "", mediaBackupFailure(first.code, next.code))
+	}
+}
+
+// mediaBackupFailure is the code a run fails with when its backup failed with next after its first route failed with
+// first: first's, unless the backup refused the content itself (or the first's is unknown). A refused real person is
+// told as refused content: the switch its own code speaks of is one the reader's node may not have.
+func mediaBackupFailure(first, next string) string {
+	switch {
+	case next == "media_real_person_rejected":
+		return "media_content_rejected"
+	case first == "" || next == "media_content_rejected":
+		return next
+	}
+	return first
+}
+
+// generateMedia makes a run's generation on one model: its provider's uploads of the run's references, its one task
+// and its results; prior is what an earlier route left (mediaPrior). It settles the run itself when the generation
+// completes, and returns code "" then and when a cancel or a shutdown stopped it; otherwise its outcome says the code
+// the run fails with, whether a backup may make the generation instead (only while the provider holds no task of it
+// that could still be charged, for a code in mediaBackupCodes) and whether the provider refused it outright.
+func (a *App) generateMedia(ctx context.Context, tid, id, sid, text string, m *mediaModel, plan *mediaPlan, prior mediaPrior) mediaOutcome {
+	hub := a.mediaProviderFor(m.Provider)
+	if hub == nil {
+		return mediaOutcome{code: "media_unavailable", backupMay: true, noTask: true}
+	}
+	// Every end before the submission says no task was made (noTask): nothing was sent.
+	unsent := mediaOutcome{noTask: true}
 	var references []string
 	if len(plan.References) > 0 {
 		// An upload creates no task and no charge; a run that fails here is not billed (recordMediaTask never ran).
 		if a.mediaStopped(ctx, id, false) {
-			return
+			return unsent
 		}
 		ids, err := a.uploadMediaReferences(ctx, hub, tid, id, plan.References)
 		if err != nil {
 			if a.mediaStopped(ctx, id, false) {
-				return
+				return unsent
 			}
-			a.finish(tid, id, "failed", "", mediaFailureCode(err))
-			return
+			// Nothing was sent, so its free attempt is given back (refused), as a submission's refusal gives it.
+			code := mediaFailureCode(err)
+			return mediaOutcome{code: code, backupMay: mediaBackupCodes[code], refused: true, noTask: true}
 		}
 		references = ids
 		// A run that waited long for its uploads (referenceUploadSlots) is not sent late: unsent, nothing is charged.
 		if mediaSendTooLate(ctx, a.cfg.MediaTimeout) {
 			if a.mediaStopped(ctx, id, false) {
-				return
+				return unsent
 			}
-			a.finish(tid, id, "failed", "", "media_provider_busy")
-			return
+			return mediaOutcome{code: "media_provider_busy", noTask: true}
 		}
 	}
 	endpoint := m.Endpoint
@@ -600,38 +710,46 @@ func (a *App) executeMedia(ctx context.Context, tid, id, sid, prompt string, sna
 	// and recorded (the API client's own timeout bounds the wait). The one answer that is sent
 	// again is one saying no task was created (submitMedia).
 	if a.mediaStopped(ctx, id, false) {
-		return
+		return unsent
 	}
 	// The generation counts as sent before the provider can bill it (generationCounts); one that cannot be marked so is
 	// not sent at all, and so costs nothing. A run cancelled meanwhile was settled by its cancel.
 	if e := a.markMediaSubmitted(ctx, tid, id); errors.Is(e, errMediaRunEnded) {
-		return
+		return unsent
 	} else if e != nil {
 		a.log.Warn("media submission not recorded; not sent", "event", "media_submit_unrecorded")
-		a.finish(tid, id, "failed", "", "media_unavailable")
-		return
+		return mediaOutcome{code: "media_unavailable", noTask: true}
 	}
 	task, err := submitMedia(ctx, hub, endpoint, body, func() { a.mediaStatus(ctx, tid, id, "queued") })
 	if err != nil {
-		if e, ok := asRHError(err); ok && e.Refused {
-			a.markMediaRefused(ctx, tid, id)
-		}
+		e, ok := asRHError(err)
+		refused, noTask := ok && e.Refused, ok && e.NoTask
 		if a.mediaStopped(ctx, id, false) {
-			return
+			return mediaOutcome{refused: refused, noTask: noTask}
 		}
-		a.finish(tid, id, "failed", "", mediaFailureCode(err))
-		return
+		code := mediaFailureCode(err)
+		out := mediaOutcome{code: code, refused: refused, noTask: noTask}
+		// Only an answer that says no task was created, or that the task it made has already ended without charging for
+		// it, lets a backup make the generation: after a resend, or without an answer, a task may exist and be charged,
+		// and one that ended charged is the generation's as it is.
+		switch {
+		case noTask:
+			out.backupMay = mediaBackupCodes[code]
+		case ok && e.Ended && e.Unbilled:
+			// A task it made and ended uncharged: its refund is the generation's, as a polled task's is.
+			out.backupMay, out.taken, out.unbilled = mediaBackupCodes[code], true, true
+		}
+		return out
 	}
 	if task.TaskID == "" {
-		a.finish(tid, id, "failed", "", "media_provider_unavailable")
-		return
+		return mediaOutcome{code: "media_provider_unavailable"}
 	}
 	recorded := a.recordMediaTask(ctx, tid, id, task.TaskID) == nil
 	if !recorded {
 		// Polling still works in this process; only a restart could not resume it.
 		a.log.Warn("media task id not recorded", "event", "media_task_unrecorded")
 	}
-	a.followMedia(ctx, hub, tid, id, sid, m, plan, task, recorded, motionProgress{})
+	return a.awaitMedia(ctx, hub, tid, id, sid, m, plan, task, recorded, motionProgress{}, prior)
 }
 
 // leaveForResume marks a media run that stopped only because the API is shutting down (or lost
@@ -700,6 +818,11 @@ func (a *App) pollMedia(ctx context.Context, hub mediaProvider, task rhTask, rep
 			if ctx.Err() != nil {
 				continue
 			}
+			// An answer about another task is never this run's, not even its failure (whose refund or backup would be
+			// another task's).
+			if next.TaskID != "" && next.TaskID != task.TaskID {
+				return task, &rhError{Code: "media_provider_unavailable"}
+			}
 			if e, ok := asRHError(err); ok && e.is("media_pending") {
 				// "Still queued / running" answered as an error code: not a failure.
 				failures = 0
@@ -730,9 +853,9 @@ func (a *App) pollMedia(ctx context.Context, hub mediaProvider, task rhTask, rep
 // few workspaces generate at once): that is waited out as the provider asked, with the run shown as queued
 // (waiting is called once), until the task is accepted, refused otherwise, or the run is cancelled or past its
 // deadline. Each send has its own timeout and is never abandoned midway, like the single send it replaces.
-// A refusal gives the generation's attempt back (rhError.Refused) only when it answered the first send: X-tasy also
-// sends again after an answer that never arrived (its Idempotency-Key returns the task the first send made), so after
-// any resend an earlier send may have created, and billed, the task.
+// A refusal gives the generation's attempt back (rhError.Refused), and says no task exists (rhError.NoTask), only when
+// it answered the first send: X-tasy also sends again after an answer that never arrived (its Idempotency-Key returns
+// the task the first send made), so after any resend an earlier send may have created, and billed, the task.
 func submitMedia(ctx context.Context, hub mediaProvider, endpoint string, body map[string]any, waiting func()) (rhTask, error) {
 	notified := false
 	for sends := 1; ; sends++ {
@@ -741,7 +864,7 @@ func submitMedia(ctx context.Context, hub mediaProvider, endpoint string, body m
 		cancelSubmit()
 		e, ok := asRHError(err)
 		if ok && sends > 1 {
-			e.Refused = false
+			e.Refused, e.NoTask = false, false
 		}
 		if !ok || e.RetryAfter <= 0 {
 			return task, err
@@ -819,7 +942,9 @@ func (a *App) recordMediaTask(ctx context.Context, tid, id, taskID string) error
 	if _, e := a.db.Exec(ctx, "UPDATE media_generations SET provider_accepted=true WHERE tenant_id=$1 AND run_id=$2", tid, id); e != nil {
 		return e
 	}
-	tag, e := a.db.Exec(ctx, "UPDATE runs SET media_task=COALESCE(media_task,'{}'::jsonb)||jsonb_build_object('taskId',$3::text,'submittedAt',to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')) WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, taskID)
+	// A backup's task keeps the time its run's generation was first sent (markMediaBackup): a restart resumes it
+	// within the run's own deadline, not a new one.
+	tag, e := a.db.Exec(ctx, "UPDATE runs SET media_task=COALESCE(media_task,'{}'::jsonb)||jsonb_build_object('taskId',$3::text,'submittedAt',COALESCE(media_task->>'submittedAt',to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))) WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, taskID)
 	if e == nil && tag.RowsAffected() == 0 {
 		return errors.New("run is no longer running")
 	}
@@ -837,7 +962,24 @@ func (a *App) mediaStatus(ctx context.Context, tid, id, status string) {
 // stores the results, or for a 3D model with a skeleton runs its chain (followTripoMotion). recorded
 // says whether the task id is durable, so a shutdown can leave the run for the next start instead of
 // settling it; progress is how far a resumed run's chain got.
-func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, plan *mediaPlan, task rhTask, recorded bool, progress motionProgress) {
+// A backup's task that a restart resumed ends the run as it ends (followMedia): there is no second backup, a charge
+// the first provider made stands (prior), and a failure is reported as the first route's was (first, its code).
+func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, plan *mediaPlan, task rhTask, recorded bool, progress motionProgress, prior mediaPrior, first string) {
+	out := a.awaitMedia(ctx, hub, tid, id, sid, m, plan, task, recorded, progress, prior)
+	if out.unbilled && !prior.charged {
+		a.unbillMedia(ctx, tid, id)
+	}
+	if out.code != "" {
+		a.finish(tid, id, "failed", "", mediaBackupFailure(first, out.code))
+	}
+}
+
+// awaitMedia is followMedia that returns how the generation ended (mediaOutcome) instead of settling a failed run: a
+// backup may make it when the provider's own answer says the task ended without a result, for a reason on the
+// operator's side (rhError.Ended, mediaBackupCodes); never when the provider only failed to say how the task is doing
+// (it may still make and charge it), when the run's own time ran out, or when the results of a task that delivered, and
+// is charged, could not be stored. A refund it reports (unbilled) the caller records.
+func (a *App) awaitMedia(ctx context.Context, hub mediaProvider, tid, id, sid string, m *mediaModel, plan *mediaPlan, task rhTask, recorded bool, progress motionProgress, prior mediaPrior) mediaOutcome {
 	// A generation admitted with a chain was priced for it: until the chain runs, none of it is charged.
 	unchained := func() {
 		if plan.Motion != nil {
@@ -851,39 +993,43 @@ func (a *App) followMedia(ctx context.Context, hub mediaProvider, tid, id, sid s
 			if !resumes {
 				unchained()
 			}
-			return
+			return mediaOutcome{}
 		}
 		unchained()
-		a.finish(tid, id, "failed", "", "media_timeout")
-		return
+		return mediaOutcome{code: "media_timeout"}
 	}
 	if err != nil {
-		if e, ok := asRHError(err); ok && e.Unbilled {
-			a.unbillMedia(ctx, tid, id)
-		}
+		e, ok := asRHError(err)
 		unchained()
-		a.finish(tid, id, "failed", "", mediaFailureCode(err))
-		return
+		code := mediaFailureCode(err)
+		// X-tasy says what it charged: a task it ended charged is the generation's as it is (RunningHub says nothing).
+		charged := m.Provider == mediaProviderXtasy && !(ok && e.Unbilled)
+		return mediaOutcome{code: code, backupMay: ok && e.Ended && !charged && mediaBackupCodes[code], unbilled: ok && e.Unbilled}
 	}
 	if plan.Motion != nil {
 		a.followTripoMotion(ctx, hub, tid, id, sid, m, plan.Motion, task, recorded, progress, textureMaxOf(plan.Params))
-		return
+		return mediaOutcome{}
 	}
 	a.mediaStatus(ctx, tid, id, "saving")
-	output, err := a.storeMediaResults(ctx, hub, tid, id, sid, m, task.Results, textureMaxOf(plan.Params))
+	output, err := a.storeMediaResults(ctx, hub, tid, id, sid, m, task.Results, textureMaxOf(plan.Params), prior.backup)
 	if err != nil {
 		if a.mediaStopped(ctx, id, recorded) {
-			return
+			return mediaOutcome{}
 		}
-		a.finish(tid, id, "failed", "", mediaFailureCode(err))
-		return
+		return mediaOutcome{code: mediaFailureCode(err)}
 	}
 	a.finish(tid, id, "completed", output, "")
+	return mediaOutcome{}
 }
 
 type resumableMedia struct {
 	tenant, run, session, task string
-	elapsed                    time.Duration
+	// model is the model the task was sent to: the run's own, or the backup it moved to (markMediaBackup); then
+	// charged says the first provider charged for a task of the run before that, and backupFor is the code its route
+	// failed with.
+	model, backupFor string
+	charged          bool
+	elapsed          time.Duration
 	// How far a 3D model's chain got (tripo_motion.go).
 	motion motionProgress
 }
@@ -891,7 +1037,8 @@ type resumableMedia struct {
 // resumableMediaRuns lists media runs that were waiting on a provider task when the API stopped.
 // They are excluded from the restart sweep and resumed: their generation is already paid for.
 func resumableMediaRuns(ctx context.Context, tx pgx.Tx) ([]resumableMedia, error) {
-	rows, e := tx.Query(ctx, `SELECT tenant_id,id,session_id,media_task->>'taskId',
+	rows, e := tx.Query(ctx, `SELECT tenant_id,id,session_id,media_task->>'taskId',COALESCE(media_task->>'model',''),
+		COALESCE(media_task->>'backupFor',''),COALESCE(media_task->>'firstCharged','')='true',
 		GREATEST(0,EXTRACT(EPOCH FROM now()-COALESCE(NULLIF(media_task->>'submittedAt','')::timestamptz,created_at)))::bigint,
 		COALESCE(media_task->'motionTasks','[]'::jsonb)::text,COALESCE(media_task->>'motionSent','0')
 		FROM runs WHERE status='running' AND media_task ? 'taskId'`)
@@ -904,7 +1051,7 @@ func resumableMediaRuns(ctx context.Context, tx pgx.Tx) ([]resumableMedia, error
 		var item resumableMedia
 		var seconds int64
 		var tasks, sent string
-		if e = rows.Scan(&item.tenant, &item.run, &item.session, &item.task, &seconds, &tasks, &sent); e != nil {
+		if e = rows.Scan(&item.tenant, &item.run, &item.session, &item.task, &item.model, &item.backupFor, &item.charged, &seconds, &tasks, &sent); e != nil {
 			return nil, e
 		}
 		item.elapsed = time.Duration(seconds) * time.Second
@@ -936,13 +1083,24 @@ func (a *App) resumeMedia(items []resumableMedia) {
 		}
 		a.dispatchFor(remaining, item.tenant, item.run, "node", func(ctx context.Context) {
 			var raw []byte
+			var prompt string
 			var snapshot executionSnapshot
-			if a.db.QueryRow(ctx, "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", item.tenant, item.run).Scan(&raw) != nil || json.Unmarshal(raw, &snapshot) != nil || snapshot.Media == nil {
+			if a.db.QueryRow(ctx, "SELECT execution_snapshot,prompt FROM runs WHERE tenant_id=$1 AND id=$2", item.tenant, item.run).Scan(&raw, &prompt) != nil || json.Unmarshal(raw, &snapshot) != nil || snapshot.Media == nil {
 				a.finish(item.tenant, item.run, "failed", "", "snapshot_invalid")
 				return
 			}
-			m, ok := builtinMediaCatalog.model(snapshot.Media.Model)
-			if ok && !frozenMotionValid(m, snapshot.Media, false) {
+			first := snapshot.Media
+			plan := first
+			m, ok := builtinMediaCatalog.model(plan.Model)
+			backup := ok && item.model != "" && item.model != plan.Model
+			if backup {
+				// The task is a backup's (markMediaBackup): it is followed on the backup's provider.
+				if m, plan, ok = mediaResumedBackup(plan, item.model); !ok {
+					a.finish(item.tenant, item.run, "failed", "", "snapshot_invalid")
+					return
+				}
+			}
+			if ok && !frozenMotionValid(m, plan, false) {
 				a.finish(item.tenant, item.run, "failed", "", "snapshot_invalid")
 				return
 			}
@@ -954,7 +1112,15 @@ func (a *App) resumeMedia(items []resumableMedia) {
 				a.finish(item.tenant, item.run, "failed", "", "media_unavailable")
 				return
 			}
-			a.followMedia(ctx, hub, item.tenant, item.run, item.session, m, snapshot.Media, rhTask{TaskID: item.task, Status: "RUNNING"}, true, item.motion)
+			task := rhTask{TaskID: item.task, Status: "RUNNING"}
+			if backup {
+				// A backup's task ends the run as it ends: there is no second backup.
+				a.followMedia(ctx, hub, item.tenant, item.run, item.session, m, plan, task, true, item.motion, mediaPrior{accepted: item.charged, charged: item.charged, backup: true}, item.backupFor)
+				return
+			}
+			// The run's own task may still end in a way its backup can make good, as when it was first sent.
+			out := a.awaitMedia(ctx, hub, item.tenant, item.run, item.session, m, plan, task, true, item.motion, mediaPrior{})
+			a.settleMedia(ctx, item.tenant, item.run, item.session, strings.TrimSpace(stripAttachmentLines(prompt)), first, out)
 		})
 	}
 }

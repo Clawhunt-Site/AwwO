@@ -169,9 +169,14 @@ export async function deleteCanvasUpload(id: string): Promise<void> {
 
 /** An image or video run reports the provider's own state; there is no invented percentage. A 3D model with a skeleton
  *  reports its chain's steps too: the rig, then its animations. */
-const mediaStatusText = (status: unknown): string | null => status === 'queued' ? canvasText('排队等待生成…', 'Queued for generation…')
-  : status === 'running' ? canvasText('正在生成…', 'Generating…') : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…')
-    : status === 'rigging' ? canvasText('正在绑定骨骼…', 'Rigging the model…') : status === 'animating' ? canvasText('正在生成动作…', 'Animating the model…') : null;
+// backup: the generation moved to a backup model after its own service failed it (media_status "backup", the API's
+// media_fallback.go), so the states that follow say whose they are.
+const mediaStatusText = (status: unknown, backup = false): string | null => status === 'backup'
+  ? canvasText('主通道暂不可用，已换用备用模型…', 'The usual service is unavailable; switching to a backup model…')
+  : status === 'queued' ? (backup ? canvasText('排队等待备用模型生成…', 'Queued on a backup model…') : canvasText('排队等待生成…', 'Queued for generation…'))
+    : status === 'running' ? (backup ? canvasText('正在用备用模型生成…', 'Generating with a backup model…') : canvasText('正在生成…', 'Generating…'))
+      : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…')
+        : status === 'rigging' ? canvasText('正在绑定骨骼…', 'Rigging the model…') : status === 'animating' ? canvasText('正在生成动作…', 'Animating the model…') : null;
 
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
@@ -511,6 +516,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const stream = new ReadableStream<Uint8Array>({ async start(controller) {
         let ended = false;
         let output = '';
+        let backup = false;
         const emit = (frame: unknown) => { if (!ended) controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)); };
         try {
           emit({ event: 'accepted', issueId: sessionId, runId: run.id, runVisible: true, operationId });
@@ -531,7 +537,8 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             } else if (event.type === 'cancelled') emit({ event: 'done', status: 'cancelled' });
             else if (event.type === 'queued' || event.type === 'running') emit({ event: 'status', status: event.type });
             else if (event.type === 'media_status') {
-              const status = mediaStatusText(event.status);
+              if (event.status === 'backup') backup = true;
+              const status = mediaStatusText(event.status, backup);
               if (status) emit({ event: 'status', status });
             }
           });

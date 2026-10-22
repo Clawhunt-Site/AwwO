@@ -326,7 +326,12 @@ func (x *xtasyClient) submit(ctx context.Context, endpoint string, body map[stri
 		return rhTask{}, xtasyResendable(err, 0)
 	}
 	if status < 200 || status > 299 {
-		return rhTask{}, xtasyResendable(refusedAnswer(xtasyHTTPError(status, data)), wait)
+		err := xtasyHTTPError(status, data)
+		// A client error turns the submission away: it made no task. A redirect or a server error may have.
+		if status >= 400 && status < 500 {
+			err = refusedAnswer(err)
+		}
+		return rhTask{}, xtasyResendable(err, wait)
 	}
 	task, err := parseXtasyTask(data, "", x.base)
 	if err != nil {
@@ -346,6 +351,8 @@ func (x *xtasyClient) query(ctx context.Context, taskID string) (rhTask, error) 
 		return rhTask{}, err
 	}
 	if status != 200 {
+		// No answer here says the task ended, "no such task" included: a key of another account finds none of the
+		// tasks the old one made, which may still be made and charged (rhError.Ended).
 		return rhTask{}, xtasyHTTPError(status, data)
 	}
 	return parseXtasyTask(data, taskID, x.base)
@@ -525,11 +532,17 @@ func parseXtasyTask(data []byte, want, base string) (rhTask, error) {
 // leaves the run unbilled for its plan.
 func xtasyTaskFailure(state string, raw json.RawMessage, billing, charged string) error {
 	code := xtasyErrorCode(raw)
-	failure := &rhError{Code: "media_failed"}
+	failure := &rhError{Code: "media_failed", Ended: true}
 	switch {
+	case state == "rejected" || state == "blocked" || state == "moderated":
+		failure.Code = "media_content_rejected"
+	// An expired task whose code refuses the content in so many words was refused for it (a backup would be asked to
+	// make it again); another code of an expiry, CONTENT_EXPIRED say, is not a refusal.
+	case state == "expired" && xtasyModerationCode(code):
+		failure.Code = "media_content_rejected"
 	case state == "expired":
 		failure.Code = "media_result_unavailable"
-	case state == "rejected" || state == "blocked" || state == "moderated" || xtasyContentCode(code):
+	case xtasyContentCode(code):
 		failure.Code = "media_content_rejected"
 	case strings.Contains(code, "INSUFFICIENT"):
 		failure.Code = "media_provider_balance"
@@ -565,6 +578,25 @@ func xtasyContentCode(code string) bool {
 	return false
 }
 
+// xtasyModerationCode reports a code that refuses the content in so many words, as it must where that refusal
+// outranks another reading of the answer (a 403, an expiry): a word of content with one of refusal
+// (CONTENT_POLICY_VIOLATION, CONTENT_MODERATION_REJECTED, CONTENT_FILTERED, UNSAFE_CONTENT, NSFW_DETECTED), and none
+// about the account, the caller's access or region, a timeout or an outage, which may be the operator's
+// (ACCOUNT_POLICY_VIOLATION, ACCESS_DENIED_BY_POLICY, REGION_BLOCKED_BY_POLICY, MODERATION_TIMEOUT,
+// MODERATION_SERVICE_UNAVAILABLE). A word of content alone may name something else too (CONTENT_EXPIRED).
+func xtasyModerationCode(code string) bool {
+	has := func(words ...string) bool {
+		for _, word := range words {
+			if strings.Contains(code, word) {
+				return true
+			}
+		}
+		return false
+	}
+	return xtasyContentCode(code) && has("VIOLATION", "REJECT", "BLOCK", "FLAG", "FILTER", "MODERATED", "REFUS", "DENIED",
+		"PROHIBIT", "NOT_ALLOWED", "DETECT", "UNSAFE", "INAPPROPRIATE", "NSFW") && !has("ACCOUNT", "ACCESS", "REGION", "TIMEOUT", "UNAVAILABLE")
+}
+
 // xtasyHTTPError reduces an error answer ({"error": {"code", "message", "retryable"}}) to a closed code; the
 // message is never read.
 func xtasyHTTPError(status int, data []byte) error {
@@ -577,7 +609,13 @@ func xtasyHTTPError(status int, data []byte) error {
 	_ = json.Unmarshal(data, &v)
 	code := strings.ToUpper(strings.TrimSpace(v.Error.Code))
 	switch {
-	case status == 401 || status == 403 || strings.Contains(code, "API_KEY") || code == "UNAUTHORIZED" || code == "FORBIDDEN":
+	case status == 401 || strings.Contains(code, "API_KEY") || code == "UNAUTHORIZED" || code == "FORBIDDEN":
+		return &rhError{Code: "media_provider_unauthorized"}
+	// A 403 whose code refuses the content in so many words is not the key's (a backup would be asked to make it
+	// again); any other 403 is.
+	case status == 403 && xtasyModerationCode(code):
+		return &rhError{Code: "media_content_rejected"}
+	case status == 403:
 		return &rhError{Code: "media_provider_unauthorized"}
 	case status == 402 || strings.Contains(code, "INSUFFICIENT"):
 		return &rhError{Code: "media_provider_balance"}

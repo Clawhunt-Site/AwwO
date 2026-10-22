@@ -264,6 +264,14 @@ type rhError struct {
 	// Refused marks a submission the provider refused for a reason on the operator's side, creating no task and so
 	// costing nothing (refusedAnswer): a free generation refused this way gives its attempt back (generationCounts).
 	Refused bool
+	// NoTask marks a submission whose answer says the provider created no task, for whatever reason (refusedAnswer):
+	// nothing of it can be charged, so a backup may make the generation instead (media_fallback.go).
+	NoTask bool
+	// Ended marks an answer in which the task's own state says it ended without a result: failed, expired, refused.
+	// A backup may then make the generation (media_fallback.go), unlike after an answer that only failed to say how the
+	// task is doing (a refused key, an error status, a "no such task" that a key of another account or a passing fault
+	// would give for a task still being made).
+	Ended bool
 }
 
 // operatorRefusals are the refusals of a submission that are the operator's, not the request's: the key, the balance,
@@ -273,13 +281,16 @@ type rhError struct {
 var operatorRefusals = map[string]bool{"media_provider_unauthorized": true, "media_provider_balance": true,
 	"media_provider_unavailable": true, "media_request_invalid": true, "media_credit_ceiling": true}
 
-// refusedAnswer marks a provider's own refusal of a submission (an HTTP error status, or an error code in an answer
-// that carries no task) as Refused when it is a definite (non-transient) refusal on the operator's side. A transient
-// one may be sent again, and a failure to read a successful answer may hide a task, so callers apply it only where the
-// answer itself says no task was created.
+// refusedAnswer marks a provider's own definite (non-transient) refusal of a submission (an HTTP error status, or an
+// error code in an answer that carries no task) as NoTask, and as Refused too when it is on the operator's side. A
+// transient one may be sent again, and a failure to read a successful answer may hide a task, so callers apply it only
+// where the answer itself says no task was created.
 func refusedAnswer(err error) error {
-	if e, ok := asRHError(err); ok && !e.Transient && operatorRefusals[e.Code] {
-		e.Refused = true
+	if e, ok := asRHError(err); ok && !e.Transient {
+		e.NoTask = true
+		if operatorRefusals[e.Code] {
+			e.Refused = true
+		}
 	}
 	return err
 }
@@ -443,19 +454,30 @@ func (h *runningHub) call(ctx context.Context, path string, body map[string]any,
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return rhTask{}, refused(&rhError{Code: "media_provider_unauthorized"})
 	case resp.StatusCode == 429:
-		return rhTask{}, &rhError{Code: "media_provider_busy", Transient: true}
+		// A rate limit turns a submission away before it is read: it made no task.
+		return rhTask{}, &rhError{Code: "media_provider_busy", Transient: true, NoTask: submission}
 	case resp.StatusCode >= 500:
 		return rhTask{}, &rhError{Code: "media_provider_unavailable", Transient: true}
+	case resp.StatusCode >= 400:
+		// A client error turns the submission away: it made no task.
+		return rhTask{}, refused(&rhError{Code: "media_failed"})
 	case resp.StatusCode != 200:
 		return rhTask{}, &rhError{Code: "media_failed"}
 	}
 	task, err := parseRHTask(data)
 	// RunningHub answers a refused submission with 200 and an error code. One that names no task (an explicit empty
 	// taskId and status, nothing wrapped, no results), read so by parseRHTask too, created none, so an operator-side
-	// code there is a refusal like a 401's.
+	// code there is a refusal like a 401's, and even a busy one made no task.
 	if err != nil && submission && task.TaskID == "" && task.Status == "" && rhAnswerNamesNoTask(data) {
 		err = refusedAnswer(err)
+		// It says so only with a code that says why (an unreadable code says nothing, nor do the success codes 0 and
+		// 200 however they are spelled), even when the code is a busy one.
+		if e, ok := asRHError(err); ok {
+			n, bad := strconv.Atoi(task.Code)
+			e.NoTask = bad == nil && n != 0 && n != 200
+		}
 	}
+	// A "no such task" code is not taken for the task's end: RunningHub has answered it beside a task it still runs.
 	return task, err
 }
 
@@ -547,7 +569,15 @@ func parseRHTaskLevel(data []byte, unwrap bool) (rhTask, error) {
 		}
 	}
 	if task.Code != "" && task.Status != "SUCCESS" {
-		return task, rhCodeError(task.Code)
+		err := rhCodeError(task.Code)
+		// A task that says it failed has ended, whatever its code calls the cause: not one to poll again.
+		if e, ok := asRHError(err); ok && task.Status == "FAILED" {
+			if e.is("media_pending") {
+				e.Code = "media_failed"
+			}
+			e.Ended, e.Transient, e.RetryAfter = true, false, 0
+		}
+		return task, err
 	}
 	if len(v.Results) > rhMaxResults {
 		v.Results = v.Results[:rhMaxResults]
@@ -559,7 +589,7 @@ func parseRHTaskLevel(data []byte, unwrap bool) (rhTask, error) {
 	switch task.Status {
 	case "QUEUED", "RUNNING", "SUCCESS":
 	case "FAILED":
-		return task, &rhError{Code: "media_failed"}
+		return task, &rhError{Code: "media_failed", Ended: true}
 	case "":
 		if task.TaskID == "" {
 			return rhTask{}, &rhError{Code: "media_provider_unavailable", Transient: true}

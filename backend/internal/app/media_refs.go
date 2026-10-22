@@ -21,7 +21,8 @@ import (
 // The picture is chosen when the run is admitted and frozen with it (its stored path, size and SHA-256); when the
 // generation starts, it is read back, checked against that digest and uploaded to the provider that runs the node's
 // model, for that one task. Only this canvas's uploads and this canvas's generated pictures can be references:
-// nothing is fetched from anywhere else, and the bytes go to no one but that provider. An upload creates no charge,
+// nothing is fetched from anywhere else, and the bytes go to no one but that provider, or the backup's provider when
+// the generation moves to its backup (media_fallback.go). An upload creates no charge,
 // so one that fails for a passing reason is tried again, and a run that fails before its task exists is not billed.
 
 const (
