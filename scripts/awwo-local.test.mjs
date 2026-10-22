@@ -12,7 +12,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, dockerEnvironment,
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
-  postgresPort, postgresSettings, privateFile, privateFolder, protectStateDirectory, resolvePostgresBin, serviceEnvironments,
+  PASSWORD_RESET_PENDING, passwordResetApplied, postgresPort, postgresSettings, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
+  resolvePostgresBin, serviceEnvironments, writeOwnerCredentials,
   stagedShowcaseFiles, systemEnvironment, withPostgresInclude, workspaceImageTag,
 } from './awwo-local-lib.mjs';
 import { acquireLock, holdBuild, parseArguments, removeInstanceContainers } from './awwo-local.mjs';
@@ -157,6 +158,54 @@ test('providers.env passes set media keys and refuses names it does not know', a
   assert.deepEqual(profile.providers, { AWWO_RUNNINGHUB_API_KEY: 'rh-key' });
   writeFileSync(state.providers, 'AWWO_RUNNINGHUB_API_KEY=rh-key\nAWWO_CREDENTIAL_MODE=operator\n');
   await assert.rejects(loadLocalProfile(state), /unknown setting AWWO_CREDENTIAL_MODE/);
+});
+
+test('providers.env takes a proxy only as http://127.0.0.1:<port>, and says so itself', async () => {
+  const state = localState(scratch());
+  mkdirSync(state.dir, { recursive: true });
+  writeFileSync(state.providers, 'AWWO_WEB_READER_PROXY=http://127.0.0.1:7897\nAWWO_MEDIA_DEV_PROXY=http://127.0.0.1:65535\n');
+  assert.deepEqual((await loadLocalProfile(state, { random: fixedRandom() })).providers,
+    { AWWO_WEB_READER_PROXY: 'http://127.0.0.1:7897', AWWO_MEDIA_DEV_PROXY: 'http://127.0.0.1:65535' });
+  for (const bad of ['http://localhost:7897', 'https://127.0.0.1:7897', 'http://127.0.0.1', 'http://127.0.0.1:0', 'http://127.0.0.1:07897',
+    'http://127.0.0.1:65536', 'http://127.0.0.1:7897/', 'http://10.0.0.2:3128', 'socks5://127.0.0.1:7897']) {
+    writeFileSync(state.providers, `AWWO_WEB_READER_PROXY=${bad}\n`);
+    await assert.rejects(loadLocalProfile(state), /providers\.env: AWWO_WEB_READER_PROXY must be http:\/\/127\.0\.0\.1:<port>/, bad);
+  }
+});
+
+test('a password reset gives the owner a new password in both files and keeps every other setting', async () => {
+  const state = localState(scratch());
+  assert.equal(await resetOwnerPassword(state), false, 'a folder with no settings yet has nothing to reset');
+  const first = await loadLocalProfile(state, { random: fixedRandom() });
+  assert.equal(await resetOwnerPassword(state, { random: size => Buffer.alloc(size, size === 32 ? 0x5a : 0x5b) }), true);
+  const after = await loadLocalProfile(state, { random: () => Buffer.alloc(32, 0xee) });
+  const fresh = Buffer.alloc(32, 0x5a).toString('base64url');
+  const id = Buffer.alloc(18, 0x5b).toString('base64url');
+  assert.equal(after.AWWO_BOOTSTRAP_ADMIN_PASSWORD, fresh);
+  assert.notEqual(fresh, first.AWWO_BOOTSTRAP_ADMIN_PASSWORD);
+  assert.match(readFileSync(state.credentials, 'utf8'), new RegExp(`Password: ${fresh}\\n`));
+  for (const name of [...GENERATED_SECRETS.filter(name => name !== 'AWWO_BOOTSTRAP_ADMIN_PASSWORD'), 'AWWO_CREDENTIAL_ENCRYPTION_KEY', 'AWWO_LOCAL_INSTANCE', 'AWWO_LOCAL_HOSTNAME', 'AWWO_BOOTSTRAP_ADMIN_EMAIL']) {
+    assert.equal(after[name], first[name], name);
+  }
+  // Pending, by its id, until an API has started with it: a start that fails first leaves the next one to finish it.
+  assert.equal(after[PASSWORD_RESET_PENDING], id);
+  assert.equal(resetId(id), id);
+  // A reset cut short between its two files left the old password in the sign-in file: a start rewrites it first.
+  writeFileSync(state.credentials, readFileSync(state.credentials, 'utf8').replace(fresh, first.AWWO_BOOTSTRAP_ADMIN_PASSWORD));
+  await writeOwnerCredentials(state, after);
+  assert.match(readFileSync(state.credentials, 'utf8'), new RegExp(`Password: ${fresh}\\n`));
+  assert.equal((await loadLocalProfile(state))[PASSWORD_RESET_PENDING], id, 'still pending at the next start');
+  await passwordResetApplied(state);
+  const done = await loadLocalProfile(state);
+  assert.equal(done[PASSWORD_RESET_PENDING], undefined);
+  assert.equal(done.AWWO_BOOTSTRAP_ADMIN_PASSWORD, fresh, 'the new password stays');
+  assert.equal(done.AWWO_CREDENTIAL_ENCRYPTION_KEY, first.AWWO_CREDENTIAL_ENCRYPTION_KEY);
+  await passwordResetApplied(state);
+  // The API is given the pending reset's id (it applies each once), and nothing without one or for a value that is not one.
+  const environment = resetPassword => serviceEnvironments({ profile: profileFor(), ports: testPorts, state: testState, capabilities: {}, system: {}, resetPassword }).api.AWWO_BOOTSTRAP_ADMIN_RESET;
+  assert.equal(environment(id), id);
+  assert.equal(environment(''), undefined);
+  for (const bad of ['pending', 'true', 'short', 'a b c d e f g h i j']) assert.equal(environment(resetId(bad)), undefined, bad);
 });
 
 // Access lists as the runtime reads them (lib readAcl): owner|protected|entries, every SID in full. Full control is
@@ -342,6 +391,7 @@ test('the API listens on loopback, accepts only the instance\'s origin, runs on 
   assert.equal(api.AWWO_RUN_TIMEOUT, '1800s');
   assert.equal(api.AWWO_MEDIA_DIR, testState.media);
   assert.equal(api.AWWO_STOP_ON_STDIN_CLOSE, 'true');
+  assert.deepEqual([api.AWWO_EDITION, api.AWWO_REGISTRATION, api.AWWO_LOCAL_STATE_DIR], ['local', 'closed', path.resolve(testState.dir)]);
   assert.equal(api.PATH, '/bin');
   for (const key of ['AWWO_SANDBOX_AGENTS_URL', 'AWWO_WORKSPACE_CALLBACK_URL', 'AWWO_OPENMAUS_URL', 'AWWO_RENDER_URL', 'AWWO_RUNNINGHUB_API_KEY']) assert.equal(api[key], undefined, key);
   assert.equal(envs.broker, null);
@@ -504,8 +554,9 @@ test('the pinned downloads name their exact files and SHA-256 values; workers in
 
 test('arguments: flags, and the Mac shell\'s positional contract', () => {
   assert.deepEqual(parseArguments(['--state', 'x', '--events', '--parent-pid', '42', '--no-docker']), {
-    state: path.resolve('x'), resources: '', build: '', events: true, parentPid: 42, docker: false, stopOnStdinClose: false, verbose: false,
+    state: path.resolve('x'), resources: '', build: '', events: true, parentPid: 42, docker: false, stopOnStdinClose: false, verbose: false, resetPassword: false,
   });
+  assert.equal(parseArguments(['--reset-password']).resetPassword, true);
   const mac = parseArguments(['/app/Resources', '/state', '77']);
   assert.equal(mac.resources, path.resolve('/app/Resources'));
   assert.equal(mac.state, path.resolve('/state'));
@@ -717,11 +768,12 @@ test('the API accepts the settings of every optional-service and media-key combi
     'a RunningHub key': { providers: { AWWO_RUNNINGHUB_API_KEY: 'r'.repeat(32) }, up: [] },
     'a Tripo key': { providers: { AWWO_TRIPO_API_KEY: 't'.repeat(32) }, up: [] },
     'an X-tasy key': { providers: { AWWO_XTASY_API_KEY: 'x'.repeat(32) }, up: [] },
-    'every key and service': { providers: { AWWO_RUNNINGHUB_API_KEY: 'r'.repeat(32), AWWO_TRIPO_API_KEY: 't'.repeat(32), AWWO_XTASY_API_KEY: 'x'.repeat(32), AWWO_MEDIA_DEV_PROXY: 'http://127.0.0.1:7897' }, up: ['render', 'broker'] },
+    'every key and service': { providers: { AWWO_RUNNINGHUB_API_KEY: 'r'.repeat(32), AWWO_TRIPO_API_KEY: 't'.repeat(32), AWWO_XTASY_API_KEY: 'x'.repeat(32), AWWO_MEDIA_DEV_PROXY: 'http://127.0.0.1:7897', AWWO_WEB_READER_PROXY: 'http://127.0.0.1:7897' }, up: ['render', 'broker'] },
+    'a password reset': { providers: {}, up: [], resetPassword: 'W1tbW1tbW1tbW1tbW1tbW1tbW1tb' },
   };
   const state = { ...localState(scratch()), media };
-  for (const [name, { providers, up }] of Object.entries(cases)) {
-    const envs = serviceEnvironments({ profile: { ...profileFor(providers), AWWO_LOCAL_DB_PASSWORD: 'pw', AWWO_LOCAL_HOSTNAME: 'awwo-0123456789ab.localhost' }, ports: { ...testPorts, database: closed }, state, capabilities: allCapabilities, system: systemEnvironment() });
+  for (const [name, { providers, up, resetPassword = '' }] of Object.entries(cases)) {
+    const envs = serviceEnvironments({ profile: { ...profileFor(providers), AWWO_LOCAL_DB_PASSWORD: 'pw', AWWO_LOCAL_HOSTNAME: 'awwo-0123456789ab.localhost' }, ports: { ...testPorts, database: closed }, state, capabilities: allCapabilities, system: systemEnvironment(), resetPassword });
     const child = spawn(builtApi, [], { env: apiEnvironment(envs, new Set(up)), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });

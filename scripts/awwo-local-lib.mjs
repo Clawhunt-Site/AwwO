@@ -102,9 +102,10 @@ export const GENERATED_SECRETS = Object.freeze([
  *  and the password would no longer open the database. */
 const DATA_BOUND = ['AWWO_CREDENTIAL_ENCRYPTION_KEY', 'AWWO_LOCAL_DB_PASSWORD'];
 
-/** What a person may put in providers.env: the keys of the picture, video, 3D and voice services, and a local proxy
- *  for downloading what they make. Model keys are not here: they are saved, encrypted, from 我的引擎 in the app. */
-export const PROVIDER_SETTINGS = Object.freeze(['AWWO_RUNNINGHUB_API_KEY', 'AWWO_TRIPO_API_KEY', 'AWWO_XTASY_API_KEY', 'AWWO_MEDIA_DEV_PROXY']);
+/** What a person may put in providers.env: the keys of the picture, video, 3D and voice services, a local proxy for
+ *  downloading what they make, and one for 从网址读取 and the skill registry. Model keys are not here: they are saved,
+ *  encrypted, from 我的引擎 in the app. */
+export const PROVIDER_SETTINGS = Object.freeze(['AWWO_RUNNINGHUB_API_KEY', 'AWWO_TRIPO_API_KEY', 'AWWO_XTASY_API_KEY', 'AWWO_MEDIA_DEV_PROXY', 'AWWO_WEB_READER_PROXY']);
 
 const PROVIDERS_TEMPLATE = `# AwwO 本地版 — 媒体服务密钥（可选）/ media service keys (optional)
 # 填写后重启 AwwO 本地版，图片、视频、3D、配音节点即可使用；留空则该服务保持关闭。
@@ -116,6 +117,10 @@ AWWO_TRIPO_API_KEY=
 AWWO_XTASY_API_KEY=
 # 媒体下载走本机代理时填写，例如 http://127.0.0.1:7897 / a local proxy for downloads, e.g. http://127.0.0.1:7897
 AWWO_MEDIA_DEV_PROXY=
+# 「从网址读取」和技能库经本机代理访问网站时填写，例如 http://127.0.0.1:7897（代理需支持 CONNECT；AwwO 先在本机解析
+# 网址，只让代理连到查过的公网地址）。/ a local proxy for reading web pages and the skill registry, e.g.
+# http://127.0.0.1:7897 (it must support CONNECT; AwwO resolves each name here and tunnels only to a public address).
+AWWO_WEB_READER_PROXY=
 `;
 
 /** Writes a file whole or not at all: a file cut short by a crash would lose a key that encrypts saved data. A copy
@@ -167,16 +172,60 @@ export async function loadLocalProfile(state, { random = randomBytes } = {}) {
   if (!validHostname(profile.AWWO_LOCAL_HOSTNAME)) {
     throw new Error('AWWO_LOCAL_HOSTNAME in local.env must be one name under .localhost, such as awwo-<instance>.localhost');
   }
-  if (Object.keys(fresh).length) {
-    const lines = Object.entries(profile).map(([key, value]) => `${key}=${value}`);
-    await writeFileAtomic(state.env, `# AwwO 本地版. Made by the runtime; keep it with the database (it holds the key that encrypts saved API keys).\n${lines.join('\n')}\n`);
-  }
+  if (Object.keys(fresh).length) await writeProfile(state, profile);
   if (!existsSync(state.providers)) await writeFileAtomic(state.providers, PROVIDERS_TEMPLATE);
-  if (!existsSync(state.credentials)) {
-    await writeFileAtomic(state.credentials, `AwwO 本地版 — sign-in for this computer\nEmail: ${profile.AWWO_BOOTSTRAP_ADMIN_EMAIL}\nPassword: ${profile.AWWO_BOOTSTRAP_ADMIN_PASSWORD}\n`);
-  }
+  if (!existsSync(state.credentials)) await writeFileAtomic(state.credentials, credentialsText(profile));
   return Object.freeze({ ...profile, providers: Object.freeze(loadProviders(state)) });
 }
+
+const writeProfile = (state, profile) => writeFileAtomic(state.env,
+  `# AwwO 本地版. Made by the runtime; keep it with the database (it holds the key that encrypts saved API keys).\n${Object.entries(profile).map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
+const credentialsText = profile => `AwwO 本地版 — sign-in for this computer\nEmail: ${profile.AWWO_BOOTSTRAP_ADMIN_EMAIL}\nPassword: ${profile.AWWO_BOOTSTRAP_ADMIN_PASSWORD}\n`;
+
+/** In local.env while a new password may not have reached the account yet: the reset's id, which every start passes on
+ *  until one has started with it. The API applies each id once (edition.go resetBootstrapPassword). */
+export const PASSWORD_RESET_PENDING = 'AWWO_LOCAL_PASSWORD_RESET';
+/** A reset id as the API takes it (AWWO_BOOTSTRAP_ADMIN_RESET). */
+export const resetId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(value) ? value : '';
+
+/**
+ * A new sign-in password for the owner (the runtime's --reset-password), the way back in for a person who forgot
+ * theirs: the local edition sends no mail. It is written to local.env and admin-credentials.txt with a new reset id,
+ * and the API sets it on the account as it starts (AWWO_BOOTSTRAP_ADMIN_RESET=<id>), which also ends the account's
+ * sessions. The id stays until an API has started with it (passwordResetApplied), so a start that fails before then
+ * leaves the next one to finish the reset; the API applies an id only once, so one left behind never undoes a password
+ * changed since. Every other setting stays as it is. A folder with no settings yet has no password to reset: its first
+ * start makes one.
+ */
+export async function resetOwnerPassword(state, { random = randomBytes } = {}) {
+  if (!existsSync(state.env)) return false;
+  const saved = readSettingsFile(state.env, 'local.env');
+  if (!saved.AWWO_BOOTSTRAP_ADMIN_EMAIL) throw new Error('local.env names no owner account whose password could be reset');
+  const profile = { ...saved, AWWO_BOOTSTRAP_ADMIN_PASSWORD: random(32).toString('base64url'), [PASSWORD_RESET_PENDING]: random(18).toString('base64url') };
+  await writeProfile(state, profile);
+  await writeFileAtomic(state.credentials, credentialsText(profile));
+  return true;
+}
+
+/** Before a start sets a pending password: admin-credentials.txt names it, even where the reset stopped between its
+ *  two files. */
+export const writeOwnerCredentials = (state, profile) => writeFileAtomic(state.credentials, credentialsText(profile));
+
+/** The API has started with the pending password: the account has it, and later starts leave it alone. */
+export async function passwordResetApplied(state) {
+  const saved = readSettingsFile(state.env, 'local.env');
+  if (!(PASSWORD_RESET_PENDING in saved)) return;
+  delete saved[PASSWORD_RESET_PENDING];
+  await writeProfile(state, saved);
+}
+
+/** A proxy setting is exactly http://127.0.0.1:<port>, as the API checks it (media_config.go loopbackOrigin): said here,
+ *  with the file's name, rather than as the API's refusal to start. */
+const PROXY_SETTINGS = new Set(['AWWO_MEDIA_DEV_PROXY', 'AWWO_WEB_READER_PROXY']);
+const loopbackProxy = value => {
+  const port = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(value)?.[1];
+  return Boolean(port) && Number(port) <= 65535;
+};
 
 /** providers.env's keys that are set. A name AwwO does not know is refused: a typo would otherwise keep a service
  *  off without a word, and the file is not a way to change the instance's other settings. */
@@ -184,7 +233,11 @@ export function loadProviders(state) {
   const values = readSettingsFile(state.providers, 'providers.env');
   const unknown = Object.keys(values).filter(key => !PROVIDER_SETTINGS.includes(key));
   if (unknown.length) throw new Error(`providers.env: unknown setting ${unknown.join(', ')}; allowed: ${PROVIDER_SETTINGS.join(', ')}`);
-  return Object.fromEntries(Object.entries(values).filter(([, value]) => value.trim() !== ''));
+  const set = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value !== ''));
+  for (const [key, value] of Object.entries(set)) {
+    if (PROXY_SETTINGS.has(key) && !loopbackProxy(value)) throw new Error(`providers.env: ${key} must be http://127.0.0.1:<port> (a proxy on this computer), not ${value}`);
+  }
+  return set;
 }
 
 /** A program of Windows itself, by its full path: Git for Windows puts its own whoami (and others) earlier on PATH,
@@ -424,7 +477,7 @@ const MODEL_LIMITS = Object.freeze({ contextWindow: '131072', maxTokens: '16384'
  * owner's own workspaces (a platform administrator owns them) are offered them (media_setup.go mediaEntitled), and an
  * account someone else registers on this computer cannot spend the owner's media keys.
  */
-export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment() }) {
+export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '' }) {
   const loopback = port => `http://127.0.0.1:${port}`;
   const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false' };
   const pi = {
@@ -469,6 +522,12 @@ export function serviceEnvironments({ profile, ports, state, capabilities, syste
     // Its wrapper stops it by closing its stdin (awwo-local-reaper.mjs --stdin-stop), in order, as SIGTERM would:
     // Windows has no polite signal for it.
     AWWO_STOP_ON_STDIN_CLOSE: 'true',
+    // The local edition (edition.go): the web leaves out the hosted site's plans and pages and shows this computer's
+    // settings; no one else signs up here; the data folder is named in those settings.
+    AWWO_EDITION: 'local', AWWO_REGISTRATION: 'closed', AWWO_LOCAL_STATE_DIR: path.resolve(state.dir),
+    // While a reset --reset-password wrote is pending: the API sets its password on the owner's account, once per id
+    // (edition.go).
+    ...(resetId(resetPassword) ? { AWWO_BOOTSTRAP_ADMIN_RESET: resetPassword } : {}),
     ...profile.providers,
   };
   // What the API is told of each optional service, added only once that service has come up (apiEnvironment).

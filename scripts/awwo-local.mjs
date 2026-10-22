@@ -2,6 +2,7 @@
 // stopped (Ctrl-C, a signal, the end of its parent process, or its stdin closing with --stop-on-stdin-close).
 //
 //   npm run local                                   from a checkout, after npm run setup:local
+//   npm run local -- --reset-password               the same, with a new sign-in password (admin-credentials.txt)
 //   node scripts/awwo-local.mjs --events ...        for a desktop window: one JSON object per line on stdout
 //   node scripts/awwo-local.mjs <resources> <state> <parent pid>
 //                                                   the contract apps/macos/AwwOLocal.swift already speaks
@@ -17,7 +18,8 @@ import { port as validPort } from './awwo-saas-lib.mjs';
 import {
   allocatePorts, apiEnvironment, browserCandidates, dockerEnvironment, findOnPath, instanceContainerQuery, loadLocalProfile,
   localLayout, localOrigin, localState, osLock, portIsFree, postgresPort, postgresSettings, protectStateDirectory,
-  resolvePostgresBin, serviceEnvironments, systemEnvironment, windowsTool, withPostgresInclude, writeFileAtomic,
+  PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
+  windowsTool, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
 } from './awwo-local-lib.mjs';
 import { createLocalWebServer } from './awwo-local-web.mjs';
 
@@ -26,12 +28,17 @@ const REAPER = fileURLToPath(new URL('./awwo-local-reaper.mjs', import.meta.url)
  *  submission in flight to record its task id (deploy/saas/compose.yml gives it 45 s); the others need less. */
 const STOP_GRACE_MS = 20_000;
 const API_STOP_GRACE_MS = 45_000;
+/** How long a service may take to come up. A warm start takes seconds; a first one on a slow or busy disk, or one an
+ *  antivirus scans file by file, can take minutes (measured: the Pi worker 41 s on this computer under load). Past this
+ *  the start fails and names the service. The API also runs its migrations first. */
+const WORKER_START_MS = 180_000;
+const API_START_MS = 300_000;
 const PUBLIC_SITE = 'https://awwo.clawhunt.store';
 /** Services without which the app does not work: one that stops ends the runtime. */
 const REQUIRED = new Set(['pi', 'agents', 'api']);
 
 export function parseArguments(argv) {
-  const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false };
+  const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false, resetPassword: false };
   if (argv.length && !argv[0].startsWith('--')) {
     // The Mac shell's contract: <resources> <state> <parent pid>, events on stdout.
     const [resources, state, parent] = argv;
@@ -53,6 +60,7 @@ export function parseArguments(argv) {
     else if (arg === '--no-docker') options.docker = false;
     else if (arg === '--stop-on-stdin-close') options.stopOnStdinClose = true;
     else if (arg === '--verbose') options.verbose = true;
+    else if (arg === '--reset-password') options.resetPassword = true;
     else throw new Error(`Unknown option ${arg}`);
   }
   return options;
@@ -353,7 +361,13 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     for (const dir of [state.logs, state.media, state.broker, state.renderTmp]) await mkdir(dir, { recursive: true });
     releaseLock = await acquireLock(state.lock);
     releaseBuild = await holdBuild(layout);
+    // Under the folder's lock: no other runtime is using these settings as they change.
+    if (options.resetPassword && await resetOwnerPassword(state)) report.info(`The owner's sign-in password was reset; the new one is in ${state.credentials}.`);
     profile = await loadLocalProfile(state);
+    // Asked now, or asked before by a start that ended before its API did: the API sets it as it starts (once per
+    // reset id), and the sign-in file names it first (a reset cut short between its two files left the old one there).
+    const reset = resetId(profile[PASSWORD_RESET_PENDING]);
+    if (reset) await writeOwnerCredentials(state, profile);
     const node = existsSync(layout.node) ? layout.node : Number(process.versions.node.split('.')[0]) >= 24 ? process.execPath : '';
     if (!node) throw new Error('AwwO 本地版 needs Node.js 24 for its services: run npm run setup:local.');
     if (!existsSync(layout.api)) throw new Error('The AwwO API is not built: run npm run setup:local.');
@@ -378,15 +392,15 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
       });
       return service;
     };
-    const envs = serviceEnvironments({ profile, ports, state, capabilities, system });
+    const envs = serviceEnvironments({ profile, ports, state, capabilities, system, resetPassword: reset });
     report.event({ event: 'status', step: 'workers' });
-    await waitHealthy(launch('pi', node, [layout.pi], envs.pi), `http://127.0.0.1:${ports.pi}/health`, { timeout: 60_000, accept: unconfiguredOk('pi') });
+    await waitHealthy(launch('pi', node, [layout.pi], envs.pi), `http://127.0.0.1:${ports.pi}/health`, { timeout: WORKER_START_MS, accept: unconfiguredOk('pi') });
     let agents = null;
     if (capabilities.python) {
       const python = launch('agents', capabilities.python, [layout.agentsPython], envs.agentsPython);
       python.retired = true; // until it is healthy, its exit falls back instead of ending the runtime
       try {
-        await waitHealthy(python, `http://127.0.0.1:${ports.agents}/health`, { timeout: 120_000 });
+        await waitHealthy(python, `http://127.0.0.1:${ports.agents}/health`, { timeout: WORKER_START_MS });
         python.retired = false;
         agents = python;
       } catch (error) {
@@ -397,7 +411,7 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     }
     if (!agents) {
       agents = launch('agents', node, [layout.agentsJs], envs.agentsJs);
-      await waitHealthy(agents, `http://127.0.0.1:${ports.agents}/health`, { timeout: 60_000, accept: unconfiguredOk('openai-agents') });
+      await waitHealthy(agents, `http://127.0.0.1:${ports.agents}/health`, { timeout: WORKER_START_MS, accept: unconfiguredOk('openai-agents') });
     }
     // The optional services: one that does not come up is stopped and left out, and the API is told only of those
     // that did (apiEnvironment).
@@ -413,7 +427,7 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     await Promise.all(optional.map(async item => {
       const service = item.start();
       try {
-        await waitHealthy(service, item.url, { timeout: 90_000, token: item.token });
+        await waitHealthy(service, item.url, { timeout: WORKER_START_MS, token: item.token });
         up.add(item.key);
       } catch (error) {
         service.retired = true;
@@ -424,7 +438,10 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     report.event({ event: 'status', step: 'api' });
     // The API stops in order when its stdin closes (AWWO_STOP_ON_STDIN_CLOSE): Windows has no polite signal for it.
     const api = launch('api', layout.api, [], apiEnvironment(envs, up), { polite: true, grace: API_STOP_GRACE_MS });
-    await waitHealthy(api, `http://127.0.0.1:${ports.api}/api/v1/health`, { timeout: 180_000 });
+    await waitHealthy(api, `http://127.0.0.1:${ports.api}/api/v1/health`, { timeout: API_START_MS });
+    // It set the new password before it answered (BootstrapAdmin runs first): the reset is done. A mark that cannot be
+    // cleared now does nothing at the next start (the API has applied its id), so it does not stop this one.
+    if (reset) await passwordResetApplied(state).catch(error => report.info(`The password reset is done, but local.env still marks it pending: ${error.message}`));
     const workspace = await ensureOwnerWorkspace({
       apiPort: ports.api, email: profile.AWWO_BOOTSTRAP_ADMIN_EMAIL, password: profile.AWWO_BOOTSTRAP_ADMIN_PASSWORD, marker: state.ownerWorkspace,
     }).catch(error => `skipped: ${error.message}`);

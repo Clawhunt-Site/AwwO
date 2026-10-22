@@ -180,7 +180,10 @@ async function buildWeb(layout, report) {
   const stampFile = path.join(layout.build, 'web-built-from.txt');
   if (clean && existsSync(path.join(layout.web, 'saas.html')) && current(stampFile, tree)) return report('web app', 'current');
   const node = existsSync(layout.node) ? layout.node : process.execPath;
-  run(node, [path.join(web, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--configLoader', 'runner', '--config', 'vite.saas.config.mjs'], { cwd: web, env: withNodePath(layout) });
+  // The local edition has no ClawHunt sign-in: no main-site link or tour step, whatever this shell or apps/web/.env says
+  // (a variable already set outranks Vite's .env files, an empty one too).
+  const env = { ...withNodePath(layout), VITE_CLAWHUNT_SITE_URL: '' };
+  run(node, [path.join(web, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--configLoader', 'runner', '--config', 'vite.saas.config.mjs'], { cwd: web, env });
   await writeFile(stampFile, `${clean ? tree : 'changed'}\n`);
   report('web app', 'built');
 }
