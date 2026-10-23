@@ -689,6 +689,7 @@ var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "con
 // normalizePlanOperations fixes, in place, the slips that turned whole plans into invalid_canvas_plan:
 //   - a new node's inputs and outputs given on add_node as "inputs" and "outputs", and a model given on it that is
 //     the one the request said new nodes take (newNodeModel) (planNodeSlips);
+//   - a node's persona given on set_task (planTaskSlips);
 //   - a field's side named in the plural ("inputs", "outputs"), and an input field typed as a picture, a clip or a
 //     sound ("image", "video", "audio"), which a node is given as a file (planFieldSlips);
 //   - a new field's value left out, or filled: the protocol has new fields start empty, so value is "", and a filled
@@ -697,7 +698,7 @@ var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "con
 //     reference in the plan, to <name>_node or <name>_field. A canvas never holds such an id, so only names this
 //     plan introduces are renamed.
 func normalizePlanOperations(ops []any, newNodeModel string) []any {
-	ops = planNodeSlips(ops, newNodeModel)
+	ops = planTaskSlips(planNodeSlips(ops, newNodeModel))
 	for _, item := range ops {
 		if op, ok := item.(map[string]any); ok {
 			planFieldSlips(op)
@@ -826,6 +827,40 @@ func planNodeSlips(ops []any, newNodeModel string) []any {
 		}
 		out = append(out, op)
 		out = append(out, after...)
+	}
+	return out
+}
+
+// planTaskSlips reads a node's persona given on set_task as the update_node that sets it (the protocol's own step for
+// it), right before the set_task, which keeps its lists, or is left out where it gave none, since the persona was all
+// it said. Found on 2026-10-23 in the one set_task with a key of its own among the 84 plans refused in 14 days (Claude
+// Haiku 4.5, 08:18Z): a 193-character persona beside its acceptance criteria, on an Agent node already on the canvas.
+// Only a persona of text that is not blank is read, and only on a set_task with no other key of its own: an empty
+// persona could mean "clear it" or "nothing", and a set_task left out must not take another key away with it.
+// update_node keeps its own limit. Any other set_task is left as it is, so the plan is refused as before.
+// The canvas applies the persona as it applies any update_node's (applyCanvasPlan): it sets an Agent node's, a media
+// node has none, and on a form, assemble or edit node it refuses the plan, which is then not asked for again as a plan
+// this gate refuses is (canvasPlanning.ts); none of the 84 set a persona on such a node.
+func planTaskSlips(ops []any) []any {
+	out := make([]any, 0, len(ops))
+	for _, item := range ops {
+		op, ok := item.(map[string]any)
+		if !ok || op["type"] != "set_task" {
+			out = append(out, item)
+			continue
+		}
+		persona, isText := op["persona"].(string)
+		if !isText || strings.TrimSpace(persona) == "" || !planKeys(op, "type", "nodeId", "persona", "constraints", "acceptanceCriteria") {
+			out = append(out, op)
+			continue
+		}
+		delete(op, "persona")
+		out = append(out, map[string]any{"type": "update_node", "nodeId": op["nodeId"], "persona": persona})
+		_, constraints := op["constraints"]
+		_, criteria := op["acceptanceCriteria"]
+		if constraints || criteria {
+			out = append(out, op)
+		}
 	}
 	return out
 }
