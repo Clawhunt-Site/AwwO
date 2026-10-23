@@ -314,6 +314,44 @@ describe('media results', () => {
     expect(frames).toContain('"event":"done","status":"succeeded"');
   });
 
+  it('says the model is thinking, from the run’s own event rather than a guess', async () => {
+    // On a reasoning model the first token can be minutes away. The server sends one `thinking` event when the
+    // model's reasoning actually begins; without it the node row keeps the label it falls back to, 'Sent. Waiting
+    // for the agent to start…', which by then is wrong — the agent has started, and it is thinking.
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
+    configureSaaSCanvasSave(async () => {});
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('operationId=')) return new Response(JSON.stringify({ items: [] }));
+      if (url.endsWith('/runs')) return new Response(JSON.stringify({ id: 'run-a', sessionId: 'session-a', status: 'queued' }));
+      if (url.endsWith('/events')) return new Response(['{"type":"running"}', '{"type":"reasoning_started","characters":8412}',
+        '{"type":"reasoning_started","characters":9001}',
+        JSON.stringify({ type: 'text_delta', delta: 'done' }), JSON.stringify({ type: 'completed', text: 'done' })].map(row => `data: ${row}\n\n`).join(''));
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const lang = document.documentElement.lang;
+    document.documentElement.lang = 'zh-CN';
+    let frames = '';
+    try {
+      const response = await canvasFetch('/gateway-api/conversations/tenant-a/agents/agent-a/messages', { method: 'POST', body: JSON.stringify({ message: 'think first', operationId: 'op-think', issueId: 'session-a' }) });
+      frames = await response.text();
+    } finally { document.documentElement.lang = lang; }
+    expect(frames).toContain('"status":"模型正在思考…"');
+    // The answer still arrives, and nothing of how much reasoning there was crosses to the page — the fixture does
+    // send counts, so this assertion can actually fail.
+    expect(frames).toContain('"event":"delta","text":"done"');
+    expect(frames).not.toMatch(/8412|9001|characters/);
+    // And the status comes down before the answer's first text, or the row under a long answer would go on saying
+    // the model was thinking while the answer streamed past it.
+    const rows = frames.split('\n\n').filter(Boolean).map(row => JSON.parse(row.replace(/^data: /, '')));
+    const thought = rows.filter(row => row.status === '模型正在思考…');
+    // Said once however many counts arrive, then put back to the run's own status — not to nothing, which is what
+    // makes the transcript fall back to 'Sent. Waiting for the agent to start…'.
+    const back = rows.findIndex(row => row.event === 'status' && row.status === 'running' && rows.indexOf(thought[0]) < rows.findIndex(r => r === row));
+    const answered = rows.findIndex(row => row.event === 'delta' && row.text);
+    expect([thought.length, back > rows.indexOf(thought[0]), back < answered]).toEqual([1, true, true]);
+    expect(rows.some(row => row.event === 'status' && row.status === '')).toBe(false);
+  });
+
   it('says when a generation moved to a backup model, and whose the states after it are', async () => {
     configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
     configureSaaSCanvasSave(async () => {});

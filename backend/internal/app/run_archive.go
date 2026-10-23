@@ -134,7 +134,10 @@ func projectRunArchiveEvent(id int64, at time.Time, raw []byte) runArchiveEvent 
 		return event
 	}
 	switch wire.Type {
-	case "queued", "running", "cancelled", "interrupted":
+	// `reasoning_started` belongs here: like these, it is the fact alone, with no payload to project. Left out it
+	// would stand in a run's evidence as an `unsupported` row with its payload omitted — true, since it has none,
+	// but it reads as something gone wrong, once for every node run whose model reasoned.
+	case "queued", "running", "cancelled", "interrupted", "reasoning_started":
 		event.Type, event.PayloadOmitted = wire.Type, false
 	case "text_delta":
 		event.Type, event.Delta, event.PayloadOmitted = wire.Type, wire.Delta, false

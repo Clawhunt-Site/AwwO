@@ -380,6 +380,12 @@ func TestRunArchiveProjectsPlannerProgressCountsOnly(t *testing.T) {
 	if event.PayloadOmitted || event.Operation != "set_input" || event.Target != "data" || event.Template != "backend" {
 		t.Fatalf("operation and target not projected: %+v", event)
 	}
+	// A node run's reasoning_started is the fact alone: projected by name, with nothing behind it, and never
+	// as an `unsupported` row. A count smuggled onto it is not projected either.
+	event = projectRunArchiveEvent(6, time.Now(), []byte(`{"type":"reasoning_started","characters":8412,"text":"hidden reasoning"}`))
+	if event.Type != "reasoning_started" || event.PayloadOmitted || event.Characters != nil || event.Text != "" || event.Stage != "" {
+		t.Fatalf("reasoning_started not projected as the fact alone: %+v", event)
+	}
 	for _, raw := range []string{
 		`{"type":"progress","stage":"done","characters":1,"nodes":0,"edges":0,"reasoning":0}`,
 		`{"type":"progress","stage":"streaming","characters":-1,"nodes":0,"edges":0,"reasoning":0}`,
@@ -744,26 +750,77 @@ func TestPostgresPlannerProgressCountsAWithheldReasoningPreamble(t *testing.T) {
 	}
 }
 
-func TestPostgresOnlyPlannerRunsAcceptReasoningActivity(t *testing.T) {
+func TestPostgresANodeRunSaysItsModelStartedReasoningOnceAndKeepsNoCounts(t *testing.T) {
+	// A node run asks for reasoning activity like a planner run, since on a reasoning model the first token can be
+	// minutes away and all the page can say until then is that a run is in flight. It keeps the fact and none of the
+	// counts: one `reasoning_started` event however many the worker sends, and never a planner's `progress`.
 	var activity atomic.Value
 	pi := plannerWorker(t, &activity, func(string) []map[string]any {
-		return []map[string]any{{"type": "reasoning", "characters": 12}, {"type": "completed", "text": "hello"}}
+		return []map[string]any{{"type": "reasoning", "characters": 12}, {"type": "reasoning", "characters": 480},
+			{"type": "reasoning", "characters": 1203}, {"type": "completed", "text": "hello"}}
 	})
 	defer pi.Close()
 	h := newHarness(t, pi.URL)
 	c, tid, _ := h.register(t, "node-reasoning@awwo.invalid")
 	_, _, sid := h.fixture(t, c, tid)
-	id := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "node-reasoning"}, 202)["id"].(string)
-	if failed := h.awaitRun(t, c, tid, id, "failed"); failed["error"] != "invalid_runtime_event" {
-		t.Fatalf("a node run accepted an activity event it never asked for: %#v", failed)
-	}
-	if got := activity.Load(); got != "" {
-		t.Fatalf("a node run opted in to reasoning activity: %v", got)
-	}
-	for _, event := range runEvents(t, h, tid, id) {
-		if event.data["type"] == "progress" {
-			t.Fatalf("a node run published planner progress: %s", event.raw)
+	// Two runs on the same session: the once-a-run guard must be per run, not per process.
+	for turn, operation := range []string{"node-reasoning-a", "node-reasoning-b"} {
+		id := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": operation}, 202)["id"].(string)
+		done := h.awaitRun(t, c, tid, id, "completed")
+		if done["output"] != "hello" {
+			t.Fatalf("run %d: a node run told of its model's reasoning did not deliver its answer: %#v", turn, done)
 		}
+		if got := activity.Load(); got != "reasoning" {
+			t.Fatalf("run %d: a node run did not opt in to reasoning activity: %v", turn, got)
+		}
+		said, settled := -1, -1
+		events := runEvents(t, h, tid, id)
+		for at, event := range events {
+			if event.data["type"] == "progress" {
+				t.Fatalf("run %d: a node run published planner progress: %s", turn, event.raw)
+			}
+			switch event.data["type"] {
+			case "reasoning_started":
+				if said >= 0 {
+					t.Fatalf("run %d: three reasoning counts published more than one event: %s", turn, event.raw)
+				}
+				said = at
+				// The fact alone: a count here would be the reasoning itself, in the one place a reader can see.
+				if len(event.data) != 1 {
+					t.Fatalf("run %d: the event carried more than its type: %s", turn, event.raw)
+				}
+			case "completed", "failed", "cancelled", "interrupted":
+				if settled < 0 {
+					settled = at
+				}
+			}
+		}
+		// Written while the run was live, so it precedes the terminal event a reader stops at (appendRunProgress).
+		if said < 0 || settled < 0 || said > settled {
+			t.Fatalf("run %d: reasoning_started at %d, terminal at %d, of %d events", turn, said, settled, len(events))
+		}
+		// And the run is charged exactly as before: the counts are not this run's hidden tokens.
+		var hidden int64
+		if e := h.db.QueryRow(context.Background(),
+			"SELECT COALESCE(sum(hidden_tokens),0) FROM model_invocations WHERE tenant_id=$1 AND run_id=$2", tid, id).Scan(&hidden); e == nil && hidden != 0 {
+			t.Fatalf("run %d: a node run's reasoning counts became hidden tokens: %d", turn, hidden)
+		}
+	}
+}
+
+func TestPostgresANodeRunStillRefusesAMalformedReasoningCount(t *testing.T) {
+	// Opting every run in does not make a malformed event acceptable anywhere.
+	var activity atomic.Value
+	pi := plannerWorker(t, &activity, func(string) []map[string]any {
+		return []map[string]any{{"type": "reasoning", "characters": -1}, {"type": "completed", "text": "hello"}}
+	})
+	defer pi.Close()
+	h := newHarness(t, pi.URL)
+	c, tid, _ := h.register(t, "node-reasoning-bad@awwo.invalid")
+	_, _, sid := h.fixture(t, c, tid)
+	id := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]string{"sessionId": sid, "prompt": "hello", "operationId": "node-reasoning-bad"}, 202)["id"].(string)
+	if failed := h.awaitRun(t, c, tid, id, "failed"); failed["error"] != "invalid_runtime_event" {
+		t.Fatalf("a node run accepted a malformed reasoning count: %#v", failed)
 	}
 }
 

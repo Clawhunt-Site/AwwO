@@ -520,11 +520,21 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
         let ended = false;
         let output = '';
         let backup = false;
+        // Whether the thinking status is the one showing, so it is set once and taken down when the answer starts.
+        let thinking = false;
         const emit = (frame: unknown) => { if (!ended) controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)); };
         try {
           emit({ event: 'accepted', issueId: sessionId, runId: run.id, runVisible: true, operationId });
           await readSseFrames(upstream.body!, (_event, event: any) => {
-            if (event.type === 'text_delta') { output += event.delta || ''; emit({ event: 'delta', text: event.delta || '' }); }
+            if (event.type === 'text_delta') {
+              // The answer has begun, so the model is no longer only reasoning: the status goes back to the run's own
+              // before the text does, or the row under a long answer would go on saying the model was thinking while
+              // the answer streamed past it. Back to `running`, not to nothing: an empty status is what makes the
+              // transcript fall back to 'Sent. Waiting for the agent to start…', the one label that otherwise never
+              // shows on a live run.
+              if (thinking && event.delta) { thinking = false; emit({ event: 'status', status: 'running' }); }
+              output += event.delta || ''; emit({ event: 'delta', text: event.delta || '' });
+            }
             else if (event.type === 'completed') {
               if (typeof event.text === 'string') {
                 if (!event.text.startsWith(output)) throw new Error('Stream output disagrees with completed run');
@@ -538,7 +548,11 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
                 || canvasText('执行失败', 'Execution failed.') });
               emit({ event: 'done', status: 'failed' });
             } else if (event.type === 'cancelled') emit({ event: 'done', status: 'cancelled' });
-            else if (event.type === 'queued' || event.type === 'running') emit({ event: 'status', status: event.type });
+            else if (event.type === 'queued' || event.type === 'running') emit({ event: 'status', status: event.type })
+            // The run's model began reasoning. The server sends this once, and only the fact: on a reasoning model the
+            // first token can be minutes away, and until then all the page can say is 运行中 / Running — that a run is
+            // in flight, not that the model is working. The reader's own clock keeps running underneath it.
+            else if (event.type === 'reasoning_started' && !thinking) { thinking = true; emit({ event: 'status', status: canvasText('模型正在思考…', 'The model is thinking…') }); }
             else if (event.type === 'media_status') {
               if (event.status === 'backup') backup = true;
               const status = mediaStatusText(event.status, backup);

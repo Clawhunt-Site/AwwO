@@ -979,12 +979,25 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		finish("failed", "", "accounting_commit_failed")
 		return
 	}
-	// Only a planner run opts in to reasoning activity: it is the one run kind whose
-	// output is withheld while it streams, so it is the one that needs another signal.
+	// Every run that reaches here opts in to reasoning activity; only a planner run keeps its counts. A media, team,
+	// computer or workspace run returns above and never asks (teams.go and workspace.go admit with no header), so a
+	// sandbox node still shows only how its run stands.
+	//
+	// A planner run's output is withheld while it streams, so its progress is the only signal it has. A node run
+	// streams its output as it goes, which used to be reason enough to ask for nothing — but that holds only for a
+	// model that answers as it reasons. On a reasoning model the first text_delta can be minutes away, and all the
+	// page can say until then is 运行中 / Running: that a run is in flight, not that the model is working. A reader
+	// cannot tell the two apart (docs: the Opus 5.5 stalls, where nothing came back at all). The activity header
+	// turns the difference into one fact.
+	//
+	// A node run keeps nothing of the counts the worker sends: it records that reasoning began, once, and drops the
+	// rest. Reporting every count would write a row about twice a second (REASONING_REPORT_MS) — up to about 1,800
+	// for a quarter-hour of reasoning, on far more runs than the planner's — and the page needs no more than the
+	// fact to start its own clock (owner 2026-10-23, asked as a cost decision).
 	var progress *plannerProgress
-	var activity http.Header
+	activity := plannerActivityHeader()
 	if kind == "planner" {
-		progress, activity = &plannerProgress{}, plannerActivityHeader()
+		progress = &plannerProgress{}
 	}
 	admissionStart := time.Now()
 	facts.Sent = admissionStart
@@ -1040,6 +1053,9 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	// Reasoning a planner run is told about but never sees counts towards what an unreported call is charged
 	// from, a token a character.
 	reasoned := 0
+	// Whether this run has already said that its model began reasoning, and whether a failed write was noted. A node
+	// run says it once and no more, and notes a refusal to record it once.
+	reasoningSaid, reasoningWarned := false, false
 	var reasoning reasoningStream
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1099,12 +1115,36 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				return
 			}
 		case "reasoning":
-			// Reasoning activity is a count the worker sends only to a run that asked
-			// for it. Anywhere else it is a worker ignoring the protocol, which stays
-			// the same failure as any other event this run cannot account for.
-			if progress == nil || ev.Characters == nil || *ev.Characters < 0 {
+			// Reasoning activity is a count the worker sends only to a run that asked for it, and every run asks
+			// now. A malformed one is still the same failure as any other event this run cannot account for.
+			if ev.Characters == nil || *ev.Characters < 0 {
 				finish("failed", output.String(), "invalid_runtime_event")
 				return
+			}
+			if progress == nil {
+				// A node run keeps the fact, once, and none of the counts: the page starts its own clock from it.
+				//
+				// The counts are deliberately NOT added to this run's hidden tokens. What a run is charged from is
+				// a separate decision from what its page says, and this change was asked for as the latter; a node
+				// run's charge is therefore exactly what it was. Worth knowing where that leaves things: for a call
+				// the provider refused without reporting usage, creditCharge (plans.go) and sizeRefusal both read
+				// hidden tokens as "did the provider do work?", so a node run that reasoned for minutes and was
+				// then refused is still charged nothing while this very row says work happened. That gap predates
+				// this change — the row only makes it visible — and closing it is the owner's to decide.
+				//
+				// The flag is set only once the row is in: a write that failed would otherwise lose the signal for
+				// the whole run, since every later count is dropped. The planner's equivalent retries the same way.
+				if !reasoningSaid {
+					if e := a.appendRunProgress(ctx, tid, id, reasoningStartedEvent); e != nil {
+						if ctx.Err() == nil && !reasoningWarned {
+							reasoningWarned = true
+							a.log.Warn("the run's reasoning was not recorded; the run continues", "event", "run_reasoning_skipped")
+						}
+					} else {
+						reasoningSaid = true
+					}
+				}
+				continue
 			}
 			progress.reasonReported(*ev.Characters)
 			reasoned = max(reasoned, *ev.Characters)

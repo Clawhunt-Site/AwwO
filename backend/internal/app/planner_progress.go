@@ -511,6 +511,17 @@ func (a *App) appendRunProgress(ctx context.Context, tid, id string, data []byte
 	return nil
 }
 
+// reasoningStartedEvent is what a run whose output is not withheld says when its model began reasoning: the fact
+// alone, with no count of it, written once a run. A reader takes it as "the model is working", which on a reasoning
+// model is what the minutes before the first token cannot otherwise tell it. Its own type, not a `progress` frame,
+// so the deploy readback's count of progress rows on non-planner runs stays what it has always been: zero.
+//
+// Named for reasoning, not thinking, because `assertNoScratchpad` (reasoning_leak_test.go) treats any durable sink
+// or replay holding "think" as a leaked scratchpad — the tags being <think> and <thinking>. A type with that word
+// in it would make that guard false-positive on every run this is written for, and a guard is not worth weakening
+// for a name.
+var reasoningStartedEvent = []byte(`{"type":"reasoning_started"}`)
+
 func plannerActivityHeader() http.Header {
 	return http.Header{runActivityHeader: []string{runActivityReasoning}}
 }
