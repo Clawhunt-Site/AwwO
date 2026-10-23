@@ -11,7 +11,7 @@ import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { readCapabilities } from '../saas/capabilitiesApi';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
-import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -119,7 +119,7 @@ import { subscribePageErrors, type PageErrorReport } from './pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
-import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, failureReason } from './surfaceMessages';
+import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, refusedNodeMessage, failureReason } from './surfaceMessages';
 import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
@@ -489,6 +489,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The workspace's image and video models. A failed read is reported in the inspector, never
   // shown as a workspace without media models.
   const [mediaState, setMediaState] = useState<MediaCatalogueState | undefined>(undefined);
+  // A run's own callback does not re-create itself when the catalogue arrives, and must still judge a media node's
+  // saved settings by the catalogue as it is now, as it reads the model palette through paletteRef.
+  const mediaStateRef = useRef(mediaState);
+  mediaStateRef.current = mediaState;
   const [mediaRefresh, setMediaRefresh] = useState(0);
   useEffect(() => {
     setMediaState(undefined);
@@ -664,6 +668,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [mediaState]);
   // A media node still set to a retired generator's model moves to the model offered now, with nothing said about it
   // (owner decision 2026-10-11). Its results stay: the move is not an edit that makes them stale.
+  // Settings a node's model no longer accepts are NOT dropped here: this catalogue is read once when the canvas
+  // opens, so a tab left open across a release that widened a model's choices holds a stale, narrower one, and
+  // deleting by it would silently and permanently lose a choice the server accepts (a silent patch leaves no undo
+  // entry, and the autosave carries it to the workspace). Such a node is named before its run instead
+  // (preflightGraphIssue), and the reader re-picks in its settings, where the offending parameter is already marked.
   useEffect(() => {
     if (readOnly) return;
     const moved = replaceRetiredMediaModels(docRef.current, mediaCatalogueOf(mediaState));
@@ -1792,7 +1801,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const reviewPolicy = !manualMessage && !collaboration ? runDocument.execution : undefined;
     const problem = collaboration ? '' : preflightIssueMessage(t, reviewPolicy
       ? preflightReviewGraphIssue(runNodes, runEdges, reviewPolicy, scope)
-      : preflightGraphIssue(runNodes, runEdges.filter(edge => edge.kind !== 'feedback'), scope, { conversation: Boolean(currentSaaSCanvas() && manualMessage) }), locale);
+      : preflightGraphIssue(runNodes, runEdges.filter(edge => edge.kind !== 'feedback'), scope,
+        { conversation: Boolean(currentSaaSCanvas() && manualMessage), media: mediaCatalogueOf(mediaStateRef.current) }), locale);
     if (problem) { refusedRevision.current = canvasPlanRevision(runDocument); setHandoffNote(problem); return; }
     setHandoffNote('');
     const ac = new AbortController();
@@ -1860,7 +1870,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           clearRunJournal(submissionStorage, pending.id);
           if (currentSaaSCanvas() !== cloud) return;
           journal.current = null; setRunning(false);
-          setHandoffNote(saasErrorMessage(error, locale)); runAbort.current = null; return;
+          // A refusal the service blamed on one node (a media node's saved model, type or settings, which it freezes
+          // for the whole scope before the run starts) names that node: its copy alone would not.
+          setHandoffNote(refusedNodeMessage(saasErrorMessage(error, locale), graphRefusedNodeId(error), runNodes, locale));
+          runAbort.current = null; return;
         }
         if (currentSaaSCanvas() !== cloud) return;
         setHandoffNote(error instanceof Error ? error.message : surfaceNotice(t, 'run_identity_unconfirmed'));

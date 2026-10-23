@@ -287,22 +287,49 @@ func frozenMotionValid(m *mediaModel, plan *mediaPlan, fresh bool) bool {
 	return err == nil && reflect.DeepEqual(want, plan.Motion)
 }
 
+func mediaAdmissionStatus(code string) int {
+	switch code {
+	case "media_unavailable", "media_storage_full", "media_storage_unavailable":
+		return 503
+	case "model_not_allowed":
+		return 403
+	case "node_setup_required":
+		return 409
+	}
+	return 400
+}
+
 func (a *App) mediaAdmissionError(w http.ResponseWriter, err error) {
 	var input setupError
 	if !errors.As(err, &input) {
 		fail(w, 500, "internal_error", "Media run admission failed")
 		return
 	}
-	status := 400
-	switch input.code {
-	case "media_unavailable", "media_storage_full", "media_storage_unavailable":
-		status = 503
-	case "model_not_allowed":
-		status = 403
-	case "node_setup_required":
-		status = 409
+	fail(w, mediaAdmissionStatus(input.code), input.code, input.message)
+}
+
+// mediaNodeFaultCodes are the media admission refusals one node's own saved state causes: its model, its type, or a
+// parameter value its model does not take. The others are the deployment's (generation not configured, no room to
+// store a result) and are no node's fault.
+var mediaNodeFaultCodes = map[string]bool{
+	"media_params_invalid": true,
+	"node_setup_required":  true,
+	"model_unavailable":    true,
+	"model_not_allowed":    true,
+}
+
+// mediaGraphAdmissionError is mediaAdmissionError for a canvas run, which freezes the model and parameters of every
+// media node in its scope before the run starts (graph_runs.go): one node's own saved state then refuses the whole
+// canvas, and the copy alone leaves the reader to find that node among hundreds. A refusal the node causes carries
+// its id in `details.nodeId`, so the page can name it; the deployment's own refusals name no node. Only the id
+// travels, which the client already has — a node's title is the reader's own words and stays out of an API error.
+func (a *App) mediaGraphAdmissionError(w http.ResponseWriter, err error, nodeID string) {
+	var input setupError
+	if errors.As(err, &input) && mediaNodeFaultCodes[input.code] {
+		failDetails(w, mediaAdmissionStatus(input.code), input.code, input.message, map[string]any{"nodeId": nodeID})
+		return
 	}
-	fail(w, status, input.code, input.message)
+	a.mediaAdmissionError(w, err)
 }
 
 // createMediaRun admits a run of an image or video node. It shares createRun's transaction, so the

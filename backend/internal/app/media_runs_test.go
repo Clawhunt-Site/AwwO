@@ -275,6 +275,13 @@ func errorCode(v map[string]any) string {
 	return code
 }
 
+// errorDetails is a refusal's machine-readable details, as a client reads them.
+func errorDetails(v map[string]any) map[string]any {
+	e, _ := v["error"].(map[string]any)
+	details, _ := e["details"].(map[string]any)
+	return details
+}
+
 func awaitRunRow(t *testing.T, h *harness, tid, id string, want ...string) (string, string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

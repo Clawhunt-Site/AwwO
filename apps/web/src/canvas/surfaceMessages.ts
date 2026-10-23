@@ -1,5 +1,6 @@
 import type { UiLocale } from '../locale';
 import { isRunFailureCopy, runFailureText } from '../saas/canvasErrors';
+import type { CanvasNode } from './canvasDoc';
 import type { CanvasTextKey, CanvasTextValues, CanvasTranslate } from './i18n';
 import type { PreflightIssue, PreflightIssueCode } from './runGraph';
 import type { ReviewPreflightReason } from './reviewGraph';
@@ -143,6 +144,7 @@ const PREFLIGHT_KEYS: Record<PreflightIssueCode, CanvasTextKey> = {
   cycle: 'run.preflightCycle',
   invalid_team: 'run.preflightInvalidTeam',
   edit_timeline: 'edit.preflightTimeline',
+  media_params: 'run.preflightMediaParams',
 };
 
 const REVIEW_PREFLIGHT_KEYS: Record<ReviewPreflightReason, CanvasTextKey> = {
@@ -181,6 +183,19 @@ export function preflightIssueMessage(
     return t(REVIEW_PREFLIGHT_KEYS[reason as ReviewPreflightReason], localizedValues(issue, locale));
   }
   return t(PREFLIGHT_KEYS[issue.code], localizedValues(issue, locale));
+}
+
+/**
+ * A refusal of a whole canvas run, with the node the service refused it for named in front of its copy. A canvas run
+ * freezes the model and settings of every media node in its scope before it starts, so one node's own saved state
+ * refuses the whole canvas (`graph_runs.go`), and the refusal code's copy says nothing about which node that was: on
+ * a canvas of hundreds that left the reader to find it. The service carries the node's id only (graphRefusedNodeId);
+ * the titles are this page's own. A refusal that names no node, or one whose node this page no longer holds, reads
+ * exactly as the service worded it.
+ */
+export function refusedNodeMessage(message: string, nodeId: string | null, nodes: ReadonlyArray<CanvasNode>, locale: UiLocale): string {
+  const title = nodeId ? nodes.find(node => node.id === nodeId)?.title : undefined;
+  return title ? `“${title}”${locale === 'zh' ? '：' : ': '}${message}` : message;
 }
 
 /** Known wrapper text is localized; an unknown native/server detail stays verbatim evidence. */

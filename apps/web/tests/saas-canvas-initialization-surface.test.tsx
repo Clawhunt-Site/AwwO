@@ -239,3 +239,72 @@ it('allows conversation before required task input is filled while keeping expli
   expect(journalAtSubmission).toBeNull();
   expect(screen.queryByText(/未绑定真实 Agent|先绑定/)).toBeNull();
 });
+
+// 图片 · 高清 as the offer had it when a node was saved, and after it was repointed to a generator whose
+// resolutions are 2K alone (2026-10-22): the model's id did not change, only its choices narrowed.
+const mediaOffer = (resolutions: string[]) => ({
+  configured: true, available: true, limits: { runsPerDay: 30, timeoutSeconds: 1200 },
+  models: [{ id: 'xt.seedream-5-pro', name: 'Seedream 5 Pro', label: ['图片 · 高清', 'Image · HD'], vendor: 'media', kind: 'image',
+    mode: 'text-to-image', prompt: { minLength: 1, maxLength: 32000 }, references: 0, audioReferences: 0, params: [
+      { name: 'resolution', type: 'enum', values: resolutions, default: '2K', label: ['分辨率', 'Resolution'] },
+      { name: 'imageNum', type: 'integer', min: 1, max: 4, default: 1, label: ['生成张数', 'Images'] }] }],
+});
+function seedMedia(mediaParams: SessionNode['mediaParams']) {
+  const node: SessionNode = { ...createSessionNode('image', { x: 50, y: 50 }), id: 'poster', title: '海报', runtime: 'pi',
+    model: 'xt.seedream-5-pro', binding: { companyId: tenant.id, agentId: 'media-agent', agentName: '海报' }, issueId: 'media-session', mediaParams };
+  canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node], view: { x: 0, y: 0, scale: 1 } }));
+}
+/** The fixture's routes, with the workspace's media catalogue and any route this test answers itself. */
+function withMediaRoutes(offer: ReturnType<typeof mediaOffer>, own: (url: string, init: RequestInit) => Response | undefined = () => undefined) {
+  const fallback = globalThis.fetch as unknown as (input: unknown, init?: RequestInit) => Promise<Response>;
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url.endsWith('/tenants/workspace/media')) return new Response(JSON.stringify(offer));
+    return own(url, init) ?? fallback(input, init);
+  }));
+}
+
+// A setting the model no longer accepts refuses the whole canvas at the server, so the run is not sent and the node
+// is named. The canvas itself is left alone: this catalogue is the one read when it opened, so deleting the setting
+// by it could lose a choice the workspace accepts.
+it('refuses a run a media node holds a refused setting in, names the node, and changes nothing', async () => {
+  seedMedia({ resolution: '1K', imageNum: 3 });
+  withMediaRoutes(mediaOffer(['2K']));
+  configureSaaSCanvasInitialize(async () => loadDocumentWithStatus().doc);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+  // The settings are judged by the workspace's catalogue, so the run waits for it; without one they are not judged
+  // here at all and the server refuses that run instead.
+  await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).endsWith('/tenants/workspace/media'))).toBe(true));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  await screen.findByText('有 1 个节点的生成设置不被它的模型接受：海报。请打开它们重新选择；如果打开这张画布之后模型有变动，刷新页面即可。');
+  expect(journalAtSubmission).toBeNull();
+  expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => String(url).endsWith('/graph-runs') && (init as RequestInit | undefined)?.method === 'POST')).toBe(false);
+  expect((loadDocumentWithStatus().doc.nodes[0] as SessionNode).mediaParams).toEqual({ resolution: '1K', imageNum: 3 });
+});
+
+it('runs a media node whose settings the workspace still accepts', async () => {
+  seedMedia({ resolution: '1K', imageNum: 3 });
+  withMediaRoutes(mediaOffer(['2K', '1K']));
+  configureSaaSCanvasInitialize(async () => loadDocumentWithStatus().doc);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+  await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).endsWith('/tenants/workspace/media'))).toBe(true));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  await waitFor(() => expect(journalAtSubmission?.nodes.poster).toBeDefined());
+  expect((loadDocumentWithStatus().doc.nodes[0] as SessionNode).mediaParams).toEqual({ resolution: '1K', imageNum: 3 });
+});
+
+// The server freezes every media node in a run's scope before the run starts, so one node's own saved state refuses
+// the whole canvas; it carries that node's id, and the page, which owns the titles, says which node it was.
+it('names the node a refused canvas run was refused for', async () => {
+  seedMedia({ resolution: '1K' });
+  withMediaRoutes(mediaOffer(['2K', '1K']), (url, init) => url.endsWith('/graph-runs') && init.method === 'POST'
+    ? new Response(JSON.stringify({ error: { code: 'media_params_invalid', message: 'Node media settings are invalid for its model', details: { nodeId: 'poster' } } }), { status: 400 })
+    : undefined);
+  configureSaaSCanvasInitialize(async () => loadDocumentWithStatus().doc);
+  render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
+  fireEvent.click(screen.getByRole('button', { name: /运行图/ }));
+  await screen.findByText('“海报”：节点的生成参数不适用于所选模型，请在节点配置中修改。');
+  expect(loadRunJournal()).toBeNull();
+});

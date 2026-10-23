@@ -306,7 +306,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					e = a.mediaStorageReady()
 				}
 				if e != nil {
-					a.mediaAdmissionError(w, e)
+					// This refusal is the whole canvas's, so a refusal this node's own saved model, type or
+					// parameters caused says which node it was (mediaGraphAdmissionError).
+					a.mediaGraphAdmissionError(w, e, n.ID)
 					return
 				}
 			} else if team, e = savedNodeTeam(own, n.ID); e != nil {

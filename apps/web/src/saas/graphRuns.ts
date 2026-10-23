@@ -211,6 +211,18 @@ export async function readGraphRun(tenantId: string, canvasId: string, graphId: 
 export interface GraphObservation { run?: string; document?: CanvasDocument }
 export function hasCloudGraphRuntime(): boolean { return currentSaaSCanvas() !== null; }
 export class GraphNotSubmittedError extends Error {}
+/**
+ * The node a refused canvas run was refused for, as the API named it, or null when it named none. A canvas run
+ * freezes the model and settings of every media node in its scope before it starts, so one node's own saved state
+ * refuses the whole canvas (`graph_runs.go`, `mediaGraphAdmissionError`), and the refusal code's copy says nothing
+ * about which node that was. Only the id travels, which this page already holds; the titles are its own.
+ */
+export function graphRefusedNodeId(error: unknown): string | null {
+  if (!(error instanceof SaaSApiError)) return null;
+  const nodeId = error.details.nodeId;
+  return typeof nodeId === 'string' && nodeId ? nodeId : null;
+}
+
 export function graphAdmissionRejected(error: unknown): boolean {
   return error instanceof GraphNotSubmittedError || (error instanceof SaaSApiError && (
     (error.status >= 400 && error.status < 500) || (error.status === 503 && ['runtime_unavailable', 'worker_unavailable', 'database_unavailable'].includes(error.code))

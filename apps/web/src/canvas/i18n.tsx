@@ -491,6 +491,7 @@ const EN = {
   'run.preflightMissingInputs': '“{nodeTitle}” inputs are not ready: {fields}. Complete the required fields with valid values.',
   'run.preflightCycle': 'The connections contain a cycle, so these nodes cannot run in topology order: {titles}.',
   'run.preflightInvalidTeam': '“{nodeTitle}” team configuration is invalid: {detail}',
+  'run.preflightMediaParams': '{count} node(s) have generation settings their model does not accept: {titles}. Open each one and choose them again, or reload the page if the models have changed since you opened this canvas.',
   'session.queued': 'Queued',
   'session.running': 'Running',
   'session.succeeded': 'Completed',
@@ -1279,6 +1280,7 @@ export type CanvasTextValues = Record<string, string | number>;
 
 const ZH: Record<CanvasTextKey, string> = {
   'run.preflightInvalidTeam': '“{nodeTitle}”的团队配置无效：{detail}',
+  'run.preflightMediaParams': '有 {count} 个节点的生成设置不被它的模型接受：{titles}。请打开它们重新选择；如果打开这张画布之后模型有变动，刷新页面即可。',
   'run.nodesNeedSetup': '{count} 个节点待配置',
   'run.preparing': '正在准备运行…',
   'run.needsAttention': '运行前有问题需要处理',
