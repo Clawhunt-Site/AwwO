@@ -49,7 +49,7 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, planContextCondensed, planNewNodeModel, type CanvasPlanMedia } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, PLAN_NOTES_SHOWN, planContextCondensed, planNewNodeModel, type CanvasPlanMedia } from './canvasPlan';
 import { componentModelEntry, planComponentModel, withAssistantModel } from './assistantModel';
 import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 import { describePlanChanges } from './planChanges';
@@ -213,6 +213,9 @@ const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-
 const shiftView = (view: ViewportState, by: number): ViewportState => by ? { ...view, x: view.x + by } : view;
 /** A changed document's planning recovery is read again once the document has not changed for this long. */
 const PLAN_RECOVERY_SETTLE_MS = 300;
+/** A request carried over from the workspace home waits at most this long for the model its plan's new nodes take
+ *  (the palette and the reader's choice, planNewNodeChoice), so a read that fails never holds it. */
+export const HAND_OVER_MODEL_WAIT_MS = 4000;
 /** An opened node's frame and the camera the app placed for it, from one measurement of the stage (openPlacement). */
 type OpenFit = { id: string; frame?: { w: number; h: number }; view: ViewportState; narrow?: number; content: OpenContent; resized?: boolean };
 /** Stage changes (window resize, rail toggles) settle for this long before the overview refits. */
@@ -3140,7 +3143,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
       // A plan that changed nothing else keeps the nodes it added, which tell whether it is still on the canvas.
       // What was applied differently from how the plan wrote it is said with its summary, never hidden.
-      const shownAdjustments = applied.adjustments.slice(0, 6);
+      const shownAdjustments = applied.adjustments.slice(0, PLAN_NOTES_SHOWN);
       // Media nodes a plan added: said once, so the user knows a canvas run generates them and Send makes one alone.
       const addedMedia = changed ? applied.doc.nodes.filter(node => applied.addedNodeIds.includes(node.id) && node.kind === 'session' && mediaKindOf(node.agentKind)).length : 0;
       // What the canvas now holds, node by node, under the model's own summary of what it meant to do.
@@ -3225,6 +3228,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const initialPlanSettled = useRef(false);
   const initialPlanShown = useRef(false);
   const plannerStatusKnown = plannerProvider === 'jev' ? jevStatus !== null : plannerStatus !== null;
+  // On a hosted canvas it also waits, at most HAND_OVER_MODEL_WAIT_MS, until the model its new nodes take is known
+  // (planNewNodeChoice), so it is sized for the reader's choice as a request sent from the box is.
+  const [handOverWaited, setHandOverWaited] = useState(false);
+  useEffect(() => {
+    if (!initialPlan || readOnly || !canInitialize) return;
+    const timer = setTimeout(() => setHandOverWaited(true), HAND_OVER_MODEL_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [initialPlan, readOnly, canInitialize]);
+  const newNodeChoiceRead = Boolean(assistantExecution?.componentModelRead);
+  const newNodeChoiceModel = assistantExecution?.componentModel?.model;
   useEffect(() => {
     const request = initialPlan;
     if (!request || readOnly || initialPlanSettled.current) return;
@@ -3250,6 +3263,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (runUnavailableReason) { setPlanningError(runUnavailableReason); settle(); return; }
     if (!plannerStatusKnown) return;
     if (planningUnavailableReason) { setPlanningError(planningUnavailableReason); settle(); return; }
+    // A palette that could not be read will not be: the request goes without naming the model.
+    if (canInitialize && !paletteError && !handOverWaited && planNewNodeChoice() === undefined) return;
     const timer = setTimeout(() => {
       initialPlanSettled.current = true;
       if (!request.claim()) { request.done(); return; }
@@ -3258,7 +3273,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }, 0);
     return () => clearTimeout(timer);
   }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason,
-    canInitialize, recoveryLoaded, recoveryChecking, planningRecovery?.pending]);
+    canInitialize, recoveryLoaded, recoveryChecking, planningRecovery?.pending, palette, paletteError, handOverWaited,
+    newNodeChoiceRead, newNodeChoiceModel]);
   // ---- one conversation, routed by the server (assistantRouting.ts) -----------------------------------
   // Where the host also does tasks, each message goes to the server first, which says whether it arranges the
   // canvas or becomes a task. A message the router cannot answer for is planned: a plan is undone in one step

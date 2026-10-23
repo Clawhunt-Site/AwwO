@@ -43,10 +43,11 @@ export function hostedPagePersona(locale: UiLocale): string {
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
-  | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string>; acceptanceCriteria?: string[] }
+  | { type: 'add_node'; ref: string; templateId: PlanTemplateId; title?: string; persona?: string; inputValues?: Record<string, string>; constraints?: string[]; acceptanceCriteria?: string[] }
   | { type: 'update_node'; nodeId: string; title?: string; persona?: string }
   /** A node's task requirements: each list given replaces that list (constraints it must follow, criteria its delivery
-   *  is checked against); a list left out stays as it is. */
+   *  is checked against), except that on a node the same plan adds the user's request stays its first constraint; a
+   *  list left out stays as it is. */
   | { type: 'set_task'; nodeId: string; constraints?: string[]; acceptanceCriteria?: string[] }
   /** A node's model (one the host offered the planner), and its reasoning effort; the runtime is AwwO's (nodeRuntime.ts). */
   | { type: 'set_model'; nodeId: string; model: string; effort?: string }
@@ -139,7 +140,7 @@ export const carriesCondensedText = (text: string | undefined): boolean => text 
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
-add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:{[已有输入字段ID]:string}}
+add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:{[已有输入字段ID]:string},constraints?:string[]}
 新增 Agent 节点的 add_node 必须写 acceptanceCriteria：1 到 3 条，每条是能对照这个节点自己的交付逐条核对的检查。
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
@@ -156,7 +157,7 @@ disconnect: {type:"disconnect",edgeId:string}
 nodeId/fromNode/toNode/reviewerNodeId 必须为当前画布中提供的真实节点ID，或前面 add_node 的唯一 ref；不允许前向引用。ref 不得与既有ID重名。
 connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点可使用其实际context/result/data端口ID。连线必须类型匹配，单输入只能连接一个来源。kind默认data，本轮data连线不得成环。feedback将上一轮反馈传回上游，可构成跨轮闭环；workflow模式保留但不执行feedback。
 互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
-set_task 改任务要求：constraints=约束，acceptanceCriteria=可逐条核对交付的验收标准；给出的列表整体替换；每列表≤20条、每条≤2000字、合计≤12000字；新节点约束默认为原始请求，@R1 等即 requirements 原文。
+set_task 改任务要求：constraints=约束，acceptanceCriteria=可逐条核对交付的验收标准；给出的列表整体替换；每列表≤20条、每条≤2000字、合计≤12000字；新节点约束默认为原始请求，给它的 constraints 接在其后；@R1 等即 requirements 原文。
 set_model 是唯一能改模型的操作，只能改用 models 中的模型：model 写 id（"default"=工作区默认），effort 只能是该模型列出的档位；执行引擎由应用选择。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
 改变已连接字段类型或删除字段前须先disconnect。remove_node 明确删除该节点及其关联连线。
@@ -166,6 +167,24 @@ set_model 是唯一能改模型的操作，只能改用 models 中的模型：mo
 const LIMITS = { raw: 120000, operations: 100, id: 128, title: 200, persona: 8000, value: 16000, help: 2000, fields: 64 } as const;
 
 const MEDIA_KIND_WORDS: Record<MediaKind, string> = { image: '图片', video: '视频', model3d: '3D 模型', audio: '音频' };
+/** How many of a plan's notes the canvas panel shows (CanvasSurface), the rest counted: applyCanvasPlan's grouped notes,
+ *  at most four, always come first among them. */
+export const PLAN_NOTES_SHOWN = 6;
+/** A new node's task lists a note names, in Chinese and in English. */
+const TASK_LIST_WORDS = { constraints: ['约束', 'constraints'], criteria: ['验收标准', 'acceptance criteria'],
+  both: ['约束和验收标准', 'constraints and acceptance criteria'] } as const;
+type TaskLists = keyof typeof TASK_LIST_WORDS;
+/** Which task lists a step gave, or none. */
+function givenLists(constraints: boolean, criteria: boolean): TaskLists | undefined {
+  return constraints && criteria ? 'both' : constraints ? 'constraints' : criteria ? 'criteria' : undefined;
+}
+function joinLists(a: TaskLists, b: TaskLists): TaskLists { return a === b ? a : 'both'; }
+/** The first five items joined, and the rest said by `rest` with how many they are; up to five, the last joined by
+ *  `last` ("and" in English). */
+function firstFive(items: string[], separator: string, rest: (more: number) => string, last = separator): string {
+  if (items.length > 5) return items.slice(0, 5).join(separator) + rest(items.length - 5);
+  return items.length > 1 ? `${items.slice(0, -1).join(separator)}${last}${items[items.length - 1]}` : items.join('');
+}
 
 /**
  * The protocol with media nodes offered: add_node may also name the given kinds, and one line says what a media node
@@ -177,7 +196,7 @@ export function withMediaNodes(protocol: string, kinds: ReadonlyArray<MediaKind>
   if (!offered.length) return protocol;
   const names = offered.map(kind => `${kind}=${MEDIA_KIND_WORDS[kind]}`).join('、');
   const line = `媒体节点（templateId 为 ${names}）：只在需求明确需要生成这类素材时添加，每个素材一个节点；在 inputValues.prompt 写这个素材完整、具体的生成提示词`
-    + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona、acceptanceCriteria 和其他输入。'
+    + '（主体、风格、构图或镜头、材质与配色；3D 模型只写单个物体或角色，不超过 1000 字），不写 persona、constraints、acceptanceCriteria 和其他输入。'
     + '媒体节点的输出端口 ID 为 result（图片、视频为对应类型，3D 模型为 file），图片节点和 3D 模型节点另有 reference 输入，可接上游图片节点的 result 作为参考图（按图改图、按图生成 3D 模型；先出角色或产品图、再做 3D 时就这样连）；视频节点的 reference 输入可接多个上游图片节点（每个要在视频里保持样子的人物、物品、场景各一条线）；连线只能接到类型相同的输入。'
     + '画布运行会按连线顺序生成媒体节点：提示词是节点自己的提示词，后面接上连到它 context 输入的上游文字；每次生成计入当天的生成次数。已有媒体节点的提示词用 set_input 的 fieldId:"prompt" 修改。';
   return protocol.split('\n').flatMap(text => text.startsWith('add_node:')
@@ -275,7 +294,7 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
     const fieldId = () => id(op.fieldId, `${location}.fieldId`);
     switch (op.type) {
       case 'add_node': {
-        keys(op, ['type', 'ref', 'templateId', 'title', 'persona', 'inputValues', 'acceptanceCriteria'], location);
+        keys(op, ['type', 'ref', 'templateId', 'title', 'persona', 'inputValues', 'constraints', 'acceptanceCriteria'], location);
         const ref = id(op.ref, `${location}.ref`);
         if (refs.has(ref)) fail(`重复的新增节点引用「${ref}」。`);
         refs.add(ref);
@@ -289,7 +308,7 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         }
         return { type: 'add_node', ref, templateId: op.templateId as PlanTemplateId,
           ...optionalText(op, 'title', LIMITS.title, location, false), ...optionalText(op, 'persona', LIMITS.persona, location),
-          ...(inputValues ? { inputValues } : {}), ...optionalList(op, 'acceptanceCriteria', location),
+          ...(inputValues ? { inputValues } : {}), ...optionalList(op, 'constraints', location), ...optionalList(op, 'acceptanceCriteria', location),
         };
       }
       case 'set_task': {
@@ -628,8 +647,36 @@ export const DEFAULT_MODEL_REFERENCE = 'default';
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
   models?: CanvasPlanModels, hosted = false): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
+  // Every note is kept, so the count the panel gives of those it does not show is true.
   const adjustments: string[] = [];
-  const adjust: Adjust = (zh, en) => { if (adjustments.length < LIMITS.operations) adjustments.push(locale === 'en' ? en : zh); };
+  const adjust: Adjust = (zh, en) => { adjustments.push(locale === 'en' ? en : zh); };
+  // Task requirements the plan gave a node it adds (with add_node, or a set_task after it) and that were not written are
+  // said apart from that list, before it, in at most four notes that name the nodes (five, the rest counted), so that
+  // no other note pushes them out of what the reader is shown (PLAN_NOTES_SHOWN): media nodes given task lists (they
+  // have none), lists that copied shortened text, lists that did not fit, and requirement names the canvas does not
+  // have. Each note names a node once, with every list it lost; a node the plan removes again is not named.
+  type Lost = { node: CanvasNode; lists: TaskLists };
+  const mediaGiven = new Map<string, Lost & { kind: MediaKind }>();
+  const copiedFor = new Map<string, Lost>();
+  const tooLongFor = new Map<string, Lost>();
+  const unknownFor = new Map<string, { node: CanvasNode; names: Set<string> }>();
+  const lose = (group: Map<string, Lost>, node: CanvasNode, lists: TaskLists | undefined) => {
+    if (!lists) return;
+    const entry = group.get(node.id);
+    if (entry) entry.lists = joinLists(entry.lists, lists);
+    else group.set(node.id, { node, lists });
+  };
+  const loseMedia = (node: CanvasNode, kind: MediaKind, lists: TaskLists | undefined) => {
+    if (!lists) return;
+    const entry = mediaGiven.get(node.id);
+    if (entry) entry.lists = joinLists(entry.lists, lists);
+    else mediaGiven.set(node.id, { node, kind, lists });
+  };
+  const loseName = (node: CanvasNode, name: string) => {
+    const entry = unknownFor.get(node.id);
+    if (entry) entry.names.add(name);
+    else unknownFor.set(node.id, { node, names: new Set([name]) });
+  };
   // A plan made from a shortened view of the canvas leaves what that view showed only in part as it is, and writes no
   // text copied from a shortened one. In any other plan such words are the reader's own, written as given.
   const condensed = planContextCondensed(value);
@@ -664,6 +711,18 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
     if (!node) fail(`节点引用「${reference}」不在当前画布，或尚未创建 / 已删除。`);
     return node;
   };
+  // A shared requirement's name stands for its text; a name the canvas does not have is left out, and said (to `skip`
+  // when given one).
+  const expand = (node: CanvasNode, items: string[], skip?: (name: string) => void) => items.flatMap(item => {
+    const named = requirements.get(item.trim());
+    if (named !== undefined) return [named];
+    if (REQUIREMENT_REF.test(item.trim())) {
+      if (skip) skip(item.trim());
+      else adjust(`跳过了「${titleOf(node)}」的约束「${item.trim()}」：画布上没有这条原始需求`, `Skipped the constraint “${item.trim()}” on “${titleOf(node)}”: the canvas has no such requirement`);
+      return [];
+    }
+    return [item];
+  });
   // A connection to a node the plan only creates further on is made once every other step has run.
   const later: Array<Extract<CanvasPlanOperation, { type: 'connect' }>> = [];
   for (const op of plan.operations) {
@@ -684,6 +743,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           }
           const node: SessionNode = { ...createSessionNode(kind, { x: 0, y: 0 }), title: copied(op.title) ? label : op.title ?? label, model };
           if (copied(op.title)) copiedAdjust(node, '名称', 'title', adjust, true);
+          // It has no task frame, so task lists given it are said to be left out rather than dropped without a word.
+          loseMedia(node, kind, givenLists(Boolean(op.constraints?.some(item => item.trim())), Boolean(op.acceptanceCriteria?.some(item => item.trim()))));
           for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, media, shownOf(node, true));
           draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
           break;
@@ -699,19 +760,41 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         else if (op.title !== undefined) node.title = op.title;
         let persona = op.persona;
         if (copied(persona)) { copiedAdjust(node, '人设', 'persona', adjust, true); persona = undefined; }
-        let criteria = op.acceptanceCriteria;
-        if (criteria?.some(copied)) { copiedAdjust(node, '验收标准', 'acceptance criteria', adjust, true); criteria = undefined; }
+        // Task lists that copy shortened text are left out whole (said with the grouped notes).
+        const copiedCriteria = Boolean(op.acceptanceCriteria?.some(copied));
+        const copiedOwn = Boolean(op.constraints?.some(copied));
+        const criteria = copiedCriteria ? undefined : op.acceptanceCriteria;
+        const own = copiedOwn ? undefined : op.constraints;
+        lose(copiedFor, node, givenLists(copiedOwn, copiedCriteria));
         // Carry the human's exact request separately from the model-authored persona.
-        // Every new downstream reviewer receives it even if an upstream draft drifts.
-        if (constraints.length || criteria?.length) {
-          const frame = cleanTaskFrame({ version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [...(criteria ?? [])] });
-          // The request is always kept whole; acceptance criteria that would push the frame past its limits are left out.
-          if (taskFrameError(frame)) {
-            const name = titleOf(node);
-            adjust(`「${name}」的验收标准太长，没有写入（任务要求合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
-              `The acceptance criteria of “${name}” were too long and were left out (task requirements allow ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
+        // Every new downstream reviewer receives it even if an upstream draft drifts. Constraints the plan gives the new
+        // node come after it (the request is the node's own first constraint, never replaced by them).
+        const added = own ? [...new Set(expand(node, own, name => loseName(node, name)))].filter(item => !constraints.includes(item)) : [];
+        // Whether what is kept of the plan's constraints holds a shared requirement's text (named or written out).
+        const shared = new Set(requirements.values());
+        const namesRequirement = added.some(item => shared.has(item));
+        if (constraints.length || added.length || criteria?.length) {
+          const frameOf = (own: string[], checks: string[]) => cleanTaskFrame({ version: 1, source: 'manual', constraints: [...constraints, ...own], acceptanceCriteria: [...checks] });
+          // The request is always kept whole; of the plan's own constraints and acceptance criteria, what would push the
+          // frame past its limits is left out: one list where the other fits beside the request (the checks the plan
+          // wrote kept, unless what is kept of its constraints holds a shared requirement's text, the user's own words),
+          // else both.
+          const tooLong = (lists: TaskLists) => lose(tooLongFor, node, lists);
+          const whole = frameOf(added, criteria ?? []);
+          const both = Boolean(added.length && criteria?.length);
+          const checksFit = both && !taskFrameError(frameOf([], criteria ?? []));
+          const ownFit = both && !taskFrameError(frameOf(added, []));
+          if (!taskFrameError(whole)) node.taskFrame = whole;
+          else if (ownFit && (!checksFit || namesRequirement)) {
+            tooLong('criteria');
+            node.taskFrame = frameOf(added, []);
+          } else if (checksFit) {
+            tooLong('constraints');
+            node.taskFrame = frameOf([], criteria ?? []);
+          } else {
+            tooLong(both ? 'both' : added.length ? 'constraints' : 'criteria');
             if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
-          } else node.taskFrame = frame;
+          }
         }
         // A figure node's page is built with AwwO's figure kit: a planned persona replaces its role, never the guide.
         if (persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(persona) : persona;
@@ -735,8 +818,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       case 'set_task': {
         if (skipped.has(op.nodeId)) break;
         const node = resolve(op.nodeId);
-        if (node.kind !== 'session' || mediaKindOf(node.agentKind)) {
-          adjust(`没有改动「${titleOf(node)}」的任务要求：只有 Agent 节点有任务要求`, `Left “${titleOf(node)}” as it was: only an Agent node has task requirements`);
+        // What a node this plan adds does not get is said with the grouped notes; for any other node, in the list.
+        const isNew = addedNodeIds.includes(node.id);
+        const kind = node.kind === 'session' ? mediaKindOf(node.agentKind) : null;
+        if (node.kind !== 'session' || kind) {
+          if (isNew && kind) loseMedia(node, kind, givenLists(Boolean(op.constraints?.some(item => item.trim())), Boolean(op.acceptanceCriteria?.some(item => item.trim()))));
+          else adjust(`没有改动「${titleOf(node)}」的任务要求：只有 Agent 节点有任务要求`, `Left “${titleOf(node)}” as it was: only an Agent node has task requirements`);
           break;
         }
         if (node.taskFrame !== undefined && !isTaskFrame(node.taskFrame)) {
@@ -744,30 +831,28 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           break;
         }
         const current: TaskFrame = isTaskFrame(node.taskFrame) ? node.taskFrame : { version: 1, source: 'manual', constraints: [], acceptanceCriteria: [] };
-        // A shared requirement's name stands for its text; a name the canvas does not have is left out.
-        const expand = (items: string[]) => items.flatMap(item => {
-          const named = requirements.get(item.trim());
-          if (named !== undefined) return [named];
-          if (REQUIREMENT_REF.test(item.trim())) {
-            adjust(`跳过了「${titleOf(node)}」的约束「${item.trim()}」：画布上没有这条原始需求`, `Skipped the constraint “${item.trim()}” on “${titleOf(node)}”: the canvas has no such requirement`);
-            return [];
-          }
-          return [item];
-        });
         // A list the plan's context showed only in part, or one that copies such text, stays as it is.
         const kept = (list: string[] | undefined, field: 'constraints' | 'acceptanceCriteria', zh: string, en: string) => {
           if (!list) return false;
           if (shownOf(node)?.partial(field)) keptPartialAdjust(node, zh, en, adjust);
-          else if (list.some(copied)) copiedAdjust(node, zh, en, adjust);
-          else return false;
+          else if (list.some(copied)) {
+            if (isNew) lose(copiedFor, node, field === 'constraints' ? 'constraints' : 'criteria');
+            else copiedAdjust(node, zh, en, adjust);
+          } else return false;
           return true;
         };
         const setConstraints = kept(op.constraints, 'constraints', '约束', 'constraints') ? undefined : op.constraints;
         const setCriteria = kept(op.acceptanceCriteria, 'acceptanceCriteria', '验收标准', 'acceptance criteria') ? undefined : op.acceptanceCriteria;
-        const next = cleanTaskFrame({ ...current, ...(setConstraints ? { constraints: expand(setConstraints) } : {}),
+        // A node this plan adds keeps the user's request as its first constraint, as add_node gives it: the constraints
+        // a set_task gives it replace only those after it.
+        const nextConstraints = setConstraints && (isNew
+          ? [...constraints, ...new Set(expand(node, setConstraints, name => loseName(node, name)).filter(item => !constraints.includes(item)))]
+          : expand(node, setConstraints));
+        const next = cleanTaskFrame({ ...current, ...(nextConstraints ? { constraints: nextConstraints } : {}),
           ...(setCriteria ? { acceptanceCriteria: [...setCriteria] } : {}) });
         if (taskFrameError(next)) {
-          adjust(`没有改动「${titleOf(node)}」的任务要求：超过了长度限制（每个列表最多 ${TASK_FRAME_MAX_ENTRIES} 条，合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
+          if (isNew) lose(tooLongFor, node, givenLists(Boolean(setConstraints?.some(item => item.trim())), Boolean(setCriteria?.some(item => item.trim()))));
+          else adjust(`没有改动「${titleOf(node)}」的任务要求：超过了长度限制（每个列表最多 ${TASK_FRAME_MAX_ENTRIES} 条，合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`,
             `Left the task requirements of “${titleOf(node)}” as they were: they exceed the limits (${TASK_FRAME_MAX_ENTRIES} entries per list, ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`);
           break;
         }
@@ -932,7 +1017,50 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const positions = new Map(arranged.map(node => [node.id, { x: node.x + right - 80, y: node.y }]));
   draft.nodes = draft.nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
   draft.updatedAt = Date.now();
-  return { doc: invalidateOutputs(base, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments,
+  const en = locale === 'en';
+  const onCanvas = new Set(draft.nodes.map(node => node.id));
+  const left = <T extends { node: CanvasNode }>(group: Map<string, T>) => [...group.values()].filter(entry => onCanvas.has(entry.node.id));
+  const words = (lists: TaskLists) => TASK_LIST_WORDS[lists][en ? 1 : 0];
+  const notices: string[] = [];
+  const mediaLost = left(mediaGiven);
+  if (mediaLost.length === 1) {
+    const [{ node, kind, lists }] = mediaLost;
+    notices.push(en ? `“${titleOf(node)}” is a media node, which has no task requirements: the ${words(lists)} given it were left out; put requirements in its prompt`
+      : `「${titleOf(node)}」是${MEDIA_KIND_WORDS[kind]}节点，没有任务要求：给它的${words(lists)}没有写入，要求请写进它的提示词`);
+  } else if (mediaLost.length) {
+    const what = mediaLost.every(entry => entry.lists === mediaLost[0].lists) ? words(mediaLost[0].lists) : en ? 'task requirements' : '任务要求';
+    const names = mediaLost.map(({ node }) => en ? `“${titleOf(node)}”` : `「${titleOf(node)}」`);
+    notices.push(en ? `${firstFive(names, ', ', more => ` and ${more} more`, ' and ')} are media nodes, which have no task requirements: the ${what} given them were left out; put requirements in their prompts`
+      : `${firstFive(names, '、', () => `等 ${names.length} 个节点`)}是媒体节点，没有任务要求：给它们的${what}没有写入，要求请写进各自的提示词`);
+  }
+  const copiedLists = left(copiedFor);
+  if (copiedLists.length === 1) {
+    const [{ node, lists }] = copiedLists;
+    notices.push(en ? `Added “${titleOf(node)}” without the ${words(lists)} the plan gave it: that text copied text the plan saw only in part`
+      : `新增的「${titleOf(node)}」没有写入「${words(lists)}」：方案给的内容抄了只显示了开头的文字`);
+  } else if (copiedLists.length) {
+    const nodes = copiedLists.map(({ node, lists }) => en ? `“${titleOf(node)}” without its ${words(lists)}` : `「${titleOf(node)}」没有写入${words(lists)}`);
+    notices.push(en ? `Added ${firstFive(nodes, ', ', more => ` and ${more} more node${more === 1 ? '' : 's'} without theirs`, ' and ')}: the text the plan gave them copied text it saw only in part`
+      : `新增的${firstFive(nodes, '、', () => `，共 ${nodes.length} 个节点`)}：方案给的内容抄了只显示了开头的文字`);
+  }
+  const tooLongLists = left(tooLongFor);
+  if (tooLongLists.length) {
+    const lists = tooLongLists.map(({ node, lists }) => en ? `the ${words(lists)} of “${titleOf(node)}”` : `「${titleOf(node)}」的${words(lists)}`);
+    const listed = en ? firstFive(lists, ', ', more => ` and those of ${more} more node${more === 1 ? '' : 's'}`, ' and ')
+      : firstFive(lists, '、', () => `等 ${lists.length} 个节点的任务要求`);
+    notices.push(en ? `${listed.charAt(0).toUpperCase()}${listed.slice(1)} were too long and were left out (task requirements allow ${TASK_FRAME_MAX_ENTRIES} entries per list and ${TASK_FRAME_MAX_TOTAL_LENGTH} characters in all)`
+      : `${listed}太长，没有写入（每个列表最多 ${TASK_FRAME_MAX_ENTRIES} 条，合计最多 ${TASK_FRAME_MAX_TOTAL_LENGTH} 字）`);
+  }
+  const unknownNames = left(unknownFor);
+  if (unknownNames.length) {
+    const which = unknownNames.map(({ node, names }) => {
+      const quoted = [...names].map(name => en ? `“${name}”` : `「${name}」`);
+      return en ? `${firstFive(quoted, ', ', more => ` and ${more} more`, ' and ')} on “${titleOf(node)}”` : `「${titleOf(node)}」的约束${firstFive(quoted, '、', () => `等 ${quoted.length} 条`)}`;
+    });
+    notices.push(en ? `Skipped constraints that name a requirement the canvas does not have: ${firstFive(which, '; ', more => `; and on ${more} more node${more === 1 ? '' : 's'}`, '; and ')}`
+      : `跳过了画布上没有的原始需求：${firstFive(which, '；', more => `；另有 ${more} 个节点`)}`);
+  }
+  return { doc: invalidateOutputs(base, draft), addedNodeIds: survivors.map(node => node.id), summary: plan.summary, adjustments: [...notices, ...adjustments],
     modelSetNodeIds: draft.nodes.filter(node => modelSetNodeIds.has(node.id)).map(node => node.id) };
 }
 

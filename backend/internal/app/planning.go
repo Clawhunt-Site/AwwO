@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 )
 
-const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_task, set_model, set_input, add_field, update_field, remove_field, remove_node, connect, set_edge_kind, set_execution, disconnect operations. Never change execution bindings, runtime settings, credentials or output values. Change a node's model only with set_model, only to a model the context lists, and only when the user asks for it or the node failed because of its model; the runtime is chosen by Awwo. Name a model as the context's model list names it (Claude Opus 5.5, for example), never by a name you remember: every model in that list exists and can run a node, even one released after your training data. Set a node's constraints and acceptance criteria with set_task (or acceptanceCriteria in add_node), keeping the user's requirements: acceptance criteria are checks a reviewer can make against that node's own delivery. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Add a media node (templateId image, video or model3d, when the protocol offers it) only where the request needs a generated picture, video clip or 3D model as an asset, one node per distinct asset, and write that asset's complete generation prompt in inputValues.prompt; a media node takes no persona and no other inputs. A canvas run generates a media node before the nodes it feeds: when a page, game or document should show the asset, connect the media node's result to that node's context input (or one of its text fields), and that node receives the stored files as <node id>/<file name> paths it must use exactly as given. When the user message carries a quoted block of uploaded files, use their text as part of the request, and hand a file to the node that needs it by writing that file's exact attachment line (as it appears in the request, "[附件] name · awwo-file:id" or "[Attachment] name · awwo-file:id") into one of the node's inputs, a file input where the node has one; never invent, alter or guess an awwo-file reference. Write each persona you add or rewrite as a self-contained brief: what the node receives, exactly what it delivers (format, scope and size) and what it must not do. Give every Agent node you add one to three acceptanceCriteria in add_node, each checkable against that node's own delivery, and change criteria or constraints with set_task when the user asks for other rules or checks; an @R reference keeps a shared requirement's text. Each Agent node is one model call: its whole delivery is one answer, which shares its model's output limit with the model's thinking, and its run also ends after a time limit; the context's node limits give both by model id (a node without a model runs on "default", and an Agent node you add without set_model runs on the model the context names for new nodes where it names one; size a node on a model they do not name by the limit they give every other model, or else by the smallest they give; where they give none, assume 16,000 tokens). Size every node's delivery before you write its brief, counting about one and a half tokens for each Chinese character and one for every three characters of English or code, and keep it within half of its model's limit, a sixth for code (its thinking takes most of the rest), or two thirds for a node that only pastes parts in unchanged. When the request needs more (a long report or book, many chapters or scenes, many files or modules, a long list), split it by chapter, section, module or batch into part nodes that run side by side, each told its exact scope and its share of the user's totals, so the parts neither overlap nor leave gaps and together keep those totals; give the parts what they share once (an outline node, or an @R requirement the context already lists), and make each part as large as its node allows so the plan stays within its operation limit: when the work needs more parts than that, plan the first ones and say in summary what is left. Join parts in one node only when the joined delivery still fits that node's answer; otherwise the part nodes' deliveries are the result. Review or rewrite a long delivery part by part too, and say briefly in summary how you split the work. Deliver a page, game or tool with one frontend node: its one output is that page as html (the component templates show it), so add no fields to it. The nodes feeding it deliver compact code-ready parts (data as constants, behaviour as functions), not prose, and it pastes them unchanged. Past about a sixth of its model's limit in code of its own (about 16,000 characters on a 32,000-token model), split it into code-module nodes and one assembly node that only pastes them in. The whole page, every part pasted in, is still that one node's answer: when even it would not fit, keep the page to what fits and say in summary what you left out, so the user can ask for it next. A node's run in the context says how its last run ended: to fix a failed node, split its work or narrow its delivery when its answer was too long or ran out of time, switch it to the default model when a premium model was refused (and size its delivery again for that model's limit), and otherwise improve its brief; say in summary what you changed and why. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
+const plannerInstructions = `You are the Awwo canvas planner. Return one JSON object only: {"version":1,"summary":"...","operations":[...]}. Follow the structural protocol supplied in the user context. Only propose add_node, update_node, set_task, set_model, set_input, add_field, update_field, remove_field, remove_node, connect, set_edge_kind, set_execution, disconnect operations. Never change execution bindings, runtime settings, credentials or output values. Change a node's model only with set_model, only to a model the context lists, and only when the user asks for it or the node failed because of its model; the runtime is chosen by Awwo. Name a model as the context's model list names it (Claude Opus 5.5, for example), never by a name you remember: every model in that list exists and can run a node, even one released after your training data. Set a node's constraints and acceptance criteria with set_task (or constraints and acceptanceCriteria in add_node, where a new node's constraints come after the user's request it already carries), keeping the user's requirements: acceptance criteria are checks a reviewer can make against that node's own delivery. Node personas define identity, responsibilities and field content, while declared output contracts define serialization. Do not instruct a persona to bypass its template's output contract: a one-sentence or plain-text requirement describes content inside the output fields, not the outer response format. If exactly one raw text output is required, explicitly propose the supported field operations to make the output contract one text/markdown field instead of relying on a persona override. Preserve user quantities, budgets, durations and prohibitions in every relevant author and reviewer instruction. Distinguish exactly, at least and at most; never relax a specified count into a minimum. Never execute tools or claim work was executed. If context is insufficient return an empty operations array and ask in summary. Add a media node (templateId image, video or model3d, when the protocol offers it) only where the request needs a generated picture, video clip or 3D model as an asset, one node per distinct asset, and write that asset's complete generation prompt in inputValues.prompt; a media node takes no persona and no other inputs. A canvas run generates a media node before the nodes it feeds: when a page, game or document should show the asset, connect the media node's result to that node's context input (or one of its text fields), and that node receives the stored files as <node id>/<file name> paths it must use exactly as given. When the user message carries a quoted block of uploaded files, use their text as part of the request, and hand a file to the node that needs it by writing that file's exact attachment line (as it appears in the request, "[附件] name · awwo-file:id" or "[Attachment] name · awwo-file:id") into one of the node's inputs, a file input where the node has one; never invent, alter or guess an awwo-file reference. Write each persona you add or rewrite as a self-contained brief: what the node receives, exactly what it delivers (format, scope and size) and what it must not do. Give every Agent node you add one to three acceptanceCriteria in add_node, each checkable against that node's own delivery, and change criteria or constraints with set_task when the user asks for other rules or checks; an @R reference keeps a shared requirement's text. Each Agent node is one model call: its whole delivery is one answer, which shares its model's output limit with the model's thinking, and its run also ends after a time limit; the context's node limits give both by model id (a node without a model runs on "default", and an Agent node you add without set_model runs on the model the context names for new nodes where it names one; size a node on a model they do not name by the limit they give every other model, or else by the smallest they give; where they give none, assume 16,000 tokens). Size every node's delivery before you write its brief, counting about one and a half tokens for each Chinese character and one for every three characters of English or code, and keep it within half of its model's limit, a sixth for code (its thinking takes most of the rest), or two thirds for a node that only pastes parts in unchanged. When the request needs more (a long report or book, many chapters or scenes, many files or modules, a long list), split it by chapter, section, module or batch into part nodes that run side by side, each told its exact scope and its share of the user's totals, so the parts neither overlap nor leave gaps and together keep those totals; give the parts what they share once (an outline node, or an @R requirement the context already lists), and make each part as large as its node allows so the plan stays within its operation limit: when the work needs more parts than that, plan the first ones and say in summary what is left. Join parts in one node only when the joined delivery still fits that node's answer; otherwise the part nodes' deliveries are the result. Review or rewrite a long delivery part by part too, and say briefly in summary how you split the work. Deliver a page, game or tool with one frontend node: its one output is that page as html (the component templates show it), so add no fields to it. The nodes feeding it deliver compact code-ready parts (data as constants, behaviour as functions), not prose, and it pastes them unchanged. Past about a sixth of its model's limit in code of its own (about 16,000 characters on a 32,000-token model), split it into code-module nodes and one assembly node that only pastes them in. The whole page, every part pasted in, is still that one node's answer: when even it would not fit, keep the page to what fits and say in summary what you left out, so the user can ask for it next. A node's run in the context says how its last run ended: to fix a failed node, split its work or narrow its delivery when its answer was too long or ran out of time, switch it to the default model when a premium model was refused (and size its delivery again for that model's limit), and otherwise improve its brief; say in summary what you changed and why. Maximum 100 operations. The caller will validate and explicitly apply the proposal.`
 
 func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -233,12 +233,16 @@ func validatePlan(raw string) bool {
 		typ, _ := op["type"].(string)
 		switch typ {
 		case "add_node":
-			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues", "acceptanceCriteria") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
+			// A new node's constraints follow the user's request, which the canvas gives every new node first (canvasPlan.ts):
+			// 27 of the 40 plans of Claude Haiku 4.5 refused in the 7 days to 2026-10-23 gave them here, before add_node took them.
+			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues", "constraints", "acceptanceCriteria") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
 				return false
 			}
-			if v, ok := op["acceptanceCriteria"]; ok {
-				if _, ok := planTaskList(v); !ok {
-					return false
+			for _, key := range []string{"constraints", "acceptanceCriteria"} {
+				if v, ok := op[key]; ok {
+					if _, ok := planTaskList(v); !ok {
+						return false
+					}
 				}
 			}
 			ref := op["ref"].(string)
@@ -483,7 +487,48 @@ func planJSONBody(raw string) string {
 			return fixed
 		}
 	}
+	// A plan behind a note of plain text (15 of the 31 Qwen plans refused in the 7 days to 2026-10-23): the plan is the
+	// object that runs to the end of the answer (planAfterNote), read like an answer of its own.
+	if plan, ok := planAfterNote(trimmed); ok {
+		return plan
+	}
 	return body
+}
+
+// planAfterNote is the plan behind a note of plain text. The note holds no '{' and no '[': the answer's first brace
+// begins the plan, at the start of a line (after spaces or tabs, the answer's start too), so no other plan, whole,
+// truncated or nested, and no JSON value of the note's own can come before it. The plan is one object with an
+// "operations" key, its quotes repaired where that makes it one (repairPlanQuotes), and it stands only when nothing but
+// white space, or the fence closing a block it is in, follows it. Of the 16 plans behind a note in the 7 days to
+// 2026-10-23, none had a brace or a bracket in its note and each began a line.
+func planAfterNote(raw string) (string, bool) {
+	i := strings.IndexAny(raw, "{[")
+	if i < 0 || raw[i] != '{' {
+		return "", false
+	}
+	if line := raw[strings.LastIndexByte(raw[:i], '\n')+1 : i]; strings.Trim(line, " \t\r") != "" {
+		return "", false
+	}
+	candidate := raw[i:]
+	d := json.NewDecoder(strings.NewReader(candidate))
+	var value map[string]json.RawMessage
+	if d.Decode(&value) != nil {
+		// Not one value as written: the plan only if its quotes repaired make it one.
+		candidate = repairPlanQuotes(raw[i:])
+		d = json.NewDecoder(strings.NewReader(candidate))
+		value = nil
+		if d.Decode(&value) != nil {
+			return "", false
+		}
+	}
+	if value["operations"] == nil {
+		return "", false
+	}
+	end := int(d.InputOffset())
+	if rest := strings.TrimSpace(candidate[end:]); rest != "" && rest != "```" {
+		return "", false
+	}
+	return candidate[:end], true
 }
 
 // planJSONText is planJSONBody without the quote repair.
@@ -613,12 +658,21 @@ func acceptPlan(raw string) (string, bool) {
 var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
 
 // normalizePlanOperations fixes, in place, the slips that turned whole plans into invalid_canvas_plan:
+//   - a new node's inputs given on add_node as "inputs" (planNodeSlips);
+//   - a field's side named in the plural ("inputs", "outputs"), and an input field typed as a picture, a clip or a
+//     sound ("image", "video", "audio"), which a node is given as a file (planFieldSlips);
 //   - a new field's value left out, or filled: the protocol has new fields start empty, so value is "", and a filled
 //     input becomes the set_input that fills it right after the field is added (an output is never filled);
 //   - a new node ref or new field id the canvas refuses (prototype, constructor, __proto__): renamed, with every
 //     reference in the plan, to <name>_node or <name>_field. A canvas never holds such an id, so only names this
 //     plan introduces are renamed.
 func normalizePlanOperations(ops []any) []any {
+	ops = planNodeSlips(ops)
+	for _, item := range ops {
+		if op, ok := item.(map[string]any); ok {
+			planFieldSlips(op)
+		}
+	}
 	nodes, fields := map[string]string{}, map[string]string{}
 	taken := map[string]bool{}
 	for _, item := range ops {
@@ -690,6 +744,111 @@ func normalizePlanOperations(ops []any) []any {
 		}
 	}
 	return out
+}
+
+// planNodeSlips reads a new node's inputs given on add_node as "inputs" (planNodeInputs), found 2026-10-23 in 8 of the
+// 40 plans of Claude Haiku 4.5 refused in 7 days: its input values, set right on the node, and its input field
+// definitions, as add_field steps right after it (the canvas applies a step to a new node by its ref). Inputs given
+// beside inputValues, or in any other shape, are left as they are, so the plan is refused as before. A model given on
+// add_node (7 of the 40) is left too: a plan changes a node's model only with set_model, which the instructions allow
+// only when the user asks for it or a node failed because of its model, and the slip cannot say which.
+func planNodeSlips(ops []any) []any {
+	out := make([]any, 0, len(ops))
+	for _, item := range ops {
+		op, ok := item.(map[string]any)
+		if !ok || op["type"] != "add_node" {
+			out = append(out, item)
+			continue
+		}
+		ref, _ := op["ref"].(string)
+		var after []any
+		if v, given := op["inputs"]; given {
+			if _, both := op["inputValues"]; !both {
+				if values, fields, ok := planNodeInputs(v, ref); ok {
+					delete(op, "inputs")
+					if values != nil {
+						op["inputValues"] = values
+					}
+					after = fields
+				}
+			}
+		}
+		out = append(out, op)
+		out = append(out, after...)
+	}
+	return out
+}
+
+// planNodeInputs reads the "inputs" a plan gave a new node: an object of input texts by field id is its inputValues;
+// a list holds {id, value} pairs, which are inputValues too, and whole input field definitions (id, label, type and
+// required, and a value only as text), each an add_field of the node's input side with its value (the field-value fix
+// then sets it with set_input). The canvas updates a field the node already has to the definition rather than adding
+// it twice. Any other shape, a value that is not text, or an id given twice, is not read (ok false).
+func planNodeInputs(v any, ref string) (values map[string]any, fields []any, ok bool) {
+	if m, isMap := v.(map[string]any); isMap {
+		return m, nil, true
+	}
+	items, isList := v.([]any)
+	if !isList {
+		return nil, nil, false
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		entry, isMap := item.(map[string]any)
+		if !isMap {
+			return nil, nil, false
+		}
+		id, isText := entry["id"].(string)
+		if !isText || seen[id] {
+			return nil, nil, false
+		}
+		seen[id] = true
+		_, label := entry["label"]
+		_, typed := entry["type"]
+		_, required := entry["required"]
+		if value, given := entry["value"]; given {
+			if _, isText := value.(string); !isText {
+				return nil, nil, false
+			}
+		}
+		switch {
+		case planKeys(entry, "id", "value") && entry["value"] != nil:
+			if values == nil {
+				values = map[string]any{}
+			}
+			values[id] = entry["value"]
+		case label && typed && required && planKeys(entry, "id", "label", "type", "required", "value", "help", "placeholder"):
+			fields = append(fields, map[string]any{"type": "add_field", "nodeId": ref, "side": "input", "field": entry})
+		default:
+			return nil, nil, false
+		}
+	}
+	return values, fields, true
+}
+
+// planFieldSlips fixes a field step's side named in the plural ("inputs", "outputs") and an input field typed as a
+// picture, a clip or a sound ("image", "video", "audio"), which a node is given as a file. An output so typed is left,
+// so the plan is refused as before: a text node cannot deliver a picture, which a media node makes.
+func planFieldSlips(op map[string]any) {
+	var field map[string]any
+	switch op["type"] {
+	case "add_field":
+		field, _ = op["field"].(map[string]any)
+	case "update_field":
+		field, _ = op["changes"].(map[string]any)
+	case "remove_field":
+	default:
+		return
+	}
+	switch op["side"] {
+	case "inputs":
+		op["side"] = "input"
+	case "outputs":
+		op["side"] = "output"
+	}
+	if field != nil && op["side"] == "input" && oneOf(field["type"], "image", "video", "audio") {
+		field["type"] = "file"
+	}
 }
 
 func normalizePlanJSON(raw string) string {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -59,14 +60,14 @@ func TestPlanGateRepairsUnescapedQuotesInsideStrings(t *testing.T) {
 			}
 		}
 	}
-	// Valid JSON is never rewritten, and the repair adds no tolerance beyond the quotes.
+	// Valid JSON is never rewritten, and the repair adds no tolerance beyond the quotes (a note before the plan is read
+	// since 2026-10-23: TestPlanGateReadsAPlanBehindANote).
 	const plain = `{"version":1,"summary":"Plain \"quoted\" text","operations":[]}`
 	if plan, ok := acceptPlan(plain); !ok || plan != plain {
 		t.Fatalf("valid plan changed: %q %v", plan, ok)
 	}
 	for name, answer := range map[string]string{
 		"unfenced plan with a note":  `{"version":1,"summary":"补充"新建"按钮","operations":[]}` + "\n\nNote: review it.",
-		"note before the block":      "Here is the plan:\n```json\n" + `{"version":1,"summary":"补充"新建"","operations":[]}` + "\n```",
 		"unknown operation repaired": `{"version":1,"summary":"补充"新建"","operations":[{"type":"exec","command":"whoami"}]}`,
 		"truncated":                  `{"version":1,"summary":"补充"新建"按钮","operations":[`,
 	} {
@@ -115,6 +116,142 @@ func TestPlanGateNormalizesNewFieldValuesAndReservedIDs(t *testing.T) {
 	// A reserved id of an existing node is not this plan's to rename: refused as before.
 	if _, ok := acceptPlan(`{"version":1,"summary":"X","operations":[{"type":"remove_node","nodeId":"__proto__"}]}`); ok {
 		t.Fatal("reserved existing node id accepted")
+	}
+}
+
+// 15 of the 31 Qwen plans refused in the 7 days to 2026-10-23 put a note of plain text before the plan, and none of the
+// 16 plans behind a note in those days had a brace or a bracket in its note. A note without either is read: the plan
+// begins a line at the answer's first brace, its quotes repaired as an answer's own are, and only nothing but white
+// space or a closing fence may follow it. Any other answer is still refused, wherever a second plan, a truncated one, a
+// list or an object of the note's own is.
+func TestPlanGateReadsAPlanBehindANote(t *testing.T) {
+	const plan = `{"version":1,"summary":"补充按钮","operations":[{"type":"add_node","ref":"ui","templateId":"frontend","title":"界面"}]}`
+	const other = `{"version":1,"summary":"删除","operations":[{"type":"remove_node","nodeId":"existing"}]}`
+	var pretty bytes.Buffer
+	if e := json.Indent(&pretty, []byte(plan), "", "  "); e != nil {
+		t.Fatal(e)
+	}
+	for name, answer := range map[string]string{
+		"a note, then the plan":                     "好的，下面是规划：\n" + plan,
+		"a note, then a fenced plan":                "Here is the plan:\n```json\n" + plan + "\n```",
+		"a note, then an indented plan":             "Here is the plan:\n    " + plan,
+		"a note, then a pretty-printed plan":        "Here is the plan:\n" + pretty.String(),
+		"a note, then a pretty-printed fenced plan": "Here is the plan:\n```json\n" + pretty.String() + "\n```\n",
+		"a note that quotes the key, then the plan": "Put the steps in \"operations\":\n" + plan,
+	} {
+		if got, ok := acceptPlan(answer); !ok || got != plan {
+			t.Errorf("%s: read as %q (%v)", name, got, ok)
+		}
+	}
+	if got, ok := acceptPlan("Here is the plan:\n```json\n" + `{"version":1,"summary":"补充"新建"","operations":[]}` + "\n```"); !ok ||
+		decodeCanvasPlan(t, got)["summary"] != `补充"新建"` {
+		t.Errorf("quotes behind a note: read as %q (%v)", got, ok)
+	}
+	truncatedAround := `{"version":1,"summary":"补充","operations":[{"type":"add_node","ref":"ui","templateId":"frontend","persona":"示例：` + "\n" + other + "\n"
+	// A plan whose key is spelt with a JSON escape for one of its letters (a backslash, then u and four digits).
+	escaped := func(letters string) string { return strings.Replace(plan, `"operations"`, `"`+letters+`"`, 1) }
+	bs := string(rune(92))
+	for name, answer := range map[string]string{
+		"a note with a brace, then the plan":              "The node reads {brief} from the request; the plan:\n\n" + plan + "\n",
+		"a note with an object of its own, then the plan": "The settings stay:\n{\"theme\":\"dark\"}\nThe plan:\n" + plan,
+		"a note with a list of its own, then the plan":    "The order:\n[\"brief\", \"draft\"]\nThe plan:\n" + plan,
+		"objects of the note's own, then the plan":        strings.Repeat("{\"step\":1}\n", 3) + plan,
+		"the plan at the end of the note's line":          "Here: " + plan,
+		"a truncated object in the note's line, a plan":   "Note: {\"version\":1,\"summary\":\"first\",\n" + other,
+		"one with a middle letter escaped, a second":      escaped("op"+bs+"u0065rations") + "\n" + other,
+		"one with its last letter escaped in the line":    "Use " + escaped("operation"+bs+"u0073") + " or:\n" + other,
+		"a note after the plan":                           "Here:\n" + plan + "\nRun it when ready.",
+		"two plans after a note":                          "First:\n" + plan + "\nOr:\n" + other,
+		"two plans, the first at the start":               plan + "\nOr:\n" + other,
+		"two bare plans":                                  plan + "\n" + other,
+		"a truncated plan":                                "Here:\n" + plan[:len(plan)-10],
+		"a plan inside a truncated one":                   "Here:\n" + truncatedAround,
+		"a plan inside the note's line":                   "Use " + plan + " as the plan.",
+		"an object without operations":                    "Here:\n" + `{"version":1,"summary":"x"}`,
+		"an indented plan, then a second":                 "Note:\n  " + plan + "\n" + other,
+		"a plan inside an indented one":                   "Here:\n  " + truncatedAround,
+		"a plan inside a list":                            "Here:\n[\n" + plan + "\n]",
+		"a plan inside a truncated list":                  "Here:\n[1,\n" + plan,
+		"a plan inside an indented list":                  "Here:\n  [1,\n" + plan,
+		"a bracket line that is no list":                  "[Draft]\n" + plan,
+		// A plan that does not begin a line is not read, and a second plan after it is not taken for the answer.
+		"one in the note's line, then a second":       "Use " + plan + " or:\n" + other,
+		"one after a lone carriage return, a second":  "Note:\r" + plan + "\n" + other,
+		"one after an ideographic space, a second":    "Note:\n\u3000" + plan + "\n" + other,
+		"one after a no-break space, a second":        "Note:\n\u00a0" + plan + "\n" + other,
+		"one after a byte-order mark, a second":       "\ufeff" + plan + "\n" + other,
+		"one in a list, then a second":                "Here:\n[\n" + plan + "\n]\n" + other,
+		"one with its key's letter escaped, a second": "Note:\n\u3000" + strings.Replace(plan, `"operations"`, `"\u006fperations"`, 1) + "\n" + other,
+	} {
+		if got, ok := acceptPlan(answer); ok {
+			t.Errorf("%s: accepted as %s", name, got)
+		}
+	}
+}
+
+// 8 of the 40 plans of Claude Haiku 4.5 refused in the 7 days to 2026-10-23 gave a new node its inputs on add_node as
+// "inputs": its values are read as its inputValues, its field definitions as add_field steps right after it; a
+// field's side in the plural (1 plan, which wrote both) and an input field typed as a picture (1) are fixed too. A
+// new node's constraints are add_node's own since 2026-10-23 (27 of the 40), and left as given.
+func TestPlanGateReadsNewNodeInputsAndFieldSlips(t *testing.T) {
+	answer := "```json\n" + `{"version":1,"summary":"Report","operations":[` +
+		`{"type":"add_node","ref":"writer","templateId":"general","title":"Writer","constraints":["At most 2,000 words"],"acceptanceCriteria":["Has 3 sections"],"inputs":{"brief":"Write the report"}},` +
+		`{"type":"add_node","ref":"reader","templateId":"review","inputs":[{"id":"brief","value":"Check it"},{"id":"rubric","label":"Rubric","type":"markdown","required":true,"value":"- clear"}]},` +
+		`{"type":"remove_field","nodeId":"old","side":"inputs","fieldId":"x"},` +
+		`{"type":"add_field","nodeId":"reader","side":"inputs","field":{"id":"shot","label":"Shot","type":"image","required":false,"value":""}},` +
+		`{"type":"connect","fromNode":"writer","fromField":"delivery","toNode":"reader","toField":"rubric"}]}` + "\n```"
+	if validatePlan(answer) {
+		t.Fatal("the strict gate itself must still refuse these slips")
+	}
+	plan, ok := acceptPlan(answer)
+	if !ok {
+		t.Fatal("plan refused")
+	}
+	ops := canvasPlanOps(t, plan)
+	types := []string{}
+	for _, op := range ops {
+		types = append(types, op["type"].(string))
+	}
+	if got := strings.Join(types, " "); got != "add_node add_node add_field set_input remove_field add_field connect" {
+		t.Fatalf("steps: %s\n%s", got, plan)
+	}
+	writer := ops[0]
+	if writer["constraints"].([]any)[0] != "At most 2,000 words" || writer["inputValues"].(map[string]any)["brief"] != "Write the report" ||
+		len(writer["acceptanceCriteria"].([]any)) != 1 || writer["inputs"] != nil {
+		t.Errorf("the writer's add_node: %v", writer)
+	}
+	reader, rubric, filled := ops[1], ops[2], ops[3]
+	if reader["inputValues"].(map[string]any)["brief"] != "Check it" || reader["inputs"] != nil {
+		t.Errorf("the reader's add_node: %v", reader)
+	}
+	if f := rubric["field"].(map[string]any); rubric["nodeId"] != "reader" || rubric["side"] != "input" || f["id"] != "rubric" || f["value"] != "" ||
+		filled["fieldId"] != "rubric" || filled["value"] != "- clear" {
+		t.Errorf("the rubric field and its value: %v %v", rubric, filled)
+	}
+	if ops[4]["side"] != "input" || ops[5]["side"] != "input" || ops[5]["field"].(map[string]any)["type"] != "file" {
+		t.Errorf("sides and the picture field: %v %v", ops[4], ops[5])
+	}
+	// What has no one reading is left as it is, and the plan refused as before.
+	for name, op := range map[string]string{
+		"inputs beside inputValues":           `{"type":"add_node","ref":"a","templateId":"general","inputs":{"brief":"x"},"inputValues":{"brief":"y"}}`,
+		"inputs as a list of text":            `{"type":"add_node","ref":"a","templateId":"general","inputs":["brief"]}`,
+		"a field definition without required": `{"type":"add_node","ref":"a","templateId":"general","inputs":[{"id":"f","label":"F","type":"text","value":""}]}`,
+		"a definition's value not text":       `{"type":"add_node","ref":"a","templateId":"general","inputs":[{"id":"n","label":"N","type":"number","required":true,"value":12}]}`,
+		"a field id given twice":              `{"type":"add_node","ref":"a","templateId":"general","inputs":[{"id":"f","value":"1"},{"id":"f","value":"2"}]}`,
+		"a model on add_node":                 `{"type":"add_node","ref":"a","templateId":"general","model":"Claude Opus 5.5"}`,
+		"an effort on add_node":               `{"type":"add_node","ref":"a","templateId":"general","effort":"high"}`,
+		"constraints that are not a list":     `{"type":"add_node","ref":"a","templateId":"general","constraints":"Be brief"}`,
+		"an output typed as a picture":        `{"type":"add_field","nodeId":"n","side":"output","field":{"id":"p","label":"P","type":"image","required":false,"value":""}}`,
+		"a side of neither kind":              `{"type":"remove_field","nodeId":"n","side":"middle","fieldId":"f"}`,
+	} {
+		if got, ok := acceptPlan(`{"version":1,"summary":"S","operations":[` + op + `]}`); ok {
+			t.Errorf("%s: accepted as %s", name, got)
+		}
+	}
+	// A reserved ref is renamed in the steps made for it too.
+	plan, ok = acceptPlan(`{"version":1,"summary":"S","operations":[{"type":"add_node","ref":"constructor","templateId":"general","inputs":[{"id":"x","label":"X","type":"text","required":false}]}]}`)
+	if ops = canvasPlanOps(t, plan); !ok || ops[0]["ref"] != "constructor_node" || ops[1]["nodeId"] != "constructor_node" {
+		t.Errorf("a reserved ref: %v %v", ok, plan)
 	}
 }
 

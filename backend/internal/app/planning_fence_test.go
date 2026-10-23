@@ -19,6 +19,8 @@ func TestPlanGateDropsANoteAfterTheClosingFence(t *testing.T) {
 		"unclosed fence (unchanged)":    "```json\n" + plan,
 		"plain JSON (unchanged)":        plan,
 		"surrounding space (unchanged)": "\n  " + plan + "\n",
+		// Read since 2026-10-23 (TestPlanGateReadsAPlanBehindANote): the plan is the block that ends the answer.
+		"note before the block": "Here is the plan:\n```json\n" + plan + "\n```",
 	}
 	for name, answer := range accepted {
 		if !validatePlan(answer) {
@@ -34,7 +36,7 @@ func TestPlanGateDropsANoteAfterTheClosingFence(t *testing.T) {
 		"two values inside the block":          "```json\n" + plan + "\n" + plan + "\n```",
 		"unfenced plan with a note":            plan + "\n\nNote: review it.",
 		"truncated plan in a block":            "```json\n" + plan[:len(plan)-3] + "\n```\nNote.",
-		"note before the block":                "Here is the plan:\n```json\n" + plan + "\n```",
+		"notes before and after the block":     "Here is the plan:\n```json\n" + plan + "\n```\nNote: review it.",
 		"schema still enforced":                "```json\n" + strings.Replace(plan, `"version":1`, `"version":2`, 1) + "\n```\nNote.",
 	}
 	for name, answer := range refused {

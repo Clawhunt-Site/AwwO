@@ -5,7 +5,7 @@
 // read when the plan lands.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { CanvasSurface } from '../src/canvas/CanvasSurface';
+import { CanvasSurface, HAND_OVER_MODEL_WAIT_MS, type InitialPlanRequest } from '../src/canvas/CanvasSurface';
 import type { AssistantExecutionHost } from '../src/canvas/assistantRouting';
 import { CANVAS_STORAGE_KEY, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
 import { markPlanNewNodeModel, type CanvasPlan } from '../src/canvas/canvasPlan';
@@ -142,6 +142,38 @@ it('names no model before the host has read the reader’s choice, and puts the 
   const node = await added();
   expect([node.runtime, node.model]).toEqual(['openai-agents', 'opus-fixture']);
 });
+
+// A request carried over from the workspace home is sent by the canvas itself, as soon as it can be: it waits for the
+// reader's choice, at most HAND_OVER_MODEL_WAIT_MS, so its plan is sized for that model too.
+const carried = (): InitialPlanRequest => ({ prompt: '加一个节点', start: true, interrupted: false, claim: vi.fn(() => true), done: vi.fn() });
+const handOver = (execution: AssistantExecutionHost, planRequest: ReturnType<typeof planner>['request'], initialPlan: InitialPlanRequest) =>
+  <CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} assistantExecution={execution} routeAssistant={router}
+    planRequest={planRequest} initialPlan={initialPlan} />;
+
+it('sends a request carried over from the home once the reader’s choice is read, naming it', async () => {
+  const { request } = planner();
+  const initialPlan = carried();
+  const view = render(handOver(host(undefined, false), request, initialPlan));
+  fireEvent.click(screen.getByRole('button', { name: '展开模型' }));
+  await screen.findByRole('button', { name: '添加 Qwen fixture' });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+  expect(request).not.toHaveBeenCalled();
+  view.rerender(handOver(host({ runtime: 'pi', model: 'opus-fixture' }), request, initialPlan));
+  await waitFor(() => expect(request).toHaveBeenCalledOnce());
+  expect(request.mock.calls[0][0]).toBe('加一个节点');
+  expect(request.mock.calls[0][6]?.newNodeModel).toBe('opus-fixture');
+  const node = await added();
+  expect([node.runtime, node.model]).toEqual(['openai-agents', 'opus-fixture']);
+});
+
+it('sends it without naming a model once it has waited long enough for a choice that is never read', async () => {
+  const { request } = planner();
+  render(handOver(host(undefined, false), request, carried()));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, HAND_OVER_MODEL_WAIT_MS - 1000)); });
+  expect(request).not.toHaveBeenCalled();
+  await waitFor(() => expect(request).toHaveBeenCalledOnce(), { timeout: 4000 });
+  expect(request.mock.calls[0][6]?.newNodeModel).toBeUndefined();
+}, 15000);
 
 it('names no model before the canvas has read its palette', async () => {
   let reply!: () => void;

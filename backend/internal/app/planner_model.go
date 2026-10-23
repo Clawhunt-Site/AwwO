@@ -23,10 +23,13 @@ import (
 //
 // AWWO_PLANNER_PER_WORKSPACE_PER_DAY and AWWO_PLANNER_TOTAL_PER_DAY count planner-model calls per UTC day (0: none,
 // like a route allowance of 0); AWWO_PLANNER_MAX_INPUT_BYTES bounds the prompt plus the planner instructions.
+// The input ceiling is the most AWWO_PLANNER_MAX_INPUT_BYTES may say, since 2026-10-23: at 60,000 bytes, 53 of the 108
+// plans of 2026-10-22 were past it (canvases copied from the homepage cases are large) and planned on the default
+// model, where 26 of them failed as invalid_canvas_plan. The daily ceilings bound what the larger calls cost.
 const (
 	defaultPlannerPerWorkspaceDay = 20
 	defaultPlannerTotalPerDay     = 2000
-	defaultPlannerMaxInputBytes   = 60000
+	defaultPlannerMaxInputBytes   = 128000
 )
 
 type plannerRequestKey struct{}

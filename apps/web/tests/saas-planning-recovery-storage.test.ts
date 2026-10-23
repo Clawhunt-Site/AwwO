@@ -29,7 +29,9 @@ describe('bounded compressed planner recovery journal', () => {
   // Re-set to 6,400 on 2026-10-15 when set_task (a node's constraints and acceptance criteria, set by the assistant)
   // joined the protocol: the journal grew to zh 6,181 and en 6,317 characters. The guidance that came with it is in the
   // server's planner instructions (planning.go), which this journal does not carry.
-  const AVAILABLE_CHARS = 6400;
+  // Re-set to 6,450 on 2026-10-23 when add_node took constraints (59 bytes of protocol): the journal grew from zh 6,281
+  // and en 6,389 characters to 6,309 and 6,421.
+  const AVAILABLE_CHARS = 6450;
   it.each(['zh', 'en'] as const)('fits the complete real %s protocol/template catalog in a nearly full browser storage budget', async locale => {
     configureSaaSCanvas({ tenant: { ...scope.tenant, name: 'Fixture', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 }, canvasId: scope.canvasId });
     const doc = emptyDocument();

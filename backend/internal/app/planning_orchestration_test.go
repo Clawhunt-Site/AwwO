@@ -35,6 +35,8 @@ func TestPlanGateAdmitsTaskRequirementsAndModels(t *testing.T) {
 		"model with effort":    {"type": "set_model", "nodeId": "n", "model": "Claude Opus 5.5", "effort": "high"},
 		"model, empty effort":  {"type": "set_model", "nodeId": "n", "model": "default", "effort": ""},
 		"new node with checks": {"type": "add_node", "ref": "page", "templateId": "frontend", "acceptanceCriteria": []any{"One complete HTML document"}},
+		// Since 2026-10-23 a new node takes constraints too, after the user's request the canvas gives it first.
+		"new node with constraints": {"type": "add_node", "ref": "page", "templateId": "frontend", "constraints": []any{"@R1", "At most 2,000 words"}},
 		// Over the task frame's 12,000 in all: the canvas leaves the step out with a note, the rest of the plan applies.
 		"over the total":        {"type": "set_task", "nodeId": "n", "constraints": overTotal},
 		"over the total in two": {"type": "set_task", "nodeId": "n", "constraints": overTotal[:3], "acceptanceCriteria": overTotal[3:]},
@@ -52,22 +54,23 @@ func TestPlanGateRefusesMalformedTaskRequirementsAndModels(t *testing.T) {
 	}
 	tooLong := strings.Repeat("a", taskFrameMaxEntryRunes+1)
 	for name, op := range map[string]map[string]any{
-		"no list":                   {"type": "set_task", "nodeId": "n"},
-		"not a list":                {"type": "set_task", "nodeId": "n", "constraints": "one"},
-		"not strings":               {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{1}},
-		"null entry":                {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{nil}},
-		"too many":                  {"type": "set_task", "nodeId": "n", "acceptanceCriteria": many},
-		"entry too long":            {"type": "set_task", "nodeId": "n", "constraints": []any{tooLong}},
-		"unknown key":               {"type": "set_task", "nodeId": "n", "constraints": []any{}, "runtime": "pi"},
-		"bad node":                  {"type": "set_task", "nodeId": "has space", "constraints": []any{}},
-		"no model":                  {"type": "set_model", "nodeId": "n"},
-		"empty model":               {"type": "set_model", "nodeId": "n", "model": " "},
-		"model too long":            {"type": "set_model", "nodeId": "n", "model": strings.Repeat("m", 201)},
-		"runtime named":             {"type": "set_model", "nodeId": "n", "model": "qwen", "runtime": "pi"},
-		"effort not a level":        {"type": "set_model", "nodeId": "n", "model": "qwen", "effort": "HIGH"},
-		"effort not text":           {"type": "set_model", "nodeId": "n", "model": "qwen", "effort": 3},
-		"new node checks malformed": {"type": "add_node", "ref": "page", "templateId": "frontend", "acceptanceCriteria": "one"},
-		"new node with constraints": {"type": "add_node", "ref": "page", "templateId": "frontend", "constraints": []any{"x"}},
+		"no list":                        {"type": "set_task", "nodeId": "n"},
+		"not a list":                     {"type": "set_task", "nodeId": "n", "constraints": "one"},
+		"not strings":                    {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{1}},
+		"null entry":                     {"type": "set_task", "nodeId": "n", "acceptanceCriteria": []any{nil}},
+		"too many":                       {"type": "set_task", "nodeId": "n", "acceptanceCriteria": many},
+		"entry too long":                 {"type": "set_task", "nodeId": "n", "constraints": []any{tooLong}},
+		"unknown key":                    {"type": "set_task", "nodeId": "n", "constraints": []any{}, "runtime": "pi"},
+		"bad node":                       {"type": "set_task", "nodeId": "has space", "constraints": []any{}},
+		"no model":                       {"type": "set_model", "nodeId": "n"},
+		"empty model":                    {"type": "set_model", "nodeId": "n", "model": " "},
+		"model too long":                 {"type": "set_model", "nodeId": "n", "model": strings.Repeat("m", 201)},
+		"runtime named":                  {"type": "set_model", "nodeId": "n", "model": "qwen", "runtime": "pi"},
+		"effort not a level":             {"type": "set_model", "nodeId": "n", "model": "qwen", "effort": "HIGH"},
+		"effort not text":                {"type": "set_model", "nodeId": "n", "model": "qwen", "effort": 3},
+		"new node checks malformed":      {"type": "add_node", "ref": "page", "templateId": "frontend", "acceptanceCriteria": "one"},
+		"new node constraints malformed": {"type": "add_node", "ref": "page", "templateId": "frontend", "constraints": "x"},
+		"new node constraints too many":  {"type": "add_node", "ref": "page", "templateId": "frontend", "constraints": many},
 	} {
 		if validatePlan(planWith(t, op)) {
 			t.Errorf("%s: admitted %v", name, op)
