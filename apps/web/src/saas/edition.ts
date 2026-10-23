@@ -10,11 +10,12 @@ export type Edition = 'hosted' | 'local';
 export const isLocalEdition = (value?: { edition?: string } | null): boolean => value?.edition === 'local';
 
 /**
- * The local edition started by AwwO Local, the Windows installer's window (`shell` in /auth/options and /local): its
- * person has the window's AwwO menu (restart, quit, reset the password, the data folder) and no checkout, so the app
- * names the menu where a checkout's person would run an npm command.
+ * The local edition started by a window of its own (`shell` in /auth/options and /local): 'windows', AwwO Local, the
+ * Windows installer's; 'macos', the Mac app's local workspace. Its person has the window's AwwO menu (restart, quit,
+ * reset the password, the data folder) and no checkout, so the app names the menu where a checkout's person would run
+ * an npm command.
  */
-export const inLocalWindow = (value?: { edition?: string; shell?: string } | null): boolean => value?.shell === 'windows';
+export const inLocalWindow = (value?: { edition?: string; shell?: string } | null): boolean => value?.shell === 'windows' || value?.shell === 'macos';
 
 /** True under a signed-in local edition's page (SaaSApp provides it from the identity). */
 export const LocalEdition = createContext(false);

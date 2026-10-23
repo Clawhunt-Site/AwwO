@@ -5,7 +5,9 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { readPayload } from './local-payload.ts';
 import { readProductionConfiguration } from './production-config.ts';
+import { build, version } from './release.ts';
 
 const exec = promisify(execFile);
 const app = process.env.AWWO_MAC_APP;
@@ -18,8 +20,8 @@ const plist = JSON.parse(plistOutput.stdout) as Record<string, unknown>;
 const metadata = JSON.parse(await readFile(path.join(resources, 'metadata.json'), 'utf8')) as Record<string, unknown>;
 assert.equal(plist.CFBundleIdentifier, 'store.clawhunt.awwo.local');
 assert.equal(plist.CFBundleDisplayName, 'AwwO');
-assert.equal(plist.CFBundleShortVersionString, '0.9.1');
-assert.equal(plist.CFBundleVersion, '10');
+assert.equal(plist.CFBundleShortVersionString, version);
+assert.equal(plist.CFBundleVersion, build);
 assert.equal(plist.CFBundleIconFile, 'AwwOFold');
 assert.equal(plist.AwwOEnvironment, expected.environment);
 assert.equal(plist.AwwOCloudURL, expected.cloudURL);
@@ -27,10 +29,17 @@ assert.equal(metadata.version, plist.CFBundleShortVersionString);
 assert.equal(metadata.build, plist.CFBundleVersion);
 assert.equal(metadata.environment, expected.environment);
 assert.equal(metadata.cloudURL, expected.cloudURL);
-assert.equal(metadata.defaultMode, 'cloud');
 assert.equal(metadata.modelCredentialsIncluded, false);
-assert.equal(metadata.localRuntimeIncluded, false);
-assert.deepEqual((await readdir(resources)).sort(), ['AwwOFold.icns', 'AwwOFoldMark.png', 'LICENSE', 'metadata.json']);
+// A build either carries the local edition's payload (its workspace chooser first) or is the hosted service's client
+// alone, with nothing local in it.
+const local = metadata.localRuntimeIncluded === true;
+assert.equal(metadata.defaultMode, local ? 'choose' : 'cloud');
+const entries = ['AwwOFold.icns', 'AwwOFoldMark.png', 'LICENSE', 'metadata.json', ...(local ? ['payload'] : [])];
+assert.deepEqual((await readdir(resources)).sort(), entries.sort());
+if (local) {
+  const payload = readPayload(path.join(resources, 'payload'), { revision: String(metadata.revision), allowDirty: metadata.testBuild === true });
+  assert.deepEqual(metadata.payload, { revision: payload.revision, dirty: payload.dirty, packagedAt: payload.packagedAt, files: payload.files, bytes: payload.bytes });
+}
 const source = path.dirname(fileURLToPath(import.meta.url));
 const brand = path.resolve(source, '../../assets/brand/awwo-fold');
 async function hash(file: string): Promise<string> {
@@ -43,7 +52,7 @@ assert.equal(metadata.canonicalMarkSHA256, await hash(path.join(brand, 'png/mark
 assert.equal(metadata.canonicalMarkSHA256, await hash(path.join(resources, 'AwwOFoldMark.png')));
 assert.equal(metadata.iconSHA256, await hash(path.join(resources, 'AwwOFold.icns')));
 assert.equal(await hash(path.join(resources, 'LICENSE')), await hash(path.resolve(source, '../../LICENSE')));
-await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', app], { timeout: 900_000, maxBuffer: 2_000_000 });
 console.log(JSON.stringify({ app, version: metadata.version, build: metadata.build, environment: metadata.environment,
   cloudURL: metadata.cloudURL, nativeSourceMatches: true, iconBrand: metadata.iconBrand, iconHashesVerified: true,
-  signatureVerified: true, localServicesAbsent: true }, null, 2));
+  signatureVerified: true, localRuntimeIncluded: local, ...(local ? { payloadRevision: (metadata.payload as Record<string, unknown>).revision } : {}) }, null, 2));

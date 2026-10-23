@@ -4,14 +4,15 @@
 // network when they are run; the files they fetched are checked by their --check.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { licenceTextMatches, parseLicenceExpression, provenanceDifferences } from './awwo-licence-files.mjs';
 import { crateFolderGaps, needed, WEBVIEW2, webview2Sdk } from './awwo-crate-licences.mjs';
 import { folderOf, githubRepository, installedPackages, leftOutPackage, permissiveLicence, repositoryFolders } from './awwo-npm-licences.mjs';
-import { POSTGRES_COMPANY, POSTGRES_LIBRARIES, POSTGRES_OWN_LIBRARIES, othersNotices, postgresLibraryGaps, postgresVersionOf, sourceNotices } from './awwo-postgres-licences.mjs';
+import { POSTGRES_COMPANY, POSTGRES_LIBRARIES, POSTGRES_MACOS_LIBRARIES, POSTGRES_OWN_LIBRARIES, othersNotices, postgresLibraryGaps, postgresMacosLibraryGaps, postgresVersionOf, sourceNotices } from './awwo-postgres-licences.mjs';
 
 const scratch = () => mkdtempSync(path.join(os.tmpdir(), 'awwo-local-licences-test-'));
 const write = (file, text) => {
@@ -199,5 +200,34 @@ test('PostgreSQL\'s libraries are carried only as listed: its version, the bytes
     if (/LGPL/.test(library.licence)) assert.match(library.source?.sha256 || '', /^[0-9a-f]{64}$/, library.name);
     else assert.ok(Object.keys(library.files).length, library.name);
     for (const sha256 of Object.values(library.dlls)) assert.match(sha256, /^[0-9a-f]{64}$/, library.name);
+  }
+});
+
+test('the macOS archive\'s libraries are carried only as listed: its version, each dylib\'s bytes, the links its programs load through', () => {
+  const lib = [
+    ...POSTGRES_MACOS_LIBRARIES.libraries.flatMap(library => Object.entries(library.dylibs).map(([name, sha256]) => ({ name, kind: 'file', sha256 }))),
+    ...POSTGRES_MACOS_LIBRARIES.libraries.flatMap(library => Object.entries(library.links || {}).map(([name, target]) => ({ name, kind: 'symlink', target }))),
+  ];
+  const version = POSTGRES_MACOS_LIBRARIES.postgres;
+  assert.deepEqual(postgresMacosLibraryGaps({ lib, version }), []);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: [...lib, { name: 'libintl.8.dylib', kind: 'file', sha256: 'y' }], version }), ['libintl.8.dylib is not in the list']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: lib.map(file => file.name === 'libiconv.2.dylib' ? { ...file, sha256: 'another build' } : file), version }), ['libiconv.2.dylib is not the build listed (other bytes)']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: lib.filter(file => file.name !== 'libedit.0.dylib'), version }), ['libedit.0.dylib is listed but not there']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: [...lib, { name: 'libpq.dylib', kind: 'symlink', target: 'libpq.5.dylib' }], version }), ['libpq.dylib is a link the list does not name (to libpq.5.dylib)']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: lib.map(file => file.name === 'libz.1.dylib' ? { ...file, target: '../../elsewhere/libz.dylib' } : file), version }), ['libz.1.dylib leads to ../../elsewhere/libz.dylib, not libz.1.3.2.dylib']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib: lib.filter(file => file.name !== 'libicui18n.dylib'), version }), ['libicui18n.dylib is listed as a link but not there as one']);
+  assert.deepEqual(postgresMacosLibraryGaps({ lib, version: '18.5' }), [`the libraries are listed for PostgreSQL ${version}, not 18.5`]);
+  // Every dylib's link leads beside it; the LGPL library has its source; every library its licence files, each of which
+  // is in third_party/postgres-macos as fetched, and of the licence its library is under.
+  const folder = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'third_party', 'postgres-macos');
+  assert.deepEqual(provenanceDifferences(folder), []);
+  for (const library of POSTGRES_MACOS_LIBRARIES.libraries) {
+    for (const [link, target] of Object.entries(library.links || {})) assert.ok(target in library.dylibs && !link.includes('/'), link);
+    if (/LGPL/.test(library.licence)) assert.match(library.source?.sha256 || '', /^[0-9a-f]{64}$/, library.name);
+    for (const sha256 of Object.values(library.dylibs)) assert.match(sha256, /^[0-9a-f]{64}$/, library.name);
+    const names = Object.keys(library.files);
+    assert.ok(names.length, library.name);
+    const texts = names.map(name => readFileSync(path.join(folder, `${library.name}-${library.version}`, name), 'utf8'));
+    assert.ok(licenceTextMatches(library.licence, texts), `${library.name}'s files are of ${library.licence}`);
   }
 });

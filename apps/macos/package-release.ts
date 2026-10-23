@@ -6,16 +6,16 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { readProductionConfiguration } from './production-config.ts';
+import { build, version } from './release.ts';
 
 const exec = promisify(execFile);
 const source = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(source, '../..');
-const version = '0.9.1';
-const build = '10';
 const appName = 'AwwO Local.app';
 
 async function run(command: string, args: string[], env = process.env): Promise<string> {
-  const result = await exec(command, args, { cwd: root, env, timeout: 120_000, maxBuffer: 2_000_000 });
+  // A build with the local edition's payload is hundreds of MB: its disk image and checks take minutes.
+  const result = await exec(command, args, { cwd: root, env, timeout: 1_800_000, maxBuffer: 2_000_000 });
   return result.stdout.trim();
 }
 
@@ -54,6 +54,8 @@ async function main(): Promise<void> {
   assert.equal(metadata.cloudURL, configuration.cloudURL);
   assert.equal(metadata.signing, 'ad-hoc-local-only');
   assert.equal(metadata.architecture, 'arm64');
+  assert.notEqual(metadata.testBuild, true, 'A build to test (AWWO_MAC_TEST_BUILD) is not published.');
+  const local = metadata.localRuntimeIncluded === true;
   const dirtyInputs = await run('/usr/bin/git', ['status', '--porcelain', '--', 'apps/macos', 'assets/brand/awwo-fold', 'LICENSE']);
   assert.equal(dirtyInputs, '', 'Release source inputs must be committed and clean.');
   await verify(app);
@@ -75,10 +77,16 @@ async function main(): Promise<void> {
   let packagingError: unknown;
   try {
     const instructions = `AwwO for Mac ${version} (build ${build})\n\n` +
-      `适用：Apple Silicon，macOS 14 或更高版本；需要联网。\n` +
-      `安装：退出旧应用并保留备份，将 ${appName} 拖入 Applications（或原安装目录）。\n` +
-      `默认连接：${configuration.cloudURL}\n` +
-      `沿用线上账号、工作区与历史记录，不内置数据库、执行引擎或 API Key。\n` +
+      (local
+        ? `适用：Apple Silicon，macOS 14 或更高版本。线上工作区需要联网。\n` +
+          `安装：退出旧应用并保留备份，将 ${appName} 拖入 Applications（或原安装目录）。\n` +
+          `第一次打开时选择工作区：线上工作区（${configuration.cloudURL}，沿用线上账号与历史记录），或本机工作区\n` +
+          `（AwwO 本地版：自带数据库与执行服务，数据只在这台 Mac 上，模型使用你自己的 Key，不内置任何 API Key）。\n` +
+          `之后可从菜单「工作区」切换。本机工作区的数据在 ~/Library/Application Support/store.clawhunt.awwo.local/state。\n`
+        : `适用：Apple Silicon，macOS 14 或更高版本；需要联网。\n` +
+          `安装：退出旧应用并保留备份，将 ${appName} 拖入 Applications（或原安装目录）。\n` +
+          `默认连接：${configuration.cloudURL}\n` +
+          `沿用线上账号、工作区与历史记录，不内置数据库、执行引擎或 API Key。\n`) +
       `保留 bundle ID 与既有 WebKit 数据；请勿删除用户数据来更新图标。\n\n` +
       `签名：ad-hoc；未经过 Apple Developer ID 签名或公证。\n` +
       `macOS 首次打开可能阻止启动，请按设备安全策略处理。安装包不修改系统安全设置。\n\n` +
@@ -119,7 +127,7 @@ async function main(): Promise<void> {
     const assets = await Promise.all([dmg, archive, brandArchive, install].map(async file => ({ name: path.basename(file), sha256: await hash(file) })));
     await writeFile(path.join(output, 'SHA256SUMS'), assets.map(asset => `${asset.sha256}  ${asset.name}\n`).join(''));
     const result = { version, build, revision, cloudURL: configuration.cloudURL, signing: 'ad-hoc-local-only',
-      notarized: false, dmgVerified: true, mountedBundleVerified: true, iconBrand: 'Fold', assets };
+      notarized: false, dmgVerified: true, mountedBundleVerified: true, iconBrand: 'Fold', localRuntimeIncluded: local, assets };
     await writeFile(path.join(output, 'release.json'), JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ output, ...result }, null, 2));
   } catch (error) {

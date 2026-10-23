@@ -38,6 +38,33 @@ PostgreSQL 只带服务器自己用的部分：程序、它们的库和数据文
 
 makensis 按完整路径读取每个文件，超过 260 个字符就失败，所以代码库所在的路径太深时（例如 `.claude/worktrees/…` 下的工作树），打包会提示改用 `--out`：`npm run package:local -- --out D:\awwo-local` 在这个目录里复制窗口的源文件，把 payload 组装在其中的 `payload`，并在那里构建安装包（也适合换到更快的磁盘）。这个目录须是空的，或是之前打包时建立的。`--no-installer` 只组装 payload；`--keep-payload` 用之前组装好的 payload 只构建安装包，但只接受由当前打包脚本、在同一提交且代码库没有改动时组装的 payload（各项检查都在组装时做）。
 
+## Mac 应用
+
+Mac 上的 AwwO（`apps/macos`，`AwwO Local.app`，Apple 芯片、macOS 14 起）从 0.10.0 起可以带着本地版：构建时把 `scripts/awwo-local-package-macos.mjs` 组装的 payload 放进 `Contents/Resources/payload`，布局与 Windows 安装包的相同（`app/` 是代码、`build/` 是程序、`licenses/` 是许可证），自带 Node.js 24.22.1、PostgreSQL 18.4（EDB 的 macOS 版，Intel 与 Apple 芯片通用）、API、网页和执行服务。第一次打开时选择线上工作区或本机工作区，之后从菜单「工作区」切换，应用记住上次打开的那个；不带 payload 的构建只有线上工作区。本机工作区的数据在 `~/Library/Application Support/store.clawhunt.awwo.local/state`，窗口自己的日志（运行时的标准错误，没有任何密钥）在旁边的 `logs` 中，与应用分开：替换应用升级、删除应用都不动它。早期构建的本机模式用过的 `~/Library/Application Support/AwwO Local/` 从不被读写（见下文「数据与配置」：运行时也不会把它当作数据目录）。
+
+窗口以 `--shell macos` 启动运行时，应用里原本提示运行 npm 命令的地方因此改为指向菜单。菜单「AwwO」中的本机项与 Windows 窗口的同名：重新启动、在浏览器中打开、打开数据目录、打开日志、重置登录密码（重新启动，并打开写着新密码的 `admin-credentials.txt`）。第一次就绪时窗口打开 `admin-credentials.txt`。关闭窗口或退出 AwwO 时，窗口先有序停止本地版（关闭运行时的标准输入），超过四分钟仍未停完时只结束运行时本身：各个包装进程在与它的管道关闭时结束各自的服务；十秒后仍在的子进程按确切的进程身份结束，再停下它留下的数据库（`pg_ctl`，先快速停止一分钟，再立即停止半分钟，期间持有数据目录的锁；仍在运行时窗口说明，退出 AwwO 或切到线上工作区之前也说明；下次启动本地版时运行时先停止它）。窗口只在运行时已经认作自己的数据目录里这样做：那里有 `local.env` 和运行时建的 `runtime.lock`（窗口不建它）；运行时拒绝了的目录两者都没有，窗口不碰其中的数据库。运行时开始停止（它的 `stopping` 事件：因错误，或者从外部，例如在「活动监视器」中退出它），或者不在了（被强制结束、崩溃）时，窗口立即移除它的页面：它的端口这时这台电脑上谁都可以占用，包括其他账号的程序，而页面的请求（轮询、运行的事件流）会把窗口的 Cookie 带给占用它的程序（那时它已作废，见上：这是多一层防护）。窗口自己停止本地版时（切换工作区、重新启动、退出）先移除页面再停；下次启动时重新载入。
+
+macOS 26 起系统才把 `*.localhost` 解析到本机（mDNSResponder 2881 把它们改写成 localhost）；macOS 14、15 不解析，WebKit 也不自行解析。所以窗口不打开数据目录自己的名字，而是 `http://127.0.0.1:<网页端口>`：运行时只对带着本次启动的 Cookie `awwo_shell` 的请求这样回答。令牌由窗口每次启动时生成，经环境变量 `AWWO_LOCAL_SHELL_TOKEN` 交给运行时（命令行任何账号都能读到，所以不放在那里），并设在窗口自己的 WebKit 存储里（只给 127.0.0.1、页面脚本读不到）；浏览器没有它，所以浏览器打开这个地址时照旧被引到实例的名字。网页服务把这个 Cookie 转给 API 之前去掉，并把窗口的 Origin 换成实例的，API 的来源检查不变；API 回答的实例地址换回窗口的。窗口的登录也不放在窗口里：API 回答窗口时设的会话 Cookie（`awwo_session`）由网页服务从回答里拿掉、替窗口保管在数据目录的 `window-session` 中，之后随窗口的每个请求交给 API（窗口自己带来的会话 Cookie 一律不转），窗口退出登录时随之删除。窗口的 WebKit 存储里因此只有本次启动的 `awwo_shell`：运行时一结束它就作废（下次启动换新令牌，登录仍在），即使窗口的请求在那之后到了占用这个端口的别的程序那里，它拿到的也只是作废的令牌。网站自己的文件（应用的资源、案例的媒体、展示视频）在这个地址上不带 Cookie 也照样给：它们就是实例名字下谁都能取的公开文件，而应用取其中一些时不带 Cookie（`credentials: 'omit'`）；应用的页面（包括按文件名取的 `saas.html`）和 API 仍只回答带 Cookie 的请求。窗口的 Cookie（本次启动的 `awwo_shell`：运行时运行期间，带着它的请求就是窗口的，也就带上了窗口的登录）属于主机 127.0.0.1，而 127.0.0.1 的每个端口都共用它，包括这台电脑上其他账号的服务：窗口因此用 WebKit 的内容规则阻止加载 127.0.0.1 上除自己端口之外的任何东西（地址里带用户名的，例如 `http://x@127.0.0.1:<别的端口>/`，也一样；连自己端口的这种地址也不加载），页面不会把它们带到别的本机服务那里。规则在第一次加载之前装好，编译不了时窗口不启动；窗口的自检让 WebKit 实际编译一遍这份规则。「在浏览器中打开」打开实例的名字：macOS 26 之前的 Safari 打不开 `*.localhost`，Chrome、Edge 和 Firefox 可以。
+
+打包在 Apple 芯片的 Mac 上进行（Xcode Command Line Tools、Go、Node.js 24）。`npm run setup:local` 在 macOS 上下载 EDB 的 PostgreSQL 并按固定的 SHA-256 核对（即使 PATH 上已有别的 PostgreSQL，代码库的运行时随后也用它），然后：
+
+```sh
+npm run package:local:macos -- --out ~/awwo-mac --smoke
+AWWO_MAC_LOCAL_PAYLOAD=~/awwo-mac/payload APP_ENV=production VITE_APP_ENV=production \
+  AWWO_MAC_CLOUD_URL=https://awwo.clawhunt.store node apps/macos/build.ts
+```
+
+payload 的组装与 Windows 的相同（执行器的依赖按镜像的方式安装，去掉为其他系统或处理器构建的包和编程代理的剪贴板；点文件、`.env`、私钥不进入），检查换成 macOS 的：
+
+- PostgreSQL 只带服务器自己用的部分：全部程序（contrib 的 oid2name 与 vacuumlo 除外）、它们加载的 17 个库和 6 个链接（`libz.1.dylib`、`liblz4.1.dylib`、`libzstd.1.dylib`、`libicui18n.dylib`、`libicuuc.77.dylib`、`libicudata.77.dylib`：程序经这些链接加载其中几个）、`lib/postgresql` 里服务器自己加载的模块、`share/postgresql` 的数据文件（扩展只留 PL/pgSQL 的）。不带任何扩展（Perl、Python、Tcl 语言从 EDB 的语言包加载）、libpq-oauth（它要的 libcurl 不在包里）和没有任何程序加载的库（libintl、libxslt、libuuid、libgssrpc、ecpg 的）。名单（`scripts/awwo-postgres-licences.mjs` 的 `POSTGRES_MACOS_LIBRARIES`）记着每个库的 SHA-256 与每个链接指向的文件，不一致时打包停止。
+- EDB 的 macOS 包不带任何许可证文件：PostgreSQL 自己的许可证取自它源码的 COPYRIGHT，各库的许可证文件取自各自对应版本的发布（`node scripts/awwo-postgres-licences.mjs --macos`，放在 `third_party/postgres-macos`，与 Windows 的几个库相同的文件字节相同）；MIT Kerberos 1.22.2、libedit 20251016-3.1 与 libiconv 1.19 是 macOS 才有的。LGPL 的 libiconv 附它的 GNU 源码发布包（GNU 签名已核对）。
+- payload 里每个 Mach-O 程序和库加载的库，都必须在 payload 里（经 `@loader_path`、`@executable_path` 或 `@rpath`）或是系统自带的，否则打包停止；Node.js、API 和 PostgreSQL 的程序必须带 Apple 芯片的代码。除名单上的 PostgreSQL 链接外，payload 里不许有链接（npm 在 macOS 上把包的命令 `node_modules/.bin` 建成链接，payload 用不到它们，打包时去掉）。
+- 没有签名的程序和库（有的包为 Intel 带的构建没有签名）由打包签上 ad-hoc 签名，然后逐个 `codesign --verify --strict`。EDB 的 PostgreSQL 带 EDB 的签名（团队 26QKX55P9K）。
+
+workers 的 npm 包许可证与 Windows 的共用 `third_party/npm-packages`；只为一种机器构建的包（esbuild 的）记着它的机器（`PROVENANCE.json` 的 `machine`），各自的 `--check`（`node scripts/awwo-npm-licences.mjs --check`，以及 `--machine darwin-arm64 --from <在别处为 Mac 安装的 workers>`）不把另一种机器的包当作多余。
+
+应用的签名是 ad-hoc 的，没有 Apple Developer ID 签名与公证：从网上下载后第一次打开，macOS 会阻止它，需要在「系统设置 → 隐私与安全性」中选择「仍要打开」。在 Mac 上构建、安装和验收它的步骤见 [awwo-local-mac-acceptance.md](awwo-local-mac-acceptance.md)。
+
 ## 从代码库运行
 
 ```sh
@@ -52,7 +79,7 @@ npm run local
 `setup:local` 可以重复运行：已是最新的部分会跳过。它会：
 
 - 在缺少时下载 Node.js 24.22.1（nodejs.org，按该版本 `SHASUMS256.txt` 中的 SHA-256 校验），只供本地版的服务使用，不改动系统中已有的 Node.js；
-- 在 Windows 上缺少 PostgreSQL 时下载 EDB 的 PostgreSQL 18.4 二进制包（只解压 `bin`、`lib`、`share`）。EDB 不公布该压缩包的校验值；脚本固定的是 2026-10-21 从 `get.enterprisedb.com` 经 HTTPS 下载的那一份的 SHA-256。其他系统请把 `initdb`、`pg_ctl`、`postgres`、`psql`、`createdb` 放在 PATH 上，或设置 `AWWO_LOCAL_PG_BIN`；
+- 在 Windows 上缺少 PostgreSQL 时、在 macOS 上（Mac 应用带的是它）下载 EDB 的 PostgreSQL 18.4 二进制包（只解压 `bin`、`lib`、`share`；macOS 上用系统的 `/usr/bin/tar`，它保留包里的链接；构建目录里的那份不是从固定的压缩包解出的，或缺了运行时要用的程序时，重新解压）。EDB 不公布压缩包的校验值；脚本固定的是从 `get.enterprisedb.com` 经 HTTPS 下载的那一份的 SHA-256（Windows 版 2026-10-21，macOS 版 2026-10-23）。Linux 请把 `initdb`、`pg_ctl`、`postgres`、`psql`、`createdb` 放在 PATH 上，或设置 `AWWO_LOCAL_PG_BIN`。运行时按 `AWWO_LOCAL_PG_BIN`、构建目录里的、PATH 上的顺序找 PostgreSQL（打包好的应用只用它自己带的）；数据库已经存在时，依次取其中与建立它的主版本（数据目录 `postgres` 的 `PG_VERSION`）相同的第一个（另一个主版本打不开它的文件），都不是时拒绝启动并说明找到了哪些：例如 macOS 上之前用 PATH 上的 PostgreSQL 16 建的库，在 setup 解压 EDB 的 18 之后仍用 16。一个都说不出自己的版本（`postgres -V` 运行不了：被系统阻止、文件损坏或不是这台电脑处理器的程序）时同样拒绝启动，并说明是程序运行不了，而不是版本不对；打包好的应用缺少或运行不了自带的程序时，说明请重新安装应用（在 macOS 上，系统设置的「隐私与安全性」会写出它阻止了哪个程序），而不是去运行 setup；
 - 为 Web、Pi、OpenAI Agents（JS）和渲染服务安装依赖：执行服务与线上镜像一样不装开发依赖、不运行安装脚本（`--omit=dev --ignore-scripts`），网页带上构建工具；用 `uv`（或 Python 3.12 的 venv）建立 Python 执行器的环境；
 - 构建 Go API 和网页，构建直接执行的核心（只需 git 与 npm）；
 - Docker 正在运行时，构建工作区镜像（`awwo-workspace:local-<源码哈希>`）；
@@ -116,6 +143,7 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 | `providers.env` | 可选的媒体服务密钥（图片、视频、3D、配音）、媒体下载用的本机代理（`AWWO_MEDIA_DEV_PROXY`）和读取网页用的本机代理（`AWWO_WEB_READER_PROXY`）；只接受这些名称。旧版本生成的文件没有最后一行，需要时手动加上。 |
 | `admin-credentials.txt` | 本机账号与初始密码。在设置中修改密码后，此文件不会更新；`npm run local -- --reset-password` 会换上新密码并更新它。 |
 | `postgres/` | 数据库。 |
+| `window-session` | 只有 Mac 应用的窗口用：运行时替窗口保管的登录（API 的会话令牌，权限 600）。窗口退出登录或会话被结束时删除。 |
 | `media/` | 上传、媒体节点和渲染生成的文件。 |
 | `logs/` | 每个服务的日志。 |
 
@@ -134,11 +162,10 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 
 `scripts/awwo-local.mjs` 也是桌面窗口要启动的程序：
 
-- `--events`：标准输出每行一个 JSON：`{"event":"status","step":…}`、`{"event":"ready","url":…,"stateDir":…,"services":{…}}`（`url` 是这个数据目录自己的地址）、`{"event":"error","message":…}`，以及停完时的 `{"event":"stopped","code":…}`；日志写到标准错误。
+- `--events`：标准输出每行一个 JSON：`{"event":"status","step":…}`、`{"event":"ready","url":…,"stateDir":…,"services":{…}}`（`url` 是这个数据目录自己的地址）、`{"event":"error","message":…}`、开始停止时（无论因信号、父进程结束、标准输入关闭还是错误，都在网页服务关闭之前）的 `{"event":"stopping"}`，以及停完时的 `{"event":"stopped","code":…}`；日志写到标准错误。
 - `--parent-pid <pid>`：该进程结束时停止；`--stop-on-stdin-close`：标准输入关闭时停止。
 - `--state <dir>`、`--resources <dir>`、`--build <dir>`：数据目录、代码目录与构建目录。Windows 路径的 `\\?\` 前缀（规范化了自己路径的启动程序会这样传，例如 Tauri）会被去掉：PostgreSQL 的程序按启动它们的路径互相查找，从这样写的路径启动不了。
-- `--shell windows`：由 AwwO Local 的窗口启动（API 得到 `AWWO_LOCAL_SHELL=windows`，`/auth/options` 与 `/api/v1/local` 中的 `shell`），应用据此提示窗口的菜单，而不是 npm 命令。
-- `node scripts/awwo-local.mjs <resources> <state> <parent pid>`：`apps/macos/AwwOLocal.swift` 已实现的本机工作区协议（等同于 `--events`）。该外壳目前只接受 `127.0.0.1` / `localhost` 的 `ready` 地址，重新启用 Mac 本机模式时需改为接受 `*.localhost`。
+- `--shell windows`、`--shell macos`：由 AwwO Local 的窗口或 Mac 应用的本机工作区启动（API 得到 `AWWO_LOCAL_SHELL`，`/auth/options` 与 `/api/v1/local` 中的 `shell`），应用据此提示窗口的菜单，而不是 npm 命令。`--shell macos` 还需要环境变量 `AWWO_LOCAL_SHELL_TOKEN`（43 个字符的 base64url），没有时运行时不启动；`ready` 事件因此多一个 `window`（`http://127.0.0.1:<网页端口>`），网页服务按上文「Mac 应用」回答这个地址。
 
 每个服务由 `scripts/awwo-local-reaper.mjs` 启动，运行时握着它的标准输入：要停止某个服务时，运行时在其中写入 `stop` 再关闭。管道没有 `stop` 就关闭了，说明运行时已经不在（被强制结束或崩溃）：服务及其启动的进程立即结束，端口随之释放，这样同一数据目录上接着启动的运行时不会遇到还在工作的旧服务。服务自己退出时，它启动、仍在运行的进程也随之结束（其他系统上是它的进程组；Windows 上是它启动的进程，Node.js 本身会结束自己的子进程，其他程序不会）。必需的服务（Pi、OpenAI Agents、API）在任何时候停止都会结束整个运行时，启动期间也一样。
 
@@ -146,8 +173,9 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 
 停止（Ctrl-C、标准输入关闭、父进程结束或信号）按以下顺序进行，在 Windows 上和其他系统上相同：
 
-- 先停 API：它的标准输入随之关闭（`AWWO_STOP_ON_STDIN_CLOSE`），API 像收到 SIGTERM 时一样有序关闭，最多等 30 秒，让正在提交的媒体生成记下任务编号、重启后继续，而不是被重复计费（线上同样给 API 45 秒）。Windows 没有可发给控制台程序的温和信号，所以用标准输入。
-- 再停执行器：Windows 上直接结束；其他系统先发 SIGTERM，20 秒后强制结束整个进程组。API 与执行器把运行状态保存在数据库中，下次启动后继续未完成的运行。
+- 先说 `{"event":"stopping"}`，网页服务随即对一切请求只回答 503（不再转给 API，打开着的连接，例如运行的事件流，随之结束），但端口一直占着，到运行时结束才放开：还开着的页面的请求（和它带的 Cookie）只会到这个进程，不会到停止途中抢占了这个端口的别的程序。说事件的管道已经没人读（窗口崩溃或被强制退出）时，写失败只结束事件，停止照常进行到底，数据库也照常关闭。
+- 再停 API：它的标准输入随之关闭（`AWWO_STOP_ON_STDIN_CLOSE`），API 像收到 SIGTERM 时一样有序关闭，最多等 30 秒，让正在提交的媒体生成记下任务编号、重启后继续，而不是被重复计费（线上同样给 API 45 秒）。Windows 没有可发给控制台程序的温和信号，所以用标准输入。
+- 然后停执行器：Windows 上直接结束；其他系统先发 SIGTERM，20 秒后强制结束整个进程组。API 与执行器把运行状态保存在数据库中，下次启动后继续未完成的运行。
 - 然后移除本实例的工作区容器：直接执行的工作区容器带有本实例的标签（`awwo.workspace-instance`），运行时在每次启动和停止时移除带此标签的容器，不触碰其他实例的容器。列不出或移除不了时，运行时报告错误，并以非零状态退出（运行期间退出了 Docker Desktop 时也是这样：它的容器已随之停止）。
 - 最后由 `pg_ctl` 快速关闭 PostgreSQL；没有关掉时运行时报告错误，并以非零状态退出。运行时被强制结束后，数据库会留下来：下次启动时，若仍有程序连着它（例如运行时在停止途中被强制结束时还在有序关闭的 API，或另一个连着数据库的工具），先等它们断开（最多一分钟），再停止它并按新设置启动。
 - 停止开始一秒以后再按一次 Ctrl-C（或再发一个信号），运行时不再等待：所有服务立即结束，PostgreSQL 立即关闭（正在进行的数据库启动或关闭会先完成）。这样停止时，正在提交的媒体生成可能丢失（已由服务商计费）。一秒之内的第二个信号算作同一次：`npm run` 会把终端的 Ctrl-C 再转给运行时，而运行时已从终端收到过它。终端的 Ctrl-C 与挂断也会传到各个服务的包装进程，它们不理会，交给运行时按顺序停止。
@@ -163,12 +191,12 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 npm run test:local
 ```
 
-运行 `scripts/awwo-local.test.mjs`（运行时、包装进程、模块检查、锁与 setup）、`scripts/awwo-local-web.test.mjs`（网页服务与代理）、`scripts/awwo-local-package.test.mjs`（Windows 安装包的 payload）和 `scripts/awwo-local-licences.test.mjs`（安装包带的许可证）。其中一项测试用构建好的 API 程序检查本地版生成的设置在各种可选服务与媒体 Key 组合下都能被 API 接受。
+运行 `scripts/awwo-local.test.mjs`（运行时、包装进程、模块检查、锁与 setup）、`scripts/awwo-local-web.test.mjs`（网页服务与代理，含 Mac 窗口的地址）、`scripts/awwo-local-package.test.mjs`（Windows 安装包的 payload）、`scripts/awwo-local-package-macos.test.mjs`（Mac 应用的 payload 与 Mach-O 检查，用测试自己写的 Mach-O 文件，在任何系统上都能跑；链接的部分只在能建链接的系统上跑）和 `scripts/awwo-local-licences.test.mjs`（安装包带的许可证）。其中一项测试用构建好的 API 程序检查本地版生成的设置在各种可选服务与媒体 Key 组合下都能被 API 接受。Mac 应用自己的检查（`apps/macos`：`npm test` 与构建时的 `--self-test-*`，其中 `--self-test-policy` 含 `ready` 事件、令牌与 Cookie 的检查）在 Mac 上运行。
 
 ## 后续
 
 1. 为沙箱接通个人 Key（经 API 的模型代理，见「本地版没有的」）。
-2. Windows 安装版里构建直接执行的工作区镜像（Docker 运行时），并带上 ffmpeg 或说明安装方法。
-3. Mac：重新打开 `AwwOLocal.swift` 中的本机工作区：接受 `*.localhost` 的 `ready` 地址；只向运行时本身发信号（它的强制清理会向各个包装进程发 SIGTERM，那在包装进程是「立即结束」）；把停止期限从 20 秒放宽到有序停止所需的时间（API 最多 55 秒、执行器 30 秒、数据库最多 120 秒）；升级与备份。
-4. Linux 与 macOS：托管核心（OpenMaus）由直接执行的服务以独立进程组启动，那个服务崩溃或被强制结束时，核心不会随包装进程结束（工作区容器仍按标签移除）。
-5. 工作区出网代理在 Docker 的 Linux 环境中运行，使直接执行的工作区可以联网。
+2. Windows 安装版与 Mac 应用里构建直接执行的工作区镜像（Docker 运行时），并带上 ffmpeg 或说明安装方法。
+3. Linux 与 macOS：托管核心（OpenMaus）由直接执行的服务以独立进程组启动，那个服务崩溃或被强制结束时，核心不会随包装进程结束（工作区容器仍按标签移除；Mac 应用强制停止时按进程身份结束它）。
+4. 工作区出网代理在 Docker 的 Linux 环境中运行，使直接执行的工作区可以联网。
+5. Mac 应用的 Developer ID 签名与公证（需要 Apple 开发者账号）。

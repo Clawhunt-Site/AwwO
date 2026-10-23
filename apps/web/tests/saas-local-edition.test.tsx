@@ -123,12 +123,34 @@ it('names the window’s menu, not npm commands, in AwwO Local’s window', asyn
   expect(screen.queryByText(/菜单「AwwO/)).toBeNull();
 });
 
+it('names the Mac app’s menu and Homebrew in its local workspace', async () => {
+  server({ local: { ...computer, managedExecution: false, render: false, shell: 'macos' } });
+  open('local', local);
+  expect(await screen.findByText(computer.dataFolder)).toBeVisible();
+  const services = document.querySelector('.saas-local-services')!;
+  const row = (name: string) => within(services as HTMLElement).getByText(name).closest('li')!;
+  expect(row('直接执行')).toHaveTextContent('安装版暂不提供');
+  expect(row('渲染视频与剪辑')).toHaveTextContent('brew install ffmpeg');
+  expect(row('渲染视频与剪辑')).toHaveTextContent('退出 AwwO（菜单「AwwO → 退出 AwwO」）再重新打开');
+  expect(row('渲染视频与剪辑')).not.toHaveTextContent('PATH');
+  expect(screen.getByText(/填写或修改后用菜单「AwwO → 重新启动」即可生效/)).toBeVisible();
+});
+
 it('tells the sign-in page’s person where AwwO Local’s window keeps the password and how its menu resets it', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).endsWith('/auth/options')
     ? json({ clawhuntSSO: false, localAuth: true, passwordRecovery: false, edition: 'local', registration: false, shell: 'windows' })
     : json({ error: { code: 'unauthenticated' } }, 401)));
   render(<SaaSApp />);
   expect(await screen.findByText(/admin-credentials\.txt 中（菜单「AwwO → 打开数据目录」）.*菜单「AwwO → 重置登录密码」/)).toBeVisible();
+  expect(screen.queryByText(/npm run/)).toBeNull();
+});
+
+it('names the menu on the sign-in page of the Mac app’s local workspace too', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).endsWith('/auth/options')
+    ? json({ clawhuntSSO: false, localAuth: true, passwordRecovery: false, edition: 'local', registration: false, shell: 'macos' })
+    : json({ error: { code: 'unauthenticated' } }, 401)));
+  render(<SaaSApp />);
+  expect(await screen.findByText(/菜单「AwwO → 重置登录密码」/)).toBeVisible();
   expect(screen.queryByText(/npm run/)).toBeNull();
 });
 

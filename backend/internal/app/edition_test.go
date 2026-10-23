@@ -49,10 +49,12 @@ func TestLocalEditionLoadsFromEnv(t *testing.T) {
 			}
 		})
 	}
-	setLocalEditionEnv(t)
-	t.Setenv("AWWO_LOCAL_SHELL", "windows")
-	if c, err := ConfigFromEnv(); err != nil || c.LocalShell != "windows" {
-		t.Fatal("the Windows window's start must load", err, c.LocalShell)
+	for _, shell := range []string{"windows", "macos"} {
+		setLocalEditionEnv(t)
+		t.Setenv("AWWO_LOCAL_SHELL", shell)
+		if c, err := ConfigFromEnv(); err != nil || c.LocalShell != shell {
+			t.Fatal("a known window's start must load", shell, err, c.LocalShell)
+		}
 	}
 }
 

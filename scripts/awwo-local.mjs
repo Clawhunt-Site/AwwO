@@ -3,9 +3,8 @@
 //
 //   npm run local                                   from a checkout, after npm run setup:local
 //   npm run local -- --reset-password               the same, with a new sign-in password (admin-credentials.txt)
-//   node scripts/awwo-local.mjs --events ...        for a desktop window: one JSON object per line on stdout
-//   node scripts/awwo-local.mjs <resources> <state> <parent pid>
-//                                                   the contract apps/macos/AwwOLocal.swift already speaks
+//   node scripts/awwo-local.mjs --events ...        for a desktop window (AwwO Local's on Windows, the Mac app's local
+//                                                   workspace): one JSON object per line on stdout
 //
 // What this computer cannot run is left out, and the app shows it as not ready, as the hosted site would: the
 // managed execution (直接执行) without Docker, renders without Chrome and ffmpeg.
@@ -18,8 +17,8 @@ import { port as validPort } from './awwo-saas-lib.mjs';
 import {
   allocatePorts, apiEnvironment, browserCandidates, dockerEnvironment, findOnPath, instanceContainerQuery, loadLocalProfile,
   localLayout, localOrigin, localState, osLock, portIsFree, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, protectStateDirectory,
-  LOCAL_SHELLS, PASSWORD_RESET_PENDING, passwordResetApplied, resetId, resetOwnerPassword, resolvePostgresBin, serviceEnvironments, systemEnvironment,
-  windowsTool, withModuleGuard, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
+  LOCAL_SHELLS, missingPieceFix, PASSWORD_RESET_PENDING, passwordResetApplied, postgresForCluster, resetId, resetOwnerPassword, serviceEnvironments, SHELL_TOKEN, shellToken,
+  systemEnvironment, windowSessionStore, windowsTool, withModuleGuard, withPostgresInclude, writeFileAtomic, writeOwnerCredentials,
 } from './awwo-local-lib.mjs';
 import { createLocalWebServer } from './awwo-local-web.mjs';
 
@@ -44,12 +43,6 @@ export const folderArgument = value => path.resolve(/^\\\\\?\\[A-Za-z]:\\/.test(
 
 export function parseArguments(argv) {
   const options = { state: '', resources: '', build: '', events: false, parentPid: 0, docker: true, stopOnStdinClose: false, verbose: false, resetPassword: false, shell: '' };
-  if (argv.length && !argv[0].startsWith('--')) {
-    // The Mac shell's contract: <resources> <state> <parent pid>, events on stdout.
-    const [resources, state, parent] = argv;
-    if (!resources || !state || !parent || argv.length > 3) throw new Error('usage: awwo-local.mjs <resources> <state> <parent pid>');
-    return { ...options, resources: folderArgument(resources), state: folderArgument(state), parentPid: positive(parent, 'parent pid'), events: true };
-  }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -80,8 +73,12 @@ function positive(value, name) {
   return number;
 }
 
-function reporter(events) {
+const ignoreWriteError = () => {};
+export function reporter(events) {
   const text = events ? process.stderr : process.stdout;
+  // A window that is gone (it crashed, was force-quit) has closed its end of the pipe the events go to, and a write
+  // then fails (EPIPE): that ends what is said there, never the stop being said (the database is stopped at its end).
+  for (const stream of [process.stdout, process.stderr]) if (!stream.listeners('error').includes(ignoreWriteError)) stream.on('error', ignoreWriteError);
   return {
     event(object) { if (events) process.stdout.write(`${JSON.stringify(object)}\n`); },
     info(message) { text.write(`${message}\n`); },
@@ -329,6 +326,15 @@ function listenWeb(server, port, host) {
   });
 }
 
+/** The Mac app's window's token (SHELL_TOKEN in its environment): with --shell macos it is needed, the window opening
+ *  AwwO at http://127.0.0.1:<port> with its cookie (awwo-local-web.mjs); without it there is none. */
+export function windowToken(options, env = process.env) {
+  if (options.shell !== 'macos') return '';
+  const token = shellToken(env[SHELL_TOKEN]);
+  if (!token) throw new Error(`--shell macos needs the window's token in ${SHELL_TOKEN} (43 characters of base64url)`);
+  return token;
+}
+
 export async function runLocal(options, { onStopped = () => {} } = {}) {
   const report = reporter(options.events);
   const layout = localLayout({ ...(options.resources ? { resources: options.resources } : {}), ...(options.build ? { build: options.build } : {}) });
@@ -345,7 +351,11 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
   const shutdown = code => stopping ??= (async () => {
     stopBegan = Date.now();
     let failed = false;
-    for (const server of webServers) { server.close(); server.closeAllConnections(); }
+    // Said however the stop came (a signal, its parent's end, its input closed, an error): a window takes its page
+    // down then. The web port is held meanwhile, answering 503, and let go only as the runtime ends, so a page still
+    // open sends its requests (its cookies) to this process and to no other that might take a freed port.
+    report.event({ event: 'stopping' });
+    for (const server of webServers) server.stopServing();
     // The API first, while the workers it calls and the database it records into still run; then the others.
     for (const group of [services.filter(service => service.name === 'api'), services.filter(service => service.name !== 'api')]) {
       for (const service of group) service.stop();
@@ -357,6 +367,7 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
       try { removeInstanceContainers(capabilities.docker, profile.AWWO_LOCAL_INSTANCE); } catch (error) { failed = true; report.error(error.message); }
     }
     try { database?.stop(); } catch (error) { failed = true; report.error(error.message); }
+    for (const server of webServers) { server.close(); server.closeAllConnections(); }
     await releaseBuild();
     await releaseLock();
     process.exitCode = failed && !code ? 1 : code;
@@ -390,6 +401,7 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
   };
 
   try {
+    const window = windowToken(options);
     await mkdir(state.dir, { recursive: true, mode: 0o700 });
     // Before any secret is written: the folder is this account's alone.
     protectStateDirectory(state.dir);
@@ -404,10 +416,14 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     const reset = resetId(profile[PASSWORD_RESET_PENDING]);
     if (reset) await writeOwnerCredentials(state, profile);
     const node = existsSync(layout.node) ? layout.node : Number(process.versions.node.split('.')[0]) >= 24 ? process.execPath : '';
-    if (!node) throw new Error('AwwO 本地版 needs Node.js 24 for its services: run npm run setup:local.');
-    if (!existsSync(layout.api)) throw new Error('The AwwO API is not built: run npm run setup:local.');
-    const pgBin = resolvePostgresBin(layout);
-    if (!pgBin) throw new Error('PostgreSQL is not installed: run npm run setup:local (or set AWWO_LOCAL_PG_BIN).');
+    if (!node) throw new Error(`AwwO 本地版 needs Node.js 24 for its services: ${missingPieceFix(layout)}.`);
+    if (!existsSync(layout.api)) throw new Error(`The AwwO API is not built (${layout.api}): ${missingPieceFix(layout)}.`);
+    // Of the PostgreSQL here, the one of the major version an existing database was made by.
+    const pgBin = postgresForCluster(layout, state.postgres);
+    if (!pgBin) {
+      throw new Error(layout.codeLock ? 'PostgreSQL is not installed: run npm run setup:local (or set AWWO_LOCAL_PG_BIN).'
+        : `PostgreSQL is not in this app (${layout.pgBin}): ${missingPieceFix(layout)}.`);
+    }
     capabilities = detectCapabilities({ layout, options, env: process.env, report });
     const webPort = validPort(profile.AWWO_LOCAL_WEB_PORT, 'AWWO_LOCAL_WEB_PORT');
     const ports = await allocatePorts(webPort, { isFree: async port => await portIsFree(port) && (port !== webPort || await portIsFree(port, '::1')) });
@@ -486,7 +502,9 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     if (stopping) return { shutdown };
     const host = profile.AWWO_LOCAL_HOSTNAME;
     const origin = localOrigin(ports.web, host);
-    const webOptions = { root: layout.web, stagedDir: layout.staged, apiPort: ports.api, port: ports.web, host, stagedFallback: stagedFallback(profile, report) };
+    // The Mac app's window's sign-in is kept in the data folder for it, the same for both addresses' servers.
+    const webOptions = { root: layout.web, stagedDir: layout.staged, apiPort: ports.api, port: ports.web, host, stagedFallback: stagedFallback(profile, report), windowToken: window,
+      ...(window ? { windowSession: windowSessionStore(state.windowSession) } : {}) };
     for (const address of ['127.0.0.1', '::1']) {
       const web = createLocalWebServer(webOptions);
       webServers.push(web);
@@ -496,7 +514,8 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
     const dead = services.filter(service => !service.retired && REQUIRED.has(service.name) && service.child.exitCode !== null);
     if (dead.length) throw new Error(`${dead.map(service => service.name).join(', ')} stopped while AwwO was starting`);
     const running = Object.fromEntries(services.filter(service => !service.retired && service.child.exitCode === null).map(service => [service.name, true]));
-    report.event({ event: 'ready', url: origin, stateDir: state.dir, services: running });
+    // The Mac app's window opens AwwO at its own address (window), the browser at the data folder's (url).
+    report.event({ event: 'ready', url: origin, ...(window ? { window: `http://127.0.0.1:${ports.web}` } : {}), stateDir: state.dir, services: running });
     report.info(`\nAwwO 本地版 is ready: ${localOrigin(ports.web)} (it opens as ${origin}, this data folder's own address)\nSign in as ${profile.AWWO_BOOTSTRAP_ADMIN_EMAIL}; the password is in ${state.credentials}\nServices: ${['database', ...Object.keys(running), 'web'].join(', ')}. Logs: ${state.logs}\nPress Ctrl-C to stop.`);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

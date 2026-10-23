@@ -179,11 +179,39 @@
       }
     }
   },
+  "@esbuild+darwin-arm64@0.28.1": {
+    "repository": "https://github.com/evanw/esbuild",
+    "ref": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
+    "from": "published",
+    "license": "MIT",
+    "machine": {
+      "os": [
+        "darwin"
+      ],
+      "cpu": [
+        "arm64"
+      ]
+    },
+    "files": {
+      "LICENSE.md": {
+        "url": "https://raw.githubusercontent.com/evanw/esbuild/bb9db84c02433fbe37b3509f53f9f3e3cc48725e/LICENSE.md",
+        "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681"
+      }
+    }
+  },
   "@esbuild+win32-x64@0.28.1": {
     "repository": "https://github.com/evanw/esbuild",
     "ref": "bb9db84c02433fbe37b3509f53f9f3e3cc48725e",
     "from": "published",
     "license": "MIT",
+    "machine": {
+      "os": [
+        "win32"
+      ],
+      "cpu": [
+        "x64"
+      ]
+    },
     "files": {
       "LICENSE.md": {
         "url": "https://raw.githubusercontent.com/evanw/esbuild/bb9db84c02433fbe37b3509f53f9f3e3cc48725e/LICENSE.md",

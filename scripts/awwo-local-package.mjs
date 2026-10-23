@@ -28,7 +28,7 @@ import { holdBuild } from './awwo-local.mjs';
 import { POSTGRES_LICENCES } from './awwo-local-setup.mjs';
 import { linkedCrates, shellMetadata, shippedLicences } from './awwo-crate-licences.mjs';
 import { provenanceDifferences, sha256 } from './awwo-licence-files.mjs';
-import { folderOf, forThisMachine, installedPackages, LEFT_OUT_PACKAGES, leftOutPackage, permissiveLicence } from './awwo-npm-licences.mjs';
+import { folderOf, forThisMachine, installedPackages, LEFT_OUT_PACKAGES, leftOutPackage, permissiveLicence, WINDOWS_X64 } from './awwo-npm-licences.mjs';
 import { POSTGRES_LIBRARIES, postgresLibraryGaps, postgresVersionOf } from './awwo-postgres-licences.mjs';
 
 const SHELL = path.join(repoRoot, 'apps', 'windows-local');
@@ -91,7 +91,7 @@ export const nodeFilter = source => item => {
   return !(parts.length === 1 && /^(npm|npx|corepack)(\.cmd|\.ps1)?$/i.test(parts[0]));
 };
 
-function copy(from, to, filter) {
+export function copy(from, to, filter) {
   if (!existsSync(from)) throw new Error(`Missing ${from}: run npm run setup:local first`);
   cpSync(from, to, { recursive: true, filter, errorOnExist: true, force: false });
 }
@@ -263,7 +263,7 @@ export function pruneUnloadedBuilds(out) {
 
 /** Loads each package a build was removed from, by its name and every exported subpath, through import and require,
  *  with the payload's Node.js from the folder its dependents find it from: proof the removed build is not needed. */
-function checkLoads(node, roots) {
+export function checkLoads(node, roots) {
   for (const root of roots) {
     const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
     const keys = typeof manifest.exports === 'object' && !Array.isArray(manifest.exports) && Object.keys(manifest.exports).some(key => key.startsWith('.'))
@@ -304,16 +304,18 @@ function prunePackageFolders(dir, drop) {
   return removed;
 }
 
-/** Removes the installed packages built for another system or machine (forThisMachine) from a worker's packages. */
-export const pruneOtherPlatforms = dir => prunePackageFolders(dir, manifest => !forThisMachine(manifest));
+/** Removes the installed packages built for another system or machine than the payload's (forThisMachine; Windows on
+ *  x64 unless named) from a worker's packages. */
+export const pruneOtherPlatforms = (dir, machine = WINDOWS_X64) => prunePackageFolders(dir, manifest => !forThisMachine(manifest, machine));
 
 /** Removes the packages the payload leaves out (LEFT_OUT_PACKAGES of awwo-npm-licences.mjs) from a worker's packages. */
 export const pruneLeftOut = dir => prunePackageFolders(dir, manifest => leftOutPackage(manifest.name));
 
-/** npm of the Node.js the payload carries, run on it. */
-function installWorkerPackages(layout, dir) {
-  const cli = path.join(path.dirname(layout.node), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  if (!existsSync(cli)) throw new Error(`npm is missing beside ${layout.node}: run npm run setup:local first`);
+/** npm of the Node.js the payload carries, run on it: beside node.exe on Windows, in lib/ beside bin/node elsewhere. */
+export function installWorkerPackages(layout, dir) {
+  const cli = [path.join(path.dirname(layout.node), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(path.dirname(layout.node), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')].find(file => existsSync(file));
+  if (!cli) throw new Error(`npm is missing beside ${layout.node}: run npm run setup:local first`);
   const result = spawnSync(layout.node, [cli, 'ci', '--no-audit', '--no-fund', '--omit=dev', '--ignore-scripts', '--prefer-offline'],
     { cwd: dir, stdio: 'inherit', windowsHide: true, env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
   if (result.status !== 0) throw new Error(`npm ci in ${dir} failed (${result.status})`);
@@ -534,7 +536,7 @@ export function vcRuntimeNeeded(out) {
 
 /** The notices of the hosted release (copyNotices of scripts/awwo-saas-release.ts), copied by the Node.js 24 the payload
  *  carries, which runs TypeScript as it is. */
-function copyNotices(layout, root, target) {
+export function copyNotices(layout, root, target) {
   const release = pathToFileURL(path.join(root, 'scripts', 'awwo-saas-release.ts')).href;
   const script = `import { copyNotices } from ${JSON.stringify(release)};\ncopyNotices(${JSON.stringify(root)}, ${JSON.stringify(target)});\n`;
   const result = spawnSync(layout.node, ['--input-type=module', '--eval', script], { encoding: 'utf8', windowsHide: true });
@@ -630,7 +632,7 @@ process.stdout.write(linkedModules(execFileSync('go', ['version', '-m', ${JSON.s
  *  none, the files third_party/npm-packages holds for it (its repository's, fetched by scripts/awwo-npm-licences.mjs,
  *  with PROVENANCE.json), else its README where that carries its licence, copied into target/<name>@<version>/. A
  *  package with no licence anywhere, or under one that is not permissive, stops the packaging. */
-export function collectNpmLicences(out, target, { root = repoRoot } = {}) {
+export function collectNpmLicences(out, target, { root = repoRoot, machine = WINDOWS_X64 } = {}) {
   const curated = path.join(root, 'third_party', 'npm-packages');
   const changed = provenanceDifferences(curated);
   if (changed.length) throw new Error(`third_party/npm-packages is not as fetched (node scripts/awwo-npm-licences.mjs --check):\n${changed.join('\n')}`);
@@ -638,7 +640,7 @@ export function collectNpmLicences(out, target, { root = repoRoot } = {}) {
   const inPayload = file => path.relative(out, file).replaceAll(path.sep, '/');
   const rows = [];
   const problems = [];
-  for (const item of installedPackages(roots)) {
+  for (const item of installedPackages(roots, machine)) {
     const key = folderOf(item.name, item.version);
     if (!permissiveLicence(item.licence)) problems.push(`${key}: under ${item.licence || 'no licence it names'}, not one of the permissive licences`);
     let files = item.files.map(inPayload);
@@ -827,7 +829,7 @@ export function inspectPayload(out) {
   return { files, bytes, longest: longest.length };
 }
 
-function revision(root) {
+export function revision(root) {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const dirty = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).stdout.trim() !== '';
   return { head, dirty };
@@ -837,10 +839,12 @@ function revision(root) {
  *  code), npm's, and AwwO's (AWWO_LOCAL_PG_BIN would run another PostgreSQL). */
 export const outsideSettingsRemoved = (env = process.env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^(NODE_|npm_|AWWO_)/i.test(key)));
 
-/** Starts the payload's own runtime on a scratch data folder, reads its page, and stops it by closing its stdin. */
+/** Starts the payload's own runtime on a scratch data folder, reads its page, and stops it by closing its stdin. Its
+ *  programs are where its runtime finds them on this system (localLayout): the Windows installer's and the Mac app's. */
 export async function smokePayload(out) {
   const state = mkdtempSync(path.join(os.tmpdir(), 'awwo-local-smoke-'));
-  const node = path.join(out, 'build', 'node', 'node.exe');
+  const layout = localLayout({ resources: path.join(out, 'app'), build: path.join(out, 'build') });
+  const node = layout.node;
   const child = spawn(node, [path.join(out, 'app', 'scripts', 'awwo-local.mjs'), '--events', '--stop-on-stdin-close', '--no-docker',
     '--resources', path.join(out, 'app'), '--build', path.join(out, 'build'), '--state', state],
   { cwd: path.join(out, 'app'), stdio: ['pipe', 'pipe', 'pipe'], env: outsideSettingsRemoved() });
@@ -897,7 +901,7 @@ export async function smokePayload(out) {
     }
     // A runtime that was ended leaves its PostgreSQL running (pg_ctl starts it outside the runtime's processes): it is
     // stopped before its folder goes.
-    const pgCtl = path.join(out, 'build', 'pgsql', 'bin', 'pg_ctl.exe');
+    const pgCtl = path.join(layout.pgBin, process.platform === 'win32' ? 'pg_ctl.exe' : 'pg_ctl');
     if (existsSync(path.join(state, 'postgres', 'postmaster.pid')) && existsSync(pgCtl)) {
       spawnSync(pgCtl, ['-D', path.join(state, 'postgres'), '-m', 'immediate', '-w', '-t', '60', 'stop'], { env: { ...outsideSettingsRemoved(), LC_MESSAGES: 'C' }, stdio: 'ignore', windowsHide: true, timeout: 90_000 });
     }

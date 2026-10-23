@@ -29,8 +29,9 @@ type editionSettings struct {
 	// gives them a new one. "" for none.
 	AdminPasswordReset string
 	// LocalShell names the window that started the local edition (AWWO_LOCAL_SHELL, the local edition only): "windows"
-	// for the Windows installer's (apps/windows-local), whose person has its menu and no checkout, so the web names the
-	// menu where it would name an npm command. "" when started from a checkout.
+	// for the Windows installer's (apps/windows-local), "macos" for the Mac app's local workspace (apps/macos). Their
+	// person has the window's menu and no checkout, so the web names the menu where it would name an npm command. ""
+	// when started from a checkout.
 	LocalShell string
 }
 
@@ -62,10 +63,10 @@ func (c *Config) editionFromEnv() error {
 		c.AdminPasswordReset = reset
 	}
 	switch shell := os.Getenv("AWWO_LOCAL_SHELL"); shell {
-	case "", "windows":
+	case "", "windows", "macos":
 		c.LocalShell = shell
 	default:
-		return errors.New("AWWO_LOCAL_SHELL must be windows or unset")
+		return errors.New("AWWO_LOCAL_SHELL must be windows, macos or unset")
 	}
 	return nil
 }

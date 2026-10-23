@@ -3,21 +3,22 @@
 // services; the one contract test runs the built API binary only far enough to see it accept its settings.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, beforeFirstStart, dockerEnvironment, foreignEntry,
+  DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, beforeFirstStart, clusterVersion, dockerEnvironment, foreignEntry,
+  missingPieceFix, postgresForCluster, postgresMajorVersion, runnablePostgres,
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
   PASSWORD_RESET_PENDING, passwordResetApplied, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
-  resolvePostgresBin, serviceEnvironments, writeOwnerCredentials,
+  resolvePostgresBin, serviceEnvironments, SHELL_TOKEN, windowSessionStore, writeOwnerCredentials,
   stagedShowcaseFiles, systemEnvironment, windowsShortPath, withPostgresInclude, workspaceImageTag, MODULE_GUARD, withModuleGuard,
 } from './awwo-local-lib.mjs';
-import { acquireLock, holdBuild, parseArguments, removeInstanceContainers } from './awwo-local.mjs';
-import { INSTALL_FLAGS, NODE_RELEASE, POSTGRES_WINDOWS, holdBuildExclusively, workspaceSourceHash } from './awwo-local-setup.mjs';
+import { acquireLock, holdBuild, parseArguments, removeInstanceContainers, windowToken } from './awwo-local.mjs';
+import { INSTALL_FLAGS, NODE_RELEASE, POSTGRES_MACOS, POSTGRES_WINDOWS, holdBuildExclusively, macPostgresUnpacked, postgresArchive, workspaceSourceHash } from './awwo-local-setup.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const reaper = path.join(here, 'awwo-local-reaper.mjs');
@@ -609,6 +610,59 @@ test('PostgreSQL is found only where all five of its programs are', () => {
   assert.equal(resolvePostgresBin(layout, { env: { AWWO_LOCAL_PG_BIN: '/opt/pg/bin' }, platform: 'linux', exists: file => partial.has(file) }), '');
 });
 
+test('an existing database runs on the PostgreSQL of the major version that made it, never on another', () => {
+  const versions = { '/build/pgsql/bin': '18', '/opt/homebrew/opt/postgresql@16/bin': '16' };
+  const candidates = Object.keys(versions);
+  const version = dir => versions[dir] || '';
+  const fresh = scratch();
+  assert.equal(postgresForCluster({}, fresh, { candidates, version }), '/build/pgsql/bin', 'a new database takes the first');
+  const made16 = scratch();
+  writeFileSync(path.join(made16, 'PG_VERSION'), '16\n');
+  assert.equal(clusterVersion(made16), '16');
+  assert.equal(postgresForCluster({}, made16, { candidates, version }), '/opt/homebrew/opt/postgresql@16/bin', 'a checkout\'s database made by PATH\'s 16 stays on it');
+  const made17 = scratch();
+  writeFileSync(path.join(made17, 'PG_VERSION'), '17\n');
+  assert.throws(() => postgresForCluster({ codeLock: '/repo/.local/awwo-local/code.lock' }, made17, { candidates, version }),
+    /was made by PostgreSQL 17, and no PostgreSQL 17 is here \(18 in \/build\/pgsql\/bin; 16 in .*postgresql@16\/bin\): put PostgreSQL 17's programs on PATH/);
+  assert.throws(() => postgresForCluster({ codeLock: null }, made17, { candidates: ['/app/build/pgsql/bin'], version: () => '18' }), /this app carries another/);
+  assert.equal(postgresForCluster({}, made17, { candidates: [], version }), '', 'none at all is said by the caller');
+  // Programs that give no version do not run, which is said as that, not as another version.
+  const silent = () => '';
+  assert.throws(() => postgresForCluster({ codeLock: null }, made17, { candidates: ['/app/build/pgsql/bin'], version: silent, platform: 'darwin' }),
+    error => /^PostgreSQL's programs here do not run \(postgres -V gave no version in \/app\/build\/pgsql\/bin\): this app's files are damaged or blocked: install it again \(System Settings → Privacy & Security/.test(error.message)
+      && !/carries another|made by/.test(error.message));
+  assert.throws(() => postgresForCluster({ codeLock: null }, made17, { candidates: ['C:\\app\\pgsql\\bin'], version: silent, platform: 'win32' }),
+    error => /install it again\.$/.test(error.message) && !/Privacy/.test(error.message));
+  assert.throws(() => postgresForCluster({ codeLock: '/repo/code.lock' }, made17, { candidates, version: silent }), /do not run .*: run npm run setup:local again, or set AWWO_LOCAL_PG_BIN/);
+  // One that runs, of another version, is named as before beside one that does not.
+  assert.throws(() => postgresForCluster({ codeLock: '/repo/code.lock' }, made17, { candidates, version: dir => (dir === '/build/pgsql/bin' ? '' : '16') }),
+    /no PostgreSQL 17 is here \(an unknown version in \/build\/pgsql\/bin; 16 in /);
+  assert.equal(missingPieceFix({ codeLock: '/repo/code.lock' }), 'run npm run setup:local');
+  assert.equal(missingPieceFix({ codeLock: null }), 'this app is incomplete: install it again');
+  // Asked in turn: the first of the database's version is taken and no later one is run.
+  const asked = [];
+  assert.equal(postgresForCluster({}, made16, { candidates: ['/opt/homebrew/opt/postgresql@16/bin', '/build/pgsql/bin'], version: dir => { asked.push(dir); return version(dir); } }), '/opt/homebrew/opt/postgresql@16/bin');
+  assert.deepEqual(asked, ['/opt/homebrew/opt/postgresql@16/bin']);
+});
+
+test('a packaged app runs its own PostgreSQL alone, whatever PATH or AWWO_LOCAL_PG_BIN name; a checkout any of them', () => {
+  const tools = dir => ['initdb', 'pg_ctl', 'postgres', 'psql', 'createdb'].map(name => path.join(dir, name));
+  const everywhere = new Set([...tools('/app/build/pgsql/bin'), ...tools('/opt/pg/bin'), ...tools('/usr/local/bin')]);
+  const options = { env: { AWWO_LOCAL_PG_BIN: '/opt/pg/bin', PATH: '/usr/local/bin' }, platform: 'darwin', exists: file => everywhere.has(file) };
+  assert.deepEqual(runnablePostgres({ codeLock: null, pgBin: '/app/build/pgsql/bin' }, options), ['/app/build/pgsql/bin']);
+  assert.deepEqual(runnablePostgres({ codeLock: '/repo/code.lock', pgBin: '/app/build/pgsql/bin' }, options),
+    ['/opt/pg/bin', '/app/build/pgsql/bin', path.dirname(path.join('/usr/local/bin', 'pg_ctl'))]);
+});
+
+test('a PostgreSQL folder\'s major version is read from its postgres -V', () => {
+  const calls = [];
+  const run = (program, args) => { calls.push([program, ...args]); return { status: 0, stdout: 'postgres (PostgreSQL) 18.4\n' }; };
+  assert.equal(postgresMajorVersion('/pg/bin', { run, platform: 'darwin' }), '18');
+  assert.deepEqual(calls, [[path.join('/pg/bin', 'postgres'), '-V']]);
+  assert.equal(postgresMajorVersion('C:\\pg\\bin', { run: () => ({ status: 0, stdout: 'postgres (PostgreSQL) 16.10\r\n' }), platform: 'win32' }), '16');
+  assert.equal(postgresMajorVersion('/pg/bin', { run: () => ({ status: 1, stdout: '' }), platform: 'linux' }), '');
+});
+
 test('findOnPath follows PATHEXT on Windows and PATH elsewhere', () => {
   const files = new Set([path.join('C:\\tools', 'ffmpeg.exe'), path.join('/usr/bin', 'ffmpeg')]);
   const exists = file => files.has(file);
@@ -654,28 +708,101 @@ test('the pinned downloads name their exact files and SHA-256 values; workers in
     assert.match(release.name, new RegExp(`^node-v${NODE_RELEASE.version.replaceAll('.', '\\.')}-`));
     assert.match(release.sha256, /^[0-9a-f]{64}$/);
   }
-  assert.match(POSTGRES_WINDOWS.sha256, /^[0-9a-f]{64}$/);
-  assert.ok(POSTGRES_WINDOWS.url.endsWith(POSTGRES_WINDOWS.name));
+  for (const archive of [POSTGRES_WINDOWS, POSTGRES_MACOS]) {
+    assert.match(archive.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(archive.url.startsWith('https://get.enterprisedb.com/') && archive.url.endsWith(archive.name));
+    assert.equal(archive.version, '18.4-1', 'both systems carry the same PostgreSQL');
+  }
+  assert.equal(postgresArchive('win32'), POSTGRES_WINDOWS);
+  assert.equal(postgresArchive('darwin'), POSTGRES_MACOS);
+  assert.equal(postgresArchive('linux'), null, 'Linux takes PostgreSQL from PATH');
+  // On macOS what setup unpacked is there only whole and from the pinned archive: else it is unpacked again.
+  const build = scratch();
+  const layout = localLayout({ resources: build, build, platform: 'darwin' });
+  mkdirSync(layout.pgBin, { recursive: true });
+  for (const name of ['initdb', 'pg_ctl', 'postgres', 'psql', 'createdb']) writeFileSync(path.join(layout.pgBin, name), '');
+  const stamp = path.join(path.dirname(layout.pgBin), '.awwo-local-archive');
+  writeFileSync(stamp, `${POSTGRES_MACOS.sha256}\n`);
+  assert.equal(macPostgresUnpacked(layout), true);
+  writeFileSync(stamp, `${'0'.repeat(64)}\n`);
+  assert.equal(macPostgresUnpacked(layout), false, 'another archive\'s');
+  writeFileSync(stamp, `${POSTGRES_MACOS.sha256}\n`);
+  rmSync(path.join(layout.pgBin, 'pg_ctl'));
+  assert.equal(macPostgresUnpacked(layout), false, 'one that lost a program the runtime runs');
   for (const worker of ['pi-worker', 'openai-agents-worker', 'render-worker']) assert.deepEqual(INSTALL_FLAGS[worker], ['--omit=dev', '--ignore-scripts']);
   assert.deepEqual(INSTALL_FLAGS.web, [], 'the web build needs its build tools');
 });
 
-test('arguments: flags, and the Mac shell\'s positional contract', () => {
+test('arguments: flags, for a checkout and for both windows', () => {
   assert.deepEqual(parseArguments(['--state', 'x', '--events', '--parent-pid', '42', '--no-docker']), {
     state: path.resolve('x'), resources: '', build: '', events: true, parentPid: 42, docker: false, stopOnStdinClose: false, verbose: false, resetPassword: false, shell: '',
   });
   assert.equal(parseArguments(['--shell', 'windows']).shell, 'windows');
-  assert.throws(() => parseArguments(['--shell', 'mac']), /--shell takes windows/);
+  assert.equal(parseArguments(['--shell', 'macos']).shell, 'macos');
+  assert.throws(() => parseArguments(['--shell', 'mac']), /--shell takes windows, macos/);
   assert.equal(parseArguments(['--reset-password']).resetPassword, true);
-  const mac = parseArguments(['/app/Resources', '/state', '77']);
-  assert.equal(mac.resources, path.resolve('/app/Resources'));
-  assert.equal(mac.state, path.resolve('/state'));
-  assert.equal(mac.parentPid, 77);
-  assert.equal(mac.events, true);
   assert.throws(() => parseArguments(['--parent-pid', 'zero']), /process id/);
   assert.throws(() => parseArguments(['--state']), /needs a value/);
   assert.throws(() => parseArguments(['--bogus']), /Unknown option/);
-  assert.throws(() => parseArguments(['/a', '/b']), /usage/);
+  // The earlier Mac app's positional form (<resources> <state> <parent pid>) is gone: the window passes flags.
+  assert.throws(() => parseArguments(['/app/Resources', '/state', '77']), /Unknown option \/app\/Resources/);
+});
+
+test('the Mac app\'s window needs its token, from its environment, and no other start has one', () => {
+  const token = 'A'.repeat(43);
+  assert.equal(windowToken({ shell: 'macos' }, { [SHELL_TOKEN]: token }), token);
+  assert.throws(() => windowToken({ shell: 'macos' }, {}), /--shell macos needs the window's token in AWWO_LOCAL_SHELL_TOKEN/);
+  assert.throws(() => windowToken({ shell: 'macos' }, { [SHELL_TOKEN]: 'short' }), /needs the window's token/);
+  assert.throws(() => windowToken({ shell: 'macos' }, { [SHELL_TOKEN]: `${'A'.repeat(42)}=` }), /needs the window's token/);
+  assert.equal(windowToken({ shell: 'windows' }, { [SHELL_TOKEN]: token }), '', 'only the Mac app\'s window opens the loopback address');
+  assert.equal(windowToken({ shell: '' }, { [SHELL_TOKEN]: token }), '');
+  // It never reaches a service: their environment is the system's few variables.
+  assert.equal(systemEnvironment({ PATH: 'p', [SHELL_TOKEN]: token })[SHELL_TOKEN], undefined);
+});
+
+test('the Mac app\'s window\'s sign-in is kept in its data folder, and only a session token', () => {
+  const state = localState(scratch());
+  const kept = windowSessionStore(state.windowSession);
+  assert.equal(kept.get(), '', 'none before a sign-in');
+  kept.set('aSession_Token-0123456789');
+  assert.equal(readFileSync(state.windowSession, 'utf8'), 'aSession_Token-0123456789\n');
+  if (process.platform !== 'win32') assert.equal(statSync(state.windowSession).mode & 0o777, 0o600);
+  assert.equal(windowSessionStore(state.windowSession).get(), 'aSession_Token-0123456789', 'a later start reads it back');
+  kept.set('');
+  assert.ok(!existsSync(state.windowSession), 'a sign-out removes it');
+  kept.set('not; a token');
+  assert.equal(kept.get(), '', 'what is not a session token is none');
+  writeFileSync(state.windowSession, 'a\r\nCookie: injected');
+  assert.equal(windowSessionStore(state.windowSession).get(), '', 'nor is a file that holds something else');
+  // A store that cannot write keeps the session for this run alone.
+  const unwritable = windowSessionStore(path.join(state.dir, 'missing-folder', 'window-session'));
+  unwritable.set('aSession_Token-0123456789');
+  assert.equal(unwritable.get(), 'aSession_Token-0123456789');
+});
+
+test('a window that is gone ends the runtime\'s events, not the stop they say', async () => {
+  // A child writes its events after the reading end of their pipe has closed (a window that crashed): with the
+  // runtime's reporter it goes on to its end; plainly written, the same write ends it (the control: EPIPE here).
+  const runtime = pathToFileURL(path.join(here, 'awwo-local.mjs')).href;
+  const run = async withReporter => {
+    const marker = path.join(scratch(), 'went-on');
+    const source = `const { writeFileSync } = await import('node:fs');
+      const say = ${withReporter} ? (await import(${JSON.stringify(runtime)})).reporter(true).event : object => process.stdout.write(JSON.stringify(object) + '\\n');
+      setTimeout(() => {
+        for (let i = 0; i < 64; i += 1) say({ event: 'stopping', pad: 'x'.repeat(1024) });
+        setTimeout(() => { writeFileSync(${JSON.stringify(marker)}, 'went on'); process.exit(0); }, 500);
+      }, 800);`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    child.stdout.destroy();
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    const code = await new Promise(resolve => child.once('exit', resolve));
+    return { code, wentOn: existsSync(marker), stderr };
+  };
+  const plain = await run(false);
+  assert.ok(!plain.wentOn && plain.code !== 0 && /EPIPE|EOF|pipe/i.test(plain.stderr), `the control's write ends it (${plain.code}): ${plain.stderr.slice(0, 300)}`);
+  const reported = await run(true);
+  assert.deepEqual([reported.code, reported.wentOn], [0, true], reported.stderr.slice(0, 300));
 });
 
 test('arguments: a Windows folder written with the verbatim prefix is taken without it, as PostgreSQL needs', { skip: process.platform !== 'win32' && 'Windows paths' }, () => {
@@ -686,7 +813,6 @@ test('arguments: a Windows folder written with the verbatim prefix is taken with
   assert.equal(parsed.state, 'C:\\data\\state');
   // A verbatim UNC path (\\?\UNC\server\share) is not a drive path and is left as given.
   assert.equal(parseArguments(['--state', '\\\\?\\UNC\\server\\share\\state']).state, '\\\\?\\UNC\\server\\share\\state');
-  assert.equal(parseArguments(['\\\\?\\C:\\app', '\\\\?\\C:\\state', '9']).resources, 'C:\\app');
 });
 
 test('a Node.js service loads the module guard first, over AwwO\'s own folders', () => {
