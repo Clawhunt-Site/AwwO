@@ -50,4 +50,6 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 
 1. Add `<name>.md` with the frontmatter above.
 2. Run `go test ./internal/app -run 'TestBuiltinSkills'` from `backend/`.
-3. Mention it in the CHANGELOG. The planner and the node editor list it automatically.
+3. Mention it in the CHANGELOG. The skill library and a node's Configure panel list it automatically; the
+   planner does not attach skills (neither `canvasPlan.ts` nor `planning.go` knows about them), so a canvas
+   the assistant plans carries none until someone attaches them.
