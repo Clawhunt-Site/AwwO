@@ -201,6 +201,11 @@ describe('canvas assistant UI', () => {
     rerender(<Harness draft="做一个看板" busy progress={progress({ stage: 'retrying', attempt: 2 })} />);
     expect(states()).toEqual(['active', 'pending', 'pending', 'pending']);
     expect(screen.getByRole('status')).toHaveTextContent('方案结构无效，正在自动重试一次');
+    // A run the model service broke off partway is asked once more too, and says so rather than blaming the plan.
+    rerender(<Harness draft="做一个看板" busy progress={progress({ stage: 'retrying', attempt: 2, retry: 'provider' })} />);
+    expect(states()).toEqual(['active', 'pending', 'pending', 'pending']);
+    expect(screen.getByRole('status')).toHaveTextContent('模型服务中途出错，正在自动重试一次');
+    expect(screen.getByRole('status')).not.toHaveTextContent('方案结构无效');
   });
 
   it('keeps the retry visible for the whole second attempt', () => {

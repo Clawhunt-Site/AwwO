@@ -51,6 +51,57 @@ describe('accepted planner run recovery', () => {
     expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
   });
 
+  it('does not ask again for a run it attached to, when that run fails partway', async () => {
+    let failed = false;
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) return json(run, 202);
+      if (url.endsWith('/events')) return failed
+        ? events({ type: 'running' }, { type: 'progress', stage: 'streaming', characters: 40 }, { type: 'failed', code: 'runtime_failed', message: 'Pi execution failed' })
+        : events({ type: 'running' });
+      return json(failed ? { ...run, status: 'failed', terminal: true, error: 'runtime_failed' } : run);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await expect(request()).rejects.toMatchObject({ code: 'planning_recovery_required' });
+    // The same request after a remount attaches to the run still in flight; its failure partway is not asked for again,
+    // as another tab's (or this tab's earlier) request already holds it.
+    clearSaaSCanvas(); online(); failed = true;
+    await expect(request()).rejects.toMatchObject({ code: 'runtime_failed', recovered: true });
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
+  });
+
+  it('does not ask again for a run it attached to whose plan does not hold up here', async () => {
+    let completed = false;
+    const broken = JSON.stringify({ version: 1, summary: 'Broken', operations: [{ type: 'no_such_operation' }] });
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) return json(run, 202);
+      if (url.endsWith('/events')) return completed ? events({ type: 'running' }, { type: 'completed', text: broken }) : events({ type: 'running' });
+      return json(completed ? { ...run, status: 'completed', terminal: true, output: broken } : run);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await expect(request()).rejects.toMatchObject({ code: 'planning_recovery_required' });
+    // A plan the host took that the page's own check refuses (its limits are not all the host's): the run was the
+    // journal's, so it is not asked for again, as a malformed plan of a run this request started would be.
+    clearSaaSCanvas(); online(); completed = true;
+    await expect(request()).rejects.toMatchObject({ code: 'invalid_canvas_plan', recovered: true });
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
+  });
+
+  it('says a plan the workspace cannot apply as itself after a provider fault, and asks no third time', async () => {
+    let admitted = 0;
+    const loop = JSON.stringify({ version: 1, summary: 'A review loop', operations: [{ type: 'set_execution', mode: 'workflow' }] });
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) { admitted += 1; return json({ ...run, id: `plan-${admitted}` }, 202); }
+      if (url.includes('/runs/plan-1/events')) return events({ type: 'running' }, { type: 'progress', stage: 'streaming', characters: 40 },
+        { type: 'failed', code: 'runtime_failed', message: 'Pi execution failed' });
+      if (url.includes('/runs/plan-2/events')) return events({ type: 'running' }, { type: 'completed', text: loop });
+      if (url.includes('/runs/plan-1')) return json({ ...run, id: 'plan-1', status: 'failed', terminal: true, error: 'runtime_failed' });
+      return json({ ...run, id: 'plan-2', status: 'completed', terminal: true, output: loop });
+    });
+    vi.stubGlobal('fetch', fetch);
+    await expect(request()).rejects.toMatchObject({ code: 'unsupported_plan_operation' });
+    expect(admitted).toBe(2);
+  });
+
   it('refuses admission if the recovery pointer cannot be stored', async () => {
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
     const fetch = vi.fn(async (url: string) => url.endsWith('/plan') ? json(run, 202) : events({ type: 'completed', text: JSON.stringify(proposal) }));

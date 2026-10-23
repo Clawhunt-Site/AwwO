@@ -148,7 +148,7 @@ function headline(t: CanvasTranslate, progress: PlanProgress | undefined, templa
   if (!progress) return t(waitedSeconds >= AWAITING_AFTER_SECONDS ? 'assistant.statusAwaiting' : 'assistant.statusSubmitting');
   switch (progress.stage) {
     case 'queued': return t('assistant.statusQueued');
-    case 'retrying': return t('assistant.statusRetrying');
+    case 'retrying': return t(progress.retry === 'provider' ? 'assistant.statusRetryingProvider' : 'assistant.statusRetrying');
     case 'running': return t('assistant.statusRunning');
     case 'thinking': return t('assistant.statusThinking');
     case 'validating': return t('assistant.statusValidating');
@@ -183,8 +183,8 @@ function writingHeadline(t: CanvasTranslate, progress: PlanProgress, template: s
 /** Everything the run has reported, so a change in any of it counts as progress. */
 function progressSignature(progress: PlanProgress | undefined): string {
   if (!progress) return 'awaiting';
-  const { stage, characters, reasoning, nodes, edges, template, operation, target, attempt } = progress;
-  return [stage, characters, reasoning, nodes, edges, template ?? '', operation ?? '', target ?? '', attempt].join('|');
+  const { stage, characters, reasoning, nodes, edges, template, operation, target, attempt, retry } = progress;
+  return [stage, characters, reasoning, nodes, edges, template ?? '', operation ?? '', target ?? '', attempt, retry ?? ''].join('|');
 }
 
 /** A next step's control: a link opens beside the canvas (the plans page), anything else is a button. */

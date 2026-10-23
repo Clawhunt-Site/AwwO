@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_TEMPLATES, createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { buildPlanningContext, loadLastPlanDuration, loadPlanningConversation, PLANNING_STORAGE_KEY, readPlannerStatus, requestCanvasPlan,
-  saveLastPlanDuration, savePlanningConversation, type PlanningMessage } from '../src/canvas/canvasPlanning';
+  saveLastPlanDuration, savePlanningConversation, type PlanningMessage, type PlanProgress } from '../src/canvas/canvasPlanning';
 import { planNewNodeModel } from '../src/canvas/canvasPlan';
 import { DEFAULT_NEW_NODE_MODEL, newNodeModelOf } from '../src/canvas/planNewNodeModel';
 import { configureCanvasStorage } from '../src/canvas/canvasStorage';
@@ -293,7 +293,7 @@ describe('the model a plan sized the nodes it adds for', () => {
   });
 });
 
-describe('a malformed plan gets exactly one more attempt', () => {
+describe('a malformed plan or a run a provider fault cut short gets exactly one more attempt', () => {
   const sseResponse = (frames: unknown[]) => ({
     ok: true,
     headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null) },
@@ -304,6 +304,22 @@ describe('a malformed plan gets exactly one more attempt', () => {
     } }),
   });
   const planFrames = [{ type: 'progress', stage: 'streaming', characters: 12, nodes: 1 }, { type: 'plan', plan: validPlan }];
+  /** A run the model service broke off after it had written part of its plan. */
+  const brokeOff = (code: string, error: string, extra: Record<string, unknown> = {}) =>
+    [{ type: 'progress', stage: 'running' }, { type: 'progress', stage: 'streaming', characters: 40 }, { type: 'error', code, error, ...extra }];
+  /** A stream whose frames each arrive at a moment of the faked clock (Date only), each after the page has read the one
+   * before: a stream pulls its next chunk as soon as one is read, so each waits for a real task first. */
+  const timedResponse = (frames: Array<[number, unknown]>) => ({
+    ok: true,
+    headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null) },
+    body: new ReadableStream<Uint8Array>({ async pull(controller) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const next = frames.shift();
+      if (!next) { controller.close(); return; }
+      vi.setSystemTime(next[0]);
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(next[1])}\n\n`));
+    } }),
+  });
 
   it('retries a plan the host rejected as malformed and reports the retry to the caller', async () => {
     const fetchMock = vi.fn()
@@ -335,9 +351,12 @@ describe('a malformed plan gets exactly one more attempt', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('does not retry a runtime fault, a quota rejection or a cancelled run', async () => {
+  it('does not retry a run out of room, a deadline, a rate limit, a quota rejection or a cancelled run', async () => {
     for (const frame of [
-      { type: 'error', code: 'runtime_failed', error: '模型执行失败' },
+      // A model that wrote its whole output budget would only do so again (runs.go plannerSpentOutput).
+      { type: 'error', code: 'output_limit', error: '规划太长' },
+      { type: 'error', code: 'run_timeout', error: '规划超时' },
+      { type: 'error', code: 'provider_rate_limited', error: '请求过多' },
       { type: 'error', code: 'quota_exceeded', error: '额度不足' },
       { type: 'error', code: 'reasoning_only_output', error: '只返回了思考过程' },
       { type: 'error', error: '规划连接中断' },
@@ -347,6 +366,123 @@ describe('a malformed plan gets exactly one more attempt', () => {
       await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow();
       expect(fetchMock).toHaveBeenCalledOnce();
     }
+  });
+
+  it('retries once a run a provider fault cut short, and says why it runs again', async () => {
+    for (const code of ['runtime_failed', 'provider_unavailable', 'runtime_stream_ended']) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(sseResponse(brokeOff(code, '模型执行失败')))
+        .mockResolvedValueOnce(sseResponse(planFrames));
+      vi.stubGlobal('fetch', fetchMock);
+      const reported: PlanProgress[] = [];
+      expect(await requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', p => reported.push({ ...p }))).toEqual(validPlan);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // The report that starts the retry says it follows a model service that failed partway, not a malformed plan;
+      // the second run's own reports then follow, and say nothing of it.
+      const retry = reported.findIndex(entry => entry.stage === 'retrying');
+      expect(reported[retry]).toMatchObject({ retry: 'provider', attempt: 2, characters: 0 });
+      expect(reported.slice(retry + 1).every(entry => entry.retry === undefined && entry.attempt === 2)).toBe(true);
+      expect(reported.at(-1)?.stage).toBe('validating');
+    }
+  });
+
+  it('gives up after a second provider fault and reports the first', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(sseResponse(brokeOff('runtime_failed', '第一次失败')))
+      .mockResolvedValueOnce(sseResponse(brokeOff('runtime_failed', '第二次失败')));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('第一次失败');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks only once more in all, and says the failure that names its cause', async () => {
+    // A malformed plan first says what the model produced; a provider fault first says nothing of it, so the second
+    // attempt's own cause is said: a malformed plan, or a plan out of room, which sending again would only repeat.
+    for (const [first, second, said] of [['invalid_canvas_plan', 'runtime_failed', 'first'], ['runtime_failed', 'invalid_canvas_plan', 'second'],
+      ['runtime_failed', 'output_limit', 'second'], ['runtime_failed', 'provider_unavailable', 'first']]) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(sseResponse(brokeOff(first, `first ${first}`)))
+        .mockResolvedValueOnce(sseResponse(brokeOff(second, `second ${second}`)))
+        .mockResolvedValueOnce(sseResponse(planFrames));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow(said === 'first' ? `first ${first}` : `second ${second}`);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('does not ask again for a run that had not begun answering when its model service failed', async () => {
+    // A refusal of the request itself (a throttle, a credential, a check of the request) comes at once, with nothing
+    // written, after the worker has already asked the model's other route.
+    for (const frames of [[{ type: 'error', code: 'runtime_failed', error: '模型执行失败' }],
+      [{ type: 'progress', stage: 'queued' }, { type: 'progress', stage: 'running' }, { type: 'error', code: 'runtime_failed', error: '模型执行失败' }]]) {
+      const fetchMock = vi.fn().mockImplementation(async () => sseResponse(frames));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('模型执行失败');
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('asks again for a run silent for ten seconds, and not for one past three minutes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t0 = Date.parse('2026-10-23T12:00:00Z');
+      for (const [failedAt, asked] of [[t0 + 9_000, 1], [t0 + 10_000, 2], [t0 + 179_000, 2], [t0 + 180_000, 1]] as const) {
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(timedResponse([[t0, { type: 'progress', stage: 'running' }], [failedAt, { type: 'error', code: 'runtime_failed', error: '模型执行失败' }]]))
+          .mockResolvedValueOnce(sseResponse(planFrames));
+        vi.stubGlobal('fetch', fetchMock);
+        const result = requestCanvasPlan('生成', emptyDocument(), [], requestSignal());
+        if (asked === 2) await expect(result).resolves.toEqual(validPlan);
+        else await expect(result).rejects.toThrow('模型执行失败');
+        expect(fetchMock).toHaveBeenCalledTimes(asked);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('asks again for a worker stream that ended however soon, and not past three minutes', async () => {
+    // A stream that ended without an answer is never a refusal of the request: only the upper bound applies.
+    let fetchMock = vi.fn()
+      .mockResolvedValueOnce(sseResponse([{ type: 'progress', stage: 'running' }, { type: 'error', code: 'runtime_stream_ended', error: '运行中断' }]))
+      .mockResolvedValueOnce(sseResponse(planFrames));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).resolves.toEqual(validPlan);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t0 = Date.parse('2026-10-23T12:00:00Z');
+      fetchMock = vi.fn()
+        .mockResolvedValueOnce(timedResponse([[t0, { type: 'progress', stage: 'running' }], [t0 + 180_000, { type: 'error', code: 'runtime_stream_ended', error: '运行中断' }]]))
+        .mockResolvedValueOnce(sseResponse(planFrames));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('运行中断');
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not ask again for a run the host attached to rather than started', async () => {
+    for (const code of ['runtime_failed', 'invalid_canvas_plan']) {
+      const fetchMock = vi.fn().mockImplementation(async () => sseResponse(brokeOff(code, '规划失败', { recovered: true })));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal())).rejects.toThrow('规划失败');
+      expect(fetchMock).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('does not retry a provider fault after the caller cancelled, nor that of a recovered run', async () => {
+    const controller = new AbortController();
+    let fetchMock = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return sseResponse(brokeOff('runtime_failed', '模型执行失败'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], controller.signal)).rejects.toThrow('模型执行失败');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    // A recovery replays its run's own request, as a malformed plan's is not asked again either.
+    fetchMock = vi.fn().mockImplementation(async () => sseResponse(brokeOff('runtime_failed', '模型执行失败')));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestCanvasPlan('生成', emptyDocument(), [], requestSignal(), 'zh', undefined, { recoveryOperationId: 'op-1' }))
+      .rejects.toThrow('模型执行失败');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('does not retry after the caller cancelled, even for a malformed plan', async () => {

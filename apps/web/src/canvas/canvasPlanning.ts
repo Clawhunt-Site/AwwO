@@ -47,7 +47,8 @@ export const PLAN_DURATION_STORAGE_KEY = 'awwo.canvas.planning.duration.v1';
 export interface PlanProgress {
   /** queued = accepted, waiting for a runtime slot; running = runtime started, nothing observed yet;
    *  thinking = the model is reasoning before it writes; streaming = the plan is being written;
-   *  validating = the plan arrived and is being checked; retrying = a malformed plan is being retried. */
+   *  validating = the plan arrived and is being checked; retrying = the single retry is starting (of a malformed plan,
+   *  or of a run a provider fault cut short: `retry`). */
   stage: 'queued' | 'running' | 'thinking' | 'streaming' | 'validating' | 'retrying';
   /** Characters of plan text written so far. */
   characters: number;
@@ -63,8 +64,11 @@ export interface PlanProgress {
   operation?: CanvasPlanOperationType;
   /** Template id of the node that operation concerns, when the proposal itself declared that node. */
   target?: string;
-  /** 1 for the first attempt, 2 for the single retry of a malformed plan. */
+  /** 1 for the first attempt, 2 for the single retry. */
   attempt: number;
+  /** Why the single retry runs, on the report that starts it: 'provider' for a run a provider fault cut short
+   *  (providerFault); absent for a malformed plan. */
+  retry?: 'provider';
 }
 export type PlanProgressReporter = (progress: PlanProgress) => void;
 
@@ -150,11 +154,12 @@ function orchestrationGuidance(locale: UiLocale, models: boolean): string {
 }
 
 /** The plan a SaaS workspace can apply. `kind: "data"` on a connect is the default kind, which models add although
- *  the protocol leaves it out; it is dropped rather than the whole plan refused. Review loops are not supported. */
+ *  the protocol leaves it out; it is dropped rather than the whole plan refused. Review loops are not supported: a plan
+ *  with one is refused with its own code, which is never asked for again and is said as itself after a retry. */
 function saasPlan(plan: CanvasPlan, locale: UiLocale): CanvasPlan {
   if (plan.operations.some(operation => operation.type === 'set_execution' || operation.type === 'set_edge_kind'
     || (operation.type === 'connect' && operation.kind !== undefined && operation.kind !== 'data'))) {
-    throw new Error(canvasText(locale, 'planning.unsupportedSaaS'));
+    throw new PlanFailure(canvasText(locale, 'planning.unsupportedSaaS'), 'unsupported_plan_operation');
   }
   return { ...plan, operations: plan.operations.map(operation => {
     if (operation.type !== 'connect' || operation.kind === undefined) return operation;
@@ -412,44 +417,76 @@ function runView(run: PlanRunState | undefined): { run?: PlanRunState } {
   return { run: { state: run.state, ...(detail && (run.state === 'failed' || run.state === 'blocked') ? { detail: Array.from(detail).slice(0, 300).join('') } : {}) } };
 }
 
-/** A planner failure that kept the server's code, so the caller can tell a malformed plan — worth
- * one more attempt — from a runtime fault, a quota rejection or a cancellation, which are not. */
+/** A planner failure that kept the server's code, so the caller can tell a malformed plan or a run a provider fault
+ * cut short — worth one more attempt — from a run out of room, a quota rejection or a cancellation, which are not. */
 class PlanFailure extends Error {
-  /** `contextRoom`: on a plan refused as too large, the bytes of canvas context the same request may carry. */
-  constructor(message: string, readonly code: string, readonly contextRoom?: number) {
+  /** `contextRoom`: on a plan refused as too large, the bytes of canvas context the same request may carry.
+   *  `recovered`: the outcome of a run the host attached to rather than started (the same request already in flight). */
+  constructor(message: string, readonly code: string, readonly contextRoom?: number, readonly recovered = false) {
     super(message);
     this.name = 'PlanFailure';
   }
 }
 
 /** A plan the model produced but that does not hold up: the structure went wrong, nothing was
- * applied, and the same request often succeeds. Nothing else is retried. */
+ * applied, and the same request often succeeds. A run a provider fault cut short is retried too (providerFault);
+ * nothing else is. */
 function malformedPlan(error: unknown): boolean {
   return error instanceof PlanFailure && error.code === 'invalid_canvas_plan';
 }
+
+/** The codes of a plan run that may have been cut short by its model service: its call failed for a reason the host
+ * cannot name (runtime_failed), the service could not be reached (provider_unavailable), or the worker's stream ended
+ * without an answer (runtime_stream_ended). Pi, which runs every hosted plan, reports every model failure but a size
+ * refusal as MODEL_ERROR (runner.mjs), which is runtime_failed: a stream the service broke off, but also a throttle, a
+ * content filter or a refused credential. So one is asked for again only from a run that had been answering
+ * (PROVIDER_RETRY_AFTER_MS, PROVIDER_RETRY_BEFORE_MS). A run whose model wrote its whole output budget is output_limit
+ * where its worker reported its usage (runs.go plannerSpentOutput), which is not asked for again. */
+const PROVIDER_FAULTS: ReadonlySet<string> = new Set(['runtime_failed', 'provider_unavailable', 'runtime_stream_ended']);
+function providerFault(error: unknown): boolean {
+  return error instanceof PlanFailure && PROVIDER_FAULTS.has(error.code);
+}
+/** A provider fault is asked for again only from a run that had been answering when it failed: one that had written some
+ * of its answer (plan text or reasoning) or had run PROVIDER_RETRY_AFTER_MS since it began. A refusal of the request
+ * itself comes within seconds and with nothing written: a throttle or an outage there the worker has already asked of
+ * the model's other route once (bedrock-bridge.ts, on Bedrock), and a refused credential or request would only be
+ * refused again. A worker's stream that ended without an answer (runtime_stream_ended: a worker that stopped, as at a
+ * deploy) is never a refusal of the request, so it needs only the other bound: a run that failed before
+ * PROVIDER_RETRY_BEFORE_MS, since asking again past it would double a long wait, most often for a model that wrote its
+ * whole budget, whose usage was not reported (about 432 s on qwen3.8-27b-p6). The figures (read only, 2026-10-23):
+ *   - in the 14 days to that day, the plans of the planner model, Claude Haiku 4.5, completed in a median 18 s and at
+ *     most 192 s, and its 29 that failed runtime_failed did so within 51 s;
+ *   - of the 34 planner runs that failed runtime_failed from 2026-10-16 13:30Z to 2026-10-23 05:52Z, the 22 the model
+ *     service refused outright and the 6 that ran out of room (each about 432 s) fall outside these bounds, and of the
+ *     6 whose stream it broke off, five fall within them. */
+const PROVIDER_RETRY_AFTER_MS = 10_000;
+const PROVIDER_RETRY_BEFORE_MS = 180_000;
 
 /** Read a progress-reporting planner stream. The host that produced the stream owns the run
  * lifecycle (including stall detection and cancellation); this only projects frames to the UI
  * and returns the single proposal frame. An ended stream without a proposal is a failure, never
  * an empty plan — the canvas must not change on a lost connection. */
 async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale,
-  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown; newNodeModel?: string }> {
-  let proposal: { plan: unknown; condensed?: unknown; newNodeModel?: string } | null = null;
+  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown; newNodeModel?: string; recovered?: boolean }> {
+  let proposal: { plan: unknown; condensed?: unknown; newNodeModel?: string; recovered?: boolean } | null = null;
   let failure = '';
   let failureCode = '';
+  let recovered = false;
   await readSseFrames(body, (_event, frame: any) => {
     if (proposal || failure) return;
     if (frame?.type === 'progress') {
       observed.last = observedProgress(frame, observed.last);
       onProgress?.(observed.last);
     } else if (frame?.type === 'plan') proposal = { plan: frame.plan, ...(Object.hasOwn(frame, 'condensed') ? { condensed: frame.condensed } : {}),
-      ...(typeof frame.newNodeModel === 'string' && frame.newNodeModel ? { newNodeModel: frame.newNodeModel } : {}) };
+      ...(typeof frame.newNodeModel === 'string' && frame.newNodeModel ? { newNodeModel: frame.newNodeModel } : {}),
+      ...(frame.recovered === true ? { recovered: true } : {}) };
     else if (frame?.type === 'error') {
       failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
       failureCode = typeof frame.code === 'string' ? frame.code : '';
+      recovered = frame.recovered === true;
     }
   });
-  if (failure) throw new PlanFailure(failure, failureCode);
+  if (failure) throw new PlanFailure(failure, failureCode, undefined, recovered);
   if (!proposal) throw new Error(canvasText(locale, 'planning.interrupted'));
   return proposal;
 }
@@ -480,10 +517,13 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   let raw: unknown;
   let condensed: PlanContextCondensed | null | undefined;
   let newNodeModel: string | undefined;
+  // A plan of a run the host attached to rather than started: if it does not hold up here, it is not asked for again.
+  let recovered = false;
   if (streaming) {
     const proposal = await readPlanStream(response.body!, locale, observed, onProgress);
     raw = proposal.plan;
     newNodeModel = proposal.newNodeModel;
+    recovered = proposal.recovered === true;
     // A set that cannot be read could let the plan write over what its view showed only in part: no plan is applied.
     if (Object.hasOwn(proposal, 'condensed')) {
       condensed = proposal.condensed === null ? null : condensedFromJSON(proposal.condensed);
@@ -504,7 +544,8 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   try {
     plan = parseCanvasPlan(raw);
   } catch (error) {
-    throw new PlanFailure(error instanceof Error && error.message ? error.message : canvasText(locale, 'planning.invalidResponse'), 'invalid_canvas_plan');
+    throw new PlanFailure(error instanceof Error && error.message ? error.message : canvasText(locale, 'planning.invalidResponse'), 'invalid_canvas_plan',
+      undefined, recovered);
   }
   // A capability violation is deliberately NOT retryable. The plan is well formed; the model chose an
   // operation this workspace does not support, which the prompt already rules out, so it is a decision
@@ -560,14 +601,21 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   if (!first) throw contextFull();
   let view: PlanView = first;
   let shrinks = 0;
-  // Exactly one more attempt, and only for a malformed plan. A second retry would let a persistently
-  // broken model spend the workspace's run quota in a loop, and retrying a runtime fault, a quota
-  // rejection or a cancellation would spend it on something that cannot succeed. Each attempt is its
-  // own run on the host, so what it costs stays visible rather than hidden inside one operation.
+  // Exactly one more attempt, and only for a malformed plan or a run a provider fault cut short while it was answering
+  // (providerFault). A second retry would let a persistently broken model spend the workspace's run quota in a loop,
+  // and retrying a run out of room, a quota rejection or a cancellation would spend it on something that cannot
+  // succeed. Each attempt is its own run on the host, so what it costs stays visible rather than hidden inside one
+  // operation.
   let diagnosis: unknown;
   for (let retried = false; ;) {
+    // When this attempt's run began (its first report past the queue), for the bounds of a provider fault's retry.
+    let began = 0;
+    const report: PlanProgressReporter = progress => {
+      if (!began && progress.stage !== 'queued' && progress.stage !== 'retrying') began = Date.now();
+      onProgress?.(progress);
+    };
     try {
-      const { plan, condensed, newNodeModel } = await planOnce(prompt, view, doc, signal, locale, saas, observed, onProgress, options);
+      const { plan, condensed, newNodeModel } = await planOnce(prompt, view, doc, signal, locale, saas, observed, report, options);
       if (signal.aborted || currentSaaSCanvas() !== scope) throw new PlanFailure(canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
       // What the host kept with the request this plan's run was made from comes first, the whole canvas (null) too: a
       // resumed run's, or one another tab started, was made from that request rather than from the view built here.
@@ -596,15 +644,24 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
       // The first failure describes what the model actually produced. The retry is our own
       // mitigation, so if it fails too its reason must not replace that diagnosis — reporting
       // "no plan was returned" for what was really an unsupported operation tells the reader
-      // nothing they can act on.
-      if (retried) throw diagnosis;
-      if (signal.aborted || options?.recoveryOperationId !== undefined || !malformedPlan(error)) throw error;
+      // nothing they can act on. A provider fault says nothing of what the model produced, though: where one came
+      // first, the second attempt's failure is said when it names its own cause (a plan out of room, a malformed plan).
+      if (retried) throw providerFault(diagnosis) && error instanceof PlanFailure && error.code && !providerFault(error) ? error : diagnosis;
+      // A run the host attached to rather than started (the same request already in flight, plannerRecovery.ts) is not
+      // asked for again, as an explicit recovery is not.
+      const attached = error instanceof PlanFailure && error.recovered;
+      const ran = began ? Date.now() - began : 0;
+      const ended = error instanceof PlanFailure && error.code === 'runtime_stream_ended';
+      const provider = providerFault(error) && ran < PROVIDER_RETRY_BEFORE_MS
+        && (ended || observed.last.characters > 0 || observed.last.reasoning > 0 || ran >= PROVIDER_RETRY_AFTER_MS);
+      if (signal.aborted || options?.recoveryOperationId !== undefined || attached || !(malformedPlan(error) || provider)) throw error;
       diagnosis = error;
       retried = true;
       // The next attempt starts from nothing, so the counts restart with it; keeping the previous
       // ones would report work that no longer exists. The attempt number stays on every report
-      // that follows, so the reader knows this is the second run rather than a restart.
-      observed.last = { stage: 'retrying', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 2 };
+      // that follows, so the reader knows this is the second run rather than a restart; the report
+      // that starts it says why it runs.
+      observed.last = { stage: 'retrying', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 2, ...(provider ? { retry: 'provider' as const } : {}) };
       onProgress?.(observed.last);
     }
   }

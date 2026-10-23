@@ -247,7 +247,9 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       // A set that is not one is refused before the run is admitted, rather than kept as a whole request would be.
       const condensed = body.condensed === undefined || body.condensed === null ? undefined : condensedFromJSON(body.condensed);
       if (body.condensed !== undefined && body.condensed !== null && !condensed) throw new SaaSApiError(400, 'invalid_input', 'The planning request is malformed.');
-      const { entry, run } = await recovery.begin(body.prompt, body.revision ?? body.context ?? '', body.context, init.signal ?? undefined,
+      // `recovering`: the journal already held this request, so this attached to its run rather than starting one; its
+      // outcome says so, and the page does not ask for it again (canvasPlanning.ts requestCanvasPlan).
+      const { entry, run, recovering } = await recovery.begin(body.prompt, body.revision ?? body.context ?? '', body.context, init.signal ?? undefined,
         typeof body.recoveryOperationId === 'string' ? body.recoveryOperationId : undefined, condensed ? condensedToJSON(condensed) : undefined);
       // A user cancel and the stall backstop can land together; cancelling once keeps that race
       // from issuing a second request the server would only have to discard.
@@ -403,7 +405,7 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
           } else if (failure) {
             // Only server terminal events release the journal; read/auth/transport failures do not.
             if (terminalObserved) await recovery.clear(entry);
-            emit({ type: 'error', error: failure, ...(failureCode ? { code: failureCode } : {}) });
+            emit({ type: 'error', error: failure, ...(failureCode ? { code: failureCode } : {}), ...(recovering ? { recovered: true } : {}) });
           }
           else if (!completed) {
             const error = planningRecoveryRequired();
@@ -421,10 +423,11 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             // shown only in part (the journal's, which read() checked), or null for the whole canvas; and the model it
             // sized the nodes it adds for, where that request named one.
             const newNodeModel = newNodeModelOf(entry.context);
-            if (parsed) emit({ type: 'plan', plan, condensed: entry.condensed ?? null, ...(newNodeModel ? { newNodeModel } : {}) });
+            if (parsed) emit({ type: 'plan', plan, condensed: entry.condensed ?? null, ...(newNodeModel ? { newNodeModel } : {}),
+              ...(recovering ? { recovered: true } : {}) });
             // Same cause as the server's own rejection — the model's structure, not the request — so
             // it carries the same code and the caller may retry it on the same terms.
-            else emit({ type: 'error', code: 'invalid_canvas_plan', error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
+            else emit({ type: 'error', code: 'invalid_canvas_plan', ...(recovering ? { recovered: true } : {}), error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });
           }
         } catch (error) {
           emit({ type: 'error', code: error instanceof SaaSApiError ? error.code : 'planning_recovery_required', error: canvasErrorMessage(error) });

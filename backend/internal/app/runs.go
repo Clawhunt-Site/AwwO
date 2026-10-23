@@ -1180,7 +1180,11 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			if sizeRefusal(facts) {
 				facts.Admission = "rejected_before_start"
 			}
-			finish("failed", output.String(), runtimeFailureCode(ev.Code, snapshot.OutputContract != nil))
+			code := runtimeFailureCode(ev.Code, snapshot.OutputContract != nil)
+			if kind == "planner" && code == "runtime_failed" && plannerSpentOutput(facts.Usage, snapshot) {
+				code = "output_limit"
+			}
+			finish("failed", output.String(), code)
 			return
 		case "cancelled":
 			finish("cancelled", output.String(), "")
@@ -1238,6 +1242,40 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 		return "workspace_unavailable"
 	}
 	return "runtime_failed"
+}
+
+// plannerSpentOutput says whether a failed planner call's model wrote every token one answer of it holds: its worker
+// reported the call's output tokens, and they reach the cap the run's snapshot froze for its model (its runtime's
+// health, as the call's ledger reads it: models[].maxOutputTokens, thinking included). Pi says only that such a call
+// failed (MODEL_ERROR for any stop but a normal finish), which runtimeFailureCode names runtime_failed. Such a plan is
+// output_limit: it ran out of room, which the canvas says as such and does not ask for again, where it asks once more
+// for a provider fault (canvasPlanning.ts). Found 2026-10-23: all 7 planner runs of qwen3.8-27b-p6 that failed as
+// runtime_failed in 14 days had written its 16,384 tokens (Pi's published cap for it), in about 432 s each. A call
+// whose usage was not reported (a Bedrock stream that broke off), or a snapshot that froze no cap (before 2026-10-22),
+// stays as it was.
+func plannerSpentOutput(u InvocationUsage, s executionSnapshot) bool {
+	if (u.Status != "reported" && u.Status != "partial") || u.OutputTokens == nil || *u.OutputTokens <= 0 {
+		return false
+	}
+	h, ok := s.memberHealth(defaultRuntime(s.Runtime))
+	if !ok {
+		return false
+	}
+	capOf := func(id string) (int, bool) {
+		for _, m := range h.Models {
+			if m.ID == id {
+				return m.MaxOutputTokens, true
+			}
+		}
+		return 0, false
+	}
+	// The model as its worker resolves it: the snapshot's own exactly (a profile may be named "default"), and the
+	// worker's default only where the snapshot names none that it lists.
+	limit, found := capOf(s.Model)
+	if !found && (s.Model == "" || s.Model == "default") {
+		limit, found = capOf(h.Model)
+	}
+	return found && limit > 0 && *u.OutputTokens >= int64(limit)
 }
 
 // sizeRefusal says whether a call that failed was refused as larger than its model's window before any work: by its
