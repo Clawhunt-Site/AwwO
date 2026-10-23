@@ -44,6 +44,23 @@ func isPlannerRequest(r *http.Request) bool {
 	return v
 }
 
+// The model a plan request's own context (the page's, without the request or the personal settings) says the nodes
+// its plan adds take, which createRun keeps in the run's snapshot for the gate at completion. Only planCanvas sets it;
+// a client cannot.
+type plannerNewNodeModelKey struct{}
+
+func withPlannerNewNodeModel(r *http.Request, model string) *http.Request {
+	if model == "" {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), plannerNewNodeModelKey{}, model))
+}
+
+func plannerNewNodeModel(r *http.Request) string {
+	v, _ := r.Context().Value(plannerNewNodeModelKey{}).(string)
+	return v
+}
+
 // What a plan's prompt gets after its hash (planCanvas): the node limits (planning_limits.go plannerNodeLimits) and the
 // asker's personal settings (preferences.go plannerPersonalization), and where in the prompt they go: after the canvas
 // context, before the request. Only planCanvas sets it; a client cannot.

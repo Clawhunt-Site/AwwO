@@ -69,6 +69,10 @@ type executionSnapshot struct {
 	HistoryAvailable int                `json:"historyAvailable,omitempty"`
 	// OperatorPaid: a canvas plan admitted on the operator's planner model, which the workspace does not pay for.
 	OperatorPaid bool `json:"operatorPaid,omitempty"`
+	// PlanNewNodeModel: the model a canvas plan's request said the nodes its plan adds take, read from the page's own
+	// context when the request was made (planning.go planCanvas, planNewNodeModel), for the gate when the run completes
+	// (runs.go acceptPlanFor). Absent where the context named none, and on every other run.
+	PlanNewNodeModel string `json:"planNewNodeModel,omitempty"`
 }
 
 // Persisted snapshots predate the creation default: an absent runtime means Pi.

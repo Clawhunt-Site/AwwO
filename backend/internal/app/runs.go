@@ -749,6 +749,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if plannerRequest {
+		// The model the plan request's context named for new nodes, for the gate when the run completes (finishOnce).
+		snapshot.PlanNewNodeModel = plannerNewNodeModel(r)
+	}
 	id := randomID()
 	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt)
 	if e != nil {
@@ -1348,7 +1352,13 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			return e
 		}
 		if kind == "planner" {
-			if plan, ok := acceptPlan(output); ok {
+			// The plan is read for the model its request's context said new nodes take, which its snapshot keeps; a run
+			// admitted before snapshots kept it reads none, so such a model is refused as before.
+			var planned struct {
+				PlanNewNodeModel string `json:"planNewNodeModel"`
+			}
+			_ = json.Unmarshal(raw, &planned)
+			if plan, ok := acceptPlanFor(output, planned.PlanNewNodeModel); ok {
 				output = plan
 			} else {
 				status = "failed"

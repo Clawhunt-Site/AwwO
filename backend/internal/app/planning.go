@@ -126,7 +126,8 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(runInput{SessionID: sid, Prompt: prompt, OperationID: b.OperationID, KnowledgeRevisionIDs: b.KnowledgeRevisionIDs, AttachmentText: b.Prompt})
 	// Only this request may run on the operator's planner model (planner_model.go).
-	next := withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), extras, len(b.Context)), c)
+	// The model the page's context names for new nodes, read from the context alone, before anything joins it.
+	next := withPlannerNewNodeModel(withPlannerContext(withPlannerPersonalization(withPlannerRequest(r), extras, len(b.Context)), c), planNewNodeModel(b.Context))
 	next.Body = io.NopCloser(bytes.NewReader(data))
 	next.ContentLength = int64(len(data))
 	next.Header.Set("Content-Type", "application/json")
@@ -628,7 +629,35 @@ func planQuoteCloses(rest string) bool {
 // acceptPlan is the planner's answer as the canvas receives it: its JSON (planJSONBody) with the slips a model makes
 // that have one safe reading normalized (normalizePlanOperations), when that passes the schema gate. Anything else
 // fails as before.
-func acceptPlan(raw string) (string, bool) {
+func acceptPlan(raw string) (string, bool) { return acceptPlanFor(raw, "") }
+
+// planNewNodeLines are the line of a plan request's context that names the model the Agent nodes its plan adds without
+// set_model take, in each language the page writes it (apps/web canvas/planNewNodeModel.ts NEW_NODE_LINE); the model
+// follows as a JSON string.
+var planNewNodeLines = []string{"New Agent nodes you add without set_model run on: ", "新增且未用 set_model 指定模型的 Agent 节点使用："}
+
+// planNewNodeModel is the model a plan request's context (the page's own, read in planCanvas before the request and
+// the asker's personal settings join it, as the page reads only its context) says the nodes its plan adds take,
+// "default" for the workspace default, read as the page reads it (newNodeModelOf): the first line that starts with the
+// new-node line and holds a model. "" where it names none (a request made before it did).
+func planNewNodeModel(context string) string {
+	for _, line := range strings.Split(context, "\n") {
+		for _, prefix := range planNewNodeLines {
+			if rest, ok := strings.CutPrefix(line, prefix); ok {
+				var model string
+				if json.Unmarshal([]byte(rest), &model) == nil && model != "" {
+					return model
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// acceptPlanFor is acceptPlan for a request whose context named newNodeModel as the model the nodes its plan adds take
+// ("" where it named none; the run's snapshot keeps it, runs.go): a model given on an Agent add_node that is that one
+// says nothing more, so it is dropped (planNodeSlips).
+func acceptPlanFor(raw, newNodeModel string) (string, bool) {
 	body := planJSONBody(raw)
 	var compact bytes.Buffer
 	if json.Compact(&compact, []byte(body)) == nil && validatePlan(compact.String()) {
@@ -639,7 +668,7 @@ func acceptPlan(raw string) (string, bool) {
 		return "", false
 	}
 	if ops, ok := p["operations"].([]any); ok {
-		p["operations"] = normalizePlanOperations(ops)
+		p["operations"] = normalizePlanOperations(ops, newNodeModel)
 	}
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
@@ -658,7 +687,8 @@ func acceptPlan(raw string) (string, bool) {
 var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "constructor": true}
 
 // normalizePlanOperations fixes, in place, the slips that turned whole plans into invalid_canvas_plan:
-//   - a new node's inputs given on add_node as "inputs" (planNodeSlips);
+//   - a new node's inputs and outputs given on add_node as "inputs" and "outputs", and a model given on it that is
+//     the one the request said new nodes take (newNodeModel) (planNodeSlips);
 //   - a field's side named in the plural ("inputs", "outputs"), and an input field typed as a picture, a clip or a
 //     sound ("image", "video", "audio"), which a node is given as a file (planFieldSlips);
 //   - a new field's value left out, or filled: the protocol has new fields start empty, so value is "", and a filled
@@ -666,8 +696,8 @@ var planReservedIDs = map[string]bool{"__proto__": true, "prototype": true, "con
 //   - a new node ref or new field id the canvas refuses (prototype, constructor, __proto__): renamed, with every
 //     reference in the plan, to <name>_node or <name>_field. A canvas never holds such an id, so only names this
 //     plan introduces are renamed.
-func normalizePlanOperations(ops []any) []any {
-	ops = planNodeSlips(ops)
+func normalizePlanOperations(ops []any, newNodeModel string) []any {
+	ops = planNodeSlips(ops, newNodeModel)
 	for _, item := range ops {
 		if op, ok := item.(map[string]any); ok {
 			planFieldSlips(op)
@@ -748,11 +778,19 @@ func normalizePlanOperations(ops []any) []any {
 
 // planNodeSlips reads a new node's inputs given on add_node as "inputs" (planNodeInputs), found 2026-10-23 in 8 of the
 // 40 plans of Claude Haiku 4.5 refused in 7 days: its input values, set right on the node, and its input field
-// definitions, as add_field steps right after it (the canvas applies a step to a new node by its ref). Inputs given
-// beside inputValues, or in any other shape, are left as they are, so the plan is refused as before. A model given on
-// add_node (7 of the 40) is left too: a plan changes a node's model only with set_model, which the instructions allow
-// only when the user asks for it or a node failed because of its model, and the slip cannot say which.
-func planNodeSlips(ops []any) []any {
+// definitions, as add_field steps right after it (the canvas applies a step to a new node by its ref). Its outputs
+// given as "outputs" (2 of the 62 plans refused in the 7 days to 2026-10-23 08:30Z, both whole field definitions) are
+// read too (planNodeOutputs). Inputs given beside inputValues, and either in any other shape, are left as they are, so
+// the plan is refused as before.
+//
+// A model given on an Agent add_node (in 4 of those 62 plans) is dropped where it is the one the request's context said
+// the nodes a plan adds take (newNodeModel, from the page's new-node line: planNewNodeModel), since such a node takes
+// that model anyway, and only without an effort beside it, which the request names none of. It was so in the one of the
+// four made since requests name it. On an image, video or 3D node, which takes its own media model, and anywhere else,
+// a model is left, so the plan is refused as before: a plan changes a node's model only with set_model, which the
+// instructions allow only when the user asks for it or a node failed because of its model, and the slip cannot say
+// which.
+func planNodeSlips(ops []any, newNodeModel string) []any {
 	out := make([]any, 0, len(ops))
 	for _, item := range ops {
 		op, ok := item.(map[string]any)
@@ -773,10 +811,64 @@ func planNodeSlips(ops []any) []any {
 				}
 			}
 		}
+		if v, given := op["outputs"]; given {
+			if fields, ok := planNodeOutputs(v, ref); ok {
+				delete(op, "outputs")
+				after = append(after, fields...)
+			}
+		}
+		// Only an Agent node takes the model new nodes take (planAgentTemplateIDs, an allow list, so a media kind added
+		// later stays refused); an image, video or 3D node takes its own media model.
+		if model, isText := op["model"].(string); isText && newNodeModel != "" && model == newNodeModel && oneOf(op["templateId"], planAgentTemplateIDs...) {
+			if _, effort := op["effort"]; !effort {
+				delete(op, "model")
+			}
+		}
 		out = append(out, op)
 		out = append(out, after...)
 	}
 	return out
+}
+
+// planAgentTemplateIDs are the templates of the Agent nodes a plan may add (planTemplateIDs without the media ones),
+// the nodes that take the model new nodes take.
+var planAgentTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure"}
+
+// planNodeOutputs reads the "outputs" a plan gave a new node: a list of whole output field definitions (id, label,
+// type and required; a value, help and placeholder may be there too), each an add_field of the node's output side.
+// The field-value fix then empties any value, as for every new field, since an output is never filled. The canvas
+// updates a field the node already has (its template's) to the definition rather than adding it twice. Any other
+// shape, a value that is not text, or an id given twice, is not read (ok false).
+func planNodeOutputs(v any, ref string) (fields []any, ok bool) {
+	items, isList := v.([]any)
+	if !isList || len(items) == 0 {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		entry, isMap := item.(map[string]any)
+		if !isMap {
+			return nil, false
+		}
+		id, isText := entry["id"].(string)
+		if !isText || seen[id] {
+			return nil, false
+		}
+		seen[id] = true
+		_, label := entry["label"]
+		_, typed := entry["type"]
+		_, required := entry["required"]
+		if value, given := entry["value"]; given {
+			if _, isText := value.(string); !isText {
+				return nil, false
+			}
+		}
+		if !label || !typed || !required || !planKeys(entry, "id", "label", "type", "required", "value", "help", "placeholder") {
+			return nil, false
+		}
+		fields = append(fields, map[string]any{"type": "add_field", "nodeId": ref, "side": "output", "field": entry})
+	}
+	return fields, true
 }
 
 // planNodeInputs reads the "inputs" a plan gave a new node: an object of input texts by field id is its inputValues;
