@@ -370,16 +370,26 @@ it('tells the reader to turn on Real people when the service refuses a photoreal
   expect(runErrorText('media_voice_unavailable', 'en')).toContain('at most 3, each 2 to 15 seconds (15 seconds in all)');
 });
 
-/** The media providers behind the picture, video, sound and 3D models: a name no message a user reads may carry. */
-const PROVIDERS = ['RunningHub', 'Running Hub', 'Tripo', 'Seedream', 'Seedance', 'Jimeng', 'X-tasy', 'Xtasy', 'Kling',
-  'Hailuo', 'Volcengine', 'MiniMax', 'Suno', 'Udio', 'ElevenLabs', 'Midjourney', '即梦', '可灵', '海螺', '豆包'];
+/** The media providers behind the picture, video, sound and 3D models: a name no message a user reads may carry. Kept
+ * wider than the publisher's own list (publish-recorded-run.mjs MARKS, pinned to saas-production-film.test.tsx), which
+ * guards a run's canvas text rather than this copy; a name either list refuses belongs in both. */
+const PROVIDERS = ['RunningHub', 'Running Hub', 'Tripo', 'Seedream', 'Seedance', 'Jimeng', 'Dreamina', 'X-tasy', 'Xtasy',
+  'Kling', 'Hailuo', 'Volcengine', 'ByteDance', 'Kuaishou', 'PixVerse', 'Shengshu', 'Vidu', 'Nano Banana', 'MiniMax',
+  'Suno', 'Udio', 'ElevenLabs', 'Midjourney', '即梦', '可灵', '海螺', '豆包', '快手', '生数'];
 
-/** Which provider a piece of copy names, if any. A name in Latin letters has to stand as its own word, so "audio" does
- * not name Udio and "sparkling" does not name Kling; a name in Chinese has no such boundary to rely on — Chinese runs
- * without spaces, and 豆包 in 豆包生成服务 sits between two letters — so those are looked for exactly as written. */
+/** Which provider a piece of copy names, if any.
+ *
+ * A name in Latin letters has to stand clear of other Latin letters and digits, so "audio" does not name Udio and
+ * "sparkling" does not name Kling. The boundary is Latin, NOT `[^\p{L}\p{N}]`: half of every message here is Chinese,
+ * a Han character IS a Unicode letter, and a Latin name sits flush against Chinese with no space — so a Unicode-letter
+ * boundary passes `（RunningHub代码 1505）`, one space from the very string this guard exists to keep out, and
+ * `用RunningHub生成时` and `Tripo的 3D 模型` with it.
+ *
+ * A name in Chinese has no boundary to rely on at all (豆包 in 豆包生成服务 sits between two letters), so those are
+ * looked for exactly as written. */
 const providerNamed = (text: string) => PROVIDERS.find(provider => (/^[\x20-\x7e]+$/.test(provider)
   // A hyphen needs no escape outside a character class, and `\-` is an invalid escape under the u flag.
-  ? new RegExp(`(^|[^\\p{L}\\p{N}])${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(text)
+  ? new RegExp(`(^|[^A-Za-z0-9])${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9])`, 'i').test(text)
   : text.includes(provider)));
 
 it('names no media provider in any message a user reads', () => {
@@ -395,12 +405,16 @@ it('names no media provider in any message a user reads', () => {
       expect(providerNamed(text!), `${code} (${locale}): ${text}`).toBeUndefined();
     }
   }
-  // And the rest of the file's copy — the HTTP, plan and service messages, which are not in that table — from the
-  // source with its comments stripped, so a comment may still record which service a code came from. Every quote
-  // style, and short strings too: 'RunningHub' on its own is ten characters.
-  const source = readFileSync(resolve(process.cwd(), 'src/saas/canvasErrors.ts'), 'utf8');
-  const copy = [...source.replace(/^[^'"`\n]*\/\/[^'"`\n]*$/gm, '').matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\]|\\.)+)`/g)]
-    .map(match => match[1] ?? match[2] ?? match[3]);
-  expect(copy.length).toBeGreaterThan(60);
-  for (const text of copy) expect(providerNamed(text), `in: ${text.slice(0, 120)}`).toBeUndefined();
+  // And the copy these two files hold outside that table — the HTTP, plan and service messages, and the table
+  // canvasErrorMessage falls through to in api.ts — read from the source. Every quote style, and short strings too:
+  // 'RunningHub' on its own is ten characters.
+  for (const file of ['src/saas/canvasErrors.ts', 'src/saas/api.ts']) {
+    // Comments go first, so one may still record which service a code came from. A whole line of `//`, and block
+    // comments entire: an apostrophe inside a comment ("the provider's own message") must not be read as a quote,
+    // which is what a line-by-line strip that stops at the first quote character gets wrong.
+    const source = readFileSync(resolve(process.cwd(), file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const copy = [...source.matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\]|\\.)+)`/g)].map(match => match[1] ?? match[2] ?? match[3]);
+    expect(copy.length, file).toBeGreaterThan(40);
+    for (const text of copy) expect(providerNamed(text), `${file}: ${text.slice(0, 120)}`).toBeUndefined();
+  }
 });
