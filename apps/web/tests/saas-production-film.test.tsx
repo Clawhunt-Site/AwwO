@@ -300,3 +300,70 @@ it('draws a film case’s card from its record: a media step for each stage of m
     expect(agentCount(caseOf(id)), id).toBe(record.nodes.filter(node => node.kind !== 'edit').length);
   }
 });
+
+it('plays the web copy by default, the file as delivered on request, and names the frame it is actually showing', async () => {
+  for (const { id, record, media } of FILMS) {
+    const delivery = deliveryOf(record), film = delivery.film!;
+    const published = media[`${delivery.id}/${film.name}`];
+    expect(published, id).toBeDefined();
+    // Only a case published with the film beside its web copy offers the switch; the rest keep one file and no button.
+    const delivered = published.original;
+    render(<ProductionFilm item={caseOf(id)} record={record} />);
+    const player = await playerIn();
+    const minutes = `${Math.floor(film.seconds / 60)}:${String(Math.round(film.seconds) % 60).padStart(2, '0')}`;
+    // Before the player has decoded a frame the heading names none: naming the delivered frame over a narrower copy is
+    // the very thing this heading used to get wrong.
+    expect(screen.getByText(`The delivered film · ${minutes}`), id).toBeInTheDocument();
+    expect(player.getAttribute('src'), id).toBe(published.src);
+    if (!delivered) { expect(screen.queryByRole('button', { name: /^As delivered/ }), id).toBeNull(); cleanup(); continue; }
+
+    // The web copy is smaller than the film: that is why it is the default, and why the heading must not keep claiming
+    // the delivered frame once the player has decoded the copy's own, narrower one.
+    expect(delivered.bytes, id).toBeGreaterThan(published.bytes);
+    const frame = (element: HTMLVideoElement, width: number, height: number) => {
+      for (const [name, value] of [['videoWidth', width], ['videoHeight', height], ['duration', film.seconds]] as const) {
+        Object.defineProperty(element, name, { configurable: true, value });
+      }
+      fireEvent(element, new Event('loadedmetadata'));
+    };
+    const copyWidth = Math.min(1280, film.width), copyHeight = Math.round((film.height * copyWidth) / film.width / 2) * 2;
+    frame(player, copyWidth, copyHeight);
+    expect(screen.getByText(`The delivered film · ${minutes} · ${copyWidth}×${copyHeight}`), id).toBeInTheDocument();
+
+    // Asking for the film as delivered plays that file, from where the viewer had got to, and says so. The label says
+    // what the click does, so it carries no pressed state — a pressed state and a changing label contradict each other.
+    player.currentTime = 42;
+    const toDelivered = screen.getByRole('button', { name: /^As delivered/ });
+    expect(toDelivered, id).toHaveAccessibleName(`As delivered · ${Math.round(delivered.bytes / 1e6).toLocaleString('en')} MB`);
+    expect(toDelivered, id).not.toHaveAttribute('aria-pressed');
+    // It was playing, so it goes on playing from that moment on the other file. (A plain function, not a vi.fn, so a
+    // mock's own bookkeeping cannot hide an unhandled refusal; jsdom has no playback of its own.)
+    const play = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'play')!;
+    const paused = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'paused')!;
+    let plays = 0;
+    Object.defineProperty(HTMLMediaElement.prototype, 'paused', { configurable: true, get: () => false });
+    Object.defineProperty(HTMLMediaElement.prototype, 'play', { ...play, value() { plays += 1; return Promise.resolve(); } });
+    try {
+      fireEvent.click(toDelivered);
+      const onDelivered = await playerIn();
+      expect(onDelivered.getAttribute('src'), id).toBe(delivered.src);
+      expect(screen.getByRole('button', { name: /^Web copy/ }), id).toBeInTheDocument();
+      frame(onDelivered, film.width, film.height);
+      expect([onDelivered.currentTime, plays], id).toEqual([42, 1]);
+      expect(screen.getByText(`The delivered film · ${minutes} · ${film.width}×${film.height}`), id).toBeInTheDocument();
+
+      // A second switch before the first has loaded keeps the moment the viewer saw, not the fresh element's 0.
+      onDelivered.currentTime = 73;
+      fireEvent.click(screen.getByRole('button', { name: /^Web copy/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^As delivered/ }));
+      const back = await playerIn();
+      expect(back.getAttribute('src'), id).toBe(delivered.src);
+      frame(back, film.width, film.height);
+      expect(back.currentTime, id).toBe(73);
+    } finally {
+      Object.defineProperty(HTMLMediaElement.prototype, 'play', play);
+      Object.defineProperty(HTMLMediaElement.prototype, 'paused', paused);
+    }
+    cleanup();
+  }
+}, 60_000);

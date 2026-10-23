@@ -47,7 +47,19 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const [filmFailed, setFilmFailed] = useState(false);
+  // Which of the two files the edit's film is played from, and the frame the player actually decoded from it. The web
+  // copy is the default (it is the smaller download); the file as delivered is what the canvas made, and until now the
+  // page only offered it as a download, so a visitor who watched the film here never saw the frame the run delivered —
+  // while the heading above the player named the delivered frame all the same. The player reports its own
+  // videoWidth/videoHeight, so the heading states the frame being shown whichever file is playing.
+  const [asDelivered, setAsDelivered] = useState(false);
+  const [shown, setShown] = useState<{ width: number; height: number } | null>(null);
   const video = useRef<HTMLVideoElement>(null);
+  // Where the viewer was when they switched files, and whether it was playing: changing a player's src runs the load
+  // algorithm, which pauses it and puts it back to the start, so both have to be carried over by hand. The seek stays
+  // pending until the replacement reports its metadata, and a second switch before that must not overwrite it with the
+  // new element's own 0.
+  const resume = useRef<{ at: number; playing: boolean } | null>(null);
   // Read through a ref, so a loader passed inline (a new function each render) does not start a load each render.
   const loader = useRef(loadManifest);
   loader.current = loadManifest;
@@ -61,6 +73,9 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   const deliveryNode = record.nodes.find(node => node.id === record.artifactNodeId);
   const film = deliveryNode?.film;
   const filmFile = film && manifest ? manifest[`${deliveryNode.id}/${film.name}`] : undefined;
+  // The file to play: the one the edit delivered when the viewer asked for it and it was published beside the web copy.
+  const delivered = filmFile?.original;
+  const source = asDelivered && delivered ? delivered : filmFile;
   const subtitlesFile = film && manifest ? manifest[`${deliveryNode.id}/${film.name.replace(/\.mp4$/i, '.vtt')}`] : undefined;
   const subtitles = useSubtitleTrack(subtitlesFile);
   const stills = useMemo(() => !deliveryNode || !manifest ? [] : Object.entries(manifest)
@@ -104,7 +119,28 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   // interval, the film's length shared evenly.
   const stillAt = (index: number) => !film ? 0 : film.stillsEverySeconds ? Math.max(0, (index + 0.5) * film.stillsEverySeconds - 0.5 / film.fps)
     : stills.length ? index * (film.seconds / stills.length) : 0;
-  const retryFilm = () => { if (!filmFile) { setAttempt(value => value + 1); return; } setFilmFailed(false); video.current?.load(); };
+  const retryFilm = () => { if (!source) { setAttempt(value => value + 1); return; } setFilmFailed(false); video.current?.load(); };
+  /** Plays the film from the other file, from the moment the viewer had reached, and keeps playing if it was playing. */
+  const switchFile = () => {
+    const element = video.current;
+    // A switch made before the last one loaded keeps the moment the viewer actually saw, not this element's reset 0.
+    if (!resume.current && element && Number.isFinite(element.currentTime)) resume.current = { at: element.currentTime, playing: !element.paused };
+    setShown(null);
+    setFilmFailed(false);
+    setAsDelivered(value => !value);
+  };
+  /** The frame the player decoded, then the moment and the playback the viewer had before a switch. */
+  const onMetadata = () => {
+    const element = video.current;
+    if (!element) return;
+    if (element.videoWidth > 0) setShown({ width: element.videoWidth, height: element.videoHeight });
+    const pending = resume.current;
+    if (!pending) return;
+    resume.current = null;
+    // The end of the film is a moment like any other: clamp to it rather than dropping the seek.
+    if (pending.at > 0) element.currentTime = Number.isFinite(element.duration) ? Math.min(pending.at, element.duration) : pending.at;
+    if (pending.playing) (element.play() as Promise<void> | undefined)?.catch(() => { /* paused there, as a refused play leaves it */ });
+  };
 
   return <section className={`production-made production-film${focused ? ' is-result-focused' : ''}`} lang="en" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading">
@@ -151,20 +187,32 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
         </article>
       </div>
       <div className="production-made-result production-film-result">
-        <header><span>{film ? `The delivered film · ${clock(film.seconds)} · ${film.width}×${film.height}` : 'Delivery'}</span>
-          {film && <div><button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}Focus the film</button></div>}</header>
+        {/* The frame is named only once the player has decoded one. Naming the delivered frame before that is what this
+            heading used to get wrong while a narrower copy played, so it says nothing rather than something untrue. */}
+        <header><span>{film ? `The delivered film · ${clock(film.seconds)}${shown ? ` · ${shown.width}×${shown.height}` : ''}` : 'Delivery'}</span>
+          {film && <div>
+            {/* An action, not a toggle: its label says what the click will do, so it carries no aria-pressed (a pressed
+                state and a changing label contradict each other). Short, because this header also carries the film's
+                length and frame and its own box clips what overflows; the hint under the player spells both files out. */}
+            {filmFile && delivered && <button type="button" onClick={switchFile}
+              title={asDelivered ? `Play the smaller copy made for the web (${megabytes(filmFile.bytes)})` : `Play the film as the last edit delivered it (${film.width}×${film.height}, ${megabytes(delivered.bytes)})`}>{asDelivered
+              ? `Web copy · ${megabytes(filmFile.bytes)}` : `As delivered · ${megabytes(delivered.bytes)}`}</button>}
+            <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}Focus the film</button></div>}</header>
         {!film || deliveryNode?.status !== 'done' ? <p className="production-made-empty">This run did not deliver the film; the failed and blocked nodes are on the left.</p>
           : manifest === undefined ? <p className="production-made-empty" role="status">Loading the film…</p>
             : !filmFile || filmFailed ? <p className="production-made-empty" role="alert">The film could not be loaded.<button type="button" onClick={retryFilm}>Try again</button></p>
               : null}
-        {filmFile && <video ref={video} className="production-film-player" hidden={filmFailed} controls preload="metadata" playsInline poster={stills[0]?.src} src={filmFile.src}
-          onError={() => setFilmFailed(true)} aria-label={`${item.title}: the film an AwwO run delivered`}>
+        {source && <video ref={video} className="production-film-player" hidden={filmFailed} controls preload="metadata" playsInline poster={stills[0]?.src} src={source.src}
+          onLoadedMetadata={onMetadata} onError={() => setFilmFailed(true)} aria-label={`${item.title}: the film an AwwO run delivered`}>
           {subtitles && <track kind="subtitles" srcLang="en" label="English" src={subtitles} default />}
         </video>}
-        {stills.length > 0 && filmFile && !filmFailed && <div className="production-film-stills" role="group" aria-label="Stills from the film">
+        {stills.length > 0 && source && !filmFailed && <div className="production-film-stills" role="group" aria-label="Stills from the film">
           {stills.map((still, index) => <button type="button" key={still.src} onClick={() => seek(stillAt(index))} aria-label={`Play from ${clock(stillAt(index))}`}>
             <img src={still.src} alt="" loading="lazy" decoding="async" /></button>)}</div>}
-        {filmFile && film && <p className="production-made-hint">{`It plays as the last edit delivered it, re-encoded for the web (${megabytes(filmFile.bytes)}); its sound is the film's own track. No frame or sound of it was changed outside AwwO; where the operator's own measurements and scripts took part, "What happened" says so.`}
+        {filmFile && film && <p className="production-made-hint">{asDelivered
+          ? `It plays as the last edit delivered it, frame for frame (${megabytes(filmFile.original?.bytes ?? filmFile.bytes)}); its sound is the film's own track.`
+          : `It plays as the last edit delivered it, re-encoded smaller for the web (${megabytes(filmFile.bytes)}); its sound is the film's own track.`}
+          {` No frame or sound of it was changed outside AwwO; where the operator's own measurements and scripts took part, "What happened" says so.`}
           {filmFile.original && <> <a className="production-film-download" href={filmFile.original.src} download={film.name}><Download size={12} aria-hidden="true" />{`Download ${film.name} as delivered (${film.width}×${film.height}, ${megabytes(filmFile.original.bytes)})`}</a></>}</p>}
       </div>
     </div>

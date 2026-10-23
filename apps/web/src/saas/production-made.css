@@ -58,9 +58,12 @@
 .production-dialog p.production-made-file { margin: 0; color: var(--saas-text); font-size: 12.5px; line-height: 1.7; overflow-wrap: anywhere; }
 
 .production-made-result { min-width: 0; overflow: hidden; border: 1px solid var(--production-line); border-radius: 12px; background: var(--saas-card); }
-.production-made-result > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 44px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--production-line);
-  color: var(--saas-muted); font-size: 12px; }
-.production-made-result > header > div { display: flex; gap: 6px; }
+/* Wraps rather than clipping: a film's header carries its length and frame on the left and up to two buttons on the
+   right, which together outrun a narrow dialog (the box itself hides any overflow). */
+.production-made-result > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; min-height: 44px; padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--production-line); color: var(--saas-muted); font-size: 12px; }
+.production-made-result > header > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.production-dialog .production-made-result header button { white-space: nowrap; }
 .production-dialog .production-made-result header button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border: 1px solid var(--production-line); border-radius: 8px;
   background: var(--saas-card); color: var(--saas-text); font-size: 12px; cursor: pointer; }
 .production-made-frame { display: block; width: 100%; height: min(620px, 70dvh); border: 0; background: #fff; }
