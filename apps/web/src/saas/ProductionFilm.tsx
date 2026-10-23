@@ -106,6 +106,9 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   const seek = (seconds: number) => {
     const element = video.current;
     if (!element) return;
+    // A moment the viewer just chose wins over one carried from before a file switch, which would otherwise arrive
+    // with the replacement's metadata and jump away from it.
+    resume.current = null;
     element.currentTime = seconds;
     const playing = element.play() as Promise<void> | undefined;
     playing?.catch(() => {});

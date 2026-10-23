@@ -139,7 +139,10 @@ export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { 
       <h3 id={`${id}-title`}>{record === undefined ? 'Loading the run record…' : 'No run record has been published for this case yet'}</h3></div>{reuse}</header>
   </section>;
   if (record.canvas === 'recorded') return <Suspense fallback={<section className="production-made" lang="en"><p className="production-made-empty" role="status">Loading the run record…</p></section>}>
-    <ProductionFilm item={item} record={record} onCopy={onCopyRecorded ? () => onCopyRecorded(item) : undefined} />
+    {/* Keyed by the case, so which file is playing, the frame decoded from it and a carried-over moment belong to that
+        case and cannot survive into another one. No path reaches a second case without closing this dialog today; the
+        key is what keeps that true if one is ever added. */}
+    <ProductionFilm key={item.id} item={item} record={record} onCopy={onCopyRecorded ? () => onCopyRecorded(item) : undefined} />
   </Suspense>;
 
   const stages = [...new Set(record.nodes.map(node => node.column))].sort((a, b) => a - b).map(column => record.nodes.filter(node => node.column === column).sort((a, b) => a.row - b.row));

@@ -63,9 +63,8 @@
 .production-made-result > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; min-height: 44px; padding: 6px 8px 6px 14px;
   border-bottom: 1px solid var(--production-line); color: var(--saas-muted); font-size: 12px; }
 .production-made-result > header > div { display: flex; flex-wrap: wrap; gap: 6px; }
-.production-dialog .production-made-result header button { white-space: nowrap; }
 .production-dialog .production-made-result header button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border: 1px solid var(--production-line); border-radius: 8px;
-  background: var(--saas-card); color: var(--saas-text); font-size: 12px; cursor: pointer; }
+  background: var(--saas-card); color: var(--saas-text); font-size: 12px; white-space: nowrap; cursor: pointer; }
 .production-made-frame { display: block; width: 100%; height: min(620px, 70dvh); border: 0; background: #fff; }
 .production-made.is-result-focused .production-made-frame { height: min(820px, 78dvh); }
 .production-dialog p.production-made-hint { margin: 0; padding: 8px 14px; border-top: 1px solid var(--production-line); color: var(--saas-muted); font-size: 11.5px; line-height: 1.6; }

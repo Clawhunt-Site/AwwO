@@ -320,10 +320,14 @@ it('plays the web copy by default, the file as delivered on request, and names t
     // The web copy is smaller than the film: that is why it is the default, and why the heading must not keep claiming
     // the delivered frame once the player has decoded the copy's own, narrower one.
     expect(delivered.bytes, id).toBeGreaterThan(published.bytes);
+    // A player that has just loaded another file, as a browser leaves one: the load algorithm rewinds it to 0 and
+    // pauses it. jsdom does neither on a src change, so the rewind is done here — without it an assertion about the
+    // restored moment would only read back the number the test itself wrote, and would pass with no restore at all.
     const frame = (element: HTMLVideoElement, width: number, height: number) => {
       for (const [name, value] of [['videoWidth', width], ['videoHeight', height], ['duration', film.seconds]] as const) {
         Object.defineProperty(element, name, { configurable: true, value });
       }
+      element.currentTime = 0;
       fireEvent(element, new Event('loadedmetadata'));
     };
     const copyWidth = Math.min(1280, film.width), copyHeight = Math.round((film.height * copyWidth) / film.width / 2) * 2;
