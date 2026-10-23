@@ -8,6 +8,8 @@ COPY apps/computer-model.ts /computer-model.ts
 COPY apps/bedrock-bridge.ts /bedrock-bridge.ts
 COPY apps/bedrock-catalog.ts /bedrock-catalog.ts
 COPY apps/bedrock-models.json /bedrock-models.json
+COPY apps/context-estimate.ts /context-estimate.ts
+COPY apps/context-overflow.ts /context-overflow.ts
 USER node
 EXPOSE 8098
 CMD ["node", "server.mjs"]

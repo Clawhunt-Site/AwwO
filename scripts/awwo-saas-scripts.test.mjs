@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { EventEmitter } from 'node:events';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseEnv, port, resolveCommand, root, serviceEnvironments, waitForHttp } from './awwo-saas-lib.mjs';
@@ -492,4 +493,147 @@ test('personal vault and mail credentials stay API-only while both workers share
   }
   assert.equal(env.api.AWWO_CREDENTIAL_ENCRYPTION_KEY, 'synthetic-vault-key');
   assert.equal(env.api.AWWO_SMTP_PASSWORD, 'synthetic-mail-password');
+});
+
+const repositoryPath = file => path.join(root, file);
+// The files under a folder of the repository, dot files too (a COPY takes them), but installed packages and .git.
+const repositoryFiles = dir => readdirSync(repositoryPath(dir), { withFileTypes: true }).flatMap(entry => entry.name === '.git'
+  || entry.name === 'node_modules' ? [] : entry.isDirectory() ? repositoryFiles(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]);
+// Whether the repository holds a path spelled exactly so: Windows also finds apps/CONTEXT-ESTIMATE.ts, BuildKit on Linux not.
+const spelled = file => file.split('/').every((name, i, parts) => readdirSync(repositoryPath(parts.slice(0, i).join('/') || '.')).includes(name));
+// A path and each folder it is in.
+const withFolders = file => file.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')).reverse();
+// A .dockerignore pattern or a COPY source as a regular expression (moby/patternmatcher).
+const globRegExp = glob => new RegExp('^' + glob.replace(/[.+^${}()|\\]/g, '\\$&')
+  .replace(/\*\*\/|\*\*$|\*|\?/g, part => ({ '**/': '(.*/)?', '**': '.*', '*': '[^/]*', '?': '[^/]' })[part]) + '$');
+// A Dockerfile's instructions as Docker reads them: comment and blank lines left out (also inside a continued
+// instruction), lines ending in a backslash (and blanks) joined, in any case or indent.
+const dockerInstructions = text => text.split(/\r?\n/).filter(line => !/^\s*(#|$)/.test(line)).join('\n').replace(/\\[ \t]*\n/g, ' ')
+  .split('\n').map(line => line.trim().split(/\s+/)).filter(([word]) => word).map(([word, ...args]) => [word.toUpperCase(), args]);
+
+// What a .dockerignore leaves out of the build context, as BuildKit's walker reads it (moby/patternmatcher's
+// MatchesUsingParentResults): folder by folder from the top, the last pattern that applies decides and a "!" one lets the
+// path in; a pattern that matched a folder applies to what is in it, but one passed over at a folder (it could not change
+// it) is not handed down. (awwo-saas-release.test.ts reads the API image's with MatchesOrParentMatches, which agrees there.)
+function dockerignored(text) {
+  // A comment is a line that starts with # before any blank is trimmed (ignorefile.ReadAll).
+  const rules = text.split(/\r?\n/).filter(line => !line.startsWith('#')).map(line => line.trim()).filter(Boolean)
+    .map(line => ({ keep: line.startsWith('!'), match: globRegExp(path.posix.normalize(line.replace(/^!\s*/, '')).replace(/^\/+|\/+$/g, '')) }));
+  return file => {
+    let inherited = [], out = false;
+    for (const name of withFolders(file).reverse()) {
+      const matched = [];
+      out = false;
+      rules.forEach(({ keep, match }, i) => {
+        if (!inherited[i]) {
+          if (keep !== out) return;
+          matched[i] = match.test(name);
+          if (!matched[i]) return;
+        }
+        matched[i] = true;
+        out = !keep;
+      });
+      inherited = matched;
+    }
+    return out;
+  };
+}
+
+// What the last stage of a Dockerfile holds from the build context (the repository): a path in the image -> the file
+// copied there, COPY by COPY through the .dockerignore, less what an rm of a RUN takes out again; and the script its CMD
+// runs. What another stage builds (COPY --from) is not read. A RUN there must be plain rm commands, or npm ci / npm install
+// with --ignore-scripts and only the flags below, joined by &&; anything else (a cd, npm run, a quote, ;, ||, a comment,
+// sh -c), npm with an .npmrc copied in or npm_config_ set by ENV or ARG, or a last stage that starts FROM an earlier one or
+// a variable, fails the test rather than be guessed at.
+function workerImage(dockerfile) {
+  const { posix } = path;
+  const ignored = dockerignored(readFileSync(repositoryPath(existsSync(repositoryPath(`${dockerfile}.dockerignore`)) ? `${dockerfile}.dockerignore` : '.dockerignore'), 'utf8'));
+  const instructions = dockerInstructions(readFileSync(repositoryPath(dockerfile), 'utf8'));
+  const last = Math.max(0, instructions.findLastIndex(([word]) => word === 'FROM'));
+  const stages = instructions.slice(0, last).filter(([word, args]) => word === 'FROM' && args.at(-2)?.toUpperCase() === 'AS').map(([, args]) => args.at(-1).toLowerCase());
+  const base = instructions[last]?.[1].find(arg => !arg.startsWith('--'))?.toLowerCase() ?? '';
+  assert.ok(!base.includes('$') && !stages.includes(base), `${dockerfile}: its last stage starts FROM ${base}, an earlier stage or a variable the test does not read`);
+  let workdir = '/', cmd = [];
+  const held = new Map();
+  for (const [word, args] of instructions.slice(last)) {
+    if (word === 'WORKDIR') workdir = posix.resolve(workdir, args[0]);
+    else if (word === 'CMD') cmd = args[0]?.startsWith('[') ? JSON.parse(args.join(' ')) : args;
+    else if (word === 'ENV' || word === 'ARG') assert.ok(!/npm_config_/i.test(args.join(' ')), `${dockerfile}: ${word} ${args.join(' ')} sets npm's configuration, which the test does not read`);
+    else if (word === 'RUN') {
+      const commands = args.join(' ').split(' && ').map(command => command.split(' '));
+      const npm = ([verb, ...rest]) => verb === 'npm' && ['ci', 'install'].includes(rest[0]) && rest.includes('--ignore-scripts')
+        && rest.slice(1).every(flag => ['--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'].includes(flag));
+      assert.ok(!/[^\w ./*?=@+,:-]/.test(commands.flat().join(' ')) && commands.every(command => command[0] === 'rm' || npm(command))
+        && !(commands.some(npm) && [...held.keys()].some(file => /(^|\/)\.?npmrc$/.test(file))),
+      `${dockerfile}: the test cannot read RUN ${args.join(' ')}; keep a worker image's last stage to rm and npm ci --ignore-scripts, or teach it`);
+      for (const gone of commands.filter(([verb]) => verb === 'rm').flatMap(([, ...paths]) => paths).filter(arg => arg && !arg.startsWith('-'))
+        .map(arg => globRegExp(posix.resolve(workdir, arg)))) {
+        for (const file of [...held.keys()]) if (withFolders(file).some(name => gone.test(name))) held.delete(file);
+      }
+    } else if (word === 'COPY' && !args.some(arg => arg.startsWith('--from='))) {
+      const paths = args.filter(arg => !arg.startsWith('--')), target = paths.at(-1), sources = paths.slice(0, -1);
+      const to = posix.resolve(workdir, target), intoFolder = sources.length > 1 || target.endsWith('/') || sources.some(source => /[*?]/.test(source));
+      for (const source of sources) {
+        const clean = posix.normalize(source).replace(/\/+$/, ''), folder = posix.dirname(clean);
+        const found = /[*?]/.test(clean) ? readdirSync(repositoryPath(folder)).filter(name => globRegExp(posix.basename(clean)).test(name)).map(name => `${folder}/${name}`) : [clean];
+        const copied = found.filter(spelled).flatMap(match => statSync(repositoryPath(match)).isDirectory()
+          ? repositoryFiles(match).filter(file => !ignored(file)).map(file => [posix.join(to, file.slice(match.length + 1)), file])
+          : ignored(match) ? [] : [[intoFolder ? posix.join(to, posix.basename(match)) : to, match]]);
+        assert.ok(copied.length, `${dockerfile}: COPY ${source} takes nothing from the build context`);
+        for (const [file, from] of copied) held.set(file, from);
+      }
+    }
+  }
+  return { held, entry: posix.resolve(workdir, cmd.find(arg => /\.[cm]?[jt]s$/.test(arg)) ?? '.') };
+}
+
+// What a script loads by a path relative to itself: its imports, re-exports and dynamic imports of a string, the files it
+// opens with new URL(..., import.meta.url), and a script or JSON file beside it that it names by its name or a relative
+// path (join(WORKER_DIR, 'mcp-shim.ts') starts one). One in a comment, or a type-only import (which Node erases), counts too:
+// telling them apart by pattern let a real import hide, while counting them only ever fails the test, loudly. A load the
+// patterns cannot read (import( of anything but one string, a comment where the path should be, new URL of a computed path,
+// require, import.meta.resolve) fails it too.
+function relativeLoads(file) {
+  const text = readFileSync(repositoryPath(file), 'utf8');
+  const unreadable = new RegExp([/\bimport\s*\(\s*(?!['"])/, /\bimport\s*\(\s*(?:'[^'\n]*'|"[^"\n]*")\s*(?![),])/, /\b(?:from|import)\s*\/[*/]/,
+    /\bnew\s+URL\s*\(\s*(?!['"])[^)]*import\.meta\.url/, /\bnew\s+URL\s*\(\s*(?:'[^'\n]*'|"[^"\n]*")\s*(?!,)[^)]*import\.meta\.url/, /\bimport\.meta\.resolve\(/,
+    /\brequire\(/].map(pattern => pattern.source).join('|')).exec(text);
+  if (unreadable) assert.fail(`${file}:${text.slice(0, unreadable.index).split('\n').length}: the test cannot read ${JSON.stringify(unreadable[0])}; `
+    + "load a file beside the worker with import('<path>'), from '<path>' or new URL('<path>', import.meta.url), or teach it");
+  const imports = [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.\.?\/[^'"\n]+)\1|\bnew\s+URL\s*\(\s*(['"])(\.\.?\/[^'"\n]+)\3\s*,\s*import\.meta\.url\s*\)/g)]
+    .map(match => match[2] ?? match[4]);
+  const named = [...text.matchAll(/(['"])((?:\.\.?\/)*[\w.-]+(?:\/[\w.-]+)*\.(?:[cm]?[jt]s|json))\1/g)].map(match => match[2].startsWith('../') || match[2].startsWith('./') ? match[2] : `./${match[2]}`)
+    .filter(name => spelled(path.posix.join(path.posix.dirname(file), name)));
+  return { imports, named };
+}
+
+// A worker image copies what its worker loads beside its folder one file at a time, and an image that misses one still
+// builds: the worker fails as it starts or, for a module it imports on a failure, at that failure (the Pi and OpenAI Agents
+// images lacked context-estimate.ts and context-overflow.ts from 2026-10-21 to 2026-10-23). So what each script an image
+// holds loads (tests aside) must be a file the image holds. Every Dockerfile under deploy/ that copies a worker is read.
+test('every worker image holds the files its scripts import, open or start', () => {
+  const images = repositoryFiles('deploy').filter(file => /(^|[/.])Dockerfile$/.test(file) && dockerInstructions(readFileSync(repositoryPath(file), 'utf8'))
+    .some(([word, args]) => word === 'COPY' && args.some(arg => /^apps\/[\w-]+-worker(\/|$)/.test(path.posix.normalize(arg)))));
+  // Compose and CI build these three, on both mains; Forgejo's main also has the AgentCore trial's.
+  for (const image of ['deploy/saas/pi.Dockerfile', 'deploy/saas/openai-agents.Dockerfile', 'deploy/saas/openmaus.Dockerfile']) assert.ok(images.includes(image), image);
+  const missing = [], named = new Set();
+  for (const dockerfile of images) {
+    const { held, entry } = workerImage(dockerfile), outside = [];
+    assert.ok(held.has(entry), `${dockerfile}: its CMD runs ${entry}, which it does not hold`);
+    for (const [file, from] of held) {
+      if (!/\.[cm]?[jt]s$/.test(from) || /\.test\.[cm]?[jt]s$/.test(from)) continue;
+      const loads = relativeLoads(from);
+      for (const name of loads.named) named.add(path.posix.join(path.posix.dirname(from), name));
+      for (const specifier of new Set([...loads.imports, ...loads.named])) {
+        const target = path.posix.resolve(path.posix.dirname(file), specifier);
+        if (loads.imports.includes(specifier) && !target.startsWith(`${path.posix.dirname(entry)}/`)) outside.push(target);
+        if (!held.has(target)) missing.push(`${dockerfile}: ${from} (${file}) loads ${specifier}, and the image has no ${target}`);
+      }
+    }
+    // Imports out of the folder of the script the image runs were read: the check did not pass on nothing.
+    assert.ok(outside.length, `${dockerfile}: no import out of ${path.posix.dirname(entry)} was read`);
+  }
+  // And the script the managed execution starts by its name was read so.
+  assert.ok(named.has('apps/openmaus-worker/mcp-shim.ts'), 'no script started by its name was read');
+  assert.deepEqual(missing, []);
 });
