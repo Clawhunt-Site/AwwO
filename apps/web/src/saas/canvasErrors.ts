@@ -112,8 +112,10 @@ const runErrors: Record<string, [string, string]> = {
   // each 2-15 s (15 s in all) and up to 10 MB, or no picture is beside it. The video is refused rather than made without
   // its line.
   media_voice_unavailable: ['声音参考用不了，这次没有生成，也没有扣积分：只有「视频 · 多图参考」能按声音对口型；声音要是这个画布里的 MP3 或 WAV，最多 3 段，每段 2–15 秒、合计不超过 15 秒，每段不超过 10 MB，而且至少要有一张参考图。', 'The voice reference cannot be used, so nothing was generated or charged: only Video · From references lip-syncs to voices, which must be MP3 or WAV files of this canvas, at most 3, each 2 to 15 seconds (15 seconds in all) and up to 10 MB, with at least one reference picture beside them.'],
-  // RunningHub refused a photorealistic person (its code 1505), which Video · From references takes with Real people on.
-  media_real_person_rejected: ['生成服务拒绝了写实的真人画面（RunningHub 代码 1505）。用「视频 · 多图参考」时，在节点设置里打开「真人模式」再运行；其他模型请改用不写实的人物或画面。', 'The generation service refused a photorealistic person (RunningHub code 1505). On Video · From references, turn on Real people in the node’s settings and run it again; with other models, use people or pictures that are not photorealistic.'],
+  // The generation service refused a photorealistic person (its code 1505), which Video · From references takes with
+  // Real people on. The copy names the code, never the service behind it: no user-facing string names a media provider
+  // (owner 2026-10-11), and canvasErrors.test.ts holds every message in this table to that.
+  media_real_person_rejected: ['生成服务拒绝了写实的真人画面（服务代码 1505）。用「视频 · 多图参考」时，在节点设置里打开「真人模式」再运行；其他模型请改用不写实的人物或画面。', 'The generation service refused a photorealistic person (service code 1505). On Video · From references, turn on Real people in the node’s settings and run it again; with other models, use people or pictures that are not photorealistic.'],
   image_input_unavailable: ['附带的图片读取失败，这次没有调用模型，也没有扣积分；请重新附上图片再发送。', 'An attached picture could not be read, so the model was not called and nothing was charged. Attach the picture again and resend.'],
   // A generation priced above the operator's per-generation ceiling stops before anything is made.
   media_credit_ceiling: ['这次生成需要的点数超过了单次上限，没有生成也没有扣点数；请缩短时长或降低分辨率后重试。', 'This generation would cost more than the per-generation limit, so nothing was generated or charged. Shorten the clip or lower the resolution, then try again.'],

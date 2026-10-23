@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { canvasErrorMessage, isRunFailureCopy, planErrorMessage, runErrorText, runFailureText } from '../src/saas/canvasErrors';
+import { canvasErrorMessage, isRunFailureCopy, planErrorMessage, runErrorCodes, runErrorText, runFailureText } from '../src/saas/canvasErrors';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCanvas } from '../src/saas/canvasBridge';
 import { fetchConversationIndex } from '../src/canvasAgentChat';
@@ -362,10 +362,45 @@ it('says a refused voice is the voice, not a picture, and that nothing was made 
   for (const text of [zh, en]) expect(text).not.toBe(runErrorText('media_reference_unavailable', text === zh ? 'zh' : 'en'));
 });
 
-it('tells the reader to turn on Real people when RunningHub refuses a photorealistic person (code 1505)', () => {
+it('tells the reader to turn on Real people when the service refuses a photorealistic person (code 1505)', () => {
   expect(runErrorText('media_real_person_rejected', 'zh')).toContain('「真人模式」');
   expect(runErrorText('media_real_person_rejected', 'zh')).toContain('1505');
   expect(runErrorText('media_real_person_rejected', 'en')).toContain('turn on Real people');
   expect(runErrorText('media_real_person_rejected', 'en')).toContain('1505');
   expect(runErrorText('media_voice_unavailable', 'en')).toContain('at most 3, each 2 to 15 seconds (15 seconds in all)');
+});
+
+/** The media providers behind the picture, video, sound and 3D models: a name no message a user reads may carry. */
+const PROVIDERS = ['RunningHub', 'Running Hub', 'Tripo', 'Seedream', 'Seedance', 'Jimeng', 'X-tasy', 'Xtasy', 'Kling',
+  'Hailuo', 'Volcengine', 'MiniMax', 'Suno', 'Udio', 'ElevenLabs', 'Midjourney', '即梦', '可灵', '海螺', '豆包'];
+
+/** Which provider a piece of copy names, if any. A name in Latin letters has to stand as its own word, so "audio" does
+ * not name Udio and "sparkling" does not name Kling; a name in Chinese has no such boundary to rely on — Chinese runs
+ * without spaces, and 豆包 in 豆包生成服务 sits between two letters — so those are looked for exactly as written. */
+const providerNamed = (text: string) => PROVIDERS.find(provider => (/^[\x20-\x7e]+$/.test(provider)
+  // A hyphen needs no escape outside a character class, and `\-` is an invalid escape under the u flag.
+  ? new RegExp(`(^|[^\\p{L}\\p{N}])${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(text)
+  : text.includes(provider)));
+
+it('names no media provider in any message a user reads', () => {
+  // The messages as a reader gets them: every code of the table, in both languages, through the function the app calls
+  // (owner 2026-10-11: on-screen model names, never the provider behind them). Reading them evaluated rather than
+  // scraped holds a message built by interpolation, written in double quotes, or joined from parts to the rule too.
+  const codes = runErrorCodes();
+  expect(codes.length).toBeGreaterThan(20);
+  for (const code of codes) {
+    for (const locale of ['zh', 'en'] as const) {
+      const text = runErrorText(code, locale);
+      expect(text, `${code} (${locale})`).toBeTruthy();
+      expect(providerNamed(text!), `${code} (${locale}): ${text}`).toBeUndefined();
+    }
+  }
+  // And the rest of the file's copy — the HTTP, plan and service messages, which are not in that table — from the
+  // source with its comments stripped, so a comment may still record which service a code came from. Every quote
+  // style, and short strings too: 'RunningHub' on its own is ten characters.
+  const source = readFileSync(resolve(process.cwd(), 'src/saas/canvasErrors.ts'), 'utf8');
+  const copy = [...source.replace(/^[^'"`\n]*\/\/[^'"`\n]*$/gm, '').matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\]|\\.)+)`/g)]
+    .map(match => match[1] ?? match[2] ?? match[3]);
+  expect(copy.length).toBeGreaterThan(60);
+  for (const text of copy) expect(providerNamed(text), `in: ${text.slice(0, 120)}`).toBeUndefined();
 });
