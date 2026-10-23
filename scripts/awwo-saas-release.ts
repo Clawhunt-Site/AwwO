@@ -22,7 +22,12 @@ export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'apps/web/licen
   'server/packages/adapters/hermes/LICENSE', 'third_party/adapted',
   'third_party/anatomy/LICENSE', 'third_party/clawwork/LICENSE', 'third_party/clawwork/NOTICE', goLicences, 'third_party/open-design/LICENSE',
   'third_party/openpencil/LICENSE', 'third_party/openpencil/packages/agent-native/LICENSE', 'third_party/osiris/LICENSE', 'third_party/wshobson-agents/LICENSE'];
-const sourcePaths = ['backend', 'apps/web', 'apps/pi-worker', 'apps/openai-agents-worker', 'apps/openmaus-worker', 'apps/user-models.ts', 'apps/computer-model.ts', 'apps/bedrock-bridge.ts', 'apps/bedrock-catalog.ts', 'apps/bedrock-models.json', 'third_party/openmaus-core', 'deploy/saas/workspace', ...noticePaths];
+// The workers the release carries (their runtime files: runtimeSource), and the files they load beside their folders, in
+// apps/ (the release test reads the workers' imports to keep this whole).
+export const releasedWorkers = ['pi-worker', 'openai-agents-worker', 'openmaus-worker'];
+export const sharedWorkerFiles = ['user-models.ts', 'computer-model.ts', 'bedrock-bridge.ts', 'bedrock-catalog.ts', 'bedrock-models.json',
+  'context-estimate.ts', 'context-overflow.ts'];
+const sourcePaths = ['backend', 'apps/web', ...releasedWorkers.map(worker => `apps/${worker}`), ...sharedWorkerFiles.map(file => `apps/${file}`), 'third_party/openmaus-core', 'deploy/saas/workspace', ...noticePaths];
 type DockerImage = { Id: string; Os: string; Architecture: string };
 type BuildOptions = { output: string; dockerContext: string; publicClawHuntURL: string };
 
@@ -274,7 +279,7 @@ export function buildRelease(options: BuildOptions): string {
     run('npm', ['run', 'build:saas', '--prefix', 'apps/web'], source, { VITE_CLAWHUNT_SITE_URL: options.publicClawHuntURL });
     if (!statSync(join(source, 'apps/web/dist-saas/saas.html')).isFile()) throw new Error('Missing saas.html');
     cpSync(join(source, 'apps/web/dist-saas'), join(release, 'html'), { recursive: true });
-    for (const worker of ['pi-worker', 'openai-agents-worker', 'openmaus-worker']) {
+    for (const worker of releasedWorkers) {
       const target = join(release, 'apps', worker); mkdirSync(target, { recursive: true });
       for (const name of readdirSync(join(source, 'apps', worker)).filter(runtimeSource)) {
         const file = join(source, 'apps', worker, name);
@@ -283,7 +288,7 @@ export function buildRelease(options: BuildOptions): string {
       }
       if (worker !== 'openmaus-worker') run('npm', ['ci', '--omit=dev', '--ignore-scripts'], target);
     }
-    for (const file of ['user-models.ts', 'computer-model.ts', 'bedrock-bridge.ts', 'bedrock-catalog.ts', 'bedrock-models.json']) cpSync(join(source, 'apps', file), join(release, 'apps', file));
+    for (const file of sharedWorkerFiles) cpSync(join(source, 'apps', file), join(release, 'apps', file));
     run(process.execPath, ['apps/openmaus-worker/setup.ts']);
     const core = join(source, 'apps/openmaus-worker/.runtime/core/dist-server'); verifyCore(core);
     cpSync(core, join(release, 'apps/openmaus-worker/.runtime/core/dist-server'), { recursive: true });

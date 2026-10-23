@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildEnvironment, checksumLines, copyNotices, noticePaths, parseImage, parseOptions, removeBuildTree, requiredNotices, runtimeSource, uncoveredNotices, validateTarget, verifyCore, withBuildCleanup } from './awwo-saas-release.ts';
+import { buildEnvironment, checksumLines, copyNotices, noticePaths, parseImage, parseOptions, releasedWorkers, removeBuildTree, requiredNotices, runtimeSource, sharedWorkerFiles, uncoveredNotices, validateTarget, verifyCore, withBuildCleanup } from './awwo-saas-release.ts';
 import { OUTPUT as goLicences, TARGET, bundleDifferences, bundleToolchain, checkLinkedModules, collectGoLicences, commentFamily, docFile, goLicenceBundle, goSums, licenceIds, linkedModules, moduleHash, noticeFile, sourceNotice, writeBundle } from './awwo-go-licences.ts';
 import type { GoPackage } from './awwo-go-licences.ts';
 import { UPSTREAM_REVISION, PATCH_VERSION } from '../apps/openmaus-worker/setup.ts';
@@ -28,6 +28,43 @@ test('release requires Linux amd64 and Node 24; Docker identity must match that 
 test('runtime allowlist excludes credentials, private state and tests', () => {
   for (const name of ['server.mjs', 'workspace-sandbox.ts', 'package.json', 'package-lock.json']) assert.equal(runtimeSource(name), true);
   for (const name of ['.env', '.env.example', 'node_modules', '.runtime', 'test-support.mjs', 'config.test.mjs', 'terminal-exit-fixture.mjs', 'README.md']) assert.equal(runtimeSource(name), false);
+});
+// The release copies its workers' runtime files and, beside their folders, sharedWorkerFiles, all from git archive: what
+// any of them loads by a path relative to itself must be one of those, or the release's own import check stops its build
+// (context-estimate.ts and context-overflow.ts were neither from 2026-10-21 to 2026-10-23), or the archive lacks a script
+// a worker starts. Loads are read as awwo-saas-scripts.test.mjs reads the worker images': imports (also one in a comment,
+// or a type-only one), files opened with new URL(..., import.meta.url), and a script or JSON file that one names by its
+// name or a relative path; a load those patterns cannot read fails the test.
+test('the release carries every file its workers import, open or start beside their folders', () => {
+  const tracked = new Set(trackedFiles());
+  const carried = new Set([...tracked].filter(file => {
+    const [apps, folder = '', name, ...deeper] = file.split('/');
+    return apps === 'apps' && (name === undefined ? sharedWorkerFiles.includes(folder) : releasedWorkers.includes(folder) && !deeper.length && runtimeSource(name));
+  }));
+  // git archive leaves out a file .gitattributes marks export-ignore.
+  const attributes = execFileSync('git', ['check-attr', 'export-ignore', '--', ...carried], { cwd: repository, encoding: 'utf8' });
+  assert.deepEqual(attributes.split('\n').filter(line => line.endsWith(': export-ignore: set')), []);
+  const read = (file: string): { imports: string[]; named: string[] } => {
+    const text = readFileSync(join(repository, file), 'utf8');
+    const unreadable = new RegExp([/\bimport\s*\(\s*(?!['"])/, /\bimport\s*\(\s*(?:'[^'\n]*'|"[^"\n]*")\s*(?![),])/, /\b(?:from|import)\s*\/[*/]/,
+      /\bnew\s+URL\s*\(\s*(?!['"])[^)]*import\.meta\.url/, /\bnew\s+URL\s*\(\s*(?:'[^'\n]*'|"[^"\n]*")\s*(?!,)[^)]*import\.meta\.url/, /\bimport\.meta\.resolve\(/,
+      /\brequire\(/].map(pattern => pattern.source).join('|')).exec(text);
+    if (unreadable) assert.fail(`${file}:${text.slice(0, unreadable.index).split('\n').length}: the test cannot read ${JSON.stringify(unreadable[0])}`);
+    const imports = [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.\.?\/[^'"\n]+)\1|\bnew\s+URL\s*\(\s*(['"])(\.\.?\/[^'"\n]+)\3\s*,\s*import\.meta\.url\s*\)/g)]
+      .map(match => posix.join(parentOf(file), match[2] ?? match[4] ?? ''));
+    const named = [...text.matchAll(/(['"])((?:\.\.?\/)*[\w.-]+(?:\/[\w.-]+)*\.(?:[cm]?[jt]s|json))\1/g)].map(match => posix.join(parentOf(file), match[2] ?? ''))
+      .filter(path => tracked.has(path));
+    return { imports, named };
+  };
+  const scripts = [...carried].filter(file => /\.[cm]?[jt]s$/.test(file));
+  assert.deepEqual(scripts.flatMap(file => {
+    const { imports, named } = read(file);
+    return [...new Set([...imports, ...named])].filter(target => !carried.has(target)).map(target => `${file} loads ${target}`);
+  }), []);
+  // Each reader read the loads this test is for, so it did not pass on nothing.
+  assert.ok(scripts.some(file => read(file).imports.includes('apps/context-estimate.ts')) && scripts.some(file => read(file).imports.includes('apps/bedrock-models.json'))
+    && scripts.some(file => read(file).named.includes('apps/openmaus-worker/mcp-shim.ts')));
+  for (const file of sharedWorkerFiles) assert.ok(carried.has(`apps/${file}`), file);
 });
 test('checksums cover relative npm bin links but reject escaped links and special filenames', t => {
   const root = mkdtempSync(join(tmpdir(), 'awwo-release-test-'));
@@ -513,7 +550,9 @@ test('the release copies the notices to their repository paths, the same way eve
   assert.throws(() => copyNotices(repository, join(root, 'one')));
 });
 
-// .dockerignore as Docker reads it (moby/patternmatcher): the last pattern that matches a path or one of its parents decides.
+// .dockerignore as Docker reads it (moby/patternmatcher): the last pattern that matches a path or one of its parents decides
+// (awwo-saas-scripts.test.mjs reads the worker images' as BuildKit's walker does, MatchesUsingParentResults; the two agree
+// on the API image's file).
 function dockerignoreRegExp(pattern: string): RegExp {
   let source = '';
   for (let i = 0; i < pattern.length; i += 1) {
