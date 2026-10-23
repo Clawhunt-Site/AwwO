@@ -107,7 +107,7 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 
 ## 数据与配置
 
-本地数据目录默认是 `.local/awwo-local/state`。在 Windows 上，运行时在写入任何密钥之前把这个目录设为只有当前账号和 SYSTEM 可以访问（关闭继承，只留这两个 SID 的完全控制，目录内文件随之继承），并按 SID 读回确认：目录的所有者须是当前账号、SYSTEM 或 Administrators，其中的密钥文件也只允许这两个 SID。做不到时拒绝启动。其他系统上目录权限为 700。在任何系统上，属于其他账号的目录，或已有其他内容却没有 `local.env` 的目录（指错了的 `--state`），都会被拒绝，而不会被改权限。Windows 上的检查通过 Windows PowerShell 读取权限；PowerShell 被 WDAC 或 AppLocker 限制为受约束语言模式（Constrained Language Mode）的电脑上无法检查，本地版因此不会启动。
+本地数据目录默认是 `.local/awwo-local/state`。在 Windows 上，运行时在写入任何密钥之前把这个目录设为只有当前账号和 SYSTEM 可以访问（关闭继承，只留这两个 SID 的完全控制，目录内文件随之继承），并按 SID 读回确认：目录的所有者须是当前账号、SYSTEM 或 Administrators，其中的密钥文件也只允许这两个 SID。做不到时拒绝启动。其他系统上目录权限为 700。在任何系统上，属于其他账号的目录会被拒绝；没有 `local.env` 的目录，尚未只属于本账号的只能是空的（Finder 的 `.DS_Store`、`.localized` 与 Explorer 的 `desktop.ini`、`Thumbs.db` 这类系统文件除外），已经只属于本账号的还可以有首次启动在写 `local.env` 之前留下的东西（`logs`、`media`、`openmaus`、`render-tmp`、`runtime.lock`、写到一半的 `local.env` 副本），有数据库（`postgres/PG_VERSION`）时还可以有运行时自己的全部文件：那是丢了 `local.env` 的数据目录，运行时随后说明这一点并请你恢复它。其他目录（指错了的 `--state`，或 Mac 应用早期本机模式的目录：它也只属于本账号，里面有 `models.env` 和旧的 `admin-credentials.txt`）一律被拒绝，而不会被改权限或写入。Windows 上的检查通过 Windows PowerShell 读取权限；PowerShell 被 WDAC 或 AppLocker 限制为受约束语言模式（Constrained Language Mode）的电脑上无法检查，本地版因此不会启动。
 
 | 路径 | 用途 |
 | --- | --- |

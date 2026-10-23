@@ -10,7 +10,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, dockerEnvironment,
+  DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, beforeFirstStart, dockerEnvironment, foreignEntry,
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
   PASSWORD_RESET_PENDING, passwordResetApplied, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
   resolvePostgresBin, serviceEnvironments, writeOwnerCredentials,
@@ -316,6 +316,54 @@ test('elsewhere the data folder gets mode 700, and another account\'s folder or 
     assert.equal(statSync(foreign).mode & 0o777, 0o755, 'a refused folder is left as it was');
     assert.equal(posix(fresh), 'already private');
   }
+});
+
+test('a private folder without local.env is refused when it holds more than a first start makes there', () => {
+  const posix = dir => protectStateDirectory(dir, { platform: 'linux', uid: statSync(dir).uid });
+  // The Mac app's own local mode made ~/Library/Application Support/AwwO Local private and kept these in it.
+  const older = scratch();
+  for (const name of ['models.env', 'admin-credentials.txt']) writeFileSync(path.join(older, name), 'the older app\'s');
+  mkdirSync(path.join(older, 'logs'));
+  chmodSync(older, 0o700);
+  assert.throws(() => posix(older), /has no local\.env and holds (models\.env|admin-credentials\.txt).*not an AwwO 本地版 data folder/);
+  assert.equal(readFileSync(path.join(older, 'admin-credentials.txt'), 'utf8'), 'the older app\'s', 'its files are left as they were');
+  // What a first start that stopped before local.env leaves is its own: the next start goes on.
+  const cut = scratch();
+  for (const name of ['logs', 'media', 'openmaus', 'render-tmp']) mkdirSync(path.join(cut, name));
+  writeFileSync(path.join(cut, 'runtime.lock'), '');
+  writeFileSync(path.join(cut, 'local.env.4242.0a1b2c3d.tmp'), 'cut short');
+  writeFileSync(path.join(cut, '.DS_Store'), 'Finder looked in');
+  chmodSync(cut, 0o700);
+  // A mode of 700 is a POSIX system's (Windows reports another whatever chmod is given): the folder checks run there,
+  // the rules (foreignEntry) everywhere.
+  if (process.platform !== 'win32') assert.equal(posix(cut), 'already private');
+  assert.ok(!beforeFirstStart('local.env.tmp') && !beforeFirstStart('providers.env') && !beforeFirstStart('owner-workspace.json') && !beforeFirstStart('postgres'));
+  // The rules themselves, as each kind of folder meets them.
+  const mine = { isPrivate: true, hasDatabase: false };
+  assert.equal(foreignEntry([], { isPrivate: false, hasDatabase: false }), null, 'an empty folder');
+  assert.equal(foreignEntry(['.DS_Store', 'desktop.ini'], { isPrivate: false, hasDatabase: false }), null, 'what Finder or Explorer leaves is no one\'s data');
+  assert.equal(foreignEntry(['logs', 'media'], { isPrivate: false, hasDatabase: false }), 'logs', 'a folder someone made, not private yet, is not taken for a cut start');
+  assert.equal(foreignEntry(['logs', 'media', 'runtime.lock'], mine), null, 'a private one a start made and left is');
+  assert.equal(foreignEntry(['logs', 'admin-credentials.txt'], mine), 'admin-credentials.txt', 'a sign-in file without its settings or database is another\'s');
+  assert.equal(foreignEntry(['postgres', 'logs', 'providers.env', 'admin-credentials.txt', 'owner-workspace.json'], { isPrivate: true, hasDatabase: true }), null,
+    'a data folder that lost its local.env is still one: loadLocalProfile asks for it back');
+  assert.equal(foreignEntry(['postgres', 'models.env'], { isPrivate: true, hasDatabase: true }), 'models.env');
+  assert.equal(foreignEntry(['thesis.docx', 'local.env'], { isPrivate: false, hasDatabase: false }), null, 'one with local.env is a data folder');
+  const lost = scratch();
+  mkdirSync(path.join(lost, 'postgres'));
+  writeFileSync(path.join(lost, 'postgres', 'PG_VERSION'), '18\n');
+  for (const name of ['providers.env', 'admin-credentials.txt', 'owner-workspace.json']) writeFileSync(path.join(lost, name), 'x');
+  chmodSync(lost, 0o700);
+  if (process.platform !== 'win32') assert.equal(posix(lost), 'already private', 'its own folder is not called another\'s');
+  // Windows: a folder already private to this account is read for the same reason before it is taken.
+  const windows = fakeWindows();
+  windows.folder = PRIVATE_FOLDER;
+  windows.file = PRIVATE_FILE;
+  const taken = scratch();
+  writeFileSync(path.join(taken, 'admin-credentials.txt'), 'x');
+  assert.throws(() => protectStateDirectory(taken, { platform: 'win32', run: windows.run, env: windowsEnv }), /not an AwwO 本地版 data folder/);
+  writeFileSync(path.join(taken, 'local.env'), 'x');
+  assert.equal(protectStateDirectory(taken, { platform: 'win32', run: windows.run, env: windowsEnv }), 'already private');
 });
 
 test('ports: a busy web port is an error, a busy service port moves to the next free one', async () => {

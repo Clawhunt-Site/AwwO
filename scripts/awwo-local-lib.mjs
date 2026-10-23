@@ -319,6 +319,25 @@ export function privateFile(line, sid) {
 /** What the runtime keeps in the data folder; only these take the folder's list when it is first protected. */
 const OWN_ENTRIES = new Set(['local.env', 'providers.env', 'admin-credentials.txt', 'runtime.lock', 'owner-workspace.json', 'logs', 'postgres', 'media', 'openmaus', 'render-tmp']);
 const SECRET_FILES = ['local.env', 'providers.env', 'admin-credentials.txt'];
+/** Files a folder gets from being looked at (Finder's .DS_Store and .localized, Explorer's desktop.ini and Thumbs.db):
+ *  no one's data, in a data folder or anywhere else. */
+export const SYSTEM_FILES = Object.freeze(['.DS_Store', '.localized', 'desktop.ini', 'Thumbs.db']);
+/** What a private data folder holds before its first start has written local.env: the folders and the lock that start
+ *  makes first, and a copy of local.env a write cut short left (writeFileAtomic). */
+export const beforeFirstStart = name => ['logs', 'media', 'openmaus', 'render-tmp', 'runtime.lock'].includes(name)
+  || /^local\.env\.\d+\.[0-9a-f]{8}\.tmp$/.test(name);
+
+/** Why a folder without local.env is not to be taken as a data folder (the name of what it holds that says so), or
+ *  null. One not yet private to this account (a mistaken --state, a folder someone made) must hold nothing but system
+ *  files. One already private may hold what a first start cut short leaves there (beforeFirstStart); one that also has
+ *  a database (postgres/PG_VERSION) is a data folder that lost its local.env, which loadLocalProfile says and asks for
+ *  back, and may hold all of the runtime's own files. Anything else is another's: an older app's folder (the Mac app's
+ *  own local mode kept models.env and an admin-credentials.txt of another password in a folder it made private). */
+export function foreignEntry(entries, { isPrivate, hasDatabase }) {
+  if (entries.includes('local.env')) return null;
+  const allowed = name => SYSTEM_FILES.includes(name) || (isPrivate && (beforeFirstStart(name) || (hasDatabase && OWN_ENTRIES.has(name))));
+  return entries.find(name => !allowed(name)) ?? null;
+}
 
 function currentSid(run, env) {
   const who = run(windowsTool('whoami', env), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
@@ -349,23 +368,26 @@ function readAcl(paths, run, env) {
  * nothing on Windows, where a folder under another drive's root inherits "Authenticated Users: modify": there the
  * folder gets its own access list (inheritance off; full control for this account's SID and SYSTEM), the runtime's own
  * entries in it take that list, and the result is read back by SID (readAcl). Elsewhere it gets mode 700. On every
- * system a folder another account owns, or one with other content and no local.env (a mistaken --state), is refused
- * rather than changed. A failure is an error: secrets are not written into a folder other accounts can read. Done once;
- * later starts only read the lists.
+ * system a folder another account owns, or one without local.env that holds more than a first start makes there
+ * (beforeFirstStart: an older app's folder, a mistaken --state), is refused rather than changed, however private it
+ * already is. A failure is an error: secrets are not written into a folder other accounts can read. Done once; later
+ * starts only read the lists.
  */
 export function protectStateDirectory(dir, { platform = process.platform, run = spawnSync, env = process.env, uid = process.getuid?.() } = {}) {
-  const refuseForeign = () => {
+  const refuseForeign = isPrivate => {
     const entries = readdirSync(dir);
-    if (entries.length && !entries.includes('local.env')) {
-      throw new Error(`${dir} is not empty and has no local.env, so it is not an AwwO 本地版 data folder; choose an empty or new folder`);
+    const other = foreignEntry(entries, { isPrivate, hasDatabase: existsSync(path.join(dir, 'postgres', 'PG_VERSION')) });
+    if (other !== null) {
+      throw new Error(`${dir} has no local.env and holds ${other}, which AwwO 本地版 does not make there, so it is not an AwwO 本地版 data folder; choose an empty or new folder`);
     }
     return entries;
   };
   if (platform !== 'win32') {
     const info = statSync(dir);
     if (uid !== undefined && info.uid !== uid) throw new Error(`${dir} belongs to another account; choose a data folder of your own`);
-    if ((info.mode & 0o777) === 0o700) return 'already private';
-    refuseForeign();
+    const isPrivate = (info.mode & 0o777) === 0o700;
+    refuseForeign(isPrivate);
+    if (isPrivate) return 'already private';
     chmodSync(dir, 0o700);
     return 'mode 700';
   }
@@ -376,9 +398,9 @@ export function protectStateDirectory(dir, { platform = process.platform, run = 
     return { folder, ok: privateFolder(folder, sid) && files.every(file => privateFile(file, sid)) };
   };
   const before = check();
-  if (before.ok) return 'already private';
   if (!trustedOwner(parseAcl(before.folder).owner, sid)) throw new Error(`${dir} belongs to another account; choose a data folder of your own`);
-  const entries = refuseForeign();
+  const entries = refuseForeign(before.ok);
+  if (before.ok) return 'already private';
   const icacls = args => run(windowsTool('icacls', env), args, { encoding: 'utf8', windowsHide: true });
   const set = icacls([dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '/grant:r', '*S-1-5-18:(OI)(CI)F', '/Q']);
   if (set.status !== 0) throw new Error(`Cannot restrict the data folder ${dir} to this account (icacls ${set.status})`);
