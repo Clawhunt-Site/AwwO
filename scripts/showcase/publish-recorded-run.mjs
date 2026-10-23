@@ -26,6 +26,9 @@ for (const key of ['note', 'verification', 'edition', 'model']) if (typeof notes
 // What the dialog shows under "What happened" and "Checked before publishing" is what was done, never a placeholder.
 for (const key of ['note', 'verification', 'edition']) if (/PROVISIONAL|TODO|TBD|placeholder|lorem ipsum/i.test(notes[key])) throw new Error(`notes.${key} is a placeholder, not what was done`);
 if (raw.locale !== 'en') throw new Error(`${raw.caseId}: the run's locale is ${raw.locale}, not en`);
+// How the film's web copy — the file the case dialog plays by default — is encoded. Never an upscale: a master
+// narrower than FILM_WEB_WIDTH is kept at its own width. See the note beside the encode for what this costs.
+const FILM_WEB_WIDTH = 1280, FILM_WEB_CRF = 23;
 const COMMIT = /^[0-9a-f]{8,40}$/;
 if (!COMMIT.test(notes.source?.api || '') || !COMMIT.test(notes.source?.worker || '') || typeof notes.thinking !== 'boolean')
   throw new Error('notes.source.api, notes.source.worker (commit hashes) and notes.thinking (boolean) are required');
@@ -306,9 +309,14 @@ try {
   scan('the film’s tags', probe.stdout);
   // The web copy is made once per film (kept beside the staged files by the film's own checksum), so publishing again
   // names the same staged file instead of a new encode of it.
+  // It is the smaller, faster-starting default, and it is deliberately smaller than the film: measured on THE LONG
+  // CHORD Episode I (2026-10-23), a 1680x720 24p master at 2.07 Mbps (270 MB) became 1280x548 at 891 kbps (130 MB) —
+  // 58% of the pixels and 43% of the rate. That is the price of the default download, not the ceiling of the case:
+  // ProductionFilm.tsx plays the file as delivered on request, and names the frame it is showing either way. Raise
+  // FILM_WEB_WIDTH/FILM_WEB_CRF to serve more by default, at that much more of the host's egress per view.
   const web = path.join(staged, `.web-from-${film.sha256.slice(0, 16)}.mp4`);
   if (!fs.existsSync(web)) ffmpeg('the film', ['-y', '-v', 'error', '-i', path.join(STORED, film.file), '-map', '0:v:0', '-map', '0:a:0', '-map_metadata', '-1',
-    '-vf', "scale='min(1280,iw)':-2", '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-maxrate', '2500k', '-bufsize', '5000k', '-g', '48',
+    '-vf', `scale='min(${FILM_WEB_WIDTH},iw)':-2`, '-c:v', 'libx264', '-preset', 'slow', '-crf', String(FILM_WEB_CRF), '-maxrate', '2500k', '-bufsize', '5000k', '-g', '48',
     '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', web]);
   const webBytes = fs.readFileSync(web);
   const stage = (bytes) => { const sum = sha256(bytes), name = `${sum.slice(0, 16)}.mp4`; fs.writeFileSync(path.join(staged, name), bytes); return { src: `/showcase/staged/${CASE}/${name}`, bytes: bytes.length, sha256: sum }; };
@@ -317,8 +325,12 @@ try {
   // The homepage card's excerpt: a few seconds of the film without sound, and its first frame.
   if (notes.footage?.stem) {
     const { stem, from, seconds: length } = notes.footage;
+    // crf 23, not 26. A film case's cover is the only one that is film — grain, smoke, star fields, long dissolves —
+    // where every other case's cover is a screen recording of a mostly still interface, which holds together at a far
+    // lower rate. Measured 2026-10-23: at crf 26 THE LONG CHORD's cover came out at 630 kbps, below the median 945 kbps
+    // of the 17 recorded covers beside it, so the one cover made of film was among the softest on the page.
     ffmpeg('the excerpt', ['-y', '-v', 'error', '-ss', String(from), '-t', String(length), '-i', path.join(STORED, film.file), '-an', '-map_metadata', '-1',
-      '-vf', 'scale=1280:-2', '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(ROOT, 'apps/web/showcase', `${stem}.mp4`)]);
+      '-vf', 'scale=1280:-2', '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(ROOT, 'apps/web/showcase', `${stem}.mp4`)]);
     ffmpeg('the excerpt’s poster', ['-y', '-v', 'error', '-ss', String(from), '-i', path.join(STORED, film.file), '-frames:v', '1', '-map_metadata', '-1',
       '-vf', 'scale=1280:-2', '-q:v', '3', path.join(ROOT, 'apps/web/showcase', `${stem}.jpg`)]);
   }
