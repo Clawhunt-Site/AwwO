@@ -10,8 +10,8 @@ AwwO 是一个协作式 AI 画布。登录账号后，选择执行引擎并连�
 
 - **线上版**：[awwo.clawhunt.store](https://awwo.clawhunt.store)。如站点启用了访问门禁，需要先通过门禁，再登录 AwwO 账号。
 - **Mac 版**：Apple Silicon、macOS 14 或更新版本。安装包见 [GitHub Releases](https://github.com/Clawhunt-Site/AwwO/releases)，使用与线上版相同的账号、工作区和执行服务。构建与安装说明见 [apps/macos](apps/macos/README.md)。当前包为 ad-hoc 签名，未完成 Apple 公证，首次打开可能被系统阻止。
-- **Windows 版**：轻量 WebView2 客户端，与线上版共用账号、工作区和执行服务。安装包通过 [GitHub Releases](https://github.com/Clawhunt-Site/AwwO/releases) 发布；构建方式见 [`apps/windows`](apps/windows/README.md)。需要 Windows 10/11 和网络连接。
-- Windows 客户端不会另外创建本地数据库，也不会自动运行本机命令。原有本地执行客户端保留在 `apps/desktop`；新客户端以 **AwwO Cloud** 独立安装，保留旧版和数据。
+- **Windows 本地版（AwwO Local）**：在自己的 Windows 10/11（x64）电脑上运行 AwwO 自己的数据库、API、网页和执行服务，只供一人使用，用自己的模型 Key，不需要套餐和额度。安装包见公开仓库 [awwo-local 的 Releases](https://github.com/Clawhunt-Site/awwo-local/releases)（只放安装包）；说明见 [docs/awwo-local-edition.md](docs/awwo-local-edition.md)，构建方式见 [`apps/windows-local`](apps/windows-local/README.md)。安装包暂未签名，Windows 可能提示未知发布者。
+- **Windows 线上客户端（AwwO Cloud）**：轻量 WebView2 客户端，与线上版共用账号、工作区和执行服务，需要网络连接；它不另外创建本地数据库，也不会自动运行本机命令。安装包在本仓库的 [GitHub Releases](https://github.com/Clawhunt-Site/AwwO/releases)；构建方式见 [`apps/windows`](apps/windows/README.md)。原有本地执行客户端保留在 `apps/desktop`；AwwO Cloud 独立安装，保留旧版和数据。
 
 ### 首次登录
 
