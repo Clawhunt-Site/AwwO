@@ -1,10 +1,12 @@
 **
-!apps/
-!apps/openmaus-worker/
 !apps/openmaus-worker/*.ts
 !apps/openmaus-worker/package.json
-!apps/openai-agents-worker/
 !apps/openai-agents-worker/workspace-sandbox.ts
-!third_party/
-!third_party/openmaus-core/
-!third_party/openmaus-core/**
+!third_party/openmaus-core/LICENSE
+!third_party/openmaus-core/NOTICE
+!third_party/openmaus-core/UPSTREAM-NOTICE
+
+# Never a checkout's own settings or installed packages, in any case of their names (BuildKit tells .ENV from .env,
+# Windows and macOS by default do not), wherever a pattern above lets their folder in.
+**/.[eE][nN][vV]*
+**/[nN][oO][dD][eE]_[mM][oO][dD][uU][lL][eE][sS]

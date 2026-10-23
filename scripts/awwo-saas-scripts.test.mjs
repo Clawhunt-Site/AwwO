@@ -499,11 +499,15 @@ const repositoryPath = file => path.join(root, file);
 // The files under a folder of the repository, dot files too (a COPY takes them), but installed packages and .git.
 const repositoryFiles = dir => readdirSync(repositoryPath(dir), { withFileTypes: true }).flatMap(entry => entry.name === '.git'
   || entry.name === 'node_modules' ? [] : entry.isDirectory() ? repositoryFiles(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]);
+// A folder of the repository and every folder in it, but installed packages and .git.
+const repositoryFolders = dir => [dir, ...readdirSync(repositoryPath(dir), { withFileTypes: true })
+  .filter(entry => entry.isDirectory() && entry.name !== '.git' && entry.name !== 'node_modules')
+  .flatMap(entry => repositoryFolders(path.posix.join(dir, entry.name)))];
 // Whether the repository holds a path spelled exactly so: Windows also finds apps/CONTEXT-ESTIMATE.ts, BuildKit on Linux not.
 const spelled = file => file.split('/').every((name, i, parts) => readdirSync(repositoryPath(parts.slice(0, i).join('/') || '.')).includes(name));
 // A path and each folder it is in.
 const withFolders = file => file.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')).reverse();
-// A .dockerignore pattern or a COPY source as a regular expression (moby/patternmatcher).
+// A COPY source or an rm argument as a regular expression (a .dockerignore pattern is read by ignorePattern).
 const globRegExp = glob => new RegExp('^' + glob.replace(/[.+^${}()|\\]/g, '\\$&')
   .replace(/\*\*\/|\*\*$|\*|\?/g, part => ({ '**/': '(.*/)?', '**': '.*', '*': '[^/]*', '?': '[^/]' })[part]) + '$');
 // A Dockerfile's instructions as Docker reads them: comment and blank lines left out (also inside a continued
@@ -511,14 +515,52 @@ const globRegExp = glob => new RegExp('^' + glob.replace(/[.+^${}()|\\]/g, '\\$&
 const dockerInstructions = text => text.split(/\r?\n/).filter(line => !/^\s*(#|$)/.test(line)).join('\n').replace(/\\[ \t]*\n/g, ' ')
   .split('\n').map(line => line.trim().split(/\s+/)).filter(([word]) => word).map(([word, ...args]) => [word.toUpperCase(), args]);
 
+// A .dockerignore's patterns as BuildKit reads them (ignorefile.ReadAll): a comment is a line that starts with # before any
+// blank is trimmed, and a pattern loses its blanks and a leading or trailing /.
+const ignoreRules = text => text.split(/\r?\n/).filter(line => !line.startsWith('#')).map(line => line.trim()).filter(Boolean)
+  .map(line => ({ keep: line.startsWith('!'), pattern: path.posix.normalize(line.replace(/^!\s*/, '')).replace(/^\/+|\/+$/g, '') }));
+// The .dockerignore BuildKit reads for a Dockerfile: the Dockerfile's own beside it, else the build context's.
+const contextIgnoreFile = dockerfile => (existsSync(repositoryPath(`${dockerfile}.dockerignore`)) ? `${dockerfile}.dockerignore` : '.dockerignore');
+
+// A .dockerignore pattern as moby/patternmatcher matches a path with it (Pattern.compile and match, with / for the
+// separator): a pattern without wildcards exactly, one ending in ** as a prefix, ** and then no other wildcard as a
+// suffix (**.mjs is any path ending in .mjs), and any other as an expression in which ** is any folders (anything at the
+// end), * and ? stop at /, a class and ^ are left as they are, . + ( ) | { } $ are literal and . stops at a line break;
+// ? and a class take one character, not one UTF-16 unit, as in Go. What Go and JavaScript read differently fails the test
+// instead: an escaped letter or digit (\s, \d), a class that starts with ] and a POSIX class ([:space:]).
+function ignorePattern(pattern) {
+  assert.ok(!/\[\^?\]|\[:/.test(pattern), `the test cannot read the class in the .dockerignore pattern ${pattern}; teach it`);
+  let source = '^', kind = 'exact';
+  for (let i = 0, at = 0; at < pattern.length; i++) {
+    const ch = pattern[at++];
+    if (ch === '*' && pattern[at] === '*') {
+      at += pattern[at + 1] === '/' ? 2 : 1;
+      if (at < pattern.length) [source, kind] = [`${source}([^\n]*/)?`, 'regexp'];
+      else if (kind === 'exact') kind = 'prefix';
+      else [source, kind] = [`${source}[^\n]*`, 'regexp'];
+      if (i === 0) kind = 'suffix';
+    } else if (ch === '*' || ch === '?') [source, kind] = [source + (ch === '*' ? '[^/]*' : '[^/]'), 'regexp'];
+    else if ('.+()|{}$'.includes(ch)) source += `\\${ch}`;
+    else if (ch === '\\' && at < pattern.length) {
+      assert.ok(!/[\p{L}\p{N}]/u.test(pattern[at]), `the test cannot read the escape \\${pattern[at]} in the .dockerignore pattern ${pattern}; teach it`);
+      [source, kind] = [`${source}\\${pattern[at++]}`, 'regexp'];
+    }
+    else if (ch === '[' || ch === ']') [source, kind] = [source + ch, 'regexp'];
+    else source += ch === '\\' ? '\\\\' : ch;
+  }
+  if (kind === 'exact') return name => name === pattern;
+  if (kind === 'prefix') return name => name.startsWith(pattern.slice(0, -2));
+  if (kind === 'suffix') return name => name.endsWith(pattern.slice(2)) || (pattern[2] === '/' && name === pattern.slice(3));
+  const expression = new RegExp(`${source}$`, 'u');
+  return name => expression.test(name);
+}
+
 // What a .dockerignore leaves out of the build context, as BuildKit's walker reads it (moby/patternmatcher's
 // MatchesUsingParentResults): folder by folder from the top, the last pattern that applies decides and a "!" one lets the
 // path in; a pattern that matched a folder applies to what is in it, but one passed over at a folder (it could not change
 // it) is not handed down. (awwo-saas-release.test.ts reads the API image's with MatchesOrParentMatches, which agrees there.)
 function dockerignored(text) {
-  // A comment is a line that starts with # before any blank is trimmed (ignorefile.ReadAll).
-  const rules = text.split(/\r?\n/).filter(line => !line.startsWith('#')).map(line => line.trim()).filter(Boolean)
-    .map(line => ({ keep: line.startsWith('!'), match: globRegExp(path.posix.normalize(line.replace(/^!\s*/, '')).replace(/^\/+|\/+$/g, '')) }));
+  const rules = ignoreRules(text).map(({ keep, pattern }) => ({ keep, match: ignorePattern(pattern) }));
   return file => {
     let inherited = [], out = false;
     for (const name of withFolders(file).reverse()) {
@@ -527,7 +569,7 @@ function dockerignored(text) {
       rules.forEach(({ keep, match }, i) => {
         if (!inherited[i]) {
           if (keep !== out) return;
-          matched[i] = match.test(name);
+          matched[i] = match(name);
           if (!matched[i]) return;
         }
         matched[i] = true;
@@ -547,7 +589,7 @@ function dockerignored(text) {
 // a variable, fails the test rather than be guessed at.
 function workerImage(dockerfile) {
   const { posix } = path;
-  const ignored = dockerignored(readFileSync(repositoryPath(existsSync(repositoryPath(`${dockerfile}.dockerignore`)) ? `${dockerfile}.dockerignore` : '.dockerignore'), 'utf8'));
+  const ignored = dockerignored(readFileSync(repositoryPath(contextIgnoreFile(dockerfile)), 'utf8'));
   const instructions = dockerInstructions(readFileSync(repositoryPath(dockerfile), 'utf8'));
   const last = Math.max(0, instructions.findLastIndex(([word]) => word === 'FROM'));
   const stages = instructions.slice(0, last).filter(([word, args]) => word === 'FROM' && args.at(-2)?.toUpperCase() === 'AS').map(([, args]) => args.at(-1).toLowerCase());
@@ -607,17 +649,22 @@ function relativeLoads(file) {
   return { imports, named };
 }
 
+// Every Dockerfile under deploy/ that copies a worker. Compose and CI build these three, on both mains; Forgejo's main also
+// has the AgentCore trial's.
+function workerDockerfiles() {
+  const images = repositoryFiles('deploy').filter(file => /(^|[/.])Dockerfile$/.test(file) && dockerInstructions(readFileSync(repositoryPath(file), 'utf8'))
+    .some(([word, args]) => word === 'COPY' && args.some(arg => /^apps\/[\w-]+-worker(\/|$)/.test(path.posix.normalize(arg)))));
+  for (const image of ['deploy/saas/pi.Dockerfile', 'deploy/saas/openai-agents.Dockerfile', 'deploy/saas/openmaus.Dockerfile']) assert.ok(images.includes(image), image);
+  return images;
+}
+
 // A worker image copies what its worker loads beside its folder one file at a time, and an image that misses one still
 // builds: the worker fails as it starts or, for a module it imports on a failure, at that failure (the Pi and OpenAI Agents
 // images lacked context-estimate.ts and context-overflow.ts from 2026-10-21 to 2026-10-23). So what each script an image
 // holds loads (tests aside) must be a file the image holds. Every Dockerfile under deploy/ that copies a worker is read.
 test('every worker image holds the files its scripts import, open or start', () => {
-  const images = repositoryFiles('deploy').filter(file => /(^|[/.])Dockerfile$/.test(file) && dockerInstructions(readFileSync(repositoryPath(file), 'utf8'))
-    .some(([word, args]) => word === 'COPY' && args.some(arg => /^apps\/[\w-]+-worker(\/|$)/.test(path.posix.normalize(arg)))));
-  // Compose and CI build these three, on both mains; Forgejo's main also has the AgentCore trial's.
-  for (const image of ['deploy/saas/pi.Dockerfile', 'deploy/saas/openai-agents.Dockerfile', 'deploy/saas/openmaus.Dockerfile']) assert.ok(images.includes(image), image);
   const missing = [], named = new Set();
-  for (const dockerfile of images) {
+  for (const dockerfile of workerDockerfiles()) {
     const { held, entry } = workerImage(dockerfile), outside = [];
     assert.ok(held.has(entry), `${dockerfile}: its CMD runs ${entry}, which it does not hold`);
     for (const [file, from] of held) {
@@ -636,4 +683,65 @@ test('every worker image holds the files its scripts import, open or start', () 
   // And the script the managed execution starts by its name was read so.
   assert.ok(named.has('apps/openmaus-worker/mcp-shim.ts'), 'no script started by its name was read');
   assert.deepEqual(missing, []);
+});
+
+// A checkout holds files git does not: a worker's own settings (.env, .env.local, ...: gitignored, real keys in them) and
+// the packages npm installed for the host (node_modules: Windows or macOS builds of native ones). A worker image's build
+// context must take neither: COPY apps/pi-worker/ ./ bakes the settings into the image (the AgentCore trial's build pushes
+// it to ECR) and lays the host's packages over the ones npm ci installed, as "!apps/" let both into the Pi, OpenAI Agents
+// and managed execution images until 2026-10-23. So both are planted, in several cases of their names (BuildKit tells
+// .ENV from .env, Windows and macOS by default do not), in every folder a "!" pattern of the image's .dockerignore
+// reaches, in a folder of the checkout's own in each (.local) and beside the .env files the folder already holds, and
+// where each "!" pattern lets them in itself (fitted below); the context may take none of them. That .dockerignore must
+// leave everything out first (**), so that what its "!" patterns reach is all the context can take. Not covered, by the
+// patterns or by the test: a folder whose name holds a line break (BuildKit's . stops at one, while [^/], * and a
+// pattern's trailing /** take it), which no checkout gets by accident.
+test("no worker image's build context takes a checkout's .env files or installed packages", () => {
+  const planted = ['.env', '.env.local', '.env.production', '.envrc', '.ENV', '.Env.local', 'node_modules', 'node_modules/.bin/tsc',
+    'node_modules/pkg/package.json', 'node_modules/pkg/index.js', 'node_modules/pkg/index.mjs', 'node_modules/pkg/index.ts',
+    'node_modules/@scope/pkg/node_modules/dep/index.mjs', 'NODE_MODULES/pkg/index.js', 'Node_Modules/pkg/index.mjs'];
+  // A pattern's text with each wildcard made a plain name: ** one folder (x/) or a name, * and ? x, a class its first
+  // member (a negated one x, which the proof below refuses where the class leaves x out).
+  const plain = text => text.replace(/\[(\^?)(.)[^\]]*\]|\*\*\/|\*\*|[*?]/g, (part, negated, member) => (member === undefined
+    ? (part === '**/' ? 'x/' : 'x') : negated ? 'x' : member));
+  // A name with its letters in every case (.env: 8 names).
+  const everyCase = name => [...name].reduce((names, ch) => names.flatMap(start => [...new Set([start + ch.toLowerCase(), start + ch.toUpperCase()])]), ['']);
+  // What a "!" pattern lets in itself of a checkout's own files: a .env, in every case, named to fit its last name where
+  // one can be (.env.mjs, .Env.mjs, ... for *.mjs, .envax.mjs for [a-z.]*.mjs; each kept only if the pattern alone lets it
+  // in), and node_modules/pkg (in lower, upper and title case) and a .envs folder (in every case) at its first ** (as
+  // folders of their own), or else in a folder named to fit the pattern (x.mjs/node_modules/pkg/x). Each folder probe is
+  // proved to be one: the pattern alone lets it in, and it lies in such a folder; one that cannot be fitted to a pattern
+  // fails the test rather than leave the pattern untried.
+  const fitted = pattern => {
+    const alone = dockerignored(`**\n!${pattern}`), last = pattern.split('/').at(-1), recursive = pattern.indexOf('**');
+    const base = plain(pattern.slice(0, -last.length));
+    const named = [...new Set([plain(last), `.env${plain(last)}`, `.env${plain(last.replace(/^[*?]+/, ''))}`])].filter(name => name.startsWith('.env'))
+      .flatMap(name => everyCase('.env').map(start => start + name.slice(4))).map(name => base + name).filter(file => !alone(file));
+    const folders = [...['node_modules', 'NODE_MODULES', 'Node_Modules'].map(name => `${name}/pkg`), ...everyCase('.envs')].map(folder => (recursive < 0 ? `${plain(pattern)}/${folder}/x`
+      : plain(pattern.slice(0, recursive)).replace(/[^/]$/, '$&x/') + folder + plain(pattern.slice(recursive + 2)).replace(/^(?=[^/])/, '/')));
+    for (const file of folders) assert.ok(!alone(file) && /(^|\/)(node_modules|\.envs)\//i.test(`${file}/`), `cannot fit a probe to "!${pattern}" (${file}): teach the test`);
+    return [...named, ...folders];
+  };
+  const taken = [];
+  for (const dockerfile of workerDockerfiles()) {
+    const ignoreFile = contextIgnoreFile(dockerfile), text = readFileSync(repositoryPath(ignoreFile), 'utf8'), rules = ignoreRules(text);
+    assert.ok(rules[0]?.pattern === '**' && !rules[0].keep, `${dockerfile}: ${ignoreFile} must leave everything out first (**), so that its "!" patterns name all its context takes`);
+    const allowed = rules.filter(({ keep }) => keep).map(({ pattern }) => pattern);
+    // A "!" pattern reaches the folder its path starts in, up to its first wildcard, and every folder of the repository in
+    // that; one without a wildcard, the folder it names and those in it, or the folder of the file it names.
+    const reached = new Set(allowed.flatMap(pattern => {
+      const wildcard = pattern.search(/[*?[]/);
+      const start = wildcard < 0 ? pattern : pattern.slice(0, wildcard).replace(/\/?[^/]*$/, '') || '.';
+      if (!existsSync(repositoryPath(start))) return [start];
+      return statSync(repositoryPath(start)).isDirectory() ? repositoryFolders(start) : [path.posix.dirname(start)];
+    }));
+    // Every folder the image copies a file from was planted in: the check did not pass on nothing.
+    for (const from of workerImage(dockerfile).held.values()) assert.ok(reached.has(path.posix.dirname(from)), `${dockerfile}: ${path.posix.dirname(from)} was not planted in`);
+    const ignored = dockerignored(text), names = [...planted, ...planted.map(file => `.local/${file}`)];
+    const files = [...[...reached].flatMap(folder => [...names, ...(existsSync(repositoryPath(folder))
+      ? readdirSync(repositoryPath(folder)).filter(name => /^\.env/i.test(name)) : [])].map(name => path.posix.join(folder, name))), ...allowed.flatMap(fitted)];
+    for (const file of files) if (!ignored(file)) taken.push(`${dockerfile}: ${file}`);
+  }
+  // Listed, not diffed: a pattern such as "!third_party/" takes tens of thousands of them.
+  assert.equal(taken.length, 0, `the build contexts take ${taken.length} of them:\n${taken.slice(0, 40).join('\n')}${taken.length > 40 ? '\n...' : ''}`);
 });
