@@ -15,7 +15,7 @@ import (
 // filter. A stored list is authoritative and exhaustive for that workspace: an
 // empty one permits nothing rather than everything, so an operator narrowing an
 // allowlist can never accidentally widen access. tenant is the workspace the
-// entitlement was read for (tenantModelEntitlement), "" when it was built without
+// entitlement was read for (workspaceEntitlement), "" when it was built without
 // one; only operator grants keyed by workspace (AWWO_JIMENG_WORKSPACES) read it.
 // operator says a platform administrator owns that workspace (operator_workspace.go);
 // it is read only for an unrestricted one, the only kind the media models' grant to
@@ -209,6 +209,14 @@ func tenantModelEntitlement(ctx context.Context, q querier, tid string) (modelEn
 	if e := q.QueryRow(ctx, "SELECT allowed_models IS NOT NULL,COALESCE(allowed_models,'{}') FROM tenants WHERE id=$1", tid).Scan(&restricted, &allowed); e != nil {
 		return deniedModels(), e
 	}
+	return workspaceEntitlement(ctx, q, tid, restricted, allowed)
+}
+
+// workspaceEntitlement is workspace tid's entitlement from its allowlist as read (restricted, allowed), bound to the
+// workspace, with whether a platform administrator owns it, which mediaEntitled reads beside the allowlist. A run's
+// admission reads the allowlist with its quota row (createRun, admitGraphChild) and builds its entitlement here too, so
+// a media node admitted there is entitled exactly as in the catalogue and its setup.
+func workspaceEntitlement(ctx context.Context, q querier, tid string, restricted bool, allowed []string) (modelEntitlement, error) {
 	entitlement, e := newModelEntitlement(restricted, allowed)
 	if e != nil {
 		return entitlement, e

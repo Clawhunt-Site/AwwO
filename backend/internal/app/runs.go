@@ -429,12 +429,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	entitlement, e := newModelEntitlement(restricted, allowed)
+	entitlement, e := workspaceEntitlement(r.Context(), tx, tid, restricted, allowed)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	entitlement.tenant = tid
 	// An entitled owner's plan replaces the workspace's own allowances with the account's (plans.go); read here
 	// without its lock, which the paid generation below and every model call take when they count or spend them.
 	plan, e := ownerPlan(r.Context(), tx, tid, false)
