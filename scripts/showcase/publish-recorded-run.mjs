@@ -314,7 +314,9 @@ try {
   // 58% of the pixels and 43% of the rate. That is the price of the default download, not the ceiling of the case:
   // ProductionFilm.tsx plays the file as delivered on request, and names the frame it is showing either way. Raise
   // FILM_WEB_WIDTH/FILM_WEB_CRF to serve more by default, at that much more of the host's egress per view.
-  const web = path.join(staged, `.web-from-${film.sha256.slice(0, 16)}.mp4`);
+  // Named after the settings as well as the film, so changing either constant makes a new encode rather than silently
+  // re-using the last one (this folder is never cleaned, unlike scratch and the case's own).
+  const web = path.join(staged, `.web-from-${film.sha256.slice(0, 16)}-w${FILM_WEB_WIDTH}-crf${FILM_WEB_CRF}.mp4`);
   if (!fs.existsSync(web)) ffmpeg('the film', ['-y', '-v', 'error', '-i', path.join(STORED, film.file), '-map', '0:v:0', '-map', '0:a:0', '-map_metadata', '-1',
     '-vf', `scale='min(${FILM_WEB_WIDTH},iw)':-2`, '-c:v', 'libx264', '-preset', 'slow', '-crf', String(FILM_WEB_CRF), '-maxrate', '2500k', '-bufsize', '5000k', '-g', '48',
     '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', web]);
