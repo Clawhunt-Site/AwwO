@@ -130,14 +130,19 @@ it('notes what changed since a video was recorded, each at a moment of the video
       for (const text of [note.text.en, note.text.zh]) expect(text, video.id).not.toMatch(PROVIDERS);
     }
   }
-  // What a copy of THE LONG CHORD makes again, as its case's record counts it, and what that costs: "about 64,000
-  // credits of media, more than six months of the Max plan and more than any plan makes in a day".
+});
+
+it('keeps what THE LONG CHORD’s tutorial says a copy costs true to the case and to AwwO’s prices', () => {
+  // Its recording of Episode I (2026-10-24, the file efc0ebb3…) says: "Running the copy makes all two hundred and
+  // eighty-two pictures, clips and sounds again: at the case's settings, about sixty-four thousand credits of media, more
+  // than six months of the Max plan, and more generations than any plan makes in a day." A change to the case's media or
+  // to AwwO's prices that breaks this is a note for the video (academyCatalog.ts) or a new recording; change this test
+  // with it, to what the note or the new recording says.
+  const video = ACADEMY_VIDEOS.find(entry => entry.id === 'the-long-chord');
+  if (!video?.sha256.startsWith('efc0ebb313f19c39')) throw new Error('THE LONG CHORD’s tutorial is not the recording these figures are from: check what the new one says');
   const media = PRODUCTION_RUN_SUMMARY['the-long-chord'].media!.total;
-  // Once THE LONG CHORD is recorded on Episode I this note goes, and so do these checks.
-  const chord = ACADEMY_VIDEOS.find(video => video.id === 'the-long-chord')?.notes?.find(note => note.text.en.includes('to make again'));
-  if (!chord) throw new Error('THE LONG CHORD’s copy note is gone: take its checks out with it');
-  expect([chord.text.en, chord.text.zh].every(text => text.includes(`${media} `) && text.includes('64,000'))).toBe(true);
   const { credits, mediaNodes, monthly, mostPerDay } = chordCopyPrice();
+  expect(media).toBe(282);
   expect(mediaNodes).toBe(media);
   expect(Math.abs(credits - 64_000)).toBeLessThan(1_000);
   expect(Math.floor(credits / monthly.max)).toBe(6);
@@ -146,7 +151,7 @@ it('notes what changed since a video was recorded, each at a moment of the video
 
 /** What a copy of THE LONG CHORD's case spends on its media: each media node of the case canvas at its own settings,
  *  priced as mediaCreditsFor (backend/internal/app/plans.go) prices a generation, from that file's price table and
- *  plans, so a price or a plan that changes there fails the note's figures here. The settings' multipliers (a video's
+ *  plans, so a price or a plan that changes there fails the video's spoken figures here. The settings' multipliers (a video's
  *  length and resolution, a picture's count, size and quality) mirror mediaCreditsFor's: a change to those rules there
  *  needs the same change here. */
 function chordCopyPrice() {

@@ -102,21 +102,17 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     changes: [{ on: '2026-10-24', text: {
       en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the 48 nodes its first run still makes, 43 of them media nodes.',
       zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 48 个节点，其中 43 个是媒体节点。' } }] },
-  { id: 'the-long-chord', section: 'flagship', caseId: 'the-long-chord', voice: 'en', recordedOn: '2026-10-21',
+  { id: 'the-long-chord', section: 'flagship', caseId: 'the-long-chord', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'THE LONG CHORD: a space opera made on one canvas', zh: 'THE LONG CHORD：一张画布做出的太空歌剧电影' },
-    summary: { en: 'Watch the film in the case, see how its lip sync was measured and its reels were cut, then copy its canvas as a draft. Recorded when the case was Act I on 109 nodes; it now holds the whole of Episode I.',
-      zh: '在案例里看影片，看口型同步怎么测、片子一卷卷怎么剪，再把画布复制成草稿。录制时案例只有第一幕、109 个节点；现在已是完整的第一集。' },
-    seconds: 385, src: '/showcase/staged/academy/f321b641a4adb841.mp4', bytes: 73953494, sha256: 'f321b641a4adb841e067bbe489925f76c963f9949721b6e7ad9f952f42381ef9',
-    poster: null, notes: [
-      { at: 16, since: '2026-10-22', text: {
-        en: 'The case is now the whole of Episode I: three acts and 15 min 52 s, made by 298 nodes over 93 graph runs, with six editor agents and ten edit nodes.',
-        zh: '案例现在是完整的第一集：三幕、15 分 52 秒，由 298 个节点经 93 次图运行做成，含 6 个剪辑 Agent 和 10 个剪辑节点。' } },
-      // The case canvas's 282 media nodes at their own settings, priced by mediaCreditsFor (plans.go): 64,460 credits;
-      // Max grants 10,000 a month and makes 100 generations a day (saas-academy.test reads both from plans.go).
-      { at: 357, since: '2026-10-22', text: {
-        en: 'A copy now has 282 pictures, clips and sounds to make again, not 104: at the case’s settings, about 64,000 credits of media, more than six months of the Max plan and more than any plan can generate in a day.',
-        zh: '现在复制后要重新生成 282 个图片、视频片段和声音，而不是 104 个：按案例的设置，媒体约需 64,000 点数，超过 Max 套餐六个月的点数，也超过任何套餐一天能生成的数量。' } },
-    ] },
+    summary: { en: 'Watch the film in the case, see how its lip sync was measured and its reels were cut, then copy its canvas as a draft.',
+      zh: '在案例里看影片，看口型同步怎么测、片子一卷卷怎么剪，再把画布复制成草稿。' },
+    seconds: 438, src: '/showcase/staged/academy/efc0ebb313f19c39.mp4', bytes: 90055554, sha256: 'efc0ebb313f19c3928d99a6ff32fc8243f5fd5e9044b35a3ced3dde3dc589f09',
+    poster: null,
+    // What a copy makes and costs is now in the narration: the case canvas's 282 media nodes at their own settings,
+    // priced by mediaCreditsFor (plans.go), 64,460 credits; Max grants 10,000 a month and makes 100 generations a day.
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO, on the whole of Episode I: its 298 nodes in six stages, 93 runs, six editors and ten edits, three acts on one canvas, and what a copy makes again and costs.',
+      zh: '在线上 AwwO 重新录制，讲的是完整的第一集：298 个节点、六个阶段、93 次运行、六个剪辑智能体和十个剪辑节点、一张画布上的三幕，以及副本要重新生成什么、要花多少。' } }] },
   { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Umber: a photo editor built by twelve agents', zh: 'Umber：十二个 Agent 做出的网页图片编辑器' },
     summary: { en: 'A layered photo editor in one web page: how its twelve agents wrote it in a clean room, how to copy its canvas, and the editor at work in Results.',
