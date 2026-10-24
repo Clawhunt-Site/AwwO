@@ -77,6 +77,11 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// So do the account's AwwO 本地版 keys: a session taken over could have made one (relay.go).
+	if _, e = tx.Exec(r.Context(), revokeRelayKeysSQL, uid, ""); e != nil {
+		a.dbError(w, e)
+		return
+	}
 	if e = audit(r.Context(), tx, uid, "", "auth.password_changed", uid); e != nil {
 		a.dbError(w, e)
 		return
@@ -223,6 +228,10 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM auth_sessions WHERE user_id=$1", uid); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if _, e = tx.Exec(r.Context(), revokeRelayKeysSQL, uid, ""); e != nil {
 		a.dbError(w, e)
 		return
 	}

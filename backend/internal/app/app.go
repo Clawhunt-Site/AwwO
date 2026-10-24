@@ -90,8 +90,10 @@ type App struct {
 	canvasSaves     chan struct{}
 	// canvasSaveWaiters counts the saves waiting for a turn, each holding its decoded body (at most maxCanvasSaveWaiters).
 	canvasSaveWaiters atomic.Int32
-	// relayCatalogCache holds the relay worker's catalog for a moment (relay.go).
+	// relayCatalogCache holds the relay worker's catalog for a moment, and relayLimits bound what relayed calls take of
+	// this site at once (relay_limits.go).
 	relayCatalogCache relayCatalogCache
+	relayLimits       relayLimits
 }
 type rateEntry struct {
 	start time.Time
@@ -183,7 +185,7 @@ func (a *App) Start(ctx context.Context) error {
 	if e = interruptWebReads(ctx, tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now(),credit_charge="+abandonedCreditCharge+" WHERE status='running'"); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET "+abandonedInvocation+" WHERE status='running'"); e != nil {
 		return e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -227,6 +229,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.resumeMedia(resume)
 	a.startMediaSweeper(watch)
 	a.startPlanSync(watch)
+	a.startRelaySweeper(watch)
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {

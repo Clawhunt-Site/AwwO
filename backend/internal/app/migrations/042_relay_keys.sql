@@ -7,8 +7,9 @@
 --
 -- A relayed call is one of the ledger's model calls: its run_id is a logical id of its own (run_id names no row since
 -- 013), and relay_key_id names its key, which is how the account's agents at once count the relayed calls running
--- (plans.go accountSlotsUsed). One nullable column without a default, so model_invocations is not rewritten; the short
--- lock timeout makes a busy deploy fail visibly instead of queueing every query behind it.
+-- (plans.go accountSlotsUsed). One nullable column without a default, so model_invocations is not rewritten, and a
+-- partial index that starts empty (building it reads the table once, as the API starts); the short lock timeout makes a
+-- busy deploy fail visibly instead of queueing every query behind it.
 SET LOCAL lock_timeout = '10s';
 CREATE TABLE IF NOT EXISTS relay_keys (
   id text PRIMARY KEY,
@@ -25,3 +26,5 @@ CREATE TABLE IF NOT EXISTS relay_keys (
 );
 CREATE INDEX IF NOT EXISTS relay_keys_user ON relay_keys(user_id, created_at DESC);
 ALTER TABLE model_invocations ADD COLUMN IF NOT EXISTS relay_key_id text;
+-- The relayed calls running, which a minute's sweep reads (relay_limits.go sweepRelayCalls): none at first.
+CREATE INDEX IF NOT EXISTS model_invocations_relay_running ON model_invocations(created_at) WHERE relay_key_id IS NOT NULL AND status='running';

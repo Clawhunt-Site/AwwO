@@ -286,6 +286,10 @@ func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status 
 		method = "clawhunt"
 	}
 	out := map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials, "authentication": method, "clawhuntSiteURL": a.cfg.ClawHuntURL, "edition": a.cfg.editionName()}
+	if a.cfg.Relay {
+		// The site offers AwwO 本地版 its models (relay.go): the web shows 设置 → 本机版连接.
+		out["relay"] = true
+	}
 	if redirect, ok := r.Context().Value(clawHuntReturnKey{}).(string); ok {
 		out["redirectURL"] = redirect
 	}

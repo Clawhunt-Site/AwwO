@@ -378,6 +378,11 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 // provider, nothing when it never did.
 const abandonedCreditCharge = `CASE WHEN credit_reserve IS NULL THEN NULL WHEN admission_status IN ('accepted','unknown') THEN credit_reserve ELSE 0 END`
 
+// abandonedInvocation settles a call left running with no handler or worker to finish it (App.Start after a restart,
+// sweepRelayCalls for a relayed call whose own settling failed): interrupted, its usage and cost unknown, and its
+// reserve charged once it may have reached the provider.
+const abandonedInvocation = `status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now(),credit_charge=` + abandonedCreditCharge
+
 func settleAbandonedInvocations(ctx context.Context, tx pgx.Tx, tid, rid, status string) error {
 	_, err := tx.Exec(ctx, `UPDATE model_invocations SET status=$3,usage_status=CASE WHEN admission_status IN ('accepted','unknown') THEN 'unknown' ELSE 'unavailable' END,
 	 usage_source='none',usage_reason=CASE WHEN admission_status IN ('accepted','unknown') THEN 'worker_lost' ELSE 'provider_missing' END,
