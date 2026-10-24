@@ -66,8 +66,9 @@ it('opens every section in one centre whose navigation marks the open page', asy
     const nav = await screen.findByRole('navigation', { name: '设置' });
     const current = within(nav).getAllByRole('link').filter(link => link.getAttribute('aria-current') === 'page');
     if (section === 'invites') expect(current).toHaveLength(0); // A local account has no 邀请好友 page in the list.
-    // The hosted site has no 本机 (the local edition's page): its address opens 账号安全.
-    else if (section === 'local') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=security']);
+    // The hosted site has no 本机 (the local edition's page): its address opens 账号安全, and so does 本机连接 where the
+    // site takes no local links (localRelay unsaid).
+    else if (section === 'local' || section === 'links') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=security']);
     else expect(current.map(link => link.getAttribute('href'))).toEqual([`/?account=${section}`]);
     expect(screen.queryByText('workspace')).toBeNull();
     cleanup();

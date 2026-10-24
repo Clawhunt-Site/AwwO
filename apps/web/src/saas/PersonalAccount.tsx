@@ -7,8 +7,10 @@ import { SecretInput } from "./SecretInput";
 import { clawHuntAccountURL, type AuthOptions } from './clawhuntAuth';
 import { LazyBoundary } from './LazyBoundary';
 import { isSettingsSection, SettingsFrame, useInSettingsFrame } from './settingsFrame';
+import { CloudLinkCard, type CloudLink } from './CloudLinkCard';
 
-type Provider = { id: string; name: string; runtimes: string[] };
+/** link: an engine connected by linking an account (「AwwO 线上」, CloudLinkCard), never a typed key. */
+type Provider = { id: string; name: string; runtimes: string[]; link?: boolean };
 type Connection = {
   id: string;
   name: string;
@@ -16,6 +18,8 @@ type Connection = {
   runtime: string;
   models: string[];
   hasKey: boolean;
+  /** An 「AwwO 线上」 connection's workspace on the hosted site and when its link ends. */
+  relay?: CloudLink;
 };
 type Connections = {
   items: Connection[];
@@ -187,8 +191,12 @@ export function ConnectionSettings({
   onboarding: boolean;
 }) {
   const { t, locale } = useSaaSPreferences();
-  const [providerID, setProviderID] = useState(catalog.providers[0]?.id || "");
-  const provider = catalog.providers.find((item) => item.id === providerID);
+  // The engine connected by linking an account has its own card; the key form lists the providers that take a key.
+  const linkProvider = catalog.providers.find((item) => item.link);
+  const keyProviders = catalog.providers.filter((item) => !item.link);
+  const linked = catalog.items.find((item) => item.relay && item.provider === linkProvider?.id)?.relay ?? null;
+  const [providerID, setProviderID] = useState(keyProviders[0]?.id || "");
+  const provider = keyProviders.find((item) => item.id === providerID);
   const [runtime, setRuntime] = useState(provider?.runtimes[0] || "");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
@@ -221,7 +229,10 @@ export function ConnectionSettings({
           ? t("先连接你的执行引擎", "Connect your first engine")
           : t("我的执行引擎", "My engines")
       }
-      intro={t(
+      intro={linkProvider ? t(
+        "连接 AwwO 线上账号，或填入自己的 API Key，即可在画布运行。",
+        "Connect your AwwO online account, or add your own API key, to run on the canvas.",
+      ) : t(
         "选择服务，填入 API Key，即可在画布使用自己的模型。",
         "Choose a provider and add your API key to use your models on the canvas.",
       )}
@@ -243,6 +254,7 @@ export function ConnectionSettings({
         </button>
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </PageNav>
+      {linkProvider && <CloudLinkCard linked={linked} onConnected={refresh} />}
       <div className="saas-connection-grid">
         <form
           ref={providerForm}
@@ -293,13 +305,13 @@ export function ConnectionSettings({
                 setProviderID(e.target.value);
                 setError(null); setNotice("");
                 setRuntime(
-                  catalog.providers.find((p) => p.id === e.target.value)
+                  keyProviders.find((p) => p.id === e.target.value)
                     ?.runtimes[0] || "",
                 );
                 setKey("");
               }}
             >
-              {catalog.providers.map((p) => (
+              {keyProviders.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -397,7 +409,10 @@ export function ConnectionSettings({
                 )}
                 <p>
                   {engineName(c.runtime)} · {c.models.length}{" "}
-                  {t("个模型", "models")} · API Key {t("已保存", "saved")}
+                  {t("个模型", "models")} · {c.relay
+                    ? t(`已连接线上工作区「${c.relay.workspace.name}」· ${new Date(c.relay.expiresAt).toLocaleDateString()} 到期`,
+                      `linked to the online workspace 「${c.relay.workspace.name}」 · ends ${new Date(c.relay.expiresAt).toLocaleDateString()}`)
+                    : <>API Key {t("已保存", "saved")}</>}
                 </p>
                 <p>
                   {c.provider} / {c.id.slice(-6)}
@@ -485,8 +500,11 @@ function RemoveConnectionDialog({ connection, onClose, onDeleted, onRemoved }: {
       } catch (cause) { setError(cause); } finally { setBusy(false); }
     }}>
       <h2 id="remove-connection-title">{t('移除模型连接？', 'Remove model connection?')}</h2>
-      <p>{t(`将移除“${connection.name}”。后续任务无法再使用此连接；已开始的调用可能继续完成。重新使用需要再次填写 API Key。`,
-        `Remove “${connection.name}”? New tasks cannot use this connection. Calls in progress may finish. Reconnecting requires the API key again.`)}</p>
+      <p>{connection.relay
+        ? t(`将断开“${connection.name}”（两个执行引擎都会断开），并请线上收回这台电脑的连接。已开始的调用可能继续完成。之后可以在「AwwO 线上」卡片重新连接。`,
+          `Disconnect “${connection.name}”? Both execution engines are disconnected, and AwwO online is asked to end this computer's link. Calls in progress may finish. You can connect again from the AwwO online card.`)
+        : t(`将移除“${connection.name}”。后续任务无法再使用此连接；已开始的调用可能继续完成。重新使用需要再次填写 API Key。`,
+          `Remove “${connection.name}”? New tasks cannot use this connection. Calls in progress may finish. Reconnecting requires the API key again.`)}</p>
       {removed && <p role="status">{t('连接已移除，正在更新列表。若刷新失败，请重试刷新。', 'Connection removed. Refresh the list if it could not be updated.')}</p>}
       {error !== null && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
       <div className="saas-draft-actions">

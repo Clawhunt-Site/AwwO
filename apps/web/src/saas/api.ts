@@ -67,7 +67,9 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string;
   /** The deployment: the hosted site, or the local edition (edition.ts). An API that does not say is the hosted site. */
-  edition?: 'hosted' | 'local' };
+  edition?: 'hosted' | 'local';
+  /** The hosted site takes AwwO 本地版's links (docs/awwo-cloud-relay.md): 设置 shows 本机连接. */
+  localRelay?: boolean };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
  * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
@@ -123,6 +125,19 @@ function serviceCodes(): Record<string, [string, string]> {
     provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],
     invalid_connection: ['请选择正确的服务商、执行引擎并填写有效密钥。','Select a provider, supported engine and valid API key.'],
     connection_limit: ['最多保存 8 个个人连接。','Up to eight personal connections are allowed.'],
+    // AwwO 本地版's 「AwwO 线上」 engine and the hosted site's 本机连接 (docs/awwo-cloud-relay.md).
+    cloud_unreachable: ['这台电脑连不上 AwwO 线上（awwo.clawhunt.store），请检查网络后重试。', 'This computer cannot reach AwwO online (awwo.clawhunt.store). Check the network and try again.'],
+    cloud_link_unavailable: ['AwwO 线上暂未开放本地版连接，请稍后再试。', 'AwwO online does not take connections from AwwO 本地版 yet. Try again later.'],
+    cloud_link_busy: ['AwwO 线上暂时繁忙，请一分钟后重试。', 'AwwO online is busy. Try again in a minute.'],
+    cloud_link_failed: ['AwwO 线上没有接受这次连接，请重试；仍不行请更新 AwwO 本地版。', 'AwwO online did not take this connection. Try again; if it keeps failing, update AwwO 本地版.'],
+    cloud_link_required: ['「AwwO 线上」不用填 API Key，请用它自己的卡片连接线上账号。', '「AwwO 线上」 takes no API key: connect your online account from its own card.'],
+    no_cloud_link: ['没有等待中的连接，请重新开始连接。', 'No connection is waiting. Start connecting again.'],
+    link_not_found: ['没有找到等待确认的连接：确认码可能已过期或已用过。请回到 AwwO 本地版重新开始连接。', 'No connection is waiting with this code: it may have expired or been used. Start connecting again in AwwO 本地版.'],
+    link_limit: ['最多连接 10 台电脑，请先断开一台。', 'At most ten computers can be connected. Disconnect one first.'],
+    link_busy: ['连接请求太多，请一分钟后重试。', 'Too many connection requests. Try again in a minute.'],
+    link_unconfirmed: ['请先勾选确认：这个确认码显示在你自己的电脑上。', 'First confirm that this code is shown on your own computer.'],
+    sign_in_again: ['为保护你的账号，确认连接前需要重新登录。', 'To protect your account, sign in again before you approve a connection.'],
+    cloud_origin_changed: ['这条连接属于另一个线上站点，请移除后重新连接 AwwO 线上。', 'This connection belongs to another AwwO online site. Remove it and connect again.'],
     email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],

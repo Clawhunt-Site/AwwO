@@ -150,6 +150,78 @@
 .saas-connection-list button {
   flex-shrink: 0;
 }
+/* 「AwwO 线上」 (CloudLinkCard.tsx) leads 我的引擎 in AwwO 本地版, above the key form. */
+.saas-cloud-link-card {
+  margin-bottom: 24px;
+  border-top: 3px solid var(--saas-accent);
+}
+.saas-cloud-link-waiting {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.saas-cloud-link-waiting p {
+  margin: 0;
+}
+.saas-cloud-link-code {
+  font: 600 32px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.12em;
+  user-select: all;
+}
+/* The hosted site's 本机连接 (settings/links.tsx). */
+.saas-link-code-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.saas-link-code-form label {
+  flex: 1 1 200px;
+}
+.saas-link-request {
+  display: grid;
+  gap: 12px;
+}
+.saas-link-request p {
+  margin: 0;
+}
+.saas-link-request p.saas-link-warning {
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: var(--saas-warning-bg);
+  color: var(--saas-warning);
+  font-size: 13px;
+}
+.saas-link-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 600;
+}
+.saas-link-confirm input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.saas-link-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.saas-link-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--saas-border);
+}
+.saas-link-list li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.saas-link-list p {
+  margin: 4px 0 0;
+}
 .saas-recovery {
   max-width: 500px;
   margin: auto;
