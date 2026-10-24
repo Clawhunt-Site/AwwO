@@ -19,7 +19,7 @@ func TestCloudOriginIsTheLocalEditionsAlone(t *testing.T) {
 	for origin, ok := range map[string]bool{"": true, "https://awwo.example": true, "https://awwo.example/": true, "http://127.0.0.1:8187": true, "http://localhost:9": true,
 		"http://awwo.example": false, "https://awwo.example/path": false, "https://u:p@awwo.example": false, "ftp://awwo.example": false, "https://awwo.example?x=1": false, "nonsense": false,
 		"HTTPS://awwo.example": false, "http://[::1]:8187": true, "https://[2001:db8::1]:8443": true, "http://[2001:db8::1]": false,
-		"https://relay_test.example": true, "https://bücher.example": true, "https://awwo.example:99999": false, "https://awwo.example?": false, "https://": false} {
+		"https://relay_test.example": true, "https://bücher.example": true, "https://awwo.example:99999": false, "https://awwo.example?": false, "https://awwo.example#": false, "https://": false} {
 		c := local
 		c.LocalCloudOrigin = origin
 		if (c.Validate() == nil) != ok {
@@ -52,7 +52,7 @@ func TestCloudBudgetLeavesRoomForWhatAWorkerAdds(t *testing.T) {
 	if got := cloudBudget(cloudModel{ContextWindow: 32768, MaxOutputTokens: 4096}); got != 28416-4096 {
 		t.Fatal("at least 4,096 tokens", got)
 	}
-	// Within the relay's request size: at a rate of 3.4, 504 KiB less 64 KiB hold 120,470 tokens with a tenth for escapes.
+	// Within the relay's request size: at a rate of 3.4, 504 KiB less 64 KiB hold 88,345 tokens with half again for escapes.
 	if got := cloudBudget(cloudModel{ContextWindow: 200000, MaxOutputTokens: 32000, ProseBytesPerToken: 3.4, MaxRequestBytes: relayBodyLimit}); got != opusBudget {
 		t.Fatal("held by the request size", got)
 	}
@@ -68,6 +68,8 @@ type fakeCloud struct {
 	status atomic.Int32
 	empty  atomic.Bool
 	delay  atomic.Int64 // how long it holds each answer
+	// delayFirst is how long it holds the next answer alone.
+	delayFirst atomic.Int64
 }
 
 const cloudKey = "awwo_rk_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
@@ -80,17 +82,19 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 			t.Errorf("unexpected cloud call %s %s", r.Method, r.URL.Path)
 		}
 		f.reads.Add(1)
-		time.Sleep(time.Duration(f.delay.Load()))
+		// Its answer is as it stood when the request came, however late it is sent.
+		status, empty := int(f.status.Load()), f.empty.Load()
+		time.Sleep(time.Duration(f.delay.Load() + f.delayFirst.Swap(0)))
 		if r.Header.Get("Authorization") != "Bearer "+cloudKey {
 			w.WriteHeader(401)
 			io.WriteString(w, `{"error":{"code":"relay_key_invalid"}}`)
 			return
 		}
-		if status := int(f.status.Load()); status != 200 {
+		if status != 200 {
 			w.WriteHeader(status)
 			return
 		}
-		if f.empty.Load() {
+		if empty {
 			io.WriteString(w, `{"object":"list","data":[]}`)
 			return
 		}
@@ -131,7 +135,7 @@ func settleCloudReads(t *testing.T, a *App) {
 
 // The hosted limits the fake cloud's two models run within, as cloudBudget makes them: Opus's held by the relay's
 // request size at its rate of 3.4 (the fake names none: the relay's own, 504 KiB), GLM's by its window.
-const opusBudget, glmBudget = 120470, 100570
+const opusBudget, glmBudget = 88345, 100570
 
 func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T) {
 	h, cloud, owner, tid, uid := localCloudHarness(t)
@@ -303,6 +307,43 @@ func TestPostgresCloudConnectionsAreReadWhenTheLocalEditionStarts(t *testing.T) 
 	h.a.cfg.Edition = ""
 	if e := h.a.warmCloudModels(context.Background()); e != nil || cloud.reads.Load() != 3 {
 		t.Fatal("read on the hosted site", e)
+	}
+}
+
+func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
+	h, cloud, owner, _, uid := localCloudHarness(t)
+	id := h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
+	ctx := context.WithValue(context.Background(), userKey{}, User{ID: uid})
+	lateRead := func() {
+		h.a.cloudModelCache.mu.Lock()
+		entry := h.a.cloudModelCache.entries[id]
+		entry.at = time.Now().Add(-cloudModelsTTL)
+		h.a.cloudModelCache.entries[id] = entry
+		h.a.cloudModelCache.mu.Unlock()
+		cloud.delayFirst.Store(int64(500 * time.Millisecond))
+		reads := cloud.reads.Load()
+		h.a.personalRuntime(ctx, runtimePI, false)
+		for cloud.reads.Load() == reads {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// A read in the background that the hosted site answered with the models, sent after a refresh it refused: the
+	// refusal stands.
+	lateRead()
+	cloud.status.Store(401)
+	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 422)
+	settleCloudReads(t, h.a)
+	if _, e := h.a.personalRuntime(ctx, runtimePI, false); e == nil {
+		t.Fatal("an older read put back the models of a key refused since")
+	}
+	// Nor does one put back a deleted connection's.
+	cloud.status.Store(200)
+	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
+	lateRead()
+	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
+	settleCloudReads(t, h.a)
+	if _, kept := h.a.cloudEntry(id); kept {
+		t.Fatal("a deleted connection's models put back")
 	}
 }
 

@@ -57,8 +57,9 @@ func (c Config) cloudOrigin() string {
 // computer (a test's hosted API), written as the workers read it (a scheme in lower case: user-models.ts, config.py);
 // no path, query or credentials.
 func validCloudOrigin(raw string) bool {
+	// A ? or # at all, even with nothing after it (which url.Parse reads as none), would hold the relay's path appended.
 	u, e := url.Parse(strings.TrimRight(raw, "/"))
-	if e != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != "" || u.Hostname() == "" || !strings.HasPrefix(raw, u.Scheme+"://") {
+	if e != nil || strings.ContainsAny(raw, "?#") || u.User != nil || u.Path != "" || u.Hostname() == "" || !strings.HasPrefix(raw, u.Scheme+"://") {
 		return false
 	}
 	if port := u.Port(); port != "" {

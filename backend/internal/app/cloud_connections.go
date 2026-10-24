@@ -50,12 +50,15 @@ type cloudModel struct {
 // the output and 256), less a tenth of it, at least 4,096 tokens, for what a worker adds to a call beyond its text (its
 // tools' definitions, the JSON around its messages), which the hosted worker counts and this API's budget does not. It
 // is also held within the relay's request size: a text of n tokens at the model's rate is at most n×rate bytes, which
-// JSON's escapes may grow by a tenth, and 64 KiB are left for the tools and the JSON around the messages.
+// JSON's escapes grow by half for a text of short lines (a line's end, prose at the rate, is two bytes escaped; Chinese
+// with blank lines between its lines measured 1.4), and 64 KiB are left for the tools and the JSON around the messages.
+// A call past the request size all the same is refused by the relay as too large for its model, which the workers read
+// as the size refusal it is (relayTooLarge).
 func cloudBudget(m cloudModel) int {
 	limit := m.ContextWindow - m.MaxOutputTokens - 256
 	budget := limit - max(4096, limit/10)
 	if m.MaxRequestBytes > 0 {
-		budget = min(budget, int(float64(m.MaxRequestBytes-64<<10)/(max(m.ProseBytesPerToken, 1)*1.1)))
+		budget = min(budget, int(float64(m.MaxRequestBytes-64<<10)/(max(m.ProseBytesPerToken, 1)*1.5)))
 	}
 	return budget
 }
@@ -136,9 +139,10 @@ func cloudDiscoveryFailed(w http.ResponseWriter, e error) {
 const cloudModelsRetry = time.Minute
 
 type cloudModelCache struct {
-	mu      sync.Mutex
-	entries map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
-	reading map[string]bool            // connection id → its models are being read in the background
+	mu         sync.Mutex
+	entries    map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
+	reading    map[string]bool            // connection id → its models are being read in the background
+	generation map[string]uint64          // connection id → how many times what is known of it was written
 }
 
 type cloudModelEntry struct {
@@ -164,18 +168,50 @@ func (a *App) rememberCloudModels(connection string, models map[string]cloudMode
 	a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now(), models: models})
 }
 
+// rememberCloudEntry keeps what is known of a connection's hosted models (nil: nothing, the connection deleted), as a
+// connection saved, refreshed or deleted learns it: newer than any read begun before (publishCloudEntry).
 func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.write(connection, entry)
+}
+
+// write keeps entry for connection, c.mu held.
+func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
 	if c.entries == nil {
 		c.entries = map[string]cloudModelEntry{}
 	}
+	if c.generation == nil {
+		c.generation = map[string]uint64{}
+	}
+	c.generation[connection]++
 	if entry == nil {
 		delete(c.entries, connection)
 		return
 	}
 	c.entries[connection] = *entry
+}
+
+// cloudGeneration is how many times what is known of a connection's hosted models has been written, which a read notes
+// when it begins.
+func (a *App) cloudGeneration(connection string) uint64 {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation[connection]
+}
+
+// publishCloudEntry keeps what a read begun at generation learnt, unless something was kept meanwhile (the connection
+// saved again, refreshed, refused or deleted): that is newer than the read's answer, which would put back models the
+// hosted site has since refused, or a deleted connection's.
+func (a *App) publishCloudEntry(connection string, generation uint64, entry *cloudModelEntry) {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation[connection] == generation {
+		c.write(connection, entry)
+	}
 }
 
 // cloudModels is a connection's hosted models' limits: as read within cloudModelsTTL, else read again with its key.
@@ -204,6 +240,7 @@ func (a *App) cloudModels(ctx context.Context, user, connection string, sealed [
 // readCloudModels reads a connection's hosted models with its key and keeps what it learnt: the models and their
 // limits, or why not; while the hosted site is out of reach, the limits read last, read again a minute later.
 func (a *App) readCloudModels(ctx context.Context, user, connection string, sealed []byte) (map[string]cloudModel, error) {
+	generation := a.cloudGeneration(connection)
 	key, e := a.openCredential(user, connection, sealed)
 	if e != nil {
 		return nil, e
@@ -212,13 +249,13 @@ func (a *App) readCloudModels(ctx context.Context, user, connection string, seal
 	entry, ok := a.cloudEntry(connection)
 	switch {
 	case e == nil:
-		a.rememberCloudModels(connection, models)
+		a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now(), models: models})
 		return models, nil
 	case ok && entry.models != nil && !cloudKeyRefused(e):
-		a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
+		a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
 		return entry.models, nil
 	}
-	a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now(), err: e})
+	a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now(), err: e})
 	return nil, e
 }
 
