@@ -994,6 +994,10 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 	// rest. Reporting every count would write a row about twice a second (REASONING_REPORT_MS) — up to about 1,800
 	// for a quarter-hour of reasoning, on far more runs than the planner's — and the page needs no more than the
 	// fact to start its own clock (owner 2026-10-23, asked as a cost decision).
+	//
+	// What a charge reads of them is separate and is not a count either: whether any reasoning carried something,
+	// which settles a call the provider refused before it streamed anything (owner 2026-10-24). See `case
+	// "reasoning"` below.
 	var progress *plannerProgress
 	activity := plannerActivityHeader()
 	if kind == "planner" {
@@ -1121,16 +1125,30 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				finish("failed", output.String(), "invalid_runtime_event")
 				return
 			}
+			// Reasoning that carried something is what two places settle a call on as proof the provider did work:
+			// creditCharge's refusal branch and sizeRefusal (plans.go, below). Both read that proof from the
+			// reasoning a run was told about, and only a planner run told them, so on a money path the same guards
+			// held for a planner call and were vacuous for a node one: a node call the provider refused inside
+			// quickRefusal after its model had produced reasoning settled at nothing, which is what this closes
+			// (owner 2026-10-24: 「计费缺口按你的建议改」). For sizeRefusal it is defence in depth rather than a
+			// live gap — no shipped worker reports a context limit once reasoning has begun (pi-task.mjs gates on
+			// !reasoningStarted, and the Python worker's on a 400/413/422 before any stream) — so it guards the
+			// combination against a worker that one day could.
+			//
+			// Only above zero, which is the worker's own distinction: its contract is "null for nothing, 0 when it
+			// only began" (agent-runtime.mjs reasoningActivity), and a responses-protocol model reports that zero
+			// the moment it opens a reasoning item, unthrottled. Having begun is not having worked, and a refusal
+			// answered before anything was generated is one this product does not bill (refusedBeforeOutput).
+			//
+			// What stays out of it on both paths is the magnitude. These are characters — code points the worker
+			// counted — and the one place that would read a number from them prices tokens, around two characters
+			// to one by this module's own deliberately low estimate, so passing them on would bill reasoning at
+			// several times its size. Nothing about what a call costs per token changes here.
+			if *ev.Characters > 0 {
+				facts.Reasoned = true
+			}
 			if progress == nil {
-				// A node run keeps the fact, once, and none of the counts: the page starts its own clock from it.
-				//
-				// The counts are deliberately NOT added to this run's hidden tokens. What a run is charged from is
-				// a separate decision from what its page says, and this change was asked for as the latter; a node
-				// run's charge is therefore exactly what it was. Worth knowing where that leaves things: for a call
-				// the provider refused without reporting usage, creditCharge (plans.go) and sizeRefusal both read
-				// hidden tokens as "did the provider do work?", so a node run that reasoned for minutes and was
-				// then refused is still charged nothing while this very row says work happened. That gap predates
-				// this change — the row only makes it visible — and closing it is the owner's to decide.
+				// A node run keeps the fact for its page too, once, and none of the counts.
 				//
 				// The flag is set only once the row is in: a write that failed would otherwise lose the signal for
 				// the whole run, since every later count is dropped. The planner's equivalent retries the same way.
@@ -1287,7 +1305,8 @@ func plannerSpentOutput(u InvocationUsage, s executionSnapshot) bool {
 // settles as refused before it started (not counted, not paid for). Its run fails as context_limit either way (its
 // caller maps the code), which a canvas node does not run again (graph_retry.go) and the reader is told is too large.
 func sizeRefusal(facts *invocationFacts) bool {
-	return (facts.WorkerCode == "MODEL_CONTEXT_LIMIT" || facts.WorkerCode == "CONTEXT_LIMIT") && facts.OutputBytes == 0 && facts.HiddenTokens == 0 &&
+	return (facts.WorkerCode == "MODEL_CONTEXT_LIMIT" || facts.WorkerCode == "CONTEXT_LIMIT") && facts.OutputBytes == 0 &&
+		facts.HiddenTokens == 0 && !facts.Reasoned &&
 		facts.Usage.Status != "reported" && facts.Usage.Status != "partial" && facts.sinceSent(time.Now()) < quickRefusal()
 }
 

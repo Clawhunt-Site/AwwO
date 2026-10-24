@@ -750,10 +750,13 @@ func TestPostgresPlannerProgressCountsAWithheldReasoningPreamble(t *testing.T) {
 	}
 }
 
-func TestPostgresANodeRunSaysItsModelStartedReasoningOnceAndKeepsNoCounts(t *testing.T) {
+func TestPostgresANodeRunSaysItsModelStartedReasoningOnceAndPublishesNoCounts(t *testing.T) {
 	// A node run asks for reasoning activity like a planner run, since on a reasoning model the first token can be
-	// minutes away and all the page can say until then is that a run is in flight. It keeps the fact and none of the
-	// counts: one `reasoning_started` event however many the worker sends, and never a planner's `progress`.
+	// minutes away and all the page can say until then is that a run is in flight. What it publishes is the fact and
+	// none of the counts: one `reasoning_started` event carrying only its type, however many the worker sends, and
+	// never a planner's `progress`. A reader is never shown a count because a count of withheld reasoning is the
+	// reasoning itself, and from a node run no count goes anywhere else either: what a charge reads is that
+	// reasoning happened, not how much (TestPostgresANodeRunsReasoningReachesWhatSettlesTheCall).
 	var activity atomic.Value
 	pi := plannerWorker(t, &activity, func(string) []map[string]any {
 		return []map[string]any{{"type": "reasoning", "characters": 12}, {"type": "reasoning", "characters": 480},
@@ -799,12 +802,9 @@ func TestPostgresANodeRunSaysItsModelStartedReasoningOnceAndKeepsNoCounts(t *tes
 		if said < 0 || settled < 0 || said > settled {
 			t.Fatalf("run %d: reasoning_started at %d, terminal at %d, of %d events", turn, said, settled, len(events))
 		}
-		// And the run is charged exactly as before: the counts are not this run's hidden tokens.
-		var hidden int64
-		if e := h.db.QueryRow(context.Background(),
-			"SELECT COALESCE(sum(hidden_tokens),0) FROM model_invocations WHERE tenant_id=$1 AND run_id=$2", tid, id).Scan(&hidden); e == nil && hidden != 0 {
-			t.Fatalf("run %d: a node run's reasoning counts became hidden tokens: %d", turn, hidden)
-		}
+		// A node run's counts reach nothing at all: hidden tokens are a planner's, and what a charge takes from a
+		// node run is the bare fact that reasoning happened. That is pinned where it settles money instead, in
+		// TestPostgresANodeRunsReasoningReachesWhatSettlesTheCall and on creditCharge itself.
 	}
 }
 

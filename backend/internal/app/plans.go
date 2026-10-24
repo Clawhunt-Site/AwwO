@@ -322,12 +322,18 @@ func (a *App) creditReserve(runtime, model string, inputBytes int64) (*int, erro
 
 // creditCharge is what a settled paid-route call costs. A call that never reached the provider costs nothing. A
 // call with reported usage costs that usage at its frozen price. A call the provider refused before producing
-// anything (a rate limit, a rejected credential, an outage) costs nothing. A call that may have reached the provider
-// but left no trace of it (no terminal report, no streamed text) costs its reserve. Any other call, a cancelled or
-// failed one, or one whose usage was not reported, costs the larger of its reserve, any partly reported usage, and an
-// estimate from the bytes it sent and streamed plus its hidden reasoning: the larger of the reasoning it reported
-// (hidden tokens) and the time before its first streamed text (unseen).
-func creditCharge(reserve int, notIncurred, refused, reached bool, u InvocationUsage, price json.RawMessage, bytesIn, bytesOut, hidden int64, unseen time.Duration) int {
+// anything (a rate limit, a rejected credential, an outage) and whose model was never reported reasoning costs
+// nothing. A call that may have reached the provider but left no trace of it (no terminal report, no streamed text)
+// costs its reserve. Any other call, a cancelled or failed one, or one whose usage was not reported, costs the larger
+// of its reserve, any partly reported usage, and an estimate from the bytes it sent and streamed plus its hidden
+// reasoning: the larger of the reasoning it reported (hidden tokens) and the time before its first streamed text
+// (unseen).
+//
+// `reasoned` is only whether the provider worked and never how much: it stops a refusal settling at nothing, which
+// leaves it costing its reserve or an estimate of what it sent, whichever is larger. It is deliberately absent from
+// that estimate, because what a run is told about its reasoning is a count of characters and everything the estimate
+// adds up is tokens.
+func creditCharge(reserve int, notIncurred, refused, reached bool, u InvocationUsage, price json.RawMessage, bytesIn, bytesOut, hidden int64, reasoned bool, unseen time.Duration) int {
 	if notIncurred {
 		return 0
 	}
@@ -342,7 +348,7 @@ func creditCharge(reserve int, notIncurred, refused, reached bool, u InvocationU
 		if cost, _ := EstimateInvocationCost(price, u); cost != nil {
 			charge = max(charge, creditsFor(*cost))
 		}
-	} else if refused && u.Status != "reported" && hidden <= 0 {
+	} else if refused && u.Status != "reported" && hidden <= 0 && !reasoned {
 		// A report, even one its price cannot read, or reasoning the run was told about, says the provider did work.
 		return 0
 	}
