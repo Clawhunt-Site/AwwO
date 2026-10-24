@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { ArrowLeft, ArrowRight, GraduationCap, Play, RotateCcw, X } from 'lucide-react';
 import { localeHtmlLang, type UiLocale } from '../locale';
 import { useSaaSPreferences } from './preferences';
-import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, type AcademyNote, type AcademySection, type AcademyVideo } from './academyCatalog';
+import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, type AcademyChange, type AcademyNote, type AcademySection, type AcademyVideo } from './academyCatalog';
 import { PRODUCTION_CASES, type ProductionCase } from './productionCatalog';
 import { canOpenCase, caseURL, openCase, subscribeCaseOpeners } from './caseLink';
 import { currentSaaSCanvas, subscribeSaaSCanvas } from './canvasBridge';
@@ -32,18 +32,28 @@ function recorded(day: string, locale: UiLocale) {
   return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(date);
 }
 
+/** 24 Oct, 10月24日. */
+function shortDay(day: string, locale: UiLocale) {
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+}
+
 function VideoCard({ video, locale, t, onPlay }: { video: AcademyVideo; locale: UiLocale; t: T; onPlay: (video: AcademyVideo) => void }) {
   const id = useId();
   const item = caseOf(video);
+  // The latest update, on the poster and in what the card's button describes.
+  const updated = video.changes?.[0];
   return <li className="academy-card">
     <div className="academy-card-media">
       <img src={posterOf(video)} alt="" loading="lazy" decoding="async" />
       <span className="academy-card-play" aria-hidden="true"><Play size={18} /></span>
+      {updated && <span id={`${id}-updated`} className="academy-card-updated">
+        {t(`${shortDay(updated.on, locale)}更新`, `Updated ${shortDay(updated.on, locale)}`)}</span>}
       <span className="academy-card-duration"><Play size={9} aria-hidden="true" />{academyDuration(video.seconds)}</span>
     </div>
     <div className="academy-card-copy">
       {item && <span className="academy-card-case" lang="en">{item.title}</span>}
-      <h4><button type="button" className="academy-card-open" aria-describedby={`${id}-summary`} data-video-id={video.id} onClick={() => onPlay(video)}>{video.title[locale]}</button></h4>
+      <h4><button type="button" className="academy-card-open" aria-describedby={updated ? `${id}-updated ${id}-summary` : `${id}-summary`} data-video-id={video.id}
+        onClick={() => onPlay(video)}>{video.title[locale]}</button></h4>
       <p id={`${id}-summary`} className="academy-card-summary">{video.summary[locale]}</p>
     </div>
   </li>;
@@ -70,6 +80,18 @@ function Library({ filter, setFilter, locale, t, onPlay }: { filter: Filter; set
         .map(video => <VideoCard key={video.id} video={video} locale={locale} t={t} onPlay={onPlay} />)}</ul>
     </section>)}
   </>;
+}
+
+/** How the video was updated after it was first published, newest first. */
+function Updates({ changes, locale, t }: { changes: ReadonlyArray<AcademyChange>; locale: UiLocale; t: T }) {
+  const id = useId();
+  return <section className="academy-updates" aria-labelledby={id}>
+    <h3 id={id}>{t('更新记录', 'Updates')}</h3>
+    <ol role="list">{changes.map(change => <li key={`${change.on} ${change.text.en}`}>
+      <time dateTime={change.on}>{recorded(change.on, locale)}</time>
+      <p>{change.text[locale]}</p>
+    </li>)}</ol>
+  </section>;
 }
 
 /** What has changed since the video was recorded: each note plays the video from where its span starts. While the video
@@ -150,6 +172,7 @@ function Player({ video, list, autoPlay, locale, t, onPick, onClose }: { video: 
         <p className="academy-player-meta">{[academyDuration(video.seconds), voice, t(`录于 ${recorded(video.recordedOn, locale)}`, `Recorded ${recorded(video.recordedOn, locale)}`)].join(' · ')}</p>
         <p className="academy-player-summary">{video.summary[locale]}</p>
         {video.section === 'build' && <p className="academy-player-how">{pick(SECTION_COPY.build.note, t)}</p>}
+        {video.changes?.length ? <Updates changes={video.changes} locale={locale} t={t} /> : null}
         {openTheCase && <div className="academy-player-actions">{openTheCase}</div>}
         {upNext.length > 0 && <nav className="academy-up-next" aria-label={t('接下来', 'Up next')}><h3>{t('接下来', 'Up next')}</h3>
           <ol role="list">{upNext.map(value => <li key={value.id}><button type="button" onClick={() => onPick(value)}>

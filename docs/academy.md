@@ -36,11 +36,18 @@ video), the day AwwO changed (`since`) and what to do now, in both languages. Th
 recorded again: a new take, spliced into the edit at the same place, rendered as the rest of the motion version, staged under
 its new sha256 and put in the entry with the note removed.
 
-The notes of 2026-10-24 (31, on all 27 videos) come from that day's audit of every video against the changelog: the 17 build
-videos' Configure step (the runtime AwwO now picks itself), the EV plant digital twin and Neon Circuit racer cases (rebuilt on
-three.js r186), what the canvas assistant says on a fresh copy of PALLWARD, Umber, Backprop, Errand and Roost, THE LONG CHORD,
-now Episode I, with what a copy makes and costs, and in the four how-tos the links between a direct task and a plan for the
-canvas (gone) and the code how-to's recap on refunds. A cost in a note is the case canvas's own media nodes priced by
+A video updated after it was first published logs it in `changes` (the day and the words in both languages, newest
+first): its card says **Updated 24 Oct** / **10月24日更新**, and the dialog lists its updates beside it as **更新记录** /
+**Updates**. Recorded again in full, as the five flagships were on 2026-10-24 (a new take of the same steps with
+`take_flagship.py`, cut from the same edit plan and narration, but for the lines that had to change), it also moves its
+`recordedOn` to that day. A take's draft copy is deleted afterwards (`delete_mine.py`, which saves it first).
+
+The notes of 2026-10-24 (31, on all 27 videos when they were published) come from that day's audit of every video against
+the changelog: the 17 build videos' Configure step (the runtime AwwO now picks itself), the EV plant digital twin and Neon
+Circuit racer cases (rebuilt on three.js r186), what the canvas assistant says on a fresh copy of PALLWARD, Umber, Backprop,
+Errand and Roost, THE LONG CHORD, now Episode I, with what a copy makes and costs, and in the four how-tos the links between a
+direct task and a plan for the canvas (gone) and the code how-to's recap on refunds. The five fresh-copy notes went the same
+day, when those videos were recorded again; 26 notes on 22 videos remain. A cost in a note is the case canvas's own media nodes priced by
 `mediaCreditsFor` (`backend/internal/app/plans.go`): `saas-academy.test.tsx` recomputes THE LONG CHORD's from that file's price
 table and plans, and checks its count against the case's record. What the how-tos show of the free plan holds until the
 promotion ends on 2026-10-29.
@@ -49,7 +56,8 @@ promotion ends on 2026-10-29.
 
 - `apps/web/src/saas/academyCatalog.ts`: the videos, in order. Each has an id, a section, its case (`caseId`), the narration's
   language, the day it was recorded, a title and a summary in both languages, its length, its file's size and sha256, a
-  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`) and its notes, if any.
+  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`), its notes, if any, and its updates
+  (`changes`), if it was updated after it was first published.
 - `apps/web/src/saas/Academy.tsx`: `AcademyProvider` (in `SaaSApp`, around every page) and `AcademyLauncher` (`header`, `menu`,
   `landing`). The dialog itself, `AcademyDialog.tsx`, loads only when it opens.
 - `apps/web/src/saas/academyLink.ts`: reading and writing `?academy`.
@@ -57,7 +65,10 @@ promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (1.70 GB; the first cut's, 1.39 GB, stay staged) are too large for a release. Each is staged once on the host,
+The files (1.71 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
+one); among them are the first cut's (1.39 GB), THE LONG CHORD's first recording (0.06 GB, replaced on 2026-10-21), the
+five flagships' earlier motion versions (0.38 GB) and nine motion versions staged on 2026-10-22 before their sound was
+encoded again (0.44 GB). Each is staged once on the host,
 outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).

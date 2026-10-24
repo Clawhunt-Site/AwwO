@@ -37,6 +37,14 @@ export interface AcademyVideo {
   poster: string | null;
   /** What has changed since it was recorded, in the video's order (docs/academy.md). */
   notes?: ReadonlyArray<AcademyNote>;
+  /** How the video was updated after it was first published, newest first: recorded again, whole or a span of it. */
+  changes?: ReadonlyArray<AcademyChange>;
+}
+
+/** One update of a published video: the day it was published again, and what changed in it. */
+export interface AcademyChange {
+  on: string;
+  text: Readonly<Record<UiLocale, string>>;
 }
 
 /** The Configure step of every build video, recorded before AwwO chose an Agent node's runtime itself (2026-10-15; the
@@ -46,10 +54,6 @@ export interface AcademyVideo {
 const runtimeNote = (at: number): AcademyNote => ({ at, since: '2026-10-15', text: {
   en: 'AwwO now picks the runtime (the engine an agent runs on) by itself, so an agent’s Configure has no runtime menu: choose only the model, Claude Opus 5.5. Since 19 October each agent may take up to 25 minutes, not ten. Or skip developer mode here and ask the canvas assistant to set each agent’s task, acceptance criteria and model.',
   zh: '现在由 AwwO 自动选择运行时（Agent 所用的执行引擎），Agent 的「配置」里已经没有运行时选项：只需选模型 Claude Opus 5.5。10月19日起，单个 Agent 最长 25 分钟，不再是 10 分钟。这一步也可以不进开发者模式，直接请画布助手为每个 Agent 设定任务、验收标准和模型。' } });
-/** A flagship's fresh copy: since 2026-10-20 the assistant's Next card counts every node without a result, as Results
- *  does, where it had called three copies done, counted four of Roost's six and three of PALLWARD's 48
- *  (saas-production-copy.test pins today's counts). */
-const freshCopyNote = (at: number, en: string, zh: string): AcademyNote => ({ at, since: '2026-10-20', text: { en, zh } });
 /** The two cases rebuilt on three.js r186 on 2026-10-15, after their videos had been recorded. */
 const rebuiltNote = (at: number, en: string, zh: string): AcademyNote => ({ at, since: '2026-10-15', text: { en, zh } });
 /** A how-to's assistant reply or empty canvas, recorded with the links that switched between a direct task and a plan
@@ -89,14 +93,15 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
       zh: '点名用户研究、产品经理、方案撰写三人团队，运行画布，在成果里拿到一份完整的产品方案文档；搭画布不占次数。' },
     seconds: 118, src: '/showcase/staged/academy/5d1faa082c4ec4cd.mp4', bytes: 17816781, sha256: '5d1faa082c4ec4cd5120edb1d102a9becb1a8017017ce86030eb2bebd37b890a',
     poster: '/showcase/academy/start-plan-2.jpg', notes: [switchLinksNote(39)] },
-  { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-20',
+  { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'PALLWARD: a dark-fantasy game built by twenty-six agents', zh: 'PALLWARD：二十六个 Agent 做出的黑暗奇幻动作游戏' },
     summary: { en: 'Open the case, play the game right in How it was made, see what the twenty agents in sandbox computers wrote, and copy the canvas as a draft.',
       zh: '打开案例，在「How it was made」里直接玩游戏，看二十个在沙箱电脑里写代码的 Agent 各交了什么，再把画布复制成草稿。' },
-    seconds: 408, src: '/showcase/staged/academy/a84161f218137246.mp4', bytes: 100087462, sha256: 'a84161f218137246cbbe9b68e3001cd147095c4a0e0f9bb4acc4f0dbb72ec8fb',
-    poster: null, notes: [freshCopyNote(277,
-      'The canvas assistant now counts a fresh copy’s nodes as Results does: on this copy its card says 48 nodes have no result yet, 43 of them media nodes, not three, and its button runs all 48.',
-      '画布助手现在按「成果」的口径统计新复制的画布：这张画布上它的卡片会说有 48 个节点还没有结果，其中 43 个是媒体节点，而不是 3 个，按钮会运行全部 48 个。')] },
+    seconds: 409, src: '/showcase/staged/academy/405974c9de49a763.mp4', bytes: 98519739, sha256: '405974c9de49a763b7790d99a415efc67452c66074559df8e7c3c70065025c54',
+    poster: null,
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the 48 nodes its first run still makes, 43 of them media nodes.',
+      zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 48 个节点，其中 43 个是媒体节点。' } }] },
   { id: 'the-long-chord', section: 'flagship', caseId: 'the-long-chord', voice: 'en', recordedOn: '2026-10-21',
     title: { en: 'THE LONG CHORD: a space opera made on one canvas', zh: 'THE LONG CHORD：一张画布做出的太空歌剧电影' },
     summary: { en: 'Watch the film in the case, see how its lip sync was measured and its reels were cut, then copy its canvas as a draft. Recorded when the case was Act I on 109 nodes; it now holds the whole of Episode I.',
@@ -112,38 +117,42 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
         en: 'A copy now has 282 pictures, clips and sounds to make again, not 104: at the case’s settings, about 64,000 credits of media, more than six months of the Max plan and more than any plan can generate in a day.',
         zh: '现在复制后要重新生成 282 个图片、视频片段和声音，而不是 104 个：按案例的设置，媒体约需 64,000 点数，超过 Max 套餐六个月的点数，也超过任何套餐一天能生成的数量。' } },
     ] },
-  { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-19',
+  { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Umber: a photo editor built by twelve agents', zh: 'Umber：十二个 Agent 做出的网页图片编辑器' },
     summary: { en: 'A layered photo editor in one web page: how its twelve agents wrote it in a clean room, how to copy its canvas, and the editor at work in Results.',
       zh: '一个网页里的分层图片编辑器：十二个 Agent 怎么在净室里写出它，怎么复制这张画布，以及在成果里直接用它。' },
-    seconds: 381, src: '/showcase/staged/academy/25673ba5e26ea35e.mp4', bytes: 61281664, sha256: '25673ba5e26ea35ed86d5b85b70c82a4219bf6c33a969381fa66d8fabc357bf7',
-    poster: null, notes: [freshCopyNote(191,
-      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says one node has none yet, with a button to run it.',
-      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 1 个节点没有结果，并给出运行它的按钮。')] },
-  { id: 'backprop-lab', section: 'flagship', caseId: 'backprop-lab', voice: 'en', recordedOn: '2026-10-19',
+    seconds: 379, src: '/showcase/staged/academy/76c910325364cbf6.mp4', bytes: 61915580, sha256: '76c910325364cbf6b835da8340c27a76139ac77b4eefa45968318cef9fd59e41',
+    poster: null,
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the one node its first run still makes, the assembly, and the narration says so.',
+      zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 1 个节点（组装节点），讲解也随之更新。' } }] },
+  { id: 'backprop-lab', section: 'flagship', caseId: 'backprop-lab', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Backprop: a neural-network lab built by thirteen agents', zh: 'Backprop：十三个 Agent 做出的神经网络训练工作台' },
     summary: { en: 'Build and train small neural networks in the browser: how thirteen agents made the workbench, and a model trained in Results.',
       zh: '在浏览器里搭建并训练小型神经网络：十三个 Agent 怎么做出这个工作台，以及在成果里训练一个模型。' },
-    seconds: 405, src: '/showcase/staged/academy/b15d8954677afe92.mp4', bytes: 67923706, sha256: 'b15d8954677afe92e1a7c0f849c834c9264bd4529e3bef0feeb89e98d97a958a',
-    poster: null, notes: [freshCopyNote(213,
-      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says one node has none yet, with a button to run it.',
-      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 1 个节点没有结果，并给出运行它的按钮。')] },
-  { id: 'errand-agent', section: 'flagship', caseId: 'errand-agent', voice: 'en', recordedOn: '2026-10-19',
+    seconds: 406, src: '/showcase/staged/academy/f6ef4c7f255120d3.mp4', bytes: 68372123, sha256: 'f6ef4c7f255120d3760f5b832633cdb0f216036abe52e50a05308355405924ca',
+    poster: null,
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the one node its first run still makes, the assembly, and the narration says so.',
+      zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 1 个节点（组装节点），讲解也随之更新。' } }] },
+  { id: 'errand-agent', section: 'flagship', caseId: 'errand-agent', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Errand: an agent workspace built by fifteen agents', zh: 'Errand：十五个 Agent 做出的智能体工作台' },
     summary: { en: 'Watch an AI agent work on its own computer, replayed from real sessions, in a page fifteen agents built, and see how the canvas ran.',
       zh: '在十五个 Agent 做出的页面里，回放 AI Agent 在自己电脑上干活的真实过程，再看这张画布是怎么跑的。' },
-    seconds: 435, src: '/showcase/staged/academy/a68bdade5f4c9cf8.mp4', bytes: 74344325, sha256: 'a68bdade5f4c9cf80c55244453ddb988ee454994897d6e84cf1807590da29354',
-    poster: null, notes: [freshCopyNote(235,
-      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says two nodes have none yet, with a button to run them.',
-      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 2 个节点没有结果，并给出运行它们的按钮。')] },
-  { id: 'roost-team', section: 'flagship', caseId: 'roost-team', voice: 'en', recordedOn: '2026-10-20',
+    seconds: 438, src: '/showcase/staged/academy/88dcf77b2ce61f57.mp4', bytes: 75691610, sha256: '88dcf77b2ce61f5731dad970d89f8ddbb70eff9f2407949eada0521789691c7a',
+    poster: null,
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the two nodes its first run still makes, the session recorder and the assembly, and the narration says so.',
+      zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 2 个节点（会话记录器和组装节点），讲解也随之更新。' } }] },
+  { id: 'roost-team', section: 'flagship', caseId: 'roost-team', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Roost: a home for a bot team built by seventeen agents', zh: 'Roost：十七个 Agent 做出的机器人团队之家' },
     summary: { en: 'AI bots sharing one computer and a group chat, replayed from a real team session: how seventeen agents built the page, step by step.',
       zh: '几个 AI 机器人共用一台电脑和一个群聊，回放一次真实的团队协作：十七个 Agent 怎么一步步做出这个页面。' },
-    seconds: 440, src: '/showcase/staged/academy/e205dd217406ccd5.mp4', bytes: 77983460, sha256: 'e205dd217406ccd511fdf38e05ec52a6aea3ffd105b26f6b2815df4670c274f9',
-    poster: null, notes: [freshCopyNote(237,
-      'The canvas assistant now counts a fresh copy’s nodes as Results does: on this copy it says six nodes have no result yet, not four, with a button to run them.',
-      '画布助手现在按「成果」的口径统计新复制的画布：这张画布上它会说有 6 个节点还没有结果，而不是 4 个，并给出运行它们的按钮。')] },
+    seconds: 445, src: '/showcase/staged/academy/f77fd2d913e61303.mp4', bytes: 80294458, sha256: 'f77fd2d913e61303ae73e3384f4fd6837c76a8aa21e55c48411eedd816a3f30a',
+    poster: null,
+    changes: [{ on: '2026-10-24', text: {
+      en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the six nodes its first run still makes, the turn recorder, the four turns and the assembly, and the narration says so.',
+      zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 6 个节点（轮次记录器、四个轮次和组装节点），讲解也随之更新。' } }] },
   { id: 'neon-city', section: 'build', caseId: 'neon-city', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a cinematic brand page with a team of agents', zh: '用 Agent 团队和媒体节点，做一个电影感品牌页' },
     summary: { en: 'A brand page, its pictures and its clip, by two agents and four media nodes.',

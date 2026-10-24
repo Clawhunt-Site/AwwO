@@ -24,6 +24,11 @@ const EN_NUMBERS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven
 const ZH_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const zhNumber = (n: number) => n < 10 ? (n === 2 ? '两' : ZH_DIGITS[n]) : `${n >= 20 ? ZH_DIGITS[Math.floor(n / 10)] : ''}十${n % 10 ? ZH_DIGITS[n % 10] : ''}`;
 const caseOf = (id?: string) => PRODUCTION_CASES.find(item => item.id === id);
+/** A real calendar day written YYYY-MM-DD, as the catalog's dates are (any year). */
+const isDay = (day: string) => {
+  const [year, month, date] = day.split('-').map(Number);
+  return /^\d{4}-\d\d-\d\d$/.test(day) && new Date(Date.UTC(year, month - 1, date)).toISOString().slice(0, 10) === day;
+};
 const library = (locale: 'zh' | 'en' = 'en') => { localStorage.setItem('superclaw_locale', locale); return render(<SaaSPreferencesProvider><AcademyProvider><AcademyLauncher /></AcademyProvider></SaaSPreferencesProvider>); };
 /** The Academy's dialog once its part of the site has loaded (its frame shows the same title while it loads). */
 const loaded = (name: string) => waitFor(() => {
@@ -54,7 +59,7 @@ it('lists every video once, by section, each staged by its checksum outside the 
     expect(video.src, video.id).toBe(`/showcase/staged/academy/${video.sha256.slice(0, 16)}.mp4`);
     expect(video.bytes, video.id).toBeGreaterThan(1_000_000);
     expect(video.seconds, video.id).toBeGreaterThan(60);
-    expect(video.recordedOn, video.id).toMatch(/^2026-\d\d-\d\d$/);
+    expect(isDay(video.recordedOn), video.id).toBe(true);
   }
   expect(existsSync(resolve(WEB, 'showcase', 'staged'))).toBe(false);
   expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(4);
@@ -91,6 +96,25 @@ it('words every video in both languages, names no media provider, and counts eac
   }
 });
 
+it('logs each update of a published video, newest first, the latest no earlier than its recording, in both languages', () => {
+  const updated = ACADEMY_VIDEOS.filter(video => video.changes?.length);
+  expect(updated.length).toBeGreaterThan(0);
+  for (const video of updated) {
+    const days = video.changes!.map(change => change.on);
+    expect(days, video.id).toEqual([...days].sort().reverse());
+    // The latest update is the recording the video holds now, or one after it (a span recorded again); an earlier
+    // update may predate a later recording of the whole video.
+    expect(days[0] >= video.recordedOn, video.id).toBe(true);
+    for (const change of video.changes!) {
+      expect(isDay(change.on), `${video.id} ${change.on}`).toBe(true);
+      expect(change.text.en.trim(), video.id).not.toBe('');
+      expect(change.text.en, video.id).not.toMatch(CHINESE);
+      expect(change.text.zh, video.id).toMatch(CHINESE);
+      for (const text of [change.text.en, change.text.zh]) expect(text, video.id).not.toMatch(PROVIDERS);
+    }
+  }
+});
+
 it('notes what changed since a video was recorded, each at a moment of the video, in both languages', () => {
   for (const video of ACADEMY_VIDEOS) {
     const notes = video.notes ?? [];
@@ -98,7 +122,7 @@ it('notes what changed since a video was recorded, each at a moment of the video
     expect(at, video.id).toEqual([...new Set(at)].sort((a, b) => a - b));
     for (const note of notes) {
       expect(Number.isInteger(note.at) && note.at >= 0 && note.at < video.seconds, `${video.id} at ${note.at}`).toBe(true);
-      expect(note.since, video.id).toMatch(/^2026-\d\d-\d\d$/);
+      expect(isDay(note.since), `${video.id} ${note.since}`).toBe(true);
       expect(note.since >= video.recordedOn, video.id).toBe(true);
       expect(note.text.en.trim(), video.id).not.toBe('');
       expect(note.text.en, video.id).not.toMatch(CHINESE);
@@ -201,7 +225,7 @@ it('opens from its button on the videos by section, filters them, plays one, and
   expect(video).toHaveAttribute('preload', 'metadata');
   expect(video.autoplay).toBe(true);
   expect(window.location.search).toBe('?academy=umber-photo');
-  expect(within(dialog).getByText(`${academyDuration(umber.seconds)} · English narration, English and Chinese subtitles · Recorded 19 October 2026`)).toBeVisible();
+  expect(within(dialog).getByText(`${academyDuration(umber.seconds)} · English narration, English and Chinese subtitles · Recorded ${noteDay(umber.recordedOn, 'en')}`)).toBeVisible();
   expect(within(dialog).getByText(`3 of ${ACADEMY_VIDEOS.filter(item => item.section === 'flagship').length}`)).toBeVisible();
   // Up next: the three after it, within the filter.
   const upNext = within(dialog).getByRole('navigation', { name: 'Up next' });
@@ -302,11 +326,45 @@ it('reads in Chinese in the Chinese interface, the case names in English', async
   expect(within(card).getByText('Pixel platformer')).toHaveAttribute('lang', 'en');
   expect(within(card).getByText(pixel.summary.zh)).toBeVisible();
   fireEvent.click(button);
-  expect(within(dialog).getByText(`${academyDuration(pixel.seconds)} · 英文讲解，中英字幕 · 录于 2026年10月14日`)).toBeVisible();
+  expect(within(dialog).getByText(`${academyDuration(pixel.seconds)} · 英文讲解，中英字幕 · 录于 ${noteDay(pixel.recordedOn, 'zh')}`)).toBeVisible();
   expect(within(dialog).getByText(/^按四个部分写需求/)).toBeVisible();
   // No case library here, and no canvas page whose home page has one: nothing would open the case.
   expect(within(dialog).queryByRole('link', { name: '打开这个案例' })).toBeNull();
   expect(within(dialog).queryByRole('button', { name: '打开这个案例' })).toBeNull();
+});
+
+it('marks an updated video on its card and lists its updates beside it, in English and Chinese', async () => {
+  // A video updated after it was first published, whichever it is.
+  const updated = ACADEMY_VIDEOS.find(video => video.changes?.length);
+  if (!updated) throw new Error('no video has an update: test the updates on a catalog of the test’s own');
+  const latest = updated.changes![0];
+  const short = (day: string, locale: 'en' | 'zh') => new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+    .format(new Date(`${day}T00:00:00Z`));
+  // The mark's words as docs/academy.md gives them: "Updated 24 Oct", 「10月24日更新」.
+  expect([short('2026-10-24', 'en'), short('2026-10-24', 'zh')]).toEqual(['24 Oct', '10月24日']);
+  library();
+  const dialog = await openLibrary();
+  const card = within(dialog).getByRole('button', { name: updated.title.en });
+  expect(card).toHaveAccessibleDescription(`Updated ${short(latest.on, 'en')} ${updated.summary.en}`);
+  expect(within(card.closest('li')!).getByText(`Updated ${short(latest.on, 'en')}`)).toBeVisible();
+  // Only updated videos carry the mark.
+  expect(within(dialog).getAllByText(/^Updated /)).toHaveLength(ACADEMY_VIDEOS.filter(video => video.changes?.length).length);
+  fireEvent.click(card);
+  const updates = within(dialog).getByRole('region', { name: 'Updates' });
+  expect(within(updates).getAllByRole('listitem')).toHaveLength(updated.changes!.length);
+  expect(within(updates).getByText(latest.text.en)).toBeVisible();
+  expect(within(updates).getByText(noteDay(latest.on, 'en'))).toHaveAttribute('datetime', latest.on);
+  cleanup();
+  library('zh');
+  fireEvent.click(screen.getByRole('button', { name: '教程' }));
+  const zh = await loaded('从真实画布学会 AwwO');
+  const zhCard = within(zh).getByRole('button', { name: updated.title.zh });
+  expect(zhCard).toHaveAccessibleDescription(`${short(latest.on, 'zh')}更新 ${updated.summary.zh}`);
+  expect(within(zhCard.closest('li')!).getByText(`${short(latest.on, 'zh')}更新`)).toBeVisible();
+  fireEvent.click(zhCard);
+  const zhUpdates = within(zh).getByRole('region', { name: '更新记录' });
+  expect(within(zhUpdates).getByText(latest.text.zh)).toBeVisible();
+  expect(within(zhUpdates).getByText(noteDay(latest.on, 'zh'))).toHaveAttribute('datetime', latest.on);
 });
 
 it('shows a video’s notes in Chinese in the Chinese interface', async () => {
