@@ -58,6 +58,10 @@ services:
       AWWO_PI_DISABLE_THINKING: ${AWWO_PI_DISABLE_THINKING:-}
       AWWO_PLATFORM_PROVIDERS: ${AWWO_PLATFORM_PROVIDERS:-}
       AWWO_PI_MAX_CONCURRENCY: ${AWWO_PI_MAX_CONCURRENCY:-4}
+      # The cloud relay's calls at once and each one's limit (docs/awwo-cloud-relay.md), apart from the runs' slots;
+      # served only while the api's AWWO_LOCAL_RELAY is on. Each call runs in a child process of its own.
+      AWWO_PI_RELAY_MAX_CONCURRENCY: ${AWWO_PI_RELAY_MAX_CONCURRENCY:-8}
+      AWWO_PI_RELAY_TIMEOUT_MS: ${AWWO_PI_RELAY_TIMEOUT_MS:-1500000}
       # A canvas plan is one long structured JSON answer, so the output cap is the binding limit,
       # not the context window. At 4096 output tokens a seven-node plan was cut off mid-string and
       # the run failed as runtime_failed / invalid_canvas_plan; a measured real plan needs ~4.5k
@@ -240,6 +244,9 @@ services:
       AWWO_BOOTSTRAP_ADMIN_EMAIL: ${AWWO_BOOTSTRAP_ADMIN_EMAIL:?Set the initial administrator email}
       AWWO_BOOTSTRAP_ADMIN_PASSWORD: ${AWWO_BOOTSTRAP_ADMIN_PASSWORD:?Set an initial administrator password}
       AWWO_TRUSTED_PROXY_CIDRS: ${AWWO_TRUSTED_PROXY_CIDRS:-}
+      # on: AwwO 本地版 may link to accounts here and call the Pi worker's Bedrock models through the relay
+      # (docs/awwo-cloud-relay.md); off (empty) by default.
+      AWWO_LOCAL_RELAY: ${AWWO_LOCAL_RELAY:-off}
       # Optional image and video nodes (docs/awwo-runninghub.md): an Enterprise-Shared RunningHub key.
       # Generated files go to the media-data volume, set only when the key is, since the API refuses
       # one without the other.

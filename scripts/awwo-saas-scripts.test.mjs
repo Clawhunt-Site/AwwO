@@ -356,7 +356,7 @@ test('capacity and timeout knobs cannot drift between compose and the shipped te
   const service = name => compose.split(/^ {2}(?=\S)/m).find(block => block.startsWith(`${name}:`)) ?? '';
   const fallback = (name, key) => new RegExp(`\\b${key}: \\$\\{${key}:-([^}]*)\\}`).exec(service(name))?.[1];
   for (const [name, key] of [['pi', 'AWWO_PI_CONTEXT_WINDOW'], ['pi', 'AWWO_PI_MAX_TOKENS'], ['pi', 'AWWO_PI_TIMEOUT_MS'],
-    ['pi', 'AWWO_PI_MAX_CONCURRENCY'], ['api', 'AWWO_RUN_TIMEOUT'], ['api', 'AWWO_GRAPH_NODE_RETRIES'], ['openai-agents', 'AWWO_OPENAI_AGENTS_CONTEXT_WINDOW'],
+    ['pi', 'AWWO_PI_MAX_CONCURRENCY'], ['pi', 'AWWO_PI_RELAY_MAX_CONCURRENCY'], ['pi', 'AWWO_PI_RELAY_TIMEOUT_MS'], ['api', 'AWWO_LOCAL_RELAY'], ['api', 'AWWO_RUN_TIMEOUT'], ['api', 'AWWO_GRAPH_NODE_RETRIES'], ['openai-agents', 'AWWO_OPENAI_AGENTS_CONTEXT_WINDOW'],
     ['openai-agents', 'AWWO_OPENAI_AGENTS_MAX_TOKENS'], ['openai-agents', 'AWWO_OPENAI_AGENTS_TIMEOUT_MS']]) {
     const configured = fallback(name, key);
     // Assert presence first: deleting a knob from both files would satisfy an equality check while
