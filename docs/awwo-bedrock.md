@@ -142,6 +142,10 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 6. **工作区模型权限**：新工作区按 `AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 写入 `tenants.allowed_models`。2026-10-05 起现网新工作区的 GPT 与 Claude 走 LLM Gate；Gate 没有的 Claude Opus 5.5 走 Bedrock（`bedrock.claude-opus-5-5`，只在 OpenAI Agents 运行时；Fable 5.1 已于 2026-10-07 下架），其余 Bedrock 模型只出现在没有白名单的旧工作区（见下方「2026-10-05 渠道选择」）。2026-10-07 起免费层的路由额度为 `gate=0,bedrock=0,media=1`：白名单里的高级模型只对付费套餐开放。开放哪些模型（Opus 等高价模型的成本）由运营方决定，单个工作区用管理端 `PATCH /api/v1/admin/tenants/{id}` 调整。
 7. 用一个测试工作区对一到两个模型做真实冒烟（不在生产创建测试画布时可用 shadow-plan 流程）。
 
+## AwwO 本地版只经线上调用 Bedrock（云端中转）
+
+AwwO 本地版从不直连 Bedrock，也从不持有 AWS 凭证：IAM 用户只认线上主机的地址，费用与额度也在线上记账。本地版「我的引擎」的「AwwO 线上」连接用户在线上的账号，它的 Bedrock 调用经线上 API 准入并记为所选工作区的调用，再由线上 Pi 在隔离子进程里经本文的 Converse 桥发出（`POST /internal/relay-model`，主、备推理配置文件规则不变），详见 `docs/awwo-cloud-relay.md`。经中转提供的模型就是线上 Pi 的 `AWWO_BEDROCK_MODELS`，再按工作区白名单过滤；中转有自己的并发池（`AWWO_PI_RELAY_MAX_CONCURRENCY`，默认 8）与时限（`AWWO_PI_RELAY_TIMEOUT_MS`，默认 25 分钟）。AWS 拒绝运营方凭证、权限或额度时，本地版收到的是 503（服务暂不可用），不会当成自己的凭证失效。
+
 ## 限制
 
 - 思考强度：Bedrock 档案目前不宣告任何档位，桥拒绝 `reasoning_effort`。Claude 与 GPT 的映射需要在实例角色获得权限后真实验证再开放。

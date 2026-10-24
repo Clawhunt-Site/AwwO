@@ -288,4 +288,23 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 reader 可读取原画布、会话及历史；业务写入由 Go 独立拒绝，原 CanvasSurface 的只读模式不发起保存、初始化、运行、规划或恢复写入。reader 仍可保存自己的账号配色；语言和浅深主题是浏览器偏好。
 
+## AwwO 本地版的本机连接与云端中转
+
+只在线上版、`AWWO_LOCAL_RELAY=on` 时提供（默认关闭）；完整说明、错误码与限额见 `docs/awwo-cloud-relay.md`。
+
+| 方法与路径（省略 /api/v1） | 请求 | 说明 |
+| --- | --- | --- |
+| POST /local-links/start | `{deviceName}`，无需登录 | 201 `{deviceCode,userCode,verificationURL,expiresIn:900,interval:5}`；每个地址每分钟 10 次 |
+| POST /local-links/token | `{deviceCode}`，无需登录 | 设备码换令牌（RFC 8628）：400 `authorization_pending`/`slow_down`/`access_denied`/`expired_token`，或一次性的 200 `{token,linkId,expiresAt,workspace}` |
+| GET /local-links/pending/{userCode} | 登录态 | `{userCode,deviceName,createdAt,expiresAt,requestIP,yourIP,sameNetwork,signInAgain}` |
+| POST /local-links/approve | `{userCode,tenantId,confirmed:true}` | 要求最近 15 分钟内登录（否则 403 `sign_in_again`）、勾选确认（否则 400 `link_unconfirmed`）、在该工作区为 member 以上；每个账号最多 10 个有效连接 |
+| POST /local-links/deny | `{userCode}` | 204 |
+| GET /local-links | 登录态 | 有效的连接，以及已确认、电脑还没取走令牌的（`status: approved`） |
+| DELETE /local-links/{id}、DELETE /local-links | 登录态 | 204，断开一台或全部 |
+| GET /relay/v1/models | `Authorization: Bearer awwo_lk_…` | OpenAI 模型列表，每项带 `awwo{contextWindow,maxOutputTokens,input,tools,proseBytesPerToken?}` |
+| POST /relay/v1/chat/completions | 同上；OpenAI Chat Completions，`stream:true`，≤ 16 MiB | 准入并记为连接所选工作区的一次模型调用，经线上 Pi 调用 Bedrock，以 SSE 流回 |
+| DELETE /relay/v1/link | 同上 | 204，吊销这个令牌 |
+
+中转接口拒绝带 `Origin` 的请求（403 `origin_not_allowed`），错误为 OpenAI 的形状 `{"error":{"message","type","code"}}`。
+
 当前不提供支付、邮箱验证/找回、OIDC、文件上传下载或工具/工程文件执行。节点团队以 Pi 文本推理为范围；协议 fixture、真实模型、本地浏览器及生产验收须分别报告，实际验收范围以对应日期的报告为准。
