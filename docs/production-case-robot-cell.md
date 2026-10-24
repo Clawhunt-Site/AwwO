@@ -186,7 +186,10 @@ back out so the tree stays green until the run:
   stage - which is why the canvas now has five stages and shares the layout's shape as a const.
 - `saas-production-cases-placement`: passes with the card where the draft puts it.
 - Still failing, as they must until the case runs: `saas-production-cases` (no `cell-real.mp4` or
-  `.jpg` under `apps/web/showcase/`) and `saas-production-copy` (18 cases, 17 published records).
+  `.jpg` under `apps/web/showcase/`) and `saas-production-copy` (one case without a published record).
+- Re-checked against `4701d91d` after a rebase onto the current `main`, where `PRODUCTION_WORKFLOWS`
+  now folds in the flagship and epic workflows: `CELL` goes into that same list
+  (`[CAR, CELL, CIRCUIT, …, ...PUBLISHED_FLAGSHIPS.map(…), ...PUBLISHED_EPICS.map(…)]`).
 - An adversarial review of the `physical-props` skill found three rules that were also wrong in these
   tasks, now corrected here: a bay's levels are a floor level and two beam levels (0.59 m of load on the
   lower two, 0.69 m on the top, 0.10 m spare), a 1.00 m pallet overhangs a 0.70 m frame by 0.15 m each
