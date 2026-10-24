@@ -610,6 +610,32 @@ func TestPostgresRelayedCallsAreHeldToWhatTheSiteCanTake(t *testing.T) {
 	if len(worker.sent()) != 0 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid) != 0 {
 		t.Fatal("a call admitted past the worker's calls at once")
 	}
+	// A workspace whose allowance is spent is told so at once, worker full or not, and told not to try again: its one call
+	// of the day made while the worker was free, then the worker full again.
+	for i := 0; i < capacity; i++ {
+		h.a.relayLimits.give("elsewhere-" + strconv.Itoa(i))
+	}
+	execSQL(t, h, "UPDATE tenants SET max_runs_per_day=1 WHERE id=$1", tid)
+	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 200 || !strings.Contains(body, "Hello") {
+		t.Fatal("the day's one call", status, body)
+	}
+	for i := 0; i < capacity; i++ {
+		h.a.relayLimits.take("elsewhere-"+strconv.Itoa(i), capacity)
+	}
+	started := time.Now()
+	r, _ := http.NewRequest("POST", h.server.URL+relayCompletionsRoute, strings.NewReader(relayHello))
+	r.Header.Set("Authorization", "Bearer "+key)
+	r.Header.Set("Content-Type", "application/json")
+	resp, e := http.DefaultClient.Do(r)
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 429 || !strings.Contains(string(raw), "quota_exceeded") || resp.Header.Get("x-should-retry") != "false" || time.Since(started) > relaySlotWait/2 {
+		t.Fatal("a spent allowance while the worker is full", resp.StatusCode, string(raw), time.Since(started))
+	}
+	execSQL(t, h, "UPDATE tenants SET max_runs_per_day=1000 WHERE id=$1", tid)
 	for i := 0; i < capacity; i++ {
 		h.a.relayLimits.give("elsewhere-" + strconv.Itoa(i))
 	}
@@ -619,9 +645,10 @@ func TestPostgresRelayedCallsAreHeldToWhatTheSiteCanTake(t *testing.T) {
 	for i := 0; i < relayAdmissions; i++ {
 		slots <- struct{}{}
 	}
-	started := time.Now()
+	sent, rows := len(worker.sent()), h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid)
+	started = time.Now()
 	busy("no place to be admitted in")
-	if time.Since(started) < relaySlotWait || len(worker.sent()) != 0 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid) != 0 {
+	if time.Since(started) < relaySlotWait || len(worker.sent()) != sent || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid) != rows {
 		t.Fatal("a call that waited for its admission", time.Since(started))
 	}
 	<-slots

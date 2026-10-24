@@ -228,7 +228,8 @@ func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string,
 		return false, e
 	}
 	if !a.relayLimits.take(caller.tenantID, capacity) {
-		return false, nil
+		// The worker is full: a call its allowance refuses anyway is told so now, not after waiting for a place.
+		return false, a.relayAllowanceRefusal(ctx, tx, caller, facts, gate)
 	}
 	kept := false
 	defer func() {
@@ -316,6 +317,25 @@ func (a *App) openRelayGate(ctx context.Context, tx pgx.Tx, caller relayCaller, 
 		g.reserve, e = a.creditReserve(facts.Runtime, facts.Model, facts.InputBytes)
 	}
 	return g, e
+}
+
+// relayAllowanceRefusal is the refusal its admission would give a call once a place is free, when the relay worker has
+// none: today's calls used up (the free allowance, or a plan's for a free model) or the plan's credits; nil while it would
+// be admitted. It only counts, and takes no deployment-wide lock: the free allowance's admission given no place stops
+// before its routes' check.
+func (a *App) relayAllowanceRefusal(ctx context.Context, tx pgx.Tx, caller relayCaller, facts *invocationFacts, g relayGate) error {
+	if g.plan == nil {
+		_, e := a.admitFreeInvocation(ctx, tx, caller.tenantID, facts.Model, 0, g.daily, g.routes, false)
+		return e
+	}
+	if g.reserve != nil {
+		return checkCredits(ctx, tx, g.plan, *g.reserve)
+	}
+	usage, e := accountPlanUsage(ctx, tx, g.plan.UserID, a.cfg.PlannerModel)
+	if e == nil && usage.FreeToday >= g.plan.Limits.Daily {
+		e = errInvocationQuota
+	}
+	return e
 }
 
 // errRelayRevoked: the key was revoked, expired or lost its member, or its workspace was suspended, after it was read.
