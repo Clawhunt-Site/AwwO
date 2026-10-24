@@ -7,6 +7,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { bedrockComputerCall, startIsolatedRun } from './runner.mjs';
+import { handleRelayModel, startRelayCall } from './relay.mjs';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -31,11 +32,14 @@ async function readBody(request) {
   return validateRequest(JSON.parse(Buffer.concat(chunks).toString('utf8')));
 }
 
-// Managed execution's Bedrock calls are made in an isolated child, as a Bedrock run's are (bedrockComputerCall).
-export function createPiServer(config, { startRun = startIsolatedRun, bedrockCall = bedrockComputerCall, edgeIdleMs } = {}) {
+// Managed execution's Bedrock calls are made in an isolated child, as a Bedrock run's are (bedrockComputerCall), and so
+// are the cloud relay's (startRelayCall).
+export function createPiServer(config, { startRun = startIsolatedRun, bedrockCall = bedrockComputerCall, relayCall = startRelayCall, edgeIdleMs } = {}) {
   const active = new Map();
+  // The cloud relay's calls hold slots of their own (relay.mjs), so the runs' capacity is the runs' alone.
+  const relays = new Map();
   const sessions = new Set();
-  const observability = createWorkerObservability(config, () => active.size);
+  const observability = createWorkerObservability(config, () => active.size + relays.size);
   let shuttingDown = false;
   const server = createServer(async (request, response) => {
     let pathname;
@@ -51,6 +55,9 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockCal
       // /internal/computer-model serves this worker's Bedrock models too (through the bridge), so the API may offer
       // them for the canvas assistant's direct tasks.
       health.computerBedrock = true;
+      // /internal/relay-model relays AwwO 本地版's calls to this worker's Bedrock models (docs/awwo-cloud-relay.md). Said only
+      // where there is one to relay to, so a worker without Bedrock answers exactly as before.
+      if (!config.userCredentials && config.models.some((profile) => profile.provider === 'bedrock')) health.relayBedrock = true;
       health.maxConcurrency = config.maxConcurrency;
       if (shuttingDown) { health.ready = false; health.status = 'stopping'; }
       return json(response, health.ready ? 200 : 503, health);
@@ -59,6 +66,9 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockCal
     if (request.method === 'POST' && pathname === '/internal/computer-model') return handleComputerModel(request, response, {
       config, runtime: 'pi', active, sessions, stopping: () => shuttingDown, bedrockCall, edgeIdleMs,
       resolveModel: resolveModelConfig, normalizeUsage, parentObservability, observe: (model, trace) => observability.begin(model, trace),
+    });
+    if (request.method === 'POST' && pathname === '/internal/relay-model') return handleRelayModel(request, response, {
+      config, active: relays, stopping: () => shuttingDown, startCall: relayCall, observe: (model, trace) => observability.begin(model, trace),
     });
     if (request.method === 'DELETE' && /^\/internal\/runs\/[A-Za-z0-9_-]+$/.test(pathname)) {
       const entry = active.get(pathname.slice('/internal/runs/'.length));
@@ -155,7 +165,7 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockCal
       shuttingDown = true;
       const stopped = new Promise((resolve) => server.close(resolve));
       const waits = [];
-      for (const entry of active.values()) {
+      for (const entry of [...active.values(), ...relays.values()]) {
         entry.cancelRequested = true;
         entry.handle?.cancel();
         // Startup can still be awaiting a directory or fork. Include every

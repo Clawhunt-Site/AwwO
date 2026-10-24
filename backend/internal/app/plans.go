@@ -179,13 +179,15 @@ func accountPlanUsage(ctx context.Context, q querier, userID, plannerModel strin
 }
 
 // accountSlotsUsed is how many of the plan's agents at once the account uses: one for every run queued or running in
-// its plan workspaces, whether or not its model call is running, and one more for each further call such a run has
-// running at once (the members of a parallel team). The plan's Concurrent caps it, so a run that calls one model at a
-// time never waits for a slot.
+// its plan workspaces, whether or not its model call is running, one more for each further call such a run has
+// running at once (the members of a parallel team), and one for each call AwwO 本地版 relays through the account's plan
+// workspaces while it runs (relay_admission.go: a relayed call has no run to hold its slot). The plan's Concurrent caps
+// it, so a run that calls one model at a time never waits for a slot.
 func accountSlotsUsed(ctx context.Context, q querier, userID string) (int, error) {
 	var n int
-	err := q.QueryRow(ctx, `SELECT COALESCE(sum(GREATEST(1,(SELECT count(*) FROM model_invocations mi
-		WHERE mi.tenant_id=r.tenant_id AND mi.run_id=r.id AND mi.status='running' AND mi.billed_user_id=$1))),0)::int
+	err := q.QueryRow(ctx, `SELECT (COALESCE(sum(GREATEST(1,(SELECT count(*) FROM model_invocations mi
+		WHERE mi.tenant_id=r.tenant_id AND mi.run_id=r.id AND mi.status='running' AND mi.billed_user_id=$1))),0)
+		+(SELECT count(*) FROM model_invocations WHERE billed_user_id=$1 AND status='running' AND relay_link_id IS NOT NULL))::int
 		FROM runs r JOIN memberships m ON m.tenant_id=r.tenant_id AND m.role='owner' JOIN tenants t ON t.id=r.tenant_id
 		WHERE m.user_id=$1 AND t.route_limits IS NOT NULL AND r.status IN ('queued','running')`, userID).Scan(&n)
 	return n, err

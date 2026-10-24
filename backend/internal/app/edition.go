@@ -177,5 +177,9 @@ func (a *App) authOptions(w http.ResponseWriter, _ *http.Request) {
 	if a.cfg.LocalShell != "" {
 		out["shell"] = a.cfg.LocalShell
 	}
+	// The hosted site takes AwwO 本地版's links (local_links.go): its 设置 shows 本机连接. Said only when it does.
+	if a.cfg.LocalRelay {
+		out["localRelay"] = true
+	}
 	writeJSON(w, 200, out)
 }

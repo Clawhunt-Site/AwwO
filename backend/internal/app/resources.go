@@ -191,6 +191,10 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 	} else {
 		_, e = tx.Exec(r.Context(), "UPDATE memberships SET role=$3 WHERE tenant_id=$1 AND user_id=$2", tid, id, role)
 	}
+	if e == nil && roleLevel(role) < roleLevel("member") {
+		// A link spends the workspace on its person's behalf (local_links.go): no longer theirs to spend, it ends.
+		e = revokeMemberLinks(r.Context(), tx, tid, id)
+	}
 	if e != nil {
 		a.dbError(w, e)
 		return

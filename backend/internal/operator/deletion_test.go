@@ -126,6 +126,7 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"graph_operation_cancellations actor_id users a", "graph_runs actor_id users a",
 			"knowledge_documents tenant_id tenants a", "knowledge_events tenant_id tenants a",
 			"knowledge_operations tenant_id tenants a", "knowledge_proposals tenant_id tenants a",
+			"local_links tenant_id tenants c", "local_links user_id users c",
 			"media_generations tenant_id tenants c", "memberships tenant_id tenants a", "memberships user_id users a",
 			"memory_items tenant_id tenants c", "model_invocations tenant_id tenants c", "node_sessions tenant_id tenants a",
 			"openmaus_dispatches tenant_id tenants a", "password_resets user_id users c", "plan_watches user_id users c",
