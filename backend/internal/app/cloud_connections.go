@@ -68,6 +68,8 @@ var (
 	errCloudNoModels    = errors.New("cloud key runs no models")
 	// errCloudUnread: a connection whose hosted models are being read, not yet known.
 	errCloudUnread = errors.New("cloud models not read yet")
+	// errCloudGone: a connection deleted while a read of it waited for its turn or was under way.
+	errCloudGone = errors.New("cloud connection deleted")
 )
 
 // discoverCloudModels reads the hosted models a connection key may run (GET /models with it): their ids, in the hosted
@@ -140,18 +142,34 @@ const cloudModelsRetry = time.Minute
 
 type cloudModelCache struct {
 	mu      sync.Mutex
-	entries map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
-	reading map[string]bool            // connection id → its models are being read in the background
-	// issued counts the reads of a connection begun, and kept is the ticket of the one whose answer is kept now: a read's
-	// answer is kept only if it began after that one (it asked the hosted site later, so it knows better, whichever
-	// answer came first), and a connection saved, refreshed or deleted makes every read begun before it stale.
-	issued, kept map[string]uint64
+	entries map[string]cloudModelEntry // connection id → what is known of its hosted models
+	reading map[string]bool            // connection id → a read of it in the background is waiting or under way
+	turns   map[string]*cloudModelTurn // connection id → its turn (cloudTurn), while it is held or waited for
+	gone    map[string]bool            // connection id → deleted: nothing is kept for it again
+}
+
+// cloudModelTurn is a connection's turn: held by one at a time (held), waited for by the others.
+type cloudModelTurn struct {
+	held  chan struct{}
+	users int // those holding it or waiting for it
 }
 
 type cloudModelEntry struct {
 	at     time.Time
 	models map[string]cloudModel // nil while they could not be read
 	err    error                 // why not, kept for cloudModelsRetry
+}
+
+// answer is what an entry answers now: its models while they are fresh (cloudModelsTTL), its failure for
+// cloudModelsRetry; ok false once the hosted site is to be asked again.
+func (e cloudModelEntry) answer() (models map[string]cloudModel, ok bool, err error) {
+	switch {
+	case e.err != nil && time.Since(e.at) < cloudModelsRetry:
+		return nil, true, e.err
+	case e.models != nil && time.Since(e.at) < cloudModelsTTL:
+		return e.models, true, nil
+	}
+	return nil, false, nil
 }
 
 func (a *App) cloudEntry(connection string) (cloudModelEntry, bool) {
@@ -162,140 +180,135 @@ func (a *App) cloudEntry(connection string) (cloudModelEntry, bool) {
 	return entry, ok
 }
 
-// rememberCloudModels keeps a connection's hosted models' limits as just read; nil forgets them (a connection deleted).
-func (a *App) rememberCloudModels(connection string, models map[string]cloudModel) {
-	if models == nil {
-		a.rememberCloudEntry(connection, nil)
-		return
+// cloudTurn is a connection's turn to learn its hosted models, waited for as long as ctx lets it. Every read of them
+// (in the background, or waited for) holds it for its whole read, and so do the connection's save and refresh, from
+// their question to the hosted site until what it answered is saved and kept: none of them overlap, and what is kept is
+// what was learnt last. A turn no one holds or waits for is forgotten.
+func (a *App) cloudTurn(ctx context.Context, connection string) (release func(), e error) {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	if c.turns == nil {
+		c.turns = map[string]*cloudModelTurn{}
 	}
-	a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now(), models: models})
+	turn := c.turns[connection]
+	if turn == nil {
+		turn = &cloudModelTurn{held: make(chan struct{}, 1)}
+		c.turns[connection] = turn
+	}
+	turn.users++
+	c.mu.Unlock()
+	leave := func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if turn.users--; turn.users == 0 {
+			delete(c.turns, connection)
+		}
+	}
+	select {
+	case turn.held <- struct{}{}:
+		return func() { <-turn.held; leave() }, nil
+	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
+	}
 }
 
-// rememberCloudEntry keeps what is known of a connection's hosted models (nil: nothing, the connection deleted), as a
-// connection saved or deleted learns it: newer than any read begun before (publishCloudEntry).
-func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
+// keepCloud keeps what was learnt of a connection's hosted models, in its turn, and says whether it did: nothing is
+// kept for a deleted connection.
+func (a *App) keepCloud(connection string, entry cloudModelEntry) bool {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.write(connection, entry)
-	c.kept[connection] = c.issued[connection]
-}
-
-// init makes the cache's maps, c.mu held.
-func (c *cloudModelCache) init() {
+	if c.gone[connection] {
+		return false
+	}
 	if c.entries == nil {
 		c.entries = map[string]cloudModelEntry{}
 	}
-	if c.issued == nil {
-		c.issued, c.kept = map[string]uint64{}, map[string]uint64{}
-	}
+	c.entries[connection] = entry
+	return true
 }
 
-// write keeps entry for connection, c.mu held.
-func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
-	c.init()
-	if entry == nil {
-		delete(c.entries, connection)
-		return
-	}
-	c.entries[connection] = *entry
-}
-
-// beginCloudRead is a read's ticket, taken when it begins asking the hosted site (publishCloudEntry); a refresh is a
-// read too.
-func (a *App) beginCloudRead(connection string) uint64 {
+// forgetCloud forgets a deleted connection's hosted models for good: a read of them under way, or waiting for its
+// turn, keeps nothing and offers nothing.
+func (a *App) forgetCloud(connection string) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.init()
-	c.issued[connection]++
-	return c.issued[connection]
+	delete(c.entries, connection)
+	if c.gone == nil {
+		c.gone = map[string]bool{}
+	}
+	c.gone[connection] = true
 }
 
-// publishCloudEntry keeps what the read of ticket learnt, unless what is kept is newer: a read begun after it, or the
-// connection saved or deleted since it began. An older answer would put back models the hosted site has since refused,
-// or a deleted connection's.
-func (a *App) publishCloudEntry(connection string, ticket uint64, entry *cloudModelEntry) {
+func (a *App) cloudGone(connection string) bool {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.init()
-	if ticket > c.kept[connection] {
-		c.write(connection, entry)
-		c.kept[connection] = ticket
-	}
-}
-
-// publishCloudFailure keeps what the read of ticket learnt when it failed, as publishCloudEntry keeps an answer, and
-// chooses it under the same lock: the hosted site's refusal of the key; else, the site being out of reach, the limits
-// kept now (read again a minute later), or a refusal kept now, which the site out of reach says nothing against; else
-// the failure. It returns the models and why not as they stand after it.
-func (a *App) publishCloudFailure(connection string, ticket uint64, e error) (map[string]cloudModel, error) {
-	c := &a.cloudModelCache
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.init()
-	current, ok := c.entries[connection]
-	if ticket <= c.kept[connection] {
-		// What is kept is newer.
-		switch {
-		case ok && current.models != nil:
-			return current.models, nil
-		case ok && current.err != nil:
-			return nil, current.err
-		}
-		return nil, e
-	}
-	c.kept[connection] = ticket
-	switch {
-	case cloudKeyRefused(e):
-	case ok && current.models != nil:
-		c.write(connection, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: current.models})
-		return current.models, nil
-	case ok && cloudKeyRefused(current.err):
-		return nil, current.err
-	}
-	c.write(connection, &cloudModelEntry{at: time.Now(), err: e})
-	return nil, e
+	return c.gone[connection]
 }
 
 // cloudModels is a connection's hosted models' limits: as read within cloudModelsTTL, else read again with its key.
 // While the hosted site is out of reach the limits last read are kept, read again a minute later; a key it no longer
 // takes, or one whose workspace runs no model, offers none until a minute has passed. wait says whether the caller may
-// wait for the hosted site: one that holds no database lock (a connection saved or refreshed, a call being sent). A
-// catalog read never does, since a run's creation reads its catalog under its workspace's lock: it takes the limits as
-// last read and has them read again in the background (refreshCloudModels), offering none until they are known.
+// wait for the hosted site: one that holds no database lock (a call being sent). A catalog read never does, since a
+// run's creation reads its catalog under its workspace's lock: it takes the limits as last read and has them read again
+// in the background (refreshCloudModels), offering none until they are known.
 func (a *App) cloudModels(ctx context.Context, user, connection string, sealed []byte, wait bool) (map[string]cloudModel, error) {
-	entry, ok := a.cloudEntry(connection)
-	switch {
-	case ok && entry.err != nil && time.Since(entry.at) < cloudModelsRetry:
-		return nil, entry.err
-	case ok && entry.models != nil && time.Since(entry.at) < cloudModelsTTL:
-		return entry.models, nil
-	case !wait:
+	entry, known := a.cloudEntry(connection)
+	if models, ok, e := entry.answer(); known && ok {
+		return models, e
+	}
+	if !wait {
 		a.refreshCloudModels(user, connection, sealed)
-		if ok && entry.models != nil {
+		if known && entry.models != nil {
 			return entry.models, nil
 		}
 		return nil, errCloudUnread
 	}
+	release, e := a.cloudTurn(ctx, connection)
+	if e != nil {
+		return nil, e
+	}
+	defer release()
 	return a.readCloudModels(ctx, user, connection, sealed)
 }
 
-// readCloudModels reads a connection's hosted models with its key and keeps what it learnt: the models and their
-// limits, or why not; while the hosted site is out of reach, the limits read last, read again a minute later.
+// readCloudModels learns a connection's hosted models in its turn, which its caller holds: from the read before it in
+// the turn, while that one's answer is good, else from the hosted site with the connection's key. What it learns is
+// kept, and is its answer: the models and their limits; the hosted site's refusal of the key; or, the site out of
+// reach, the limits or the refusal known already, the site to be asked again a minute later, else the failure. A read
+// cut short (a shutdown, its caller gone) learns nothing, and one of a connection deleted meanwhile offers nothing.
 func (a *App) readCloudModels(ctx context.Context, user, connection string, sealed []byte) (map[string]cloudModel, error) {
-	ticket := a.beginCloudRead(connection)
+	entry, known := a.cloudEntry(connection)
+	if models, ok, e := entry.answer(); known && ok {
+		return models, e
+	}
+	if a.cloudGone(connection) {
+		return nil, errCloudGone
+	}
 	key, e := a.openCredential(user, connection, sealed)
 	if e != nil {
 		return nil, e
 	}
 	_, models, e := a.discoverCloudModels(ctx, key)
-	if e != nil {
-		return a.publishCloudFailure(connection, ticket, e)
+	if e != nil && ctx.Err() != nil {
+		return nil, e
 	}
-	a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), models: models})
-	return models, nil
+	learnt := cloudModelEntry{at: time.Now(), models: models, err: e}
+	switch {
+	case e == nil || cloudKeyRefused(e):
+	case known && entry.models != nil:
+		learnt = cloudModelEntry{at: learnt.at.Add(cloudModelsRetry - cloudModelsTTL), models: entry.models}
+	case known && cloudKeyRefused(entry.err):
+		// The site out of reach says nothing against a key it refused.
+		learnt.err = entry.err
+	}
+	if !a.keepCloud(connection, learnt) {
+		return nil, errCloudGone
+	}
+	return learnt.models, learnt.err
 }
 
 // cloudKeyRefused says whether a failure to read a connection's hosted models is the hosted site's answer about its key
@@ -304,8 +317,9 @@ func cloudKeyRefused(e error) bool {
 	return errors.Is(e, errCloudKeyRejected) || errors.Is(e, errCloudNoModels)
 }
 
-// refreshCloudModels reads a connection's hosted models in the background, once at a time for each connection, as part
-// of the work this process runs (a.running, a.tasks): a shutdown or a lost database lock cuts the read.
+// refreshCloudModels reads a connection's hosted models in the background, in its turn, one read waiting or under way
+// at a time for each connection, as part of the work this process runs (a.running, a.tasks): a shutdown or a lost
+// database lock cuts the read, or its wait for the turn.
 func (a *App) refreshCloudModels(user, connection string, sealed []byte) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
@@ -343,6 +357,11 @@ func (a *App) refreshCloudModels(user, connection string, sealed []byte) {
 			a.mu.Unlock()
 			cancel()
 		}()
+		release, e := a.cloudTurn(ctx, connection)
+		if e != nil {
+			return
+		}
+		defer release()
 		_, _ = a.readCloudModels(ctx, user, connection, sealed)
 	}()
 }

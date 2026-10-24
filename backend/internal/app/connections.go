@@ -349,6 +349,17 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid, id := currentUser(r).ID, randomID()
+	if cloud {
+		// The new connection's turn until its hosted models are kept: a read of it begun once it is saved keeps nothing
+		// before them (cloudTurn).
+		release, waited := a.cloudTurn(r.Context(), id)
+		if waited != nil {
+			// Only its request ended (no other holds a new connection's turn): nothing was saved.
+			cloudDiscoveryFailed(w, waited)
+			return
+		}
+		defer release()
+	}
 	secret, e := a.sealCredential(uid, id, b.APIKey)
 	if e != nil {
 		fail(w, 503, "vault_unavailable", "Credential storage is unavailable")
@@ -388,7 +399,7 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if limits != nil {
-		a.rememberCloudModels(id, limits)
+		a.keepCloud(id, cloudModelEntry{at: time.Now(), models: limits})
 	}
 	writeJSON(w, 201, map[string]any{"id": id, "provider": b.Provider, "runtime": b.Runtime, "name": b.Name, "models": models, "hasKey": true})
 }
@@ -421,14 +432,20 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	var models []string
 	var limits map[string]cloudModel
-	// A refresh is a read of the hosted models like any other: of two at once, the one begun later is kept.
-	var ticket uint64
 	if provider == cloudProviderID {
-		ticket = a.beginCloudRead(id)
+		// The connection's turn, from the question to the hosted site until what it answered is saved and kept: two
+		// refreshes, or a refresh and a read, never overlap (cloudTurn).
+		release, waited := a.cloudTurn(r.Context(), id)
+		if waited != nil {
+			// Its request's deadline came first, the reads before it held by the online site: nothing was read or saved.
+			cloudDiscoveryFailed(w, waited)
+			return
+		}
+		defer release()
 		if models, limits, e = a.discoverCloudModels(r.Context(), key); e != nil {
 			// The hosted site's answer about the key ends the models it offered; the site out of reach leaves them.
 			if cloudKeyRefused(e) {
-				a.publishCloudEntry(id, ticket, &cloudModelEntry{at: time.Now(), err: e})
+				a.keepCloud(id, cloudModelEntry{at: time.Now(), err: e})
 			}
 			cloudDiscoveryFailed(w, e)
 			return
@@ -465,26 +482,27 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if limits != nil {
-		a.publishCloudEntry(id, ticket, &cloudModelEntry{at: time.Now(), models: limits})
+		a.keepCloud(id, cloudModelEntry{at: time.Now(), models: limits})
 	}
 	writeJSON(w, 200, view)
 }
 
 func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
+	uid, id := currentUser(r).ID, r.PathValue("id")
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
 	defer tx.Rollback(r.Context())
-	uid, id := currentUser(r).ID, r.PathValue("id")
-	result, e := tx.Exec(r.Context(), "DELETE FROM user_connections WHERE id=$1 AND user_id=$2", id, uid)
-	if e != nil {
-		a.dbError(w, e)
+	var provider string
+	e = tx.QueryRow(r.Context(), "DELETE FROM user_connections WHERE id=$1 AND user_id=$2 RETURNING provider", id, uid).Scan(&provider)
+	if noRows(e) {
+		fail(w, 404, "not_found", "Connection not found")
 		return
 	}
-	if result.RowsAffected() != 1 {
-		fail(w, 404, "not_found", "Connection not found")
+	if e != nil {
+		a.dbError(w, e)
 		return
 	}
 	if e = audit(r.Context(), tx, uid, "", "connection.deleted", id); e != nil {
@@ -495,7 +513,11 @@ func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.rememberCloudModels(id, nil)
+	// It does not wait for a read of its hosted models under way (up to 15 s, the hosted site out of reach): that read
+	// keeps nothing once it is forgotten.
+	if provider == cloudProviderID {
+		a.forgetCloud(id)
+	}
 	w.WriteHeader(204)
 }
 

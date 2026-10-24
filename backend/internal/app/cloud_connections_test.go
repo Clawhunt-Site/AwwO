@@ -46,38 +46,172 @@ func TestCloudOriginIsTheLocalEditionsAlone(t *testing.T) {
 	}
 }
 
-func TestCloudReadFailuresKeepWhatIsNewest(t *testing.T) {
-	a := New(nil, testConfig())
-	models := map[string]cloudModel{"m": {ContextWindow: 8192, MaxOutputTokens: 1024}}
-	outage := errors.New("cloud unavailable")
-	// An older read heard the key refused, a newer one found the site out of reach: the refusal stands.
-	a.rememberCloudModels("c", models)
-	older, newer := a.beginCloudRead("c"), a.beginCloudRead("c")
-	if _, e := a.publishCloudFailure("c", older, errCloudKeyRejected); !errors.Is(e, errCloudKeyRejected) {
-		t.Fatal("the refusal", e)
+func TestCloudReadsKeepWhatTheyLearnt(t *testing.T) {
+	cloud := newFakeCloud(t)
+	c := testConfig()
+	c.Edition, c.UserCredentials, c.CredentialKey, c.LocalCloudOrigin = editionLocal, true, bytes.Repeat([]byte{5}, 32), cloud.URL
+	a := New(nil, c)
+	sealed, e := a.sealCredential("u", "c", cloudKey)
+	if e != nil {
+		t.Fatal(e)
 	}
-	if m, e := a.publishCloudFailure("c", newer, outage); m != nil || !errors.Is(e, errCloudKeyRejected) {
-		t.Fatal("the site out of reach says nothing against a refusal", m, e)
+	read := func() (map[string]cloudModel, error) {
+		return a.readCloudModels(context.Background(), "u", "c", sealed)
 	}
-	// An older read's failure after a newer read's answer is dropped, and the answer kept is what it says.
-	a.rememberCloudModels("c", models)
-	older, newer = a.beginCloudRead("c"), a.beginCloudRead("c")
-	a.publishCloudEntry("c", newer, &cloudModelEntry{at: time.Now(), models: models})
-	if m, e := a.publishCloudFailure("c", older, errCloudKeyRejected); e != nil || m == nil {
-		t.Fatal("an older refusal", m, e)
+	entry := func() cloudModelEntry { got, _ := a.cloudEntry("c"); return got }
+	age := func(by time.Duration) { ageCloudModels(a, "c", by) }
+	// Never read and the site out of reach: the failure, held for a minute.
+	cloud.status.Store(503)
+	if _, e = read(); e == nil || entry().err == nil || cloud.reads.Load() != 1 {
+		t.Fatal("the failure", e, entry())
 	}
-	if entry, _ := a.cloudEntry("c"); entry.models == nil {
-		t.Fatal("the newer answer replaced")
+	if _, e = read(); e == nil || cloud.reads.Load() != 1 {
+		t.Fatal("asked again within the minute", cloud.reads.Load())
 	}
-	// The site out of reach keeps the limits, to be read again a minute later; never read, its failure.
-	if m, e := a.publishCloudFailure("c", a.beginCloudRead("c"), outage); e != nil || m == nil {
-		t.Fatal("the limits kept", m, e)
+	// Read: the models, fresh for ten minutes; old, and the site out of reach, kept, asked again a minute later.
+	cloud.status.Store(200)
+	age(cloudModelsRetry)
+	if models, e := read(); e != nil || len(models) != 2 || cloud.reads.Load() != 2 {
+		t.Fatal("read", models, e)
 	}
-	if entry, _ := a.cloudEntry("c"); time.Since(entry.at) < cloudModelsTTL-cloudModelsRetry-time.Second || time.Since(entry.at) >= cloudModelsTTL {
-		t.Fatal("read again a minute later", time.Since(entry.at))
+	if _, e = read(); e != nil || cloud.reads.Load() != 2 {
+		t.Fatal("asked again while fresh")
 	}
-	if _, e := a.publishCloudFailure("new", a.beginCloudRead("new"), outage); !errors.Is(e, outage) {
-		t.Fatal("a connection never read", e)
+	age(cloudModelsTTL)
+	cloud.status.Store(503)
+	if models, e := read(); e != nil || len(models) != 2 || cloud.reads.Load() != 3 {
+		t.Fatal("the limits kept while out of reach", models, e)
+	}
+	if since := time.Since(entry().at); since < cloudModelsTTL-cloudModelsRetry-time.Second || since >= cloudModelsTTL {
+		t.Fatal("asked again a minute later", since)
+	}
+	// The key refused: no models; the site out of reach after it says nothing against that, held for another minute.
+	age(cloudModelsTTL)
+	cloud.status.Store(401)
+	if _, e = read(); !errors.Is(e, errCloudKeyRejected) {
+		t.Fatal("refused", e)
+	}
+	age(cloudModelsRetry)
+	cloud.status.Store(503)
+	if _, e = read(); !errors.Is(e, errCloudKeyRejected) || !errors.Is(entry().err, errCloudKeyRejected) || time.Since(entry().at) > time.Second {
+		t.Fatal("the refusal stands, held for another minute", e, entry())
+	}
+	// A read cut short learns nothing.
+	age(cloudModelsRetry)
+	before := entry()
+	cut, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, e = a.readCloudModels(cut, "u", "c", sealed); e == nil || entry().at != before.at {
+		t.Fatal("a read cut short kept something", e, entry())
+	}
+	// A connection deleted: nothing asked, nothing kept.
+	reads := cloud.reads.Load()
+	a.forgetCloud("c")
+	cloud.status.Store(200)
+	if _, e = read(); !errors.Is(e, errCloudGone) || cloud.reads.Load() != reads {
+		t.Fatal("a deleted connection read", e)
+	}
+	if a.keepCloud("c", cloudModelEntry{at: time.Now(), models: map[string]cloudModel{}}) {
+		t.Fatal("a deleted connection's models kept")
+	}
+	if _, kept := a.cloudEntry("c"); kept {
+		t.Fatal("a deleted connection's models kept")
+	}
+	// One under way when its connection is deleted: it offers nothing and keeps nothing.
+	deleted, e := a.sealCredential("u", "d", cloudKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cloud.delayNext <- 300 * time.Millisecond
+	answer := make(chan error, 1)
+	go func() { _, e := a.readCloudModels(context.Background(), "u", "d", deleted); answer <- e }()
+	waitUntil(t, "the read never asked", func() bool { return cloud.reads.Load() != reads })
+	a.forgetCloud("d")
+	if e = <-answer; !errors.Is(e, errCloudGone) {
+		t.Fatal("a read under way offered a deleted connection's models", e)
+	}
+	if _, kept := a.cloudEntry("d"); kept {
+		t.Fatal("a read under way kept a deleted connection's models")
+	}
+}
+
+func TestCloudReadsTakeTurns(t *testing.T) {
+	cloud := newFakeCloud(t)
+	c := testConfig()
+	c.Edition, c.UserCredentials, c.CredentialKey, c.LocalCloudOrigin = editionLocal, true, bytes.Repeat([]byte{6}, 32), cloud.URL
+	a := New(nil, c)
+	sealed, e := a.sealCredential("u", "c", cloudKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ctx := context.Background()
+	answers := make(chan error, 3)
+	waitingReads := func() {
+		for range 3 {
+			go func() {
+				models, e := a.cloudModels(ctx, "u", "c", sealed, true)
+				if e == nil && len(models) != 2 {
+					e = errors.New("not the models")
+				}
+				answers <- e
+			}()
+		}
+	}
+	answered := func(what string) {
+		t.Helper()
+		for range 3 {
+			select {
+			case e := <-answers:
+				if e != nil {
+					t.Fatal(what, e)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal(what, "no answer")
+			}
+		}
+	}
+	// A connection being saved holds its turn until its models are kept: a read in the background and three calls' reads
+	// begun meanwhile wait for it, and take them, asking nothing.
+	release, e := a.cloudTurn(ctx, "c")
+	if e != nil {
+		t.Fatal(e)
+	}
+	a.refreshCloudModels("u", "c", sealed)
+	waitingReads()
+	waitUntil(t, "a read did not wait for the turn", func() bool { users, _ := cloudTurnUsers(a, "c"); return users == 5 })
+	a.keepCloud("c", cloudModelEntry{at: time.Now(), models: map[string]cloudModel{
+		"bedrock.claude-opus-5-5": {ContextWindow: 200000, MaxOutputTokens: 32000, ProseBytesPerToken: 3.4, MaxRequestBytes: relayBodyLimit},
+		"bedrock.glm-5":           {ContextWindow: 128000, MaxOutputTokens: 16000, ProseBytesPerToken: 1, MaxRequestBytes: relayBodyLimit}}})
+	release()
+	answered("a read waiting for the saved models")
+	settleCloudReads(t, a)
+	if users, turns := cloudTurnUsers(a, "c"); cloud.reads.Load() != 0 || users != 0 || turns != 0 {
+		t.Fatal("asked while the saved models were fresh, or the turn not forgotten", cloud.reads.Load(), users, turns)
+	}
+	// Old, and three calls' reads at once: one asks the hosted site, the others wait for its turn and take its answer.
+	ageCloudModels(a, "c", cloudModelsTTL)
+	cloud.delay.Store(int64(200 * time.Millisecond))
+	waitingReads()
+	answered("reads at once")
+	if cloud.reads.Load() != 1 || cloud.most.Load() != 1 {
+		t.Fatal("the hosted site asked by each, or by two at once", cloud.reads.Load(), cloud.most.Load())
+	}
+	// A read whose caller stops waiting for the turn leaves it.
+	ageCloudModels(a, "c", cloudModelsTTL)
+	if release, e = a.cloudTurn(ctx, "c"); e != nil {
+		t.Fatal(e)
+	}
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if _, e = a.cloudModels(short, "u", "c", sealed, true); !errors.Is(e, context.DeadlineExceeded) {
+		t.Fatal("a read that stopped waiting", e)
+	}
+	if users, _ := cloudTurnUsers(a, "c"); users != 1 {
+		t.Fatal("a read that stopped waiting still counted", users)
+	}
+	release()
+	if _, turns := cloudTurnUsers(a, "c"); turns != 0 || cloud.reads.Load() != 1 {
+		t.Fatal("the turn not forgotten, or asked by a read that stopped waiting", turns, cloud.reads.Load())
 	}
 }
 
@@ -100,12 +234,15 @@ func TestCloudBudgetLeavesRoomForWhatAWorkerAdds(t *testing.T) {
 // fakeCloud is the hosted AwwO's relay as an AwwO 云端 connection reads it: its /models for one key, and what it reads.
 type fakeCloud struct {
 	*httptest.Server
-	reads  atomic.Int32
-	status atomic.Int32
-	empty  atomic.Bool
-	delay  atomic.Int64 // how long it holds each answer
+	reads   atomic.Int32
+	status  atomic.Int32
+	empty   atomic.Bool
+	glmOnly atomic.Bool  // it lists the GLM model alone
+	delay   atomic.Int64 // how long it holds each answer
 	// delayNext holds the next answers each longer by its next duration, one each.
 	delayNext chan time.Duration
+	// asking is how many reads it is answering now; most, the most it ever answered at once.
+	asking, most atomic.Int32
 }
 
 const cloudKey = "awwo_rk_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
@@ -118,8 +255,11 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 			t.Errorf("unexpected cloud call %s %s", r.Method, r.URL.Path)
 		}
 		f.reads.Add(1)
+		asking := f.asking.Add(1)
+		for most := f.most.Load(); asking > most && !f.most.CompareAndSwap(most, asking); most = f.most.Load() {
+		}
 		// Its answer is as it stood when the request came, however late it is sent.
-		status, empty := int(f.status.Load()), f.empty.Load()
+		status, empty, glmOnly := int(f.status.Load()), f.empty.Load(), f.glmOnly.Load()
 		wait := time.Duration(f.delay.Load())
 		select {
 		case d := <-f.delayNext:
@@ -127,6 +267,8 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 		default:
 		}
 		time.Sleep(wait)
+		// Counted out before its answer is sent: a read sent once the answer came is never counted with this one.
+		f.asking.Add(-1)
 		if r.Header.Get("Authorization") != "Bearer "+cloudKey {
 			w.WriteHeader(401)
 			io.WriteString(w, `{"error":{"code":"relay_key_invalid"}}`)
@@ -138,6 +280,10 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 		}
 		if empty {
 			io.WriteString(w, `{"object":"list","data":[]}`)
+			return
+		}
+		if glmOnly {
+			io.WriteString(w, `{"object":"list","data":[{"id":"bedrock.glm-5","context_window":128000,"max_output_tokens":16000,"prose_bytes_per_token":1}]}`)
 			return
 		}
 		io.WriteString(w, `{"object":"list","data":[
@@ -171,6 +317,42 @@ func settleCloudReads(t *testing.T, a *App) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("hosted models still being read")
+		}
+	}
+}
+
+// ageCloudModels makes what is known of a connection's hosted models older by by.
+func ageCloudModels(a *App, connection string, by time.Duration) {
+	a.cloudModelCache.mu.Lock()
+	defer a.cloudModelCache.mu.Unlock()
+	entry := a.cloudModelCache.entries[connection]
+	entry.at = entry.at.Add(-by)
+	a.cloudModelCache.entries[connection] = entry
+}
+
+// clearCloudModels forgets what is known of every connection's hosted models, as a restart does.
+func clearCloudModels(a *App) {
+	a.cloudModelCache.mu.Lock()
+	defer a.cloudModelCache.mu.Unlock()
+	a.cloudModelCache.entries = nil
+}
+
+// cloudTurnUsers is how many hold or wait for a connection's turn, and how many turns are known at all.
+func cloudTurnUsers(a *App, connection string) (users, turns int) {
+	a.cloudModelCache.mu.Lock()
+	defer a.cloudModelCache.mu.Unlock()
+	if turn := a.cloudModelCache.turns[connection]; turn != nil {
+		users = turn.users
+	}
+	return users, len(a.cloudModelCache.turns)
+}
+
+// waitUntil waits up to 10 s for ok, failing the test with what if it never holds.
+func waitUntil(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
 		}
 	}
 }
@@ -236,7 +418,7 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	}
 	// Not known (a restart): a catalog never waits for the hosted site, which a run's creation reads under its workspace's
 	// lock. It offers the connection's models once the read it began in the background has them; a call being sent waits.
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	if _, e = h.a.personalRuntime(ctx, runtimePI, false); e == nil {
 		t.Fatal("models offered before their limits are known")
 	}
@@ -244,11 +426,11 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != 2 {
 		t.Fatal("read in the background", catalog, e, cloud.reads.Load())
 	}
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	if _, e = h.a.personalAdmission(context.Background(), runtimePI, raw); e != nil || cloud.reads.Load() != 3 {
 		t.Fatal("a call waits for its model's limits", e, cloud.reads.Load())
 	}
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	cloud.status.Store(503)
 	h.a.personalRuntime(ctx, runtimePI, false)
 	settleCloudReads(t, h.a)
@@ -262,9 +444,7 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
 	// Old, they are taken as they were while being read again, and kept while the hosted site is out of reach, read again
 	// a minute later; a catalog read never waits for them, even on a site that holds its answer.
-	aged := func() {
-		h.a.cloudModelCache.entries[id] = cloudModelEntry{at: time.Now().Add(-cloudModelsTTL), models: h.a.cloudModelCache.entries[id].models}
-	}
+	aged := func() { ageCloudModels(h.a, id, cloudModelsTTL) }
 	aged()
 	cloud.status.Store(503)
 	cloud.delay.Store(int64(time.Second))
@@ -302,7 +482,7 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 		t.Fatal("refreshed", e)
 	}
 	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
-	if _, kept := h.a.cloudModelCache.entries[id]; kept {
+	if _, kept := h.a.cloudEntry(id); kept {
 		t.Fatal("a deleted connection's limits are forgotten")
 	}
 }
@@ -310,7 +490,7 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 func TestPostgresCloudConnectionsAreReadWhenTheLocalEditionStarts(t *testing.T) {
 	h, cloud, owner, _, uid := localCloudHarness(t)
 	id := h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	if e := h.a.warmCloudModels(context.Background()); e != nil {
 		t.Fatal(e)
 	}
@@ -324,7 +504,7 @@ func TestPostgresCloudConnectionsAreReadWhenTheLocalEditionStarts(t *testing.T) 
 		t.Fatal("the first catalog after a start", e)
 	}
 	// One read at a time for each connection, and none once the API is closing.
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	cloud.delay.Store(int64(300 * time.Millisecond))
 	for i := 0; i < 3; i++ {
 		h.a.personalRuntime(ctx, runtimePI, false)
@@ -336,7 +516,7 @@ func TestPostgresCloudConnectionsAreReadWhenTheLocalEditionStarts(t *testing.T) 
 	h.a.mu.Lock()
 	h.a.closed = true
 	h.a.mu.Unlock()
-	h.a.cloudModelCache.entries = nil
+	clearCloudModels(h.a)
 	h.a.personalRuntime(ctx, runtimePI, false)
 	settleCloudReads(t, h.a)
 	h.a.mu.Lock()
@@ -356,94 +536,51 @@ func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
 	h, cloud, owner, _, uid := localCloudHarness(t)
 	id := h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
 	ctx := context.WithValue(context.Background(), userKey{}, User{ID: uid})
-	lateRead := func() {
-		h.a.cloudModelCache.mu.Lock()
-		entry := h.a.cloudModelCache.entries[id]
-		entry.at = time.Now().Add(-cloudModelsTTL)
-		h.a.cloudModelCache.entries[id] = entry
-		h.a.cloudModelCache.mu.Unlock()
-		cloud.delayNext <- 500 * time.Millisecond
+	// lateRead has a catalog begin a read in the background of the connection's models, made old, which the hosted site
+	// holds for hold: it returns once the site was asked, the read holding the connection's turn.
+	lateRead := func(id string, hold time.Duration) {
+		ageCloudModels(h.a, id, cloudModelsTTL)
+		cloud.delayNext <- hold
 		reads := cloud.reads.Load()
 		h.a.personalRuntime(ctx, runtimePI, false)
-		for cloud.reads.Load() == reads {
-			time.Sleep(time.Millisecond)
-		}
+		waitUntil(t, "the read in the background never asked", func() bool { return cloud.reads.Load() != reads })
 	}
-	// A read in the background that the hosted site answered with the models, sent after a refresh it refused: the
-	// refusal stands.
-	lateRead()
+	// A refresh the hosted site refuses, sent while a read in the background is being answered with the models: it waits
+	// for the read's turn, and its refusal stands.
+	lateRead(id, 500*time.Millisecond)
 	cloud.status.Store(401)
 	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 422)
 	settleCloudReads(t, h.a)
 	if _, e := h.a.personalRuntime(ctx, runtimePI, false); e == nil {
 		t.Fatal("an older read put back the models of a key refused since")
 	}
-	// Nor does one put back a deleted connection's.
+	// Nor does one put back a deleted connection's, whose deletion does not wait for it.
 	cloud.status.Store(200)
 	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
-	lateRead()
+	lateRead(id, 500*time.Millisecond)
 	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
 	settleCloudReads(t, h.a)
 	if _, kept := h.a.cloudEntry(id); kept {
 		t.Fatal("a deleted connection's models put back")
 	}
-	// Of two reads at once (a catalog's in the background, a call's that waits), the one begun later asked the hosted
-	// site later and wins, whichever answers first: here the earlier one answers first with the models, the later one,
-	// asked once the key was refused, after it.
+	// A call's read waits for a read in the background under way and takes what it learnt: the hosted site, asked once,
+	// is not asked again, though it would now refuse the key.
 	id = h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
 	var sealed []byte
 	if e := h.db.QueryRow(context.Background(), "SELECT secret FROM user_connections WHERE id=$1", id).Scan(&sealed); e != nil {
 		t.Fatal(e)
 	}
-	h.a.cloudModelCache.mu.Lock()
-	entry := h.a.cloudModelCache.entries[id]
-	entry.at = time.Now().Add(-cloudModelsTTL)
-	h.a.cloudModelCache.entries[id] = entry
-	h.a.cloudModelCache.mu.Unlock()
-	cloud.delayNext <- 200 * time.Millisecond
-	cloud.delayNext <- 600 * time.Millisecond
+	lateRead(id, 300*time.Millisecond)
+	cloud.status.Store(401)
 	reads := cloud.reads.Load()
-	h.a.personalRuntime(ctx, runtimePI, false)
-	for cloud.reads.Load() == reads {
-		time.Sleep(time.Millisecond)
-	}
-	cloud.status.Store(401)
-	if _, e := h.a.readCloudModels(context.Background(), uid, id, sealed); !errors.Is(e, errCloudKeyRejected) {
-		t.Fatal("the later read", e)
+	if models, e := h.a.cloudModels(context.Background(), uid, id, sealed, true); e != nil || len(models) != 2 || cloud.reads.Load() != reads {
+		t.Fatal("a call's read asked again", models, e, cloud.reads.Load())
 	}
 	settleCloudReads(t, h.a)
-	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
-		t.Fatal("the earlier read's answer, sent first, replaced the later one's", entry)
-	}
-	// And the other way round: the later one's refusal first, the earlier one's models after it.
+	// Two refreshes at once: the later one waits for the earlier one's turn and asks after it; what it learnt (the GLM
+	// model alone) is both what is saved and what is kept.
 	cloud.status.Store(200)
-	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
-	h.a.cloudModelCache.mu.Lock()
-	entry = h.a.cloudModelCache.entries[id]
-	entry.at = time.Now().Add(-cloudModelsTTL)
-	h.a.cloudModelCache.entries[id] = entry
-	h.a.cloudModelCache.mu.Unlock()
 	cloud.delayNext <- 600 * time.Millisecond
-	cloud.delayNext <- 100 * time.Millisecond
-	reads = cloud.reads.Load()
-	h.a.personalRuntime(ctx, runtimePI, false)
-	for cloud.reads.Load() == reads {
-		time.Sleep(time.Millisecond)
-	}
-	cloud.status.Store(401)
-	if _, e := h.a.readCloudModels(context.Background(), uid, id, sealed); !errors.Is(e, errCloudKeyRejected) {
-		t.Fatal("the later read", e)
-	}
-	settleCloudReads(t, h.a)
-	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
-		t.Fatal("the earlier read's answer, sent last, replaced the later one's", entry)
-	}
-	// Refreshes are reads too: of two at once, the earlier one's models answered last do not replace the later one's
-	// refusal.
-	cloud.status.Store(200)
-	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
-	cloud.delayNext <- 600 * time.Millisecond
-	cloud.delayNext <- 100 * time.Millisecond
 	reads = cloud.reads.Load()
 	earlier := make(chan int, 1)
 	go func() {
@@ -458,16 +595,54 @@ func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
 		resp.Body.Close()
 		earlier <- resp.StatusCode
 	}()
-	for cloud.reads.Load() == reads {
-		time.Sleep(time.Millisecond)
+	waitUntil(t, "the earlier refresh never asked", func() bool { return cloud.reads.Load() != reads })
+	cloud.glmOnly.Store(true)
+	if models := h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)["models"].([]any); len(models) != 1 {
+		t.Fatal("the later refresh", models)
 	}
-	cloud.status.Store(401)
-	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 422)
 	if status := <-earlier; status != 200 {
 		t.Fatal("the earlier refresh", status)
 	}
-	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
-		t.Fatal("an earlier refresh's models, answered last, replaced a later refusal", entry)
+	var raw []byte
+	var saved []string
+	if e := h.db.QueryRow(context.Background(), "SELECT models FROM user_connections WHERE id=$1", id).Scan(&raw); e != nil || json.Unmarshal(raw, &saved) != nil ||
+		len(saved) != 1 || saved[0] != "bedrock.glm-5" {
+		t.Fatal("the models saved", string(raw), e)
+	}
+	if entry, _ := h.a.cloudEntry(id); len(entry.models) != 1 || entry.models["bedrock.glm-5"] == (cloudModel{}) {
+		t.Fatal("the models kept", entry)
+	}
+	if catalog, e := h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 1 {
+		t.Fatal("the models offered", catalog, e)
+	}
+	// The hosted site never answered two reads of a connection at once.
+	if cloud.most.Load() != 1 {
+		t.Fatal("reads at once", cloud.most.Load())
+	}
+}
+
+func TestPostgresARefreshWhoseDeadlineComesWhileItWaitsSaysSo(t *testing.T) {
+	h, cloud, owner, _, _ := localCloudHarness(t)
+	id := h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
+	saved := requestDeadline
+	requestDeadline = 300 * time.Millisecond
+	defer func() { requestDeadline = saved }()
+	// A read of the connection's models holds its turn past the refresh's deadline: the refresh says it could not be
+	// done, never that it was (an empty 200, which the page reads as synced).
+	release, e := h.a.cloudTurn(context.Background(), id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reads := cloud.reads.Load()
+	if body := h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 503); !strings.Contains(asJSON(t, body), "cloud_unavailable") || cloud.reads.Load() != reads {
+		t.Fatal("a refresh that never had its turn", body, cloud.reads.Load())
+	}
+	if users, _ := cloudTurnUsers(h.a, id); users != 1 {
+		t.Fatal("the refresh that stopped waiting still counted", users)
+	}
+	release()
+	if _, turns := cloudTurnUsers(h.a, id); turns != 0 {
+		t.Fatal("the turn not forgotten", turns)
 	}
 }
 
