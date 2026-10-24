@@ -130,6 +130,10 @@ function serviceCodes(): Record<string, [string, string]> {
     relay_unavailable: ['线上 AwwO 暂未开放本机版连接。', 'The online AwwO does not offer AwwO Local connections right now.'],
     invalid_relay_key: ['请给密钥起一个不超过 80 个字的名称，并选择一个工作区。', 'Name the key (at most 80 characters) and choose a workspace.'],
     tenant_not_found: ['找不到这个工作区，或你在其中只能查看。', 'That workspace was not found, or you can only read it.'],
+    // AwwO 本地版's AwwO 云端 connection (cloud_connections.go).
+    cloud_key_rejected: ['线上 AwwO 不接受这个连接密钥，它可能已撤销或过期。请在线上 AwwO 的「设置 → 本机版连接」生成新密钥。', 'The online AwwO did not take this connection key; it may be revoked or expired. Make a new one on the online AwwO under Settings → AwwO Local connection.'],
+    cloud_no_models: ['这个密钥所属的线上工作区不能使用任何云端模型。', 'This key’s online workspace may use no cloud model.'],
+    cloud_unavailable: ['暂时连不上线上 AwwO，请稍后再试。', 'The online AwwO could not be reached. Try again shortly.'],
     email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
