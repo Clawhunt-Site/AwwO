@@ -5,6 +5,7 @@ Node worker uses, so a deployment can swap the runtime without new variables.
 import json
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field, replace
 
 from bedrock_bridge import bridge_base_url, valid_region
@@ -467,8 +468,15 @@ def cloud_relay_base(env=os.environ) -> str | None:
     AWWO_LOCAL_CLOUD_ORIGIN as the API is told (https://awwo.clawhunt.store unless set); None for an origin the API
     would refuse (HTTPS, or HTTP on this computer, with no path). As apps/user-models.ts cloudRelayBase."""
     origin = (env.get("AWWO_LOCAL_CLOUD_ORIGIN") or "https://awwo.clawhunt.store").rstrip("/")
-    match = re.fullmatch(r"(https?)://(\[::1\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?", origin)
-    if not match or (match.group(1) == "http" and match.group(2) not in {"127.0.0.1", "localhost", "[::1]"}):
+    try:
+        parts = urllib.parse.urlsplit(origin)
+        host, _ = parts.hostname, parts.port  # .port refuses a port that is not one
+    except ValueError:
+        return None
+    if (parts.scheme not in ("https", "http") or not origin.startswith(parts.scheme + "://") or not host
+            or parts.username is not None or parts.password is not None or parts.path or parts.query or parts.fragment
+            or "#" in origin or "?" in origin
+            or (parts.scheme == "http" and host not in ("127.0.0.1", "localhost", "::1"))):
         return None
     return origin + "/api/v1/relay/v1"
 

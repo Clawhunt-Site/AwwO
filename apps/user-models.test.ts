@@ -131,7 +131,10 @@ test("the relay's base is the local edition's cloud origin, an HTTPS one or one 
   assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "http://127.0.0.1:18187/" }), "http://127.0.0.1:18187/api/v1/relay/v1");
   assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "https://staging.example" }), "https://staging.example/api/v1/relay/v1");
   assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "http://[::1]:18187" }), "http://[::1]:18187/api/v1/relay/v1");
-  for (const origin of ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example"]) {
+  assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "https://[2001:db8::1]:8443" }), "https://[2001:db8::1]:8443/api/v1/relay/v1");
+  for (const origin of ["https://relay_test.example", "https://bücher.example"]) assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: origin }), origin + "/api/v1/relay/v1");
+  for (const origin of ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example", "http://[2001:db8::1]",
+    "https://x.example:99999", "https://x.example?", "https://x.example#", "https://"]) {
     assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: origin }), null, origin);
   }
   const saved = process.env.AWWO_LOCAL_CLOUD_ORIGIN;

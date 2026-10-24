@@ -51,7 +51,7 @@ export function cloudRelayBase(env: Record<string, string | undefined> = process
   try {
     const url = new URL(origin);
     const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-    if (url.username || url.password || url.search || url.hash || url.pathname !== "/" || !origin.startsWith(url.protocol + "//") ||
+    if (url.username || url.password || /[?#]/.test(origin) || url.pathname !== "/" || !origin.startsWith(url.protocol + "//") ||
       !(url.protocol === "https:" || (url.protocol === "http:" && local))) return null;
   } catch {
     return null;

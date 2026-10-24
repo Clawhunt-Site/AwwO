@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -35,24 +36,35 @@ func (a *App) connectionProvider(id string) (connectionProvider, bool) {
 	return providerByID(id)
 }
 
-// cloudModel is one hosted model's limits, as the hosted /models lists them.
+// cloudModel is one hosted model's limits, as the hosted /models lists them: its window, its output, its prose rate, and
+// the largest request the relay reads (relayModels; the relay's own limit, relayBodyLimit, where an older site says
+// none).
 type cloudModel struct {
 	ContextWindow      int     `json:"context_window"`
 	MaxOutputTokens    int     `json:"max_output_tokens"`
 	ProseBytesPerToken float64 `json:"prose_bytes_per_token"`
+	MaxRequestBytes    int     `json:"max_request_bytes"`
 }
 
 // cloudBudget is how much of a hosted model's window a run here may fill: what the hosted worker takes (the window less
 // the output and 256), less a tenth of it, at least 4,096 tokens, for what a worker adds to a call beyond its text (its
-// tools' definitions, the JSON around its messages), which the hosted worker counts and this API's budget does not.
+// tools' definitions, the JSON around its messages), which the hosted worker counts and this API's budget does not. It
+// is also held within the relay's request size: a text of n tokens at the model's rate is at most n×rate bytes, which
+// JSON's escapes may grow by a tenth, and 64 KiB are left for the tools and the JSON around the messages.
 func cloudBudget(m cloudModel) int {
 	limit := m.ContextWindow - m.MaxOutputTokens - 256
-	return limit - max(4096, limit/10)
+	budget := limit - max(4096, limit/10)
+	if m.MaxRequestBytes > 0 {
+		budget = min(budget, int(float64(m.MaxRequestBytes-64<<10)/(max(m.ProseBytesPerToken, 1)*1.1)))
+	}
+	return budget
 }
 
 var (
 	errCloudKeyRejected = errors.New("cloud key rejected")
 	errCloudNoModels    = errors.New("cloud key runs no models")
+	// errCloudUnread: a connection whose hosted models are being read, not yet known.
+	errCloudUnread = errors.New("cloud models not read yet")
 )
 
 // discoverCloudModels reads the hosted models a connection key may run (GET /models with it): their ids, in the hosted
@@ -86,11 +98,16 @@ func (a *App) discoverCloudModels(ctx context.Context, key string) ([]string, ma
 	}
 	ids, models := []string{}, map[string]cloudModel{}
 	for _, m := range list.Data {
+		// A rate is held to 1–4 and to a multiple of 0.05, rounded down, as a worker's is (validProseRate); a site that
+		// names no request size reads the relay's own.
+		m.ProseBytesPerToken = math.Floor(min(max(m.ProseBytesPerToken, 1), 4)*20+1e-9) / 20
+		if m.MaxRequestBytes <= 0 {
+			m.MaxRequestBytes = relayBodyLimit
+		}
 		if !personalTextModel(m.ID) || models[m.ID] != (cloudModel{}) || m.ContextWindow < 4096 || m.ContextWindow > 2_000_000 ||
-			m.MaxOutputTokens < 1 || m.MaxOutputTokens+256 >= m.ContextWindow || cloudBudget(m.cloudModel) < 1024 {
+			m.MaxOutputTokens < 1 || m.MaxOutputTokens+256 >= m.ContextWindow || m.MaxRequestBytes > 64<<20 || cloudBudget(m.cloudModel) < 1024 {
 			continue
 		}
-		m.ProseBytesPerToken = min(max(m.ProseBytesPerToken, 1), 4)
 		ids, models[m.ID] = append(ids, m.ID), m.cloudModel
 	}
 	if len(ids) > maxRuntimeModels {
@@ -121,12 +138,21 @@ const cloudModelsRetry = time.Minute
 type cloudModelCache struct {
 	mu      sync.Mutex
 	entries map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
+	reading map[string]bool            // connection id → its models are being read in the background
 }
 
 type cloudModelEntry struct {
 	at     time.Time
 	models map[string]cloudModel // nil while they could not be read
 	err    error                 // why not, kept for cloudModelsRetry
+}
+
+func (a *App) cloudEntry(connection string) (cloudModelEntry, bool) {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[connection]
+	return entry, ok
 }
 
 // rememberCloudModels keeps a connection's hosted models' limits as just read; nil forgets them (a connection deleted).
@@ -152,33 +178,127 @@ func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
 	c.entries[connection] = *entry
 }
 
-// cloudModels is a connection's hosted models' limits: as read within cloudModelsTTL, else read again with its key. While
-// the hosted site is out of reach the limits last read are kept, and read again a minute later; a key it no longer
-// takes, or one whose workspace runs no model, offers none, as does a connection never read, until a minute has passed.
-func (a *App) cloudModels(ctx context.Context, user, connection string, sealed []byte) (map[string]cloudModel, error) {
-	c := &a.cloudModelCache
-	c.mu.Lock()
-	entry, ok := c.entries[connection]
-	c.mu.Unlock()
+// cloudModels is a connection's hosted models' limits: as read within cloudModelsTTL, else read again with its key.
+// While the hosted site is out of reach the limits last read are kept, read again a minute later; a key it no longer
+// takes, or one whose workspace runs no model, offers none until a minute has passed. wait says whether the caller may
+// wait for the hosted site: one that holds no database lock (a connection saved or refreshed, a call being sent). A
+// catalog read never does, since a run's creation reads its catalog under its workspace's lock: it takes the limits as
+// last read and has them read again in the background (refreshCloudModels), offering none until they are known.
+func (a *App) cloudModels(ctx context.Context, user, connection string, sealed []byte, wait bool) (map[string]cloudModel, error) {
+	entry, ok := a.cloudEntry(connection)
 	switch {
 	case ok && entry.err != nil && time.Since(entry.at) < cloudModelsRetry:
 		return nil, entry.err
 	case ok && entry.models != nil && time.Since(entry.at) < cloudModelsTTL:
 		return entry.models, nil
+	case !wait:
+		a.refreshCloudModels(user, connection, sealed)
+		if ok && entry.models != nil {
+			return entry.models, nil
+		}
+		return nil, errCloudUnread
 	}
+	return a.readCloudModels(ctx, user, connection, sealed)
+}
+
+// readCloudModels reads a connection's hosted models with its key and keeps what it learnt: the models and their
+// limits, or why not; while the hosted site is out of reach, the limits read last, read again a minute later.
+func (a *App) readCloudModels(ctx context.Context, user, connection string, sealed []byte) (map[string]cloudModel, error) {
 	key, e := a.openCredential(user, connection, sealed)
 	if e != nil {
 		return nil, e
 	}
 	_, models, e := a.discoverCloudModels(ctx, key)
+	entry, ok := a.cloudEntry(connection)
 	switch {
 	case e == nil:
 		a.rememberCloudModels(connection, models)
 		return models, nil
-	case ok && entry.models != nil && !errors.Is(e, errCloudKeyRejected) && !errors.Is(e, errCloudNoModels):
+	case ok && entry.models != nil && !cloudKeyRefused(e):
 		a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
 		return entry.models, nil
 	}
 	a.rememberCloudEntry(connection, &cloudModelEntry{at: time.Now(), err: e})
 	return nil, e
+}
+
+// cloudKeyRefused says whether a failure to read a connection's hosted models is the hosted site's answer about its key
+// (refused, or its workspace may run no model), which ends the models it offered, rather than the site out of reach.
+func cloudKeyRefused(e error) bool {
+	return errors.Is(e, errCloudKeyRejected) || errors.Is(e, errCloudNoModels)
+}
+
+// refreshCloudModels reads a connection's hosted models in the background, once at a time for each connection, as part
+// of the work this process runs (a.running, a.tasks): a shutdown or a lost database lock cuts the read.
+func (a *App) refreshCloudModels(user, connection string, sealed []byte) {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	if c.reading[connection] {
+		c.mu.Unlock()
+		return
+	}
+	if c.reading == nil {
+		c.reading = map[string]bool{}
+	}
+	c.reading[connection] = true
+	c.mu.Unlock()
+	done := func() {
+		c.mu.Lock()
+		delete(c.reading, connection)
+		c.mu.Unlock()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		cancel()
+		done()
+		return
+	}
+	a.running["cloud:"+connection] = cancel
+	a.tasks.Add(1)
+	a.mu.Unlock()
+	go func() {
+		defer a.tasks.Done()
+		defer done()
+		defer func() {
+			a.mu.Lock()
+			delete(a.running, "cloud:"+connection)
+			a.mu.Unlock()
+			cancel()
+		}()
+		_, _ = a.readCloudModels(ctx, user, connection, sealed)
+	}()
+}
+
+// warmCloudModels has the hosted models of every AwwO 云端 connection on this computer read in the background when the
+// local edition starts, so its first catalog offers them.
+func (a *App) warmCloudModels(ctx context.Context) error {
+	if a.cfg.Edition != editionLocal {
+		return nil
+	}
+	rows, e := a.db.Query(ctx, "SELECT user_id,id,secret FROM user_connections WHERE provider=$1", cloudProviderID)
+	if e != nil {
+		return e
+	}
+	defer rows.Close()
+	type connection struct {
+		user, id string
+		sealed   []byte
+	}
+	found := []connection{}
+	for rows.Next() {
+		var c connection
+		if e = rows.Scan(&c.user, &c.id, &c.sealed); e != nil {
+			return e
+		}
+		found = append(found, c)
+	}
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	for _, c := range found {
+		a.refreshCloudModels(c.user, c.id, c.sealed)
+	}
+	return nil
 }

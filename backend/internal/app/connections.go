@@ -289,7 +289,12 @@ func (a *App) listConnections(w http.ResponseWriter, r *http.Request) {
 		item["models"], _ = json.Marshal(eligible)
 		items[i], _ = json.Marshal(item)
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "providers": a.personalProviders(), "required": a.cfg.UserCredentials, "purchaseURL": "https://api.clawhunt.site/"})
+	answer := map[string]any{"items": items, "providers": a.personalProviders(), "required": a.cfg.UserCredentials, "purchaseURL": "https://api.clawhunt.site/"}
+	// Where an AwwO 云端 connection's key is made: the hosted site's 设置 → 本机版连接 (relay.tsx).
+	if a.cfg.Edition == editionLocal && !a.cfg.LLMGateOnly {
+		answer["cloudKeysURL"] = a.cfg.cloudOrigin() + "/?account=relay"
+	}
+	writeJSON(w, 200, answer)
 }
 func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	if len(a.cfg.CredentialKey) != 32 {
@@ -418,6 +423,10 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 	var limits map[string]cloudModel
 	if provider == cloudProviderID {
 		if models, limits, e = a.discoverCloudModels(r.Context(), key); e != nil {
+			// The hosted site's answer about the key ends the models it offered; the site out of reach leaves them.
+			if cloudKeyRefused(e) {
+				a.rememberCloudEntry(id, &cloudModelEntry{at: time.Now(), err: e})
+			}
 			cloudDiscoveryFailed(w, e)
 			return
 		}
@@ -555,7 +564,7 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 			if a.cfg.Edition != editionLocal {
 				continue
 			}
-			if cloud, e = a.cloudModels(ctx, u.ID, c.id, c.sealed); e != nil {
+			if cloud, e = a.cloudModels(ctx, u.ID, c.id, c.sealed, false); e != nil {
 				continue
 			}
 		}
@@ -590,6 +599,12 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 	}
 	h.Model = h.Models[0].ID
 	h.Provider = h.Models[0].Provider
+	// The default model is measured by the catalog's own limits (modelLimits, modelRate), which are therefore its own: an
+	// AwwO 云端 model's are the hosted site's.
+	h.Limits["maxContextTextBytes"] = float64(h.Models[0].MaxContextTextBytes)
+	if validProseRate(h.Models[0].ProseBytesPerToken) {
+		h.Limits["proseBytesPerToken"] = h.Models[0].ProseBytesPerToken
+	}
 	return h, nil
 }
 
@@ -677,7 +692,7 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 	userModel := map[string]any{"id": selector, "provider": provider, "model": model, "baseURL": p.BaseURL, "apiKey": key, "protocol": protocol, "contextWindow": 32768, "maxTokens": 4096, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}
 	// An AwwO 云端 model runs within the hosted site's limits, measured at its prose rate as the hosted worker measures it.
 	if provider == cloudProviderID {
-		cloud, e := a.cloudModels(ctx, uid, match[1], sealed)
+		cloud, e := a.cloudModels(ctx, uid, match[1], sealed, true)
 		limits, offered := cloud[model]
 		if e != nil || !offered {
 			return nil, errors.New("model unavailable")

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -57,8 +58,13 @@ func (c Config) cloudOrigin() string {
 // no path, query or credentials.
 func validCloudOrigin(raw string) bool {
 	u, e := url.Parse(strings.TrimRight(raw, "/"))
-	if e != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || u.Hostname() == "" || !strings.HasPrefix(raw, u.Scheme+"://") {
+	if e != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != "" || u.Hostname() == "" || !strings.HasPrefix(raw, u.Scheme+"://") {
 		return false
+	}
+	if port := u.Port(); port != "" {
+		if n, e := strconv.Atoi(port); e != nil || n > 65535 {
+			return false
+		}
 	}
 	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" || u.Hostname() == "localhost"))
 }

@@ -114,7 +114,12 @@ class PersonalCredentialsTests(unittest.TestCase):
         self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "http://127.0.0.1:18187/"}), "http://127.0.0.1:18187/api/v1/relay/v1")
         self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "http://[::1]:18187"}), "http://[::1]:18187/api/v1/relay/v1")
         self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "https://staging.example"}), "https://staging.example/api/v1/relay/v1")
-        for origin in ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example"]:
+        self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "https://[2001:db8::1]:8443"}), "https://[2001:db8::1]:8443/api/v1/relay/v1")
+        # Hosts the API and the TS workers take too: an underscore, a name in another script.
+        for origin in ["https://relay_test.example", "https://bücher.example"]:
+            self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": origin}), origin + "/api/v1/relay/v1")
+        for origin in ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example",
+                       "http://[2001:db8::1]", "https://x.example:99999", "https://x.example?q=1", "https://x.example#f", "https://"]:
             with self.subTest(origin=origin):
                 self.assertIsNone(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": origin}))
 

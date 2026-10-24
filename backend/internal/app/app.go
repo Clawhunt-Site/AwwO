@@ -233,6 +233,9 @@ func (a *App) Start(ctx context.Context) error {
 	a.startMediaSweeper(watch)
 	a.startPlanSync(watch)
 	a.startRelaySweeper(watch)
+	if e = a.warmCloudModels(ctx); e != nil {
+		a.log.Warn("the AwwO 云端 connections' models could not be read at start", "error_type", "database")
+	}
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
