@@ -462,6 +462,35 @@ PERSONAL_ENDPOINTS = {
 }
 
 
+# An origin as every reader of AWWO_CLOUD_ORIGIN takes it (apps/cloud-origin-vectors.json; the API's relay_config.go,
+# apps/user-models.ts and scripts/awwo-local-lib.mjs share the rule): ASCII alone, whatever the locale's digits.
+_ORIGIN_HOST = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
+_ORIGIN_PORT = r"(?:6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3})"
+_CLOUD_ORIGIN = re.compile(rf"https://{_ORIGIN_HOST}(?::{_ORIGIN_PORT})?|http://127\.0\.0\.1:{_ORIGIN_PORT}", re.ASCII)
+
+
+def valid_cloud_origin(origin) -> bool:
+    """Whether a value is exactly a hosted site's origin, as AWWO_CLOUD_ORIGIN must be."""
+    return isinstance(origin, str) and _CLOUD_ORIGIN.fullmatch(origin) is not None
+
+
+def cloud_relay_url(env=None) -> str:
+    """The 「AwwO 线上」 engine's one address (docs/awwo-cloud-relay.md): the relay of the hosted site AwwO 本地版's
+    runtime links to (AWWO_CLOUD_ORIGIN), "" where there is none, as apps/user-models.ts cloudRelayURL reads it."""
+    origin = (os.environ if env is None else env).get("AWWO_CLOUD_ORIGIN", "")
+    return origin + "/api/v1/relay/v1" if valid_cloud_origin(origin) else ""
+
+
+def _relay_limits(model: dict) -> bool:
+    """A relayed model's own limits, as the hosted site's catalog bounds them; apps/user-models.ts validLimits."""
+    window, tokens = model["contextWindow"], model["maxTokens"]
+    kinds = model.get("input", ["text"])
+    prose = model.get("proseBytesPerToken")
+    return (type(window) is int and 4096 <= window <= 2_000_000 and type(tokens) is int and 128 <= tokens <= 65_536
+            and tokens + 256 < window and kinds in (["text"], ["text", "image"])
+            and (prose is None or (type(prose) in (int, float) and 1 < prose <= 4)))
+
+
 def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
     """Resolve only an authenticated request's profile, without shared mutation."""
     if not isinstance(body, dict):
@@ -473,27 +502,33 @@ def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
     model = body.get("userModel")
     fields = {"id", "provider", "model", "baseURL", "apiKey", "protocol", "contextWindow",
               "maxTokens", "reasoningEfforts", "defaultReasoningEffort"}
-    if not isinstance(model, dict) or set(model) != fields:
+    # 「AwwO 线上」 alone carries what its model takes and its prose rate, both optional.
+    relay = isinstance(model, dict) and model.get("provider") == "awwo"
+    if not isinstance(model, dict) or not fields <= set(model) or set(model) - fields - ({"input", "proseBytesPerToken"} if relay else set()):
         raise ValueError("Invalid personal model configuration")
+    endpoint = cloud_relay_url() if relay else PERSONAL_ENDPOINTS.get(model["provider"]) if isinstance(model["provider"], str) else None
     if (not isinstance(model["id"], str)
             or not re.fullmatch(r"byok_[A-Za-z0-9_-]{33}_[0-9a-f]{16}", model["id"])
             or model["id"] != body.get("model")
             or not isinstance(model["model"], str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}", model["model"])
             or not isinstance(model["provider"], str)
-            or model["provider"] not in PERSONAL_ENDPOINTS
+            or not endpoint
             or (config.llmgate_only and model["provider"] != "llmgate")
-            or model["baseURL"] != PERSONAL_ENDPOINTS[model["provider"]]
+            or model["baseURL"] != endpoint
             or not isinstance(model["apiKey"], str)
             or not re.fullmatch(r"[\x21-\x7e]{8,4096}", model["apiKey"])
             or not isinstance(model["protocol"], str) or model["protocol"] not in PROTOCOLS
-            or type(model["contextWindow"]) is not int or model["contextWindow"] != 32768
-            or type(model["maxTokens"]) is not int or model["maxTokens"] != 4096
+            or (relay and model["protocol"] != "chat_completions")
+            or (relay and not _relay_limits(model))
+            or (not relay and (type(model["contextWindow"]) is not int or model["contextWindow"] != 32768
+                               or type(model["maxTokens"]) is not int or model["maxTokens"] != 4096))
             or model["reasoningEfforts"] != [] or model["defaultReasoningEffort"] != ""):
         raise ValueError("Invalid personal model configuration")
     profile = ModelProfile(id=model["id"], provider="openai", model=model["model"],
                            base_url=model["baseURL"], api_key=model["apiKey"], protocol=model["protocol"],
-                           context_window=32768, max_tokens=4096)
+                           context_window=model["contextWindow"] if relay else 32768, max_tokens=model["maxTokens"] if relay else 4096,
+                           **({"input": tuple(model.get("input", ["text"])), "prose_bytes_per_token": float(model.get("proseBytesPerToken", 1.0))} if relay else {}))
     clean = {key: value for key, value in body.items() if key != "userModel"}
     return replace(config, models=(profile,), model=profile.id, api_key="", ready=True), clean
 

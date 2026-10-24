@@ -586,6 +586,34 @@ export function windowSessionStore(file) {
   });
 }
 
+/** The hosted site whose Bedrock models AwwO 本地版's 「AwwO 线上」 engine calls through its relay, once its person has
+ *  linked the two (docs/awwo-cloud-relay.md). */
+export const CLOUD_ORIGIN = 'https://awwo.clawhunt.store';
+
+// An origin as every reader of AWWO_CLOUD_ORIGIN takes it (apps/cloud-origin-vectors.json; the API's relay_config.go,
+// apps/user-models.ts and the Python worker's config.py share the rule).
+const ORIGIN_HOST = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*';
+const ORIGIN_PORT = '(?:6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3})';
+const ORIGIN = new RegExp(`^(?:https://${ORIGIN_HOST}(?::${ORIGIN_PORT})?|http://127\\.0\\.0\\.1:${ORIGIN_PORT})$`);
+
+/** Whether a value is exactly a hosted site's origin. */
+export function validCloudOrigin(value) {
+  return typeof value === 'string' && ORIGIN.test(value);
+}
+
+/**
+ * The hosted site this instance links to: CLOUD_ORIGIN, or local.env's AWWO_CLOUD_ORIGIN, which may name another https
+ * origin (a staging site), a test's own site on http://127.0.0.1:<port>, or off (no 「AwwO 线上」 engine). It is not
+ * written to local.env, so an instance follows CLOUD_ORIGIN as releases change it unless its person set it there.
+ */
+export function cloudOrigin(profile) {
+  const value = String(profile.AWWO_CLOUD_ORIGIN ?? '').trim();
+  if (value === '') return CLOUD_ORIGIN;
+  if (value === 'off') return '';
+  if (validCloudOrigin(value)) return value;
+  throw new Error(`local.env: AWWO_CLOUD_ORIGIN must be an https origin, http://127.0.0.1:<port> or off, not ${value}`);
+}
+
 /**
  * Each service's environment. `capabilities` says which optional services run: python (the OpenAI Agents runtime in
  * Python, as the hosted site runs it; else the JavaScript worker takes its place), docker + image + brokerCore (the
@@ -599,7 +627,9 @@ export function windowSessionStore(file) {
  */
 export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '' }) {
   const loopback = port => `http://127.0.0.1:${port}`;
-  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false' };
+  // The API offers 「AwwO 线上」 and links to the hosted site there; the workers take its relay's address alone for it.
+  const cloud = cloudOrigin(profile);
+  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false', ...(cloud ? { AWWO_CLOUD_ORIGIN: cloud } : {}) };
   const pi = {
     ...common, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(ports.pi), AWWO_PI_TOKEN: profile.AWWO_PI_TOKEN,
     AWWO_PI_CONTEXT_WINDOW: MODEL_LIMITS.contextWindow, AWWO_PI_MAX_TOKENS: MODEL_LIMITS.maxTokens,

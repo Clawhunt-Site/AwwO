@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { estimateTokens } from './context-estimate.ts';
 import { contextOverflow } from './context-overflow.ts';
-import { bindUserModel } from './user-models.ts';
+import { bindUserModel, cloudRelayURL } from './user-models.ts';
 
 type ObjectValue = Record<string, any>;
 type Message = { role: string; content: string | null; tool_calls?: ObjectValue[]; tool_call_id?: string; reasoning_details?: ObjectValue[] };
@@ -108,8 +108,8 @@ export interface ComputerCallOptions { thinking?: boolean; maxTokens?: number }
 
 /** One provider call. `stream` says the call is sent streaming and its answer is to be gathered (gatherChatStream): a
  *  Chat Completions call through LLM Gate, where Cloudflare cuts a response that sends nothing for about 100 s and a call
- *  that is not streamed sends nothing until its last token, and one to the DeepSeek API, which thinks before it answers.
- *  Every other call is sent whole, as before. */
+ *  that is not streamed sends nothing until its last token, one to the DeepSeek API, which thinks before it answers, and
+ *  one to 「AwwO 线上」's relay, which takes streaming calls alone. Every other call is sent whole, as before. */
 export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue; stream?: boolean } {
   const base = model.baseURL.replace(/\/+$/, '');
   const common = { model: model.model, stream: false };
@@ -157,7 +157,9 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   const origin = new URL(base).origin;
   const google = origin === 'https://generativelanguage.googleapis.com';
   const deepseek = model.provider === 'deepseek';
-  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN || deepseek;
+  // 「AwwO 线上」's relay answers streaming calls alone, behind the same Cloudflare edge (docs/awwo-cloud-relay.md).
+  const relay = cloudRelayURL() !== '' && base === cloudRelayURL();
+  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN || deepseek || relay;
   // A DeepSeek call thinks unless it is told not to by its own field: for thinking: false, for the effort none where its
   // profile lists that level, and always when it carries tools, since the API wants a tool loop's earlier reasoning_content
   // sent back, which a managed execution's thread does not keep (gatherChatStream passes reasoning over).
