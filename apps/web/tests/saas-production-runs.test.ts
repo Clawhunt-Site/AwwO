@@ -109,14 +109,16 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
   await expect(loadProductionMedia(record.caseId, idle.fetchFile, 50, () => new Promise(() => {}))).rejects.toThrow('production_media_unavailable');
   expect(idle.seen).toEqual([]);
   // The files get the time their bytes take at a slow link's speed on top of the deadline: a file 200 ms late fails a
-  // 50 ms deadline alone, and arrives when the case's bytes are given five seconds more.
+  // 50 ms deadline alone, and arrives when the case's bytes are given five seconds more. That second load is handed its
+  // manifest, so that time is added in a microtask, before the 50 ms timer can run: loading the chunk can take more than
+  // 50 ms on a busy run, and the load could then end before its bytes' time was added.
   const total = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
   const late = (fetchFile: typeof fetch) => (async (input: RequestInfo | URL, init?: RequestInit) => {
     await new Promise(resolve => setTimeout(resolve, 200));
     return fetchFile(input, init);
   }) as typeof fetch;
   await expect(loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, Infinity)).rejects.toThrow('production_media_unavailable');
-  expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, total / 5)).sort()).toEqual(Object.keys(manifest).sort());
+  expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, () => Promise.resolve(manifest), total / 5)).sort()).toEqual(Object.keys(manifest).sort());
   expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
 });
 
