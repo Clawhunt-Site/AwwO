@@ -9,17 +9,19 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// fakeRelayWorker is a relay worker: its health lists models, and its managed-call route answers as answer says, keeping
-// every body it was sent.
+// fakeRelayWorker is a relay worker: its health lists models and its calls at once (capacity, 16 unless set before its
+// health is first read), and its managed-call route answers as answer says, keeping every body it was sent.
 type fakeRelayWorker struct {
 	*httptest.Server
-	mu     sync.Mutex
-	bodies []map[string]any
-	answer func(w http.ResponseWriter, body map[string]any)
+	mu       sync.Mutex
+	bodies   []map[string]any
+	answer   func(w http.ResponseWriter, body map[string]any)
+	capacity atomic.Int32
 }
 
 const relayHealth = `{"ready":true,"computerBedrock":true,"models":[
@@ -37,9 +39,10 @@ func newFakeRelayWorker(t *testing.T, token string) *fakeRelayWorker {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, relayCompletionReply("Hello"))
 	}}
+	f.capacity.Store(16)
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && r.URL.Path == "/health" {
-			io.WriteString(w, relayHealth)
+			io.WriteString(w, strings.Replace(relayHealth, `"ready":true,`, `"ready":true,"maxConcurrency":`+strconv.Itoa(int(f.capacity.Load()))+`,`, 1))
 			return
 		}
 		if r.Method != "POST" || r.URL.Path != "/internal/computer-model" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("Content-Type") != "application/json" {
@@ -588,26 +591,30 @@ func TestPostgresRelayedCallsAreHeldToWhatTheSiteCanTake(t *testing.T) {
 	}
 	// A workspace past its relayed calls at once is refused at once, before it reaches the database.
 	for i := 0; i < relayPerWorkspace; i++ {
-		h.a.relayLimits.enter(tid, relayOnSite)
+		h.a.relayLimits.enter(tid)
 	}
 	busy("past the workspace's calls at once")
 	for i := 0; i < relayPerWorkspace; i++ {
 		h.a.relayLimits.leave(tid)
 	}
-	// The site lets in no more calls at once than the relay worker takes: one past them would only be refused there
-	// (this worker's health does not say, so the Pi worker's default).
-	for i := 0; i < relayWorkerCapacity; i++ {
-		h.a.relayLimits.enter("elsewhere-"+strconv.Itoa(i), relayOnSite)
-	}
-	busy("past the worker's calls at once")
-	for i := 0; i < relayWorkerCapacity; i++ {
-		h.a.relayLimits.leave("elsewhere-" + strconv.Itoa(i))
-	}
-	// A call waits for one of the site's places to be admitted in, which holds no database connection meanwhile, and is
-	// refused as busy when none is free in time, never reserved.
 	saved := relaySlotWait
 	relaySlotWait = 300 * time.Millisecond
 	defer func() { relaySlotWait = saved }()
+	// No call is admitted past the relay worker's own calls at once (its health's maxConcurrency): it waits for one of
+	// them, and is refused as busy when none frees in time, never reserved.
+	capacity := int(worker.capacity.Load())
+	for i := 0; i < capacity; i++ {
+		h.a.relayLimits.take("elsewhere-"+strconv.Itoa(i), capacity)
+	}
+	busy("past the worker's calls at once")
+	if len(worker.sent()) != 0 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid) != 0 {
+		t.Fatal("a call admitted past the worker's calls at once")
+	}
+	for i := 0; i < capacity; i++ {
+		h.a.relayLimits.give("elsewhere-" + strconv.Itoa(i))
+	}
+	// A call waits for one of the site's places to be admitted in, which holds no database connection meanwhile, and is
+	// refused as busy when none is free in time, never reserved.
 	slots := h.a.relayLimits.admitting()
 	for i := 0; i < relayAdmissions; i++ {
 		slots <- struct{}{}
@@ -623,6 +630,66 @@ func TestPostgresRelayedCallsAreHeldToWhatTheSiteCanTake(t *testing.T) {
 	}
 	for i := 1; i < relayAdmissions; i++ {
 		<-slots
+	}
+}
+
+func TestPostgresCallsWaitingForTheirWorkspaceLeaveTheWorkerToOthers(t *testing.T) {
+	h, worker, _, first, firstKey := relayHarness(t)
+	// A worker taking four calls at once, and two workspaces that run one call at once each: its first call holds the
+	// worker, two more wait for it. Before, a waiting call held a place too, and the two filled the worker.
+	worker.capacity.Store(4)
+	saved := relaySlotWait
+	relaySlotWait = 2 * time.Second
+	defer func() { relaySlotWait = saved }()
+	workspace := func() (string, string) {
+		cookie, tid, _ := h.register(t, "relay-ws-"+strings.ToLower(randomID()[:6])+"@example.test")
+		return tid, h.request(t, cookie, "POST", "/auth/relay-keys", map[string]any{"tenantId": tid}, 201)["key"].(string)
+	}
+	second, secondKey := workspace()
+	third, thirdKey := workspace()
+	for _, tid := range []string{first, second} {
+		execSQL(t, h, "UPDATE tenants SET max_concurrent_runs=1 WHERE id=$1", tid)
+	}
+	release, holding := make(chan struct{}), make(chan struct{}, 2)
+	var released sync.Once
+	open := func() { released.Do(func() { close(release) }) }
+	defer open() // a failure lets the calls held go, or the server's close would wait on them
+	worker.answerWith(func(w http.ResponseWriter, body map[string]any) {
+		if body["tenantId"] != third {
+			// Told of the first two; those after the release go through.
+			select {
+			case holding <- struct{}{}:
+			default:
+			}
+			<-release
+		}
+		io.WriteString(w, relayCompletionReply("answered"))
+	})
+	var calls sync.WaitGroup
+	call := func(key string) {
+		calls.Add(1)
+		go func() { defer calls.Done(); sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello) }()
+	}
+	call(firstKey)
+	call(secondKey)
+	<-holding
+	<-holding
+	for i := 0; i < 2; i++ {
+		call(firstKey)
+		call(secondKey)
+	}
+	time.Sleep(300 * time.Millisecond)
+	// A third workspace's call finds the worker free: the calls waiting for theirs hold none of its places.
+	if status, body := sendRelay(t, h, thirdKey, "POST", relayCompletionsRoute, relayHello); status != 200 || !strings.Contains(body, "answered") {
+		t.Fatal("another workspace's call while two wait for their own", status, body)
+	}
+	open()
+	calls.Wait()
+	h.a.relayLimits.mu.Lock()
+	admitted, total := h.a.relayLimits.admitted, h.a.relayLimits.total
+	h.a.relayLimits.mu.Unlock()
+	if admitted != 0 || total != 0 {
+		t.Fatal("every place given back", admitted, total)
 	}
 }
 

@@ -22,10 +22,10 @@ const (
 	relayRequestsPerMinute = 120
 	relayFailuresPerMinute = 30
 	relayRefusalsPerMinute = 20
-	// relayPerWorkspace and relayOnSite bound the relayed calls handled at once, in one workspace and on the site (the
-	// site's, at most the relay worker's own calls at once: relayWorker.capacity), and relayAdmissions those being
-	// admitted at once: an admission holds a database connection, and may wait on its workspace's row, and the pool
-	// has 20 (database.go).
+	// relayPerWorkspace and relayOnSite bound the relayed calls handled at once, in one workspace and on the site, and
+	// relayAdmissions those being admitted at once: an admission holds a database connection, and may wait on its
+	// workspace's row, and the pool has 20 (database.go). The calls admitted at once are bound by the relay worker's own
+	// calls at once (relayWorker.capacity), which a call waiting for its admission never holds (take).
 	relayPerWorkspace = 8
 	relayOnSite       = 32
 	relayAdmissions   = 6
@@ -50,6 +50,8 @@ type relayLimits struct {
 	refusals   map[string]rateEntry // key id → its calls the relay worker refused as the caller's this minute
 	inFlight   map[string]int       // workspace → relayed calls handled now
 	total      int                  // relayed calls handled now, on the site
+	admitted   int                  // relayed calls admitted now, on the site: each holds one of the relay worker's places
+	admittedBy map[string]int       // workspace → its relayed calls admitted now
 	admissions chan struct{}        // the places to be admitted in (relayAdmissions)
 }
 
@@ -103,20 +105,46 @@ func (l *relayLimits) refused(key string) {
 	l.count(&l.refusals, key, relayRefusalsPerMinute, true)
 }
 
-// enter takes a place for a relayed call of a workspace; false when the workspace or the site has none left. capacity is
-// the relay worker's own calls at once, which the site never passes: a call let in past it would only be refused there.
-func (l *relayLimits) enter(tid string, capacity int) bool {
+// enter takes a place for a relayed call of a workspace; false when the workspace or the site has none left.
+func (l *relayLimits) enter(tid string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.inFlight == nil {
 		l.inFlight = map[string]int{}
 	}
-	if l.inFlight[tid] >= relayPerWorkspace || l.total >= min(relayOnSite, capacity) {
+	if l.inFlight[tid] >= relayPerWorkspace || l.total >= relayOnSite {
 		return false
 	}
 	l.inFlight[tid]++
 	l.total++
 	return true
+}
+
+// take takes one of the relay worker's places for a workspace's call about to be admitted, false when all capacity of
+// them are held (a call admitted past them would only be refused there), or half of them by the workspace, at least
+// one, so its calls never take the worker from every other. A call holds its place from its admission to its end, never
+// while it waits to be admitted (reserveRelayInvocation), so waiting calls leave the worker to the others.
+func (l *relayLimits) take(tid string, capacity int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	places := min(relayOnSite, capacity)
+	if l.admitted >= places || l.admittedBy[tid] >= max(1, places/2) {
+		return false
+	}
+	if l.admittedBy == nil {
+		l.admittedBy = map[string]int{}
+	}
+	l.admitted++
+	l.admittedBy[tid]++
+	return true
+}
+func (l *relayLimits) give(tid string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.admitted--
+	if l.admittedBy[tid]--; l.admittedBy[tid] <= 0 {
+		delete(l.admittedBy, tid)
+	}
 }
 func (l *relayLimits) leave(tid string) {
 	l.mu.Lock()

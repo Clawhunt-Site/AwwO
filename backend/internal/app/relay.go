@@ -314,8 +314,8 @@ func relayRateLimited(w http.ResponseWriter) {
 // relayModels lists the models a key's workspace may have this site run: the relay worker's catalog as its entitlement
 // permits, with what a caller needs to size its calls (AwwO's fields beside OpenAI's): a call may hold
 // context_window - max_output_tokens - 256 tokens, counted at prose_bytes_per_token bytes a token of its JSON plus 32 a
-// message, as the worker counts it. None takes a reasoning effort here (the worker's managed-call route serves its
-// Bedrock models through its Converse bridge, which sends none).
+// message, as the worker counts it, in a request of at most max_request_bytes. None takes a reasoning effort here (the
+// worker's managed-call route serves its Bedrock models through its Converse bridge, which sends none).
 func (a *App) relayModels(w http.ResponseWriter, r *http.Request) {
 	caller, ok := a.relayAuthenticate(w, r)
 	if !ok {
@@ -348,7 +348,7 @@ func (a *App) relayModels(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, map[string]any{"id": m.ID, "object": "model", "owned_by": "awwo", "name": name,
 			"context_window": m.ContextWindow, "max_output_tokens": m.MaxOutputTokens, "prose_bytes_per_token": m.ProseBytesPerToken,
-			"reasoning_efforts": []string{}})
+			"max_request_bytes": relayBodyLimit, "reasoning_efforts": []string{}})
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
 }

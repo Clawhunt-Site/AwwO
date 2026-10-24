@@ -65,7 +65,7 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "relay_unavailable", "Cloud models are unavailable right now")
 		return
 	}
-	if !a.relayLimits.enter(caller.tenantID, worker.capacity) {
+	if !a.relayLimits.enter(caller.tenantID) {
 		relayBusy(w)
 		return
 	}
@@ -92,7 +92,7 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	facts := &invocationFacts{Runtime: a.relayRuntime(model.ID), Model: model.ID, Provider: model.Provider, ProviderModel: model.ProviderModel,
 		Protocol: model.Protocol, Admission: "not_attempted", Usage: missingUsage("unavailable", "provider_missing"), InputBytes: int64(len(body))}
 	admission, admitted := context.WithTimeout(ctx, relaySlotWait)
-	e = a.reserveRelayInvocation(admission, caller, id, facts)
+	e = a.reserveRelayInvocation(admission, caller, id, facts, worker.capacity)
 	admitted()
 	if e != nil {
 		// A commit whose answer was lost may have reserved the call all the same: settle it, as one never sent.
@@ -102,6 +102,8 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 		relayRefusal(w, e)
 		return
 	}
+	// The call holds one of the relay worker's places until it ends (relayLimits.take).
+	defer a.relayLimits.give(caller.tenantID)
 	// end settles the call once and lets its handler go; it comes before anything is written to the caller, whose
 	// connection may be slow, so a shutdown never waits on one.
 	var once sync.Once
@@ -181,12 +183,20 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request, models []rel
 // still live and its member still one, the workspace's entitlement and a plan-only model's gate, then the owner's plan
 // (its agents at once, today's free calls, the period's credits) or the free allowance (the workspace's calls at once and
 // its daily total, and the paid routes' allowances). A relayed call belongs to no run, so it never takes a place a run
-// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). While none is free it tries
-// again, backing off, until ctx ends.
-func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id string, facts *invocationFacts) error {
+// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). Each try holds one of the relay
+// worker's places (relayLimits.take; capacity is the worker's calls at once), kept once the call is admitted, given back
+// if it is not. While none is free it tries again, backing off, until ctx ends.
+func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id string, facts *invocationFacts, capacity int) error {
 	for wait := 40 * time.Millisecond; ; wait = min(wait*2, 500*time.Millisecond) {
-		if admitted, e := a.relayAdmission(ctx, caller, id, facts); e != nil || admitted {
-			return e
+		if a.relayLimits.take(caller.tenantID, capacity) {
+			admitted, e := a.relayAdmission(ctx, caller, id, facts)
+			if e == nil && admitted {
+				return nil
+			}
+			a.relayLimits.give(caller.tenantID)
+			if e != nil {
+				return e
+			}
 		}
 		// Waiting for a place backs off from 40 ms to half a second, as reserveInvocation's does.
 		select {

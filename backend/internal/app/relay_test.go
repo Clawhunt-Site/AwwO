@@ -331,29 +331,45 @@ func TestRelayLimitsHoldOffWhatWouldTakeTheSite(t *testing.T) {
 		t.Fatal("a key whose calls keep being refused")
 	}
 	for i := 0; i < relayPerWorkspace; i++ {
-		if !l.enter("w", relayOnSite) {
+		if !l.enter("w") {
 			t.Fatal("a workspace's call within its places refused", i)
 		}
 	}
-	if l.enter("w", relayOnSite) {
+	if l.enter("w") {
 		t.Fatal("a workspace past its places")
 	}
 	l.leave("w")
-	if !l.enter("w", relayOnSite) {
+	if !l.enter("w") {
 		t.Fatal("a place given back")
 	}
 	for i := relayPerWorkspace; i < relayOnSite; i++ {
-		if !l.enter("w"+string(rune('a'+i%20)), relayOnSite) {
+		if !l.enter("w" + string(rune('a'+i%20))) {
 			t.Fatal("the site's places", i)
 		}
 	}
-	if l.enter("fresh", relayOnSite) {
+	if l.enter("fresh") {
 		t.Fatal("the site past its places")
 	}
-	// The relay worker's own calls at once bound the site's.
+	// The relay worker's own calls at once bound the calls admitted, half of them at most a workspace's, and a place given
+	// back is free again.
 	var small relayLimits
-	if !small.enter("a", 2) || !small.enter("b", 2) || small.enter("c", 2) {
-		t.Fatal("the site past the worker's calls at once")
+	if !small.take("a", 4) || !small.take("a", 4) || small.take("a", 4) {
+		t.Fatal("past a workspace's half of the worker")
+	}
+	if !small.take("b", 4) || !small.take("c", 4) || small.take("d", 4) {
+		t.Fatal("past the worker's calls at once")
+	}
+	small.give("a")
+	if !small.take("d", 4) || small.take("a", 4) {
+		t.Fatal("a worker's place given back")
+	}
+	var one relayLimits
+	if !one.take("a", 1) || one.take("b", 1) {
+		t.Fatal("a worker of one call at once takes one")
+	}
+	one.give("a")
+	if len(one.admittedBy) != 0 || one.admitted != 0 {
+		t.Fatal("a workspace that gave back every place", one.admittedBy, one.admitted)
 	}
 	if slots := l.admitting(); cap(slots) != relayAdmissions || l.admitting() != slots {
 		t.Fatal("the site's places to be admitted in")
