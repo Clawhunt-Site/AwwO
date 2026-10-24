@@ -46,6 +46,41 @@ func TestCloudOriginIsTheLocalEditionsAlone(t *testing.T) {
 	}
 }
 
+func TestCloudReadFailuresKeepWhatIsNewest(t *testing.T) {
+	a := New(nil, testConfig())
+	models := map[string]cloudModel{"m": {ContextWindow: 8192, MaxOutputTokens: 1024}}
+	outage := errors.New("cloud unavailable")
+	// An older read heard the key refused, a newer one found the site out of reach: the refusal stands.
+	a.rememberCloudModels("c", models)
+	older, newer := a.beginCloudRead("c"), a.beginCloudRead("c")
+	if _, e := a.publishCloudFailure("c", older, errCloudKeyRejected); !errors.Is(e, errCloudKeyRejected) {
+		t.Fatal("the refusal", e)
+	}
+	if m, e := a.publishCloudFailure("c", newer, outage); m != nil || !errors.Is(e, errCloudKeyRejected) {
+		t.Fatal("the site out of reach says nothing against a refusal", m, e)
+	}
+	// An older read's failure after a newer read's answer is dropped, and the answer kept is what it says.
+	a.rememberCloudModels("c", models)
+	older, newer = a.beginCloudRead("c"), a.beginCloudRead("c")
+	a.publishCloudEntry("c", newer, &cloudModelEntry{at: time.Now(), models: models})
+	if m, e := a.publishCloudFailure("c", older, errCloudKeyRejected); e != nil || m == nil {
+		t.Fatal("an older refusal", m, e)
+	}
+	if entry, _ := a.cloudEntry("c"); entry.models == nil {
+		t.Fatal("the newer answer replaced")
+	}
+	// The site out of reach keeps the limits, to be read again a minute later; never read, its failure.
+	if m, e := a.publishCloudFailure("c", a.beginCloudRead("c"), outage); e != nil || m == nil {
+		t.Fatal("the limits kept", m, e)
+	}
+	if entry, _ := a.cloudEntry("c"); time.Since(entry.at) < cloudModelsTTL-cloudModelsRetry-time.Second || time.Since(entry.at) >= cloudModelsTTL {
+		t.Fatal("read again a minute later", time.Since(entry.at))
+	}
+	if _, e := a.publishCloudFailure("new", a.beginCloudRead("new"), outage); !errors.Is(e, outage) {
+		t.Fatal("a connection never read", e)
+	}
+}
+
 func TestCloudBudgetLeavesRoomForWhatAWorkerAdds(t *testing.T) {
 	if got := cloudBudget(cloudModel{ContextWindow: 200000, MaxOutputTokens: 32000}); got != 167744-16774 {
 		t.Fatal("a tenth of a large window", got)
@@ -402,6 +437,37 @@ func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
 	settleCloudReads(t, h.a)
 	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
 		t.Fatal("the earlier read's answer, sent last, replaced the later one's", entry)
+	}
+	// Refreshes are reads too: of two at once, the earlier one's models answered last do not replace the later one's
+	// refusal.
+	cloud.status.Store(200)
+	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
+	cloud.delayNext <- 600 * time.Millisecond
+	cloud.delayNext <- 100 * time.Millisecond
+	reads = cloud.reads.Load()
+	earlier := make(chan int, 1)
+	go func() {
+		r, _ := http.NewRequest("POST", h.server.URL+"/api/v1/auth/connections/"+id+"/refresh", nil)
+		r.Header.Set("Origin", h.cfg.PublicOrigin)
+		r.AddCookie(owner)
+		resp, e := http.DefaultClient.Do(r)
+		if e != nil {
+			earlier <- 0
+			return
+		}
+		resp.Body.Close()
+		earlier <- resp.StatusCode
+	}()
+	for cloud.reads.Load() == reads {
+		time.Sleep(time.Millisecond)
+	}
+	cloud.status.Store(401)
+	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 422)
+	if status := <-earlier; status != 200 {
+		t.Fatal("the earlier refresh", status)
+	}
+	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
+		t.Fatal("an earlier refresh's models, answered last, replaced a later refusal", entry)
 	}
 }
 

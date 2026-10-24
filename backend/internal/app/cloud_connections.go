@@ -172,7 +172,7 @@ func (a *App) rememberCloudModels(connection string, models map[string]cloudMode
 }
 
 // rememberCloudEntry keeps what is known of a connection's hosted models (nil: nothing, the connection deleted), as a
-// connection saved, refreshed or deleted learns it: newer than any read begun before (publishCloudEntry).
+// connection saved or deleted learns it: newer than any read begun before (publishCloudEntry).
 func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
@@ -181,14 +181,19 @@ func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
 	c.kept[connection] = c.issued[connection]
 }
 
-// write keeps entry for connection, c.mu held.
-func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
+// init makes the cache's maps, c.mu held.
+func (c *cloudModelCache) init() {
 	if c.entries == nil {
 		c.entries = map[string]cloudModelEntry{}
 	}
 	if c.issued == nil {
 		c.issued, c.kept = map[string]uint64{}, map[string]uint64{}
 	}
+}
+
+// write keeps entry for connection, c.mu held.
+func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
+	c.init()
 	if entry == nil {
 		delete(c.entries, connection)
 		return
@@ -196,29 +201,62 @@ func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
 	c.entries[connection] = *entry
 }
 
-// beginCloudRead is a read's ticket, taken when it begins asking the hosted site (publishCloudEntry).
+// beginCloudRead is a read's ticket, taken when it begins asking the hosted site (publishCloudEntry); a refresh is a
+// read too.
 func (a *App) beginCloudRead(connection string) uint64 {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.issued == nil {
-		c.issued, c.kept = map[string]uint64{}, map[string]uint64{}
-	}
+	c.init()
 	c.issued[connection]++
 	return c.issued[connection]
 }
 
 // publishCloudEntry keeps what the read of ticket learnt, unless what is kept is newer: a read begun after it, or the
-// connection saved, refreshed, refused or deleted since it began. An older answer would put back models the hosted site
-// has since refused, or a deleted connection's.
+// connection saved or deleted since it began. An older answer would put back models the hosted site has since refused,
+// or a deleted connection's.
 func (a *App) publishCloudEntry(connection string, ticket uint64, entry *cloudModelEntry) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.init()
 	if ticket > c.kept[connection] {
 		c.write(connection, entry)
 		c.kept[connection] = ticket
 	}
+}
+
+// publishCloudFailure keeps what the read of ticket learnt when it failed, as publishCloudEntry keeps an answer, and
+// chooses it under the same lock: the hosted site's refusal of the key; else, the site being out of reach, the limits
+// kept now (read again a minute later), or a refusal kept now, which the site out of reach says nothing against; else
+// the failure. It returns the models and why not as they stand after it.
+func (a *App) publishCloudFailure(connection string, ticket uint64, e error) (map[string]cloudModel, error) {
+	c := &a.cloudModelCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	current, ok := c.entries[connection]
+	if ticket <= c.kept[connection] {
+		// What is kept is newer.
+		switch {
+		case ok && current.models != nil:
+			return current.models, nil
+		case ok && current.err != nil:
+			return nil, current.err
+		}
+		return nil, e
+	}
+	c.kept[connection] = ticket
+	switch {
+	case cloudKeyRefused(e):
+	case ok && current.models != nil:
+		c.write(connection, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: current.models})
+		return current.models, nil
+	case ok && cloudKeyRefused(current.err):
+		return nil, current.err
+	}
+	c.write(connection, &cloudModelEntry{at: time.Now(), err: e})
+	return nil, e
 }
 
 // cloudModels is a connection's hosted models' limits: as read within cloudModelsTTL, else read again with its key.
@@ -253,17 +291,11 @@ func (a *App) readCloudModels(ctx context.Context, user, connection string, seal
 		return nil, e
 	}
 	_, models, e := a.discoverCloudModels(ctx, key)
-	entry, ok := a.cloudEntry(connection)
-	switch {
-	case e == nil:
-		a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), models: models})
-		return models, nil
-	case ok && entry.models != nil && !cloudKeyRefused(e):
-		a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
-		return entry.models, nil
+	if e != nil {
+		return a.publishCloudFailure(connection, ticket, e)
 	}
-	a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), err: e})
-	return nil, e
+	a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), models: models})
+	return models, nil
 }
 
 // cloudKeyRefused says whether a failure to read a connection's hosted models is the hosted site's answer about its key

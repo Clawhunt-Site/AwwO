@@ -421,11 +421,14 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	var models []string
 	var limits map[string]cloudModel
+	// A refresh is a read of the hosted models like any other: of two at once, the one begun later is kept.
+	var ticket uint64
 	if provider == cloudProviderID {
+		ticket = a.beginCloudRead(id)
 		if models, limits, e = a.discoverCloudModels(r.Context(), key); e != nil {
 			// The hosted site's answer about the key ends the models it offered; the site out of reach leaves them.
 			if cloudKeyRefused(e) {
-				a.rememberCloudEntry(id, &cloudModelEntry{at: time.Now(), err: e})
+				a.publishCloudEntry(id, ticket, &cloudModelEntry{at: time.Now(), err: e})
 			}
 			cloudDiscoveryFailed(w, e)
 			return
@@ -462,7 +465,7 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if limits != nil {
-		a.rememberCloudModels(id, limits)
+		a.publishCloudEntry(id, ticket, &cloudModelEntry{at: time.Now(), models: limits})
 	}
 	writeJSON(w, 200, view)
 }
