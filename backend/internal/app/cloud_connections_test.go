@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -68,14 +69,14 @@ type fakeCloud struct {
 	status atomic.Int32
 	empty  atomic.Bool
 	delay  atomic.Int64 // how long it holds each answer
-	// delayFirst is how long it holds the next answer alone.
-	delayFirst atomic.Int64
+	// delayNext holds the next answers each longer by its next duration, one each.
+	delayNext chan time.Duration
 }
 
 const cloudKey = "awwo_rk_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
 
 func newFakeCloud(t *testing.T) *fakeCloud {
-	f := &fakeCloud{}
+	f := &fakeCloud{delayNext: make(chan time.Duration, 4)}
 	f.status.Store(200)
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/relay/v1/models" || r.Method != "GET" {
@@ -84,7 +85,13 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 		f.reads.Add(1)
 		// Its answer is as it stood when the request came, however late it is sent.
 		status, empty := int(f.status.Load()), f.empty.Load()
-		time.Sleep(time.Duration(f.delay.Load() + f.delayFirst.Swap(0)))
+		wait := time.Duration(f.delay.Load())
+		select {
+		case d := <-f.delayNext:
+			wait += d
+		default:
+		}
+		time.Sleep(wait)
 		if r.Header.Get("Authorization") != "Bearer "+cloudKey {
 			w.WriteHeader(401)
 			io.WriteString(w, `{"error":{"code":"relay_key_invalid"}}`)
@@ -320,7 +327,7 @@ func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
 		entry.at = time.Now().Add(-cloudModelsTTL)
 		h.a.cloudModelCache.entries[id] = entry
 		h.a.cloudModelCache.mu.Unlock()
-		cloud.delayFirst.Store(int64(500 * time.Millisecond))
+		cloud.delayNext <- 500 * time.Millisecond
 		reads := cloud.reads.Load()
 		h.a.personalRuntime(ctx, runtimePI, false)
 		for cloud.reads.Load() == reads {
@@ -344,6 +351,57 @@ func TestPostgresAnOlderReadNeverOverwritesWhatWasLearntSince(t *testing.T) {
 	settleCloudReads(t, h.a)
 	if _, kept := h.a.cloudEntry(id); kept {
 		t.Fatal("a deleted connection's models put back")
+	}
+	// Of two reads at once (a catalog's in the background, a call's that waits), the one begun later asked the hosted
+	// site later and wins, whichever answers first: here the earlier one answers first with the models, the later one,
+	// asked once the key was refused, after it.
+	id = h.request(t, owner, "POST", "/auth/connections", map[string]any{"provider": "awwo", "runtime": runtimePI, "apiKey": cloudKey}, 201)["id"].(string)
+	var sealed []byte
+	if e := h.db.QueryRow(context.Background(), "SELECT secret FROM user_connections WHERE id=$1", id).Scan(&sealed); e != nil {
+		t.Fatal(e)
+	}
+	h.a.cloudModelCache.mu.Lock()
+	entry := h.a.cloudModelCache.entries[id]
+	entry.at = time.Now().Add(-cloudModelsTTL)
+	h.a.cloudModelCache.entries[id] = entry
+	h.a.cloudModelCache.mu.Unlock()
+	cloud.delayNext <- 200 * time.Millisecond
+	cloud.delayNext <- 600 * time.Millisecond
+	reads := cloud.reads.Load()
+	h.a.personalRuntime(ctx, runtimePI, false)
+	for cloud.reads.Load() == reads {
+		time.Sleep(time.Millisecond)
+	}
+	cloud.status.Store(401)
+	if _, e := h.a.readCloudModels(context.Background(), uid, id, sealed); !errors.Is(e, errCloudKeyRejected) {
+		t.Fatal("the later read", e)
+	}
+	settleCloudReads(t, h.a)
+	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
+		t.Fatal("the earlier read's answer, sent first, replaced the later one's", entry)
+	}
+	// And the other way round: the later one's refusal first, the earlier one's models after it.
+	cloud.status.Store(200)
+	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
+	h.a.cloudModelCache.mu.Lock()
+	entry = h.a.cloudModelCache.entries[id]
+	entry.at = time.Now().Add(-cloudModelsTTL)
+	h.a.cloudModelCache.entries[id] = entry
+	h.a.cloudModelCache.mu.Unlock()
+	cloud.delayNext <- 600 * time.Millisecond
+	cloud.delayNext <- 100 * time.Millisecond
+	reads = cloud.reads.Load()
+	h.a.personalRuntime(ctx, runtimePI, false)
+	for cloud.reads.Load() == reads {
+		time.Sleep(time.Millisecond)
+	}
+	cloud.status.Store(401)
+	if _, e := h.a.readCloudModels(context.Background(), uid, id, sealed); !errors.Is(e, errCloudKeyRejected) {
+		t.Fatal("the later read", e)
+	}
+	settleCloudReads(t, h.a)
+	if entry, _ := h.a.cloudEntry(id); !errors.Is(entry.err, errCloudKeyRejected) {
+		t.Fatal("the earlier read's answer, sent last, replaced the later one's", entry)
 	}
 }
 

@@ -139,10 +139,13 @@ func cloudDiscoveryFailed(w http.ResponseWriter, e error) {
 const cloudModelsRetry = time.Minute
 
 type cloudModelCache struct {
-	mu         sync.Mutex
-	entries    map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
-	reading    map[string]bool            // connection id → its models are being read in the background
-	generation map[string]uint64          // connection id → how many times what is known of it was written
+	mu      sync.Mutex
+	entries map[string]cloudModelEntry // connection id → its hosted models' limits, as last read
+	reading map[string]bool            // connection id → its models are being read in the background
+	// issued counts the reads of a connection begun, and kept is the ticket of the one whose answer is kept now: a read's
+	// answer is kept only if it began after that one (it asked the hosted site later, so it knows better, whichever
+	// answer came first), and a connection saved, refreshed or deleted makes every read begun before it stale.
+	issued, kept map[string]uint64
 }
 
 type cloudModelEntry struct {
@@ -175,6 +178,7 @@ func (a *App) rememberCloudEntry(connection string, entry *cloudModelEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.write(connection, entry)
+	c.kept[connection] = c.issued[connection]
 }
 
 // write keeps entry for connection, c.mu held.
@@ -182,10 +186,9 @@ func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
 	if c.entries == nil {
 		c.entries = map[string]cloudModelEntry{}
 	}
-	if c.generation == nil {
-		c.generation = map[string]uint64{}
+	if c.issued == nil {
+		c.issued, c.kept = map[string]uint64{}, map[string]uint64{}
 	}
-	c.generation[connection]++
 	if entry == nil {
 		delete(c.entries, connection)
 		return
@@ -193,24 +196,28 @@ func (c *cloudModelCache) write(connection string, entry *cloudModelEntry) {
 	c.entries[connection] = *entry
 }
 
-// cloudGeneration is how many times what is known of a connection's hosted models has been written, which a read notes
-// when it begins.
-func (a *App) cloudGeneration(connection string) uint64 {
+// beginCloudRead is a read's ticket, taken when it begins asking the hosted site (publishCloudEntry).
+func (a *App) beginCloudRead(connection string) uint64 {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.generation[connection]
+	if c.issued == nil {
+		c.issued, c.kept = map[string]uint64{}, map[string]uint64{}
+	}
+	c.issued[connection]++
+	return c.issued[connection]
 }
 
-// publishCloudEntry keeps what a read begun at generation learnt, unless something was kept meanwhile (the connection
-// saved again, refreshed, refused or deleted): that is newer than the read's answer, which would put back models the
-// hosted site has since refused, or a deleted connection's.
-func (a *App) publishCloudEntry(connection string, generation uint64, entry *cloudModelEntry) {
+// publishCloudEntry keeps what the read of ticket learnt, unless what is kept is newer: a read begun after it, or the
+// connection saved, refreshed, refused or deleted since it began. An older answer would put back models the hosted site
+// has since refused, or a deleted connection's.
+func (a *App) publishCloudEntry(connection string, ticket uint64, entry *cloudModelEntry) {
 	c := &a.cloudModelCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.generation[connection] == generation {
+	if ticket > c.kept[connection] {
 		c.write(connection, entry)
+		c.kept[connection] = ticket
 	}
 }
 
@@ -240,7 +247,7 @@ func (a *App) cloudModels(ctx context.Context, user, connection string, sealed [
 // readCloudModels reads a connection's hosted models with its key and keeps what it learnt: the models and their
 // limits, or why not; while the hosted site is out of reach, the limits read last, read again a minute later.
 func (a *App) readCloudModels(ctx context.Context, user, connection string, sealed []byte) (map[string]cloudModel, error) {
-	generation := a.cloudGeneration(connection)
+	ticket := a.beginCloudRead(connection)
 	key, e := a.openCredential(user, connection, sealed)
 	if e != nil {
 		return nil, e
@@ -249,13 +256,13 @@ func (a *App) readCloudModels(ctx context.Context, user, connection string, seal
 	entry, ok := a.cloudEntry(connection)
 	switch {
 	case e == nil:
-		a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now(), models: models})
+		a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), models: models})
 		return models, nil
 	case ok && entry.models != nil && !cloudKeyRefused(e):
-		a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
+		a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now().Add(cloudModelsRetry - cloudModelsTTL), models: entry.models})
 		return entry.models, nil
 	}
-	a.publishCloudEntry(connection, generation, &cloudModelEntry{at: time.Now(), err: e})
+	a.publishCloudEntry(connection, ticket, &cloudModelEntry{at: time.Now(), err: e})
 	return nil, e
 }
 
