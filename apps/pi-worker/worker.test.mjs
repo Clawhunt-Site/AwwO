@@ -95,6 +95,14 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
       return;
     }
+    // Refusals by their status, on every request (a Gate model's one retry included): a credential not allowed this
+    // model, a rate limit, an outage, and an outage answered with no body.
+    const refusals = { forbidden: 403, rate_limited: 429, unavailable: 503, unavailable_bodiless: 502 };
+    if (Object.hasOwn(refusals, mode)) {
+      res.writeHead(refusals[mode], { 'content-type': 'application/json' });
+      res.end(mode === 'unavailable_bodiless' ? undefined : JSON.stringify({ error: { type: mode, message: 'private-provider-detail' } }));
+      return;
+    }
     if (mode === 'too_long' || mode === 'too_long_usage' || mode === 'too_long_answer' || mode === 'too_long_unreadable' || mode === 'rejected') {
       res.writeHead(400, { 'content-type': 'application/json' });
       const body = JSON.stringify({ error: mode === 'rejected'
@@ -108,7 +116,7 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       res.end(mode === 'too_long_unreadable' ? body.slice(0, -1) : body);
       return;
     }
-    if (mode === 'transient' && requests.length === 1) {
+    if ((mode === 'transient' || mode === 'transient_broken') && requests.length === 1) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { type: 'temporarily_unavailable', message: 'try again' } }));
       return;
@@ -122,7 +130,9 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
       send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
       send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello from Pi' } });
       send('content_block_stop', { type: 'content_block_stop', index: 0 });
-      send('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 4 } });
+      // A stop at the model's output cap, and the model's own refusal.
+      const stop = mode === 'length' ? 'max_tokens' : mode === 'refusal' ? 'refusal' : 'end_turn';
+      send('message_delta', { type: 'message_delta', delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 4 } });
       send('message_stop', { type: 'message_stop' });
     } else {
       const send = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: 'chat_test', object: 'chat.completion.chunk', created: 1, model: 'test-model', choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
@@ -140,6 +150,34 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
         else if (mode === 'too_long_after_usage') res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 } })}\n\n`);
         res.end(`data: ${JSON.stringify({ error: { message: 'This model\'s maximum context length is 131072 tokens.', type: 'invalid_request_error', code: 'context_length_exceeded',
           ...(mode === 'too_long_frame_usage' ? { usage: { prompt_tokens: 140000 } } : {}) } })}\n\n`);
+        return;
+      } else if (mode === 'length' || mode === 'length_reasoning' || mode === 'content_filter') {
+        // A stop at the model's output cap, after its answer began or while it only reasoned, and a stop by the
+        // provider's content filter.
+        if (mode === 'length_reasoning') send({ role: 'assistant', reasoning_content: REASONING_TEXT });
+        else send({ role: 'assistant', content: 'Hello from' });
+        send({}, mode === 'content_filter' ? 'content_filter' : 'length');
+      } else if (mode === 'length_then_unavailable' || mode === 'reasoning_then_unavailable') {
+        // An AWS failure after the stream began, as the bridge relays it: after a stop at the output cap (its usage then
+        // lost), and right after a model reasoned, before the 500 ms that reasoning counts are coalesced in.
+        if (mode === 'length_then_unavailable') {
+          send({ role: 'assistant', content: 'Hello from' });
+          send({}, 'length');
+        } else {
+          send({ role: 'assistant', reasoning_content: REASONING_TEXT.slice(0, 12) });
+          send({ reasoning_content: REASONING_TEXT.slice(12) });
+        }
+        res.end(`data: ${JSON.stringify({ error: { message: 'The Bedrock stream reported an error', type: 'serviceUnavailableException', code: 'serviceUnavailableException', status: 503 } })}\n\n`);
+        return;
+      } else if (mode === 'frame_unavailable' || mode === 'frame_rate_limited' || mode === 'frame_unknown' || mode === 'transient_broken') {
+        // A failure after the stream began, as the Bedrock bridge relays one: an error frame carrying the status of the
+        // AWS failure (bedrock-bridge.ts errorBody), and one of the bridge's own, which carries none (also after a
+        // refused first request, for a Gate model's retry).
+        send({ role: 'assistant', content: 'Hello ' });
+        const aws = mode === 'frame_unavailable' ? ['ServiceUnavailableException', 503] : ['ThrottlingException', 429];
+        res.end(`data: ${JSON.stringify({ error: mode === 'frame_unknown' || mode === 'transient_broken'
+          ? { message: 'The Bedrock stream ended before the response was complete', type: 'api_error', code: 'api_error' }
+          : { message: 'The Bedrock request failed', type: aws[0], code: aws[0], status: aws[1] } })}\n\n`);
         return;
       } else if (mode === 'reasoning') {
         // A provider that streams its reasoning in a separate field before answering.
@@ -574,6 +612,60 @@ test('a provider\'s refusal of the request as larger than its model\'s window ke
     await third.handle.done;
     assert.deepEqual([third.events.at(-1).type, third.events.at(-1).code], ['failed', 'MODEL_ERROR'], mode);
     assert.equal(JSON.stringify(third.events).includes('131072'), false, mode);
+  }
+});
+
+// The parent's words for each failure a child may name (runner.mjs), never the child's or the provider's.
+const FAILURE_WORDS = {
+  MODEL_OUTPUT_LIMIT: 'The model response reached its configured output limit.',
+  MODEL_REFUSAL: 'The model declined the request.',
+  MODEL_AUTHENTICATION: 'The model service rejected its configured credentials.',
+  MODEL_RATE_LIMIT: 'The model service is rate limited.',
+  MODEL_UNAVAILABLE: 'The model service is unavailable.',
+  MODEL_ERROR: 'The model request failed. Check the server provider configuration.',
+};
+
+test('a call that did not finish keeps what ended it: its output cap, a declined request, the status it failed with', { timeout: 120000 }, async (t) => {
+  const end = async (mode, overrides = {}, protocol = 'openai') => {
+    const model = await provider(t, { mode, protocol });
+    const { handle, events } = await run(t, configuration(model.baseURL, overrides));
+    await handle.done;
+    return { last: events.at(-1), events, requests: model.requests.length };
+  };
+  for (const [mode, code] of [
+    ['length', 'MODEL_OUTPUT_LIMIT'], ['length_reasoning', 'MODEL_OUTPUT_LIMIT'], ['content_filter', 'MODEL_REFUSAL'],
+    ['error', 'MODEL_AUTHENTICATION'], ['forbidden', 'MODEL_AUTHENTICATION'], ['rate_limited', 'MODEL_RATE_LIMIT'],
+    ['unavailable', 'MODEL_UNAVAILABLE'], ['unavailable_bodiless', 'MODEL_UNAVAILABLE'],
+    ['frame_unavailable', 'MODEL_UNAVAILABLE'], ['frame_rate_limited', 'MODEL_RATE_LIMIT'],
+    // A stop at the cap is that, whatever failed after it.
+    ['length_then_unavailable', 'MODEL_OUTPUT_LIMIT'], ['reasoning_then_unavailable', 'MODEL_UNAVAILABLE'],
+    // A refusal that says none of these, and an error frame with no status of its own, stay the model's failure.
+    ['rejected', 'MODEL_ERROR'], ['frame_unknown', 'MODEL_ERROR'],
+  ]) {
+    const { last, events, requests } = await end(mode);
+    assert.deepEqual(businessEvent(last), { type: 'failed', code, message: FAILURE_WORDS[code] }, mode);
+    assert.equal(events.some(event => event.type === 'completed'), false, mode);
+    assert.equal(requests, 1, `${mode}: a provider that is not the Gate is asked once`);
+    const everything = JSON.stringify(events);
+    assert.ok(!everything.includes('private-provider') && !everything.includes('Bedrock') && !everything.includes('44102'), mode);
+  }
+  // A model that reasoned and then failed within the reasoning reports' 500 ms is said to have reasoned, all of it,
+  // before its failure: the API bills a call refused after its model reasoned (runs.go facts.Reasoned, plans.go
+  // creditCharge), however soon it was refused.
+  const reasoned = await end('reasoning_then_unavailable');
+  const counts = reasoned.events.filter(event => event.type === 'reasoning');
+  assert.equal(counts.at(-1)?.characters, [...REASONING_TEXT].length);
+  assert.ok(reasoned.events.indexOf(counts.at(-1)) < reasoned.events.length - 1);
+  // The Anthropic protocol's stop at the output cap, and its model's refusal.
+  for (const [mode, code] of [['length', 'MODEL_OUTPUT_LIMIT'], ['refusal', 'MODEL_REFUSAL']]) {
+    const { last } = await end(mode, { AWWO_PI_PROVIDER: 'anthropic' }, 'anthropic');
+    assert.deepEqual(businessEvent(last), { type: 'failed', code, message: FAILURE_WORDS[code] }, `anthropic ${mode}`);
+  }
+  // A Gate model's refusal is asked for once more, and the call ends as its last request did: refused again, or
+  // answered and broken off with nothing that says why.
+  for (const [mode, code] of [['unavailable', 'MODEL_UNAVAILABLE'], ['rate_limited', 'MODEL_RATE_LIMIT'], ['transient_broken', 'MODEL_ERROR']]) {
+    const { last, requests } = await end(mode, { AWWO_PI_PROVIDER: 'llmgate' });
+    assert.deepEqual([last.type, last.code, requests], ['failed', code, 2], `gate ${mode}`);
   }
 });
 

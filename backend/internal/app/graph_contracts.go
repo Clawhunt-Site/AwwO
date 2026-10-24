@@ -653,8 +653,9 @@ func graphOutputJSONText(output string) string {
 //     end its string (点击"开始"), by the rule the planner's repair uses (planQuoteCloses).
 //
 // A model answer stopped by its output cap never gets here: every runtime fails it before delivery (openai-agents
-// as MODEL_OUTPUT_LIMIT, Pi on any stop reason but "stop"). A repair whose result still is not one JSON object
-// returns the text unchanged, so it keeps failing, and the contract is checked on what the repair produced.
+// as MODEL_OUTPUT_LIMIT, Pi too since 2026-10-24, on any stop reason but "stop"). A repair whose result still is not
+// one JSON object returns the text unchanged, so it keeps failing, and the contract is checked on what the repair
+// produced.
 func repairDeliveryJSON(text string) string {
 	if !strings.HasPrefix(text, "{") || json.Valid([]byte(text)) {
 		return text

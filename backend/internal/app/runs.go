@@ -1264,13 +1264,14 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 
 // plannerSpentOutput says whether a failed planner call's model wrote every token one answer of it holds: its worker
 // reported the call's output tokens, and they reach the cap the run's snapshot froze for its model (its runtime's
-// health, as the call's ledger reads it: models[].maxOutputTokens, thinking included). Pi says only that such a call
-// failed (MODEL_ERROR for any stop but a normal finish), which runtimeFailureCode names runtime_failed. Such a plan is
-// output_limit: it ran out of room, which the canvas says as such and does not ask for again, where it asks once more
-// for a provider fault (canvasPlanning.ts). Found 2026-10-23: all 7 planner runs of qwen3.8-27b-p6 that failed as
-// runtime_failed in 14 days had written its 16,384 tokens (Pi's published cap for it), in about 432 s each. A call
-// whose usage was not reported (a Bedrock stream that broke off), or a snapshot that froze no cap (before 2026-10-22),
-// stays as it was.
+// health, as the call's ledger reads it: models[].maxOutputTokens, thinking included). Pi said only that such a call
+// failed (MODEL_ERROR for any stop but a normal finish), which runtimeFailureCode names runtime_failed, until its
+// release of 2026-10-24 named such a stop MODEL_OUTPUT_LIMIT; this still reads a call that ended some other way after
+// writing all its tokens. Such a plan is output_limit: it ran out of room, which the canvas says as such and does not
+// ask for again, where it asks once more for a provider fault (canvasPlanning.ts). Found 2026-10-23: all 7 planner
+// runs of qwen3.8-27b-p6 that failed as runtime_failed in 14 days had written its 16,384 tokens (Pi's published cap
+// for it), in about 432 s each. A call whose usage was not reported (a Bedrock stream that broke off), or a snapshot
+// that froze no cap (before 2026-10-22), stays as it was.
 func plannerSpentOutput(u InvocationUsage, s executionSnapshot) bool {
 	if (u.Status != "reported" && u.Status != "partial") || u.OutputTokens == nil || *u.OutputTokens <= 0 {
 		return false

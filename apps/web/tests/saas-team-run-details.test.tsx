@@ -71,7 +71,7 @@ describe('durable team run details', () => {
       ? { ...record('failed'), error: 'provider_auth_failed' }
       : { items: [turn({ status: 'failed', error: 'model_refused' }), turn({ id: 'turn-b', ordinal: 2, status: 'failed', error: 'provider_diagnostic_42' })] }));
     vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
-    expect(await screen.findByText('The model provider rejected the configured credentials. Check the API key of this model connection.')).toBeInTheDocument();
+    expect(await screen.findByText('The model provider rejected this model’s credentials, so this did not finish. Choose another model; if it is a model you connected yourself, check its API key in My engines.')).toBeInTheDocument();
     expect(screen.getByText('The model declined this request. Adjust the task and try again.')).toBeInTheDocument();
     expect(screen.getByText('provider_diagnostic_42')).toBeInTheDocument();
     expect(screen.queryByText('model_refused')).toBeNull();
