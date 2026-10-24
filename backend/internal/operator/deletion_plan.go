@@ -64,6 +64,7 @@ const accountFactsSQL = `SELECT COALESCE((SELECT status FROM user_plans WHERE us
 	OR EXISTS(SELECT 1 FROM audit_events WHERE actor_id=$1 AND ` + typeSafeStarted + `),
 	(SELECT count(*) FROM auth_sessions WHERE user_id=$1),
 	(SELECT count(*) FROM user_connections WHERE user_id=$1),
+	(SELECT count(*) FROM relay_keys WHERE user_id=$1),
 	(SELECT count(*) FROM account_deletion_requests WHERE user_id=$1),
 	COALESCE((SELECT id FROM account_deletion_requests WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1),''),
 	COALESCE((SELECT status FROM account_deletion_requests WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1),''),
@@ -82,7 +83,7 @@ func (p *deletionPlan) readAccount(ctx context.Context, tx pgx.Tx, a Account, ap
 	}
 	f := &p.account
 	var live bool
-	if err := tx.QueryRow(ctx, accountFactsSQL, a.ID).Scan(&f.PlanStatus, &f.PlanWatchOpen, &f.ActiveWork, &f.Sessions, &f.Connections, &f.DeletionRequests, &f.LatestRequestID, &f.LatestRequestStatus, &live); err != nil {
+	if err := tx.QueryRow(ctx, accountFactsSQL, a.ID).Scan(&f.PlanStatus, &f.PlanWatchOpen, &f.ActiveWork, &f.Sessions, &f.Connections, &f.RelayKeys, &f.DeletionRequests, &f.LatestRequestID, &f.LatestRequestStatus, &live); err != nil {
 		return ErrDatabase
 	}
 	f.IdentityLinks = len(a.Identities)

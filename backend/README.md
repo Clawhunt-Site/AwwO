@@ -185,7 +185,8 @@ the account exists, migration 038).
    - `workspaces`: every workspace the person belongs to or has work in, with its `name`, their `role`, the
      `outcome`, the `ownerAfter`, the other members, the canvases, and the person's runs, graph rows and invitations
      there;
-   - `account`: plan status, sessions, identity links, keys, deletion requests and the latest one;
+   - `account`: plan status, sessions, identity links, keys, AwwO 本地版 connection keys (`relayKeys`), deletion
+     requests and the latest one;
    - `rows`: the rows the command itself changes. Cascades are not counted.
 4. **Decide each workspace the person alone owns** (`workspace_undecided:<id>`):
    - Hand it to one of its members with `--transfer-workspaces WORKSPACE=MEMBER_ID[,...]`. A workspace without other

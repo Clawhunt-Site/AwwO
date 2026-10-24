@@ -129,7 +129,8 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"media_generations tenant_id tenants c", "memberships tenant_id tenants a", "memberships user_id users a",
 			"memory_items tenant_id tenants c", "model_invocations tenant_id tenants c", "node_sessions tenant_id tenants a",
 			"openmaus_dispatches tenant_id tenants a", "password_resets user_id users c", "plan_watches user_id users c",
-			"refunded_calls tenant_id tenants c", "refunded_runs tenant_id tenants c", "render_jobs tenant_id tenants c", "runs actor_id users a",
+			"refunded_calls tenant_id tenants c", "refunded_runs tenant_id tenants c", "relay_keys tenant_id tenants c", "relay_keys user_id users c",
+			"render_jobs tenant_id tenants c", "runs actor_id users a",
 			"runs tenant_id tenants a", "tenant_invites accepted_by users a", "tenant_invites created_by users a",
 			"tenant_invites tenant_id tenants a", "tenant_skills tenant_id tenants c", "upgrade_interests tenant_id tenants c",
 			"upgrade_interests user_id users c", "usage_retention_boundaries tenant_id tenants c",
@@ -248,6 +249,10 @@ func seedAccount(t *testing.T, h *harness) {
 		"INSERT INTO user_plans(user_id,plan,status,period_start,period_end,credits) VALUES('person','pro','canceled',now()-interval '40 days',now()-interval '10 days',0)",
 		"INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES('session-person','person',now()+interval '1 hour'),('session-member','member',now()+interval '1 hour')",
 		"INSERT INTO user_connections(id,user_id,provider,runtime,name,secret,models) VALUES('conn','person','openai','pi','Key','\\x00','[]')",
+		// A connection key for AwwO 本地版 goes with its account, even in a workspace that stays; the member's stays.
+		`INSERT INTO relay_keys(id,user_id,tenant_id,key_hash,prefix,name,expires_at) VALUES
+			('rk-person','person','w-team',repeat('a',64),'awwo_rk_aaaa','Laptop',now()+interval '90 days'),
+			('rk-member','member','w-own',repeat('b',64),'awwo_rk_bbbb','Desktop',now()+interval '90 days')`,
 	} {
 		h.exec(t, sql)
 	}
@@ -307,7 +312,7 @@ func TestPostgresDeletionPreviewsAndRefusalsChangeNothing(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(outcomes, map[string]string{"w-own": "transfer:member", "w-solo": "delete:", "w-team": "leave:other"}) ||
-		p.Account.PlanStatus != "canceled" || p.Account.Sessions != 1 || p.Account.Connections != 1 || p.Account.DeletionRequests != 1 || p.Account.IdentityLinks != 1 {
+		p.Account.PlanStatus != "canceled" || p.Account.Sessions != 1 || p.Account.Connections != 1 || p.Account.RelayKeys != 1 || p.Account.DeletionRequests != 1 || p.Account.IdentityLinks != 1 {
 		t.Fatal("preview", p.Workspaces, p.Account)
 	}
 	want := operator.DeletionRows{WorkspacesTransferred: 1, WorkspacesDeleted: 1, CanvasesDeleted: 1, KnowledgeOriginsDeleted: 1, AuditEventsDetached: 2,
@@ -440,6 +445,7 @@ func TestPostgresDeletionKeepsSharedWorkAndReplays(t *testing.T) {
 		"SELECT count(*) FROM auth_sessions WHERE user_id='person'":       0,
 		"SELECT count(*) FROM external_identities WHERE user_id='person'": 0,
 		"SELECT count(*) FROM user_connections WHERE user_id='person'":    0,
+		"SELECT count(*) FROM relay_keys WHERE user_id='person'":          0,
 		"SELECT count(*) FROM user_plans WHERE user_id='person'":          0,
 		// The workspace it alone owned, with everything in it.
 		"SELECT count(*) FROM tenants WHERE id='w-solo'":                                             0,
@@ -479,6 +485,7 @@ func TestPostgresDeletionKeepsSharedWorkAndReplays(t *testing.T) {
 		"SELECT count(*) FROM knowledge_source_origins WHERE tenant_id='w-team'":                               1,
 		"SELECT count(*) FROM memberships WHERE tenant_id='w-team'":                                            2,
 		"SELECT count(*) FROM auth_sessions WHERE user_id='member'":                                            1,
+		"SELECT count(*) FROM relay_keys WHERE user_id='member' AND tenant_id='w-own'":                         1,
 	} {
 		if got := h.count(t, sql); got != want {
 			t.Errorf("%s = %d, want %d", sql, got, want)

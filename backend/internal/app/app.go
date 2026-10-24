@@ -90,6 +90,8 @@ type App struct {
 	canvasSaves     chan struct{}
 	// canvasSaveWaiters counts the saves waiting for a turn, each holding its decoded body (at most maxCanvasSaveWaiters).
 	canvasSaveWaiters atomic.Int32
+	// relayCatalogCache holds the relay worker's catalog for a moment (relay.go).
+	relayCatalogCache relayCatalogCache
 }
 type rateEntry struct {
 	start time.Time
@@ -313,6 +315,7 @@ func (a *App) Handler() http.Handler {
 	a.registerWikiCompilerRoutes(m)
 	a.registerOpenMausRoutes(m)
 	a.registerComputerRoutes(m)
+	a.registerRelayRoutes(m)
 	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.
@@ -416,7 +419,8 @@ func requestDeadlineApplies(path string) bool {
 		(strings.Contains(path, "/canvases/") && strings.HasSuffix(path, "/uploads")) {
 		return false
 	}
-	return path != computerModelRoute
+	// A call AwwO 本地版 relays here (relay.go) is a managed call too, with the same bound.
+	return path != computerModelRoute && path != relayCompletionsRoute
 }
 
 func (a *App) security(next http.Handler) http.Handler {
