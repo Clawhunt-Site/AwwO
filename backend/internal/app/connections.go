@@ -73,6 +73,10 @@ func (a *App) personalProviderAllowed(id string) bool {
 }
 func (a *App) personalProviders() []connectionProvider {
 	if !a.cfg.LLMGateOnly {
+		// The local edition offers the hosted AwwO's models first (cloud_connections.go).
+		if a.cfg.Edition == editionLocal {
+			return append([]connectionProvider{a.cloudProvider()}, connectionProviders...)
+		}
 		return connectionProviders
 	}
 	providers := make([]connectionProvider, 0, 1)
@@ -301,9 +305,11 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 	if !a.decode(w, r, &b) {
 		return
 	}
-	p, ok := providerByID(b.Provider)
+	p, ok := a.connectionProvider(b.Provider)
 	b.Name = strings.TrimSpace(b.Name)
-	if !ok || !a.personalProviderAllowed(b.Provider) || !connectionSupports(p, b.Runtime) || !validAPIKey(b.APIKey) || len(b.Name) > 80 {
+	cloud := b.Provider == cloudProviderID
+	if !ok || !a.personalProviderAllowed(b.Provider) || !connectionSupports(p, b.Runtime) || !validAPIKey(b.APIKey) || len(b.Name) > 80 ||
+		(cloud && !relayKeyPattern.MatchString(b.APIKey)) {
 		fail(w, 400, "invalid_connection", "Choose a provider, supported engine and valid API key")
 		return
 	}
@@ -321,7 +327,18 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "account_password_as_key", "Enter a provider API key, not your AwwO account password")
 		return
 	}
-	models, e := a.discoverConnectionModels(r.Context(), p, b.APIKey)
+	var models []string
+	var limits map[string]cloudModel
+	var e error
+	if cloud {
+		models, limits, e = a.discoverCloudModels(r.Context(), b.APIKey)
+	} else {
+		models, e = a.discoverConnectionModels(r.Context(), p, b.APIKey)
+	}
+	if e != nil && cloud {
+		cloudDiscoveryFailed(w, e)
+		return
+	}
 	if e != nil {
 		fail(w, 422, "provider_verification_failed", "Could not verify the API key and read its model catalog. Check the key, access region and provider account.")
 		return
@@ -365,6 +382,9 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	if limits != nil {
+		a.rememberCloudModels(id, limits)
+	}
 	writeJSON(w, 201, map[string]any{"id": id, "provider": b.Provider, "runtime": b.Runtime, "name": b.Name, "models": models, "hasKey": true})
 }
 
@@ -384,7 +404,7 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	p, ok := providerByID(provider)
+	p, ok := a.connectionProvider(provider)
 	if !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		fail(w, 400, "invalid_connection", "This provider or execution engine is not supported")
 		return
@@ -394,8 +414,14 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "vault_unavailable", "Credential storage is unavailable")
 		return
 	}
-	models, e := a.discoverConnectionModels(r.Context(), p, key)
-	if e != nil {
+	var models []string
+	var limits map[string]cloudModel
+	if provider == cloudProviderID {
+		if models, limits, e = a.discoverCloudModels(r.Context(), key); e != nil {
+			cloudDiscoveryFailed(w, e)
+			return
+		}
+	} else if models, e = a.discoverConnectionModels(r.Context(), p, key); e != nil {
 		fail(w, 422, "provider_verification_failed", "Could not refresh the model catalog. The saved connection is unchanged.")
 		return
 	}
@@ -426,6 +452,9 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	if limits != nil {
+		a.rememberCloudModels(id, limits)
+	}
 	writeJSON(w, 200, view)
 }
 
@@ -454,6 +483,7 @@ func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	a.rememberCloudModels(id, nil)
 	w.WriteHeader(204)
 }
 
@@ -474,6 +504,36 @@ func (a *App) requirePersonalConnection(ctx context.Context, runtime string) err
 	return nil
 }
 
+// savedConnection is one of a person's connections for a runtime, as saved.
+type savedConnection struct {
+	id, provider, name string
+	models             []string
+	sealed             []byte
+}
+
+// savedConnections reads a person's connections for a runtime, oldest first, all of them before any is used (an AwwO 云端
+// connection may read the hosted site, which no open query should wait on).
+func (a *App) savedConnections(ctx context.Context, user, runtime string) ([]savedConnection, error) {
+	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models,secret FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate') ORDER BY created_at", user, runtime, a.cfg.LLMGateOnly)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	saved := []savedConnection{}
+	for rows.Next() {
+		var c savedConnection
+		var raw []byte
+		if e = rows.Scan(&c.id, &c.provider, &c.name, &raw, &c.sealed); e != nil {
+			return nil, e
+		}
+		if json.Unmarshal(raw, &c.models) != nil {
+			return nil, errors.New("invalid personal catalog")
+		}
+		saved = append(saved, c)
+	}
+	return saved, rows.Err()
+}
+
 // personalRuntime builds the caller's catalogue from their own connections. workerStructured
 // is the admitted worker's user-mode claim that it can bind a user model carrying
 // structuredOutput.
@@ -482,43 +542,47 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 	if !ok {
 		return piHealth{}, errors.New("personal credentials required")
 	}
-	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate') ORDER BY created_at", u.ID, runtime, a.cfg.LLMGateOnly)
+	saved, e := a.savedConnections(ctx, u.ID, runtime)
 	if e != nil {
 		return piHealth{}, e
 	}
-	defer rows.Close()
 	h := piHealth{Ready: true, Status: "ready", Limits: map[string]any{"maxContextTextBytes": float64(28416), "messageOverheadBytes": float64(32)}, Models: []piModel{}}
-	connections := 0
-	for rows.Next() {
-		connections++
-		var id, provider, name string
-		var raw []byte
-		if e = rows.Scan(&id, &provider, &name, &raw); e != nil {
-			return piHealth{}, e
+	for _, c := range saved {
+		// An AwwO 云端 connection's models carry the hosted site's limits; one whose limits cannot be read now (the
+		// hosted site out of reach, its key revoked) offers none until they can.
+		var cloud map[string]cloudModel
+		if c.provider == cloudProviderID {
+			if a.cfg.Edition != editionLocal {
+				continue
+			}
+			if cloud, e = a.cloudModels(ctx, u.ID, c.id, c.sealed); e != nil {
+				continue
+			}
 		}
-		var models []string
-		if json.Unmarshal(raw, &models) != nil {
-			return piHealth{}, errors.New("invalid personal catalog")
-		}
-		for _, model := range models {
+		for _, model := range c.models {
 			if !personalTextModel(model) {
 				continue
 			}
-			label := model + " · " + name + " · " + provider + " / " + id[max(0, len(id)-6):]
-			protocol := connectionProtocol(provider, runtime, model)
+			label := model + " · " + c.name + " · " + c.provider + " / " + c.id[max(0, len(c.id)-6):]
+			protocol := connectionProtocol(c.provider, runtime, model)
 			// The capability needs all three: the deployment switch, the worker's own claim and
 			// a provider that enforces the schema. It is omitted when false and the runtime
 			// catalogue never projects it, so with the switch off (or a worker that makes no
 			// claim) the catalogue, and every snapshot frozen from it, serializes exactly as
 			// before and nothing can be frozen for a worker that would refuse it.
-			structured := a.cfg.StructuredContracts && workerStructured && runtime == runtimeOpenAIAgents && providerStructuredOutput(provider, protocol)
-			h.Models = append(h.Models, piModel{ID: connectionModelID(id, model), Name: model, Label: label, Provider: provider, ProviderModel: model, Protocol: protocol, Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32, StructuredOutput: structured})
+			structured := a.cfg.StructuredContracts && workerStructured && runtime == runtimeOpenAIAgents && providerStructuredOutput(c.provider, protocol)
+			m := piModel{ID: connectionModelID(c.id, model), Name: model, Label: label, Provider: c.provider, ProviderModel: model, Protocol: protocol, Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32, StructuredOutput: structured}
+			if cloud != nil {
+				limits, offered := cloud[model]
+				if !offered {
+					continue
+				}
+				m.MaxContextTextBytes, m.ProseBytesPerToken, m.MaxOutputTokens = cloudBudget(limits), limits.ProseBytesPerToken, limits.MaxOutputTokens
+			}
+			h.Models = append(h.Models, m)
 		}
 	}
-	if e = rows.Err(); e != nil {
-		return piHealth{}, e
-	}
-	if connections == 0 {
+	if len(saved) == 0 {
 		return piHealth{}, setupError{"personal_engine_required", "Add your own API key in Personal engines"}
 	}
 	if len(h.Models) == 0 {
@@ -601,7 +665,7 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 			break
 		}
 	}
-	p, ok := providerByID(provider)
+	p, ok := a.connectionProvider(provider)
 	if !personalTextModel(model) || !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		return nil, errors.New("model unavailable")
 	}
@@ -611,6 +675,15 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 	}
 	protocol := connectionProtocol(provider, runtime, model)
 	userModel := map[string]any{"id": selector, "provider": provider, "model": model, "baseURL": p.BaseURL, "apiKey": key, "protocol": protocol, "contextWindow": 32768, "maxTokens": 4096, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}
+	// An AwwO 云端 model runs within the hosted site's limits, measured at its prose rate as the hosted worker measures it.
+	if provider == cloudProviderID {
+		cloud, e := a.cloudModels(ctx, uid, match[1], sealed)
+		limits, offered := cloud[model]
+		if e != nil || !offered {
+			return nil, errors.New("model unavailable")
+		}
+		userModel["contextWindow"], userModel["maxTokens"], userModel["proseBytesPerToken"] = limits.ContextWindow, limits.MaxOutputTokens, limits.ProseBytesPerToken
+	}
 	// The worker only honours a contract from a model that declares the capability.
 	// It is declared solely when this request already carries a frozen contract, which
 	// Go sends only after the switch, the runtime and this provider's capability all

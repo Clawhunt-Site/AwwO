@@ -95,6 +95,8 @@ type App struct {
 	// this site at once (relay_limits.go).
 	relayCatalogCache relayCatalogCache
 	relayLimits       relayLimits
+	// cloudModelCache holds the hosted models' limits of the local edition's AwwO 云端 connections (cloud_connections.go).
+	cloudModelCache cloudModelCache
 }
 type rateEntry struct {
 	start time.Time

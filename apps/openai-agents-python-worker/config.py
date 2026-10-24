@@ -462,6 +462,24 @@ PERSONAL_ENDPOINTS = {
 }
 
 
+def cloud_relay_base(env=os.environ) -> str | None:
+    """Where AwwO 云端 connections send their calls: the hosted AwwO's relay, at the local edition's
+    AWWO_LOCAL_CLOUD_ORIGIN as the API is told (https://awwo.clawhunt.store unless set); None for an origin the API
+    would refuse (HTTPS, or HTTP on this computer, with no path). As apps/user-models.ts cloudRelayBase."""
+    origin = (env.get("AWWO_LOCAL_CLOUD_ORIGIN") or "https://awwo.clawhunt.store").rstrip("/")
+    match = re.fullmatch(r"(https?)://(\[::1\]|[A-Za-z0-9.-]+)(:[0-9]{1,5})?", origin)
+    if not match or (match.group(1) == "http" and match.group(2) not in {"127.0.0.1", "localhost", "[::1]"}):
+        return None
+    return origin + "/api/v1/relay/v1"
+
+
+def _cloud_limits(model: dict) -> bool:
+    """An AwwO 云端 model's limits hold: the hosted site's window, output and prose rate, on Chat Completions."""
+    window, output, prose = model["contextWindow"], model["maxTokens"], model.get("proseBytesPerToken", 1)
+    return (type(window) is int and 4096 <= window <= 2_000_000 and type(output) is int and 1 <= output and output + 256 < window
+            and type(prose) in (int, float) and 1 <= prose <= 4 and model["protocol"] == "chat_completions")
+
+
 def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
     """Resolve only an authenticated request's profile, without shared mutation."""
     if not isinstance(body, dict):
@@ -473,7 +491,10 @@ def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
     model = body.get("userModel")
     fields = {"id", "provider", "model", "baseURL", "apiKey", "protocol", "contextWindow",
               "maxTokens", "reasoningEfforts", "defaultReasoningEffort"}
-    if not isinstance(model, dict) or set(model) != fields:
+    cloud = isinstance(model, dict) and model.get("provider") == "awwo"
+    endpoints = {**PERSONAL_ENDPOINTS, **({"awwo": cloud_relay_base()} if cloud_relay_base() else {})}
+    # An AwwO 云端 model may carry its prose rate, which no other connection does.
+    if not isinstance(model, dict) or not (set(model) == fields or (cloud and set(model) == fields | {"proseBytesPerToken"})):
         raise ValueError("Invalid personal model configuration")
     if (not isinstance(model["id"], str)
             or not re.fullmatch(r"byok_[A-Za-z0-9_-]{33}_[0-9a-f]{16}", model["id"])
@@ -481,19 +502,20 @@ def bind_user_model(config: Config, body: dict) -> tuple[Config, dict]:
             or not isinstance(model["model"], str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}", model["model"])
             or not isinstance(model["provider"], str)
-            or model["provider"] not in PERSONAL_ENDPOINTS
+            or model["provider"] not in endpoints
             or (config.llmgate_only and model["provider"] != "llmgate")
-            or model["baseURL"] != PERSONAL_ENDPOINTS[model["provider"]]
+            or model["baseURL"] != endpoints[model["provider"]]
             or not isinstance(model["apiKey"], str)
             or not re.fullmatch(r"[\x21-\x7e]{8,4096}", model["apiKey"])
             or not isinstance(model["protocol"], str) or model["protocol"] not in PROTOCOLS
-            or type(model["contextWindow"]) is not int or model["contextWindow"] != 32768
-            or type(model["maxTokens"]) is not int or model["maxTokens"] != 4096
+            or (not _cloud_limits(model) if cloud else (type(model["contextWindow"]) is not int or model["contextWindow"] != 32768
+                                                       or type(model["maxTokens"]) is not int or model["maxTokens"] != 4096))
             or model["reasoningEfforts"] != [] or model["defaultReasoningEffort"] != ""):
         raise ValueError("Invalid personal model configuration")
     profile = ModelProfile(id=model["id"], provider="openai", model=model["model"],
                            base_url=model["baseURL"], api_key=model["apiKey"], protocol=model["protocol"],
-                           context_window=32768, max_tokens=4096)
+                           context_window=model["contextWindow"], max_tokens=model["maxTokens"],
+                           prose_bytes_per_token=float(model.get("proseBytesPerToken", 1)))
     clean = {key: value for key, value in body.items() if key != "userModel"}
     return replace(config, models=(profile,), model=profile.id, api_key="", ready=True), clean
 

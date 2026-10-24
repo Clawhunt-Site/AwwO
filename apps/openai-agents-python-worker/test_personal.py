@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 
-from config import ConfigError, bind_user_model, load_config, public_health
+from config import ConfigError, bind_user_model, cloud_relay_base, load_config, public_health
 from server import create_app
 
 
@@ -76,6 +76,47 @@ class PersonalCredentialsTests(unittest.TestCase):
                 body["userModel"][field] = value
                 with self.assertRaises(ValueError):
                     bind_user_model(self.config, body)
+
+    def cloud_body(self, **change):
+        body = copy.deepcopy(self.body)
+        body["userModel"].update(provider="awwo", model="bedrock.claude-opus-5-5", apiKey="awwo_rk_" + "a" * 43,
+                                 baseURL="https://awwo.clawhunt.store/api/v1/relay/v1", contextWindow=200000,
+                                 maxTokens=32000, proseBytesPerToken=3.4)
+        body["userModel"].update(change)
+        return body
+
+    def test_cloud_model_binds_to_the_hosted_relay_with_its_limits_which_no_other_model_carries(self):
+        bound, _ = bind_user_model(self.config, self.cloud_body())
+        profile = bound.models[0]
+        self.assertEqual(profile.provider, "openai")
+        self.assertEqual(profile.base_url, "https://awwo.clawhunt.store/api/v1/relay/v1")
+        self.assertEqual((profile.context_window, profile.max_tokens, profile.prose_bytes_per_token), (200000, 32000, 3.4))
+        for change in [{"baseURL": "https://elsewhere.example/api/v1/relay/v1"}, {"contextWindow": 1000}, {"contextWindow": 200000.5},
+                       {"maxTokens": 199800}, {"maxTokens": 0}, {"proseBytesPerToken": 9}, {"proseBytesPerToken": True},
+                       {"protocol": "responses"}, {"reasoningEfforts": ["high"]}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                bind_user_model(self.config, self.cloud_body(**change))
+        # The other connections keep their fixed limits and take no rate.
+        for change in [{"proseBytesPerToken": 2}, {"contextWindow": 200000}]:
+            body = copy.deepcopy(self.body)
+            body["userModel"].update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                bind_user_model(self.config, body)
+        # A test's hosted API on this computer: there, and only there.
+        with patch.dict("os.environ", {"AWWO_LOCAL_CLOUD_ORIGIN": "http://127.0.0.1:18187"}):
+            bound, _ = bind_user_model(self.config, self.cloud_body(baseURL="http://127.0.0.1:18187/api/v1/relay/v1"))
+            self.assertEqual(bound.models[0].base_url, "http://127.0.0.1:18187/api/v1/relay/v1")
+            with self.assertRaises(ValueError):
+                bind_user_model(self.config, self.cloud_body())
+
+    def test_cloud_relay_base_is_the_local_editions_cloud_origin(self):
+        self.assertEqual(cloud_relay_base({}), "https://awwo.clawhunt.store/api/v1/relay/v1")
+        self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "http://127.0.0.1:18187/"}), "http://127.0.0.1:18187/api/v1/relay/v1")
+        self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "http://[::1]:18187"}), "http://[::1]:18187/api/v1/relay/v1")
+        self.assertEqual(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": "https://staging.example"}), "https://staging.example/api/v1/relay/v1")
+        for origin in ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example"]:
+            with self.subTest(origin=origin):
+                self.assertIsNone(cloud_relay_base({"AWWO_LOCAL_CLOUD_ORIGIN": origin}))
 
     def test_operator_rejects_personal_override(self):
         config = load_config({"AWWO_OPENAI_AGENTS_TOKEN": "t" * 32})

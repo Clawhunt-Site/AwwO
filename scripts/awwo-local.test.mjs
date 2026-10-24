@@ -447,6 +447,13 @@ test('the API listens on loopback, accepts only the instance\'s origin, runs on 
   assert.equal(envs.render, null);
 });
 
+test('a test\'s hosted AwwO for the AwwO 云端 connections reaches the API and every worker alike, and is none unless given', () => {
+  const plain = serviceEnvironments({ profile: profileFor(), ports: testPorts, state: testState, capabilities: allCapabilities, system: {} });
+  for (const [name, env] of Object.entries(plain)) if (env) assert.equal(env.AWWO_LOCAL_CLOUD_ORIGIN, undefined, name);
+  const pointed = serviceEnvironments({ profile: profileFor(), ports: testPorts, state: testState, capabilities: allCapabilities, system: {}, cloudOrigin: 'http://127.0.0.1:18187' });
+  for (const name of ['api', 'pi', 'agentsPython', 'agentsJs']) assert.equal(pointed[name].AWWO_LOCAL_CLOUD_ORIGIN, 'http://127.0.0.1:18187', name);
+});
+
 test('no switch opens the media services to every workspace: the owner\'s own are offered them (media_setup.go)', () => {
   const keyed = serviceEnvironments({ profile: profileFor({ AWWO_RUNNINGHUB_API_KEY: 'r'.repeat(32), AWWO_TRIPO_API_KEY: 't'.repeat(32), AWWO_XTASY_API_KEY: 'x'.repeat(32) }), ports: testPorts, state: testState, capabilities: {}, system: {} }).api;
   for (const key of ['AWWO_MEDIA_UNRESTRICTED_WORKSPACES', 'AWWO_TRIPO_ALL_WORKSPACES', 'AWWO_XTASY_ALL_WORKSPACES', 'AWWO_JIMENG_ALL_WORKSPACES', 'AWWO_MAX_OWNED_WORKSPACES']) assert.equal(keyed[key], undefined, key);

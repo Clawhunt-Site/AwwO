@@ -597,9 +597,12 @@ export function windowSessionStore(file) {
  * owner's own workspaces (a platform administrator owns them) are offered them (media_setup.go mediaEntitled), and an
  * account someone else registers on this computer cannot spend the owner's media keys.
  */
-export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '' }) {
+export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '', cloudOrigin = '' }) {
   const loopback = port => `http://127.0.0.1:${port}`;
-  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false' };
+  // cloudOrigin is a test's hosted AwwO for the AwwO 云端 connections (AWWO_LOCAL_CLOUD_ORIGIN, which the API and the
+  // workers check alike); unset, they run on https://awwo.clawhunt.store.
+  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false',
+    ...(cloudOrigin ? { AWWO_LOCAL_CLOUD_ORIGIN: cloudOrigin } : {}) };
   const pi = {
     ...common, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(ports.pi), AWWO_PI_TOKEN: profile.AWWO_PI_TOKEN,
     AWWO_PI_CONTEXT_WINDOW: MODEL_LIMITS.contextWindow, AWWO_PI_MAX_TOKENS: MODEL_LIMITS.maxTokens,

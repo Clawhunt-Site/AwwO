@@ -568,11 +568,12 @@ test('a Chat Completions call through LLM Gate is streamed and gathered into one
   assert.doesNotMatch(JSON.stringify(body), /private reasoning|secret-provider-key/);
 });
 
-test('only a Chat Completions call through LLM Gate or to the DeepSeek API streams: a Gate profile named "openai" too, no other provider or protocol', () => {
+test('only a Chat Completions call through LLM Gate, to the hosted AwwO\'s relay or to the DeepSeek API streams: a Gate profile named "openai" too, no other provider or protocol', () => {
   const completion = validateComputerCompletion({ messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] });
   const profile = (baseURL: string, provider: string, protocol = 'chat_completions') => ({ model: 'm', apiKey: 'k', baseURL, provider, protocol, maxTokens: 1024, contextWindow: 32768 });
+  // An AwwO 云端 model is bound as "openai" (user-models.ts): its relay's base says where it goes.
   for (const model of [profile('https://api.clawhunt.site/v1', 'openai'), profile('https://api.clawhunt.site/v1/', 'llmgate'), profile('http://127.0.0.1:9/v1', 'llmgate'),
-    profile('https://api.deepseek.com', 'deepseek')]) {
+    profile('https://api.deepseek.com', 'deepseek'), profile('https://awwo.clawhunt.store/api/v1/relay/v1', 'openai')]) {
     const call = providerComputerRequest(completion, model);
     assert.equal(call.stream, true, model.baseURL);
     assert.equal(call.body.stream, true);

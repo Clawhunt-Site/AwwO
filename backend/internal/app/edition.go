@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // The local edition (AwwO 本地版, scripts/awwo-local.mjs) is this API run on one person's computer with their own model
@@ -33,6 +35,32 @@ type editionSettings struct {
 	// person has the window's menu and no checkout, so the web names the menu where it would name an npm command. ""
 	// when started from a checkout.
 	LocalShell string
+	// LocalCloudOrigin is the hosted AwwO whose models the local edition's AwwO 云端 connections run (the hosted
+	// site's relay.go; cloud_connections.go): AWWO_LOCAL_CLOUD_ORIGIN, the local edition only, defaultCloudOrigin
+	// unless set. A test points it at a hosted API of its own.
+	LocalCloudOrigin string
+}
+
+// defaultCloudOrigin is the hosted AwwO the local edition's AwwO 云端 connections run on.
+const defaultCloudOrigin = "https://awwo.clawhunt.store"
+
+// cloudOrigin is the hosted AwwO this local edition's AwwO 云端 connections run on.
+func (c Config) cloudOrigin() string {
+	if c.LocalCloudOrigin != "" {
+		return strings.TrimRight(c.LocalCloudOrigin, "/")
+	}
+	return defaultCloudOrigin
+}
+
+// validCloudOrigin is an origin the AwwO 本地版's AwwO 云端 connections may send their keys to: HTTPS, or HTTP to this
+// computer (a test's hosted API), written as the workers read it (a scheme in lower case: user-models.ts, config.py);
+// no path, query or credentials.
+func validCloudOrigin(raw string) bool {
+	u, e := url.Parse(strings.TrimRight(raw, "/"))
+	if e != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || u.Hostname() == "" || !strings.HasPrefix(raw, u.Scheme+"://") {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" || u.Hostname() == "localhost"))
 }
 
 // adminResetID is one reset's id: 16–64 letters, digits, - or _ (the runtime makes 24).
@@ -68,6 +96,7 @@ func (c *Config) editionFromEnv() error {
 	default:
 		return errors.New("AWWO_LOCAL_SHELL must be windows, macos or unset")
 	}
+	c.LocalCloudOrigin = os.Getenv("AWWO_LOCAL_CLOUD_ORIGIN")
 	return nil
 }
 
@@ -86,8 +115,13 @@ func (c Config) validateEdition() error {
 			return errors.New("AWWO_BOOTSTRAP_ADMIN_RESET is the local edition's and needs AWWO_EDITION=local")
 		case c.LocalShell != "":
 			return errors.New("AWWO_LOCAL_SHELL is the local edition's and needs AWWO_EDITION=local")
+		case c.LocalCloudOrigin != "":
+			return errors.New("AWWO_LOCAL_CLOUD_ORIGIN is the local edition's and needs AWWO_EDITION=local")
 		}
 		return nil
+	}
+	if c.LocalCloudOrigin != "" && !validCloudOrigin(c.LocalCloudOrigin) {
+		return errors.New("AWWO_LOCAL_CLOUD_ORIGIN must be an HTTPS origin, or an HTTP one on this computer")
 	}
 	switch {
 	case c.AdminPasswordReset != "" && c.AdminEmail == "":

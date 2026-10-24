@@ -445,7 +445,8 @@ export async function runLocal(options, { onStopped = () => {} } = {}) {
       });
       return service;
     };
-    const envs = serviceEnvironments({ profile, ports, state, capabilities, system, resetPassword: reset, shell: options.shell });
+    const envs = serviceEnvironments({ profile, ports, state, capabilities, system, resetPassword: reset, shell: options.shell,
+      cloudOrigin: process.env.AWWO_LOCAL_CLOUD_ORIGIN || '' });
     report.event({ event: 'status', step: 'workers' });
     await waitHealthy(launch('pi', node, [layout.pi], envs.pi), `http://127.0.0.1:${ports.pi}/health`, { timeout: WORKER_START_MS, accept: unconfiguredOk('pi') });
     let agents = null;
