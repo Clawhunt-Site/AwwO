@@ -68,6 +68,8 @@ it('opens every section in one centre whose navigation marks the open page', asy
     if (section === 'invites') expect(current).toHaveLength(0); // A local account has no 邀请好友 page in the list.
     // The hosted site has no 本机 (the local edition's page): its address opens 账号安全.
     else if (section === 'local') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=security']);
+    // A site that does not offer AwwO 本地版 its models has no 本机版连接: its address opens the engines page.
+    else if (section === 'relay') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=engines']);
     else expect(current.map(link => link.getAttribute('href'))).toEqual([`/?account=${section}`]);
     expect(screen.queryByText('workspace')).toBeNull();
     cleanup();

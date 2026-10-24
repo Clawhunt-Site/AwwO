@@ -269,6 +269,61 @@
   font-size: 12px;
   line-height: 1.6;
 }
+/* 本机版连接 (settings/relay.tsx): the key just made, shown once, and the account's keys. */
+.saas-relay-new {
+  border-color: color-mix(in srgb, var(--saas-accent) 45%, var(--saas-border));
+}
+.saas-relay-new .saas-local-path button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.saas-relay-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.saas-relay-key {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--saas-border);
+}
+.saas-relay-key:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.saas-relay-key p {
+  margin: 0;
+}
+.saas-relay-key > button {
+  justify-self: start;
+}
+.saas-relay-key-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.saas-relay-key-name code {
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--saas-muted);
+}
+.saas-relay-key-name span {
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1px solid var(--saas-border);
+  border-radius: 999px;
+}
+.saas-relay-key[data-state='live'] .saas-relay-key-name span {
+  border-color: color-mix(in srgb, var(--saas-accent) 50%, var(--saas-border));
+}
+.saas-relay-key[data-state='revoked'],
+.saas-relay-key[data-state='expired'] {
+  color: var(--saas-muted);
+}
 .saas-settings-themes .saas-theme-choices {
   max-height: none;
 }

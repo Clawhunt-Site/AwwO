@@ -126,7 +126,9 @@ export function PersonalEngineGate({
   ) ?? false;
   // Every ?account= page is a section of the 设置 centre; an account that brings its own key manages it under 连接器.
   if (isSettingsSection(section)) {
-    const engines = !needed || section !== "engines" ? null
+    // 本机版连接's address opens the engines page where the site does not offer it (SettingsCenter editionSection),
+    // as in the local edition, whose engines are the person's own.
+    const engines = !needed || (section !== "engines" && section !== "relay") ? null
       : error ? <AccountLayout
           title={t("连接执行引擎", "Connect an engine")}
           intro={t("使用你自己的模型凭证。", "Use your own model credentials.")}

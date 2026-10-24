@@ -67,7 +67,9 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string;
   /** The deployment: the hosted site, or the local edition (edition.ts). An API that does not say is the hosted site. */
-  edition?: 'hosted' | 'local' };
+  edition?: 'hosted' | 'local';
+  /** The hosted site offers AwwO 本地版 its models, with keys made in 设置 → 本机版连接 (settings/relay.tsx). */
+  relay?: boolean };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
  * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
@@ -123,6 +125,11 @@ function serviceCodes(): Record<string, [string, string]> {
     provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],
     invalid_connection: ['请选择正确的服务商、执行引擎并填写有效密钥。','Select a provider, supported engine and valid API key.'],
     connection_limit: ['最多保存 8 个个人连接。','Up to eight personal connections are allowed.'],
+    // 设置 → 本机版连接 (settings/relay.tsx).
+    relay_key_limit: ['最多同时有 5 个有效的连接密钥，请先撤销一个。', 'An account holds at most five live connection keys. Revoke one first.'],
+    relay_unavailable: ['线上 AwwO 暂未开放本机版连接。', 'The online AwwO does not offer AwwO Local connections right now.'],
+    invalid_relay_key: ['请给密钥起一个不超过 80 个字的名称，并选择一个工作区。', 'Name the key (at most 80 characters) and choose a workspace.'],
+    tenant_not_found: ['找不到这个工作区，或你在其中只能查看。', 'That workspace was not found, or you can only read it.'],
     email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
