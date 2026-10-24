@@ -3,7 +3,10 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -171,14 +174,15 @@ func parseRelayCall(raw []byte) (relayCall, error) {
 	return c, nil
 }
 
-// relayTools reads a call's tool definitions: functions with distinct names and an object's schema as their parameters.
+// relayTools reads a call's tool definitions: functions with distinct names and an object's schema as their parameters,
+// whose numbers are written as the relay worker writes them (jsNumbers), so the call is measured as it measures it.
 func relayTools(raw json.RawMessage) ([]relayTool, error) {
 	var tools []relayTool
 	if json.Unmarshal(raw, &tools) != nil || len(tools) > 64 {
 		return nil, relayInvalid("tools must be a list of at most 64 function definitions")
 	}
 	names := map[string]bool{}
-	for _, t := range tools {
+	for i, t := range tools {
 		var schema map[string]json.RawMessage
 		var kind string
 		if t.Type != "function" || !relayToolName.MatchString(t.Function.Name) || names[t.Function.Name] ||
@@ -186,8 +190,176 @@ func relayTools(raw json.RawMessage) ([]relayTool, error) {
 			return nil, relayInvalid("Each tool must be a function with its own name and an object's schema as its parameters")
 		}
 		names[t.Function.Name] = true
+		tools[i].Function.Parameters = jsNumbers(t.Function.Parameters)
 	}
 	return tools, nil
+}
+
+// jsNumbers writes the numbers of a JSON text as JavaScript writes them (JSON.parse, then JSON.stringify), and the rest
+// as it is: the relay worker measures a call's tool parameters so, and for some numbers that is longer than what a
+// caller sent (1e-6 is 0.000001 there, 1e21 is 1e+21). raw is valid JSON.
+func jsNumbers(raw []byte) []byte {
+	out := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); {
+		switch c := raw[i]; {
+		case c == '"':
+			j := i + 1
+			for ; raw[j] != '"'; j++ {
+				if raw[j] == '\\' {
+					j++
+				}
+			}
+			out, i = append(out, raw[i:j+1]...), j+1
+		case c == '-' || (c >= '0' && c <= '9'):
+			j := i + 1
+			for j < len(raw) && strings.IndexByte("+-.eE0123456789", raw[j]) >= 0 {
+				j++
+			}
+			out, i = append(out, jsNumber(string(raw[i:j]))...), j
+		default:
+			out, i = append(out, c), i+1
+		}
+	}
+	return out
+}
+
+// jsNumber is a JSON number as JavaScript writes it (Number::toString of the double it reads as): the shortest digits
+// that read back as that double, plainly from 1e-6 to below 1e21 and with an exponent (e+n, e-n) beyond; 0 for -0, and
+// null for a number past a double's range (Infinity, which JSON.stringify writes so).
+func jsNumber(s string) string {
+	f, _ := strconv.ParseFloat(s, 64)
+	switch {
+	case math.IsInf(f, 0):
+		return "null"
+	case f == 0:
+		return "0"
+	}
+	sign := ""
+	if f < 0 {
+		sign, f = "-", -f
+	}
+	mantissa, exponent, _ := strings.Cut(strconv.FormatFloat(f, 'e', -1, 64), "e")
+	digits := strings.Replace(mantissa, ".", "", 1)
+	power, _ := strconv.Atoi(exponent)
+	k, n := len(digits), power+1
+	switch {
+	case k <= n && n <= 21:
+		return sign + digits + strings.Repeat("0", n-k)
+	case 0 < n && n <= 21:
+		return sign + digits[:n] + "." + digits[n:]
+	case -6 < n && n <= 0:
+		return sign + "0." + strings.Repeat("0", -n) + digits
+	}
+	written := sign + digits[:1]
+	if k > 1 {
+		written += "." + digits[1:]
+	}
+	if n-1 < 0 {
+		return written + "e-" + strconv.Itoa(1-n)
+	}
+	return written + "e+" + strconv.Itoa(n-1)
+}
+
+// The Converse bridge's rules (apps/bedrock-bridge.ts) that are stricter than the managed-call route's: a tool's name
+// (TOOL_NAME) and a tool call's id (TOOL_USE_ID).
+var (
+	bedrockToolName  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+	bedrockToolUseID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+)
+
+// bedrockRefusal is why the relay worker's Converse bridge would refuse the call to a Bedrock model, or "": a tool's
+// name or a tool call's id it does not take, or a conversation that does not open and close on a user turn. Such a call
+// would be admitted, reach the worker, start its Bedrock child and be refused there, as its caller's.
+func (c relayCall) bedrockRefusal() string {
+	for _, t := range c.Tools {
+		if !bedrockToolName.MatchString(t.Function.Name) {
+			return "This model takes tools named by a letter, then at most 63 letters, digits, _ or -"
+		}
+	}
+	for _, m := range c.Messages {
+		ids := []string{}
+		if m.Role == "tool" {
+			ids = append(ids, m.ToolCallID)
+		}
+		for _, call := range m.ToolCalls {
+			ids = append(ids, call.ID)
+		}
+		for _, id := range ids {
+			if !bedrockToolUseID.MatchString(id) {
+				return "This model takes tool call ids of at most 128 letters, digits, _ or -"
+			}
+		}
+	}
+	turns := bedrockTurns(relayOpening(c.Messages))
+	switch {
+	case len(turns) == 0 || turns[0] != "user":
+		return "The conversation must start with a user message"
+	case turns[len(turns)-1] != "user":
+		return "The conversation must end with a user message"
+	}
+	return ""
+}
+
+// relayOpening is the worker's threadOpening (apps/computer-model.ts) as far as the conversation's turns go: an opening
+// before the first user message that holds an assistant's message and no tool calls or results is folded into the
+// system prompt, its assistant's messages leaving the conversation.
+func relayOpening(messages []relayMessage) []relayMessage {
+	first := slices.IndexFunc(messages, func(m relayMessage) bool { return m.Role == "user" })
+	if first <= 0 {
+		return messages
+	}
+	assistant := false
+	for _, m := range messages[:first] {
+		if m.Role == "tool" || len(m.ToolCalls) > 0 {
+			return messages
+		}
+		assistant = assistant || m.Role == "assistant"
+	}
+	if !assistant {
+		return messages
+	}
+	kept := []relayMessage{}
+	for _, m := range messages[:first] {
+		if m.Role != "assistant" {
+			kept = append(kept, m)
+		}
+	}
+	return append(kept, messages[first:]...)
+}
+
+// bedrockTurns are the conversation's turns as the bridge makes them for Converse (toConverseInput): a user's message
+// with text, a tool's result (a user turn), an assistant's message with text or tool calls; a text JavaScript's trim
+// leaves nothing of is none, a system or developer message goes to the system prompt, and turns of one role in a row are
+// one.
+func bedrockTurns(messages []relayMessage) []string {
+	turns := []string{}
+	add := func(role string) {
+		if len(turns) == 0 || turns[len(turns)-1] != role {
+			turns = append(turns, role)
+		}
+	}
+	for _, m := range messages {
+		text := m.Content != nil && !jsBlank(*m.Content)
+		switch {
+		case m.Role == "tool", m.Role == "user" && text:
+			add("user")
+		case m.Role == "assistant" && (text || len(m.ToolCalls) > 0):
+			add("assistant")
+		}
+	}
+	return turns
+}
+
+// jsBlank says whether JavaScript's trim() leaves nothing of s: its white space and line ends, which are not Go's
+// unicode.IsSpace (U+FEFF is one, U+0085 is not).
+func jsBlank(s string) bool {
+	return strings.TrimFunc(s, func(r rune) bool {
+		switch r {
+		case '\t', '\n', '\v', '\f', '\r', ' ', 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff:
+			return true
+		}
+		return r >= 0x2000 && r <= 0x200a
+	}) == ""
 }
 
 // relayMessages reads a call's messages as the route checks them: known roles, text or nothing, an assistant's tool

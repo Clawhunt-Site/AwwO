@@ -19,22 +19,27 @@ const KEY = 'awwo_rk_' + 'A'.repeat(43);
 const item = (id: string, overrides: Record<string, unknown> = {}) => ({ id, name: 'Laptop ' + id, prefix: 'awwo_rk_AAAA', tenant: { id: 'team-a', name: 'Team A' },
   createdAt: '2026-10-20T08:00:00Z', expiresAt: '2099-01-18T08:00:00Z', lastUsedAt: null, revokedAt: null, ...overrides });
 
-/** The keys API in memory: its list, a key made, a key revoked. */
-function server({ items = [item('k1')] as unknown[], list = undefined as unknown, made = undefined as unknown } = {}) {
-  const state = { items: [...items] };
+/** The keys API in memory: its list, a key made (each of `keys` in turn), a key revoked; after one, the list can answer
+ *  `listAfterRevoke` instead (an error's status). */
+function server({ items = [item('k1')] as unknown[], list = undefined as unknown, made = undefined as unknown, keys = [KEY], listAfterRevoke = 0 } = {}) {
+  const state = { items: [...items], made: 0, revoked: false };
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
     const method = init.method || 'GET';
     if (url.endsWith('/auth/preferences')) return json({ preferences: {}, version: 0 });
-    if (url.endsWith('/auth/relay-keys') && method === 'GET') return json(list ?? { items: state.items, limit: 5 });
+    if (url.endsWith('/auth/relay-keys') && method === 'GET') {
+      if (state.revoked && listAfterRevoke) return json({ error: { code: 'database_unavailable', message: 'Database unavailable' } }, listAfterRevoke);
+      return json(list ?? { items: state.items, limit: 5 });
+    }
     if (url.endsWith('/auth/relay-keys') && method === 'POST') {
       const body = JSON.parse(String(init.body));
       const fresh = item('k' + (state.items.length + 1), { name: body.name || 'AwwO 本地版', tenant: { id: body.tenantId, name: body.tenantId } });
       state.items = [fresh, ...state.items];
-      return json(made ?? { key: KEY, item: fresh }, 201);
+      return json(made ?? { key: keys[Math.min(state.made++, keys.length - 1)], item: fresh }, 201);
     }
     const revoke = /\/auth\/relay-keys\/([^/]+)$/.exec(url);
     if (revoke && method === 'DELETE') {
       state.items = state.items.map(entry => (entry as { id: string }).id === revoke[1] ? { ...(entry as object), revokedAt: '2026-10-25T09:00:00Z' } : entry);
+      state.revoked = true;
       return json(null, 204);
     }
     return json({ error: { code: 'not_found', message: 'Not found' } }, 404);
@@ -111,6 +116,23 @@ it('copies the new key', async () => {
   expect(writeText).toHaveBeenCalledWith(KEY);
 });
 
+it('draws a second key made while the first is shown afresh, never as already copied', async () => {
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+  const second = 'awwo_rk_' + 'B'.repeat(43);
+  server({ items: [], keys: [KEY, second] });
+  open('relay');
+  await screen.findByText('还没有连接密钥。');
+  fireEvent.click(screen.getByRole('button', { name: '生成密钥' }));
+  await screen.findByText(KEY);
+  fireEvent.click(screen.getByRole('button', { name: '复制' }));
+  await screen.findByRole('button', { name: '已复制' });
+  fireEvent.click(screen.getByRole('button', { name: '生成密钥' }));
+  await screen.findByText(second);
+  expect(screen.queryByText(KEY)).toBeNull();
+  expect(screen.getByRole('button', { name: '复制' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '已复制' })).toBeNull();
+});
+
 it('revokes a key only once it is confirmed, then reads the list again', async () => {
   const { fetch } = server();
   open('relay');
@@ -122,6 +144,17 @@ it('revokes a key only once it is confirmed, then reads the list again', async (
   fireEvent.click(within(row).getByRole('button', { name: '确认撤销' }));
   await waitFor(() => expect(within(screen.getByRole('list', { name: '连接密钥' })).getAllByRole('listitem')[0].getAttribute('data-state')).toBe('revoked'));
   expect(calls(fetch, 'DELETE').map(([url]) => String(url).split('/').pop())).toEqual(['k1']);
+});
+
+it('draws a key revoked as revoked even when the list cannot be read again', async () => {
+  server({ items: [item('k1'), item('k2')], listAfterRevoke: 503 });
+  open('relay');
+  const row = within(await screen.findByRole('list', { name: '连接密钥' })).getAllByRole('listitem')[0];
+  fireEvent.click(within(row).getByRole('button', { name: '撤销' }));
+  fireEvent.click(within(row).getByRole('button', { name: '确认撤销' }));
+  await screen.findByRole('button', { name: '重试' });
+  const rows = within(screen.getByRole('list', { name: '连接密钥' })).getAllByRole('listitem');
+  expect(rows.map(entry => entry.getAttribute('data-state'))).toEqual(['revoked', 'live']);
 });
 
 it('holds the button at the limit, and says what the API refused or could not be read', async () => {

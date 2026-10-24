@@ -123,9 +123,12 @@ export function RelaySettings({ identity }: { identity: Identity }) {
   const revoke = async (id: string) => {
     if (busy) return;
     setBusy(true); setError(null);
-    // A key revoked meanwhile (another tab) is gone as asked: read the list again either way.
-    try { await api(`/auth/relay-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-    catch (cause) { if (!(cause instanceof SaaSApiError && cause.status === 404)) setError(cause); }
+    // Revoked (or revoked meanwhile, in another tab: gone as asked), the key is drawn so at once, before the list is read
+    // again, so a list that cannot be read now never shows it live.
+    const revoked = () => setKeys(current => current && { ...current,
+      items: current.items.map(item => item.id === id && !item.revokedAt ? { ...item, revokedAt: new Date().toISOString() } : item) });
+    try { await api(`/auth/relay-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }); revoked(); }
+    catch (cause) { if (cause instanceof SaaSApiError && cause.status === 404) revoked(); else setError(cause); }
     finally { setBusy(false); setRevision(value => value + 1); }
   };
   const live = keys?.items.filter(item => keyState(item) === 'live').length ?? 0;
@@ -137,7 +140,8 @@ export function RelaySettings({ identity }: { identity: Identity }) {
     <SettingsIntro title={t('本机版连接', 'AwwO Local connection')} intro={t('AwwO 本地版可以通过线上 AwwO 使用 Claude 等云端模型。在这里生成一个连接密钥，粘贴到本地版。每次调用都计入你选择的工作区，和在线上使用一样：用它的免费次数，或用套餐的点数。', 'AwwO Local can use cloud models such as Claude through the online AwwO. Make a connection key here and paste it into AwwO Local. Each call counts in the workspace you choose, as it would online: its free calls, or your plan’s credits.')} />
     <div className="saas-settings-stack">
       <SettingsCard title={t('生成连接密钥', 'Make a connection key')} description={t('密钥只显示一次，90 天后失效。每个账号最多同时有 5 个有效密钥。', 'A key is shown once and works for 90 days. An account holds at most five live keys.')}>
-        {created && <NewKey value={created} onDone={() => setCreated('')} />}
+        {/* Keyed by the key, so a second key made meanwhile is drawn afresh, never as the first one's "Copied". */}
+        {created && <NewKey key={created} value={created} onDone={() => setCreated('')} />}
         {usable.length === 0
           ? <p role="status">{t('你还没有可以运行任务的工作区：需要是某个正常工作区的成员、管理员或所有者。', 'You have no workspace you can run tasks in: you need to be a member, an admin or the owner of an active one.')}</p>
           : <form className="saas-settings-form" onSubmit={create}>

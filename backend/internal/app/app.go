@@ -42,6 +42,7 @@ type App struct {
 	tasks       sync.WaitGroup
 	closed      bool
 	lease       *pgxpool.Conn
+	leasePID    int32 // the backend pid of lease's connection, which holds the worker lock (relayLeaseHeld)
 	leaseCancel context.CancelFunc
 	leaseLost   atomic.Bool
 	authSlots   chan struct{}
@@ -126,7 +127,7 @@ func (a *App) Start(ctx context.Context) error {
 		return e
 	}
 	var locked bool
-	if e = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended(current_database() || ':' || current_schema(),84321002))").Scan(&locked); e != nil || !locked {
+	if e = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended(current_database() || ':' || current_schema(),84321002)),pg_backend_pid()").Scan(&locked, &a.leasePID); e != nil || !locked {
 		conn.Release()
 		if e != nil {
 			return e

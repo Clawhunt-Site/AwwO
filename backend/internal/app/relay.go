@@ -40,8 +40,10 @@ func (c *Config) relayFromEnv() error {
 	return nil
 }
 
-// validateRelay checks the relay's settings: with the relay on, a loopback worker origin and its token; never on the
-// local edition or with personal keys, whose calls are their person's own.
+// validateRelay checks the relay's settings: with the relay on, a loopback worker origin and its token, and the proxies
+// in front of this API (the relay holds off an address that keeps sending keys that are not, which behind an unnamed
+// proxy would be every caller's at once); never on the local edition or with personal keys, whose calls are their
+// person's own.
 func (c Config) validateRelay() error {
 	if !c.Relay {
 		if c.RelayWorkerURL != "" || c.RelayWorkerToken != "" {
@@ -51,6 +53,9 @@ func (c Config) validateRelay() error {
 	}
 	if c.Edition == editionLocal || c.UserCredentials {
 		return errors.New("AWWO_RELAY=on serves this site's own models: not with AWWO_EDITION=local or AWWO_CREDENTIAL_MODE=user")
+	}
+	if len(c.TrustedProxyCIDRs) == 0 {
+		return errors.New("AWWO_RELAY=on needs AWWO_TRUSTED_PROXY_CIDRS: the proxies in front of this API, so each caller is told apart by its own address")
 	}
 	u, e := url.Parse(c.RelayWorkerURL)
 	if e != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") ||
@@ -150,15 +155,31 @@ func (a *App) createRelayKey(w http.ResponseWriter, r *http.Request) {
 	// The account's row serializes its keys, so two made at once cannot pass the limit together. FOR NO KEY UPDATE, not
 	// FOR UPDATE: a run created meanwhile locks its workspace's row and then checks its actor against this one (the
 	// foreign key's FOR KEY SHARE), which FOR UPDATE would block while this insert waits on that workspace: a deadlock.
-	var member bool
+	// Then the workspace's row, which a member's removal or downgrade locks before it revokes their keys there
+	// (changeMember): whichever comes second sees the first, so a key is never made for a member just removed, nor kept
+	// by one. The session is read again after both: a password changed or reset meanwhile ended it, after revoking the
+	// account's keys (account_security.go), and a key made now would outlive it.
+	var session, member bool
 	var live int
+	token := ""
+	if cookie, missing := r.Cookie("awwo_session"); missing == nil {
+		token = cookie.Value
+	}
 	if _, e = tx.Exec(r.Context(), "SELECT 1 FROM users WHERE id=$1 FOR NO KEY UPDATE", uid); e == nil {
-		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM memberships m JOIN tenants t ON t.id=m.tenant_id
+		_, e = tx.Exec(r.Context(), "SELECT 1 FROM tenants WHERE id=$1 FOR SHARE", b.TenantID)
+	}
+	if e == nil {
+		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE token_hash=$3 AND user_id=$2 AND expires_at>now()),
+			EXISTS(SELECT 1 FROM memberships m JOIN tenants t ON t.id=m.tenant_id
 			WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.role IN ('owner','admin','member') AND t.status='active'),
-			(SELECT count(*) FROM relay_keys WHERE user_id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp())`, b.TenantID, uid).Scan(&member, &live)
+			(SELECT count(*) FROM relay_keys WHERE user_id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp())`, b.TenantID, uid, tokenHash(token)).Scan(&session, &member, &live)
 	}
 	if e != nil {
 		a.dbError(w, e)
+		return
+	}
+	if !session {
+		fail(w, 401, "unauthorized", "Session expired")
 		return
 	}
 	if !member {
@@ -255,17 +276,20 @@ func (a *App) relayAuthenticate(w http.ResponseWriter, r *http.Request) (relayCa
 		fail(w, 401, "relay_key_invalid", "Invalid connection key")
 		return c, false
 	}
-	var expired bool
+	var expired, revoked bool
 	var role, status string
-	e := a.db.QueryRow(r.Context(), `SELECT k.id,k.user_id,k.tenant_id,k.expires_at<=clock_timestamp(),COALESCE(m.role,''),t.status FROM relay_keys k
+	e := a.db.QueryRow(r.Context(), `SELECT k.id,k.user_id,k.tenant_id,k.expires_at<=clock_timestamp(),k.revoked_at IS NOT NULL,COALESCE(m.role,''),t.status FROM relay_keys k
 		JOIN tenants t ON t.id=k.tenant_id LEFT JOIN memberships m ON m.tenant_id=k.tenant_id AND m.user_id=k.user_id
-		WHERE k.key_hash=$1 AND k.revoked_at IS NULL`, tokenHash(key)).Scan(&c.keyID, &c.userID, &c.tenantID, &expired, &role, &status)
+		WHERE k.key_hash=$1`, tokenHash(key)).Scan(&c.keyID, &c.userID, &c.tenantID, &expired, &revoked, &role, &status)
 	switch {
 	case noRows(e):
 		a.relayLimits.lookupFailed(address)
 		fail(w, 401, "relay_key_invalid", "Invalid connection key")
 	case e != nil:
 		a.dbError(w, e)
+	case revoked:
+		// A key that was one: a program still holding it is no guesser, and is never held off for it with its address.
+		fail(w, 401, "relay_key_invalid", "Invalid connection key")
 	case !a.relayLimits.requestAllowed(c.keyID):
 		relayRateLimited(w)
 	case expired:
@@ -297,7 +321,7 @@ func (a *App) relayModels(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	models, e := a.relayCatalog(r.Context())
+	worker, e := a.relayCatalog(r.Context())
 	if e != nil {
 		fail(w, 503, "relay_unavailable", "Cloud models are unavailable right now")
 		return
@@ -314,7 +338,7 @@ func (a *App) relayModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := []map[string]any{}
-	for _, m := range models {
+	for _, m := range worker.models {
 		if !entitlement.permits(m.ID) {
 			continue
 		}

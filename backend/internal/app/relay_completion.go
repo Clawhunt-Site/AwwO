@@ -55,12 +55,22 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.relayLimits.enter(caller.tenantID) {
+	if !a.relayLimits.refusalsAllowed(caller.keyID) {
+		w.Header().Set("Retry-After", "60")
+		fail(w, 429, "relay_rate_limited", "Too many of this connection's calls were refused as sent: check them, then wait a minute")
+		return
+	}
+	worker, e := a.relayCatalog(r.Context())
+	if e != nil {
+		fail(w, 503, "relay_unavailable", "Cloud models are unavailable right now")
+		return
+	}
+	if !a.relayLimits.enter(caller.tenantID, worker.capacity) {
 		relayBusy(w)
 		return
 	}
 	defer a.relayLimits.leave(caller.tenantID)
-	call, model, ok := a.readRelayCall(w, r)
+	call, model, ok := a.readRelayCall(w, r, worker.models)
 	if !ok {
 		return
 	}
@@ -82,7 +92,7 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	facts := &invocationFacts{Runtime: a.relayRuntime(model.ID), Model: model.ID, Provider: model.Provider, ProviderModel: model.ProviderModel,
 		Protocol: model.Protocol, Admission: "not_attempted", Usage: missingUsage("unavailable", "provider_missing"), InputBytes: int64(len(body))}
 	admission, admitted := context.WithTimeout(ctx, relaySlotWait)
-	e := a.reserveRelayInvocation(admission, caller, id, facts)
+	e = a.reserveRelayInvocation(admission, caller, id, facts)
 	admitted()
 	if e != nil {
 		// A commit whose answer was lost may have reserved the call all the same: settle it, as one never sent.
@@ -111,6 +121,9 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	defer reply.end("")
 	answer, failure := a.forwardRelayCall(ctx, caller, model.ID, body, facts)
 	if failure != nil {
+		if failure.refused {
+			a.relayLimits.refused(caller.keyID)
+		}
 		_ = end("failed", failure.code)
 		reply.fail(failure.errCode, failure.message)
 		return
@@ -122,9 +135,10 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	reply.answer(model.ID, answer, call.SingleTool)
 }
 
-// readRelayCall reads a call's request and the catalog's model it names (the workspace's entitlement is its admission's),
-// and refuses a call longer than its model reads, as the worker would after its admission.
-func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request) (relayCall, relayModel, bool) {
+// readRelayCall reads a call's request and the model of the relay worker's catalog it names (the workspace's
+// entitlement is its admission's), and refuses a call longer than its model reads, as the worker would after its
+// admission, and a Bedrock model's call the worker's Converse bridge would refuse.
+func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request, models []relayModel) (relayCall, relayModel, bool) {
 	var call relayCall
 	if media, _, e := mime.ParseMediaType(r.Header.Get("Content-Type")); e != nil || media != "application/json" {
 		fail(w, 415, "unsupported_media_type", "Use application/json")
@@ -145,14 +159,13 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request) (relayCall, 
 		fail(w, 400, input.code, input.message)
 		return call, relayModel{}, false
 	}
-	models, e := a.relayCatalog(r.Context())
-	if e != nil {
-		fail(w, 503, "relay_unavailable", "Cloud models are unavailable right now")
-		return call, relayModel{}, false
-	}
 	for _, m := range models {
 		if m.ID != call.Model {
 			continue
+		}
+		if why := call.bedrockRefusal(); m.Provider == "bedrock" && why != "" {
+			fail(w, 400, "invalid_request", why)
+			return call, relayModel{}, false
 		}
 		if relayCallTokens(call, m.ProseBytesPerToken) > m.ContextWindow-m.MaxOutputTokens-256 {
 			fail(w, 400, "context_length_exceeded", "The call is longer than the model can read")
@@ -168,87 +181,12 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request) (relayCall, 
 // still live and its member still one, the workspace's entitlement and a plan-only model's gate, then the owner's plan
 // (its agents at once, today's free calls, the period's credits) or the free allowance (the workspace's calls at once and
 // its daily total, and the paid routes' allowances). A relayed call belongs to no run, so it never takes a place a run
-// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). It waits for one until ctx ends,
-// when one of the site's few places to wait is free (relayLimits.wait); else it is refused as busy at once.
+// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). While none is free it tries
+// again, backing off, until ctx ends.
 func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id string, facts *invocationFacts) error {
-	model, wait, waiting := facts.Model, 40*time.Millisecond, false
-	defer func() {
-		if waiting {
-			a.relayLimits.waited()
-		}
-	}()
-	for {
-		tx, e := a.db.Begin(ctx)
-		if e != nil {
+	for wait := 40 * time.Millisecond; ; wait = min(wait*2, 500*time.Millisecond) {
+		if admitted, e := a.relayAdmission(ctx, caller, id, facts); e != nil || admitted {
 			return e
-		}
-		var status string
-		var concurrent, daily int
-		var restricted, needsPlan, live bool
-		var allowed []string
-		var routes []byte
-		e = tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits,requires_plan FROM tenants WHERE id=$1 FOR UPDATE", caller.tenantID).Scan(&status, &concurrent, &daily, &restricted, &allowed, &routes, &needsPlan)
-		if e == nil {
-			daily, routes, e = a.todayAllowance(ctx, tx, caller.tenantID, daily, routes)
-		}
-		var plan *activePlan
-		if e == nil {
-			plan, e = ownerPlan(ctx, tx, caller.tenantID, false)
-		}
-		if e == nil {
-			e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM relay_keys k JOIN memberships m ON m.tenant_id=k.tenant_id AND m.user_id=k.user_id
-				WHERE k.id=$1 AND k.revoked_at IS NULL AND k.expires_at>clock_timestamp() AND m.role IN ('owner','admin','member'))`, caller.keyID).Scan(&live)
-		}
-		if e == nil && (status != "active" || !live) {
-			e = errRelayRevoked
-		}
-		if e == nil {
-			entitlement, entitlementErr := newModelEntitlement(restricted, allowed)
-			if entitlementErr != nil || !entitlement.permits(model) {
-				e = errModelNotAllowed
-			}
-		}
-		if e == nil {
-			e = requiresPlan(ctx, tx, caller.tenantID, needsPlan, plan)
-		}
-		if e == nil && a.cfg.planOnlyModel(model) {
-			var closed bool
-			if closed, e = a.planOnlyClosed(ctx, tx, caller.tenantID, plan); e == nil && closed {
-				e = errRouteQuota
-			}
-		}
-		var reserve *int
-		if e == nil && plan != nil {
-			reserve, e = a.creditReserve(facts.Runtime, model, facts.InputBytes)
-		}
-		if e != nil {
-			tx.Rollback(context.Background())
-			return e
-		}
-		admitted, billed := false, (*activePlan)(nil)
-		if plan == nil {
-			admitted, e = a.admitFreeInvocation(ctx, tx, caller.tenantID, model, concurrent, daily, routes, false)
-		} else {
-			billed, e = a.admitPlanRelayInvocation(ctx, tx, caller.tenantID, reserve)
-			admitted = billed != nil
-		}
-		if e == nil && admitted {
-			if e = a.reserveInvocationFacts(ctx, tx, caller.tenantID, id, id, facts, reserve, billed); e == nil {
-				if _, e = tx.Exec(ctx, "UPDATE model_invocations SET relay_key_id=$3 WHERE tenant_id=$1 AND id=$2", caller.tenantID, id, caller.keyID); e == nil {
-					// The caller leaving now must not lose the commit's answer: the call would be reserved unbeknown.
-					return tx.Commit(context.WithoutCancel(ctx))
-				}
-			}
-		}
-		tx.Rollback(context.Background())
-		if e != nil {
-			return e
-		}
-		if !waiting {
-			if !a.relayLimits.wait() {
-				return errRelayBusy
-			}
-			waiting = true
 		}
 		// Waiting for a place backs off from 40 ms to half a second, as reserveInvocation's does.
 		select {
@@ -256,8 +194,105 @@ func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id
 			return ctx.Err()
 		case <-time.After(wait):
 		}
-		wait = min(wait*2, 500*time.Millisecond)
 	}
+}
+
+// relayAdmission is one try at a relayed call's admission, in one of the site's places to be admitted in
+// (relayAdmissions), waited for as long as ctx lets it: true once the call is reserved, false while its workspace or its
+// plan has no place free. A try holds a database connection, which it gives back before its call waits for the next.
+func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string, facts *invocationFacts) (bool, error) {
+	slots := a.relayLimits.admitting()
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	defer func() { <-slots }()
+	tx, e := a.db.Begin(ctx)
+	if e != nil {
+		return false, e
+	}
+	defer tx.Rollback(context.Background())
+	gate, e := a.openRelayGate(ctx, tx, caller, facts)
+	if e != nil {
+		return false, e
+	}
+	admitted, billed := false, (*activePlan)(nil)
+	if gate.plan == nil {
+		admitted, e = a.admitFreeInvocation(ctx, tx, caller.tenantID, facts.Model, gate.concurrent, gate.daily, gate.routes, false)
+	} else {
+		billed, e = a.admitPlanRelayInvocation(ctx, tx, caller.tenantID, gate.reserve)
+		admitted = billed != nil
+	}
+	if e != nil || !admitted {
+		return false, e
+	}
+	if e = a.reserveInvocationFacts(ctx, tx, caller.tenantID, id, id, facts, gate.reserve, billed); e != nil {
+		return false, e
+	}
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET relay_key_id=$3 WHERE tenant_id=$1 AND id=$2", caller.tenantID, id, caller.keyID); e != nil {
+		return false, e
+	}
+	// The caller leaving now must not lose the commit's answer (the call would be reserved unbeknown), and a commit that
+	// stalls must not hold the call past its own bound.
+	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return true, tx.Commit(commit)
+}
+
+// relayGate is what a relayed call's admission read of its workspace under its row's lock: its free allowance (its calls
+// at once, today's calls, the paid routes' allowances), or its owner's plan and the call's credit reserve on it.
+type relayGate struct {
+	concurrent, daily int
+	routes            []byte
+	plan              *activePlan
+	reserve           *int
+}
+
+// openRelayGate locks a relayed call's workspace and refuses the call outright when its key is no longer live or its
+// member no longer one, the workspace is suspended, its entitlement leaves the model out, it needs a plan it lacks, a
+// plan-only model's gate is closed, or its owner's plan would pay for a model this site cannot price.
+func (a *App) openRelayGate(ctx context.Context, tx pgx.Tx, caller relayCaller, facts *invocationFacts) (relayGate, error) {
+	var g relayGate
+	var status string
+	var restricted, needsPlan, live bool
+	var allowed []string
+	e := tx.QueryRow(ctx, "SELECT status,max_concurrent_runs,max_runs_per_day,allowed_models IS NOT NULL,COALESCE(allowed_models,'{}'),route_limits,requires_plan FROM tenants WHERE id=$1 FOR UPDATE", caller.tenantID).Scan(&status, &g.concurrent, &g.daily, &restricted, &allowed, &g.routes, &needsPlan)
+	if e == nil {
+		g.daily, g.routes, e = a.todayAllowance(ctx, tx, caller.tenantID, g.daily, g.routes)
+	}
+	if e == nil {
+		g.plan, e = ownerPlan(ctx, tx, caller.tenantID, false)
+	}
+	if e == nil {
+		e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM relay_keys k JOIN memberships m ON m.tenant_id=k.tenant_id AND m.user_id=k.user_id
+			WHERE k.id=$1 AND k.revoked_at IS NULL AND k.expires_at>clock_timestamp() AND m.role IN ('owner','admin','member'))`, caller.keyID).Scan(&live)
+	}
+	if e != nil {
+		return g, e
+	}
+	if status != "active" || !live {
+		return g, errRelayRevoked
+	}
+	if entitlement, invalid := newModelEntitlement(restricted, allowed); invalid != nil || !entitlement.permits(facts.Model) {
+		return g, errModelNotAllowed
+	}
+	if e = requiresPlan(ctx, tx, caller.tenantID, needsPlan, g.plan); e != nil {
+		return g, e
+	}
+	if a.cfg.planOnlyModel(facts.Model) {
+		closed, e := a.planOnlyClosed(ctx, tx, caller.tenantID, g.plan)
+		if e != nil {
+			return g, e
+		}
+		if closed {
+			return g, errRouteQuota
+		}
+	}
+	if g.plan != nil {
+		g.reserve, e = a.creditReserve(facts.Runtime, facts.Model, facts.InputBytes)
+	}
+	return g, e
 }
 
 // errRelayRevoked: the key was revoked, expired or lost its member, or its workspace was suspended, after it was read.
@@ -302,12 +337,12 @@ func (a *App) admitPlanRelayInvocation(ctx context.Context, tx pgx.Tx, tid strin
 
 // relayRefused says whether an admission's error is its refusal, which reserved nothing.
 func relayRefused(e error) bool {
-	return admissionRefusal(e) != "" || errors.Is(e, errModelNotAllowed) || errors.Is(e, errRelayRevoked) || errors.Is(e, errRelayBusy)
+	return admissionRefusal(e) != "" || errors.Is(e, errModelNotAllowed) || errors.Is(e, errRelayRevoked)
 }
 
 func relayBusy(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "5")
-	fail(w, 429, "relay_busy", "Every call this workspace may run at once is running: try again shortly")
+	fail(w, 429, "relay_busy", "Every call that may run at once is running: try again shortly")
 }
 
 // relayRefusal answers a call whose admission was refused: its plan, allowance and route codes (admissionRefusal) as 429,
@@ -327,7 +362,7 @@ func relayRefusal(w http.ResponseWriter, e error) {
 		fail(w, 429, code, "The workspace's allowance for this model is used up for now")
 	case errors.Is(e, errModelNotAllowed):
 		fail(w, 403, "model_not_allowed", "This workspace may not use this model")
-	case errors.Is(e, errRelayBusy), errors.Is(e, context.DeadlineExceeded):
+	case errors.Is(e, context.DeadlineExceeded):
 		relayBusy(w)
 	case errors.Is(e, errRelayRevoked):
 		fail(w, 401, "relay_key_invalid", "Invalid connection key")
@@ -460,6 +495,8 @@ type relayAnswer struct {
 // relayFailure is how a call failed once it went to the relay worker: the ledger's code, and what its caller is told.
 type relayFailure struct {
 	code, errCode, message string
+	// refused: the worker refused the call as its caller's, before any work (relayWorkerFailure).
+	refused bool
 }
 
 // forwardRelayCall sends one admitted call to the relay worker and reads its answer, recording on facts what the ledger
@@ -528,8 +565,12 @@ func (a *App) forwardRelayCall(ctx context.Context, caller relayCaller, model st
 // for a direct task's call: computerModelFailure, computerCallBroke), and what its caller is told. A call longer than
 // its model reads is context_length_exceeded (OpenAI's code, by which callers shorten a conversation); a worker at
 // capacity, or Bedrock throttling, is busy; any other failed. Bedrock refusing the call within moments, before its
-// stream began (bedrock:<status>:<type>, never stream:…), did no model work, which AWS does not bill either: the call
-// never counts, as one the worker refused.
+// stream began (bedrock:<status>:<type>, never stream:…), for a fault of the platform's side (computerProviderFault:
+// its quota, its credentials, its service) did no model work, which AWS does not bill either: the call never counts, as
+// one the worker refused. Its refusal of the request itself (a 400) is the call's own and counts, as a direct task's
+// does; so does every other failure. What the worker refused as the call's own, before any work (its check of the
+// request, the provider's size refusal), counts nowhere, so the key is told (refused) and held off when it keeps
+// sending such calls (relayRefusalsPerMinute).
 func relayWorkerFailure(status int, data []byte, readErr error, done bool, facts *invocationFacts) *relayFailure {
 	if readErr != nil {
 		return &relayFailure{code: computerCallBroke(readErr, done), errCode: "relay_model_transport", message: "The model's answer did not arrive"}
@@ -538,10 +579,11 @@ func relayWorkerFailure(status int, data []byte, readErr error, done bool, facts
 	failure := &relayFailure{code: computerModelFailure(status, data, false), errCode: "relay_model_failed", message: "The model could not complete this call"}
 	quick := facts.sinceSent(facts.Ended) < quickRefusal()
 	sized := computerSizeRefusal(status, data)
-	beforeStream := status == 502 && workerCode == "PROVIDER_ERROR" && strings.HasPrefix(reason, "bedrock:")
-	if (sized || beforeStream) && quick {
+	platform := status == 502 && workerCode == "PROVIDER_ERROR" && strings.HasPrefix(reason, "bedrock:") && computerProviderFault(reason)
+	if (sized || platform) && quick {
 		facts.Admission = "rejected_before_start"
 	}
+	failure.refused = (status == 400 && workerCode == "INVALID_INPUT") || status == 413 || (sized && quick)
 	switch {
 	case sized || (status == 413 && workerCode == "CONTEXT_LIMIT"):
 		failure.errCode, failure.message = "context_length_exceeded", "The call is longer than the model can read"

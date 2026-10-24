@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -267,6 +268,56 @@ func TestPostgresRelayKeysWorkOnlyWhileTheirAccountMay(t *testing.T) {
 	h.a.relayLimits.failures = nil
 	h.request(t, cookie, "DELETE", "/auth/relay-keys/"+fresh["id"].(string), nil, 204)
 	check(401, "relay_key_invalid", made["key"].(string))
+	// A revoked key a program still sends is refused, and never held against its address as a guess.
+	for i := 0; i <= relayFailuresPerMinute+5; i++ {
+		sendRelay(t, h, made["key"].(string), "GET", relayModelsRoute, "")
+	}
+	again := h.request(t, cookie, "POST", "/auth/relay-keys", map[string]any{"tenantId": tid}, 201)
+	check(200, "list", again["key"].(string))
+}
+
+func TestPostgresRelayKeyIsNeverMadeOnASessionThatEnded(t *testing.T) {
+	h, _, cookie, tid, _ := relayHarness(t)
+	var uid string
+	if e := h.db.QueryRow(context.Background(), "SELECT user_id FROM auth_sessions WHERE token_hash=$1", tokenHash(cookie.Value)).Scan(&uid); e != nil {
+		t.Fatal(e)
+	}
+	// The session ended after the request was let in (a password changed meanwhile, revoking the account's keys).
+	execSQL(t, h, "DELETE FROM auth_sessions WHERE token_hash=$1", tokenHash(cookie.Value))
+	r := httptest.NewRequest("POST", "/api/v1/auth/relay-keys", strings.NewReader(`{"tenantId":"`+tid+`"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(cookie)
+	r = r.WithContext(context.WithValue(r.Context(), userKey{}, User{ID: uid}))
+	w := httptest.NewRecorder()
+	h.a.createRelayKey(w, r)
+	if w.Code != 401 || h.relayCount(t, "SELECT count(*) FROM relay_keys WHERE user_id=$1", uid) != 1 {
+		t.Fatal("a key made on a session that ended", w.Code, w.Body.String())
+	}
+}
+
+func TestPostgresAKeyWhoseCallsKeepBeingRefusedIsHeldOff(t *testing.T) {
+	h, worker, _, tid, key := relayHarness(t)
+	worker.answerWith(func(w http.ResponseWriter, _ map[string]any) {
+		w.WriteHeader(400)
+		io.WriteString(w, `{"error":{"code":"INVALID_INPUT","detail":"completion:tool-name"}}`)
+	})
+	for i := 0; i <= relayRefusalsPerMinute; i++ {
+		status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello)
+		if _, _, errCode, _ := relayStreamed(t, body); status != 200 || errCode != "invalid_request" {
+			t.Fatal("a call the worker refuses", i, status, body)
+		}
+	}
+	if h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1 AND cost_status='not_incurred'", tid) != relayRefusalsPerMinute+1 {
+		t.Fatal("refused calls count nowhere")
+	}
+	sent := len(worker.sent())
+	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 429 || !strings.Contains(body, "relay_rate_limited") || len(worker.sent()) != sent {
+		t.Fatal("a key whose calls keep being refused", status, body)
+	}
+	// It may still list its models.
+	if status, _ := sendRelay(t, h, key, "GET", relayModelsRoute, ""); status != 200 {
+		t.Fatal("the key's models", status)
+	}
 }
 
 func TestPostgresRelayKeysEndWithTheirMembershipAndPassword(t *testing.T) {
@@ -347,14 +398,15 @@ func TestPostgresRelayedCallRunsAsOneOfTheWorkspacesCalls(t *testing.T) {
 	if runID != sent[0]["runId"] || statusRow != "completed" || runtime != runtimePI || usage != "reported" || input != 12 || output != 3 || keyHash != tokenHash(key) {
 		t.Fatal("ledger", runID, statusRow, runtime, usage, input, output)
 	}
-	if len(h.a.trackedRelayCalls()) != 0 {
+	if tracked, _ := h.a.trackedRelayCalls(); len(tracked) != 0 {
 		t.Fatal("a call settled is let go")
 	}
-	// Refused by the worker as larger than its model reads, or by Bedrock at once: never counted. A failure once the
-	// stream began counts.
+	// Refused by the worker as larger than its model reads, or by Bedrock at once for its own side: never counted. Its
+	// refusal of the request, and a failure once the stream began, count.
 	for _, c := range []struct{ answer, code, cost string }{
 		{`{"error":{"code":"CONTEXT_LIMIT"}}`, "context_length_exceeded", "not_incurred"},
 		{`{"error":{"code":"PROVIDER_ERROR","message":"secret provider words","reason":"bedrock:503:ServiceUnavailableException"}}`, "relay_model_failed", "not_incurred"},
+		{`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:ValidationException"}}`, "relay_model_failed", "unknown"},
 		{`{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:500:InternalServerException"}}`, "relay_model_failed", "unknown"},
 	} {
 		worker.answerWith(func(w http.ResponseWriter, _ map[string]any) {
@@ -382,6 +434,9 @@ func TestPostgresRelayedCallRunsAsOneOfTheWorkspacesCalls(t *testing.T) {
 		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"x"}}]}]}`, "unsupported_content", 400},
 		{`{"model":"bedrock.claude-opus-5-5","messages":[{"role":"user","content":"hi"}]}`, "stream_required", 400},
 		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"tool","tool_call_id":"c1","content":"x"}]}`, "invalid_request", 400},
+		// What the worker's Converse bridge would refuse of a Bedrock model's call.
+		{`{"model":"bedrock.claude-opus-5-5","stream":true,"tools":[{"type":"function","function":{"name":"fs.read","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"hi"}]}`, "invalid_request", 400},
+		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"there"}]}`, "invalid_request", 400},
 		{`{"model":"nope","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"broken","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"bedrock.glm-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", 120000) + `"}]}`, "context_length_exceeded", 400},
@@ -444,7 +499,7 @@ func TestPostgresRelayedCallsSpendTheWorkspacesAllowance(t *testing.T) {
 		done <- body
 	}()
 	<-holding
-	if tracked := h.a.trackedRelayCalls(); len(tracked) != 1 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE id=$1 AND status='running'", tracked[0]) != 1 {
+	if tracked, _ := h.a.trackedRelayCalls(); len(tracked) != 1 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE id=$1 AND status='running'", tracked[0]) != 1 {
 		t.Fatal("the call running is registered with this process's work", tracked)
 	}
 	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 429 || !strings.Contains(body, "relay_busy") {
@@ -525,39 +580,50 @@ func TestPostgresRelayedCallsTakeThePlansAgentsAtOnce(t *testing.T) {
 
 func TestPostgresRelayedCallsAreHeldToWhatTheSiteCanTake(t *testing.T) {
 	h, worker, _, tid, key := relayHarness(t)
+	busy := func(why string) {
+		t.Helper()
+		if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 429 || !strings.Contains(body, "relay_busy") {
+			t.Fatal(why, status, body)
+		}
+	}
 	// A workspace past its relayed calls at once is refused at once, before it reaches the database.
 	for i := 0; i < relayPerWorkspace; i++ {
-		h.a.relayLimits.enter(tid)
+		h.a.relayLimits.enter(tid, relayOnSite)
 	}
-	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 429 || !strings.Contains(body, "relay_busy") {
-		t.Fatal("past the workspace's calls at once", status, body)
-	}
+	busy("past the workspace's calls at once")
 	for i := 0; i < relayPerWorkspace; i++ {
 		h.a.relayLimits.leave(tid)
 	}
-	// With every place to wait taken, a call that would wait is refused at once.
-	execSQL(t, h, "UPDATE tenants SET max_concurrent_runs=1 WHERE id=$1", tid)
-	release, holding := make(chan struct{}), make(chan struct{}, 1)
-	worker.answerWith(func(w http.ResponseWriter, _ map[string]any) {
-		holding <- struct{}{}
-		<-release
-		io.WriteString(w, relayCompletionReply("held"))
-	})
-	done := make(chan struct{})
-	go func() { sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); close(done) }()
-	<-holding
-	for i := 0; i < relayWaiters; i++ {
-		h.a.relayLimits.wait()
+	// The site lets in no more calls at once than the relay worker takes: one past them would only be refused there
+	// (this worker's health does not say, so the Pi worker's default).
+	for i := 0; i < relayWorkerCapacity; i++ {
+		h.a.relayLimits.enter("elsewhere-"+strconv.Itoa(i), relayOnSite)
+	}
+	busy("past the worker's calls at once")
+	for i := 0; i < relayWorkerCapacity; i++ {
+		h.a.relayLimits.leave("elsewhere-" + strconv.Itoa(i))
+	}
+	// A call waits for one of the site's places to be admitted in, which holds no database connection meanwhile, and is
+	// refused as busy when none is free in time, never reserved.
+	saved := relaySlotWait
+	relaySlotWait = 300 * time.Millisecond
+	defer func() { relaySlotWait = saved }()
+	slots := h.a.relayLimits.admitting()
+	for i := 0; i < relayAdmissions; i++ {
+		slots <- struct{}{}
 	}
 	started := time.Now()
-	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 429 || !strings.Contains(body, "relay_busy") || time.Since(started) > relaySlotWait/2 {
-		t.Fatal("no place to wait", status, body, time.Since(started))
+	busy("no place to be admitted in")
+	if time.Since(started) < relaySlotWait || len(worker.sent()) != 0 || h.relayCount(t, "SELECT count(*) FROM model_invocations WHERE tenant_id=$1", tid) != 0 {
+		t.Fatal("a call that waited for its admission", time.Since(started))
 	}
-	for i := 0; i < relayWaiters; i++ {
-		h.a.relayLimits.waited()
+	<-slots
+	if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, relayHello); status != 200 || !strings.Contains(body, "Hello") {
+		t.Fatal("a place freed", status, body)
 	}
-	close(release)
-	<-done
+	for i := 1; i < relayAdmissions; i++ {
+		<-slots
+	}
 }
 
 func TestPostgresTheSweepSettlesRelayedCallsLeftRunning(t *testing.T) {
@@ -590,18 +656,50 @@ func TestPostgresTheSweepSettlesRelayedCallsLeftRunning(t *testing.T) {
 	if states["rl-left"] != "interrupted" || states["rl-young"] != "running" || states["rl-handled"] != "running" || states["run-call"] != "running" {
 		t.Fatal("only a relayed call no handler holds, old enough, is settled", states)
 	}
+	// Only while this process holds the worker lock: a lock lost unseen, or seen, leaves the calls running to their own.
+	insert("rl-later", keyID, "5 minutes")
+	later := func() string {
+		var status string
+		h.db.QueryRow(context.Background(), "SELECT status FROM model_invocations WHERE id='rl-later'").Scan(&status)
+		return status
+	}
+	held := h.a.leasePID
+	h.a.leasePID = 0
+	if e := h.a.sweepRelayCalls(context.Background()); e != nil || later() != "running" {
+		t.Fatal("a sweep by a process whose connection does not hold the lock", e, later())
+	}
+	h.a.leasePID = held
+	h.a.leaseLost.Store(true)
+	if e := h.a.sweepRelayCalls(context.Background()); e != nil || later() != "running" {
+		t.Fatal("a sweep by a process that lost its lock", e, later())
+	}
+	h.a.leaseLost.Store(false)
+	if e := h.a.sweepRelayCalls(context.Background()); e != nil || later() != "interrupted" {
+		t.Fatal("the lock held again", e, later())
+	}
 }
 
 func TestRelayCallsAreRegisteredWithTheAPIsWork(t *testing.T) {
 	a := New(nil, testConfig())
 	stopped := false
-	if !a.trackRelayCall("rl-1", func() { stopped = true }) || len(a.trackedRelayCalls()) != 1 || a.running["relay:rl-1"] == nil {
+	tracked := func() int {
+		ids, running := a.trackedRelayCalls()
+		if !running {
+			t.Fatal("running")
+		}
+		return len(ids)
+	}
+	if !a.trackRelayCall("rl-1", func() { stopped = true }) || tracked() != 1 || a.running["relay:rl-1"] == nil {
 		t.Fatal("registered")
 	}
 	a.running["relay:rl-1"]()
 	a.untrackRelayCall("rl-1")
-	if !stopped || len(a.trackedRelayCalls()) != 0 {
+	if !stopped || tracked() != 0 {
 		t.Fatal("cut and let go")
+	}
+	a.leaseLost.Store(true)
+	if _, running := a.trackedRelayCalls(); running {
+		t.Fatal("a process that lost its database lock is not running")
 	}
 	a.closed = true
 	if a.trackRelayCall("rl-2", func() {}) {

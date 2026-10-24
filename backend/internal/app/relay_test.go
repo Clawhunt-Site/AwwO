@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +21,7 @@ func TestRelaySettingsAreCheckedAtStart(t *testing.T) {
 	on := func(edit func(*Config)) error {
 		c := testConfig()
 		c.Relay, c.RelayWorkerURL, c.RelayWorkerToken = true, "http://127.0.0.1:8099", strings.Repeat("r", 32)
+		c.TrustedProxyCIDRs = []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
 		edit(&c)
 		return c.Validate()
 	}
@@ -25,6 +29,7 @@ func TestRelaySettingsAreCheckedAtStart(t *testing.T) {
 		t.Fatal("a loopback relay worker refused", e)
 	}
 	for name, edit := range map[string]func(*Config){
+		"no proxies named":     func(c *Config) { c.TrustedProxyCIDRs = nil },
 		"the local edition":    func(c *Config) { c.Edition, c.UserCredentials = editionLocal, true },
 		"personal keys":        func(c *Config) { c.UserCredentials = true },
 		"a remote worker":      func(c *Config) { c.RelayWorkerURL = "http://10.0.0.5:8099" },
@@ -171,24 +176,33 @@ func TestRelayWorkerFailuresSayWhatTheCallerCanDo(t *testing.T) {
 		body, errCode   string
 		code, admission string
 		took            time.Duration
+		refused         bool
 	}{
-		{413, `{"error":{"code":"CONTEXT_LIMIT"}}`, "context_length_exceeded", "computer_model_failed", "unknown", time.Second},
-		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`, "context_length_exceeded", "computer_model_failed", "rejected_before_start", time.Second},
-		{400, `{"error":{"code":"INVALID_INPUT","detail":"completion:tool-name"}}`, "invalid_request", "computer_model_failed", "unknown", time.Second},
-		{429, `{"error":{"code":"CAPACITY_EXCEEDED"}}`, "relay_busy", "computer_model_failed", "unknown", time.Second},
-		{503, `{"error":{"code":"RUNTIME_UNAVAILABLE"}}`, "relay_unavailable", "computer_model_failed", "unknown", time.Second},
-		// Bedrock refusing before its stream began, at once: no work done, never counted.
-		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:503:ServiceUnavailableException"}}`, "relay_model_failed", "computer_model_provider", "rejected_before_start", time.Second},
-		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:429:ThrottlingException"}}`, "relay_busy", "computer_model_provider", "rejected_before_start", time.Second},
+		// Refused as the call's own, before any work: counted nowhere, and told to the key's back-off.
+		{413, `{"error":{"code":"CONTEXT_LIMIT"}}`, "context_length_exceeded", "computer_model_failed", "unknown", time.Second, true},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`, "context_length_exceeded", "computer_model_failed", "rejected_before_start", time.Second, true},
+		{400, `{"error":{"code":"INVALID_INPUT","detail":"completion:tool-name"}}`, "invalid_request", "computer_model_failed", "unknown", time.Second, true},
+		// The worker's own side: its capacity, its catalog, its stopping.
+		{429, `{"error":{"code":"CAPACITY_EXCEEDED"}}`, "relay_busy", "computer_model_failed", "unknown", time.Second, false},
+		{400, `{"error":{"code":"MODEL_NOT_FOUND","detail":"catalog"}}`, "relay_model_failed", "computer_model_failed", "unknown", time.Second, false},
+		{503, `{"error":{"code":"RUNTIME_UNAVAILABLE"}}`, "relay_unavailable", "computer_model_failed", "unknown", time.Second, false},
+		// Bedrock refusing before its stream began, at once, for the platform's side: no work done, never counted.
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:503:ServiceUnavailableException"}}`, "relay_model_failed", "computer_model_provider", "rejected_before_start", time.Second, false},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:429:ThrottlingException"}}`, "relay_busy", "computer_model_provider", "rejected_before_start", time.Second, false},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:403:AccessDeniedException"}}`, "relay_model_failed", "computer_model_provider", "rejected_before_start", time.Second, false},
+		// Its refusal of the request itself is the call's own, and counts, as a direct task's does.
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:invalid_request_error"}}`, "relay_model_failed", "computer_model_failed", "unknown", time.Second, false},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:ValidationException"}}`, "relay_model_failed", "computer_model_failed", "unknown", time.Second, false},
 		// The same after a while, and a failure once the stream began, may follow work.
-		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:503:ServiceUnavailableException"}}`, "relay_model_failed", "computer_model_provider", "unknown", time.Minute},
-		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:500:InternalServerException"}}`, "relay_model_failed", "computer_model_provider", "unknown", time.Second},
-		{499, `{"error":{"code":"CANCELLED","reason":"timeout"}}`, "relay_model_failed", "computer_model_cut", "unknown", time.Second},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:503:ServiceUnavailableException"}}`, "relay_model_failed", "computer_model_provider", "unknown", time.Minute, false},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`, "context_length_exceeded", "computer_model_failed", "unknown", time.Minute, false},
+		{502, `{"error":{"code":"PROVIDER_ERROR","reason":"stream:error:500:InternalServerException"}}`, "relay_model_failed", "computer_model_provider", "unknown", time.Second, false},
+		{499, `{"error":{"code":"CANCELLED","reason":"timeout"}}`, "relay_model_failed", "computer_model_cut", "unknown", time.Second, false},
 	}
 	for _, c := range cases {
 		facts := after(c.took)
 		f := relayWorkerFailure(c.status, []byte(c.body), nil, false, facts)
-		if f.errCode != c.errCode || f.code != c.code || facts.Admission != c.admission {
+		if f.errCode != c.errCode || f.code != c.code || facts.Admission != c.admission || f.refused != c.refused {
 			t.Errorf("%d %s after %s: %+v, admission %s", c.status, c.body, c.took, f, facts.Admission)
 		}
 	}
@@ -287,37 +301,62 @@ func TestRelayLimitsHoldOffWhatWouldTakeTheSite(t *testing.T) {
 	if l.lookupAllowed("192.0.2.1") || !l.lookupAllowed("192.0.2.2") {
 		t.Fatal("an address sending keys that are not is held off")
 	}
+	// An IPv6 address counts by its /64, the block one line is usually given.
+	for i := 0; i <= relayFailuresPerMinute; i++ {
+		l.lookupFailed("2001:db8:1:2::" + strconv.FormatInt(int64(i+1), 16))
+	}
+	if l.lookupAllowed("2001:db8:1:2:ffff::1") || !l.lookupAllowed("2001:db8:1:3::1") {
+		t.Fatal("an IPv6 address by its /64")
+	}
+	// A full table holds off only the addresses it counted: one it does not hold passes, and its count makes room.
+	var full relayLimits
+	for i := 0; i < relayRateEntries; i++ {
+		full.lookupFailed(fmt.Sprintf("10.%d.%d.%d", i>>16&255, i>>8&255, i&255))
+	}
+	if !full.lookupAllowed("192.0.2.9") {
+		t.Fatal("a full table holds off an address it never counted")
+	}
+	full.lookupFailed("192.0.2.9")
+	if len(full.failures) != relayRateEntries || full.failures["192.0.2.9"].count != 1 {
+		t.Fatal("the oldest count made room", len(full.failures))
+	}
+	// A key whose calls keep being refused as sent is held off, that key alone.
+	for i := 0; i <= relayRefusalsPerMinute; i++ {
+		if !l.refusalsAllowed("k") {
+			t.Fatal("a key held off early", i)
+		}
+		l.refused("k")
+	}
+	if l.refusalsAllowed("k") || !l.refusalsAllowed("other") {
+		t.Fatal("a key whose calls keep being refused")
+	}
 	for i := 0; i < relayPerWorkspace; i++ {
-		if !l.enter("w") {
+		if !l.enter("w", relayOnSite) {
 			t.Fatal("a workspace's call within its places refused", i)
 		}
 	}
-	if l.enter("w") {
+	if l.enter("w", relayOnSite) {
 		t.Fatal("a workspace past its places")
 	}
 	l.leave("w")
-	if !l.enter("w") {
+	if !l.enter("w", relayOnSite) {
 		t.Fatal("a place given back")
 	}
 	for i := relayPerWorkspace; i < relayOnSite; i++ {
-		if !l.enter("w" + string(rune('a'+i%20))) {
+		if !l.enter("w"+string(rune('a'+i%20)), relayOnSite) {
 			t.Fatal("the site's places", i)
 		}
 	}
-	if l.enter("fresh") {
+	if l.enter("fresh", relayOnSite) {
 		t.Fatal("the site past its places")
 	}
-	for i := 0; i < relayWaiters; i++ {
-		if !l.wait() {
-			t.Fatal("a waiter within the site's places refused", i)
-		}
+	// The relay worker's own calls at once bound the site's.
+	var small relayLimits
+	if !small.enter("a", 2) || !small.enter("b", 2) || small.enter("c", 2) {
+		t.Fatal("the site past the worker's calls at once")
 	}
-	if l.wait() {
-		t.Fatal("the site past its waiters")
-	}
-	l.waited()
-	if !l.wait() {
-		t.Fatal("a waiter's place given back")
+	if slots := l.admitting(); cap(slots) != relayAdmissions || l.admitting() != slots {
+		t.Fatal("the site's places to be admitted in")
 	}
 }
 
@@ -345,8 +384,8 @@ func TestRelayCatalogIsReadOnceAtATimeAndKept(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			models, _ := a.relayCatalog(context.Background())
-			results[i] = len(models)
+			worker, _ := a.relayCatalog(context.Background())
+			results[i] = len(worker.models)
 		}()
 	}
 	// A caller whose own time runs out stops waiting, the read goes on for the others.
@@ -363,6 +402,9 @@ func TestRelayCatalogIsReadOnceAtATimeAndKept(t *testing.T) {
 	if reads.Load() != 1 || results[0] != 2 || results[4] != 2 {
 		t.Fatal("one read for all, its usable models for each", reads.Load(), results)
 	}
+	if a.relayCatalogCache.worker.capacity != relayWorkerCapacity {
+		t.Fatal("a worker that does not say takes the Pi worker's default calls at once", a.relayCatalogCache.worker.capacity)
+	}
 	// Kept, a failure too, for its own while.
 	healthy.Store(false)
 	a.relayCatalogCache.at = time.Now().Add(-relayCatalogTTL)
@@ -371,5 +413,93 @@ func TestRelayCatalogIsReadOnceAtATimeAndKept(t *testing.T) {
 	}
 	if _, e := a.relayCatalog(context.Background()); e == nil || reads.Load() != 2 {
 		t.Fatal("a failure is kept for its retry time", reads.Load(), e)
+	}
+}
+
+func TestRelayWorkerSaysHowManyCallsItTakesAtOnce(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, strings.Replace(relayHealth, `"ready":true,`, `"ready":true,"maxConcurrency":12,`, 1))
+	}))
+	defer worker.Close()
+	c := testConfig()
+	c.Relay, c.RelayWorkerURL, c.RelayWorkerToken = true, worker.URL, strings.Repeat("w", 32)
+	if got, e := New(nil, c).relayCatalog(context.Background()); e != nil || got.capacity != 12 || len(got.models) != 2 {
+		t.Fatal("the worker's calls at once", got, e)
+	}
+}
+
+// Each number as JavaScript writes it back (JSON.parse, then JSON.stringify), printed by Node 24.
+var relayJSNumbers = [][2]string{
+	{"1e-6", "0.000001"}, {"1e-7", "1e-7"}, {"1e21", "1e+21"}, {"1e20", "100000000000000000000"}, {"-0", "0"}, {"1.0", "1"},
+	{"0.1", "0.1"}, {"123.456e2", "12345.6"}, {"1e400", "null"}, {"-1e400", "null"}, {"5e-324", "5e-324"},
+	{"1.7976931348623157e308", "1.7976931348623157e+308"}, {"0.000001234", "0.000001234"}, {"1234567890123456789012", "1.2345678901234568e+21"},
+	{"9007199254740993", "9007199254740992"}, {"-1.5E-7", "-1.5e-7"}, {"100", "100"}, {"2.5e-6", "0.0000025"}, {"1E+2", "100"},
+	{"0.30000000000000004", "0.30000000000000004"}, {"1e-400", "0"}, {"123456789012345680000", "123456789012345680000"}, {"-12.5", "-12.5"},
+	{"0.00001", "0.00001"}, {"1.5e300", "1.5e+300"}, {"4.35", "4.35"}, {"0.1e1", "1"}, {"-0.0e5", "0"}, {"7e22", "7e+22"}, {"1.25e-5", "0.0000125"},
+}
+
+func TestRelayToolParametersAreMeasuredAsTheWorkerWritesThem(t *testing.T) {
+	for _, v := range relayJSNumbers {
+		if got := jsNumber(v[0]); got != v[1] {
+			t.Errorf("%s: %s, JavaScript writes %s", v[0], got, v[1])
+		}
+	}
+	// Numbers anywhere in the schema, and nothing else: strings (an escaped quote, digits, a minus) and keys stay as sent.
+	raw := `{"type":"object","minimum":1e-6,"items":[-0,1E+2,{"x":"a\"1e-6 -2","d":[true,false,null,7e22]}],"description":"A \\"}`
+	want := `{"type":"object","minimum":0.000001,"items":[0,100,{"x":"a\"1e-6 -2","d":[true,false,null,7e+22]}],"description":"A \\"}`
+	if got := string(jsNumbers([]byte(raw))); got != want {
+		t.Fatalf("got %s", got)
+	}
+	call, e := parseRelayCall([]byte(`{"model":"m","stream":true,"tools":[{"type":"function","function":{"name":"pick","parameters":{"type":"object","properties":{"n":{"type":"number","minimum":1e-6,"maximum":1e21}}}}}],"messages":[{"role":"user","content":"Pick"}]}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if forwarded := string(relayForwardBody("rlx", "t", "m", call)); !strings.Contains(forwarded, `"minimum":0.000001,"maximum":1e+21`) {
+		t.Fatal("what is forwarded is what is measured", forwarded)
+	}
+}
+
+func TestRelayCallsToBedrockKeepTheBridgesRules(t *testing.T) {
+	refusal := func(body string) string {
+		t.Helper()
+		call, e := parseRelayCall([]byte(`{"model":"m","stream":true,` + body + `}`))
+		if e != nil {
+			t.Fatal(body, e)
+		}
+		return call.bedrockRefusal()
+	}
+	readCall := func(id string) string {
+		return `{"role":"assistant","content":null,"tool_calls":[{"id":"` + id + `","type":"function","function":{"name":"read","arguments":"{}"}}]}`
+	}
+	held := map[string]string{
+		"a user's message": `"messages":[{"role":"user","content":"Hello"}]`,
+		"its system prompt and greeting before the user's message": `"messages":[{"role":"system","content":"S"},{"role":"assistant","content":"Hi, I'm AwwO workspace."},{"role":"user","content":"Build it"}]`,
+		"a tool loop ending on its result":                         `"tools":[` + readTool + `],"messages":[{"role":"user","content":"Read"},` + readCall("tooluse_Ab12") + `,{"role":"tool","tool_call_id":"tooluse_Ab12","content":"done"}]`,
+		"blank turns between turns of one role":                    `"messages":[{"role":"user","content":"A"},{"role":"assistant","content":"  "},{"role":"user","content":"B"}]`,
+		"a last message JavaScript does not trim":                  `"messages":[{"role":"user","content":"\u0085"}]`,
+		"a developer's message at the end":                         `"messages":[{"role":"user","content":"A"},{"role":"developer","content":"D"}]`,
+		"a history's tool, defined by its name too":                `"messages":[{"role":"user","content":"Read"},` + readCall("c-1") + `,{"role":"tool","tool_call_id":"c-1","content":"x"},{"role":"user","content":"Go on"}]`,
+	}
+	for name, body := range held {
+		if why := refusal(body); why != "" {
+			t.Errorf("%s refused: %s", name, why)
+		}
+	}
+	refused := map[string]string{
+		"a tool named with a dot":          `"tools":[{"type":"function","function":{"name":"fs.read","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"Read"}]`,
+		"a tool named by a digit":          `"tools":[{"type":"function","function":{"name":"9read","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"Read"}]`,
+		"a tool call's id with a colon":    `"tools":[` + readTool + `],"messages":[{"role":"user","content":"Read"},` + readCall("call:1") + `,{"role":"tool","tool_call_id":"call:1","content":"x"}]`,
+		"a tool call's id of 129":          `"tools":[` + readTool + `],"messages":[{"role":"user","content":"Read"},` + readCall(strings.Repeat("a", 129)) + `,{"role":"tool","tool_call_id":"` + strings.Repeat("a", 129) + `","content":"x"}]`,
+		"the assistant's message last":     `"messages":[{"role":"user","content":"A"},{"role":"assistant","content":"B"}]`,
+		"a blank user's message last":      `"messages":[{"role":"user","content":"A"},{"role":"assistant","content":"B"},{"role":"user","content":" \ufeff\u3000\u2028"}]`,
+		"only a system prompt":             `"messages":[{"role":"system","content":"S"}]`,
+		"no user's message at all":         `"messages":[{"role":"system","content":"S"},{"role":"assistant","content":"Hi"}]`,
+		"an opening that called tools":     `"tools":[` + readTool + `],"messages":[` + readCall("op1") + `,{"role":"tool","tool_call_id":"op1","content":"done"},{"role":"user","content":"Build"}]`,
+		"a history's tool named with dots": `"messages":[{"role":"user","content":"Read"},{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"fs.read","arguments":"{}"}}]},{"role":"tool","tool_call_id":"c1","content":"x"},{"role":"user","content":"Go on"}]`,
+	}
+	for name, body := range refused {
+		if why := refusal(body); why == "" {
+			t.Errorf("%s held", name)
+		}
 	}
 }
