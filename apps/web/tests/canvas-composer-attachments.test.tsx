@@ -12,7 +12,6 @@ import { ContractFields } from '../src/canvas/ContractFields';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { createAgentTemplate, getAgentTemplate } from '../src/canvas/agentTemplates';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { activeNodeThread } from '../src/canvas/nodeThreads';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import * as invalidation from '../src/canvas/invalidateOutputs';
 import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
