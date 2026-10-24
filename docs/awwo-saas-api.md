@@ -268,6 +268,26 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 **视频渲染** 需要单独部署 `apps/render-worker`（Playwright + Chromium + ffmpeg，见其 README），并配置 `AWWO_RENDER_URL`、`AWWO_RENDER_TOKEN` 和 `AWWO_MEDIA_DIR`（`AWWO_RENDERS_PER_DAY` 默认 20、`AWWO_RENDERS_SITE_PER_DAY` 默认 300、`AWWO_RENDER_TIMEOUT` 默认 8m）。前端发送成果工作台里构建好的页面文档；页面定义 `window.renderAt(t)` 时逐帧精确（渲染约定），否则在虚拟时钟下运行。渲染器一次只渲染一个：其他工作区的渲染保持 queued 排队，渲染器仍在释放上一个时会重试；渲染器没有接手的渲染（忙、不可用、服务重启、排队时被停止）不计入每日次数。MP4（以及可选的 GIF、帧缩略图）全部校验 hash 与文件类型后，与完成状态在同一事务里存为画布的媒体文件，随画布删除与清理；渲染记录本身是每日次数的账本，画布删除后仍保留，画布在渲染排队或进行中时不能删除。服务重启或关闭时排队或进行中的渲染标记为 `interrupted`，不会重复渲染。
 
+## 本机版连接（云端中转）
+
+AwwO 本地版可以让线上站点替它调用线上提供的模型，每次调用计入一个线上工作区（`relay.go`、`relay_call.go`、`relay_completion.go`、`relay_limits.go`）。默认关闭：`AWWO_RELAY=on` 开启，并须设置 `AWWO_RELAY_WORKER_URL`（本机回环上的 Pi 执行器：它的目录就是提供的模型，`/health` 报告 `computerBedrock` 时才提供 Bedrock 模型，报告的 `maxConcurrency` 是中转同时运行的调用数，建议 16）、`AWWO_RELAY_WORKER_TOKEN`（≥ 32 个字符）和 `AWWO_TRUSTED_PROXY_CIDRS`（API 前面的代理；不设时所有调用者共用代理的地址，按地址计的限制会落到所有人头上）。本地版与个人 Key 模式下拒绝启动。
+
+| 方法与路径（省略 /api/v1） | 请求 | 说明 |
+| --- | --- | --- |
+| GET /auth/relay-keys | 无 | 登录会话。`{items,limit}`：本账号的有效密钥与最近撤销的 20 个（id、name、prefix、tenant、createdAt、expiresAt、lastUsedAt、revokedAt），不含密钥本身 |
+| POST /auth/relay-keys | name?（≤ 80 字，默认「AwwO 本地版」）, tenantId | 登录会话。201 `{key,item}`：密钥（`awwo_rk_` 加 43 个字符）只在这次返回，只保存其 SHA-256，90 天后失效；须是该工作区的成员、管理员或所有者，工作区正常（否则 404 `tenant_not_found`）；每个账号最多 5 个有效密钥（409 `relay_key_limit`）；会话在此期间结束（例如密码刚被修改）时 401 |
+| DELETE /auth/relay-keys/{id} | 无 | 204 撤销；不是本账号的或已撤销的 404 |
+| GET /relay/v1/models | `Authorization: Bearer <密钥>` | `{object:"list",data}`：工作区可用的模型（按其 entitlement），每个带 `context_window`、`max_output_tokens`、`prose_bytes_per_token`、`max_request_bytes`（504 KiB）和空的 `reasoning_efforts` |
+| POST /relay/v1/chat/completions | Chat Completions，`stream:true` | SSE：开头一行 `: awwo relay`，模型工作时每 15 秒一行 `: keep-alive`，然后答复块、用量块与 `[DONE]`；失败时一个 `error` 帧，只说明类别 |
+
+**密钥** 由程序使用：带任何 Origin 的请求一律拒绝（403 `relay_browser_refused`），网页拿到密钥也用不了。密钥只对创建它的工作区有效，每次认证与准入都核对它仍有效、成员仍是 member 以上、工作区正常；成员被移出工作区或降为只读、密码被修改或重设时，相应的密钥一并撤销，之后恢复角色也不会复活。
+
+**请求** 在准入之前按执行器的规则检查，执行器会拒绝的请求不进入账本：角色；文本内容（content parts 合并为文本，图片与文件拒绝，`unsupported_content`）；工具定义（函数名、对象 schema、最多 64 个；参数里的数字按 JavaScript 的写法转发与计量）；工具调用与结果配对，历史中调用过而本次没有定义的工具补上定义；Bedrock 模型还须符合 Converse 的规则（工具名以字母开头、最多 64 个字符；调用 id 只含字母、数字、`_`、`-`；对话以用户消息开头和结束，开头的助手问候按执行器的方式并入系统提示）；按执行器的估算不超过模型窗口减输出上限再减 256（400 `context_length_exceeded`）；请求超过 504 KiB 时 413，同样是 `context_length_exceeded`，两者的说明都以执行器认得的「maximum context length」写成，本地版据此把调用当作超出模型容量，而不是服务故障。不支持：非流式调用（`stream_required`：前面的边缘会切断约 100 秒没有输出的响应）、`n` > 1、指定工具、`text` 以外的 `response_format`、`stop`、`none` 以外的 `reasoning_effort`；`tool_choice:"none"` 不能跟在工具调用之后；`parallel_tool_calls:false` 时只给出第一个工具调用。
+
+**准入与计费** 与线上自己的模型调用相同，在工作区行锁下：工作区 entitlement、需要套餐的工作区与仅限套餐的模型；所有者有套餐时按套餐的同时智能体数、免费模型每日次数与点数（按站点的定价；未定价的模型 503 `model_unpriced`），没有套餐时按工作区的同时运行数、每日次数与付费路线额度（`quota_exceeded` 等，带 `x-should-retry: false`）。每次调用记一行 `model_invocations`（`relay_key_id`，迁移 042），用量照常结算；线上不保存调用内容。执行器在任何工作之前拒绝的调用不计次数也不收费：调用者自己的（请求不合规则、超长）与平台一侧的快速拒绝（Bedrock 限流、凭据、服务不可用）；Bedrock 拒绝请求本身（400）照常计入。同一密钥一分钟内超过 20 次调用者自己的这类拒绝后，那一分钟里的调用都被拒绝（429 `relay_rate_limited`）。
+
+**站点承受能力**（单进程计数）：每个密钥每分钟 120 个请求；每个地址（IPv6 按 /64）每分钟 30 次查不到的密钥，已撤销的密钥不算，表满时只限制已计数的地址；同时处理的调用全站 32 个、每个工作区 8 个，超出时 429 `relay_busy`（`Retry-After: 5`）；同时准入 6 个（每个占一个数据库连接）；准入后的调用占中转执行器的一个名额直到结束，每个工作区最多占一半，等待工作区或套餐名额的调用不占；等待超过 60 秒同样 `relay_busy`。处理者已不在的运行中调用每分钟清理一次，只在本进程持有工作锁时。
+
 ## 平台管理
 
 | 方法与路径（省略 /api/v1） | 请求 / 查询 | 说明 |
