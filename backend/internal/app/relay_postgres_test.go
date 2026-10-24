@@ -443,7 +443,7 @@ func TestPostgresRelayedCallRunsAsOneOfTheWorkspacesCalls(t *testing.T) {
 		{`{"model":"nope","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"broken","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"bedrock.glm-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", 120000) + `"}]}`, "context_length_exceeded", 400},
-		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", relayBodyLimit) + `"}]}`, "body_too_large", 413},
+		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", relayBodyLimit) + `"}]}`, "maximum context length: its request is larger than 504 KiB", 413},
 	} {
 		if status, body := sendRelay(t, h, key, "POST", relayCompletionsRoute, c.body); status != c.status || !strings.Contains(body, c.code) {
 			t.Error(c.code, status, body[:min(len(body), 300)])

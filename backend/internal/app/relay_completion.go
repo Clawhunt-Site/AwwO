@@ -22,6 +22,11 @@ const (
 	// relayBodyLimit is the most of one call this site reads, and the most it forwards: what the worker's managed-call
 	// route reads (computerWorkerBodyLimit), less room for the fields this site adds.
 	relayBodyLimit = computerWorkerBodyLimit - 8<<10
+	// relayTooLong and relayTooLarge refuse a call past its model's window and one past what the relay reads: OpenAI's
+	// code, context_length_exceeded, and words a worker reads as the size refusal they are (apps/context-overflow.ts,
+	// context-overflow-vectors.json), so AwwO 本地版 settles such a call as too large, never as a provider's fault.
+	relayTooLong  = "The call is past this model's maximum context length"
+	relayTooLarge = "The call is past the relay's maximum context length: its request is larger than 504 KiB"
 )
 
 var (
@@ -77,7 +82,7 @@ func (a *App) relayCompletion(w http.ResponseWriter, r *http.Request) {
 	id := "rl" + randomID()
 	body := relayForwardBody(id, caller.tenantID, model.ID, call)
 	if len(body) > relayBodyLimit {
-		fail(w, 413, "body_too_large", "The call is larger than a relayed call may be")
+		fail(w, 413, "context_length_exceeded", relayTooLarge)
 		return
 	}
 	// Not the API's 30 s request deadline (requestDeadlineApplies): the bound of a managed call.
@@ -152,7 +157,7 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request, models []rel
 		fail(w, 400, "invalid_request", "The call could not be read")
 		return call, relayModel{}, false
 	case len(raw) > relayBodyLimit:
-		fail(w, 413, "body_too_large", "The call is larger than a relayed call may be")
+		fail(w, 413, "context_length_exceeded", relayTooLarge)
 		return call, relayModel{}, false
 	}
 	if call, e = parseRelayCall(raw); e != nil {
@@ -170,7 +175,7 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request, models []rel
 			return call, relayModel{}, false
 		}
 		if relayCallTokens(call, m.ProseBytesPerToken) > m.ContextWindow-m.MaxOutputTokens-256 {
-			fail(w, 400, "context_length_exceeded", "The call is longer than the model can read")
+			fail(w, 400, "context_length_exceeded", relayTooLong)
 			return call, relayModel{}, false
 		}
 		return call, m, true
@@ -183,20 +188,13 @@ func (a *App) readRelayCall(w http.ResponseWriter, r *http.Request, models []rel
 // still live and its member still one, the workspace's entitlement and a plan-only model's gate, then the owner's plan
 // (its agents at once, today's free calls, the period's credits) or the free allowance (the workspace's calls at once and
 // its daily total, and the paid routes' allowances). A relayed call belongs to no run, so it never takes a place a run
-// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). Each try holds one of the relay
-// worker's places (relayLimits.take; capacity is the worker's calls at once), kept once the call is admitted, given back
-// if it is not. While none is free it tries again, backing off, until ctx ends.
+// already holds: on a plan it needs a free one (accountSlotsUsed counts relayed calls). An admitted call also holds one
+// of the relay worker's places (capacity is the worker's calls at once) until it ends. While no place is free it tries
+// again, backing off, until ctx ends.
 func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id string, facts *invocationFacts, capacity int) error {
 	for wait := 40 * time.Millisecond; ; wait = min(wait*2, 500*time.Millisecond) {
-		if a.relayLimits.take(caller.tenantID, capacity) {
-			admitted, e := a.relayAdmission(ctx, caller, id, facts)
-			if e == nil && admitted {
-				return nil
-			}
-			a.relayLimits.give(caller.tenantID)
-			if e != nil {
-				return e
-			}
+		if admitted, e := a.relayAdmission(ctx, caller, id, facts, capacity); e != nil || admitted {
+			return e
 		}
 		// Waiting for a place backs off from 40 ms to half a second, as reserveInvocation's does.
 		select {
@@ -208,9 +206,11 @@ func (a *App) reserveRelayInvocation(ctx context.Context, caller relayCaller, id
 }
 
 // relayAdmission is one try at a relayed call's admission, in one of the site's places to be admitted in
-// (relayAdmissions), waited for as long as ctx lets it: true once the call is reserved, false while its workspace or its
-// plan has no place free. A try holds a database connection, which it gives back before its call waits for the next.
-func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string, facts *invocationFacts) (bool, error) {
+// (relayAdmissions), waited for as long as ctx lets it: true once the call is reserved, false while its workspace, its
+// plan or the relay worker has no place free. A try holds a database connection, which it gives back before its call
+// waits for the next. The relay worker's place is taken only once the try holds its workspace's row, so a call waiting
+// for its place to be admitted in, or for that row, holds none; it is kept only if the call is admitted (relayLimits.take).
+func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string, facts *invocationFacts, capacity int) (bool, error) {
 	slots := a.relayLimits.admitting()
 	select {
 	case slots <- struct{}{}:
@@ -227,6 +227,15 @@ func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string,
 	if e != nil {
 		return false, e
 	}
+	if !a.relayLimits.take(caller.tenantID, capacity) {
+		return false, nil
+	}
+	kept := false
+	defer func() {
+		if !kept {
+			a.relayLimits.give(caller.tenantID)
+		}
+	}()
 	admitted, billed := false, (*activePlan)(nil)
 	if gate.plan == nil {
 		admitted, e = a.admitFreeInvocation(ctx, tx, caller.tenantID, facts.Model, gate.concurrent, gate.daily, gate.routes, false)
@@ -247,7 +256,11 @@ func (a *App) relayAdmission(ctx context.Context, caller relayCaller, id string,
 	// stalls must not hold the call past its own bound.
 	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	return true, tx.Commit(commit)
+	if e = tx.Commit(commit); e != nil {
+		return true, e
+	}
+	kept = true
+	return true, nil
 }
 
 // relayGate is what a relayed call's admission read of its workspace under its row's lock: its free allowance (its calls
@@ -596,7 +609,7 @@ func relayWorkerFailure(status int, data []byte, readErr error, done bool, facts
 	failure.refused = (status == 400 && workerCode == "INVALID_INPUT") || status == 413 || (sized && quick)
 	switch {
 	case sized || (status == 413 && workerCode == "CONTEXT_LIMIT"):
-		failure.errCode, failure.message = "context_length_exceeded", "The call is longer than the model can read"
+		failure.errCode, failure.message = "context_length_exceeded", relayTooLong
 	case status == 400 && workerCode == "INVALID_INPUT":
 		failure.errCode, failure.message = "invalid_request", "The call does not hold: "+detail
 	case status == 429 || status == 409 || strings.HasPrefix(reason, "bedrock:429"):

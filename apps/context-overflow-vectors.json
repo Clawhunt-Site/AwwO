@@ -1,6 +1,8 @@
 {
   "notes": "Provider error messages and whether each refuses the request as larger than the model's context window (context-overflow.ts and the Python worker's context_overflow.py both read these). The refusals are the providers' own words as the Pi agent library and their documentation give them; a rate limit is never one.",
   "cases": [
+    {"message": "The call is past this model's maximum context length", "overflow": true},
+    {"message": "413 The call is past the relay's maximum context length: its request is larger than 504 KiB", "overflow": true},
     {"message": "prompt is too long: 213462 tokens > 200000 maximum", "overflow": true},
     {"message": "input length and `max_tokens` exceed context limit: 187472 + 32000 > 200000, decrease input length or `max_tokens` and try again", "overflow": true},
     {"message": "400 Input is too long for requested model", "overflow": true},
