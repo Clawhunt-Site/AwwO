@@ -8,6 +8,15 @@ import type { UiLocale } from '../locale';
 export type AcademySection = 'start' | 'flagship' | 'build';
 export const ACADEMY_SECTIONS: ReadonlyArray<AcademySection> = ['start', 'flagship', 'build'];
 
+/** Something the live AwwO now does differently from what a span of a video shows, until that span is recorded again. */
+export interface AcademyNote {
+  /** Where the span starts, in whole seconds of the video: the note plays it from there. */
+  at: number;
+  /** The day the live AwwO changed. */
+  since: string;
+  text: Readonly<Record<UiLocale, string>>;
+}
+
 export interface AcademyVideo {
   /** Its address: ?academy=<id>. A case's videos take the case's id. */
   id: string;
@@ -26,7 +35,28 @@ export interface AcademyVideo {
   sha256: string;
   /** Its own poster; a case's video has its case's cover (`/showcase/<footage>.jpg`) instead. */
   poster: string | null;
+  /** What has changed since it was recorded, in the video's order (docs/academy.md). */
+  notes?: ReadonlyArray<AcademyNote>;
 }
+
+/** The Configure step of every build video, recorded before AwwO chose an Agent node's runtime itself (2026-10-15; the
+ *  panel's hint now calls it the engine), when an OpenAI Agents run still stopped at ten minutes (25 since 2026-10-19).
+ *  Claude Opus 5.5 offers no effort levels (the Bedrock bridge refuses them), so its Configure shows none. `at` is where
+ *  the span to record again starts. */
+const runtimeNote = (at: number): AcademyNote => ({ at, since: '2026-10-15', text: {
+  en: 'AwwO now picks the runtime (the engine an agent runs on) by itself, so an agent’s Configure has no runtime menu: choose only the model, Claude Opus 5.5. Since 19 October each agent may take up to 25 minutes, not ten. Or skip developer mode here and ask the canvas assistant to set each agent’s task, acceptance criteria and model.',
+  zh: '现在由 AwwO 自动选择运行时（Agent 所用的执行引擎），Agent 的「配置」里已经没有运行时选项：只需选模型 Claude Opus 5.5。10月19日起，单个 Agent 最长 25 分钟，不再是 10 分钟。这一步也可以不进开发者模式，直接请画布助手为每个 Agent 设定任务、验收标准和模型。' } });
+/** A flagship's fresh copy: since 2026-10-20 the assistant's Next card counts every node without a result, as Results
+ *  does, where it had called three copies done, counted four of Roost's six and three of PALLWARD's 48
+ *  (saas-production-copy.test pins today's counts). */
+const freshCopyNote = (at: number, en: string, zh: string): AcademyNote => ({ at, since: '2026-10-20', text: { en, zh } });
+/** The two cases rebuilt on three.js r186 on 2026-10-15, after their videos had been recorded. */
+const rebuiltNote = (at: number, en: string, zh: string): AcademyNote => ({ at, since: '2026-10-15', text: { en, zh } });
+/** A how-to's assistant reply or empty canvas, recorded with the links that switched between a direct task and a plan
+ *  for the canvas, which went on 2026-10-19; a correction in words hands a request over the other way. */
+const switchLinksNote = (at: number): AcademyNote => ({ at, since: '2026-10-19', text: {
+  en: 'The links shown here to switch between doing a task directly and adjusting the canvas are gone: the canvas assistant decides by itself, and you can tell it otherwise in words, such as “don’t change the canvas, just write it” or “put it on the canvas instead”.',
+  zh: '视频里在「直接执行」和「调整画布」之间切换的链接已经移除：画布助手会自己判断；想换一种方式，直接用文字告诉它，比如「别改画布，直接帮我写」或「还是放到画布上吧」。' } });
 
 export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
   { id: 'start-code', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
@@ -34,163 +64,198 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     summary: { en: 'What one call is, then one sentence: the canvas assistant writes a working Python sales-report tool itself. Preview the report, say “continue” and check the usage.',
       zh: '先讲清「1 次」是什么，再用一句话让画布助手直接写出能用的 Python 销售报告工具：预览报告，说「继续」接着改，再看用量。' },
     seconds: 154, src: '/showcase/staged/academy/07803132ff5c7f16.mp4', bytes: 17416804, sha256: '07803132ff5c7f1654e97708692921dbb5fb8d16ae3f08c04c9499c74c784891',
-    poster: '/showcase/academy/start-code-2.jpg' },
+    poster: '/showcase/academy/start-code-2.jpg', notes: [
+      switchLinksNote(56),
+      // The recap's 「平台原因失败会退还」: since 2026-10-19 a platform time limit gives back only the call it cut.
+      { at: 152, since: '2026-10-19', text: {
+        en: 'A call a platform time limit cut short now gives back that one call, not every call of its task; other platform failures still give back all of them, up to 32 a day.',
+        zh: '被平台时限中断的调用，现在只退还这一次，而不是整个任务的次数；其他平台原因的失败仍会全部退还，每天最多 32 次。' } },
+    ] },
   { id: 'start-image', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Image: an event poster', zh: '生图：做一张活动海报' },
     summary: { en: 'One sentence for a café’s autumn poster: the assistant sets up a copy node and an image node on the canvas, you run the canvas and find the poster in Results.',
       zh: '一句话做咖啡店的秋季海报：助手在画布上搭好文案和图像两个节点，运行整张画布，在成果里看海报。' },
     seconds: 106, src: '/showcase/staged/academy/87ad377098a1ce0b.mp4', bytes: 12757417, sha256: '87ad377098a1ce0b5471bb4ae7b8c38f3affc974de8ba366f691a2f7313603be',
-    poster: '/showcase/academy/start-image-2.jpg' },
+    poster: '/showcase/academy/start-image-2.jpg', notes: [switchLinksNote(42)] },
   { id: 'start-web', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Web design: a complete website', zh: '网页设计：做一个完整官网' },
     summary: { en: 'Switch to Claude Opus 5.5 and ask for a pottery studio’s one-page site: about three minutes later, preview it full screen and check the usage.',
       zh: '换成 Claude Opus 5.5，一句话做陶艺工作室的单页官网：约三分钟后全屏预览，再看用量。' },
     seconds: 104, src: '/showcase/staged/academy/8bca3281173a3123.mp4', bytes: 17859188, sha256: '8bca3281173a3123887af7e09a2778ca80c743a4cd25a348e295ba832659bc83',
-    poster: '/showcase/academy/start-web-2.jpg' },
+    poster: '/showcase/academy/start-web-2.jpg', notes: [switchLinksNote(37)] },
   { id: 'start-plan', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Product plan: let a team write it', zh: '产品方案：让团队分工来写' },
     summary: { en: 'Name a team of three, a user researcher, a product manager and a writer, and run the canvas: the whole plan arrives as one document in Results. Setting up a canvas uses no calls.',
       zh: '点名用户研究、产品经理、方案撰写三人团队，运行画布，在成果里拿到一份完整的产品方案文档；搭画布不占次数。' },
     seconds: 118, src: '/showcase/staged/academy/5d1faa082c4ec4cd.mp4', bytes: 17816781, sha256: '5d1faa082c4ec4cd5120edb1d102a9becb1a8017017ce86030eb2bebd37b890a',
-    poster: '/showcase/academy/start-plan-2.jpg' },
+    poster: '/showcase/academy/start-plan-2.jpg', notes: [switchLinksNote(39)] },
   { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-20',
     title: { en: 'PALLWARD: a dark-fantasy game built by twenty-six agents', zh: 'PALLWARD：二十六个 Agent 做出的黑暗奇幻动作游戏' },
     summary: { en: 'Open the case, play the game right in How it was made, see what the twenty agents in sandbox computers wrote, and copy the canvas as a draft.',
       zh: '打开案例，在「How it was made」里直接玩游戏，看二十个在沙箱电脑里写代码的 Agent 各交了什么，再把画布复制成草稿。' },
     seconds: 408, src: '/showcase/staged/academy/a84161f218137246.mp4', bytes: 100087462, sha256: 'a84161f218137246cbbe9b68e3001cd147095c4a0e0f9bb4acc4f0dbb72ec8fb',
-    poster: null },
+    poster: null, notes: [freshCopyNote(277,
+      'The canvas assistant now counts a fresh copy’s nodes as Results does: on this copy its card says 48 nodes have no result yet, 43 of them media nodes, not three, and its button runs all 48.',
+      '画布助手现在按「成果」的口径统计新复制的画布：这张画布上它的卡片会说有 48 个节点还没有结果，其中 43 个是媒体节点，而不是 3 个，按钮会运行全部 48 个。')] },
   { id: 'the-long-chord', section: 'flagship', caseId: 'the-long-chord', voice: 'en', recordedOn: '2026-10-21',
     title: { en: 'THE LONG CHORD: a space opera made on one canvas', zh: 'THE LONG CHORD：一张画布做出的太空歌剧电影' },
     summary: { en: 'Watch the film in the case, see how its lip sync was measured and its reels were cut, then copy its canvas as a draft. Recorded when the case was Act I on 109 nodes; it now holds the whole of Episode I.',
       zh: '在案例里看影片，看口型同步怎么测、片子一卷卷怎么剪，再把画布复制成草稿。录制时案例只有第一幕、109 个节点；现在已是完整的第一集。' },
     seconds: 385, src: '/showcase/staged/academy/f321b641a4adb841.mp4', bytes: 73953494, sha256: 'f321b641a4adb841e067bbe489925f76c963f9949721b6e7ad9f952f42381ef9',
-    poster: null },
+    poster: null, notes: [
+      { at: 16, since: '2026-10-22', text: {
+        en: 'The case is now the whole of Episode I: three acts and 15 min 52 s, made by 298 nodes over 93 graph runs, with six editor agents and ten edit nodes.',
+        zh: '案例现在是完整的第一集：三幕、15 分 52 秒，由 298 个节点经 93 次图运行做成，含 6 个剪辑 Agent 和 10 个剪辑节点。' } },
+      // The case canvas's 282 media nodes at their own settings, priced by mediaCreditsFor (plans.go): 64,460 credits;
+      // Max grants 10,000 a month and makes 100 generations a day (saas-academy.test reads both from plans.go).
+      { at: 357, since: '2026-10-22', text: {
+        en: 'A copy now has 282 pictures, clips and sounds to make again, not 104: at the case’s settings, about 64,000 credits of media, more than six months of the Max plan and more than any plan can generate in a day.',
+        zh: '现在复制后要重新生成 282 个图片、视频片段和声音，而不是 104 个：按案例的设置，媒体约需 64,000 点数，超过 Max 套餐六个月的点数，也超过任何套餐一天能生成的数量。' } },
+    ] },
   { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-19',
     title: { en: 'Umber: a photo editor built by twelve agents', zh: 'Umber：十二个 Agent 做出的网页图片编辑器' },
     summary: { en: 'A layered photo editor in one web page: how its twelve agents wrote it in a clean room, how to copy its canvas, and the editor at work in Results.',
       zh: '一个网页里的分层图片编辑器：十二个 Agent 怎么在净室里写出它，怎么复制这张画布，以及在成果里直接用它。' },
     seconds: 381, src: '/showcase/staged/academy/25673ba5e26ea35e.mp4', bytes: 61281664, sha256: '25673ba5e26ea35ed86d5b85b70c82a4219bf6c33a969381fa66d8fabc357bf7',
-    poster: null },
+    poster: null, notes: [freshCopyNote(191,
+      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says one node has none yet, with a button to run it.',
+      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 1 个节点没有结果，并给出运行它的按钮。')] },
   { id: 'backprop-lab', section: 'flagship', caseId: 'backprop-lab', voice: 'en', recordedOn: '2026-10-19',
     title: { en: 'Backprop: a neural-network lab built by thirteen agents', zh: 'Backprop：十三个 Agent 做出的神经网络训练工作台' },
     summary: { en: 'Build and train small neural networks in the browser: how thirteen agents made the workbench, and a model trained in Results.',
       zh: '在浏览器里搭建并训练小型神经网络：十三个 Agent 怎么做出这个工作台，以及在成果里训练一个模型。' },
     seconds: 405, src: '/showcase/staged/academy/b15d8954677afe92.mp4', bytes: 67923706, sha256: 'b15d8954677afe92e1a7c0f849c834c9264bd4529e3bef0feeb89e98d97a958a',
-    poster: null },
+    poster: null, notes: [freshCopyNote(213,
+      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says one node has none yet, with a button to run it.',
+      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 1 个节点没有结果，并给出运行它的按钮。')] },
   { id: 'errand-agent', section: 'flagship', caseId: 'errand-agent', voice: 'en', recordedOn: '2026-10-19',
     title: { en: 'Errand: an agent workspace built by fifteen agents', zh: 'Errand：十五个 Agent 做出的智能体工作台' },
     summary: { en: 'Watch an AI agent work on its own computer, replayed from real sessions, in a page fifteen agents built, and see how the canvas ran.',
       zh: '在十五个 Agent 做出的页面里，回放 AI Agent 在自己电脑上干活的真实过程，再看这张画布是怎么跑的。' },
     seconds: 435, src: '/showcase/staged/academy/a68bdade5f4c9cf8.mp4', bytes: 74344325, sha256: 'a68bdade5f4c9cf80c55244453ddb988ee454994897d6e84cf1807590da29354',
-    poster: null },
+    poster: null, notes: [freshCopyNote(235,
+      'The canvas assistant now counts a fresh copy’s nodes as Results does, so it no longer says every node has a result: on this copy it says two nodes have none yet, with a button to run them.',
+      '画布助手现在按「成果」的口径统计新复制的画布，不再说每个节点都已有结果：这张画布上它会说还有 2 个节点没有结果，并给出运行它们的按钮。')] },
   { id: 'roost-team', section: 'flagship', caseId: 'roost-team', voice: 'en', recordedOn: '2026-10-20',
     title: { en: 'Roost: a home for a bot team built by seventeen agents', zh: 'Roost：十七个 Agent 做出的机器人团队之家' },
     summary: { en: 'AI bots sharing one computer and a group chat, replayed from a real team session: how seventeen agents built the page, step by step.',
       zh: '几个 AI 机器人共用一台电脑和一个群聊，回放一次真实的团队协作：十七个 Agent 怎么一步步做出这个页面。' },
     seconds: 440, src: '/showcase/staged/academy/e205dd217406ccd5.mp4', bytes: 77983460, sha256: 'e205dd217406ccd511fdf38e05ec52a6aea3ffd105b26f6b2815df4670c274f9',
-    poster: null },
+    poster: null, notes: [freshCopyNote(237,
+      'The canvas assistant now counts a fresh copy’s nodes as Results does: on this copy it says six nodes have no result yet, not four, with a button to run them.',
+      '画布助手现在按「成果」的口径统计新复制的画布：这张画布上它会说有 6 个节点还没有结果，而不是 4 个，并给出运行它们的按钮。')] },
   { id: 'neon-city', section: 'build', caseId: 'neon-city', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a cinematic brand page with a team of agents', zh: '用 Agent 团队和媒体节点，做一个电影感品牌页' },
     summary: { en: 'A brand page, its pictures and its clip, by two agents and four media nodes.',
       zh: '一个品牌页连同它的图片和视频，由两个 Agent 和四个媒体节点做出。' },
     seconds: 413, src: '/showcase/staged/academy/cf30bb4f9ddfdc86.mp4', bytes: 92793695, sha256: 'cf30bb4f9ddfdc864ffcb8bcf89e7b97eca84aa49cbae0967c7e0d73377360b6',
-    poster: null },
+    poster: null, notes: [runtimeNote(171)] },
   { id: 'shanhai-vn', section: 'build', caseId: 'shanhai-vn', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a visual-novel chapter with a team of agents', zh: '用 Agent 团队和媒体节点，做一章视觉小说' },
     summary: { en: 'A visual-novel chapter, its pictures and its clip, by three agents and six media nodes.',
       zh: '一章视觉小说连同它的图片和视频，由三个 Agent 和六个媒体节点做出。' },
     seconds: 415, src: '/showcase/staged/academy/720e5820546d3fa4.mp4', bytes: 92624243, sha256: '720e5820546d3fa4e6afdadcedd315f361c6c0612589f2c6585637fb50125655',
-    poster: null },
+    poster: null, notes: [runtimeNote(211)] },
   { id: 'aurora-gt', section: 'build', caseId: 'aurora-gt', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a car launch site with a team of agents', zh: '用 Agent 团队和媒体节点，做一个新车发布站' },
     summary: { en: 'A car launch site, its pictures and its clip, by two agents and four media nodes.',
       zh: '一个新车发布站连同它的图片和视频，由两个 Agent 和四个媒体节点做出。' },
     seconds: 377, src: '/showcase/staged/academy/a3dde657d514deff.mp4', bytes: 66764286, sha256: 'a3dde657d514deff7d2a74f5087def501249aa7d31499847c05c1e4bc9f18b09',
-    poster: null },
+    poster: null, notes: [runtimeNote(160)] },
   { id: 'car-plant', section: 'build', caseId: 'car-plant', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a live 3D digital twin with a team of agents', zh: '用一支 Agent 团队，做一个实时 3D 工厂数字孪生' },
     summary: { en: 'A live 3D digital twin of an EV plant, by eight agents.',
       zh: '一个实时 3D 电动车工厂数字孪生，由八个 Agent 做出。' },
     seconds: 438, src: '/showcase/staged/academy/5f09c16c095bfc5e.mp4', bytes: 70202733, sha256: '5f09c16c095bfc5e9ac328423ceb86ac6b4c96d9807e18095144bee94e7095d9',
-    poster: null },
+    poster: null, notes: [
+      runtimeNote(202),
+      rebuiltNote(426,
+        'The EV plant digital twin case on the home page is now built by a later version of this team: its page uses a newer three.js (r186) with a glow effect, and a 3D model node makes its cars. A copy of it is that version, not the prompts shown here.',
+        '首页的 EV plant digital twin 案例现在由这支团队的更新版本做成：页面用更新的 three.js（r186），带辉光效果，车辆由一个 3D 模型节点生成。复制得到的是这个新版本，而不是视频里的提示词。'),
+    ] },
   { id: 'neon-circuit', section: 'build', caseId: 'neon-circuit', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D racing game with a team of agents', zh: '用一支 Agent 团队，做一款 3D 赛车游戏' },
     summary: { en: 'A 3D racing game, by ten agents.',
       zh: '一款 3D 赛车游戏，由十个 Agent 做出。' },
     seconds: 445, src: '/showcase/staged/academy/43851ad021198aa5.mp4', bytes: 78446631, sha256: '43851ad021198aa5c24707ec3b7623cecdeb31d30dce836b5692630ac71ef1aa',
-    poster: null },
+    poster: null, notes: [
+      runtimeNote(176),
+      rebuiltNote(433,
+        'The Neon Circuit racer case on the home page is now built by a later version of this team: its page uses a newer three.js (r186) with a glow effect, and a 3D model node makes its six cars. A copy of it is that version, not the prompts shown here.',
+        '首页的 Neon Circuit racer 案例现在由这支团队的更新版本做成：页面用更新的 three.js（r186），带辉光效果，六辆赛车由一个 3D 模型节点生成。复制得到的是这个新版本，而不是视频里的提示词。'),
+    ] },
   { id: 'crystal-keep', section: 'build', caseId: 'crystal-keep', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D tower-defense game with a team of agents', zh: '用一支 Agent 团队，做一款 3D 塔防游戏' },
     summary: { en: 'A 3D tower-defense game, by ten agents.',
       zh: '一款 3D 塔防游戏，由十个 Agent 做出。' },
     seconds: 489, src: '/showcase/staged/academy/62732787638751ce.mp4', bytes: 78179292, sha256: '62732787638751cedf55875382b3b9dbf03e08d9bcf1a5517bf5b32ad438e62a',
-    poster: null },
+    poster: null, notes: [runtimeNote(176)] },
   { id: 'mars-mission', section: 'build', caseId: 'mars-mission', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a Mars mission control with a team of agents', zh: '用一支 Agent 团队，做一个火星任务控制中心' },
     summary: { en: 'A Mars mission you plan and fly, by eight agents.',
       zh: '一个可以规划和驾驶的火星任务，由八个 Agent 做出。' },
     seconds: 452, src: '/showcase/staged/academy/46a0ef1263f02d61.mp4', bytes: 71940566, sha256: '46a0ef1263f02d6128d70c0f3169c186bc0967abe058953468236d3a5ce29c47',
-    poster: null },
+    poster: null, notes: [runtimeNote(177)] },
   { id: 'beat-studio', section: 'build', caseId: 'beat-studio', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a browser music workstation with a team of agents', zh: '用一支 Agent 团队，做一个浏览器音乐工作站' },
     summary: { en: 'A music workstation in the browser, by ten agents.',
       zh: '一个浏览器里的音乐工作站，由十个 Agent 做出。' },
     seconds: 430, src: '/showcase/staged/academy/739c60d1371aef5e.mp4', bytes: 63716961, sha256: '739c60d1371aef5efdba8b87194a24eb7f4a840909cd8d86c8252eeac2f90498',
-    poster: null },
+    poster: null, notes: [runtimeNote(208)] },
   { id: 'knowledge-base', section: 'build', caseId: 'knowledge-base', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a team knowledge-base app with a team of agents', zh: '用一支 Agent 团队，做一个团队知识库应用' },
     summary: { en: 'A team knowledge-base app on simulated data, by seven agents.',
       zh: '一个用模拟数据的团队知识库应用，由七个 Agent 做出。' },
     seconds: 389, src: '/showcase/staged/academy/6a24a96b156ed316.mp4', bytes: 55014523, sha256: '6a24a96b156ed3163724555e02b9ef1abe261e685dc441382a270cca30a6fad7',
-    poster: null },
+    poster: null, notes: [runtimeNote(222)] },
   { id: 'pixel-platformer', section: 'build', caseId: 'pixel-platformer', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a pixel-art platformer with a team of agents', zh: '用一支 Agent 团队，做一款像素平台跳跃游戏' },
     summary: { en: 'A pixel-art platformer level, by six agents.',
       zh: '一关像素平台跳跃游戏，由六个 Agent 做出。' },
     seconds: 324, src: '/showcase/staged/academy/7ae71099cbf1d6a7.mp4', bytes: 55348960, sha256: '7ae71099cbf1d6a7e01662f03a8e51dd52ba93b6cdc183efef20bfe00ec0ad96',
-    poster: null },
+    poster: null, notes: [runtimeNote(180)] },
   { id: '3d-configurator', section: 'build', caseId: '3d-configurator', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D product configurator with a team of agents', zh: '用一支 Agent 团队，做一个 3D 产品配置器' },
     summary: { en: 'A 3D e-bike configurator, by five agents.',
       zh: '一个 3D 电动自行车配置器，由五个 Agent 做出。' },
     seconds: 395, src: '/showcase/staged/academy/544295f5aad88354.mp4', bytes: 57674546, sha256: '544295f5aad88354ed973e56940669ac93faa6fe9d3f1d31da1bd898a16771cd',
-    poster: null },
+    poster: null, notes: [runtimeNote(195)] },
   { id: 'papercraft-puzzle', section: 'build', caseId: 'papercraft-puzzle', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a papercraft puzzle with a team of agents', zh: '用一支 Agent 团队，做一款纸艺解谜游戏' },
     summary: { en: 'A papercraft puzzle game, by seven agents.',
       zh: '一款纸艺解谜游戏，由七个 Agent 做出。' },
     seconds: 390, src: '/showcase/staged/academy/e80f6f1f866dec10.mp4', bytes: 64534196, sha256: 'e80f6f1f866dec105930bc4d0fdf2fac99cf8166e097933f37ac3bdd86077471',
-    poster: null },
+    poster: null, notes: [runtimeNote(216)] },
   { id: 'summer-ad', section: 'build', caseId: 'summer-ad', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Pre-produce a 30-second ad with a team of agents', zh: '用一支 Agent 团队，预制一支 30 秒广告' },
     summary: { en: 'A 30-second ad’s animatic, by six agents.',
       zh: '一支 30 秒广告的动态分镜，由六个 Agent 做出。' },
     seconds: 383, src: '/showcase/staged/academy/503f8466f43990aa.mp4', bytes: 62580470, sha256: '503f8466f43990aad3f4908d7288d93c3326c505f348a5e0fdeb6a39047f799a',
-    poster: null },
+    poster: null, notes: [runtimeNote(224)] },
   { id: 'port-twin', section: 'build', caseId: 'port-twin', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a live 3D port cockpit with a team of agents', zh: '用一支 Agent 团队，做一个实时 3D 港口驾驶舱' },
     summary: { en: 'A live 3D port cockpit, by six agents.',
       zh: '一个实时 3D 港口驾驶舱，由六个 Agent 做出。' },
     seconds: 432, src: '/showcase/staged/academy/93c995fe7c04414a.mp4', bytes: 70124991, sha256: '93c995fe7c04414ac505860e14ccbd10763f5e7d176608ca10eabbcb786a628b',
-    poster: null },
+    poster: null, notes: [runtimeNote(218)] },
   { id: 'glider-adventure', section: 'build', caseId: 'glider-adventure', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D glider adventure with a team of agents', zh: '用一支 Agent 团队，做一款 3D 滑翔冒险游戏' },
     summary: { en: 'A 3D glider adventure, by six agents.',
       zh: '一款 3D 滑翔冒险游戏，由六个 Agent 做出。' },
     seconds: 342, src: '/showcase/staged/academy/471e41cc805ca0bd.mp4', bytes: 56079290, sha256: '471e41cc805ca0bdd7e22686a279be5cd234b69807fd09268df045764c2dea16',
-    poster: null },
+    poster: null, notes: [runtimeNote(162)] },
   { id: 'party-game', section: 'build', caseId: 'party-game', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a four-player party game with a team of agents', zh: '用一支 Agent 团队，做一款四人派对游戏' },
     summary: { en: 'A four-player party game, by six agents.',
       zh: '一款四人派对游戏，由六个 Agent 做出。' },
     seconds: 362, src: '/showcase/staged/academy/b615ee461de844b5.mp4', bytes: 52160396, sha256: 'b615ee461de844b5647e8ddb8112ebe347b03c875515b16b033b25addd5c7af2',
-    poster: null },
+    poster: null, notes: [runtimeNote(193)] },
   { id: 'rhythm-runner', section: 'build', caseId: 'rhythm-runner', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a rhythm runner with a team of agents', zh: '用一支 Agent 团队，做一款节奏跑酷游戏' },
     summary: { en: 'A rhythm runner game, by six agents.',
       zh: '一款节奏跑酷游戏，由六个 Agent 做出。' },
     seconds: 357, src: '/showcase/staged/academy/e7d17cff35d35826.mp4', bytes: 95035202, sha256: 'e7d17cff35d3582637d688c8006a3ba0e0a84d45abb339a067d90bbad8f6e85a',
-    poster: null },
+    poster: null, notes: [runtimeNote(190)] },
 ];
 
 /** 6:15, 1:02:03. */

@@ -27,11 +27,29 @@ the Academy and opens the case there: the library then shows every case, and clo
 On other pages it is a link to the workspace's home page with `?case=<case id>`, which the case library follows once and then
 takes out of the address (`caseLink.ts`). That link works on its own too, so a case can be shared.
 
+## When AwwO changes under a video
+
+A video stays as it was recorded, so the live AwwO can come to differ from what it shows. Each such difference is a note
+in the video's catalog entry (`notes`, since 2026-10-24): where the span that shows it starts (`at`, whole seconds of the
+video), the day AwwO changed (`since`) and what to do now, in both languages. The dialog lists a video's notes under it as
+**录制之后的变化** / **Changed since recording**; each note's time plays the video from there. A note goes when its span is
+recorded again: a new take, spliced into the edit at the same place, rendered as the rest of the motion version, staged under
+its new sha256 and put in the entry with the note removed.
+
+The notes of 2026-10-24 (31, on all 27 videos) come from that day's audit of every video against the changelog: the 17 build
+videos' Configure step (the runtime AwwO now picks itself), the EV plant digital twin and Neon Circuit racer cases (rebuilt on
+three.js r186), what the canvas assistant says on a fresh copy of PALLWARD, Umber, Backprop, Errand and Roost, THE LONG CHORD,
+now Episode I, with what a copy makes and costs, and in the four how-tos the links between a direct task and a plan for the
+canvas (gone) and the code how-to's recap on refunds. A cost in a note is the case canvas's own media nodes priced by
+`mediaCreditsFor` (`backend/internal/app/plans.go`): `saas-academy.test.tsx` recomputes THE LONG CHORD's from that file's price
+table and plans, and checks its count against the case's record. What the how-tos show of the free plan holds until the
+promotion ends on 2026-10-29.
+
 ## Code
 
 - `apps/web/src/saas/academyCatalog.ts`: the videos, in order. Each has an id, a section, its case (`caseId`), the narration's
-  language, the day it was recorded, a title and a summary in both languages, its length, its file's size and sha256, and a
-  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`).
+  language, the day it was recorded, a title and a summary in both languages, its length, its file's size and sha256, a
+  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`) and its notes, if any.
 - `apps/web/src/saas/Academy.tsx`: `AcademyProvider` (in `SaaSApp`, around every page) and `AcademyLauncher` (`header`, `menu`,
   `landing`). The dialog itself, `AcademyDialog.tsx`, loads only when it opens.
 - `apps/web/src/saas/academyLink.ts`: reading and writing `?academy`.
