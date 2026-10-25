@@ -18,6 +18,9 @@ kept for them, in Chinese and simple mode, with the same tools and motion layer.
 made and run before the take, reads its Task, changes it with the assistant and runs the nodes left again (real runs);
 the other walks through the settings centre without changing a setting. The account that records them is an
 administrator's: that take hides the entries only administrators see, so it shows what every user sees.
+Each how-to's title card numbers it in Start here, 「从这里开始 · n / 6」. The first four said n / 4 and the two new ones
+had no number, so later on 2026-10-25 all six were rendered again with that number and nothing else: the same takes,
+sound, timing and length, in new files with new posters.
 
 ## Where it opens
 
@@ -45,7 +48,8 @@ put in the entry with the note removed.
 
 A video updated after it was first published logs it in `changes` (the day and the words in both languages, newest
 first): its card says **Updated 24 Oct** / **10月24日更新**, and the dialog lists its updates beside it as **更新记录** /
-**Updates**. Recorded again in full, as the five flagships were on 2026-10-24 (a new take of the same steps with
+**Updates**. A video rendered again with nothing recorded again (the how-tos' renumbered title cards of 2026-10-25) logs
+nothing: its viewers see nothing new to watch. Recorded again in full, as the five flagships were on 2026-10-24 (a new take of the same steps with
 `take_flagship.py`, cut from the same edit plan and narration, but for the lines that had to change) and THE LONG CHORD the
 same day on Episode I (14 of its 29 lines written again from the case's record, and its copy walked by panning: in the
 recording's 1920-px window no zoom shows all 298 nodes at once), it also moves its `recordedOn` to that day. Recorded again
@@ -86,8 +90,8 @@ free plan holds until the promotion ends on 2026-10-29.
 The files (1.91 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
 one); among them are the first cut's (1.39 GB), THE LONG CHORD's first recording (0.06 GB, replaced on 2026-10-21), the
 earlier motion versions of the six flagships recorded again on 2026-10-24 (0.46 GB), the 17 build videos' versions from
-before their step 3 was recorded again on 2026-10-25 (1.18 GB) and nine motion versions staged on 2026-10-22 before their
-sound was encoded again (0.44 GB). Each is staged once on the host,
+before their step 3 was recorded again on 2026-10-25 (1.18 GB), the six how-tos' versions from before their title cards
+were renumbered (0.10 GB) and nine motion versions staged on 2026-10-22 before their sound was encoded again (0.44 GB). Each is staged once on the host,
 outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).

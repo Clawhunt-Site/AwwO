@@ -41,7 +41,8 @@ export interface AcademyVideo {
   changes?: ReadonlyArray<AcademyChange>;
 }
 
-/** One update of a published video: the day it was published again, and what changed in it. */
+/** One update of a published video: the day it was published again with something recorded again, and what changed
+ *  in it. A video only rendered again (a title card's number) logs none. */
 export interface AcademyChange {
   on: string;
   text: Readonly<Record<UiLocale, string>>;
@@ -58,8 +59,8 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'Code: one sentence, and it’s written', zh: '写代码：一句话，直接写好' },
     summary: { en: 'What one call is, then one sentence: the canvas assistant writes a working Python sales-report tool itself. Preview the report, say “continue” and check the usage.',
       zh: '先讲清「1 次」是什么，再用一句话让画布助手直接写出能用的 Python 销售报告工具：预览报告，说「继续」接着改，再看用量。' },
-    seconds: 154, src: '/showcase/staged/academy/07803132ff5c7f16.mp4', bytes: 17416804, sha256: '07803132ff5c7f1654e97708692921dbb5fb8d16ae3f08c04c9499c74c784891',
-    poster: '/showcase/academy/start-code-2.jpg', notes: [
+    seconds: 154, src: '/showcase/staged/academy/c7d7975a5f6c8776.mp4', bytes: 17416976, sha256: 'c7d7975a5f6c877615f1dd90e353deefa731e80d4c25bebb0be7c6de43d26c59',
+    poster: '/showcase/academy/start-code-3.jpg', notes: [
       switchLinksNote(56),
       // The recap's 「平台原因失败会退还」: since 2026-10-19 a platform time limit gives back only the call it cut.
       { at: 152, since: '2026-10-19', text: {
@@ -70,32 +71,32 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'Image: an event poster', zh: '生图：做一张活动海报' },
     summary: { en: 'One sentence for a café’s autumn poster: the assistant sets up a copy node and an image node on the canvas, you run the canvas and find the poster in Results.',
       zh: '一句话做咖啡店的秋季海报：助手在画布上搭好文案和图像两个节点，运行整张画布，在成果里看海报。' },
-    seconds: 106, src: '/showcase/staged/academy/87ad377098a1ce0b.mp4', bytes: 12757417, sha256: '87ad377098a1ce0b5471bb4ae7b8c38f3affc974de8ba366f691a2f7313603be',
-    poster: '/showcase/academy/start-image-2.jpg', notes: [switchLinksNote(42)] },
+    seconds: 106, src: '/showcase/staged/academy/0f88aae37a3af01e.mp4', bytes: 12760808, sha256: '0f88aae37a3af01e693f0930f73e87576e96229890731f877be17991a09178a5',
+    poster: '/showcase/academy/start-image-3.jpg', notes: [switchLinksNote(42)] },
   { id: 'start-web', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Web design: a complete website', zh: '网页设计：做一个完整官网' },
     summary: { en: 'Switch to Claude Opus 5.5 and ask for a pottery studio’s one-page site: about three minutes later, preview it full screen and check the usage.',
       zh: '换成 Claude Opus 5.5，一句话做陶艺工作室的单页官网：约三分钟后全屏预览，再看用量。' },
-    seconds: 104, src: '/showcase/staged/academy/8bca3281173a3123.mp4', bytes: 17859188, sha256: '8bca3281173a3123887af7e09a2778ca80c743a4cd25a348e295ba832659bc83',
-    poster: '/showcase/academy/start-web-2.jpg', notes: [switchLinksNote(37)] },
+    seconds: 104, src: '/showcase/staged/academy/8f25594fca78dbe9.mp4', bytes: 17870391, sha256: '8f25594fca78dbe914dc68da8d58dd2706cf6c1d6465d6391a50bf4eaa8cc5f4',
+    poster: '/showcase/academy/start-web-3.jpg', notes: [switchLinksNote(37)] },
   { id: 'start-plan', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Product plan: let a team write it', zh: '产品方案：让团队分工来写' },
     summary: { en: 'Name a team of three, a user researcher, a product manager and a writer, and run the canvas: the whole plan arrives as one document in Results. Setting up a canvas uses no calls.',
       zh: '点名用户研究、产品经理、方案撰写三人团队，运行画布，在成果里拿到一份完整的产品方案文档；搭画布不占次数。' },
-    seconds: 118, src: '/showcase/staged/academy/5d1faa082c4ec4cd.mp4', bytes: 17816781, sha256: '5d1faa082c4ec4cd5120edb1d102a9becb1a8017017ce86030eb2bebd37b890a',
-    poster: '/showcase/academy/start-plan-2.jpg', notes: [switchLinksNote(39)] },
+    seconds: 118, src: '/showcase/staged/academy/7f90986b2ba18317.mp4', bytes: 17812438, sha256: '7f90986b2ba18317dc380d604449593a054f57a4e8f805a1431f1ae43aad382e',
+    poster: '/showcase/academy/start-plan-3.jpg', notes: [switchLinksNote(39)] },
   { id: 'start-node', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
     title: { en: 'Inside a node: what it was asked, and how to change it', zh: '看懂节点：它被要求做什么，怎么改' },
     summary: { en: 'Open a node of a three-node team: its Task names the model, the job, its criteria and constraints. Change with the assistant writes your change into them, and the nodes left run again.',
       zh: '打开三人小团队里的一个节点：「任务」写着模型、要做的事、验收标准和约束。点「让助手修改」说出要改什么，助手把它写进去，再运行剩下的节点。' },
-    seconds: 123, src: '/showcase/staged/academy/a2bc503c752f381b.mp4', bytes: 21377874, sha256: 'a2bc503c752f381b0d9d4138e234be9aad484457b2d72d61af64f1da99b6ae85',
-    poster: '/showcase/academy/start-node-1.jpg' },
+    seconds: 123, src: '/showcase/staged/academy/2adbe0533e15a23e.mp4', bytes: 21379481, sha256: '2adbe0533e15a23e2bf492186da3d67f8c3b1f3c537e31ba913a4d36980509a2',
+    poster: '/showcase/academy/start-node-2.jpg' },
   { id: 'start-settings', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
     title: { en: 'Settings: everything for your account in one place', zh: '设置中心：账号的设置都在这里' },
     summary: { en: 'More options, then Settings: one page, grouped on the left. The language and the mode stay in this browser; the default model and task alerts follow your account. Export your data before you ask to delete your account.',
       zh: '更多选项里的「设置」：一个页面，左边分好了组。语言和使用模式只在这个浏览器，默认模型和任务提醒跟着账号走；申请删除账号前，先导出数据。' },
-    seconds: 149, src: '/showcase/staged/academy/37521d1747351aec.mp4', bytes: 15766545, sha256: '37521d1747351aec59623a768bfed962add63e9caaf75dc9dfe2e08677f4f6d5',
-    poster: '/showcase/academy/start-settings-1.jpg' },
+    seconds: 149, src: '/showcase/staged/academy/5ff1eda816148f9c.mp4', bytes: 15771102, sha256: '5ff1eda816148f9cf66ac832bbaa801c7b6c49b6d5d396228f290e549b275328',
+    poster: '/showcase/academy/start-settings-2.jpg' },
   { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'PALLWARD: a dark-fantasy game built by twenty-six agents', zh: 'PALLWARD：二十六个 Agent 做出的黑暗奇幻动作游戏' },
     summary: { en: 'Open the case, play the game right in How it was made, see what the twenty agents in sandbox computers wrote, and copy the canvas as a draft.',
