@@ -83,7 +83,7 @@ npm run local
 - 为 Web、Pi、OpenAI Agents（JS）和渲染服务安装依赖：执行服务与线上镜像一样不装开发依赖、不运行安装脚本（`--omit=dev --ignore-scripts`），网页带上构建工具；用 `uv`（或 Python 3.12 的 venv）建立 Python 执行器的环境；
 - 构建 Go API 和网页，构建直接执行的核心（只需 git 与 npm）；
 - Docker 正在运行时，构建工作区镜像（`awwo-workspace:local-<源码哈希>`）；
-- 带 `--staged-videos` 时，下载 Academy 的 27 个教程视频和《THE LONG CHORD》的成片（约 1.5 GB，每个文件按其完整 SHA-256 校验；已有文件也会重新校验）。
+- 带 `--staged-videos` 时，下载 Academy 的 29 个教程视频和《THE LONG CHORD》的成片（约 2.3 GB，每个文件按其完整 SHA-256 校验；已有文件也会重新校验）。
 
 更新代码后先停止本地版，再运行 `setup:local`：Windows 不允许覆盖正在运行的程序。`setup:local` 会替换代码中的部分（依赖、网页构建、直接执行的核心）和构建目录中的部分，所以有两把锁：代码的 `.local/awwo-local/code.lock` 和构建目录的 `build.lock`。每个运行时在运行期间持有这两把锁（共享，无论它用哪份代码、哪个构建目录），`setup:local` 工作时独占它们，所以这份代码或这个构建有任何运行时（无论数据目录在哪）时 setup 会拒绝执行，setup 进行中运行时也不会启动，两个 setup 也不会同时进行；拿不到锁的运行时不会启动。`setup:local` 只替换带着它的代码库和该代码库自己的构建目录（`.local/awwo-local/build`），所以只有这两处有锁：打包好的应用的代码与构建目录没有锁，运行时也不在应用包里写任何文件；它若用的是某个代码库的构建目录，仍持有那个构建目录的锁。这些锁和下文数据目录的锁都是操作系统的锁，随持有它的进程结束而释放，进程如何结束都一样，所以不会留下需要手动删除的锁。
 

@@ -1,4 +1,4 @@
-/** The AwwO Academy (Academy.tsx): the tutorial videos, each recorded on the live AwwO. Four short how-tos to start with
+/** The AwwO Academy (Academy.tsx): the tutorial videos, each recorded on the live AwwO. Six short how-tos to start with
  * (Chinese narration), then a walk through each flagship case and a build of each other homepage case (English narration);
  * every video has Chinese and English subtitles burned in. The files are too large for a release: each is staged once on
  * the host, outside every release, under /showcase/staged/academy/<first 16 hex digits of its sha256>.mp4, and the dev
@@ -84,6 +84,18 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
       zh: '点名用户研究、产品经理、方案撰写三人团队，运行画布，在成果里拿到一份完整的产品方案文档；搭画布不占次数。' },
     seconds: 118, src: '/showcase/staged/academy/5d1faa082c4ec4cd.mp4', bytes: 17816781, sha256: '5d1faa082c4ec4cd5120edb1d102a9becb1a8017017ce86030eb2bebd37b890a',
     poster: '/showcase/academy/start-plan-2.jpg', notes: [switchLinksNote(39)] },
+  { id: 'start-node', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
+    title: { en: 'Inside a node: what it was asked, and how to change it', zh: '看懂节点：它被要求做什么，怎么改' },
+    summary: { en: 'Open a node of a three-node team: its Task names the model, the job, its criteria and constraints. Change with the assistant writes your change into them, and the nodes left run again.',
+      zh: '打开三人小团队里的一个节点：「任务」写着模型、要做的事、验收标准和约束。点「让助手修改」说出要改什么，助手把它写进去，再运行剩下的节点。' },
+    seconds: 123, src: '/showcase/staged/academy/a2bc503c752f381b.mp4', bytes: 21377874, sha256: 'a2bc503c752f381b0d9d4138e234be9aad484457b2d72d61af64f1da99b6ae85',
+    poster: '/showcase/academy/start-node-1.jpg' },
+  { id: 'start-settings', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
+    title: { en: 'Settings: everything for your account in one place', zh: '设置中心：账号的设置都在这里' },
+    summary: { en: 'More options, then Settings: one page, grouped on the left. The language and the mode stay in this browser; the default model and task alerts follow your account. Export your data before you ask to delete your account.',
+      zh: '更多选项里的「设置」：一个页面，左边分好了组。语言和使用模式只在这个浏览器，默认模型和任务提醒跟着账号走；申请删除账号前，先导出数据。' },
+    seconds: 149, src: '/showcase/staged/academy/37521d1747351aec.mp4', bytes: 15766545, sha256: '37521d1747351aec59623a768bfed962add63e9caaf75dc9dfe2e08677f4f6d5',
+    poster: '/showcase/academy/start-settings-1.jpg' },
   { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'PALLWARD: a dark-fantasy game built by twenty-six agents', zh: 'PALLWARD：二十六个 Agent 做出的黑暗奇幻动作游戏' },
     summary: { en: 'Open the case, play the game right in How it was made, see what the twenty agents in sandbox computers wrote, and copy the canvas as a draft.',

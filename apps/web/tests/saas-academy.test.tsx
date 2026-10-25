@@ -62,7 +62,7 @@ it('lists every video once, by section, each staged by its checksum outside the 
     expect(isDay(video.recordedOn), video.id).toBe(true);
   }
   expect(existsSync(resolve(WEB, 'showcase', 'staged'))).toBe(false);
-  expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(4);
+  expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(6);
 });
 
 it('walks through homepage cases in the homepage’s order, one video a case, each with a poster on disk', () => {

@@ -19,7 +19,7 @@ const posterOf = (video: AcademyVideo) => video.poster ?? (caseOf(video) ? `/sho
 
 const SECTION_COPY: Readonly<Record<AcademySection, { title: [string, string]; chip: [string, string]; note: [string, string] }>> = {
   start: { title: ['从这里开始', 'Start here'], chip: ['入门', 'Start here'],
-    note: ['四个两分钟左右的短片：写代码、生图、做网页、写方案。中文讲解，中英字幕。', 'Four videos of about two minutes each: code, an image, a website and a plan. Chinese narration, with Chinese and English subtitles.'] },
+    note: ['六个两分钟左右的短片：写代码、生图、做网页、写方案，再看懂节点、用好设置。中文讲解，中英字幕。', 'Six videos of about two minutes each: code, an image, a website and a plan, then inside a node and the settings. Chinese narration, with Chinese and English subtitles.'] },
   flagship: { title: ['拆解旗舰案例', 'Inside the flagship cases'], chip: ['旗舰案例', 'Flagship cases'],
     note: ['打开案例，看它是怎么做出来的，把画布复制成草稿，再用它交付的成品。英文讲解，中英字幕。', 'Open the case, see how it was made, copy its canvas as a draft and use what it delivered. English narration, with English and Chinese subtitles.'] },
   build: { title: ['跟着做一个案例', 'Build a case, step by step'], chip: ['跟着做', 'Build a case'],

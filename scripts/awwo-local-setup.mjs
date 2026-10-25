@@ -3,7 +3,7 @@
 // running, the workspace image and the managed execution's core. Run it again after an update: what is current stays.
 //
 //   npm run setup:local                         everything this computer can run
-//   npm run setup:local -- --staged-videos      also the Academy's videos and the film case's film (about 1.5 GB)
+//   npm run setup:local -- --staged-videos      also the Academy's videos and the film case's film (about 2.3 GB)
 //   npm run setup:local -- --no-docker          without the workspace image and the managed execution's core
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

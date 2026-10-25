@@ -9,9 +9,15 @@ narration, and quiet sound effects under the narration.
 
 | Section | Videos | Narration | What they show |
 | --- | --- | --- | --- |
-| Start here (`start`) | 4, about 2 min each | Chinese | One sentence and the canvas assistant writes code, makes a poster, builds a site, writes a plan with a team |
+| Start here (`start`) | 6, about 2 min each | Chinese | One sentence and the canvas assistant writes code, makes a poster, builds a site, writes a plan with a team; then a node opened and changed with the assistant, and the settings centre |
 | Inside the flagship cases (`flagship`) | 6 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
 | Build a case, step by step (`build`) | 17 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result |
+
+The two how-tos added on 2026-10-25 were recorded as the first four were (2026-10-17): on the live AwwO, in the workspace
+kept for them, in Chinese and simple mode, with the same tools and motion layer. One opens a node of a three-node canvas
+made and run before the take, reads its Task, changes it with the assistant and runs the nodes left again (real runs);
+the other walks through the settings centre without changing a setting. The account that records them is an
+administrator's: that take hides the entries only administrators see, so it shows what every user sees.
 
 ## Where it opens
 
@@ -53,10 +59,10 @@ which saves it first).
 The notes of 2026-10-24 (31, on all 27 videos when they were published) come from that day's audit of every video against
 the changelog: the 17 build videos' Configure step (the runtime AwwO now picks itself), the EV plant digital twin and Neon
 Circuit racer cases (rebuilt on three.js r186), what the canvas assistant says on a fresh copy of PALLWARD, Umber, Backprop,
-Errand and Roost, THE LONG CHORD, now Episode I, with what a copy makes and costs, and in the four how-tos the links between a
+Errand and Roost, THE LONG CHORD, now Episode I, with what a copy makes and costs, and in the first four how-tos the links between a
 direct task and a plan for the canvas (gone) and the code how-to's recap on refunds. The five fresh-copy notes and THE LONG
 CHORD's two went the same day, when those videos were recorded again, and the build videos' 19 on 2026-10-25, when their
-step 3 was; the four how-tos' five remain. THE LONG CHORD's tutorial
+step 3 was; the first four how-tos' five remain. THE LONG CHORD's tutorial
 now says itself what a copy makes again and costs: `saas-academy.test.tsx` recomputes it from the case canvas's own media
 nodes, priced by `mediaCreditsFor` (`backend/internal/app/plans.go`) from that file's price table and plans, and checks the
 count against the case's record, so a new price, plan or count that makes the video wrong fails the test. The multipliers
@@ -77,7 +83,7 @@ free plan holds until the promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (1.87 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
+The files (1.91 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
 one); among them are the first cut's (1.39 GB), THE LONG CHORD's first recording (0.06 GB, replaced on 2026-10-21), the
 earlier motion versions of the six flagships recorded again on 2026-10-24 (0.46 GB), the 17 build videos' versions from
 before their step 3 was recorded again on 2026-10-25 (1.18 GB) and nine motion versions staged on 2026-10-22 before their
