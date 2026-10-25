@@ -149,10 +149,7 @@ Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 
 
 数据库与线上一样是 UTF-8：AwwO 用的 `awwo` 库以 UTF-8（`--locale=C`）从 template0 建立，每次启动都核对，不是 UTF-8 时运行时拒绝启动。PostgreSQL 集群自己的库（template1、postgres）则是 SQL_ASCII：initdb 会把它 `share` 目录的路径写进它执行的 SQL（导入 `sql_features.txt` 的 COPY），UTF-8 的库不收不是 ASCII 的路径，而中文账号的 `%LOCALAPPDATA%`（默认的安装目录和数据目录都在其中）就不是。PostgreSQL 的程序按系统的 ANSI 代码页（「非 Unicode 程序的语言」）接收路径，代码页里没有的字符（例如中文 Windows 上的韩文账号名、emoji）到它们那里会变成「?」，所以在 Windows 上，运行时（和窗口停下残留数据库时）把不是 ASCII 的路径换成它的短名（8.3）再交给它们；中文 Windows 的短名仍保留中文，这些字符代码页里都有。路径里有代码页没有的字符、所在的卷又不保留短名（系统盘默认保留）时，PostgreSQL 无法启动，运行时的错误会说明这一点。PostgreSQL 经系统的 shell 启动服务器与 initdb 的引导（Windows 上是 cmd.exe，其他系统上是 /bin/sh），所以交给它的路径在 Windows 上不能含 `%` 或 `!`，在其他系统上不能含 `$`、`` ` ``、`"` 或 `\`：有这些字符时运行时在启动数据库之前就拒绝，并说明是哪个目录。
 
-模型在应用的「我的引擎」中接入，有两种：
-
-- **「AwwO 线上」**（第一张卡片）：连接你在 awwo.clawhunt.store 的账号，经线上调用 Claude Opus 5.5 等 Bedrock 模型，不用填 Key，次数和点数计入你在线上选的工作区（`docs/awwo-cloud-relay.md`）。连接时本地版显示一个确认码，在浏览器打开的线上页面确认；令牌加密保存在数据库中，90 天有效，可以在线上「设置 → 本机连接」断开。连接的线上站点由 `local.env` 的可选设置 `AWWO_CLOUD_ORIGIN` 决定：不写时是 `https://awwo.clawhunt.store`，`off` 不提供这个引擎（运行时不把它写进 `local.env`，所以版本更新改了默认站点时会跟着变）。
-- **个人 API Key**：加密保存在数据库中；每次运行由 API 交给执行器，只用于该次调用。本地版不附带任何平台 Key。
+模型的 API Key 在应用的「我的引擎」中添加，加密保存在数据库中；每次运行由 API 交给执行器，只用于该次调用。本地版不附带任何平台 Key。
 
 媒体服务只提供给本机账号（平台管理员）拥有的工作区（API 的 `mediaEntitled`：管理员拥有的工作区即运营方自己的工作区）。本地版不打开「所有工作区可用媒体」的开关，所以即使有人在这台电脑上另注册账号，也用不了 `providers.env` 中的媒体 Key。
 

@@ -73,11 +73,6 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	// Every device signs in again, AwwO 本地版's links among them (local_links.go).
-	if e = revokeLocalLinks(r.Context(), tx, uid); e != nil {
-		a.dbError(w, e)
-		return
-	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM password_resets WHERE user_id=$1", uid); e != nil {
 		a.dbError(w, e)
 		return
@@ -228,11 +223,6 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM auth_sessions WHERE user_id=$1", uid); e != nil {
-		a.dbError(w, e)
-		return
-	}
-	// Every device signs in again, AwwO 本地版's links among them (local_links.go).
-	if e = revokeLocalLinks(r.Context(), tx, uid); e != nil {
 		a.dbError(w, e)
 		return
 	}

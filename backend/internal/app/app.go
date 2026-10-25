@@ -59,14 +59,6 @@ type App struct {
 	routeLimiter assistantRouteLimiter
 	// registry holds the skill registry's caches and limits (skill_registry_client.go).
 	registry *skillRegistry
-	// The cloud relay (relay.go, relay_limits.go): the Pi worker's relayable Bedrock models, each link's relayed calls at
-	// once, the request bodies held, the per-address windows, and the local edition's links waiting for approval
-	// (cloud_link.go).
-	relayCatalog relayCatalogCache
-	relayCalls   relayCallLimiter
-	relayHeld    relayBodies
-	relayRates   relayLimits
-	cloudLinks   cloudLinkFlows
 	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
 	signupClock func() time.Time
 	// promptClock is the clock of the date a model call's system prompt names (model_identity.go); nil is time.Now.
@@ -232,7 +224,6 @@ func (a *App) Start(ctx context.Context) error {
 	}()
 	a.resumeMedia(resume)
 	a.startMediaSweeper(watch)
-	a.startRelaySweeper(watch)
 	a.startPlanSync(watch)
 	return a.recoverGraphs(ctx)
 }
@@ -280,26 +271,6 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/connections", a.auth(a.authRate(a.createConnection)))
 	m.HandleFunc("POST /api/v1/auth/connections/{id}/refresh", a.auth(a.authRate(a.refreshConnection)))
 	m.HandleFunc("DELETE /api/v1/auth/connections/{id}", a.auth(a.deleteConnection))
-	// The cloud relay (docs/awwo-cloud-relay.md): the hosted site's links and relayed calls with AWWO_LOCAL_RELAY=on,
-	// and the local edition's link to the hosted site with AWWO_CLOUD_ORIGIN. Neither edition serves the other's.
-	if a.cfg.LocalRelay {
-		m.HandleFunc("POST /api/v1/local-links/start", a.relayRate(&a.relayRates.starts, linkStartsPerMinute, a.authRate(a.localLinkStart)))
-		m.HandleFunc("POST /api/v1/local-links/token", a.relayRate(&a.relayRates.polls, linkPollsPerMinute, a.localLinkToken))
-		m.HandleFunc("GET /api/v1/local-links/pending/{code}", a.auth(a.authRate(a.localLinkPending)))
-		m.HandleFunc("POST /api/v1/local-links/approve", a.auth(a.authRate(a.localLinkApprove)))
-		m.HandleFunc("POST /api/v1/local-links/deny", a.auth(a.authRate(a.localLinkDeny)))
-		m.HandleFunc("GET /api/v1/local-links", a.auth(a.localLinkList))
-		m.HandleFunc("DELETE /api/v1/local-links", a.auth(a.localLinkRevokeAll))
-		m.HandleFunc("DELETE /api/v1/local-links/{id}", a.auth(a.localLinkRevoke))
-		m.HandleFunc("GET /api/v1/relay/v1/models", a.relayRate(&a.relayRates.calls, relayCallsPerMinute, a.relayModelList))
-		m.HandleFunc("POST "+relayChatRoute, a.relayRate(&a.relayRates.calls, relayCallsPerMinute, a.relayChat))
-		m.HandleFunc("DELETE /api/v1/relay/v1/link", a.relayRate(&a.relayRates.calls, relayCallsPerMinute, a.relayRevokeSelf))
-	}
-	if a.cfg.CloudOrigin != "" {
-		m.HandleFunc("POST /api/v1/auth/cloud-link", a.auth(a.authRate(a.cloudLinkStart)))
-		m.HandleFunc("POST /api/v1/auth/cloud-link/poll", a.auth(a.cloudLinkPoll))
-		m.HandleFunc("DELETE /api/v1/auth/cloud-link", a.auth(a.cloudLinkCancel))
-	}
 	m.HandleFunc("POST /api/v1/auth/password", a.auth(a.authRate(a.changePassword)))
 	m.HandleFunc("GET /api/v1/auth/sessions", a.auth(a.listAuthSessions))
 	m.HandleFunc("DELETE /api/v1/auth/sessions/{id}", a.auth(a.revokeAuthSession))
@@ -445,8 +416,7 @@ func requestDeadlineApplies(path string) bool {
 		(strings.Contains(path, "/canvases/") && strings.HasSuffix(path, "/uploads")) {
 		return false
 	}
-	// A relayed call (relay.go) streams for as long as its model writes, bounded by relayCallLimit and its worker.
-	return path != computerModelRoute && path != relayChatRoute
+	return path != computerModelRoute
 }
 
 func (a *App) security(next http.Handler) http.Handler {

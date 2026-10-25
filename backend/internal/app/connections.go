@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,16 +27,14 @@ type connectionProvider struct {
 	Runtimes  []string `json:"runtimes"`
 	BaseURL   string   `json:"-"`
 	ModelsURL string   `json:"-"`
-	// Link says the engine is connected by linking an account (「AwwO 线上」, cloud_link.go), not by a typed key.
-	Link bool `json:"link,omitempty"`
 }
 
 var connectionProviders = []connectionProvider{
-	{"llmgate", "LLM Gate · ClawHunt", []string{runtimeOpenAIAgents, runtimePI}, "https://api.clawhunt.site/v1", "https://api.clawhunt.site/v1/models", false},
-	{"openai", "OpenAI / Codex", []string{runtimeOpenAIAgents}, "https://api.openai.com/v1", "https://api.openai.com/v1/models", false},
-	{"anthropic", "Claude / Anthropic", []string{runtimePI}, "https://api.anthropic.com", "https://api.anthropic.com/v1/models?limit=1000", false},
-	{"xai", "Grok / xAI", []string{runtimeOpenAIAgents, runtimePI}, "https://api.x.ai/v1", "https://api.x.ai/v1/models", false},
-	{"google", "Gemini / Google", []string{runtimeOpenAIAgents, runtimePI}, "https://generativelanguage.googleapis.com/v1beta/openai", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", false},
+	{"llmgate", "LLM Gate · ClawHunt", []string{runtimeOpenAIAgents, runtimePI}, "https://api.clawhunt.site/v1", "https://api.clawhunt.site/v1/models"},
+	{"openai", "OpenAI / Codex", []string{runtimeOpenAIAgents}, "https://api.openai.com/v1", "https://api.openai.com/v1/models"},
+	{"anthropic", "Claude / Anthropic", []string{runtimePI}, "https://api.anthropic.com", "https://api.anthropic.com/v1/models?limit=1000"},
+	{"xai", "Grok / xAI", []string{runtimeOpenAIAgents, runtimePI}, "https://api.x.ai/v1", "https://api.x.ai/v1/models"},
+	{"google", "Gemini / Google", []string{runtimeOpenAIAgents, runtimePI}, "https://generativelanguage.googleapis.com/v1beta/openai", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"},
 }
 var providerModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$`)
 var connectionSelectorPattern = regexp.MustCompile(`^byok_([A-Za-z0-9_-]{33})_([0-9a-f]{16})$`)
@@ -71,30 +68,11 @@ func providerByID(id string) (connectionProvider, bool) {
 	}
 	return connectionProvider{}, false
 }
-
-// provider is a personal engine by its id: one of the fixed providers, or this local edition's 「AwwO 线上」
-// (cloudProvider) where it links to the hosted site.
-func (a *App) provider(id string) (connectionProvider, bool) {
-	if id == cloudProviderID {
-		return a.cloudProvider()
-	}
-	return providerByID(id)
-}
-
-// connectionView is a connection as its person sees it: never its key. An 「AwwO 线上」 connection also names its
-// workspace on the hosted site and when its link ends.
-const connectionView = `jsonb_build_object('id',id,'provider',provider,'runtime',runtime,'name',name,'models',models,'createdAt',created_at,'hasKey',true)
-	|| CASE WHEN relay IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('relay',jsonb_build_object('workspace',relay->'workspace','expiresAt',relay->'expiresAt')) END`
-
 func (a *App) personalProviderAllowed(id string) bool {
 	return !a.cfg.LLMGateOnly || id == "llmgate"
 }
 func (a *App) personalProviders() []connectionProvider {
 	if !a.cfg.LLMGateOnly {
-		// 「AwwO 线上」 comes first where this edition links to the hosted site (docs/awwo-cloud-relay.md).
-		if cloud, ok := a.cloudProvider(); ok {
-			return append([]connectionProvider{cloud}, connectionProviders...)
-		}
 		return connectionProviders
 	}
 	providers := make([]connectionProvider, 0, 1)
@@ -284,7 +262,7 @@ func (a *App) verifyGateCredential(ctx context.Context, key string) error {
 }
 
 func (a *App) listConnections(w http.ResponseWriter, r *http.Request) {
-	items, e := rowsJSON(r.Context(), a.db, `SELECT `+connectionView+` FROM user_connections WHERE user_id=$1 ORDER BY created_at`, currentUser(r).ID)
+	items, e := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',id,'provider',provider,'runtime',runtime,'name',name,'models',models,'createdAt',created_at,'hasKey',true) FROM user_connections WHERE user_id=$1 ORDER BY created_at`, currentUser(r).ID)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -321,10 +299,6 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 		APIKey   string `json:"apiKey"`
 	}
 	if !a.decode(w, r, &b) {
-		return
-	}
-	if b.Provider == cloudProviderID {
-		fail(w, 400, "cloud_link_required", "Connect AwwO online from its own card: it links your account instead of taking a key")
 		return
 	}
 	p, ok := providerByID(b.Provider)
@@ -400,8 +374,8 @@ func (a *App) createConnection(w http.ResponseWriter, r *http.Request) {
 func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 	uid, id := currentUser(r).ID, r.PathValue("id")
 	var provider, runtime string
-	var sealed, relay []byte
-	e := a.db.QueryRow(r.Context(), "SELECT provider,runtime,secret,relay FROM user_connections WHERE id=$1 AND user_id=$2", id, uid).Scan(&provider, &runtime, &sealed, &relay)
+	var sealed []byte
+	e := a.db.QueryRow(r.Context(), "SELECT provider,runtime,secret FROM user_connections WHERE id=$1 AND user_id=$2", id, uid).Scan(&provider, &runtime, &sealed)
 	if errors.Is(e, pgx.ErrNoRows) {
 		fail(w, 404, "not_found", "Connection not found")
 		return
@@ -410,22 +384,9 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	p, ok := a.provider(provider)
+	p, ok := providerByID(provider)
 	if !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		fail(w, 400, "invalid_connection", "This provider or execution engine is not supported")
-		return
-	}
-	if provider == cloudProviderID {
-		view, e := a.refreshCloudConnection(r.Context(), uid, id, sealed, relay)
-		if errors.Is(e, errCloudOriginChanged) {
-			fail(w, 409, "cloud_origin_changed", "This connection belongs to another AwwO online site; remove it and connect again")
-			return
-		}
-		if e != nil {
-			fail(w, 422, "provider_verification_failed", "Could not read the models of AwwO online. The saved connection is unchanged.")
-			return
-		}
-		writeJSON(w, 200, view)
 		return
 	}
 	key, e := a.openCredential(uid, id, sealed)
@@ -444,16 +405,11 @@ func (a *App) refreshConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	// The account's row before the connection's, as removing a connection takes them.
-	if _, e = tx.Exec(r.Context(), "SELECT id FROM users WHERE id=$1 FOR UPDATE", uid); e != nil {
-		a.dbError(w, e)
-		return
-	}
 	raw, _ := json.Marshal(models)
 	var view json.RawMessage
 	e = tx.QueryRow(r.Context(), `UPDATE user_connections SET models=$3
 		WHERE id=$1 AND user_id=$2 AND secret=$4 AND provider=$5 AND runtime=$6
-		RETURNING `+connectionView, id, uid, raw, sealed, provider, runtime).Scan(&view)
+		RETURNING jsonb_build_object('id',id,'provider',provider,'runtime',runtime,'name',name,'models',models,'createdAt',created_at,'hasKey',true)`, id, uid, raw, sealed, provider, runtime).Scan(&view)
 	if errors.Is(e, pgx.ErrNoRows) {
 		fail(w, 404, "not_found", "Connection not found or changed during refresh")
 		return
@@ -481,32 +437,13 @@ func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	uid, id := currentUser(r).ID, r.PathValue("id")
-	// The account's row before its connections', as connecting 「AwwO 线上」 again takes them (keepCloudConnection).
-	if _, e = tx.Exec(r.Context(), "SELECT id FROM users WHERE id=$1 FOR UPDATE", uid); e != nil {
-		a.dbError(w, e)
-		return
-	}
-	var provider string
-	if e = tx.QueryRow(r.Context(), "SELECT provider FROM user_connections WHERE id=$1 AND user_id=$2 FOR UPDATE", id, uid).Scan(&provider); noRows(e) {
-		fail(w, 404, "not_found", "Connection not found")
-		return
-	} else if e != nil {
-		a.dbError(w, e)
-		return
-	}
-	// An 「AwwO 线上」 link is one engine for both runtimes: removing it removes both, and ends its token on the hosted site.
-	var ended []cloudToken
-	if provider == cloudProviderID {
-		if ended, e = a.cloudTokens(r.Context(), tx, uid); e != nil {
-			a.dbError(w, e)
-			return
-		}
-		_, e = tx.Exec(r.Context(), "DELETE FROM user_connections WHERE user_id=$1 AND provider=$2", uid, cloudProviderID)
-	} else {
-		_, e = tx.Exec(r.Context(), "DELETE FROM user_connections WHERE id=$1 AND user_id=$2", id, uid)
-	}
+	result, e := tx.Exec(r.Context(), "DELETE FROM user_connections WHERE id=$1 AND user_id=$2", id, uid)
 	if e != nil {
 		a.dbError(w, e)
+		return
+	}
+	if result.RowsAffected() != 1 {
+		fail(w, 404, "not_found", "Connection not found")
 		return
 	}
 	if e = audit(r.Context(), tx, uid, "", "connection.deleted", id); e != nil {
@@ -517,7 +454,6 @@ func (a *App) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	a.revokeCloudTokens(ended...)
 	w.WriteHeader(204)
 }
 
@@ -546,7 +482,7 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 	if !ok {
 		return piHealth{}, errors.New("personal credentials required")
 	}
-	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models,relay FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate') ORDER BY created_at", u.ID, runtime, a.cfg.LLMGateOnly)
+	rows, e := a.db.Query(ctx, "SELECT id,provider,name,models FROM user_connections WHERE user_id=$1 AND runtime=$2 AND (NOT $3::boolean OR provider='llmgate') ORDER BY created_at", u.ID, runtime, a.cfg.LLMGateOnly)
 	if e != nil {
 		return piHealth{}, e
 	}
@@ -556,32 +492,16 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 	for rows.Next() {
 		connections++
 		var id, provider, name string
-		var raw, relay []byte
-		if e = rows.Scan(&id, &provider, &name, &raw, &relay); e != nil {
+		var raw []byte
+		if e = rows.Scan(&id, &provider, &name, &raw); e != nil {
 			return piHealth{}, e
 		}
 		var models []string
 		if json.Unmarshal(raw, &models) != nil {
 			return piHealth{}, errors.New("invalid personal catalog")
 		}
-		// An 「AwwO 线上」 engine without a hosted site to reach (AWWO_CLOUD_ORIGIN unset since) offers nothing.
-		if _, ok := a.provider(provider); !ok {
-			continue
-		}
-		meta, cloud := a.usableCloudMeta(relay)
 		for _, model := range models {
 			if !personalTextModel(model) {
-				continue
-			}
-			if provider == cloudProviderID {
-				// The model's own limits on the hosted site, which a relayed call is held to there.
-				m, ok := meta.Models[model]
-				if !cloud || !ok {
-					continue
-				}
-				h.Models = append(h.Models, piModel{ID: connectionModelID(id, model), Name: m.Name, Label: m.Name + " · " + name, Provider: provider, ProviderModel: model,
-					Protocol: "chat_completions", Runtime: runtime, MaxContextTextBytes: m.ContextWindow - m.MaxOutputTokens - 256, MessageOverheadBytes: 32,
-					ProseBytesPerToken: m.ProseBytesPerToken, MaxOutputTokens: m.MaxOutputTokens, Input: slices.Clone(m.Input)})
 				continue
 			}
 			label := model + " · " + name + " · " + provider + " / " + id[max(0, len(id)-6):]
@@ -665,8 +585,8 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 		return nil, errors.New("run session does not match")
 	}
 	var provider string
-	var sealed, raw, relay []byte
-	e = a.db.QueryRow(ctx, "SELECT provider,secret,models,relay FROM user_connections WHERE id=$1 AND user_id=$2 AND runtime=$3", match[1], uid, runtime).Scan(&provider, &sealed, &raw, &relay)
+	var sealed, raw []byte
+	e = a.db.QueryRow(ctx, "SELECT provider,secret,models FROM user_connections WHERE id=$1 AND user_id=$2 AND runtime=$3", match[1], uid, runtime).Scan(&provider, &sealed, &raw)
 	if e != nil {
 		return nil, errors.New("personal credential was removed or belongs to another account")
 	}
@@ -681,7 +601,7 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 			break
 		}
 	}
-	p, ok := a.provider(provider)
+	p, ok := providerByID(provider)
 	if !personalTextModel(model) || !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) {
 		return nil, errors.New("model unavailable")
 	}
@@ -691,18 +611,6 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 	}
 	protocol := connectionProtocol(provider, runtime, model)
 	userModel := map[string]any{"id": selector, "provider": provider, "model": model, "baseURL": p.BaseURL, "apiKey": key, "protocol": protocol, "contextWindow": 32768, "maxTokens": 4096, "reasoningEfforts": []string{}, "defaultReasoningEffort": ""}
-	if provider == cloudProviderID {
-		// A relayed model is held to its own limits on the hosted site, and sees pictures where it does there.
-		meta, cloud := a.usableCloudMeta(relay)
-		m, known := meta.Models[model]
-		if !cloud || !known {
-			return nil, errors.New("model unavailable")
-		}
-		userModel["contextWindow"], userModel["maxTokens"], userModel["input"] = m.ContextWindow, m.MaxOutputTokens, m.Input
-		if m.ProseBytesPerToken > 1 {
-			userModel["proseBytesPerToken"] = m.ProseBytesPerToken
-		}
-	}
 	// The worker only honours a contract from a model that declares the capability.
 	// It is declared solely when this request already carries a frozen contract, which
 	// Go sends only after the switch, the runtime and this provider's capability all

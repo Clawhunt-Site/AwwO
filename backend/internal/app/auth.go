@@ -286,9 +286,6 @@ func (a *App) meResponse(w http.ResponseWriter, r *http.Request, u User, status 
 		method = "clawhunt"
 	}
 	out := map[string]any{"user": u, "tenants": items, "personalCredentialsRequired": a.cfg.UserCredentials, "authentication": method, "clawhuntSiteURL": a.cfg.ClawHuntURL, "edition": a.cfg.editionName()}
-	if a.cfg.LocalRelay {
-		out["localRelay"] = true
-	}
 	if redirect, ok := r.Context().Value(clawHuntReturnKey{}).(string); ok {
 		out["redirectURL"] = redirect
 	}

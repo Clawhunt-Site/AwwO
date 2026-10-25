@@ -513,7 +513,7 @@ func (a *App) requireWorkspacePersonalConnection(ctx context.Context, tx pgx.Tx,
 	if err := tx.QueryRow(ctx, "SELECT provider,models FROM user_connections WHERE id=$1 AND user_id=$2 AND runtime=$3 FOR SHARE", match[1], actor, runtime).Scan(&provider, &raw); err != nil {
 		return errors.New("personal_credential_unavailable")
 	}
-	p, ok := a.provider(provider)
+	p, ok := providerByID(provider)
 	var models []string
 	if !ok || !a.personalProviderAllowed(provider) || !connectionSupports(p, runtime) || json.Unmarshal(raw, &models) != nil {
 		return errors.New("personal_model_unavailable")

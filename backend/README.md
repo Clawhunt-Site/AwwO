@@ -286,7 +286,7 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Their invitations, sent and accepted, are deleted: one passed to another sender could come back to life.
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs, file rows, agents, knowledge, skills, memory notes, usage
-  ledger, everyone's memberships and invitations, and every AwwO 本地版 link to it (migration 042).
+  ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.
@@ -310,7 +310,6 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - its keys, appearance and settings;
   - its plan mirror and plan watches;
   - its upgrade interest;
-  - its AwwO 本地版 links (`local_links`, migration 042): a linked computer's next relayed call is refused;
   - its check-ins. In a workspace that stays, a check-in the person made today takes its bonus away from that
     workspace for the rest of the day, and another member may check in again.
 

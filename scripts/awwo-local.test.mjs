@@ -10,7 +10,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  CLOUD_ORIGIN, DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, cloudOrigin, validCloudOrigin, apiEnvironment, beforeFirstStart, clusterVersion, dockerEnvironment, foreignEntry,
+  DEFAULT_PORTS, GENERATED_SECRETS, LOCAL_HOST, OWNER_EMAIL, POSTGRES_INCLUDE, allocatePorts, apiEnvironment, beforeFirstStart, clusterVersion, dockerEnvironment, foreignEntry,
   missingPieceFix, postgresForCluster, postgresMajorVersion, runnablePostgres,
   findOnPath, instanceContainerQuery, loadLocalProfile, localLayout, localOrigin, localState, osLock, parseAcl, portIsFree,
   PASSWORD_RESET_PENDING, passwordResetApplied, postgresPath, postgresPathNote, postgresPort, postgresSettings, postgresShellUnsafe, privateFile, privateFolder, protectStateDirectory, resetId, resetOwnerPassword,
@@ -479,24 +479,6 @@ test('each worker gets its own token and limits, and no other service\'s secrets
     assert.equal(envs[name].AWWO_STOP_ON_STDIN_CLOSE, undefined, `${name} stops on its own signals`);
   }
   assert.equal(envs.api.AWWO_RUNNINGHUB_API_KEY, 'rh-key');
-});
-
-test('the API and the workers link to the hosted site (docs/awwo-cloud-relay.md): CLOUD_ORIGIN, local.env\'s own origin, or none', () => {
-  const envs = serviceEnvironments({ profile: profileFor(), ports: testPorts, state: testState, capabilities: allCapabilities, system: {} });
-  assert.equal(CLOUD_ORIGIN, 'https://awwo.clawhunt.store');
-  for (const name of ['api', 'pi', 'agentsPython', 'agentsJs']) assert.equal(envs[name].AWWO_CLOUD_ORIGIN, CLOUD_ORIGIN, name);
-  for (const name of ['broker', 'render']) assert.equal(envs[name].AWWO_CLOUD_ORIGIN, undefined, `${name} has no model to call`);
-  const own = origin => serviceEnvironments({ profile: { ...profileFor(), AWWO_CLOUD_ORIGIN: origin }, ports: testPorts, state: testState, capabilities: {}, system: {} });
-  assert.equal(own('https://staging.awwo.example').api.AWWO_CLOUD_ORIGIN, 'https://staging.awwo.example');
-  assert.equal(own('http://127.0.0.1:28087').pi.AWWO_CLOUD_ORIGIN, 'http://127.0.0.1:28087', 'a test\'s own hosted site');
-  for (const name of ['api', 'pi', 'agentsJs']) assert.equal(own('off')[name].AWWO_CLOUD_ORIGIN, undefined, 'off offers no 「AwwO 线上」');
-  for (const bad of ['http://awwo.clawhunt.store', 'https://awwo.clawhunt.store/', 'https://user@awwo.clawhunt.store', 'http://localhost:28087', 'awwo.clawhunt.store']) {
-    assert.throws(() => cloudOrigin({ AWWO_CLOUD_ORIGIN: bad }), /local\.env: AWWO_CLOUD_ORIGIN must be/, bad);
-  }
-  assert.equal(cloudOrigin({ AWWO_CLOUD_ORIGIN: '  https://staging.awwo.example  ' }), 'https://staging.awwo.example', 'a person\'s value is trimmed');
-  const vectors = JSON.parse(readFileSync(new URL('../apps/cloud-origin-vectors.json', import.meta.url), 'utf8'));
-  assert.ok(vectors.cases.length >= 20);
-  for (const item of vectors.cases) assert.equal(validCloudOrigin(item.origin), item.valid, JSON.stringify(item.origin));
 });
 
 test('the managed execution uses the built image, labels its containers with this instance, and is wired only once up', () => {

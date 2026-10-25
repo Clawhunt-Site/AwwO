@@ -1,5 +1,5 @@
 import { loadObservabilityConfig } from './observability.mjs';
-import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse, readBedrockCatalog } from '../bedrock-catalog.ts';
+import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
 import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
 import { estimateTokens, proseRate, proseRateSetting } from '../context-estimate.ts';
 const DEFAULTS = Object.freeze({
@@ -258,11 +258,6 @@ export function loadConfig(env = process.env) {
   }
   assertDeepSeekProfiles(userCredentials, llmgateOnly, platformProviders, models, (env[DEEPSEEK_API_KEY_ENV] ?? '').trim());
   assertOperatorOnlyBedrock(userCredentials, models);
-  // The catalog's Bedrock models that take tools (its entries' own `tools`), for the cloud relay: AwwO 本地版's OpenAI
-  // Agents runs offer tools, so only these are relayed to them (docs/awwo-cloud-relay.md). An operator's own MODELS_JSON
-  // Bedrock profile says nothing of tools and is relayed to tool-free runs alone. The file is read only when the catalog
-  // gave this worker a model, so a worker without Bedrock never depends on it.
-  const relayTools = Object.freeze(new Set(catalog.length ? readBedrockCatalog().filter((entry) => entry.tools && catalog.some((profile) => profile.id === entry.id)).map((entry) => entry.id) : []));
   return Object.freeze({
     observability: loadObservabilityConfig(env, 'pi', environment),
     host: env.AWWO_PI_HOST ?? '127.0.0.1',
@@ -272,12 +267,6 @@ export function loadConfig(env = process.env) {
     cancelGraceMs: integer(env.AWWO_PI_CANCEL_GRACE_MS, 2_000, 50, 10_000, 'AWWO_PI_CANCEL_GRACE_MS'),
     maxConcurrency: integer(env.AWWO_PI_MAX_CONCURRENCY, 4, 1, 32, 'AWWO_PI_MAX_CONCURRENCY'),
     maxOutputBytes: integer(env.AWWO_PI_MAX_OUTPUT_BYTES, 1_048_576, 1024, 8_388_608, 'AWWO_PI_MAX_OUTPUT_BYTES'),
-    // One cloud relay call's limit (relay.mjs): a canvas node's call there may think as long as on the Python worker,
-    // whose node limit is 25 minutes, and the API's own run limit (30 minutes) ends sooner still.
-    relayTimeoutMs: integer(env.AWWO_PI_RELAY_TIMEOUT_MS, 1_500_000, 1_000, 1_800_000, 'AWWO_PI_RELAY_TIMEOUT_MS'),
-    // The cloud relay's calls at once (relay.mjs), each in a child of its own, apart from the runs' slots.
-    relayMaxConcurrency: integer(env.AWWO_PI_RELAY_MAX_CONCURRENCY, 8, 1, 64, 'AWWO_PI_RELAY_MAX_CONCURRENCY'),
-    relayTools,
     contextWindow, maxTokens, models,
     ...(prose > 1 ? { proseBytesPerToken: prose } : {}),
     userCredentials,
@@ -313,8 +302,6 @@ export function publicHealth(config, activeRuns = 0) {
       ...(profile.proseBytesPerToken > 1 ? { proseBytesPerToken: profile.proseBytesPerToken } : {}),
       // What the model takes; the API shows pictures only to a model listing 'image' (vision).
       input: [...(profile.input ?? ['text'])],
-      // A Bedrock model's tools, for the cloud relay's list (relayTools); no other profile says anything new.
-      ...(profile.provider === 'bedrock' ? { tools: config.relayTools?.has(profile.id) === true } : {}),
     })),
     // This worker takes a run's pictures ("images") and shows them to the models whose input lists 'image'.
     imageInput: true,

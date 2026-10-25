@@ -28,7 +28,6 @@ import { navigateTo } from './navigation';
 import { StaleBuildNotice } from './StaleBuildNotice';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
-import { rememberPendingLink, restorePendingLink } from './pendingLink';
 import { AdminPanel } from './AdminPanel';
 import { LocalEdition, inLocalWindow, isLocalEdition } from './edition';
 import { RouteUsageMeter } from './RouteUsageMeter';
@@ -105,8 +104,6 @@ function AuthenticatedApp() {
   // invitation waits: a completed link or login restores it through onAuthenticated instead.
   const deferInviteRestore = useRef(ssoReturn !== null || new URLSearchParams(window.location.search).has('reset'));
   useEffect(() => { rememberPendingInvite(new URLSearchParams(window.location.search).get('invite')); }, []);
-  // AwwO 本地版's code (?link=), kept across a sign-in the same way and opened in 设置 → 本机连接 once signed in.
-  useEffect(() => { rememberPendingLink(new URLSearchParams(window.location.search).get('link')); }, []);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
   const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('reset'));
@@ -124,7 +121,6 @@ function AuthenticatedApp() {
     // that older request later returns another account or a service error.
     sessionRequestGeneration.current += 1;
     restorePendingInvite();
-    restorePendingLink();
     trackSignedInSession(true);
     setSessionEnded(false);
     setIdentity(value);
@@ -138,7 +134,7 @@ function AuthenticatedApp() {
     const generation = ++sessionRequestGeneration.current;
     const controller = new AbortController();
     const current = () => live && generation === sessionRequestGeneration.current;
-    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { if (!deferInviteRestore.current) { restorePendingInvite(); restorePendingLink(); } trackSignedInSession(true); setIdentity(value); } })
+    api<Identity>('/auth/me', { signal: controller.signal }).then(value => { if (current()) { if (!deferInviteRestore.current) restorePendingInvite(); trackSignedInSession(true); setIdentity(value); } })
       .catch(error => {
         if (!current()) return;
         if (!(error instanceof SaaSApiError && error.status === 401)) { setFailure(message(error)); return; }

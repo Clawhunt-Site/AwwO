@@ -3,7 +3,7 @@
 // plans, invites, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 邀请好友, 我的引擎)
 // are drawn as they were, inside the centre (settingsFrame.ts); the others live in settings/.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CreditCard, Database, Gift, Info, Keyboard, Laptop, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
+import { ArrowLeft, CreditCard, Database, Gift, Info, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
 import type { Identity } from './api';
 import { isLocalEdition } from './edition';
 import { AccountSecurity, accountURL } from './PersonalAccount';
@@ -16,17 +16,14 @@ import type { SettingsSection } from './settingsFrame';
 import { AboutSettings, AppearanceSettings, DataSettings, EngineSettings, GeneralSettings, PersonalizationSettings, PlansUsage, ShortcutSettings, SkillSettings, WorkspaceSettings } from './settings/sections';
 import { SettingsIntro } from './settings/general';
 import { LocalComputerSettings } from './settings/local';
-import { LocalLinksSettings } from './settings/links';
 import './settings/settings-center.css';
 
 /**
  * The page an address opens in this edition. The local edition sells nothing and takes no invited friends, so the links
- * the app sends to 用量与计费 or 邀请好友 open 本机 there; the hosted site has no 本机 and opens 账号安全 for it. 本机连接
- * is the hosted site's, where it takes AwwO 本地版's links (docs/awwo-cloud-relay.md); the local edition links from 我的引擎.
+ * the app sends to 用量与计费 or 邀请好友 open 本机 there; the hosted site has no 本机 and opens 账号安全 for it.
  */
 export function editionSection(identity: Identity, section: SettingsSection): SettingsSection {
-  if (isLocalEdition(identity)) return section === 'plans' || section === 'invites' ? 'local' : section === 'links' ? 'engines' : section;
-  if (section === 'links' && !identity.localRelay) return 'security';
+  if (isLocalEdition(identity)) return section === 'plans' || section === 'invites' ? 'local' : section;
   return section === 'local' ? 'security' : section;
 }
 
@@ -46,7 +43,6 @@ function navigation(identity: Identity): Group[] {
       isLocalEdition(identity) ? { id: 'local', icon: <Monitor size={16} />, zh: '本机', en: 'This computer' }
         : { id: 'plans', icon: <CreditCard size={16} />, zh: '用量与计费', en: 'Usage and billing' },
       ...(clawhunt ? [{ id: 'invites' as const, icon: <Gift size={16} />, zh: '邀请好友', en: 'Invite friends' }] : []),
-      ...(!isLocalEdition(identity) && identity.localRelay ? [{ id: 'links' as const, icon: <Laptop size={16} />, zh: '本机连接', en: 'Connected computers' }] : []),
     ] },
     { zh: '设置', en: 'Settings', items: [
       { id: 'general', icon: <Settings2 size={16} />, zh: '通用', en: 'General' },
@@ -112,7 +108,6 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
       <InviteFriends identity={identity} />
     </>;
     case 'local': return <LocalComputerSettings />;
-    case 'links': return <LocalLinksSettings identity={identity} />;
     case 'general': return <GeneralSettings identity={identity} />;
     case 'appearance': return <AppearanceSettings />;
     case 'shortcuts': return <ShortcutSettings />;

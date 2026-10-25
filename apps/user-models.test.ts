@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import test from "node:test";
-import { readFileSync } from "node:fs";
-import { bindUserModel, cloudRelayURL, validCloudOrigin } from "./user-models.ts";
+import { bindUserModel } from "./user-models.ts";
 import { createOpenAIAgentsServer } from "./openai-agents-worker/server.mjs";
 import { createPiServer } from "./pi-worker/server.mjs";
 import { loadConfig as loadAgents } from "./openai-agents-worker/config.mjs";
@@ -269,62 +268,3 @@ for (const runtime of ["pi", "openai-agents"]) {
     },
   );
 }
-
-// 「AwwO 线上」 (docs/awwo-cloud-relay.md): a relayed model is bound only to the relay the runtime links to.
-const relayProfile = () => ({
-  ...profile("awwo_lk_" + "x".repeat(43)),
-  provider: "awwo",
-  model: "bedrock.claude-opus-5-5",
-  baseURL: "https://awwo.clawhunt.store/api/v1/relay/v1",
-  contextWindow: 200000,
-  maxTokens: 64000,
-  input: ["text", "image"],
-  proseBytesPerToken: 2.15,
-});
-function withCloudOrigin<T>(origin: string | undefined, run: () => T): T {
-  const saved = process.env.AWWO_CLOUD_ORIGIN;
-  if (origin === undefined) delete process.env.AWWO_CLOUD_ORIGIN;
-  else process.env.AWWO_CLOUD_ORIGIN = origin;
-  try { return run(); } finally {
-    if (saved === undefined) delete process.env.AWWO_CLOUD_ORIGIN;
-    else process.env.AWWO_CLOUD_ORIGIN = saved;
-  }
-}
-const personalConfig = { userCredentials: true, ready: true, models: [] as unknown[] };
-
-test("a relayed model keeps its own limits and input, at the runtime's own relay alone", () => {
-  for (const runtime of ["pi", "openai-agents"]) {
-    const bound = withCloudOrigin("https://awwo.clawhunt.store", () =>
-      bindUserModel(personalConfig, { ...request(), userModel: relayProfile() }, runtime));
-    assert.deepEqual(bound.models, [{ ...relayProfile(), provider: "openai" }]);
-  }
-  for (const origin of [undefined, "", "http://awwo.clawhunt.store", "https://awwo.clawhunt.store/x", "https://evil.example"]) {
-    assert.throws(() => withCloudOrigin(origin, () =>
-      bindUserModel(personalConfig, { ...request(), userModel: relayProfile() }, "pi")), /Invalid personal model configuration/, String(origin));
-  }
-  assert.equal(withCloudOrigin("http://127.0.0.1:18087", () =>
-    bindUserModel(personalConfig, { ...request(), userModel: { ...relayProfile(), baseURL: "http://127.0.0.1:18087/api/v1/relay/v1" } }, "pi")).ready, true);
-});
-
-test("a relayed model's limits stay within the hosted catalog's bounds, and other providers take no relay fields", () => {
-  const bind = (userModel: Record<string, unknown>, runtime = "pi") => withCloudOrigin("https://awwo.clawhunt.store", () =>
-    bindUserModel(personalConfig, { ...request(), userModel }, runtime));
-  for (const change of [{ contextWindow: 2_000_001 }, { maxTokens: 65_537 }, { maxTokens: 199_900 }, { input: ["image"] },
-    { input: ["text", "audio"] }, { proseBytesPerToken: 9 }, { protocol: "responses" }, { structuredOutput: true }]) {
-    assert.throws(() => bind({ ...relayProfile(), ...change }, "openai-agents"), /Invalid personal model configuration/, JSON.stringify(change));
-  }
-  assert.throws(() => bind({ ...profile(), input: ["text", "image"] }), /Invalid personal model configuration/);
-  assert.throws(() => bind({ ...profile(), contextWindow: 200000 }), /Invalid personal model configuration/);
-  assert.throws(() => bind({ ...relayProfile(), baseURL: "https://api.clawhunt.site/v1" }), /Invalid personal model configuration/);
-  assert.deepEqual(bind(profile()).models, [{ ...profile(), provider: "openai" }], "a Gate key binds as it did");
-});
-
-test("the hosted site's origin is read as every reader of AWWO_CLOUD_ORIGIN reads it", () => {
-  const vectors = JSON.parse(readFileSync(new URL("./cloud-origin-vectors.json", import.meta.url), "utf8")) as { cases: Array<{ origin: string; valid: boolean }> };
-  assert.ok(vectors.cases.length >= 20);
-  for (const item of vectors.cases) {
-    assert.equal(validCloudOrigin(item.origin), item.valid, JSON.stringify(item.origin));
-    assert.equal(cloudRelayURL({ AWWO_CLOUD_ORIGIN: item.origin }), item.valid ? `${item.origin}/api/v1/relay/v1` : "", JSON.stringify(item.origin));
-  }
-  assert.equal(cloudRelayURL({}), "");
-});
