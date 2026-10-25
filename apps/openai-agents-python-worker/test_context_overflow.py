@@ -130,9 +130,9 @@ class ContextOverflowTest(unittest.TestCase):
                     self.assertEqual(code, "MODEL_CONTEXT_LIMIT" if case["overflow"] else "MODEL_REQUEST_REJECTED")
 
     def test_a_size_refusal_is_read_as_the_other_workers_read_one(self):
-        # The rule the JavaScript worker and the Pi child keep for one body, but for the statuses (this worker, as the Pi
-        # child, takes a 422 too): the provider's own words, work looked for anywhere in a body of at most 64 KiB, a body
-        # not typed a stream and JSON as JavaScript reads it.
+        # The rule the JavaScript worker and the Pi child keep for one body, with their statuses (a 400 or 413): the
+        # provider's own words, work looked for anywhere in a body of at most 64 KiB, a body not typed a stream and JSON
+        # as JavaScript reads it.
         for status, body, code, *content_type in [
             # By its code or its type, whatever its message says, and by an error that is only words.
             (400, {"error": {"message": "Bad request", "code": "context_length_exceeded"}}, "MODEL_CONTEXT_LIMIT"),
@@ -189,9 +189,10 @@ class ContextOverflowTest(unittest.TestCase):
             (400, {"error": {"message": f"{'漢' * 2000} maximum context length"}}, "MODEL_CONTEXT_LIMIT"),
             (400, {"error": {"message": f"{chr(0x1F600) * 2047}maximum context length"}}, "MODEL_REQUEST_REJECTED"),
             (400, {"error": {"message": f"{chr(0x1F600) * 2036}maximum context length"}}, "MODEL_CONTEXT_LIMIT"),
-            # Another status: a 422 (this worker's, and the Pi child's, not the JavaScript worker's), a rate limit, an
-            # outage, and a status past 599, which is neither an outage nor a refusal (as in the other workers).
-            (422, {"error": {"message": TOO_LONG}}, "MODEL_CONTEXT_LIMIT"),
+            # Another status, as in the other workers: a 422 (owner 2026-10-25), a rate limit, an outage, and a status
+            # past 599, which is neither an outage nor a refusal.
+            (422, {"error": {"message": TOO_LONG}}, "MODEL_REQUEST_REJECTED"),
+            (422, {"error": {"message": TOO_LONG, "code": "context_length_exceeded"}}, "MODEL_REQUEST_REJECTED"),
             (429, {"error": {"message": TOO_LONG, "code": "context_length_exceeded"}}, "MODEL_RATE_LIMIT"),
             (500, {"error": {"message": TOO_LONG}}, "MODEL_UNAVAILABLE"),
             (599, {"error": {"message": TOO_LONG}}, "MODEL_UNAVAILABLE"),
@@ -202,6 +203,12 @@ class ContextOverflowTest(unittest.TestCase):
                 error = refusal(status, body, *content_type)
                 self.assertEqual(classify_error(error)["code"], code)
                 self.assertEqual(classify_error(error, requests=2)["code"], "MODEL_REQUEST_REJECTED" if code == "MODEL_CONTEXT_LIMIT" else code)
+
+    def test_of_every_status_from_400_to_599_only_a_400_or_413_is_a_size_refusal(self):
+        # As in the other workers (a 422 is not: owner 2026-10-25).
+        body = {"error": {"message": TOO_LONG, "code": "context_length_exceeded"}}
+        sized = [status for status in range(400, 600) if classify_error(refusal(status, body))["code"] == "MODEL_CONTEXT_LIMIT"]
+        self.assertEqual(sized, [400, 413])
 
     def test_a_refusals_words_are_the_providers_own_read_from_its_error_alone(self):
         for body, words in [

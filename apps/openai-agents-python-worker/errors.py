@@ -39,10 +39,10 @@ def failure_event(code: str) -> dict:
 
 
 # The rule for a refusal before any work is the JavaScript worker's (openai-agents-worker/usage.mjs and errors.mjs) and
-# the Pi child's (pi-worker/usage.mjs), so that the three read one body alike, but for the statuses (the JavaScript worker
-# takes a 400 or 413; this worker, as the Pi child, a 422 too) and two ways this reading is more careful: a JSON integer
-# of more than 4,300 digits makes json.loads refuse the body, which so cannot say it carries no work, and the rate limit's
-# veto in context_overflow.py also spans a character outside the Basic Multilingual Plane, which JavaScript's does not.
+# the Pi child's (pi-worker/usage.mjs), so that the three read one body alike, with the same statuses (a 400 or 413; a
+# 422 is another refusal: owner 2026-10-25), but for two ways this reading is more careful: a JSON integer of more than
+# 4,300 digits makes json.loads refuse the body, which so cannot say it carries no work, and the rate limit's veto in
+# context_overflow.py also spans a character outside the Basic Multilingual Plane, which JavaScript's does not.
 
 # A refusal's body is read only up to this many bytes; a longer one cannot say it carries no work.
 REFUSAL_BODY_LIMIT = 65_536
@@ -140,12 +140,12 @@ def refuses_size(body) -> bool:
 
 
 def refused_before_any_work(error: BaseException):
-    """The body of the provider's refusal of the request with an HTTP 400, 413 or 422 answer, before any stream (a refusal
+    """The body of the provider's refusal of the request with an HTTP 400 or 413 answer, before any stream (a refusal
     inside a stream that answered 200 may follow work: it carries its status in its body, never as the SDK's
     status_code), when it can say it carries no work: read from the response the SDK kept (never relayed), at most
     REFUSAL_BODY_LIMIT bytes, not typed a stream (in any letters), JSON as the other workers read it (its text as UTF-8,
     no NaN or Infinity), an object, and no work anywhere in it. None for any other."""
-    if getattr(error, "status_code", None) not in (400, 413, 422):
+    if getattr(error, "status_code", None) not in (400, 413):
         return None
     response = getattr(error, "response", None)
     try:

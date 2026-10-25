@@ -511,6 +511,8 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     'gate-400-nested-under': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(`{"error":{"code":"context_length_exceeded","details":${'['.repeat(50)}{}${']'.repeat(50)}},"usage":{"prompt_tokens":"0","cached":true}}`); },
     'gate-400-stream-typed': res => { res.writeHead(400, { 'content-type': 'Text/Event-Stream; charset=utf-8' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' } })); },
     'gate-400-no-error-field': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ message: 'secret-provider-key maximum context length is 131072 tokens', code: 'context_length_exceeded' })); },
+    // A 422 is another refusal whatever its words, as in the workers (owner 2026-10-25): it keeps the provider's code.
+    'gate-422': res => { res.writeHead(422, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error', code: 'context_length_exceeded' } })); },
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
@@ -529,6 +531,7 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     ['gate-400-usage-words', 'provider:400:context_length_exceeded', undefined], ['gate-400-usage-metadata', 'provider:400:context_length_exceeded', undefined],
     ['gate-400-nested', 'provider:400:context_length_exceeded', undefined], ['gate-400-nested-under', 'provider:400:context_length_exceeded', 'before-output'],
     ['gate-400-stream-typed', 'provider:400:context_length_exceeded', undefined], ['gate-400-no-error-field', 'provider:400:context_length_exceeded', undefined],
+    ['gate-422', 'provider:422:context_length_exceeded', undefined],
   ] as const) {
     const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
     assert.equal(response.status, 502, scenario);
@@ -539,11 +542,32 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 33);
+  assert.equal(logged.length, 34);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
     'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);
   assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|tokens|quota|gate-400|not json/);
+});
+
+test('of every status from 400 to 599, only a 400\'s or a 413\'s refusal as too large is one before any work, as in the workers', async t => {
+  const logged = rejections(t);
+  const s = await serve(t, 'chat_completions', (body, _req, res) => {
+    res.writeHead(Number(body.messages.at(-1).content), { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'maximum context length is 131072 tokens', code: 'context_length_exceeded' } }));
+  }, {}, 'pi');
+  const before: number[] = [];
+  for (let status = 400; status <= 599; status += 1) {
+    // Every status reaches the rule, its label says, but two that fetch fails on its own: a 407 (no proxy is asked for),
+    // and a 421, which it sends again on a new connection without its body (this provider could not read it).
+    if (status === 421) continue;
+    const response = await s.send(input({ completion: { messages: [{ role: 'user', content: String(status) }], tools: [tool] } }));
+    const { error } = await response.json();
+    if (status === 407) assert.match(error.reason, /^network(:[A-Z0-9_]+)?$/);
+    else assert.equal(error.reason, `provider:${status}:context_length_exceeded`, String(status));
+    if (error.detail === 'before-output') before.push(status);
+  }
+  assert.deepEqual(before, [400, 413]);
+  assert.equal(logged.length, 199);
 });
 
 // An event stream as LLM Gate sends one: each frame a `data:` line (an object as JSON, a string as written), sent in

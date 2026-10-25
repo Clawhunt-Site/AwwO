@@ -442,7 +442,7 @@ function providerWords(body: ObjectValue): string[] {
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
  *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
  *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed) made before any
- *  work: with a status 400, 413 or 422 (an answer before any stream: one inside a 200 may follow work, and keeps its own
+ *  work: with a status 400 or 413 (an answer before any stream: one inside a 200 may follow work, and keeps its own
  *  code and type) in a body read whole that carries no work (carriesWork), in the provider's own words (providerWords),
  *  as the workers read one, if more strictly in two ways: a body is read within 16 KiB here (64 KiB in a worker's
  *  observer), and one that starts with a byte order mark is not JSON here. That one carries the label an
@@ -451,7 +451,7 @@ function providerWords(body: ObjectValue): string[] {
  *  stream or not JSON is never read as one. */
 function refusal(status: number, body: ObjectValue = {}, whole = false): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if (whole && [400, 413, 422].includes(status) && !carriesWork(body) && providerWords(body).some(words => contextOverflow(words))) {
+  if (whole && [400, 413].includes(status) && !carriesWork(body) && providerWords(body).some(words => contextOverflow(words))) {
     return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));

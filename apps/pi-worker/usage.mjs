@@ -220,11 +220,12 @@ export function createProviderObserver(protocol, { now = () => performance.now()
       try { return observe(await fetchImpl(input, { ...init, headers, redirect: 'error' })); }
       catch (error) { ended ??= now(); throw error; }
     },
-    // Whether the call was refused before any work: its one request answered with a 400, 413 or 422 (never a stream:
-    // work may come before a refusal inside one, and a refusal typed a stream cannot say it carries none), in a body
-    // that was JSON and carries no work. Read after settled().
+    // Whether the call was refused before any work: its one request answered with a 400 or 413, as in the other workers
+    // (a 422 is another refusal: owner 2026-10-25), never a stream (work may come before a refusal inside one, and a
+    // refusal typed a stream cannot say it carries none), in a body that was JSON and carries no work. Read after
+    // settled().
     refusedBeforeAnyWork() {
-      return requests === 1 && !unsettled && refusal?.clean === true && [400, 413, 422].includes(refusal.status);
+      return requests === 1 && !unsettled && refusal?.clean === true && [400, 413].includes(refusal.status);
     },
     // The provider's own words in the call's last refusal (providerWords: its error's message, code and type), which the
     // child reads for a refusal of the request as too large (pi-task.mjs) and which never leave it; none for a refusal

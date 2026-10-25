@@ -98,14 +98,26 @@ test('many small data lines share a bounded SSE event budget', async () => {
   assert.equal(observer.snapshot('completed').usage.status, 'invalid');
 });
 
-test('a call is refused before any work only by an HTTP 400, 413 or 422 to its one request in a JSON body that carries no work', async () => {
+test('of every status from 400 to 599, only a 400 or 413 refuses a call before any work, as in the other workers', async () => {
+  const refusal = JSON.stringify({ error: { code: 'context_length_exceeded', message: 'maximum context length is 131072 tokens' } });
+  const before = [];
+  for (let status = 400; status <= 599; status += 1) {
+    const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(refusal, { status, headers: { 'content-type': 'application/json' } }) });
+    await (await observer.fetch('http://127.0.0.1/provider')).text();
+    await observer.settled();
+    if (observer.refusedBeforeAnyWork()) before.push(status);
+  }
+  assert.deepEqual(before, [400, 413]);
+});
+
+test('a call is refused before any work only by an HTTP 400 or 413 to its one request in a JSON body that carries no work', async () => {
   const json = { 'content-type': 'application/json' };
   const refusal = JSON.stringify({ error: { code: 'context_length_exceeded' } });
   for (const [body, status, headers, before] of [
     [refusal, 400, json, true],
     [refusal, 413, { 'content-type': 'Application/JSON' }, true],
     // Read whatever its type says, as the SDKs read it.
-    [refusal, 422, { 'content-type': 'text/plain' }, true],
+    [refusal, 400, { 'content-type': 'text/plain' }, true],
     [JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: 0, completion_tokens: 0 }, choices: [] }), 400, json, true],
     // Work anywhere in the body, as the JavaScript worker's twin looks for it: usage beside or inside its error or under
     // a detail of it, under usage_metadata or usageMetadata, or any of an answer; and a body nested past 64 levels. An
@@ -141,7 +153,9 @@ test('a call is refused before any work only by an HTTP 400, 413 or 422 to its o
     [JSON.stringify({ error: { code: 'context_length_exceeded', message: '漢'.repeat(21_000) } }), 400, json, true],
     [refusal, 400, { 'content-type': 'text/event-stream' }, false],
     [refusal, 413, { 'content-type': 'Text/Event-Stream; charset=utf-8' }, false],
-    // Another status, and a stream that answered 200 whatever came inside it.
+    // Another status (a 422 as in the other workers: owner 2026-10-25), and a stream that answered 200 whatever came
+    // inside it.
+    [refusal, 422, json, false],
     [refusal, 429, json, false],
     [`data: ${refusal}\n\n`, 200, { 'content-type': 'text/event-stream' }, false],
   ]) {

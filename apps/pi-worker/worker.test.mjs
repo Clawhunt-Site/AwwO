@@ -650,6 +650,8 @@ test('a size refusal is told by the provider\'s own words, never beside work any
     // Past 64 KiB of bytes, if not of characters; and JSON typed a stream.
     [{ status: 400, body: JSON.stringify({ error: { message: `${TOO_LONG} ${'漢'.repeat(30_000)}` } }) }, 'MODEL_ERROR'],
     [{ status: 400, headers: { 'content-type': 'text/event-stream' }, body: JSON.stringify({ error: { message: TOO_LONG, code: 'context_length_exceeded' } }) }, 'MODEL_ERROR'],
+    // A 422 is another refusal whatever its words, as in the other workers (owner 2026-10-25).
+    [{ status: 422, body: JSON.stringify({ error: { message: TOO_LONG, code: 'context_length_exceeded' } }) }, 'MODEL_ERROR'],
   ]) {
     const { last, events, requests } = await end(answer);
     assert.deepEqual([last.type, last.code], ['failed', code], answer.body.slice(0, 120));

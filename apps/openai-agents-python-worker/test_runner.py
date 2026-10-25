@@ -297,6 +297,8 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
             (400, "Text/Event-Stream", {"error": {"message": too_long, "code": "context_length_exceeded"}}, "MODEL_REQUEST_REJECTED"),
             (400, "application/json", {"error": {"message": f"{too_long} {'漢' * 30_000}"}}, "MODEL_REQUEST_REJECTED"),
             (400, "application/json", '{"error":{"code":"context_length_exceeded"},"usage":{"prompt_tokens":NaN}}', "MODEL_REQUEST_REJECTED"),
+            # A 422 is another refusal whatever its words, as in the other workers (owner 2026-10-25).
+            (422, "application/json", {"error": {"message": too_long, "code": "context_length_exceeded"}}, "MODEL_REQUEST_REJECTED"),
         ]:
             with self.subTest(status=status, body=str(body)[:100]):
                 self.mode, self.reply = "reply", (status, content_type, body if isinstance(body, str) else json.dumps(body, ensure_ascii=False))
