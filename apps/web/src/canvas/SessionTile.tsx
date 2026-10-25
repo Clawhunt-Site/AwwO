@@ -487,6 +487,16 @@ export const SessionTile = memo(function SessionTile({
   const inputToggleRef = useRef<HTMLButtonElement>(null);
   const sessionInputRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
+  // The other parts of an opened node that unmount the button closing them, which would take the keyboard's focus to
+  // the page's body with it, the same loss the inputs drawer's closeInput already answers: the template guide, the
+  // delivery drawer and the sessions list. Each names what closes and the control that opens it again, for focusFrom.
+  const templateGuideRef = useRef<HTMLElement>(null);
+  const templateToggleRef = useRef<HTMLButtonElement>(null);
+  const deliveryDrawerRef = useRef<HTMLElement>(null);
+  const deliverablesToggleRef = useRef<HTMLButtonElement>(null);
+  const sessionsListRef = useRef<HTMLElement>(null);
+  const sessionsToggleRef = useRef<HTMLButtonElement>(null);
+  const sessionsCollapseRef = useRef<HTMLButtonElement>(null);
   const [deliverablesEditorOpen, setDeliverablesEditorOpen] = useState(false);
   // Each press of the template guide's 编辑 opens the editor, also after the reader collapsed it.
   const [deliverablesEditorRequest, setDeliverablesEditorRequest] = useState(0);
@@ -832,6 +842,28 @@ export const SessionTile = memo(function SessionTile({
   // An opened node's chat column too short to read in draws its message box and task card compact.
   const chatRef = useRef<HTMLDivElement>(null);
   const shortColumn = useShortColumn(chatRef, expanded);
+  /**
+   * Where the keyboard's focus goes when a part of an opened node closes from its own button, which unmounts that
+   * button. Tried in order until one takes it: the controls the caller names first (the control that opens the part
+   * again, and whatever else reopens it), the conversation's message box, the conversation's other enabled controls,
+   * and the node's menu button. Anything inside `closing` is skipped, since it goes with the part — the template guide
+   * sits inside the conversation panel, so without that the focus could land on what is about to unmount.
+   *
+   * A control that is not drawn takes no focus (the conversation gives way to the opened inputs, awwo-node.css), which
+   * is why each candidate is tried rather than the first one trusted. Nothing scrolls for it: the canvas root clips, so
+   * a scroll would shift the canvas under the reader.
+   */
+  const focusFrom = (closing: Element | null, ...first: (HTMLElement | null)[]) => {
+    const panel = chatRef.current?.querySelector('.awwo-node-panel--conversation');
+    const outside = (selector: string) =>
+      Array.from(panel?.querySelectorAll<HTMLElement>(selector) ?? []).filter(element => !closing?.contains(element));
+    for (const candidate of [...first, ...outside('.canvas-composer-input:enabled'),
+      ...outside(':is(button, textarea, select):enabled:not([tabindex="-1"])'), moreRef.current]) {
+      if (!candidate) continue;
+      candidate.focus({ preventScroll: true });
+      if (document.activeElement === candidate) return;
+    }
+  };
   const busy = interactionLocked || active;
   useLayoutEffect(() => { if (formEdit && (!expanded || active || !editing)) setFormEdit(null); }, [formEdit, expanded, active, editing]);
   // A delivery that edit took back keeps the share of the node's width its drawer had (DRAWER_WIDTH) while the edit
@@ -898,6 +930,12 @@ export const SessionTile = memo(function SessionTile({
       setFormEdit({ form: made.form, thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery', base: node });
     }
   };
+  // The drawer's own ✕, which toggleDeliverables alone would close from under the focus. Also reached on a drawer an
+  // edit in progress holds open.
+  const closeDeliverables = () => {
+    if (deliveryDrawerRef.current?.contains(document.activeElement)) focusFrom(deliveryDrawerRef.current, deliverablesToggleRef.current);
+    toggleDeliverables();
+  };
   // What else the deliverables change, made from this render's node: a result published by hand, written alone. Nothing
   // else comes this way: NodeDeliverables sends every change of its form to changeOutputs, which it is given whenever it is
   // given this. The publication ends the edit in progress.
@@ -926,6 +964,33 @@ export const SessionTile = memo(function SessionTile({
       return id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft);
     });
   };
+  // Each of these moves the focus before closing, and only when the part actually holds it: a click that focused
+  // nothing, as Safari leaves it, moves nothing. The guide's 编辑 buttons and a drawer that closes by itself are not
+  // these — nothing of theirs unmounts under the focus.
+  const closeTemplate = () => {
+    if (templateGuideRef.current?.contains(document.activeElement)) focusFrom(templateGuideRef.current, templateToggleRef.current);
+    setTemplateOpen(false);
+  };
+  // The sessions list and the chat heading's 展开 Session 列表 take each other's place, so neither can hand the focus
+  // on before closing: the control to give it to is drawn by the same commit that removes the other. Each notes that
+  // it held the focus, and the layout effect below hands it over once the replacement exists.
+  const sessionsFocusMoves = useRef(false);
+  const collapseSessions = () => {
+    sessionsFocusMoves.current = Boolean(sessionsListRef.current?.contains(document.activeElement));
+    setSessionsOpen(false);
+  };
+  const expandSessions = () => {
+    sessionsFocusMoves.current = document.activeElement === sessionsToggleRef.current;
+    setSessionsOpen(true);
+  };
+  useLayoutEffect(() => {
+    if (!sessionsFocusMoves.current) return;
+    sessionsFocusMoves.current = false;
+    // Only while the focus it took with it is still lost: anything that claimed it meanwhile keeps it.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    if (sessionsOpen) sessionsCollapseRef.current?.focus({ preventScroll: true });
+    else focusFrom(null, sessionsToggleRef.current);
+  }, [sessionsOpen]);
   const toggleDeliverables = () => {
     if (node.kind !== 'session') return;
     const next = !deliverablesOpen;
@@ -953,16 +1018,7 @@ export const SessionTile = memo(function SessionTile({
   // node's own menu button. Only a focus inside the drawer moves (a click that focused nothing, as in Safari, leaves it
   // where it was), and nothing scrolls for it (the canvas root clips, so a scroll would shift it).
   const closeInput = () => {
-    if (inputDrawerRef.current?.contains(document.activeElement)) {
-      const below = chatRef.current?.querySelector('.awwo-node-panel--conversation');
-      const targets = [inputToggleRef.current, sessionInputRef.current, below?.querySelector<HTMLElement>('.canvas-composer-input:enabled'),
-        ...(below?.querySelectorAll<HTMLElement>(':is(button, textarea, select):enabled:not([tabindex="-1"])') ?? []), moreRef.current];
-      for (const target of targets) {
-        if (!target) continue;
-        target.focus({ preventScroll: true });
-        if (document.activeElement === target) break;
-      }
-    }
+    if (inputDrawerRef.current?.contains(document.activeElement)) focusFrom(inputDrawerRef.current, inputToggleRef.current, sessionInputRef.current);
     setInputOpen(false); setInputSchemaOpen(false);
   };
   // The opened inputs take the column while no run is going (has-inputs): the replies wait, and a rework note's findings
@@ -1066,7 +1122,7 @@ export const SessionTile = memo(function SessionTile({
           {onStopNode && (run?.state === 'running' || run?.state === 'waiting') ? <button type="button" className="awwo-card-stop" aria-label={t('run.stopNode')} title={t('run.stopNode')}
             onClick={() => onStopNode(nodeId)}><Square size={12} /><span>{t('run.stopNode')}</span></button> : null}
           {onConfigure ? <button type="button" aria-label={t('tile.configure')} title={t('tile.configure')} disabled={busy} onClick={() => onConfigure(nodeId)}><Settings2 size={15} /></button> : null}
-          <button type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
+          <button ref={deliverablesToggleRef} type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
           {onOpenStudio && node.lastOutput ? <button type="button" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={15} /></button> : null}
           {!simple && <NodeViewStylePicker />}
           {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
@@ -1139,8 +1195,8 @@ export const SessionTile = memo(function SessionTile({
             </>
           ) : (
             <div className={`awwo-node-workbench${deliverablesOpen || configurationPanel ? ' has-deliverables' : ''}${caseIntro ? ' is-case-intro' : ''}`}>
-              {expanded && sessionsOpen ? <nav className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>
-                <div className="awwo-session-heading"><span>{t('tile.sessions')}</span><button type="button" aria-label={t('tile.collapseSessions')} title={t('tile.collapseList')} onClick={() => setSessionsOpen(false)}><PanelLeftClose size={14} /></button></div>
+              {expanded && sessionsOpen ? <nav ref={sessionsListRef} className="awwo-session-sidebar" aria-label={t('tile.sessionManagement')}>
+                <div className="awwo-session-heading"><span>{t('tile.sessions')}</span><button ref={sessionsCollapseRef} type="button" aria-label={t('tile.collapseSessions')} title={t('tile.collapseList')} onClick={collapseSessions}><PanelLeftClose size={14} /></button></div>
                 <button className="awwo-session-new" type="button" aria-label={t('tile.newSession')} disabled={readOnly} onClick={() => changeThread()}><Plus size={14} />{t('tile.new')}</button>
                 <div className="awwo-session-list">{getNodeThreads(node).map(thread => <button key={thread.id} type="button" className={thread.id === currentThread?.id ? 'is-active' : ''}
                   aria-label={t('tile.openSession', { title: threadTitle(thread.title, t) })} aria-current={thread.id === currentThread?.id ? 'page' : undefined}
@@ -1151,10 +1207,10 @@ export const SessionTile = memo(function SessionTile({
               </nav> : null}
               <div ref={chatRef} className={`awwo-node-chat${shortColumn ? ' is-short' : ''}${inputsHaveColumn ? ' has-inputs' : ''}`}>
                 {expanded ? <div className="awwo-chat-heading">
-                  {!sessionsOpen && !simple ? <button type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={() => setSessionsOpen(true)}><PanelLeftOpen size={15} /></button> : null}
+                  {!sessionsOpen && !simple ? <button ref={sessionsToggleRef} type="button" aria-label={t('tile.expandSessions')} title={t('tile.sessions')} onClick={expandSessions}><PanelLeftOpen size={15} /></button> : null}
                   <span title={threadTitle(currentThread?.title, t)}>{threadTitle(currentThread?.title, t)}</span>
                   {freeConversation && onRunNode ? <button type="button" className="awwo-chat-task-action" disabled={viewOnly || busy || interactionLocked} onClick={() => onRunNode(nodeId)}><Play size={13} />{t('conversation.executeTask')}</button> : null}
-                  {template && !simple ? <button className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
+                  {template && !simple ? <button ref={templateToggleRef} className="awwo-template-toggle" type="button" aria-label={t('tile.templateGuide')} aria-expanded={templateOpen} onClick={() => { setTemplateOpen(!templateOpen); setInputOpen(false); }}><BookOpen size={13} />{t('tile.template')}</button> : null}
                   {/* What the node receives: always in developer mode, where its fields are added, and in the simple view once it has inputs to fill. */}
                   {/* What closed inputs come to hold, said to a screen reader (their chips' own alerts are hidden with them): a
                       failed upload or a file waiting for its 加入, whatever else still uploads. Mounted with the node, so a change
@@ -1178,8 +1234,8 @@ export const SessionTile = memo(function SessionTile({
                 </section> : null}
                 <div className={`awwo-node-panel awwo-node-panel--conversation${!emptyConversation && !(expanded && templateOpen && template) ? ' has-turns' : ''}`}>
                   {expanded && node.kind === 'session' ? <ReworkFindingsNote node={node} waiting={shortColumn && inputsHaveColumn} column={inputsHaveColumn ? chatRef : undefined} /> : null}
-                  {expanded && templateOpen && template ? <section className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
-                    <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={() => setTemplateOpen(false)}><X size={14} /></button></header>
+                  {expanded && templateOpen && template ? <section ref={templateGuideRef} className="awwo-node-template-guide" aria-label={t('tile.templateGuide')}>
+                    <header><div><strong>{template.title}</strong><span>{t('tile.templateReference')}</span></div><button type="button" aria-label={t('tile.collapseTemplate')} onClick={closeTemplate}><X size={14} /></button></header>
                     <AgentTemplateDetails template={template} contract={contract}
                       onEditInputs={readOnly ? undefined : editInputStructure} onEditOutputs={readOnly ? undefined : editDeliverableForm} />
                   </section> : emptyConversation ?
@@ -1203,8 +1259,8 @@ export const SessionTile = memo(function SessionTile({
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>
               </div>
-              {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode ? updateDeliverables : undefined} onChangeOutputs={onUpdateNode ? changeOutputs : undefined}
+              {expanded && (deliverablesOpen || configurationPanel) ? <section ref={deliveryDrawerRef} className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={closeDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode ? updateDeliverables : undefined} onChangeOutputs={onUpdateNode ? changeOutputs : undefined}
                   editorOpen={deliverablesEditorOpen}
                   editorRequest={deliverablesEditorRequest}
                   canvasEntries={canvasEntries}

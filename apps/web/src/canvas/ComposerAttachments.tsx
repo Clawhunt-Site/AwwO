@@ -2,7 +2,7 @@
 // one chip per file. The draft text stays the single source of truth: an uploaded file becomes a line at its end
 // (attachments.ts), so whatever already keeps, recovers or sends a draft keeps, recovers and sends its files too.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { AlertCircle, Box, File as FileIcon, FileArchive, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, Plus, X } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import {
@@ -183,6 +183,7 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
     add(files);
   }, [enabled, add]);
   const dropProps = {
+    'data-attachment-box': '',
     onDragEnter: (event: DragEvent<HTMLElement>) => { if (enabled && carriesFiles(event.dataTransfer)) { event.preventDefault(); setDragging(true); } },
     onDragOver: (event: DragEvent<HTMLElement>) => { if (enabled && carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } },
     onDragLeave: (event: DragEvent<HTMLElement>) => {
@@ -231,6 +232,47 @@ export function AttachButton({ state, className }: { state: ComposerAttachmentsS
 
 /** One chip per attached file, uploads in flight and refusals included. Read-only in a transcript. A file that waits to
  *  be added (deferWhileDisabled) has a 加入 of its own, pressable while `canAdd`. */
+/** A box's controls that can take the focus once neither chip beside a removed one is left, in the box's order. */
+const BOX_CONTROLS = ':is(button, textarea, select, a[href], input:not([type="file"])):not([tabindex="-1"])';
+
+/** On a chip's ✕: a pointer press leaves the focus where it was, as Safari does, instead of focusing the ✕ (Chrome
+ *  does), which would have the press hand the focus on to another file's ✕, for a stray Enter or Space to remove that
+ *  file — and, for an upload made in that box, delete it. */
+const keepFocus = (event: MouseEvent<HTMLElement>) => event.preventDefault();
+
+/**
+ * A chip's own ✕ takes its chip away, and with the focus on the ✕ the keyboard's focus would fall to the page's body.
+ * Pressed with the focus in its chip (from the keyboard: a click focuses nothing, see keepFocus), the ✕ hands the focus
+ * on in the render its press draws, once the chip has gone — the box's owner may refuse the change, and then the chip
+ * and the focus both stay. It goes to the chip that took its place, else to the one before it (that chip's ✕, else its
+ * link), else to the box's text field, else to the box's first control that takes it. Nothing scrolls for it: the canvas
+ * root clips, so a scroll would shift the canvas under the reader.
+ */
+function useChipFocusHandOff() {
+  const pressed = useRef<{ chip: Element; next: Element | null; previous: Element | null; box: Element | null } | null>(null);
+  // Every press draws a render, so a press whose change is refused is let go at once and moves nothing later.
+  const [, setPresses] = useState(0);
+  useLayoutEffect(() => {
+    const press = pressed.current;
+    if (!press) return;
+    pressed.current = null;
+    if (press.chip.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+    // Tried in order until one takes the focus: a control that went too, is disabled or is not drawn takes none.
+    const controls = (chip: Element | null) => [chip?.querySelector<HTMLElement>('.awwo-attachment-remove'), chip?.querySelector<HTMLElement>('a.awwo-attachment-name')];
+    for (const candidate of [...controls(press.next), ...controls(press.previous), press.box?.querySelector<HTMLElement>('textarea'),
+      ...Array.from(press.box?.querySelectorAll<HTMLElement>(BOX_CONTROLS) ?? [])]) {
+      candidate?.focus({ preventScroll: true });
+      if (candidate && document.activeElement === candidate) return;
+    }
+  });
+  return useCallback((event: MouseEvent<HTMLElement>) => {
+    const chip = event.currentTarget.closest('li');
+    if (!chip?.contains(document.activeElement)) return;
+    pressed.current = { chip, next: chip.nextElementSibling, previous: chip.previousElementSibling, box: chip.closest('[data-attachment-box]') };
+    setPresses(count => count + 1);
+  }, []);
+}
+
 export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss, onAdd, canAdd = false, disabled = false, compact = false }: {
   attachments: ReadonlyArray<ComposerAttachment>;
   uploads?: ReadonlyArray<PendingUpload>;
@@ -249,6 +291,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
   // nothing is handed on later.
   const list = useRef<HTMLUListElement>(null);
   const focusAdded = useRef<string | null>(null);
+  const handOff = useChipFocusHandOff();
   useLayoutEffect(() => {
     const id = focusAdded.current;
     if (!id) return;
@@ -269,7 +312,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
           : <span className="awwo-attachment-name" title={item.name}>{item.name}</span>}
         <span className="sr-only">{t(`attach.kind.${item.kind}`)}</span>
         {onRemove ? <button type="button" className="awwo-attachment-remove" disabled={disabled} aria-label={t('attach.remove', { name: item.name })}
-          onClick={() => onRemove(item.id)}><X size={12} aria-hidden="true" /></button> : null}
+          onMouseDown={keepFocus} onClick={event => { handOff(event); onRemove(item.id); }}><X size={12} aria-hidden="true" /></button> : null}
       </li>;
     })}
     {uploads.map(upload => {
@@ -285,7 +328,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
           aria-describedby={noteId} title={canAdd ? t('attach.addReadyNote') : undefined}
           onClick={event => { if (event.currentTarget === document.activeElement) focusAdded.current = upload.ready!.id; onAdd(upload.key); }}>{t('attach.addReadyShort')}</button> : null}
         {onDismiss ? <button type="button" className="awwo-attachment-remove" aria-label={t(upload.error ? 'attach.dismiss' : upload.ready ? 'attach.remove' : 'attach.cancel', { name: upload.name })}
-          onClick={() => onDismiss(upload.key)}><X size={12} aria-hidden="true" /></button> : null}
+          onMouseDown={keepFocus} onClick={event => { handOff(event); onDismiss(upload.key); }}><X size={12} aria-hidden="true" /></button> : null}
       </li>;
     })}
   </ul>
