@@ -202,11 +202,11 @@ function fakeConverse(turn: (input: any) => AsyncIterable<Record<string, unknown
 // The Pi worker's managed-execution Bedrock call (pi-worker/bedrock-call.mjs), made here in-process with a fake SDK
 // rather than in its child; the child itself is tested in pi-worker/bedrock-call.test.mjs.
 async function inProcessCall(sdk: unknown, seen: any[] = []) {
-  const [{ createBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
+  const [{ childBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
   return async (model: any, body: any) => {
     seen.push(model);
     const answer = await bedrockCall({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body) },
-      { load: async () => ({ createBedrockFetch, sdk }) });
+      { load: async () => ({ childBedrockFetch, sdk }) });
     if (!answer.ok) throw Object.assign(new Error('The Bedrock call failed'), { reason: answer.reason });
     return answer.raw;
   };
