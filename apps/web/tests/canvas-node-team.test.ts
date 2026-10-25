@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_BACKUP_KEY, CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, sanitizeDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { createNodeTeam, followNodeModel, followNodeRuntime, inheritNodeModel, inheritingRuntime, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
+import { createNodeTeam, everyMemberInherits, followNodeModel, followNodeRuntime, inheritNodeModel, inheritingRuntime, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 function node(): SessionNode {
@@ -199,5 +199,6 @@ describe('the node model reaches its team', () => {
     const team = createNodeTeam({ title: 'Plan', persona: '', model: '', runtime: '' });
     const own = { ...team, members: [{ ...team.members[0], model: 'agents-model' }, team.members[1]] };
     expect(nodeTeamModelOverrides({ runtime: '', model: '', team: own }).map(item => item.index)).toEqual([0]);
+    expect([everyMemberInherits(team), everyMemberInherits(own)]).toEqual([true, false]);
   });
 });

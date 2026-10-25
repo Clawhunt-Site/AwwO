@@ -12,7 +12,7 @@ import type { UiLocale } from '../locale';
 import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
 import { SANDBOX_RUNTIME, automaticEntry } from './nodeRuntime';
-import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, newTeamRuntime, validateNodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
+import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, inheritingRuntime, newTeamRuntime, nodeTeamRuntimeLabel, validateNodeTeam, type NodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
@@ -693,6 +693,26 @@ export function sharedRequirements(doc: CanvasDocument): Map<string, string> {
   return table;
 }
 const REQUIREMENT_REF = /^@R\d+$/;
+/** What a plan's team for `node` should be told about, against the team the node had before the plan (`previous`): rounds
+ *  cut to fit one run's calls; members with a model of their own who left; and where the team runs, for a member
+ *  without a model of its own inherits the node's only on the node's runtime as the API resolves it
+ *  (runtime_workers.go resolveTeam), and one elsewhere gets that runtime's default model. */
+function teamNotes(node: SessionNode, team: NodeTeam, previous: NodeTeam | undefined, asked: number, adjust: Adjust): void {
+  const title = titleOf(node);
+  if (team.maxRounds < asked) adjust(`「${title}」的 ${team.members.length} 人团队按 ${asked} 轮要超过一次运行最多 ${NODE_TEAM_MAX_CALLS} 次模型调用，已改为 ${team.maxRounds} 轮`,
+    `The team of ${team.members.length} on “${title}” would need more than the ${NODE_TEAM_MAX_CALLS} model calls one run may make in ${asked} rounds, so it has ${team.maxRounds}`);
+  // Members the user put on a model of their own who are not in the team: their choice goes with them.
+  const dropped = (previous?.members ?? []).filter(member => member.model && !team.members.some(kept => kept.id === member.id));
+  if (dropped.length) adjust(`「${title}」换了团队成员：原来单独选了模型的${dropped.map(member => `「${member.name}」`).join('、')}不在新团队里`,
+    `The team of “${title}” changed: ${dropped.map(member => `“${member.name}”`).join(', ')}, with a model of ${dropped.length === 1 ? 'its' : 'their'} own, ${dropped.length === 1 ? 'is' : 'are'} not in it`);
+  const where = nodeTeamRuntimeLabel(team.runtime);
+  const apart = team.members.filter(member => !member.model && (member.runtime || team.runtime) !== inheritingRuntime(node));
+  if (apart.length) adjust(`「${title}」的团队仍在 ${where} 上运行（有成员单独设置了执行框架、模型或工具）：${apart.map(member => `「${member.name}」`).join('、')}没有单独设置模型，使用所在执行框架的默认模型，不继承节点的模型`,
+    `The team of “${title}” stays on ${where} (a member has a runtime, a model or tools of its own): ${apart.map(member => `“${member.name}”`).join(', ')} ${apart.length === 1 ? 'has' : 'have'} no model of ${apart.length === 1 ? 'its' : 'their'} own and ${apart.length === 1 ? 'uses' : 'use'} that runtime’s default model, not the node’s`);
+  else if (previous && previous.runtime !== team.runtime) adjust(`「${title}」的团队改在节点所在的 ${where} 上运行，成员继承节点的模型`,
+    `The team of “${title}” now runs on ${where}, where the node runs, and its members inherit the node’s model`);
+}
+
 /** The model a set_model may name for the workspace's default: the node then runs the server's default model. */
 export const DEFAULT_MODEL_REFERENCE = 'default';
 
@@ -765,8 +785,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   // Each node's team before this plan, and the nodes this plan gave a team (set_team).
   const originalTeams = new Map(doc.nodes.flatMap(node => node.kind === 'session' && node.team ? [[node.id, node.team] as const] : []));
   const teamedHere = new Set<string>();
-  // The members a note already said left their team with a model of their own, so a second set_team does not repeat it.
-  const droppedSaid = new Set<string>();
+  // The rounds each node's last set_team asked for, against which its team is said to have been cut.
+  const teamAsked = new Map<string, number>();
   const find = (reference: string): CanvasNode | undefined => draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
   const resolve = (reference: string): CanvasNode => {
     const node = find(reference);
@@ -1018,14 +1038,8 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           adjust(`没有给「${title}」配团队：这个团队配置无效`, `Did not give “${title}” a team: the team is not valid`);
           break;
         }
-        if (team.maxRounds < shape.maxRounds) adjust(`「${title}」的 ${team.members.length} 人团队按 ${shape.maxRounds} 轮要超过一次运行最多 ${NODE_TEAM_MAX_CALLS} 次模型调用，已改为 ${team.maxRounds} 轮`,
-          `The team of ${team.members.length} on “${title}” would need more than the ${NODE_TEAM_MAX_CALLS} model calls one run may make in ${shape.maxRounds} rounds, so it has ${team.maxRounds}`);
-        // Members the user put on a model of their own who are not in the new team: their choice goes with them.
-        const dropped = (previous?.members ?? []).filter(member => member.model && !team.members.some(kept => kept.id === member.id)
-          && !droppedSaid.has(`${node.id}\n${member.id}`));
-        for (const member of dropped) droppedSaid.add(`${node.id}\n${member.id}`);
-        if (dropped.length) adjust(`「${title}」换了团队成员：原来单独选了模型的${dropped.map(member => `「${member.name}」`).join('、')}不在新团队里`,
-          `The team of “${title}” changed: ${dropped.map(member => `“${member.name}”`).join(', ')}, with a model of ${dropped.length === 1 ? 'its' : 'their'} own, ${dropped.length === 1 ? 'is' : 'are'} not in it`);
+        // What the team is like is said once the plan is applied, of the team the node ends with (teamNotes).
+        teamAsked.set(node.id, shape.maxRounds);
         node.team = team;
         teamedHere.add(node.id);
         break;
@@ -1139,6 +1153,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
       continue;
     }
     connectPlanned(draft, from, to, op, locale, adjust, copied);
+  }
+  // A team the plan gave a node is described as it ends: a later set_team on the same node replaces what an earlier one
+  // would have said, and a node the plan removes says nothing.
+  for (const id of teamedHere) {
+    const node = draft.nodes.find(item => item.id === id);
+    if (node?.kind === 'session' && node.team) teamNotes(node, node.team, originalTeams.get(id), teamAsked.get(id) ?? node.team.maxRounds, adjust);
   }
   checkGraph(draft);
   checkExecution(draft);

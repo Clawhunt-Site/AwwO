@@ -9,7 +9,7 @@
 // where AwwO runs every node (nodeRuntime.ts).
 import type { CanvasDocument } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
-import { NODE_TEAM_RUNTIMES, type NodeTeamRuntime } from './nodeTeam';
+import { NODE_TEAM_RUNTIMES, everyMemberInherits, type NodeTeamRuntime } from './nodeTeam';
 import { automaticEntry } from './nodeRuntime';
 import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 
@@ -57,7 +57,7 @@ export function withAssistantModel(doc: CanvasDocument, addedNodeIds: ReadonlyAr
     const team = node.team;
     const runtime = NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime) ? entry.runtime as NodeTeamRuntime : undefined;
     // A team goes only where it can follow its node: never split from it by a runtime that runs no team.
-    if (team && (!runtime || team.members.some(member => member.runtime || member.model))) return node;
+    if (team && (!runtime || !everyMemberInherits(team))) return node;
     changed = true;
     return { ...node, runtime: entry.runtime, model: entry.model, effort: entry.effort ?? '', ...(team && runtime ? { team: { ...team, runtime } } : {}) };
   });

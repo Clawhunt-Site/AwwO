@@ -46,9 +46,12 @@ describe('node team templates', () => {
     for (const runtime of ['', 'pi', 'openai-agents']) {
       expect(createNodeTeamFromTemplate(template, { runtime }, 'en').runtime).toBe(createNodeTeam({ title: '', persona: '', model: '', runtime }).runtime);
     }
-    // A replaced team keeps the runtime it had, which the user chose.
+    // A replaced team goes where its node runs too, unless a member it keeps is set up its own way (sub-agent review
+    // 2026-10-25: a team left on Pi by the old default gave every new member Pi's default model, not the node's).
     const before = createNodeTeamFromTemplate(template, { runtime: 'pi' }, 'en');
-    expect(createNodeTeamFromTemplate(nodeTeamTemplate('research-panel')!, { runtime: '' }, 'en', before).runtime).toBe('pi');
+    expect(createNodeTeamFromTemplate(nodeTeamTemplate('research-panel')!, { runtime: '' }, 'en', before).runtime).toBe('openai-agents');
+    const own = { ...before, members: [{ ...before.members[0], model: 'pi-model' }, before.members[1]] };
+    expect(createNodeTeamFromTemplate(template, { runtime: '' }, 'en', own).runtime).toBe('pi');
   });
 
   it('gives every planned call its time one after another, as members also queue for the workspace’s free slots', () => {
@@ -94,13 +97,31 @@ describe('replacing a node team', () => {
     expect(team.members[1]).toMatchObject({ model: '', runtime: '' });
   });
 
-  it('keeps the team runtime and limits, raising a limit only where the new team needs more', () => {
+  it('keeps the team limits, raising one only where the new team needs more, and its runtime only for a member it keeps', () => {
     const before = previous();
-    const kept = buildNodeTeam({ mode: 'review', maxRounds: 2, members: [{ name: 'A', role: 'r', instructions: '' }, { name: 'B', role: 'r', instructions: '' }] }, { runtime: 'pi' }, before);
+    const fresh = buildNodeTeam({ mode: 'review', maxRounds: 2, members: [{ name: 'A', role: 'r', instructions: '' }, { name: 'B', role: 'r', instructions: '' }] }, { runtime: 'pi' }, before);
+    expect(fresh).toMatchObject({ runtime: 'pi', maxTurns: 20, timeoutSeconds: 900 });
+    // The kept Writer has a model and a tool of OpenAI Agents', so the team stays there.
+    const kept = buildNodeTeam({ mode: 'review', maxRounds: 2, members: [{ name: 'Writer', role: 'r', instructions: '' }, { name: 'B', role: 'r', instructions: '' }] }, { runtime: 'pi' }, before);
     expect(kept).toMatchObject({ runtime: 'openai-agents', maxTurns: 20, timeoutSeconds: 900 });
+    expect(validateNodeTeam(kept)).toEqual([]);
     const raised = buildNodeTeam({ mode: 'debate', maxRounds: 8, members: Array.from({ length: 8 }, (_, index) => ({ name: `M${index}`, role: 'r', instructions: '' })) }, { runtime: 'pi' }, before);
     expect(raised).toMatchObject({ maxRounds: 7, maxTurns: 57, timeoutSeconds: 1800 });
     expect(validateNodeTeam(raised)).toEqual([]);
+  });
+
+  // Sub-agent review 2026-10-25: a team made in one language lost its members' settings when the template was applied
+  // in the other, its names no longer matching.
+  it('keeps a member’s settings when the template is applied in the other language, under the new name', () => {
+    for (const template of nodeTeamTemplates()) expect(template.zh.members.length).toBe(template.en.members.length);
+    const template = nodeTeamTemplate('draft-review')!;
+    const zh = createNodeTeamFromTemplate(template, { runtime: 'openai-agents' }, 'zh');
+    const own = { ...zh, members: [{ ...zh.members[0], model: 'own-model' }, zh.members[1]] };
+    const en = createNodeTeamFromTemplate(template, { runtime: 'openai-agents' }, 'en', own);
+    expect(en.members.map(member => [member.id, member.name, member.model])).toEqual([[zh.members[0].id, 'Writer', 'own-model'], [zh.members[1].id, 'Reviewer', '']]);
+    // A plan's own members match by their names alone.
+    const written = buildNodeTeam({ mode: 'sequential', maxRounds: 2, members: [{ name: 'Writer', role: 'r', instructions: '' }] }, { runtime: 'openai-agents' }, own);
+    expect(written.members[0].id).not.toBe(zh.members[0].id);
   });
 
   it('matches a member by its trimmed name, as a plan writes it back', () => {

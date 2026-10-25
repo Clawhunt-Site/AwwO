@@ -4,7 +4,7 @@ import { buildPlanningContext, fitPlanningContext, utf8Bytes } from '../src/canv
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { createNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
-import { NODE_TEAM_TEMPLATE_IDS, nodeTeamTemplate } from '../src/canvas/nodeTeamTemplates';
+import { NODE_TEAM_TEMPLATE_IDS, createNodeTeamFromTemplate, nodeTeamTemplate } from '../src/canvas/nodeTeamTemplates';
 import { describePlanChanges } from '../src/canvas/planChanges';
 import { canvasText, type CanvasTranslate } from '../src/canvas/i18n';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
@@ -289,6 +289,47 @@ describe('applying set_team', () => {
     const refused = apply(doc(existing), copied);
     expect(teamOf(refused.doc)).toEqual(existing.team);
     expect(refused.adjustments).toEqual(['没有改动「撰写」的「协作团队」：新的内容抄了只显示了开头的文字']);
+  });
+
+  // Sub-agent review 2026-10-25: a team the old default left on Pi beside an OpenAI node gave every new member Pi's
+  // default model, though the protocol tells the planner new members inherit the node's.
+  it('moves a replaced team where its node runs, or says why it stays elsewhere', () => {
+    const node = agent('writer', { runtime: 'openai-agents', model: 'own' });
+    node.team = { ...createNodeTeam(node), runtime: 'pi' };
+    const moved = apply(doc(node), plan(template()));
+    expect(teamOf(moved.doc)?.runtime).toBe('openai-agents');
+    expect(moved.adjustments).toEqual(['「撰写」的团队改在节点所在的 OpenAI Agents 上运行，成员继承节点的模型']);
+    const anchored = { ...node, team: { ...node.team, members: [{ ...node.team.members[0], name: '撰写者', model: 'pi-model' }, node.team.members[1]] } };
+    const stays = apply(doc(anchored), plan(template()));
+    expect(teamOf(stays.doc)?.runtime).toBe('pi');
+    // Only the member left on Pi without a model of its own misses the node's model (Codex review 2026-10-25).
+    expect(stays.adjustments).toEqual(['「撰写」的团队仍在 Pi 上运行（有成员单独设置了执行框架、模型或工具）：「审核者」没有单独设置模型，使用所在执行框架的默认模型，不继承节点的模型']);
+    const own = { ...node, team: { ...node.team, members: [{ ...node.team.members[0], name: '撰写者', runtime: 'openai-agents' as const },
+      { ...node.team.members[1], name: '审核者', model: 'pi-model' }] } };
+    const none = apply(doc(own), plan(template()));
+    expect(teamOf(none.doc)?.runtime).toBe('pi');
+    expect(none.adjustments).toEqual([]);
+  });
+
+  // Codex review 2026-10-25: a later set_team on a node left the notes an earlier one wrote, though they no longer held.
+  it('describes the team a node ends with, not the one an earlier step wrote', () => {
+    const node = agent('writer', { runtime: 'openai-agents', model: 'own' });
+    const team = createNodeTeam(node);
+    node.team = { ...team, runtime: 'pi', members: [{ ...team.members[0], name: 'A', model: 'a' }, { ...team.members[1], name: 'B', model: 'b' }] };
+    const applied = apply(doc(node), plan(template(), custom([member('A'), member('B')])));
+    expect(teamOf(applied.doc)?.runtime).toBe('pi');
+    expect(teamOf(applied.doc)!.members.map(item => item.model)).toEqual(['a', 'b']);
+    expect(applied.adjustments).toEqual([]);
+    // A node the plan removes again says nothing of its team.
+    expect(apply(doc(node), plan(template(), { type: 'remove_node', nodeId: 'writer' })).adjustments).toEqual([]);
+  });
+
+  it('keeps the settings of a member the template names in the other language', () => {
+    const existing = agent(); const zhTeam = createNodeTeamFromTemplate(nodeTeamTemplate('draft-review')!, existing, 'zh');
+    existing.team = { ...zhTeam, members: [{ ...zhTeam.members[0], model: 'model-b' }, zhTeam.members[1]] };
+    const applied = apply(doc(existing), plan(template()), true, 'en');
+    expect(teamOf(applied.doc)!.members.map(item => [item.id, item.name, item.model])).toEqual([[zhTeam.members[0].id, 'Writer', 'model-b'], [zhTeam.members[1].id, 'Reviewer', '']]);
+    expect(applied.adjustments).toEqual([]);
   });
 });
 

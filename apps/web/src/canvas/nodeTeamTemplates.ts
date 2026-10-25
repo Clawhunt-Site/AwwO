@@ -1,4 +1,4 @@
-import { NODE_TEAM_LIMITS, createNodeTeamMember, newTeamRuntime, nodeTeamTurnEstimate, type NodeTeam, type NodeTeamMode } from './nodeTeam';
+import { NODE_TEAM_LIMITS, createNodeTeamMember, everyMemberInherits, newTeamRuntime, nodeTeamTurnEstimate, type NodeTeam, type NodeTeamMode } from './nodeTeam';
 import type { UiLocale } from '../locale';
 
 /** The closed set of team template ids. The plan gate keeps the same list (planner_progress.go planTeamTemplateIDs). */
@@ -10,8 +10,10 @@ export type NodeTeamTemplateId = typeof NODE_TEAM_TEMPLATE_IDS[number];
 export interface NodeTeamMemberBrief { name: string; role: string; instructions: string }
 interface NodeTeamTemplateText { title: string; summary: string; members: readonly NodeTeamMemberBrief[] }
 export interface NodeTeamTemplate { id: NodeTeamTemplateId; mode: NodeTeamMode; maxRounds: number; zh: NodeTeamTemplateText; en: NodeTeamTemplateText }
-/** A team as a template or a plan describes it, before the node's runtime and the user's member settings join it. */
-export interface NodeTeamShape { mode: NodeTeamMode; maxRounds: number; members: readonly NodeTeamMemberBrief[] }
+/** A team as a template or a plan describes it, before the node's runtime and the user's member settings join it. A
+ *  template's member also answers to its name in the template's other language (`aliases`), so a team made in one
+ *  language keeps its members' settings when the template is applied in the other. */
+export interface NodeTeamShape { mode: NodeTeamMode; maxRounds: number; members: ReadonlyArray<NodeTeamMemberBrief & { aliases?: readonly string[] }> }
 
 const brief = (name: string, role: string, does: string, doesNot: string, doneWhen: string, locale: UiLocale): NodeTeamMemberBrief => ({
   name, role, instructions: locale === 'zh' ? `负责：${does}\n不负责：${doesNot}\n完成标准：${doneWhen}` : `Does: ${does}\nDoes not: ${doesNot}\nDone when: ${doneWhen}`,
@@ -91,7 +93,8 @@ export const nodeTeamTemplates = (): readonly NodeTeamTemplate[] => TEMPLATES;
 export const isNodeTeamTemplateId = (value: unknown): value is NodeTeamTemplateId => NODE_TEAM_TEMPLATE_IDS.includes(value as NodeTeamTemplateId);
 export const nodeTeamTemplate = (id: string): NodeTeamTemplate | undefined => TEMPLATES.find(template => template.id === id);
 export const nodeTeamTemplateShape = (template: NodeTeamTemplate, locale: UiLocale): NodeTeamShape =>
-  ({ mode: template.mode, maxRounds: template.maxRounds, members: template[locale].members });
+  ({ mode: template.mode, maxRounds: template.maxRounds, members: template[locale].members.map((member, index) =>
+    ({ ...member, aliases: [template[locale === 'zh' ? 'en' : 'zh'].members[index].name] })) });
 
 /** The most model calls one team run may make (the editor's and the server's bound on maxTurns). */
 export const NODE_TEAM_MAX_CALLS = NODE_TEAM_LIMITS.calls;
@@ -113,24 +116,28 @@ export function nodeTeamFittingRounds(mode: NodeTeamMode, count: number, rounds:
 /** A member's name as two teams are matched by it: as a plan writes it, trimmed. */
 const memberKey = (name: string): string => name.trim();
 
-/** The team `shape` describes, for `node`: a new team runs where its node runs (newTeamRuntime), and its new members
- *  inherit the node's model. A member of `previous` (the node's
- *  current team) under the same name, trimmed, keeps its id and its own settings (model, effort, runtime, context,
+/** The team `shape` describes, for `node`. A member of `previous` (the node's current team) under the same name, trimmed,
+ *  or under one of the shape member's aliases, keeps its id and its own settings (model, effort, runtime, context,
  *  tools), so replacing a team never drops a choice the user made; where `previous` holds a name twice, its first member
- *  answers for it. The team keeps its runtime and its call and time limits, raised where the new team needs more; its
- *  rounds are cut to what NODE_TEAM_MAX_CALLS lets it finish. */
+ *  answers for it, and one matched by an alias takes the shape's name. New members inherit the node's model.
+ *  The team runs where its node runs (newTeamRuntime), so they do. A replaced team stays on its runtime only where a
+ *  member it keeps has a runtime, a model or tools of its own, which another runtime may not run. Its call and time
+ *  limits are raised where the new team needs more, never lowered, and its rounds are cut to what
+ *  NODE_TEAM_MAX_CALLS lets it finish. */
 export function buildNodeTeam(shape: NodeTeamShape, node: { runtime?: string }, previous?: NodeTeam): NodeTeam {
-  const runtime = previous?.runtime ?? newTeamRuntime(node);
   const kept = new Map<string, NodeTeam['members'][number]>();
   for (const member of previous?.members ?? []) if (!kept.has(memberKey(member.name))) kept.set(memberKey(member.name), member);
-  const members = shape.members.map(({ name, role, instructions }) => {
-    const own = kept.get(memberKey(name));
-    kept.delete(memberKey(name));
-    return own ? { ...own, role, instructions, tools: [...own.tools] } : createNodeTeamMember({ name, role, instructions });
+  const members = shape.members.map(({ name, role, instructions, aliases = [] }) => {
+    const key = [name, ...aliases].map(memberKey).find(candidate => kept.has(candidate));
+    const own = key === undefined ? undefined : kept.get(key);
+    if (key !== undefined) kept.delete(key);
+    return own ? { ...own, ...(key === memberKey(name) ? {} : { name }), role, instructions, tools: [...own.tools] }
+      : createNodeTeamMember({ name, role, instructions });
   });
-  const team: NodeTeam = { version: 1, mode: shape.mode, runtime, maxRounds: nodeTeamFittingRounds(shape.mode, members.length, shape.maxRounds),
+  const team: NodeTeam = { version: 1, mode: shape.mode, runtime: newTeamRuntime(node), maxRounds: nodeTeamFittingRounds(shape.mode, members.length, shape.maxRounds),
     maxTurns: NODE_TEAM_MAX_CALLS, timeoutSeconds: NODE_TEAM_LIMITS.maxSeconds, members };
   return { ...team,
+    runtime: previous && !everyMemberInherits(team) ? previous.runtime : team.runtime,
     maxTurns: Math.min(NODE_TEAM_MAX_CALLS, Math.max(nodeTeamTurnEstimate(team), members.length, previous?.maxTurns ?? 0)),
     timeoutSeconds: Math.min(NODE_TEAM_LIMITS.maxSeconds, Math.max(nodeTeamTimeoutFor(team), previous?.timeoutSeconds ?? 0)) };
 }

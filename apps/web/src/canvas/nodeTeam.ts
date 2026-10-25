@@ -143,6 +143,9 @@ export function createNodeTeamMember(overrides: Partial<Omit<NodeTeamMember, 'id
 export function newTeamRuntime(node: { runtime?: string }): NodeTeamRuntime {
   return NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : DEFAULT_NODE_RUNTIME;
 }
+/** Every member inherits the node's model, with no runtime, model or tool of its own: nothing of the team then needs the
+ *  runtime it is on, and it may run wherever its node runs. */
+export const everyMemberInherits = (team: NodeTeam): boolean => team.members.every(member => !member.runtime && !member.model && !member.tools.length);
 export function createNodeTeam(node: { title: string; persona: string; model: string; runtime?: string }, locale: 'zh' | 'en' = 'zh'): NodeTeam {
   const zh = locale === 'zh';
   return { version: 1, mode: 'sequential', runtime: newTeamRuntime(node), maxRounds: 2, maxTurns: 8, timeoutSeconds: 300,
@@ -202,6 +205,6 @@ export function followNodeModel(team: NodeTeam, previous: { runtime?: string; mo
 export function followNodeRuntime(team: NodeTeam, previous: { runtime?: string }, next: { runtime?: string }): NodeTeam {
   const runtime = newTeamRuntime(next);
   if (team.runtime !== newTeamRuntime(previous) || team.runtime === runtime || (next.runtime && !NODE_TEAM_RUNTIMES.includes(next.runtime as NodeTeamRuntime))
-    || team.members.some(member => member.runtime || member.model || member.tools.length)) return team;
+    || !everyMemberInherits(team)) return team;
   return { ...team, runtime };
 }

@@ -202,6 +202,13 @@ describe('node team configuration', () => {
     await enable();
     expect(member(1).getByRole('option', { name: '继承节点已绑定模型' })).toHaveValue('');
   });
+  it('says when a replacement moves the team to where its node runs', () => {
+    const initial = { ...session(), runtime: 'openai-agents', model: '' };
+    initial.team = { ...createNodeTeam(initial), runtime: 'pi' };
+    render(<Harness initial={initial} runtimes={['pi', 'openai-agents']} runtimeTools={{ 'openai-agents': [] }} />);
+    fireEvent.change(screen.getByLabelText('协作模板'), { target: { value: 'draft-review' } });
+    expect(screen.getByText('替换后团队改在节点所在的 OpenAI Agents 上运行，成员继承节点的模型。')).toBeInTheDocument();
+  });
   it('does not enable teams when the host lacks Pi', () => {
     render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();
   });
