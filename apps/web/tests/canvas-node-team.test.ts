@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_BACKUP_KEY, CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, sanitizeDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { createNodeTeam, everyMemberInherits, followNodeModel, followNodeRuntime, inheritNodeModel, inheritingRuntime, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
+import { createNodeTeam, everyMemberInherits, followNodeModel, followNodeRuntime, inheritNodeModel, inheritingRuntime, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, paletteRunsTeams, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 function node(): SessionNode {
@@ -200,5 +200,10 @@ describe('the node model reaches its team', () => {
     const own = { ...team, members: [{ ...team.members[0], model: 'agents-model' }, team.members[1]] };
     expect(nodeTeamModelOverrides({ runtime: '', model: '', team: own }).map(item => item.index)).toEqual([0]);
     expect([everyMemberInherits(team), everyMemberInherits(own)]).toEqual([true, false]);
+  });
+  it('offers a plan teams only where a model is ready on a runtime that runs them', () => {
+    expect(paletteRunsTeams([{ runtime: 'pi', available: true }])).toBe(true);
+    expect(paletteRunsTeams([{ runtime: 'openai-agents', available: false }, { runtime: 'sandbox', available: true }])).toBe(false);
+    expect(paletteRunsTeams([])).toBe(false);
   });
 });

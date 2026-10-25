@@ -3,7 +3,7 @@ import { accountURL } from '../saas/PersonalAccount';
 import { canvasFetch } from '../saas/canvasBridge';
 import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
 import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
-import { NODE_TEAM_RUNTIMES, type NodeTeamRuntime } from './nodeTeam';
+import { paletteRunsTeams } from './nodeTeam';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
 import { useLocalEdition } from '../saas/edition';
@@ -3135,7 +3135,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
       // A plan may give a node a team on a hosted canvas whose palette has a model ready on a team runtime: every hosted
       // runtime runs teams (canvasBridge.ts supportsNodeTeams), and the palette already says which are ready.
-      const teams = currentSaaSCanvas() !== null && planModels.some(entry => entry.available && NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime));
+      const teams = currentSaaSCanvas() !== null && paletteRunsTeams(planModels);
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
         { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds, teams,
           models: automaticEntries(planModels).filter(entry => entry.available).map(entry => ({ id: entry.model, name: entry.name || entry.model,

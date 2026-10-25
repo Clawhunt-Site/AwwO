@@ -146,6 +146,10 @@ export function newTeamRuntime(node: { runtime?: string }): NodeTeamRuntime {
 /** Every member inherits the node's model, with no runtime, model or tool of its own: nothing of the team then needs the
  *  runtime it is on, and it may run wherever its node runs. */
 export const everyMemberInherits = (team: NodeTeam): boolean => team.members.every(member => !member.runtime && !member.model && !member.tools.length);
+/** Whether a model palette has a model ready on a runtime that runs teams: a hosted canvas then offers a plan set_team
+ *  (CanvasSurface; every hosted runtime runs teams, canvasBridge.ts supportsNodeTeams). */
+export const paletteRunsTeams = (models: ReadonlyArray<{ runtime: string; available?: boolean }>): boolean =>
+  models.some(entry => entry.available === true && NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime));
 export function createNodeTeam(node: { title: string; persona: string; model: string; runtime?: string }, locale: 'zh' | 'en' = 'zh'): NodeTeam {
   const zh = locale === 'zh';
   return { version: 1, mode: 'sequential', runtime: newTeamRuntime(node), maxRounds: 2, maxTurns: 8, timeoutSeconds: 300,

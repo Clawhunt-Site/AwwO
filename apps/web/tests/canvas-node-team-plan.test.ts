@@ -291,6 +291,15 @@ describe('applying set_team', () => {
     expect(refused.adjustments).toEqual(['没有改动「撰写」的「协作团队」：新的内容抄了只显示了开头的文字']);
   });
 
+  it.each(['name', 'role'] as const)('leaves a team whose member %s copies shortened text', field => {
+    const existing = agent(); existing.team = createNodeTeam(existing);
+    const copied = plan(custom([member('a', { [field]: `开头${condensedMark(500, 'zh')}` }), member('b')]));
+    markPlanContextCondensed(copied, new Map());
+    const refused = apply(doc(existing), copied);
+    expect(teamOf(refused.doc)).toEqual(existing.team);
+    expect(refused.adjustments).toEqual(['没有改动「撰写」的「协作团队」：新的内容抄了只显示了开头的文字']);
+  });
+
   // Sub-agent review 2026-10-25: a team the old default left on Pi beside an OpenAI node gave every new member Pi's
   // default model, though the protocol tells the planner new members inherit the node's.
   it('moves a replaced team where its node runs, or says why it stays elsewhere', () => {
