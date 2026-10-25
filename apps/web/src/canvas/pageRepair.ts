@@ -142,7 +142,9 @@ export function pageRepairMessage(target: PageRepairTarget, report: PageErrorRep
   const field = contract.outputs.find(item => item.id === target.fieldId)!;
   const page = htmlDocumentSource(target.values[target.fieldId]);
   const others = contract.outputs.some(item => item.id !== target.fieldId && Object.hasOwn(target.values, item.id));
-  const sandbox = 'The page runs in a sandbox without storage or network: guard any use of localStorage, sessionStorage or cookies with try/catch.';
+  // The preview gives a page that uses storage a stand-in that lasts while the page is open (PREVIEW_STORAGE_SCRIPT), so
+  // the model is told what it has there rather than asked to guard against what it no longer lacks.
+  const sandbox = 'The page runs in a sandbox with no network access; localStorage, sessionStorage and cookies work there, kept only while the page is open.';
   // A figure that runs but never moves (pageErrors.ts): what AwwO tried and saw, and what moving means in the figure kit.
   const ask = report.kind === 'still' ? [
     `AwwO page repair · field "${field.id}" · still`,

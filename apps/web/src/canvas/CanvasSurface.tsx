@@ -56,7 +56,7 @@ import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
 import { planModelsOf } from './userChosenModels';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
-  readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
+  readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, planSeedRequest, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { assembleInputViews } from './assembleNode';
@@ -2961,6 +2961,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [modelFocusId, setModelFocusId] = useState<string | null>(null);
   const planningRequest = useRef<{ id: string; controller: AbortController; prompt: string } | null>(null);
   const planningSequence = useRef(0);
+  // Every fix request this page wrote, word for word: the nodes a plan adds never take one as their task (planSeedRequest).
+  const writtenFixRequests = useRef(new Set<string>());
   const refreshPlanningRecovery = useCallback(async (signal?: AbortSignal) => {
     if (!canInitialize || !mounted.current || readOnlyRef.current || currentSaaSCanvas() !== cloudScope) return;
     const sequence = ++recoveryCheckSequence.current;
@@ -3146,7 +3148,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null);
+      // The nodes it adds take the request as their first constraint, but never the canvas's own fix request in it: one
+      // this page wrote, or the one it would write for a failure it shows now (a request written before a reload).
+      const failedIds = Object.entries(runs).filter(([, run]) => run.state === 'failed').map(([nodeId]) => nodeId);
+      const seed = planSeedRequest(prompt, [...writtenFixRequests.current,
+        ...(failedIds.length ? [fixRequestText(failedIds), ...failedIds.map(nodeId => fixRequestText([nodeId]))] : [])]);
+      const planned = jev ? applyJevPlan(before, jev, locale, seed) : applyCanvasPlan(before, plan, locale, seed, planMedia, modelChoices, currentSaaSCanvas() !== null);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own):
       // the one its request named, which the planner sized them for (a resume's, chosen before the reader changed it;
       // planComponentModel), against the reader's choice now, which may have changed while it planned; except a node the
@@ -3580,10 +3587,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A step the assistant takes from the conversation, said as the reader's own message so the turn reads as asked.
   const askAssistant = (prompt: string) => { setAssistantOpen(true); void sendPlanningMessage(prompt); };
   // Said as the reader's own message, so it carries what happened, and the request says how to change the canvas.
-  const fixRequest = (ids: ReadonlyArray<string>) => {
+  const fixRequestText = (ids: ReadonlyArray<string>) => {
     const failedNodes = ids.map(titleOf).filter(Boolean);
     return t('assistant.fixRequest', { nodes: failedNodes.map(name => locale === 'zh' ? `「${name}」` : `“${name}”`).join(listSeparator),
       reason: failureReason(t, runs[ids[0]]?.detail, locale) || t('assistant.repairNoReason') });
+  };
+  const fixRequest = (ids: ReadonlyArray<string>) => {
+    const text = fixRequestText(ids);
+    const written = writtenFixRequests.current;
+    written.delete(text); written.add(text);
+    // The newest fifty: one asked about long ago has been planned since.
+    if (written.size > 50) written.delete(written.values().next().value!);
+    return text;
   };
   // A node handed to the assistant from its own view: 'edit' starts the request in the composer (the reader says what
   // to change), 'fix' asks it to make the failed node finish, as the 接下来 card's step does.

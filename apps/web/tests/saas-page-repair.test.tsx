@@ -11,7 +11,7 @@ import * as Tiles from '../src/canvas/SessionTile';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { CANVAS_STORAGE_KEY, createSessionNode, type CanvasDocument, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import { canvasStorage } from '../src/canvas/canvasStorage';
-import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
+import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT, PREVIEW_STORAGE_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
 import { activeThreadId, sessionStoreKey } from '../src/canvas/nodeThreads';
 import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, pageErrorScript, readPageErrorMessage, reportPageError, subscribePageErrors, type PageErrorReport } from '../src/canvas/pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
@@ -56,6 +56,41 @@ describe('the page error reporter', () => {
     expect(page.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, message: "Uncaught SyntaxError: Identifier 'tokens' has already been declared", line: 177, column: 9, stack: '' }]);
   });
 
+  it('leaves the sandbox’s own refusals alone, and what follows one', () => {
+    // 2026-10-25: four of one account's pages were sent back for repair, each a paid run, for the first message alone.
+    const refusals = [
+      "Uncaught SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+      "Uncaught SecurityError: Failed to execute 'pushState' on 'History': A history state object with URL 'about:/coach' cannot be created in a document with origin 'null' and URL 'about:srcdoc'.",
+      "Uncaught SecurityError: Failed to read a named property 'document' from 'Window': Blocked a frame with origin \"null\" from accessing a cross-origin frame.",
+      "Uncaught SecurityError: Failed to execute 'open' on 'IDBFactory': access to the Indexed Database API is denied in this context.",
+    ];
+    for (const message of refusals) {
+      const page = reporter();
+      page.fire('error', new page.Event(message, 412, 22));
+      // What follows a refusal may be its consequence: it is not sent back either.
+      page.fire('error', new page.Event('Uncaught TypeError: Cannot read properties of null (reading \'token\')', 413, 5));
+      expect(page.posted).toEqual([]);
+    }
+    const rejected = reporter();
+    rejected.fire('unhandledrejection', { reason: Object.assign(new Error("Failed to read the 'cookie' property from 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag."), { name: 'SecurityError' }) });
+    expect(rejected.posted).toEqual([]);
+    // Review: a history entry's URL comes first, and a long one pushed the words that tell the refusal past the 600
+    // characters a report keeps; the message is read whole.
+    const long = reporter();
+    long.fire('error', new long.Event(`Uncaught SecurityError: Failed to execute 'pushState' on 'History': A history state object with URL 'about:/${'coach/'.repeat(90)}' cannot be created in a document with origin 'null' and URL 'about:srcdoc'.`, 7, 1));
+    expect(long.posted).toEqual([]);
+  });
+
+  // Review 2026-10-25: matching every SecurityError hid a page's own mistakes, which fail where it is deployed too.
+  it('still reports a SecurityError the page would meet anywhere, and an error that only names one', () => {
+    for (const message of ["Uncaught SecurityError: Failed to execute 'getImageData' on 'CanvasRenderingContext2D': The canvas has been tainted by cross-origin data.",
+      'Uncaught ReferenceError: SecurityError is not defined']) {
+      const page = reporter();
+      page.fire('error', new page.Event(message, 9, 1));
+      expect(page.posted).toEqual([{ type: PAGE_ERROR_MESSAGE, message, line: 9, column: 1, stack: '' }]);
+    }
+  });
+
   it('reports an unhandled rejection, but not a request the preview blocks', () => {
     const page = reporter();
     page.fire('unhandledrejection', { reason: Object.assign(new Error('Failed to fetch'), { name: 'TypeError' }) });
@@ -92,7 +127,7 @@ describe('the page error reporter', () => {
   it('runs ahead of every running page, and in no static one', async () => {
     const running = new DOMParser().parseFromString(htmlPreviewDocument(PAGE, true), 'text/html');
     expect([...running.head.querySelectorAll('script')].map(script => script.textContent)).toEqual([PREVIEW_HOST_SCRIPT]);
-    expect(PREVIEW_HOST_SCRIPT).toBe(PREVIEW_VIEWPORT_SCRIPT + PAGE_ERROR_SCRIPT);
+    expect(PREVIEW_HOST_SCRIPT).toBe(PREVIEW_STORAGE_SCRIPT + PREVIEW_VIEWPORT_SCRIPT + PAGE_ERROR_SCRIPT);
     const still = new DOMParser().parseFromString(htmlPreviewDocument(PAGE, false), 'text/html');
     expect(still.querySelectorAll('script')).toHaveLength(0);
     const live = new DOMParser().parseFromString(await buildLiveDocument(PAGE), 'text/html');
@@ -155,6 +190,18 @@ describe('the figure watch', () => {
       expect(other.inputs()).toEqual({ key: 0, pointer: 0 });
     }
     for (const item of [still, readoutOnly, keyed, touring, spaceOnly, page, canvas]) item.close();
+  });
+
+  // Review 2026-10-25: a figure the sandbox stopped at its start never moves either, and its 'still' report would send it
+  // back for the paid repair the refusal itself is spared.
+  it('reports no figure the sandbox stopped as one that never moves', async () => {
+    const blocked = run(`dispatchEvent(new ErrorEvent('error', { message: "Uncaught SecurityError: Failed to execute 'pushState' on 'History': A history state object with URL 'about:/coach' cannot be created in a document with origin 'null' and URL 'about:srcdoc'.", lineno: 3, colno: 1 }));`);
+    const control = run('');
+    await waitFor(() => expect(control.posted).toHaveLength(1), { timeout: 8_000 });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(blocked.posted).toEqual([]);
+    expect(blocked.inputs()).toEqual({ key: 0, pointer: 0 });
+    blocked.close(); control.close();
   });
 });
 
@@ -285,7 +332,9 @@ describe('the repair request', () => {
     expect(message).toContain(report.message);
     expect(message).toContain('Where it happened, as AwwO ran the page:\n  let tokens = 9;');
     expect(message).toContain(`-----BEGIN PAGE-----\n${PAGE}\n-----END PAGE-----`);
-    expect(message).toContain('guard any use of localStorage');
+    // The preview gives storage a stand-in, so the model hears what it has rather than being asked to guard it.
+    expect(message).toContain('localStorage, sessionStorage and cookies work there, kept only while the page is open');
+    expect(message).not.toContain('guard any use of localStorage');
     expect(message.endsWith('Reply with only the whole fixed HTML document, from <!doctype html> to </html>: no JSON, no Markdown fence, no other words. AwwO puts it back in "交互原理图".')).toBe(true);
     const more = { ...node, contract: { ...node.contract!, outputs: [...node.contract!.outputs, { id: 'notes', label: '说明', type: 'markdown' as const, required: false, value: '' }] } };
     expect(pageRepairMessage({ node: more, output: node.lastOutput!, fieldId: 'figure', values: { figure: PAGE, notes: 'n' } }, report))

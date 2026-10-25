@@ -44,7 +44,7 @@ const stillWatch = (idleMs: number, stepMs: number) => ''
   + "()=>press(' ','Space',32),()=>press('Enter','Enter',13),()=>press('End','End',35),()=>press('Home','Home',36)];"
   + `let last=null,read0='',f0=0,seen=0,next=${idleMs},step=0,timer=0;const t0=Date.now();`
   + "const stop=()=>{clearInterval(timer);if(io)io.disconnect()};"
-  + "timer=setInterval(()=>{try{if(sent||!svg.isConnected||Date.now()-t0>600000)return stop();"
+  + "timer=setInterval(()=>{try{if(sent||blocked||!svg.isConnected||Date.now()-t0>600000)return stop();"
   + "if(!shown||document.visibilityState==='hidden')return;const now=sig();"
   + "if(last===null){last=now;read0=text();f0=frames;return}if(now!==last)return stop();"
   + `seen+=${stepMs};if(seen<next)return;if(step<steps.length){steps[step++]();next=seen+${stepMs};return}stop();`
@@ -64,7 +64,15 @@ const stillWatch = (idleMs: number, stepMs: number) => ''
 /**
  * Runs first in a running preview (with PREVIEW_VIEWPORT_SCRIPT, htmlDeliverable.ts). Reports the first uncaught script
  * error or unhandled rejection, once. What is not the page's own mistake is left alone: a cross-origin "Script error."
- * with no detail, the browser's ResizeObserver loop notice, a request the preview blocks, a missing WebGL context.
+ * with no detail, the browser's ResizeObserver loop notice, a request the preview blocks, a missing WebGL context, and
+ * the sandbox's own refusals: storage or cookies the stand-ins did not cover (PREVIEW_STORAGE_SCRIPT), IndexedDB, a
+ * history entry with a path, a parent frame. Each is a SecurityError with a message only an opaque-origin document gets,
+ * matched by that message alone, read whole before it is shortened for the report (a history entry's URL comes before
+ * the words that tell it, and can be long); a tainted canvas's SecurityError, which fails where the page is deployed too,
+ * is still reported. Sending one back for repair would have the node's model rewrite a working page, at the reader's
+ * cost, for a place it never runs. Nothing after such a refusal is reported either, since what follows may be its
+ * consequence, and a page the sandbox stopped so is not watched for a figure that never moves: it stopped for the same
+ * reason, and that report would send it back all the same.
  *
  * A figure page's own script runs inside AwwO's figure kit (`Anatomy.run`), which catches its error, logs the Error with
  * console.error and shows its `.anatomy-error` card instead of throwing, so no error event follows. The first such card
@@ -81,9 +89,10 @@ const stillWatch = (idleMs: number, stepMs: number) => ''
  * `setAttribute("innerHTML", …)`.
  */
 export function pageErrorScript(idleMs = STILL_IDLE_MS, stepMs = STILL_STEP_MS): string {
-  return "(()=>{let sent=0,caught=null,frames=0,watching=0;"
+  return "(()=>{let sent=0,caught=null,frames=0,watching=0,blocked=0;"
     + "const noise=/^(?:Uncaught )?Script error\\.?$|ResizeObserver loop|Failed to fetch|NetworkError|Load failed|Content Security Policy|WebGL context/i;"
-    + "const send=(m,l,c,s,k,n)=>{m=String(m||'').slice(0,600);if(sent||!m.trim()||noise.test(m))return;sent=1;"
+    + "const sandbox=/sandboxed and lacks the 'allow-same-origin' flag|cannot be created in a document with origin 'null'|Blocked a frame with origin \"null\"|Indexed Database API is denied in this context/i;"
+    + "const send=(m,l,c,s,k,n)=>{m=String(m||'');if(sandbox.test(m))blocked=1;m=m.slice(0,600);if(sent||blocked||!m.trim()||noise.test(m))return;sent=1;"
     + `const d={type:'${PAGE_ERROR_MESSAGE}',message:m,line:+l||0,column:+c||0,stack:String(s||'').slice(0,1500)};if(k){d.kind=k;d.notes=n}`
     + "try{parent.postMessage(d,'*')}catch(e){}};"
     + "addEventListener('error',e=>{if(e instanceof ErrorEvent)send(e.message||(e.error&&e.error.message),e.lineno,e.colno,e.error&&e.error.stack)},true);"
@@ -94,7 +103,7 @@ export function pageErrorScript(idleMs = STILL_IDLE_MS, stepMs = STILL_STEP_MS):
     + stillWatch(idleMs, stepMs)
     + "try{new MutationObserver((r,o)=>{const n=document.querySelector('.anatomy-error');"
     + "if(n){o.disconnect();const x=caught;send(x?(x.name||'Error')+': '+x.message:n.textContent,0,0,x&&x.stack);return}"
-    + "if(!watching&&!sent&&window.Anatomy){const f=document.querySelector('main.iso-page svg');if(f){watching=1;try{watch(f)}catch(e){}}}"
+    + "if(!watching&&!sent&&!blocked&&window.Anatomy){const f=document.querySelector('main.iso-page svg');if(f){watching=1;try{watch(f)}catch(e){}}}"
     + "}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}})();";
 }
 
