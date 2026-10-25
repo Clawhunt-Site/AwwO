@@ -30,7 +30,7 @@ import { PersonaPicker } from './PersonaPicker';
 import { TaskFrameEditor } from './TaskFrameEditor';
 import { NodeSkillsEditor } from './NodeSkillsEditor';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
-import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, inheritNodeModel, nodeTeamModelOverrides, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
+import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamModelOverrides, type NodeTeam, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
@@ -170,6 +170,12 @@ let fieldSeq = 0;
 function mintFieldId(): string {
   fieldSeq += 1;
   return `f-${Date.now().toString(36)}-${fieldSeq.toString(36)}`;
+}
+
+/** A node's team when the node's model changes: members that held the previous model follow it (followNodeModel), and a
+ *  team that ran where the node ran moves with the node to its new model's runtime (followNodeRuntime). */
+function followNode(team: NodeTeam, previous: SessionNode, runtime: string): NodeTeam {
+  return followNodeRuntime(followNodeModel(team, previous, { runtime }), previous, { runtime });
 }
 
 export function InspectorPanel({
@@ -514,7 +520,7 @@ export function InspectorPanel({
                 <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode}
                   disabled={busy}
                   onChange={next => editDraft({ ...sessionDraft, ...next,
-                    ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: next.runtime }) } : {}) })} />
+                    ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNode(sessionDraft.team, sessionDraft, next.runtime) } : {}) })} />
                 {teamModelOverrides.length ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
                     <div>{t('inspector.teamModelOverride', { count: teamModelOverrides.length })}</div>
@@ -533,7 +539,7 @@ export function InspectorPanel({
                   value={{ backend: sessionDraft.runtime || (onInitialize ? 'pi' : ''), model: sessionDraft.model, effort: sessionDraft.effort }}
                   onChange={(v: RuntimeValue) =>
                     editDraft({ ...sessionDraft, runtime: v.backend, model: v.model, effort: v.effort,
-                      ...(sessionDraft.team && v.model !== sessionDraft.model ? { team: followNodeModel(sessionDraft.team, sessionDraft, { runtime: v.backend }) } : {}) })
+                      ...(sessionDraft.team && v.model !== sessionDraft.model ? { team: followNode(sessionDraft.team, sessionDraft, v.backend) } : {}) })
                   }
                   readJson={readJson}
                   lang={locale}

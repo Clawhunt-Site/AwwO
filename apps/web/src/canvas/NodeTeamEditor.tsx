@@ -3,6 +3,7 @@ import type { SessionNode } from './canvasDoc';
 import { modelLabel, modelLabels } from '../modelLabels';
 import { useCanvasI18n } from './i18n';
 import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
+import { createNodeTeamFromTemplate, nodeTeamTemplate, nodeTeamTemplates, type NodeTeamTemplate, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
 /** An unset effort is omitted rather than stored as '' so saved teams keep their shape and fingerprint. */
 const normalizeMember = ({ effort, ...member }: NodeTeamMember): NodeTeamMember => effort ? { ...member, effort } : member;
@@ -12,6 +13,8 @@ type ReadJson = (path: string) => Promise<any>;
 const COPY = {
   zh: {
     title: '节点协作团队', enable: '启用多 Agent 协作', unavailable: '当前运行环境未提供团队执行能力。',
+    template: '协作模板', templatePlaceholder: '从模板开始…', templateOption: '{title}（{mode} · 最多 {count} 次调用）',
+    templateReplace: '用「{title}」替换当前团队的 {count} 位成员？同名成员保留自己选的模型和设置。', templateApply: '替换为此模板', templateCancel: '保留当前团队',
     mode: '协作方式', runtime: '团队默认执行框架', rounds: '最多轮数', turns: '最多模型调用次数', timeout: '节点超时（秒）',
     inherit: '继承团队默认', defaultModel: '继承节点已绑定模型', runtimeDefaultModel: '使用此执行框架的服务默认模型', model: '模型', memberRuntime: '执行框架',
     effort: '思考强度', effortDefault: '不指定（使用模型默认）', effortNeedsModel: '留空模型时继承节点模型及其思考强度；选择明确的模型后才可单独设置。', effortUnavailable: '当前模型不提供：',
@@ -37,6 +40,8 @@ const COPY = {
   },
   en: {
     title: 'Node collaboration team', enable: 'Enable multiple Agents', unavailable: 'The current runtime does not provide team execution.',
+    template: 'Team template', templatePlaceholder: 'Start from a template…', templateOption: '{title} ({mode} · up to {count} calls)',
+    templateReplace: 'Replace the {count} members of this team with “{title}”? Members with the same name keep their own model and settings.', templateApply: 'Use this template', templateCancel: 'Keep the current team',
     mode: 'Collaboration mode', runtime: 'Team default harness', rounds: 'Maximum rounds', turns: 'Maximum model calls', timeout: 'Node timeout (seconds)',
     inherit: 'Inherit team default', defaultModel: 'Inherit bound node model', runtimeDefaultModel: 'Use this runtime’s server default model', model: 'Model', memberRuntime: 'Harness',
     effort: 'Reasoning effort', effortDefault: 'Not set (model default)', effortNeedsModel: 'An empty model inherits the node model together with its reasoning effort; choose an explicit model to set a member effort.', effortUnavailable: 'Not offered by this model: ',
@@ -79,6 +84,10 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   readRef.current = readJson;
   const [catalogState, setCatalogState] = useState<{ key: string; models: NodeTeamModelCatalogs; efforts: NodeTeamEffortCatalogs; labels: Partial<Record<NodeTeamRuntime, Record<string, string>>>; failed: string[] } | null>(null);
   const [retry, setRetry] = useState(0);
+  // A template chosen while the node already has a team waits for the reader to confirm the replacement; the choice
+  // belongs to the node it was made on and never carries over to the next one opened.
+  const [pendingTemplate, setPendingTemplate] = useState<{ nodeId: string; id: NodeTeamTemplateId } | null>(null);
+  const pending = team && pendingTemplate?.nodeId === node.id ? nodeTeamTemplate(pendingTemplate.id) : undefined;
   const hasTeam = Boolean(team);
   const requestedRuntimes = team ? [...new Set([team.runtime, ...team.members.map(member => member.runtime || team.runtime)])].filter(runtime => NODE_TEAM_RUNTIMES.includes(runtime)).sort() : [];
   const catalogKey = `${node.id}:${requestedRuntimes.join(',')}:${retry}`;
@@ -130,6 +139,14 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   const valid = !team || (issues.length === 0 && available && catalogsReady);
   useEffect(() => { onValidityChange?.(valid); }, [valid, onValidityChange]);
   const change = (next: NodeTeam | undefined) => { if (!disabledRef.current) onChange(next); };
+  const templateLabel = (template: NodeTeamTemplate) => t.templateOption.replace('{title}', template[locale].title).replace('{mode}', t.modes[template.mode])
+    .replace('{count}', String(nodeTeamTurnEstimate({ mode: template.mode, maxRounds: template.maxRounds, members: template[locale].members })));
+  const chooseTemplate = (id: string) => {
+    const template = nodeTeamTemplate(id);
+    if (!template || disabledRef.current) return;
+    if (team) setPendingTemplate({ nodeId: node.id, id: template.id });
+    else change(createNodeTeamFromTemplate(template, node, locale));
+  };
   const edit = (patch: Partial<NodeTeam>) => { if (team) change({ ...team, ...patch }); };
   const editMember = (index: number, patch: Partial<NodeTeamMember>) => {
     if (team) edit({ members: team.members.map((member, position) => position === index ? normalizeMember({ ...member, ...patch }) : member) });
@@ -143,6 +160,16 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   return <section className="node-team-editor" aria-label={t.title}>
     <label className="node-team-enable"><input type="checkbox" checked={Boolean(team)} disabled={disabled || (!team && !available)}
       onChange={event => change(event.target.checked ? createNodeTeam(node, locale) : undefined)} />{t.enable}</label>
+    <label>{t.template}<select className="canvas-inspector-input" value="" disabled={disabled || !available} onChange={event => chooseTemplate(event.target.value)}>
+      <option value="">{t.templatePlaceholder}</option>
+      {nodeTeamTemplates().map(template => <option key={template.id} value={template.id} title={template[locale].summary}>{templateLabel(template)}</option>)}
+    </select></label>
+    {pending && team ? <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" aria-live="polite">
+      <p>{t.templateReplace.replace('{title}', pending[locale].title).replace('{count}', String(team.members.length))}</p>
+      <p className="canvas-inspector-hint">{pending[locale].summary}</p>
+      <button type="button" disabled={disabled} onClick={() => { change(createNodeTeamFromTemplate(pending, node, locale, team)); setPendingTemplate(null); }}>{t.templateApply}</button>
+      {' '}<button type="button" onClick={() => setPendingTemplate(null)}>{t.templateCancel}</button>
+    </div> : null}
     {!available ? <p className="canvas-inspector-hint">{t.unavailable}</p> : null}
     {team ? <>
       <p className="canvas-inspector-hint">{t.retained}</p>

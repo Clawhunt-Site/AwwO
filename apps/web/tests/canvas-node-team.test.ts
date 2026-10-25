@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_BACKUP_KEY, CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, sanitizeDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { createNodeTeam, followNodeModel, inheritNodeModel, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
+import { createNodeTeam, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamFingerprint, nodeTeamModelOverrides, nodeTeamTurnEstimate, sanitizeNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 function node(): SessionNode {
@@ -173,5 +173,24 @@ describe('the node model reaches its team', () => {
     expect(followNodeModel(legacy, { runtime: 'pi', model: 'claude-opus-5' }, { runtime: 'openai-agents' })).toBe(legacy);
     expect(followNodeModel(legacy, { runtime: 'pi', model: 'other-model' }, { runtime: 'pi' })).toBe(legacy);
     expect(followNodeModel(legacy, { runtime: 'pi', model: '' }, { runtime: 'pi' })).toBe(legacy);
+  });
+  // Codex review 2026-10-25: a node on the workspace default gets a team on OpenAI Agents, where the API runs it, and
+  // switching the node to a Pi model left the team there, its members on OpenAI Agents' default model.
+  it('moves a team that runs where its node runs to the node’s new runtime, and no other team', () => {
+    const fresh = createNodeTeam({ title: 'Plan', persona: '', model: '', runtime: '' });
+    expect(fresh.runtime).toBe('openai-agents');
+    const onPi = followNodeRuntime(fresh, { runtime: '' }, { runtime: 'pi' });
+    expect(onPi).toEqual({ ...fresh, runtime: 'pi' });
+    expect(followNodeRuntime(onPi, { runtime: 'pi' }, { runtime: '' }).runtime).toBe('openai-agents');
+    expect(followNodeRuntime(fresh, { runtime: '' }, { runtime: 'openai-agents' })).toBe(fresh);
+    // A team put on another runtime than its node's, a member with a runtime, a model or tools of its own, or a node
+    // moving where no team runs keeps the team where it is.
+    const elsewhere = { ...fresh, runtime: 'pi' as const };
+    expect(followNodeRuntime(elsewhere, { runtime: 'openai-agents' }, { runtime: '' })).toBe(elsewhere);
+    for (const patch of [{ runtime: 'openai-agents' as const }, { model: 'model-b' }, { tools: ['calculator'] }]) {
+      const own = { ...fresh, members: [{ ...fresh.members[0], ...patch }, fresh.members[1]] };
+      expect(followNodeRuntime(own, { runtime: '' }, { runtime: 'pi' })).toBe(own);
+    }
+    expect(followNodeRuntime(fresh, { runtime: '' }, { runtime: 'sandbox' })).toBe(fresh);
   });
 });

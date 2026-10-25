@@ -117,7 +117,7 @@ export function nodeTeamFingerprint(team?: NodeTeam): string | null {
   if (!team) return null;
   return JSON.stringify(sanitizeNodeTeam(team) ?? team);
 }
-export function nodeTeamTurnEstimate(team: NodeTeam): number {
+export function nodeTeamTurnEstimate(team: Pick<NodeTeam, 'mode' | 'maxRounds'> & { members: readonly unknown[] }): number {
   if (team.mode === 'debate') return team.members.length * team.maxRounds + 1;
   if (team.mode === 'review') return team.members.length * team.maxRounds;
   return team.members.length;
@@ -128,9 +128,16 @@ export function createNodeTeamMember(overrides: Partial<Omit<NodeTeamMember, 'id
   return { id: `member-${Date.now().toString(36)}-${sequence.toString(36)}`, name: 'Agent', role: 'Contributor',
     instructions: '', runtime: '', model: '', context: 'shared', ...overrides, tools: [] };
 }
+/** The runtime a new team takes: its node's, where the node names a team runtime, and otherwise the one the API runs a
+ *  node without a runtime on (runtime_workers.go defaultRuntime). Either way the team runs where its node runs, so members
+ *  with no model of their own inherit the node's model (resolveTeam). Never a runtime picked by which workers answered a
+ *  health check just now: a team chosen that way stays off its node's runtime after the worker is back. */
+export function newTeamRuntime(node: { runtime?: string }): NodeTeamRuntime {
+  return NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : 'openai-agents';
+}
 export function createNodeTeam(node: { title: string; persona: string; model: string; runtime?: string }, locale: 'zh' | 'en' = 'zh'): NodeTeam {
   const zh = locale === 'zh';
-  return { version: 1, mode: 'sequential', runtime: NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : 'pi', maxRounds: 2, maxTurns: 8, timeoutSeconds: 300,
+  return { version: 1, mode: 'sequential', runtime: newTeamRuntime(node), maxRounds: 2, maxTurns: 8, timeoutSeconds: 300,
     members: [
       // The worker inherits the node's model (empty) rather than a copy of it. A copy froze the model the node had
       // when the team was enabled, so switching the node to another model afterwards — the default model after a
@@ -177,4 +184,15 @@ export function followNodeModel(team: NodeTeam, previous: { runtime?: string; mo
   const following = team.members.flatMap((member, index) => (member.runtime || team.runtime) === runtime && member.model === previous.model
     && (!member.effort || member.effort === (previous.effort || '')) ? [index] : []);
   return following.length ? inheritNodeModel(team, following) : team;
+}
+/** Carry a change of the node's runtime to a team that ran where the node ran, every member inheriting the node's model
+ * with no runtime, model or tool of its own: it moves to the node's new runtime (newTeamRuntime), so its members keep
+ * inheriting the model the node now has (resolveTeam inherits only on the node's runtime). A team on another runtime
+ * than its node's, one with a member set up its own way, or a node moving to a runtime that runs no team keeps the
+ * team's own runtime selector. Returns the same team when nothing follows. */
+export function followNodeRuntime(team: NodeTeam, previous: { runtime?: string }, next: { runtime?: string }): NodeTeam {
+  const runtime = newTeamRuntime(next);
+  if (team.runtime !== newTeamRuntime(previous) || team.runtime === runtime || (next.runtime && !NODE_TEAM_RUNTIMES.includes(next.runtime as NodeTeamRuntime))
+    || team.members.some(member => member.runtime || member.model || member.tools.length)) return team;
+  return { ...team, runtime };
 }

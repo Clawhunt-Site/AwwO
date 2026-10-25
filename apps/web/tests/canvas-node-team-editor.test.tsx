@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { NodeTeamEditor } from '../src/canvas/NodeTeamEditor';
-import { createNodeTeam, type NodeTeamRuntime, type NodeTeamTool } from '../src/canvas/nodeTeam';
+import { createNodeTeam, validateNodeTeam, type NodeTeamRuntime, type NodeTeamTool } from '../src/canvas/nodeTeam';
+import { nodeTeamTemplates } from '../src/canvas/nodeTeamTemplates';
 import { InspectorPanel } from '../src/canvas/InspectorPanel';
 import { LocaleProvider as CanvasI18nProvider } from '../src/canvas/i18n';
 import { SessionTile } from '../src/canvas/SessionTile';
+import type { ModelPaletteGroup } from '../src/canvas/modelPalette';
 const readJson = vi.fn(async (path: string) => path.endsWith('/models') ? { models: ['model-a', 'model-b'] } : { agents: [{ name: 'pi', supports_model_selection: true, supports_node_teams: true }] });
 function session(): SessionNode { return { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'node-a', title: '研究', persona: 'Check the source.', model: 'model-a', runtime: 'pi' }; }
 function Harness({ initial = session(), disabled = false, available = true, read = readJson, onChange = vi.fn(), runtimes, runtimeTools }: {
@@ -159,6 +161,25 @@ describe('node team configuration', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(save.mock.lastCall![0]).toMatchObject({ model: 'model-b', team: { members: [expect.objectContaining({ model: '' }), expect.anything()] } });
   });
+  // Codex review 2026-10-25: choosing the node's model after enabling its team left the team on the runtime it began on.
+  it('moves a team that runs where its node runs along with the model the node is switched to', async () => {
+    const groups: ModelPaletteGroup[] = [{ id: 'models', label: 'Models', available: true, models: [
+      { key: 'pi-a', label: 'Pi A', providerGroup: 'models', runtime: 'pi', model: 'model-a', available: true },
+      { key: 'agents-b', label: 'Agents B', providerGroup: 'models', runtime: 'openai-agents', model: 'model-b', available: true },
+    ] }];
+    const both = vi.fn(async (path: string) => path.endsWith('/models') ? { models: ['model-a', 'model-b'] } : { agents: [
+      { name: 'pi', supports_model_selection: true, supports_node_teams: true },
+      { name: 'openai-agents', supports_model_selection: true, supports_node_teams: true }] });
+    const save = vi.fn();
+    render(<InspectorPanel node={{ ...session(), runtime: '', model: '' }} liveCompanies={[]} apiBase="/api" readJson={both} modelGroups={groups}
+      onSave={save} onClose={vi.fn()} />);
+    await enable();
+    fireEvent.change(screen.getAllByRole('combobox', { name: '模型' })[0], { target: { value: 'model-a' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(save.mock.lastCall![0]).toMatchObject({ runtime: 'pi', model: 'model-a',
+      team: { runtime: 'pi', members: [expect.objectContaining({ runtime: '', model: '' }), expect.objectContaining({ runtime: '', model: '' })] } });
+  });
   it('does not enable teams when the host lacks Pi', () => {
     render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();
   });
@@ -256,5 +277,66 @@ describe('OpenAI Agents team configuration', () => {
     const calculator = member(1).getByRole('checkbox', { name: /计算器/ }); expect(calculator).toBeChecked(); expect(calculator).toBeDisabled();
     fireEvent.click(calculator); fireEvent.change(member(1).getByLabelText('执行框架'), { target: { value: 'pi' } });
     expect(save).not.toHaveBeenCalled();
+  });
+});
+describe('node team templates in the editor', () => {
+  const template = () => screen.getByLabelText('协作模板');
+  it('lists every template with its mode and planned calls, and starts a team from one', async () => {
+    const save = vi.fn(); render(<Harness onChange={save} />);
+    expect(within(template()).getAllByRole('option').map(option => option.getAttribute('value'))).toEqual(['', ...nodeTeamTemplates().map(item => item.id)]);
+    expect(within(template()).getByRole('option', { name: '正反辩论与裁决（多轮讨论 · 最多 7 次调用）' })).toBeInTheDocument();
+    fireEvent.change(template(), { target: { value: 'debate-verdict' } });
+    const team = save.mock.lastCall![0];
+    expect(team).toMatchObject({ mode: 'debate', runtime: 'pi', maxRounds: 2, maxTurns: 7 });
+    expect(team.members.map((item: { name: string }) => item.name)).toEqual(['正方', '反方', '裁决者']);
+    expect(validateNodeTeam(team)).toEqual([]);
+    await waitFor(() => expect(member(3).getByLabelText('模型')).not.toBeDisabled());
+    expect(member(3).getByLabelText('模型')).toHaveValue('');
+    expect(template()).toHaveValue('');
+  });
+  it('asks before replacing a team, keeps it on cancel and keeps a same-name member’s own model on replace', async () => {
+    const node = session(); node.team = createNodeTeam(node);
+    node.team.members[1] = { ...node.team.members[1], name: '审核者', model: 'model-b' };
+    const save = vi.fn(); render(<Harness initial={node} onChange={save} />);
+    fireEvent.change(template(), { target: { value: 'draft-review' } });
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByText('用「撰写与审核」替换当前团队的 2 位成员？同名成员保留自己选的模型和设置。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保留当前团队' }));
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.queryByText(/替换当前团队/)).toBeNull();
+    fireEvent.change(template(), { target: { value: 'draft-review' } });
+    fireEvent.click(screen.getByRole('button', { name: '替换为此模板' }));
+    const team = save.mock.lastCall![0];
+    expect(team.mode).toBe('review');
+    expect(team.members.map((item: { name: string; model: string }) => [item.name, item.model])).toEqual([['撰写者', ''], ['审核者', 'model-b']]);
+    expect(team.members[1].id).toBe(node.team.members[1].id);
+    expect(screen.queryByText(/替换当前团队/)).toBeNull();
+  });
+  it('offers no template while the editor is read-only or teams are unavailable', () => {
+    const { unmount } = render(<Harness disabled />);
+    expect(template()).toBeDisabled();
+    unmount();
+    render(<Harness available={false} />);
+    expect(template()).toBeDisabled();
+  });
+});
+describe('a new team’s runtime', () => {
+  it('is where its node runs, from the checkbox and from a template alike, whatever the catalogue answered just now', () => {
+    const save = vi.fn();
+    const read = vi.fn(async (path: string) => path.endsWith('/models') ? { models: ['agents-model'] } : { agents: [] });
+    const { unmount } = render(<Harness initial={{ ...session(), runtime: '' }} read={read} runtimes={['openai-agents']} runtimeTools={{ 'openai-agents': [] }} onChange={save} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' }));
+    expect(save.mock.lastCall![0].runtime).toBe('openai-agents');
+    unmount();
+    const fromTemplate = vi.fn();
+    render(<Harness initial={{ ...session(), runtime: '' }} read={read} runtimes={['openai-agents']} runtimeTools={{ 'openai-agents': [] }} onChange={fromTemplate} />);
+    fireEvent.change(screen.getByLabelText('协作模板'), { target: { value: 'plan-build-check' } });
+    expect(fromTemplate.mock.lastCall![0].runtime).toBe('openai-agents');
+    cleanup();
+    // A Pi node's team stays on Pi even while the catalogue lists only OpenAI Agents.
+    const onPi = vi.fn();
+    render(<Harness initial={{ ...session(), runtime: 'pi' }} read={read} runtimes={['openai-agents']} runtimeTools={{ 'openai-agents': [] }} onChange={onPi} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' }));
+    expect(onPi.mock.lastCall![0].runtime).toBe('pi');
   });
 });
