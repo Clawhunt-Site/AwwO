@@ -1022,8 +1022,9 @@ class RealEventStreamTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
-    """A Bedrock call that sends nothing for the stream's idle limit fails as the service's outage (MODEL_UNAVAILABLE,
-    which a canvas node runs again after) instead of riding out its run: real botocore against a local endpoint, no AWS."""
+    """A Bedrock call that sends nothing for the stream's idle limit fails as a stall (MODEL_STALLED: the service's
+    failure, which a canvas node runs again after and the API does not charge before any output) instead of riding out
+    its run: real botocore against a local endpoint, no AWS."""
 
     def setUp(self):
         self.enterContext(mock.patch.dict(os.environ, STUB_AWS))
@@ -1055,7 +1056,37 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(type(error).__module__):
                 failure = bridge_failure(error)
                 self.assertEqual((failure.status, failure.kind, failure.upstream), (504, "ReadTimeoutError", True))
-                self.assertEqual(classify_error(failure)["code"], "MODEL_UNAVAILABLE")
+                self.assertEqual(classify_error(failure, bedrock=True)["code"], "MODEL_STALLED")
+                self.assertEqual(classify_error(failure)["code"], "MODEL_UNAVAILABLE", "only a call the bridge served stalls")
+
+    def test_only_the_bridges_read_timeout_is_a_stall(self):
+        # For a call the bridge served, the SDK's error for its answer, before its stream (the 504 and its body) and
+        # inside one (the error frame, its status in its body), reads as a stall; so does the bridge's own failure.
+        from openai import APIError, BadRequestError, InternalServerError
+        request = httpx2.Request("POST", f"{bridge_base_url('us-east-1')}/chat/completions")
+        body = {"message": "Bedrock sent nothing for too long", "type": "ReadTimeoutError", "code": "ReadTimeoutError", "status": 504}
+        before = InternalServerError("Error code: 504", response=httpx2.Response(504, request=request, json={"error": body}), body=body)
+        stalls = (before, APIError("Bedrock sent nothing for too long", request, body=body), APIError("stalled", request, body={"error": body}),
+                  BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True))
+        for error in stalls:
+            with self.subTest(type(error).__name__):
+                self.assertEqual(classify_error(error, bedrock=True)["code"], "MODEL_STALLED")
+                # The same answer from a call no bridge served (another provider's) is never a stall.
+                self.assertNotEqual(classify_error(error)["code"], "MODEL_STALLED")
+        # Any other 504, an HTTP status other than 504 under the bridge's body, a body that only names the type or
+        # carries another status, and the bridge's other failures stay what they were, the bridge's own calls too.
+        for error, code in ((InternalServerError("Error code: 504", response=httpx2.Response(504, request=request, json={"error": {"message": "Gateway Timeout"}}),
+                                                 body={"message": "Gateway Timeout"}), "MODEL_UNAVAILABLE"),
+                            (BadRequestError("Error code: 400", response=httpx2.Response(400, request=request, json={"error": body}), body=body),
+                             "MODEL_REQUEST_REJECTED"),
+                            (APIError("stalled", request, body={**body, "status": 502}), "MODEL_UNAVAILABLE"),
+                            (APIError("stalled", request, body={"type": "ReadTimeoutError", "status": 504}), "MODEL_UNAVAILABLE"),
+                            (APIError("stalled", request, body={**body, "code": "api_error"}), "MODEL_UNAVAILABLE"),
+                            (BridgeError(502, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True), "MODEL_UNAVAILABLE"),
+                            (BridgeError(504, "api_error", "The Bedrock request failed", upstream=True), "MODEL_UNAVAILABLE"),
+                            (BridgeError(400, "invalid_request_error", "Invalid request"), "MODEL_REQUEST_REJECTED")):
+            with self.subTest(error=str(getattr(error, "body", None) or error)):
+                self.assertEqual(classify_error(error, bedrock=True)["code"], code)
 
     async def test_a_stalled_call_fails_at_the_idle_limit_and_never_turns_to_the_other_profile(self):
         # With a fallback the first event is read ahead; without one the stream is read in the worker's own loop.
@@ -1107,7 +1138,7 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((error["type"], error["status"]), ("ReadTimeoutError", 504))
                     self.assertEqual(facts, [{"event": "failed", "model": model, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
 
-    async def test_a_run_whose_call_stalls_ends_as_the_service_unavailable_long_before_its_deadline(self):
+    async def test_a_run_whose_call_stalls_ends_as_a_stall_long_before_its_deadline(self):
         set_trace_processors([])
         import runner
         original = runner.BedrockConverseTransport
@@ -1131,7 +1162,8 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                     events = [event async for event in stream_run(request, config, asyncio.Event())]
                 self.assertLess(time.monotonic() - started, 15, "the idle limit, not the run's 30 s deadline")
                 self.assertEqual(seen, [1])
-                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_UNAVAILABLE"), events[-1])
+                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_STALLED"), events[-1])
+                self.assertFalse([event for event in events if event["type"] == "text_delta"], "nothing was returned")
                 written = "".join(call.args[0] for call in stderr.write.call_args_list)
                 self.assertEqual([json.loads(line) for line in written.splitlines() if line.startswith('{"service"')], [{
                     "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_call_failed", "model": target,

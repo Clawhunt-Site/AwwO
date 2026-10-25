@@ -6,6 +6,7 @@ MESSAGES = {
     "MODEL_AUTHENTICATION": "The model service rejected its configured credentials.",
     "MODEL_RATE_LIMIT": "The model service is rate limited.",
     "MODEL_UNAVAILABLE": "The model service is unavailable.",
+    "MODEL_STALLED": "The model service sent nothing for too long.",
     "MODEL_REQUEST_REJECTED": "The model service rejected the request.",
     "MODEL_CONTEXT_LIMIT": "The model service refused the request as larger than the model's context window.",
     "CONTEXT_LIMIT": "The prompt and history exceed the configured model context budget.",
@@ -67,6 +68,26 @@ def carries_work(body: dict) -> bool:
                or any(p.get(key) not in (None, "", [], {}) for key in ANSWER_KEYS) for p in parts)
 
 
+def stalled(error: BaseException, bedrock: bool) -> bool:
+    """Whether the error is the Bedrock bridge's read timeout (bedrock_bridge.bridge_failure: Bedrock sent nothing for
+    the call's silence limit, bedrock_bridge.call_read_timeout), for a call the bridge served (`bedrock`: no other
+    provider's answer is taken for it, whatever its body says): the bridge's own failure, or the SDK's error for the
+    bridge's answer to it, before its stream (an HTTP 504 with the bridge's body) or inside one (its error frame, which
+    the SDK raises without a status of its own), its body the bridge's type and code with the status 504."""
+    from bedrock_bridge import BridgeError
+
+    if not bedrock:
+        return False
+    if isinstance(error, BridgeError):
+        return error.kind == "ReadTimeoutError" and error.status == 504
+    if getattr(error, "status_code", None) not in (None, 504):
+        return False
+    body = getattr(error, "body", None)
+    inner = body.get("error") if isinstance(body, dict) and isinstance(body.get("error"), dict) else body
+    return (isinstance(inner, dict) and inner.get("type") == "ReadTimeoutError" and inner.get("code") == "ReadTimeoutError"
+            and inner.get("status") == 504)
+
+
 def refused_before_any_work(error: BaseException) -> bool:
     """Whether the provider refused the request with an HTTP 400, 413 or 422 answer, before any stream (a refusal inside
     a stream that answered 200 may follow work: it carries its status in its body, never as the SDK's status_code), in a
@@ -82,10 +103,11 @@ def refused_before_any_work(error: BaseException) -> bool:
     return isinstance(body, dict) and not carries_work(body)
 
 
-def classify_error(error: BaseException, requests: int = 1) -> dict:
+def classify_error(error: BaseException, requests: int = 1, bedrock: bool = False) -> dict:
     """The wire failure for an error. A provider's refusal of the request as too large is MODEL_CONTEXT_LIMIT only when
     it came before any work: to the call's one request (`requests`, as the runner counted them) and as
-    refused_before_any_work says; otherwise it is the refusal it otherwise is."""
+    refused_before_any_work says; otherwise it is the refusal it otherwise is. `bedrock` says the Bedrock bridge served
+    the call (its profile is a Bedrock one): only then can it have stalled (MODEL_STALLED)."""
     from tools import ToolInputError
 
     name = type(error).__name__
@@ -101,6 +123,11 @@ def classify_error(error: BaseException, requests: int = 1) -> dict:
         return failure_event("MODEL_PROTOCOL_ERROR")
     if name == "ToolCallError":
         return failure_event("TOOL_INPUT_INVALID")
+    if stalled(error, bedrock):
+        # The service failed, not the run's deadline: a canvas node whose call stalled before anything streamed runs
+        # again (graph_retry.go), as after MODEL_UNAVAILABLE. Told apart so that the API does not charge a call that a
+        # time limit of the platform's cut before it returned anything (plans.go stalledBeforeOutput).
+        return failure_event("MODEL_STALLED")
     status = getattr(error, "status_code", None) or getattr(error, "status", None)
     if status is None:
         # An error frame inside a stream that already answered 200 carries its status in its body.

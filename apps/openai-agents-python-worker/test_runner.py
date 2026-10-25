@@ -96,10 +96,17 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if self.mode == "too_long_unreadable":
             # The same refusal in a body that is not JSON (its last brace missing).
             return web.Response(status=400, content_type="application/json", text=json.dumps({"error": too_long})[:-1])
+        # The Bedrock bridge's answer to a read timeout (bedrock_bridge._error_body), sent by a provider that is not it.
+        stall = {"message": "Bedrock sent nothing for too long", "type": "ReadTimeoutError", "code": "ReadTimeoutError", "status": 504}
+        if self.mode == "bridge_timeout":
+            return web.json_response({"error": stall}, status=504)
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         if self.compress:
             response.enable_compression()
         await response.prepare(request)
+        if self.mode == "bridge_timeout_frame":
+            await response.write(f"data: {json.dumps({'error': stall})}\n\n".encode())
+            return response
         if self.mode.startswith("too_long_"):
             # The same refusal as a frame inside the stream (with its status, as the Bedrock bridge sends one): first,
             # or after the model began (its reasoning, or usage that counts something), in the same write as it.
@@ -332,6 +339,16 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(set(obs["timing"]), {"setupMs", "providerMs", "providerTtftMs", "workerTotalMs", "workerFirstDeltaMs"})
                 self.assertLessEqual(obs["timing"]["providerMs"], obs["timing"]["workerTotalMs"])
                 self.assertLessEqual(obs["timing"]["providerTtftMs"], obs["timing"]["providerMs"])
+
+    async def test_another_providers_answer_shaped_as_the_bridges_read_timeout_is_no_stall(self):
+        # Only a call the Bedrock bridge served can have stalled (errors.stalled, 2026-10-25), which the API does not
+        # charge: another provider's 504, or an error frame inside its stream, with the bridge's very body is the
+        # service's outage, charged as before.
+        for mode in ("bridge_timeout", "bridge_timeout_frame"):
+            with self.subTest(mode=mode):
+                self.mode = mode
+                events = await self.collect()
+                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_UNAVAILABLE"), events)
 
     async def test_partial_text_and_observed_usage_survive_timeout_and_cancel(self):
         for cancelled in (False, True):

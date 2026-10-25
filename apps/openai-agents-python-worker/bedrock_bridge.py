@@ -640,8 +640,8 @@ def bridge_failure(error: BaseException) -> BridgeError:
         return error
     if any(cls.__name__ == "ReadTimeoutError" for cls in type(error).__mro__):
         # botocore's read timeout (urllib3's inside a stream): Bedrock sent nothing for the stream's idle limit. The
-        # service failed, not the run's deadline (MODEL_UNAVAILABLE, never DEADLINE_EXCEEDED): a canvas node whose call
-        # stalled before anything streamed runs again (graph_retry.go).
+        # service failed, not the run's deadline (MODEL_STALLED, never DEADLINE_EXCEEDED, errors.stalled): a canvas node
+        # whose call stalled before anything streamed runs again (graph_retry.go), and such a call is not charged.
         return BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True)
     if type(error).__name__ in CREDENTIAL_ERRORS:
         # No usable AWS credentials: an authentication failure, like a rejected key.
