@@ -266,6 +266,41 @@ func TestCreditChargeIsTheUsageOrAnEstimateThatErrsHigh(t *testing.T) {
 	}
 }
 
+// Owner 2026-10-25: a call its worker cut for silence before it returned anything is not charged, however long it ran
+// and whatever reasoning its run was told about; a call that streamed text first, whose usage was reported (in part
+// too), that failed otherwise or that did not fail is not such a call.
+func TestOnlyACallCutForSilenceBeforeAnyOutputIsStalled(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	unknown := missingUsage("unknown", "transport_unknown")
+	for _, u := range []InvocationUsage{unknown, missingUsage("unavailable", "provider_missing"), missingUsage("invalid", "protocol_invalid")} {
+		if !stalledBeforeOutput("failed", &invocationFacts{WorkerCode: "MODEL_STALLED"}, u) {
+			t.Fatal("a call cut for silence before any output, its usage", u.Status)
+		}
+	}
+	if !stalledBeforeOutput("failed", &invocationFacts{WorkerCode: "MODEL_STALLED", Reasoned: true, HiddenTokens: 5000}, unknown) {
+		t.Fatal("reasoning the run was told about made a call cut for silence chargeable")
+	}
+	stalled := &invocationFacts{WorkerCode: "MODEL_STALLED"}
+	for name, c := range map[string]struct {
+		status string
+		f      *invocationFacts
+		u      InvocationUsage
+	}{
+		"streamed text first": {"failed", &invocationFacts{WorkerCode: "MODEL_STALLED", OutputBytes: 1}, unknown},
+		"usage reported":      {"failed", stalled, InvocationUsage{Status: "reported", Source: "provider_raw", InputTokens: n(10), OutputTokens: n(0)}},
+		"usage in part":       {"failed", stalled, InvocationUsage{Status: "partial", Source: "provider_raw", InputTokens: n(10)}},
+		"an outage":           {"failed", &invocationFacts{WorkerCode: "MODEL_UNAVAILABLE"}, unknown},
+		"no worker code":      {"failed", &invocationFacts{}, unknown},
+		"cancelled":           {"cancelled", stalled, unknown},
+		"interrupted":         {"interrupted", stalled, unknown},
+		"completed":           {"completed", stalled, unknown},
+	} {
+		if stalledBeforeOutput(c.status, c.f, c.u) {
+			t.Fatal(name, "was taken as a call cut for silence before any output")
+		}
+	}
+}
+
 func TestStripeURLsMustBeStripes(t *testing.T) {
 	for raw, want := range map[string]bool{
 		"https://checkout.stripe.com/c/pay/cs_test_1":       true,

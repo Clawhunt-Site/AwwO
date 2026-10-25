@@ -329,7 +329,8 @@ func (a *App) creditReserve(runtime, model string, inputBytes int64) (*int, erro
 // costs its reserve. Any other call, a cancelled or failed one, or one whose usage was not reported, costs the larger
 // of its reserve, any partly reported usage, and an estimate from the bytes it sent and streamed plus its hidden
 // reasoning: the larger of the reasoning it reported (hidden tokens) and the time before its first streamed text
-// (unseen).
+// (unseen). A call its worker cut for silence before it returned anything costs nothing, up to refundedCallsPerDay such
+// calls a day a workspace, and is settled so without coming here (stalledBeforeOutput, settleInvocation).
 //
 // `reasoned` is only whether the provider worked and never how much: it stops a refusal settling at nothing, which
 // leaves it costing its reserve or an estimate of what it sent, whichever is larger. It is deliberately absent from
@@ -398,6 +399,17 @@ func refusedBeforeOutput(code, workerCode string, bytesOut int64, unseen time.Du
 		return false
 	}
 	return code == "provider_rate_limited" || code == "provider_auth_failed" || workerCode == "MODEL_UNAVAILABLE"
+}
+
+// stalledBeforeOutput reports a call that failed because its worker cut it for silence before it returned anything:
+// the worker's MODEL_STALLED (the Python worker's Bedrock read timeout: nothing for 3 minutes in a call to Claude Opus 4.8
+// or 5.5 that offers no tools, for 15 otherwise), no text streamed and no usage reported (u is the usage the call settles
+// with). A time limit of the platform's cut it, so it is not charged (owner 2026-10-25, the rule a direct task's call cut
+// on its way follows, direct_task_refund.go): it costs no credits and the daily total gives it back, at most
+// refundedCallsPerDay such calls a day (settleInvocation). Reasoning its run was told about changes nothing: the reader
+// got nothing of it.
+func stalledBeforeOutput(status string, f *invocationFacts, u InvocationUsage) bool {
+	return status == "failed" && f.WorkerCode == "MODEL_STALLED" && f.OutputBytes == 0 && u.Status != "reported" && u.Status != "partial"
 }
 
 // mediaBaseCredits is a generation's price at the model's default settings: RunningHub charged $0.17–0.33 a

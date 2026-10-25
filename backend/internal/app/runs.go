@@ -1246,6 +1246,11 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 		return "provider_rate_limited"
 	case "MODEL_UNAVAILABLE", "MODEL_CONNECTION_ERROR":
 		return "provider_unavailable"
+	case "MODEL_STALLED":
+		// The provider sent nothing for the worker's silence limit (the Python worker's Bedrock read timeout): the
+		// service's failure, which a canvas node runs again after (graph_retry.go). Before any output, its call is not
+		// charged (stalledBeforeOutput).
+		return "provider_unavailable"
 	case "DEADLINE_EXCEEDED":
 		return "run_timeout"
 	case "WORKSPACE_CONTEXT_LIMIT":
@@ -1439,6 +1444,10 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 		return e
 	}
 	defer tx.Rollback(ctx)
+	// Before the run's row: a call that may be noted as cut for silence locks the workspace row first, as a cancellation does.
+	if e = keyShareBeforeStalledNote(ctx, tx, tid, facts); e != nil {
+		return e
+	}
 	var sid string
 	if status == "completed" {
 		var kind string

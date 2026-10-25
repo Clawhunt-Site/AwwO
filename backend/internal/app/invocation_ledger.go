@@ -65,6 +65,9 @@ type invocationFacts struct {
 	HiddenTokens int64
 	Reasoned     bool
 	WorkerCode   string
+	// keyShared says the settling transaction locked the workspace row FOR KEY SHARE before the run's or the turn's own
+	// row (keyShareBeforeStalledNote), which noting a call cut for silence needs: a call settled without it is not noted.
+	keyShared bool
 }
 
 // unseen is how long the call's stream ran before its first text, up to its terminal event (or now, without
@@ -352,12 +355,24 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 			costStatus = "estimated"
 		}
 	}
+	// A call its worker cut for silence before it returned anything, once noted as given back (its daily total gives it
+	// back, dailyCalls), costs no credits; one that was not settles as any other failure. An operator-paid planner call
+	// costs its workspace nothing (no credits, outside the daily total: countsTowardsDaily), so it takes no place.
+	stalled := false
+	if f.keyShared && !a.operatorPaidCall(f, f.Model) && stalledBeforeOutput(status, f, u) {
+		if stalled, err = noteStalledCall(ctx, tx, tid, id); err != nil {
+			return nil, err
+		}
+	}
 	var charge *int
 	if reserve != nil {
-		// A call reached the provider once its stream began, even if it was cancelled while the model reasoned.
-		reached := f.Terminal || f.OutputBytes > 0 || !f.Streamed.IsZero()
-		unseen := f.unseen(time.Now())
-		n := creditCharge(*reserve, costStatus == "not_incurred", refusedBeforeOutput(code, f.WorkerCode, f.OutputBytes, unseen), reached, u, price, f.InputBytes, f.OutputBytes, f.HiddenTokens, f.Reasoned, unseen)
+		n := 0
+		if !stalled {
+			// A call reached the provider once its stream began, even if it was cancelled while the model reasoned.
+			reached := f.Terminal || f.OutputBytes > 0 || !f.Streamed.IsZero()
+			unseen := f.unseen(time.Now())
+			n = creditCharge(*reserve, costStatus == "not_incurred", refusedBeforeOutput(code, f.WorkerCode, f.OutputBytes, unseen), reached, u, price, f.InputBytes, f.OutputBytes, f.HiddenTokens, f.Reasoned, unseen)
+		}
 		charge = &n
 	}
 	tm := f.Timing
@@ -366,12 +381,57 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 	 queue_ms=$15,admission_ms=$16,setup_ms=$17,provider_ms=$18,provider_ttft_ms=$19,worker_total_ms=$20,worker_first_delta_ms=$21,
 	 cost_status=$22,estimated_cost_microusd=$23,failure_class=$24,completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=clock_timestamp(),observability_version=$25,credit_charge=$26
 	 WHERE tenant_id=$1 AND id=$2 AND status='running'`, tid, id, status, f.Admission, u.Status, u.Source, u.Reason, u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.CacheWriteTokens, u.ReasoningTokens, u.ProviderTotalTokens, u.ComputedTotalTokens, tm.QueueMs, tm.AdmissionMs, tm.SetupMs, tm.ProviderMs, tm.ProviderTtftMs, tm.WorkerTotalMs, tm.WorkerFirstDeltaMs, costStatus, cost, invocationFailure(status, code), f.Version, charge)
+	if err == nil && tag.RowsAffected() == 0 && stalled {
+		// Its running row is held FOR UPDATE above, so this cannot happen; never leave a note behind without its call.
+		err = errors.New("a call noted as cut for silence was not settled")
+	}
 	if err != nil || tag.RowsAffected() == 0 {
 		return nil, err
 	}
 	return func() {
 		a.observeInvocation(f.Runtime, f.Model, status, u.Status, u.Reason, map[string]*int64{"input": u.InputTokens, "output": u.OutputTokens, "cache_read": u.CachedInputTokens, "cache_write": u.CacheWriteTokens, "reasoning": u.ReasoningTokens}, tm.ProviderMs, tm.ProviderTtftMs, cost)
 	}, nil
+}
+
+// keyShareBeforeStalledNote locks the workspace row FOR KEY SHARE when the call may be noted as cut for silence
+// (noteStalledCall writes refunded_calls, whose foreign key on the workspace takes that lock), and says so on the facts
+// (keyShared), which settleInvocation requires before it notes the call. Called before its transaction locks the run's
+// or the turn's own row, it keeps the order a cancellation takes (the workspace row FOR UPDATE, then the run's:
+// cancelRun), so the two wait for each other in turn and never deadlock (Codex, 2026-10-25); a settling path that does
+// not call it first notes nothing. The wait is for a transaction that holds the workspace row FOR UPDATE (an admission,
+// a cancellation, all short), within its attempt's own time (persistExecution).
+func keyShareBeforeStalledNote(ctx context.Context, tx pgx.Tx, tid string, f *invocationFacts) error {
+	if f == nil {
+		return nil
+	}
+	f.keyShared = false
+	if f.WorkerCode != "MODEL_STALLED" {
+		return nil
+	}
+	if _, e := tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); e != nil {
+		return e
+	}
+	f.keyShared = true
+	return nil
+}
+
+// noteStalledCall notes in refunded_calls, as given back, a call its worker cut for silence before it returned anything
+// (stalledBeforeOutput) while its workspace has had fewer than refundedCallsPerDay such calls today (UTC), and says
+// whether it did; the caller holds the call's running row. A workspace's settlements count and write these notes one at
+// a time (a lock its transaction holds until it ends), so concurrent ones never pass the number, and a call already
+// noted for any reason gets no second note, nor its credits back.
+func noteStalledCall(ctx context.Context, tx pgx.Tx, tid, id string) (bool, error) {
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('awwo-stalled-calls:' || $1, 84321005))`, tid); e != nil {
+		return false, e
+	}
+	var noted int
+	e := tx.QueryRow(ctx, `INSERT INTO refunded_calls(tenant_id,invocation_id,reason) SELECT $1,$2,'stalled'
+		WHERE (SELECT count(*) FROM refunded_calls WHERE tenant_id=$1 AND reason='stalled' AND created_at>=`+todayUTC+`)<$3
+		ON CONFLICT DO NOTHING RETURNING 1`, tid, id, refundedCallsPerDay).Scan(&noted)
+	if noRows(e) {
+		return false, nil
+	}
+	return e == nil, e
 }
 
 // abandonedCreditCharge settles a paid-route call whose worker was lost: its reserve once it may have reached the

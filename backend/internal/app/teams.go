@@ -718,6 +718,11 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 				return e
 			}
 			defer tx.Rollback(c)
+			// Before the turn's row: a call that may be noted as cut for silence locks the workspace row first, as a
+			// cancellation does.
+			if e = keyShareBeforeStalledNote(c, tx, tid, facts); e != nil {
+				return e
+			}
 			if _, e = tx.Exec(c, "UPDATE run_turns SET status=$3,output=$4,error=$5,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')", tid, id, status, output, code); e != nil {
 				return e
 			}

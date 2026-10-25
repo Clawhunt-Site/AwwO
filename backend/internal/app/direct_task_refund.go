@@ -22,8 +22,15 @@ import "strconv"
 //
 // A refund is the daily total's only: route allowances and the deployment-wide ceilings still count the calls, as the
 // operator paid for them; credits are not touched.
+//
+// Any model call its worker cut for silence before it returned anything (stalledBeforeOutput: the Python worker's Bedrock
+// read timeout) is the platform's cut too, and is given back by itself, in any run (owner 2026-10-25, to the proposal
+// that such a call not be charged, as above: 「那就按照你的建议往下执行吧」). It is noted in refunded_calls with the reason
+// stalled as it settles, while its workspace has had fewer than refundedCallsPerDay such calls that day (noteStalledCall),
+// and then costs no credits either (settleInvocation). Route allowances and the ceilings count it, as above.
 
-// refundedCallsPerDay is how many refunded calls a day a workspace's daily total gives back.
+// refundedCallsPerDay is how many refunded calls a day a workspace's daily total gives back, and how many calls cut for
+// silence a day it gives back (settleInvocation).
 const refundedCallsPerDay = 32
 
 // refundEvidence matches, for the run rr (alias rr of refunded_runs), what makes its ending the platform's: an
@@ -43,20 +50,27 @@ const refundedRun = `EXISTS(SELECT 1 FROM refunded_runs rr WHERE rr.tenant_id=r.
 // refundedDirectTaskCall matches a ledger row (alias mi) of a run whose calls are given back.
 const refundedDirectTaskCall = `EXISTS(SELECT 1 FROM refunded_runs rr WHERE rr.tenant_id=mi.tenant_id AND rr.run_id=mi.run_id AND ` + refundEvidence + `)`
 
-// refundedCutCall matches a ledger row (alias call) that a time limit on its way cut (refunded_calls) in a run that ended
-// for the platform's sake (refunded_runs): that call is given back, whatever its run's other calls do.
+// refundedCutCall matches a ledger row (alias call) that a time limit on its way cut (refunded_calls, reason timeout) in
+// a run that ended for the platform's sake (refunded_runs): that call is given back, whatever its run's other calls do.
 func refundedCutCall(call string) string {
 	return `EXISTS(SELECT 1 FROM refunded_calls rc JOIN refunded_runs rr ON rr.tenant_id=rc.tenant_id AND rr.run_id=` + call +
-		`.run_id WHERE rc.tenant_id=` + call + `.tenant_id AND rc.invocation_id=` + call + `.id)`
+		`.run_id WHERE rc.tenant_id=` + call + `.tenant_id AND rc.invocation_id=` + call + `.id AND rc.reason='timeout')`
+}
+
+// refundedStalledCall matches a ledger row (alias call) that its worker cut for silence before it returned anything
+// (refunded_calls, reason stalled): that call is given back, whatever its run.
+func refundedStalledCall(call string) string {
+	return `EXISTS(SELECT 1 FROM refunded_calls rs WHERE rs.tenant_id=` + call + `.tenant_id AND rs.invocation_id=` + call +
+		`.id AND rs.reason='stalled')`
 }
 
 // dailyCalls is the SQL count, over ledger rows (alias mi) the query already selects, of the calls in window that spend
 // a daily allowance (countsTowardsDaily; p holds the planner model), less the refunded ones (refundedDirectTaskCall,
-// refundedCutCall), up to refundedCallsPerDay. A query that selects only today's rows passes window "true", keeping the
-// day in its WHERE for the index.
+// refundedCutCall, refundedStalledCall), up to refundedCallsPerDay. A query that selects only today's rows passes window
+// "true", keeping the day in its WHERE for the index.
 func dailyCalls(p, window string) string {
 	counted := window + ` AND ` + countsTowardsDaily(p)
-	refunded := `(` + refundedDirectTaskCall + ` OR ` + refundedCutCall("mi") + `)`
+	refunded := `(` + refundedDirectTaskCall + ` OR ` + refundedCutCall("mi") + ` OR ` + refundedStalledCall("mi") + `)`
 	return `(count(*) FILTER (WHERE ` + counted + `) - LEAST(count(*) FILTER (WHERE ` + counted + ` AND ` + refunded + `), ` +
 		strconv.Itoa(refundedCallsPerDay) + `))`
 }
