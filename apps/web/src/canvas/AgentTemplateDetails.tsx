@@ -15,7 +15,11 @@ export function AgentGlyph({ title, templateId, size = 18 }: { title?: string; t
 /** A template describes intended work; it never claims that work has been performed. Its inputs and deliverables
  *  are the node's own, so where the host lets them change the guide says how and opens the editor for each side. */
 export function AgentTemplateDetails({ template, contract, onEditInputs, onEditOutputs }: {
-  template: AgentTemplate; contract?: NodeContract; onEditInputs?: () => void; onEditOutputs?: () => void;
+  // The presses are passed through to the handlers (SessionTile's editInputStructure, editDeliverableForm): each
+  // closes the guide this sits in, unmounting the button pressed, so it has to hand the keyboard's focus on and
+  // stop a held Enter repeating into whatever it hands it to.
+  template: AgentTemplate; contract?: NodeContract;
+  onEditInputs?: (event: { detail: number }) => void; onEditOutputs?: (event: { detail: number }) => void;
 }) {
   const { t } = useCanvasI18n();
   const inputs = contract?.inputs ?? template.inputs;

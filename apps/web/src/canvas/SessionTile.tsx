@@ -506,6 +506,13 @@ export const SessionTile = memo(function SessionTile({
   // (deliverablesShown).
   const drawerShown = deliverablesShown(node, deliveryBeside);
   const [deliverablesOpen, setDeliverablesOpen] = useState(drawerShown);
+  // Whether the drawer was shown at the last run of the effect that follows drawerShown, so a hand-off happens on
+  // the turn that closes it and not on the first commit of a node that never had a delivery.
+  const drawerWasShown = useRef(drawerShown);
+  // Whether the drawer held the keyboard's focus as of the last commit. Needed because a control inside it can be
+  // conditional on what goes away with it (在成果工作台打开 needs node.lastOutput), so React removes that control first and
+  // the focus is already on the body by the time the drawer's own effect runs.
+  const drawerHadFocus = useRef(false);
   // An edit of the drawer's form in progress (updateDeliverables) since the node last showed a delivery, which an edit of
   // it takes back until the form is published again (invalidateOutputs): the output form it left, its conversation, and
   // whether the node showed a delivery when it began, whose share of the width it keeps (below). It ends when a delivery
@@ -533,6 +540,28 @@ export const SessionTile = memo(function SessionTile({
       return;
     }
     setDrawerHeld(false);
+    // Closing by itself unmounts the drawer with the focus inside it, which no press can guard. Usually the focus is
+    // still in the drawer here, this effect being what causes the unmount, so it is handed on before the state
+    // changes. But a control inside it can be conditional on the very thing that went away — the drawer's 打开工作室
+    // needs node.lastOutput — and React removes that in the commit before this runs, leaving the focus already on the
+    // body. So a lost focus counts too, and only on a shown -> hidden turn, or the first commit of a node with no
+    // delivery would move a focus nobody asked about.
+    const wasShown = drawerWasShown.current;
+    drawerWasShown.current = drawerShown;
+    // A focus that was already nowhere is left alone: a click that focused nothing, as Safari leaves it, must not be
+    // moved. So the question is whether the DRAWER held it — drawerHadFocus, which a focusin listener keeps, not this
+    // or any other effect. Known window, narrow and accepted: a focus dropped on nothing fires no focusin, so the
+    // answer stays true until something else takes the focus, and a delivery invalidated from elsewhere meanwhile
+    // (an upstream publish, an undo) can move the keyboard onto this node's 交付物 button with no press behind it.
+    // Nothing holds the focus in that state, so the move costs the reader nothing but surprise.
+    // Only when the section actually goes away. It is shared: with a configurationPanel set it holds the inline
+    // inspector instead (the local edition draws the inspector there rather than over the canvas), and then
+    // setDeliverablesOpen(false) below unmounts nothing — handing off would throw the reader out of a form still on
+    // screen, which main never did.
+    if (!drawerShown && wasShown && !configurationPanel
+        && (drawerHadFocus.current || deliveryDrawerRef.current?.contains(document.activeElement))) {
+      focusFrom(deliveryDrawerRef.current, deliverablesToggleRef.current);
+    }
     setDeliverablesOpen(drawerShown);
     if (!drawerShown) setDeliverablesEditorOpen(false);
   }, [drawerShown]);
@@ -977,16 +1006,10 @@ export const SessionTile = memo(function SessionTile({
   // Each of these moves the focus before closing, and only when the part actually holds it: a click that focused
   // nothing, as Safari leaves it, moves nothing.
   //
-  // Two neighbours are NOT handled here and DO still drop the focus, which the stranded original listed as out of its
-  // scope and this re-derivation keeps out of its own — stated plainly so the next reader is not told there is nothing
-  // to find:
-  //   - the guide's 编辑 buttons (editInputStructure, editDeliverableForm) close the guide, which unmounts the very
-  //     button pressed, and nothing in the form they open takes the focus. The focus then sits on the page's body,
-  //     where useCanvasKeys reads Backspace as a canvas key and deletes the selected node — which is this node. These
-  //     cannot use the pattern below, since they open a part in the same commit that closes one: they need the
-  //     deferred layout effect the sessions pair uses.
-  //   - a drawer that closes by itself (the effect that follows drawerShown) unmounts it with the focus inside.
-  // Both behave exactly as they do on main; nothing here made them worse.
+  // The guide's 编辑 buttons and a drawer closing by itself were the two this pattern could not serve, and both are
+  // answered elsewhere now: the first by openedFromGuide and its layout effect (they open a part in the same commit
+  // that closes one, so there is nothing to hand the focus to yet), the second inside the effect that follows
+  // drawerShown.
   const closeTemplate = (event: { detail: number }) => {
     if (templateGuideRef.current?.contains(document.activeElement)) {
       focusFrom(templateGuideRef.current, templateToggleRef.current);
@@ -1016,6 +1039,18 @@ export const SessionTile = memo(function SessionTile({
     if (sessionsOpen) sessionsCollapseRef.current?.focus({ preventScroll: true });
     else focusFrom(null, sessionsToggleRef.current);
   }, [sessionsOpen]);
+  // Followed by event, not by render: the focus reaches the drawer by Tab, between commits, so no render sees it
+  // arrive. focusin fires for whatever takes it next, so the answer is kept until something OUTSIDE the drawer does.
+  // A focus the reader drops on nothing fires no focusin, which leaves this true and lets the drawer hand it on when
+  // it closes — the same as a control of its own being taken away, and harmless either way, since nothing holds it.
+  useEffect(() => {
+    const seen = (event: FocusEvent) => {
+      const inside = Boolean(deliveryDrawerRef.current?.contains(event.target as Node | null));
+      if (inside || drawerHadFocus.current) drawerHadFocus.current = inside;
+    };
+    document.addEventListener('focusin', seen);
+    return () => document.removeEventListener('focusin', seen);
+  }, []);
   const toggleDeliverables = () => {
     if (node.kind !== 'session') return;
     const next = !deliverablesOpen;
@@ -1030,13 +1065,67 @@ export const SessionTile = memo(function SessionTile({
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
     else writeNode(current => ({ ...current, deliverablesOpen: next }));
   };
-  const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
-  const editDeliverableForm = () => {
+  // The guide's 编辑 buttons close the guide, which unmounts the button pressed, and open another part in the same
+  // commit. So they cannot hand the focus over before closing as closeTemplate does — the control to receive it is
+  // drawn by that very commit. Each notes which part it opened, and the layout effect below hands the focus into it
+  // once it exists, the way the sessions pair does for the control that replaces it.
+  //
+  // Left as it was, the focus fell to the page's body while the reader believed they were in the form that had just
+  // opened, and the next Backspace was read as a canvas key: useCanvasKeys called onDeleteSelection, and the
+  // selection is this node (CanvasSurface selects a node when it opens it). Pressing 编辑 could delete the node.
+  const openedFromGuide = useRef<'inputs' | 'delivery' | null>(null);
+  const noteOpenedFromGuide = (part: 'inputs' | 'delivery', event: { detail: number }) => {
+    if (!templateGuideRef.current?.contains(document.activeElement)) return;
+    openedFromGuide.current = part;
+    refuseHeldEnter(event);
+  };
+  const editInputStructure = (event: { detail: number }) => {
+    noteOpenedFromGuide('inputs', event);
+    setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true);
+  };
+  const editDeliverableForm = (event: { detail: number }) => {
+    noteOpenedFromGuide('delivery', event);
     setTemplateOpen(false);
     setDeliverablesEditorOpen(true);
     setDeliverablesEditorRequest(count => count + 1);
     if (!deliverablesOpen) toggleDeliverables();
   };
+  // Runs on every commit, like the attachment chips' own hand-off: the note is taken at once, so a press moves the
+  // focus only in the render it drew.
+  //
+  // Where it lands is chosen for Backspace, not only for Tab. useCanvasKeys spares the canvas's keys only from a
+  // TYPING target (isTypingTarget: INPUT, TEXTAREA, SELECT, contentEditable), so parking the focus on a part's header
+  // ✕ would look repaired while Backspace still deleted the node — the very harm this fixes. A field of the part that
+  // opened, then, since the reader pressed 编辑 to edit.
+  //
+  // EVERY field is tried, and any inside a closed <details> is skipped. Both matter, and a review caught the cost of
+  // getting them wrong: the first typing match in the delivery drawer is the 交付形式 select of
+  // NodeDeliverables' 添加交付要求 details, which carries no `open` and so is never open on this path. A browser will
+  // not focus what a closed details hides, so taking only the first match meant the editor's own fields were never
+  // tried at all — and the fall-through then reached the node's message box, where the reader's next Enter SENDS the
+  // draft to the agent: a real turn, a run and credits, in place of the edit they asked for. The message box is a
+  // send surface, never a place to park a focus, so it is not a rung here.
+  //
+  // With no field to be had — the editor reopened collapsed, its fields shut away — the focus goes to the part's own
+  // controls, as every other hand-off in this file does. Backspace from a button is then read as a canvas key, as it
+  // is on main: not repaired, but not made worse, and strictly better than sending a message nobody wrote.
+  useLayoutEffect(() => {
+    const opened = openedFromGuide.current;
+    if (!opened) return;
+    openedFromGuide.current = null;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const part = opened === 'inputs' ? inputDrawerRef.current : deliveryDrawerRef.current;
+    const drawn = part && !part.hasAttribute('hidden') ? part : null;
+    const typing = ':is(textarea, select, input:not([type="file"])):enabled:not([tabindex="-1"])';
+    const reachable = (element: HTMLElement) => !element.closest('details:not([open])');
+    const fields = Array.from(drawn?.querySelectorAll<HTMLElement>(typing) ?? []).filter(reachable);
+    const controls = Array.from(drawn?.querySelectorAll<HTMLElement>(':is(button, textarea, select, input:not([type="file"])):enabled:not([tabindex="-1"])') ?? []).filter(reachable);
+    for (const candidate of [...fields, ...controls]) {
+      candidate?.focus({ preventScroll: true });
+      if (candidate && document.activeElement === candidate) return;
+    }
+    focusFrom(null, opened === 'inputs' ? inputToggleRef.current : deliverablesToggleRef.current);
+  });
   // Closed from its own button, the drawer would take the keyboard's focus with it to the page's body: the focus goes to
   // the control that opens the inputs again, where there is none to the message box or the first control below them
   // that takes it (the opened inputs hide the conversation's own, and a hidden control takes no focus), else to the

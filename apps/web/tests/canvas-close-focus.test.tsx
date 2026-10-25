@@ -12,6 +12,7 @@ import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { getNodeThreads } from '../src/canvas/nodeThreads';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
+import { isTypingTarget } from '../src/canvas/useCanvasKeys';
 import { TileComposer } from '../src/canvas/TileComposer';
 import { CanvasAssistant, type CanvasAssistantProps } from '../src/canvas/CanvasAssistant';
 import { ContractFields } from '../src/canvas/ContractFields';
@@ -589,4 +590,160 @@ it('refuses an Enter held down on a part closed with no control to reopen it, so
   fireEvent.keyUp(composerBox(), { key: 'Enter', code: 'Enter' });
   fireEvent.keyDown(composerBox(), { key: 'Enter', code: 'Enter' });
   expect(onSend).toHaveBeenCalledTimes(1);
+});
+
+// The guide's 编辑 buttons were the loss this file's pattern could not serve: they close the guide, unmounting the
+// button pressed, and open another part in the same commit, so there is nothing to hand the focus to until that part
+// is drawn. Left on the page's body, the next Backspace was read as a canvas key and deleted the open node.
+describe('the guide’s 编辑 buttons, which open a part as they close the guide', () => {
+  const toggle = () => screen.getByRole('button', { name: '模板指引', exact: true });
+  const guide = () => screen.queryByRole('region', { name: '模板指引', exact: true });
+  const editInputs = () => within(guide()!).getAllByRole('button', { name: /编辑/ })[0];
+
+  it('hands the focus into the part that opened, not to the page', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    press(editInputs());
+    expect(guide()).toBeNull();
+    const drawer = screen.getByRole('region', { name: '输入表单', exact: true });
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    movedWithoutScrolling();
+  });
+
+  it('leaves a focus that was not in the guide where it was', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    composerBox().focus();
+    fireEvent.click(editInputs());
+    expect(guide()).toBeNull();
+    expect(document.activeElement).toBe(composerBox());
+  });
+
+  it('stops an Enter held down on 编辑, so its repeats do not reach what the focus went to', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    press(editInputs());
+    const landed = document.activeElement as HTMLElement;
+    expect(landed).not.toBe(document.body);
+    expect(fireEvent.keyDown(landed, { key: 'Enter', code: 'Enter', repeat: true })).toBe(false);
+    // A key let go and pressed again is a fresh press, not a repeat.
+    fireEvent.keyUp(landed, { key: 'Enter', code: 'Enter' });
+    expect(fireEvent.keyDown(landed, { key: 'Enter', code: 'Enter' })).toBe(true);
+  });
+});
+
+// The other loss this file's pattern could not serve: a drawer that closes by ITSELF, with no press to guard. The
+// effect that follows drawerShown is what unmounts it, so the focus is handed on from inside that effect.
+it('hands the focus on when the delivery drawer closes by itself with the focus inside it', () => {
+  const node = delivered();
+  const view = render(<CanvasUiModeProvider mode="developer">
+    <SessionTile node={node} scale={1} focused initializeOnSend onSend={vi.fn()} onUpdateNode={vi.fn()} /></CanvasUiModeProvider>);
+  const drawer = screen.getByRole('region', { name: '交付物', exact: true });
+  const inside = within(drawer).getAllByRole('button')[0];
+  inside.focus();
+  expect(drawer.contains(document.activeElement)).toBe(true);
+  focusCalls = [];
+  // The delivery goes, so deliverablesShown turns false and the drawer unmounts without anyone pressing anything.
+  view.rerender(<CanvasUiModeProvider mode="developer">
+    <SessionTile node={{ ...node, lastOutput: undefined }} scale={1} focused initializeOnSend onSend={vi.fn()} onUpdateNode={vi.fn()} /></CanvasUiModeProvider>);
+  expect(screen.queryByRole('region', { name: '交付物', exact: true })).toBeNull();
+  // The node head's 展开交付物, which is a button: nothing typing is left once the drawer goes, and the message box is
+  // a send surface, not a parking spot. So Backspace from here is read as a canvas key, as it is on main — the focus
+  // is restored for Tab, and this path is not made worse.
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '展开交付物', exact: true }));
+  movedWithoutScrolling();
+});
+
+// Both found by Codex on the first draft of the 编辑 fix. They share one cause: moving the focus off the body is not
+// enough, because useCanvasKeys spares the canvas's keys only from a typing target (isTypingTarget). A focus parked on
+// a drawer's ✕ reads as repaired while Backspace still deletes the node.
+describe('where the 编辑 hand-off may land', () => {
+  const toggle = () => screen.getByRole('button', { name: '模板指引', exact: true });
+  const guide = () => screen.queryByRole('region', { name: '模板指引', exact: true });
+  const editOutputs = () => within(guide()!).getAllByRole('button', { name: /编辑/ })[1];
+
+  it('lands on a field of the part that opened', () => {
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    press(editOutputs());
+    expect(guide()).toBeNull();
+    const landed = document.activeElement as HTMLElement;
+    expect(landed).not.toBe(document.body);
+    // The canvas's Backspace is only held off a typing target, so that is what the hand-off has to reach.
+    expect(isTypingTarget(landed)).toBe(true);
+  });
+
+  // jsdom draws no stylesheet and will happily focus what a closed <details> hides, so these two drive it through the
+  // `undrawn` hook, which makes focus() a no-op there as a browser's does. Without it the suite could not see the
+  // worst version of this bug: the first typing match in the drawer is the 交付形式 select of 添加交付要求, a details
+  // that is NEVER open, so a browser refused it, the editor's own fields went untried, and the focus fell to the
+  // message box — where the reader's next Enter sends the draft to the agent.
+  const closedDetails = 'details:not([open])';
+
+  it('reaches the editor’s own field, not a control a closed details hides', () => {
+    undrawn = closedDetails;
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    press(editOutputs());
+    const landed = document.activeElement as HTMLElement;
+    expect(landed).not.toBe(document.body);
+    expect(isTypingTarget(landed)).toBe(true);
+    // Whatever it is, it is reachable: never inside a details a browser keeps shut.
+    expect(landed.closest(closedDetails)).toBeNull();
+  });
+
+  it('never parks the focus in the message box, which would send on the next Enter', () => {
+    undrawn = closedDetails;
+    render(<TileHost initial={templated()} />);
+    fireEvent.click(toggle());
+    press(editOutputs());
+    expect(document.activeElement).not.toBe(composerBox());
+    // And the same on a second press, where NodeDeliverables re-opens its collapsed editor only in a passive effect.
+    const editor = document.querySelector<HTMLDetailsElement>('details.awwo-deliverables-editor[open]');
+    if (editor) editor.open = false;
+    fireEvent.click(toggle());
+    press(editOutputs());
+    expect(document.activeElement).not.toBe(composerBox());
+    expect((document.activeElement as HTMLElement).closest(closedDetails)).toBeNull();
+  });
+});
+
+// A control inside the drawer that is conditional on what went away: 在成果工作台打开 needs node.lastOutput, so React removes
+// it in the commit before the drawer's own effect runs, and the focus is already on the body by then.
+it('hands the focus on when the drawer self-closes after taking its focused control with it', () => {
+  const node = delivered();
+  // onOpenStudio is what draws 在成果工作台打开, the control conditional on the delivery that goes away; CanvasSurface passes it.
+  const props = (n: CanvasNode) => ({ node: n, scale: 1, focused: true, initializeOnSend: true, onSend: vi.fn(), onUpdateNode: vi.fn(), onOpenStudio: vi.fn() });
+  const view = render(<CanvasUiModeProvider mode="developer"><SessionTile {...props(node)} /></CanvasUiModeProvider>);
+  const studio = within(screen.getByRole('region', { name: '交付物', exact: true })).getByRole('button', { name: '在成果工作台打开', exact: true });
+  studio.focus();
+  expect(document.activeElement).toBe(studio);
+  focusCalls = [];
+  // The delivery goes: the drawer closes AND its 在成果工作台打开 is removed, so the focus is lost before the effect runs.
+  view.rerender(<CanvasUiModeProvider mode="developer"><SessionTile {...props({ ...node, lastOutput: undefined })} /></CanvasUiModeProvider>);
+  expect(screen.queryByRole('region', { name: '交付物', exact: true })).toBeNull();
+  // The node head's 展开交付物, which is a button: nothing typing is left once the drawer goes, and the message box is
+  // a send surface, not a parking spot. So Backspace from here is read as a canvas key, as it is on main — the focus
+  // is restored for Tab, and this path is not made worse.
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '展开交付物', exact: true }));
+  movedWithoutScrolling();
+});
+
+// The delivery drawer's <section> is shared: with a configurationPanel set it holds the inline inspector instead (the
+// local edition draws it there rather than over the canvas), and then losing the delivery unmounts nothing. Handing
+// the focus off would throw the reader out of a form still on screen — which main never did. Found by a reviewer.
+it('leaves the focus alone when the shared section keeps an inspector open', () => {
+  const node = delivered();
+  const panel = <label>标题<input defaultValue="a" /></label>;
+  const props = (n: CanvasNode) => ({ node: n, scale: 1, focused: true, initializeOnSend: true,
+    onSend: vi.fn(), onUpdateNode: vi.fn(), configurationPanel: panel });
+  const view = render(<CanvasUiModeProvider mode="developer"><SessionTile {...props(node)} /></CanvasUiModeProvider>);
+  const field = screen.getByLabelText('标题');
+  field.focus();
+  expect(document.activeElement).toBe(field);
+  // The delivery goes, so drawerShown turns false — but the section stays, holding the inspector.
+  view.rerender(<CanvasUiModeProvider mode="developer"><SessionTile {...props({ ...node, lastOutput: undefined })} /></CanvasUiModeProvider>);
+  expect(screen.getByLabelText('标题')).toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByLabelText('标题'));
 });
