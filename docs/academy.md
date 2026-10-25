@@ -33,23 +33,30 @@ A video stays as it was recorded, so the live AwwO can come to differ from what 
 in the video's catalog entry (`notes`, since 2026-10-24): where the span that shows it starts (`at`, whole seconds of the
 video), the day AwwO changed (`since`) and what to do now, in both languages. The dialog lists a video's notes under it as
 **录制之后的变化** / **Changed since recording**; each note's time plays the video from there. A note goes when its span is
-recorded again: a new take, spliced into the edit at the same place, rendered as the rest of the motion version, staged under
-its new sha256 and put in the entry with the note removed.
+recorded again: a new take of those steps, cut into the edit at the same place (spliced in, or the edit built again from its
+plan with those beats taken from the new take), rendered as the rest of the motion version, staged under its new sha256 and
+put in the entry with the note removed.
 
 A video updated after it was first published logs it in `changes` (the day and the words in both languages, newest
 first): its card says **Updated 24 Oct** / **10月24日更新**, and the dialog lists its updates beside it as **更新记录** /
 **Updates**. Recorded again in full, as the five flagships were on 2026-10-24 (a new take of the same steps with
 `take_flagship.py`, cut from the same edit plan and narration, but for the lines that had to change) and THE LONG CHORD the
 same day on Episode I (14 of its 29 lines written again from the case's record, and its copy walked by panning: in the
-recording's 1920-px window no zoom shows all 298 nodes at once), it also moves its `recordedOn` to that day. A take's draft copy is deleted afterwards
-(`delete_mine.py`, which saves it first).
+recording's 1920-px window no zoom shows all 298 nodes at once), it also moves its `recordedOn` to that day. Recorded again
+in part, it keeps its `recordedOn`: the 17 build videos' step 3 on 2026-10-25, every agent's Configure done again on a draft
+copy of its case, with the steps of the video's own take in today's panel (which asks only for a model: AwwO picks the
+engine), the edit built again from its plan with those beats from the new take, and the narration's runtime lines, the
+recap's step on it and the two rebuilt cases' closing lines written and voiced again (the old panel showed its runtime row
+throughout step 3, not only where the narration named it). A take's draft copy is deleted afterwards (`delete_mine.py`,
+which saves it first).
 
 The notes of 2026-10-24 (31, on all 27 videos when they were published) come from that day's audit of every video against
 the changelog: the 17 build videos' Configure step (the runtime AwwO now picks itself), the EV plant digital twin and Neon
 Circuit racer cases (rebuilt on three.js r186), what the canvas assistant says on a fresh copy of PALLWARD, Umber, Backprop,
 Errand and Roost, THE LONG CHORD, now Episode I, with what a copy makes and costs, and in the four how-tos the links between a
 direct task and a plan for the canvas (gone) and the code how-to's recap on refunds. The five fresh-copy notes and THE LONG
-CHORD's two went the same day, when those videos were recorded again; 24 notes on 21 videos remain. THE LONG CHORD's tutorial
+CHORD's two went the same day, when those videos were recorded again, and the build videos' 19 on 2026-10-25, when their
+step 3 was; the four how-tos' five remain. THE LONG CHORD's tutorial
 now says itself what a copy makes again and costs: `saas-academy.test.tsx` recomputes it from the case canvas's own media
 nodes, priced by `mediaCreditsFor` (`backend/internal/app/plans.go`) from that file's price table and plans, and checks the
 count against the case's record, so a new price, plan or count that makes the video wrong fails the test. The multipliers
@@ -70,10 +77,11 @@ free plan holds until the promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (1.72 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
+The files (1.87 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
 one); among them are the first cut's (1.39 GB), THE LONG CHORD's first recording (0.06 GB, replaced on 2026-10-21), the
-earlier motion versions of the six flagships recorded again on 2026-10-24 (0.46 GB) and nine motion versions staged on
-2026-10-22 before their sound was encoded again (0.44 GB). Each is staged once on the host,
+earlier motion versions of the six flagships recorded again on 2026-10-24 (0.46 GB), the 17 build videos' versions from
+before their step 3 was recorded again on 2026-10-25 (1.18 GB) and nine motion versions staged on 2026-10-22 before their
+sound was encoded again (0.44 GB). Each is staged once on the host,
 outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
