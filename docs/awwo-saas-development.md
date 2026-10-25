@@ -65,9 +65,9 @@ AWWO_REVIEWER_API_KEY=YOUR_PRIVATE_KEY
 
 需要可重复的本地负向验收时，使用 `node scripts/awwo-saas-browser-fixture.mjs --start`。输出的 0600 credentials 文件含随机管理员与控制 token；`scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json>` 只为该 fixture 设置一次性精确方法/路径故障。Go API 和生产部署不加载此控制器。支持非法规划、上游 503/断连、HTTP 失败/延迟和 SSE 断连，普通请求仍经过实际 Go/Pi。详见 [整改验收记录](awwo-fable-remediation-20260907.md)。
 
-原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 尚不创建或修改 team。SaaS 整图运行先保存画布、初始化节点身份，再提交 canonical 文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
+原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 可用 `set_team` 新建或替换节点团队（不选择成员模型，见[节点团队 §2.1](awwo-node-teams.md#21-团队模板与规划助手)）。SaaS 整图运行先保存画布、初始化节点身份，再提交 canonical 文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
 
-SaaS 属性面板编辑名称、人格、runtime、模型后点击“保存并准备运行”即可，不再另选公司或绑定 Agent。runtime 留空默认 Pi，模型从有效 runtime 补齐；当前只能选择文本或编程任务，图像禁用。保存及首次整图、局部运行、手动会话发送都会调用 `POST canvases/{id}/initialize`，先准备 Agent / Session 再进行运行校验。初始化只探测所需 worker health 和写数据库，不调用模型；配置健康与真实推理仍分别验收。
+SaaS 属性面板编辑名称、人格、runtime、模型后点击“保存并准备运行”即可，不再另选公司或绑定 Agent。runtime 留空时按 OpenAI Agents 补齐（`defaultRuntime`，2026-09-20 起；此前是 Pi），模型从有效 runtime 补齐；当前只能选择文本或编程任务，图像禁用。保存及首次整图、局部运行、手动会话发送都会调用 `POST canvases/{id}/initialize`，先准备 Agent / Session 再进行运行校验。初始化只探测所需 worker health 和写数据库，不调用模型；配置健康与真实推理仍分别验收。
 
 重复初始化使用当前版本且有效文档未变时，不重复建 Agent / Session 或提升版本；有效模型、人格、类型、名称及 team 变化会建立新当前会话，旧历史仍保留。迁移 008 保存有效初始化快照。后端拒绝 reader、跨租户/画布引用、陈旧版本，以及存在活动图/节点/规划任务的初始化请求。属性面板等待期间锁定控件；明确拒绝时修正草稿再保存。若提示“节点准备结果尚未确认”，保留或导出本地草稿，重新加载核对云端版本与会话后继续，不反复点击创建，也不把旧草稿覆盖未知的新状态。完整字段见 [API 初始化契约](awwo-saas-api.md#节点初始化与配置保存)。
 
