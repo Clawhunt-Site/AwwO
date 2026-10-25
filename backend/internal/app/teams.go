@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -155,6 +156,20 @@ func structuredContractConsistent(snap executionSnapshot) bool {
 		snap.Health.supportsStructuredOutput(snap.Model) && validOutputContract(snap.OutputContract)
 }
 
+// jsTrim trims what the canvas's String.prototype.trim trims: ECMAScript white space (tab, vertical tab, form feed,
+// U+FEFF and every space separator) and line terminators. A team is written on the canvas, which judges a member's id,
+// name and role blank that way (nodeTeam.ts validateNodeTeam, canvasPlan.ts), so the plan gate and the execution do too.
+// strings.TrimSpace differs on two: it keeps U+FEFF and trims U+0085.
+func jsTrim(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		switch r {
+		case '\t', '\n', '\v', '\f', '\r', '\uFEFF', '\u2028', '\u2029':
+			return true
+		}
+		return unicode.Is(unicode.Zs, r)
+	})
+}
+
 func validateTeam(t *nodeTeam) error {
 	if t == nil {
 		return nil
@@ -173,7 +188,7 @@ func validateTeam(t *nodeTeam) error {
 	}
 	ids := map[string]bool{}
 	for _, m := range t.Members {
-		if strings.TrimSpace(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || strings.TrimSpace(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || strings.TrimSpace(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validEffortLevel(m.Effort) || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
+		if jsTrim(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || jsTrim(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || jsTrim(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validEffortLevel(m.Effort) || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
 			return errors.New("Invalid member identity, runtime, model, context or tools")
 		}
 		ids[m.ID] = true

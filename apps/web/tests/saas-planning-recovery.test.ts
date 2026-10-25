@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { emptyDocument } from '../src/canvas/canvasDoc';
-import { applyCanvasPlan, canvasPlanRevision, planContextCondensed, planNewNodeModel } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, planContextCondensed, planNewNodeModel, planOffersTeams } from '../src/canvas/canvasPlan';
 import { canvasStorageKey, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { buildPlanningContext, cancelCanvasPlanRecovery, fitPlanningContext, readCanvasPlanRecovery, requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { canvasFetch, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
@@ -509,6 +509,36 @@ describe('accepted planner run recovery', () => {
       expect(planNewNodeModel(plan)).toBe(asked);
       expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(1);
     });
+
+  // A request that offered no set_team showed every team only as `team: true` (canvasPlan.ts markPlanOffersTeams): its
+  // plan gives no node a team, whichever request reads it, and one that offered set_team does, whichever request reads it.
+  it('says whether the request a plan was made from offered set_team, a resumed or attached run’s too', async () => {
+    let completed = true;
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/plan')) return json(run, 202);
+      if (url.endsWith('/events')) return events({ type: 'running' });
+      return json(completed ? { ...run, status: 'completed', terminal: true, output: JSON.stringify(proposal) } : run);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const ask = (options: object = {}) => requestCanvasPlan('Build a report', emptyDocument(), [], new AbortController().signal, 'en', undefined, options);
+    expect(planOffersTeams(await ask({ teams: true }))).toBe(true);
+    expect(planOffersTeams(await ask())).toBe(false);
+    // Kept without set_team, then read by a request that offers it: attached by its prompt and revision, or resumed.
+    for (const resume of [false, true]) {
+      completed = false;
+      await expect(ask()).rejects.toMatchObject({ code: 'planning_recovery_required' });
+      const operationId = plannerRecovery({ tenant, canvasId: 'recovery-canvas' }, []).read()?.operationId;
+      completed = true;
+      expect(planOffersTeams(await ask({ teams: true, ...(resume ? { recoveryOperationId: operationId } : {}) }))).toBe(false);
+    }
+    // Kept with set_team, then resumed by a request that does not offer it.
+    completed = false;
+    await expect(ask({ teams: true })).rejects.toMatchObject({ code: 'planning_recovery_required' });
+    const operationId = plannerRecovery({ tenant, canvasId: 'recovery-canvas' }, []).read()?.operationId;
+    completed = true;
+    expect(planOffersTeams(await ask({ recoveryOperationId: operationId }))).toBe(true);
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/plan'))).toHaveLength(5);
+  });
 
   it('keeps a set of any size with its request, and refuses one that is not a set before a run is admitted', async () => {
     // A node of 250 inputs, more than the journal once kept for one node: the set used to be dropped, and its plan

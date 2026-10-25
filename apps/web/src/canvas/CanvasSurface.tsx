@@ -3,6 +3,7 @@ import { accountURL } from '../saas/PersonalAccount';
 import { canvasFetch } from '../saas/canvasBridge';
 import { workspaceAgentCatalog } from '../saas/workspaceAgentCatalog';
 import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAgents';
+import { NODE_TEAM_RUNTIMES, type NodeTeamRuntime } from './nodeTeam';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
 import { useLocalEdition } from '../saas/edition';
@@ -3132,8 +3133,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         { state: run.state, ...(run.detail ? { detail: failureReason(t, run.detail, locale) || run.detail } : {}) }]));
       const jev = !resume && plannerProvider === 'jev'
         ? await requestJevPlan(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress) : null;
+      // A plan may give a node a team on a hosted canvas whose palette has a model ready on a team runtime: every hosted
+      // runtime runs teams (canvasBridge.ts supportsNodeTeams), and the palette already says which are ready.
+      const teams = currentSaaSCanvas() !== null && planModels.some(entry => entry.available && NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime));
       const plan = jev?.plan ?? await planRequest(prompt, snapshot, planningTurns(planning.messages), controller.signal, locale, reportProgress,
-        { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds,
+        { ...(resume ? { recoveryOperationId: planningRecovery!.operationId } : {}), mediaKinds, teams,
           models: automaticEntries(planModels).filter(entry => entry.available).map(entry => ({ id: entry.model, name: entry.name || entry.model,
             ...(entry.efforts?.length ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { paid: true } : {}) })),
           // The model the nodes it adds without set_model will take (withAssistantModel below), which it sizes them by.
@@ -3146,7 +3150,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null);
+      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null,
+        teams);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own):
       // the one its request named, which the planner sized them for (a resume's, chosen before the reader changed it;
       // planComponentModel), against the reader's choice now, which may have changed while it planned; except a node the

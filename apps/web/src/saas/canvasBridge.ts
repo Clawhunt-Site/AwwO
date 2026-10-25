@@ -3,7 +3,7 @@ import { modelEffortCapability, runtimeDefinitions, runtimeModels, withPlanTag, 
 import { readSseFrames } from '../sse';
 import { canvasErrorMessage, canvasText, planErrorMessage } from './canvasErrors';
 import type { CanvasDocument } from '../canvas/canvasDoc';
-import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS, condensedFromJSON, condensedToJSON } from '../canvas/canvasPlan';
+import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, PLAN_TEMPLATE_IDS, condensedFromJSON, condensedToJSON, planContextOffersTeams } from '../canvas/canvasPlan';
 import { plannerRecovery, planningRecoveryRequired, type PlannerRun } from './plannerRecovery';
 import { newNodeModelOf } from '../canvas/planNewNodeModel';
 import type { UploadedCanvasFile } from '../canvas/attachments';
@@ -420,11 +420,11 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             let parsed = false;
             try { plan = JSON.parse(output.trim()); parsed = true; } catch { parsed = false; }
             // The plan says what the request its run was made from showed, whichever tab or resume reads it: the fields
-            // shown only in part (the journal's, which read() checked), or null for the whole canvas; and the model it
-            // sized the nodes it adds for, where that request named one.
+            // shown only in part (the journal's, which read() checked), or null for the whole canvas; the model it sized
+            // the nodes it adds for, where that request named one; and whether it offered set_team.
             const newNodeModel = newNodeModelOf(entry.context);
             if (parsed) emit({ type: 'plan', plan, condensed: entry.condensed ?? null, ...(newNodeModel ? { newNodeModel } : {}),
-              ...(recovering ? { recovered: true } : {}) });
+              ...(planContextOffersTeams(entry.context) ? { teams: true } : {}), ...(recovering ? { recovered: true } : {}) });
             // Same cause as the server's own rejection — the model's structure, not the request — so
             // it carries the same code and the caller may retry it on the same terms.
             else emit({ type: 'error', code: 'invalid_canvas_plan', ...(recovering ? { recovered: true } : {}), error: canvasText('Pi 返回的规划不是有效 JSON；当前画布保持原样。', 'Pi returned an invalid JSON plan. The canvas has not changed.') });

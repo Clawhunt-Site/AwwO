@@ -9,6 +9,8 @@ import { mediaKindOf } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import { isTaskFrame } from './taskFrame';
 import { effortLabel } from './NodeModelSettings';
+import { nodeTeamFingerprint, nodeTeamTurnEstimate } from './nodeTeam';
+import { nodeTeamModeLabel } from './NodeTeamEditor';
 
 const MAX_NAMES = 4;
 const MAX_LINES = 8;
@@ -80,6 +82,14 @@ export function describePlanChanges(before: CanvasDocument, after: CanvasDocumen
   if (inputs.length) lines.push(t('planning.changeInputs', { names: names(locale, t, inputs) }));
   if (prompts.length) lines.push(t('planning.changePrompt', { names: names(locale, t, prompts) }));
   lines.push(...modelLines);
+  // A team a plan gave a node, new or changed, with what one run of it costs: every member call is a model call.
+  for (const next of after.nodes) {
+    if (next.kind !== 'session' || !next.team) continue;
+    const previous = earlier.get(next.id);
+    if (previous?.kind === 'session' && nodeTeamFingerprint(previous.team) === nodeTeamFingerprint(next.team)) continue;
+    lines.push(t('planning.changeTeam', { node: title(next), count: next.team.members.length, mode: nodeTeamModeLabel(next.team.mode, locale),
+      calls: nodeTeamTurnEstimate(next.team) }));
+  }
   const wiresBefore = new Set(before.edges.map(wire));
   const wiresAfter = new Set(after.edges.map(wire));
   const connected = after.edges.filter(edge => !wiresBefore.has(wire(edge))).length;

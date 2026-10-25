@@ -1,11 +1,15 @@
 // The canvas assistant's model (chosen under its composer) for the components a plan adds: a canvas the assistant
 // builds then runs on the model the reader picked there, the same one its direct tasks use. Only the Agent nodes the
 // plan itself created and left unset take it ('' runtime and model, canvasDoc.ts: never back-filled, the picker
-// fills); media nodes keep their media model, nodes on a team or bound to an Agent keep theirs, and Jev's own choices
-// stand (the host does not call this for a Jev plan). The runtime is not the assistant's: its direct tasks run on Pi
-// (the only worker that serves them Bedrock), but a node runs the model where AwwO runs every node (nodeRuntime.ts).
+// fills); media nodes keep their media model, nodes bound to an Agent keep theirs, and Jev's own choices stand (the
+// host does not call this for a Jev plan). A team the plan gave such a node (set_team) goes with it: its members
+// inherit the node's model on the node's runtime (nodeTeam.ts), so the team moves to that runtime; a team with a
+// member set up its own way, or a model on a runtime that runs no team, leaves the node as it is. The runtime is not
+// the assistant's: its direct tasks run on Pi (the only worker that serves them Bedrock), but a node runs the model
+// where AwwO runs every node (nodeRuntime.ts).
 import type { CanvasDocument } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
+import { NODE_TEAM_RUNTIMES, type NodeTeamRuntime } from './nodeTeam';
 import { automaticEntry } from './nodeRuntime';
 import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 
@@ -48,10 +52,14 @@ export function withAssistantModel(doc: CanvasDocument, addedNodeIds: ReadonlyAr
   const added = new Set(addedNodeIds);
   let changed = false;
   const nodes = doc.nodes.map(node => {
-    if (!added.has(node.id) || node.kind !== 'session' || mediaKindOf(node.agentKind) || node.team
+    if (!added.has(node.id) || node.kind !== 'session' || mediaKindOf(node.agentKind)
       || node.runtime || node.model || node.binding?.agentId) return node;
+    const team = node.team;
+    const runtime = NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime) ? entry.runtime as NodeTeamRuntime : undefined;
+    // A team goes only where it can follow its node: never split from it by a runtime that runs no team.
+    if (team && (!runtime || team.members.some(member => member.runtime || member.model))) return node;
     changed = true;
-    return { ...node, runtime: entry.runtime, model: entry.model, effort: entry.effort ?? '' };
+    return { ...node, runtime: entry.runtime, model: entry.model, effort: entry.effort ?? '', ...(team && runtime ? { team: { ...team, runtime } } : {}) };
   });
   return changed ? { ...doc, nodes } : doc;
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { componentModelEntry, planComponentModel, withAssistantModel } from '../src/canvas/assistantModel';
 import { DEFAULT_NEW_NODE_MODEL } from '../src/canvas/planNewNodeModel';
 import { createSessionNode, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { createNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
 import { executionHost } from '../src/saas/AssistantExecution';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { executionModelKey, useManagedExecution } from '../src/saas/useManagedExecution';
@@ -44,6 +45,25 @@ describe('the components a canvas-assistant plan adds', () => {
     const notReady = palette.map(item => item.runtime === 'openai-agents' ? { ...item, available: false } : item);
     expect(componentModelEntry(opus, notReady)?.runtime).toBe('pi');
     expect(componentModelEntry({ runtime: 'openai-agents', model: 'qwen3.8-27b-p6' }, palette)?.runtime).toBe('pi');
+  });
+
+  it('take a team the plan gave a node it added to the chosen model’s runtime, where its members inherit that model', () => {
+    const fresh = node('team-new', { team: createNodeTeam({ title: '', persona: '', model: '', runtime: '' }) });
+    const own = createNodeTeam({ title: '', persona: '', model: '', runtime: '' });
+    const set = node('team-own', { team: { ...own, members: [{ ...own.members[0], model: 'claude-opus-5' }, own.members[1]] } });
+    const after = withAssistantModel(doc([fresh, set]), ['team-new', 'team-own'], opus, palette);
+    const [moved, kept] = after.nodes as SessionNode[];
+    expect([moved.runtime, moved.model, moved.team?.runtime]).toEqual(['openai-agents', 'bedrock.claude-opus-5-5', 'openai-agents']);
+    expect(moved.team?.members.every(member => member.runtime === '' && member.model === '')).toBe(true);
+    expect(validateNodeTeam(moved.team)).toEqual([]);
+    // A model AwwO runs on Pi takes the team there too, off the runtime a new team starts on (nodeTeam.ts newTeamRuntime).
+    const onPi = withAssistantModel(doc([fresh]), ['team-new'], { runtime: 'pi', model: 'qwen3.8-27b-p6' }, palette).nodes[0] as SessionNode;
+    expect([onPi.runtime, onPi.model, onPi.team?.runtime]).toEqual(['pi', 'qwen3.8-27b-p6', 'pi']);
+    // A member set up its own way: the node and its team stay exactly as the plan left them.
+    expect(kept).toBe(set);
+    // A model on a runtime that runs no team (one a later catalogue might add) never splits a node from its team: both stay.
+    const elsewhere = withAssistantModel(doc([fresh]), ['team-new'], { runtime: 'later', model: 'box' }, [{ runtime: 'later', model: 'box', available: true }]);
+    expect(elsewhere.nodes[0]).toBe(fresh);
   });
 
   it('keep the workspace default when no model was chosen or the workspace offers the chosen one to no node', () => {

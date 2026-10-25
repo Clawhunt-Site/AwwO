@@ -46,6 +46,15 @@ export function fixtureOutput(body) {
   const prompt = content(messages.filter(m => m.role === 'user').at(-1));
   if (systems.includes('Awwo canvas planner')) {
     if (prompt.includes('[fixture:invalid-plan]')) return JSON.stringify({ version: 1, summary: 'Explicit invalid plan fixture', operations: [{ type: 'exec', command: 'never-execute-fixture' }] });
+    // Both kinds of set_team, a template's and one the plan writes, both sequential so a fixture run can finish them
+    // (a review team's reviewer would need a verdict JSON the fixture never writes).
+    if (prompt.includes('[fixture:team-plan]')) return JSON.stringify({ version: 1, summary: '本地协议 fixture：添加两个协作团队节点（模板团队与自定义团队）；无外部模型推理。', operations: [
+      { type: 'add_node', ref: 'fixture_template_team', templateId: 'general', title: 'Fixture 模板团队', acceptanceCriteria: ['交付覆盖任务要求'] },
+      { type: 'set_team', nodeId: 'fixture_template_team', template: 'plan-build-check' },
+      { type: 'add_node', ref: 'fixture_custom_team', templateId: 'general', title: 'Fixture 自定义团队', acceptanceCriteria: ['交付覆盖任务要求'] },
+      { type: 'set_team', nodeId: 'fixture_custom_team', mode: 'sequential', members: [
+        { name: '起草', role: '写出初稿', instructions: 'PROTOCOL_FIXTURE_TEAM_DRAFT。' }, { name: '定稿', role: '检查并定稿' }] },
+    ] });
     return JSON.stringify({ version: 1, summary: '本地协议 fixture：添加两个通用节点及一条依赖，需绑定 awwo-protocol-fixture 后运行；无外部模型推理。', operations: [
       { type: 'add_node', ref: 'fixture_first', templateId: 'general', title: 'Fixture A · 协议输出',
         persona: 'PROTOCOL_FIXTURE_PERSONA_A。仅用于本地协议验收，内容由确定性 fixture 生成，不代表真实推理或业务交付。',
@@ -178,10 +187,14 @@ export function selfTest() {
   assert.deepEqual(planner.operations.map(op => op.type), ['add_node', 'add_node', 'connect']);
   assert.equal(planner.operations[2].fromNode, planner.operations[0].ref);
   assert.equal(planner.operations[2].toNode, planner.operations[1].ref);
+  const teams = JSON.parse(fixtureOutput({ messages: [{ role: 'system', content: 'Awwo canvas planner' }, { role: 'user', content: '配团队 [fixture:team-plan]' }] }));
+  assert.deepEqual(teams.operations.map(op => op.type), ['add_node', 'set_team', 'add_node', 'set_team']);
+  assert.equal(teams.operations[1].nodeId, teams.operations[0].ref); assert.equal(teams.operations[1].template, 'plan-build-check');
+  assert.equal(teams.operations[3].nodeId, teams.operations[2].ref); assert.equal(teams.operations[3].mode, 'sequential');
   const summary = summarizeRequest({ ...body, authorization: 'must-never-save-this', apiKey: 'must-never-save-that' }, 1);
   const serialized = JSON.stringify(summary); assert.ok(!serialized.includes('must-never-save'));
   assert.equal(summary.messages[0].sha256, digest('PROTOCOL_FIXTURE_PERSONA_A'));
-  console.log('PASS: fixture text/history/persona, typed JSON output, planner shape, summary key exclusion. No processes, database or network listeners started.');
+  console.log('PASS: fixture text/history/persona, typed JSON output, planner shape, team plan shape, summary key exclusion. No processes, database or network listeners started.');
 }
 
 async function reservation() {
@@ -338,6 +351,7 @@ export async function start() {
     console.log('仅本地协议验收：在此 URL 注册新的测试账号；先规划添加两节点，应用后分别绑定模型 awwo-protocol-fixture，再运行整图。');
     console.log('单节点聊天：first-turn → second-turn；[fixture:slow] 给约15秒刷新窗口；[fixture:hold] 发出部分内容后等待你取消，可立即重跑。');
     console.log('负向标记：[fixture:invalid-plan]（规划拒绝）、[fixture:provider-503]、[fixture:provider-disconnect]。标记会保留在规划上下文中，请使用专用测试画布。');
+    console.log('团队标记：[fixture:team-plan] 规划添加一个模板团队节点和一个自定义团队节点（都是顺序执行，fixture 可以跑完）。');
     console.log('随机测试管理员和故障控制token仅写入上述600 credentialsFile；node scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json-file> 配置一次性精确API故障。默认无故障。');
     console.log('Persona/history证据：查看requestSummaryURL或临时requests.jsonl（仅测试文本摘要，无headers/API keys）。无需改用户模型配置。');
     console.log('边界：确定性协议文本与现有【输出格式】字段类型；不支持任意JSON schema推理。file 字段返回确定性占位内容，会被真实存成可下载交付物（非真实业务成果）。请勿输入真实业务秘密。Ctrl-C清理本实例。');

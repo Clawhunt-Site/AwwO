@@ -5,12 +5,13 @@ import { getAgentTemplateForNode, getAgentTemplates } from './agentTemplates';
 import { figureRole } from './figureKit/figureKit';
 import type { CanvasDocument } from './canvasDoc';
 import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_PLAN_PROTOCOL, DEFAULT_MODEL_REFERENCE, HOSTED_PAGE_TEMPLATE_ID, MEDIA_PLAN_TEMPLATE_IDS, PLAN_TEMPLATE_IDS,
-  canvasPlanRevision, condensedFromJSON, condensedMark, condensedToJSON, hostedPageOutputs, markPlanContextCondensed, markPlanNewNodeModel, parseCanvasPlan,
+  canvasPlanRevision, condensedFromJSON, condensedMark, condensedToJSON, hostedPageOutputs, markPlanContextCondensed, markPlanNewNodeModel, markPlanOffersTeams, parseCanvasPlan,
   sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
 import { NEW_NODE_LINE } from './planNewNodeModel';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
+import { nodeTeamTemplates } from './nodeTeamTemplates';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
 import { readSseFrames } from '../sse';
@@ -114,9 +115,10 @@ export function saveLastPlanDuration(seconds: number): void {
 
 
 /** Keep the shared structural protocol, with only the Go host's supported operations/types, and the media nodes the
- *  workspace can generate (a hosted workspace only). A host that offers the planner no models leaves set_model out. */
-function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = [], models = false): string {
-  const protocol = models ? CANVAS_PLAN_PROTOCOL : CANVAS_PLAN_PROTOCOL.split('\n').filter(line => !line.startsWith('set_model')).join('\n');
+ *  workspace can generate (a hosted workspace only). A host that offers the planner no models leaves set_model out, and
+ *  one that runs no node teams leaves set_team out. */
+function planningProtocol(saas: boolean, mediaKinds: ReadonlyArray<MediaKind> = [], models = false, teams = false): string {
+  const protocol = CANVAS_PLAN_PROTOCOL.split('\n').filter(line => (models || !line.startsWith('set_model')) && (teams || !line.startsWith('set_team'))).join('\n');
   if (!saas) return protocol;
   return withMediaNodes(protocol.split('\n').filter(line =>
     !/^(set_edge_kind:|set_execution:|互审Graph使用)/.test(line),
@@ -134,7 +136,9 @@ export interface PlanRunState { state: string; detail?: string }
  *  nodes a plan adds without set_model take (the reader's choice for the canvas assistant, assistantModel.ts;
  *  DEFAULT_NEW_NODE_MODEL where they run the workspace default), which a hosted planner sizes their tasks by
  *  (planning_limits.go). */
-export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Readonly<Record<string, PlanRunState | undefined>>; newNodeModel?: string }
+/** `teams`: the host runs node teams, so the planner may give a node one (set_team) and is shown each team and the team
+ *  templates. */
+export interface PlanningExtras { models?: ReadonlyArray<PlanModel>; runs?: Readonly<Record<string, PlanRunState | undefined>>; newNodeModel?: string; teams?: boolean }
 
 /** What the planner is told about a node's brief, its requirements and how its last run went: the things a person used
  *  to set by hand in developer mode, which the assistant now sets itself (owner request 2026-10-15). A hosted
@@ -292,7 +296,12 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
         ...(frame?.acceptanceCriteria.length ? { acceptanceCriteria: frame.acceptanceCriteria.map(item => short(node.id, 'acceptanceCriteria', item)) } : {}),
         // The planner sees a node's model only where it can change one; an unset node runs the workspace default.
         ...(models ? { model: node.model || DEFAULT_MODEL_REFERENCE } : {}),
-        ...(node.team ? { team: true } : {}),
+        // A team's members as the planner may write them (set_team): never their models, runtimes or tools. Their texts
+        // shorten with the node's (eight members' 512-character roles on many nodes would fill a context on their own),
+        // and a team shown in part is one the plan leaves as it is (applyCanvasPlan).
+        ...(node.team ? { team: extras.teams ? { mode: node.team.mode, maxRounds: node.team.maxRounds,
+          members: node.team.members.map(({ name, role, instructions }) => ({ name: short(node.id, 'team', name), role: short(node.id, 'team', role),
+            ...(instructions ? { instructions: short(node.id, 'team', instructions) } : {}) })) } : true } : {}),
         inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value: short(node.id, `input:${id}`, value) })),
         outputs: node.contract?.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}),
@@ -338,6 +347,11 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
     ? ' When the request needs pictures, video or 3D models as assets, add one matching media node per asset with its prompt written, rather than having a text Agent describe the asset or claim a file.'
     : '需要图片、视频或3D模型素材时，为每个素材添加一个对应的媒体节点并写好提示词，不要让文字Agent用描述代替生成或声称已有文件。';
   const modelHeading = locale === 'en' ? 'Models a node can run (for set_model; "default" is the workspace default)' : '节点可用的模型（供 set_model 使用；"default" 为工作区默认模型）';
+  // The team templates set_team may name, with what each one's members do (their full instructions stay in the app).
+  const teamTemplates = extras.teams ? `${locale === 'en' ? 'Team templates (the template of set_team)' : '协作团队模板（set_team 的 template）'}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(
+    nodeTeamTemplates().map(template => ({ id: template.id, title: template[locale].title, summary: template[locale].summary, mode: template.mode,
+      ...(template.mode === 'debate' || template.mode === 'review' ? { maxRounds: template.maxRounds } : {}),
+      members: template[locale].members.map(({ name, role }) => ({ name, role })) })))}` : '';
   // The model the Agent nodes this plan adds without set_model take, as the host resolved it (only one a node can run,
   // or "default" for the workspace default): possibly one the model list leaves out, a model only a user may choose
   // (planModelsOf), which they still take.
@@ -350,12 +364,13 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
     ? 'The canvas is large, so some long texts are shown only in part this time, ending in "… [N more characters not shown; kept as they are]": the canvas keeps them whole. Do not rewrite them or copy shortened text into any operation. When the user wants to change exactly such a text, return empty operations and say in summary that the canvas is too large for that text to be read here: they can edit it in the node themselves, or name that node in the request if they have not.'
     : '画布内容较多，部分长文字这次只显示了开头，以「…〔另有 N 字未显示，保持原样〕」结尾：画布上的原文保持不变。不要改写这些文字，也不要把截短的文字写进任何操作。用户要改的正是被截短的内容时，返回空operations，并在summary里说明画布太大、这段文字这次读不全：可以直接在节点里修改，还没写明节点名称的话也可以写明后再发一次。';
   return [
-    planningProtocol(saas, offeredMedia, Boolean(models)),
+    planningProtocol(saas, offeredMedia, Boolean(models), Boolean(extras.teams)),
     guidance[0], guidance[1] + mediaGuidance, ...(saas ? [] : [orchestrationGuidance(locale, Boolean(models))]), ...guidance.slice(2, 4),
     `${guidance[4]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(templates)}`,
     ...(models ? [`${modelHeading}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(models.map(({ id, name, efforts, paid }) => ({ id, name,
       ...(efforts?.length ? { efforts } : {}), ...(paid ? { paid: true } : {}) })))}`] : []),
     ...(newNodeLine ? [newNodeLine] : []),
+    ...(teamTemplates ? [teamTemplates] : []),
     ...(shortened ? [shortenedNote] : []),
     `${guidance[5]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(graph)}`,
     `${guidance[6]}${locale === 'zh' ? '：' : ':'}\n${JSON.stringify(turns)}`,
@@ -469,8 +484,8 @@ const PROVIDER_RETRY_BEFORE_MS = 180_000;
  * and returns the single proposal frame. An ended stream without a proposal is a failure, never
  * an empty plan — the canvas must not change on a lost connection. */
 async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale,
-  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown; newNodeModel?: string; recovered?: boolean }> {
-  let proposal: { plan: unknown; condensed?: unknown; newNodeModel?: string; recovered?: boolean } | null = null;
+  observed: { last: PlanProgress }, onProgress?: PlanProgressReporter): Promise<{ plan: unknown; condensed?: unknown; newNodeModel?: string; teams?: boolean; recovered?: boolean }> {
+  let proposal: { plan: unknown; condensed?: unknown; newNodeModel?: string; teams?: boolean; recovered?: boolean } | null = null;
   let failure = '';
   let failureCode = '';
   let recovered = false;
@@ -481,7 +496,7 @@ async function readPlanStream(body: ReadableStream<Uint8Array>, locale: UiLocale
       onProgress?.(observed.last);
     } else if (frame?.type === 'plan') proposal = { plan: frame.plan, ...(Object.hasOwn(frame, 'condensed') ? { condensed: frame.condensed } : {}),
       ...(typeof frame.newNodeModel === 'string' && frame.newNodeModel ? { newNodeModel: frame.newNodeModel } : {}),
-      ...(frame.recovered === true ? { recovered: true } : {}) };
+      ...(frame.teams === true ? { teams: true } : {}), ...(frame.recovered === true ? { recovered: true } : {}) };
     else if (frame?.type === 'error') {
       failure = typeof frame.error === 'string' && frame.error.trim() ? frame.error : canvasText(locale, 'planning.unavailable');
       failureCode = typeof frame.code === 'string' ? frame.code : '';
@@ -503,7 +518,7 @@ type PlanView = Partial<FittedPlanningContext> & { context: string };
  * tab's plan was made from too; undefined where the host does not say (the desktop gateway). */
 async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, signal: AbortSignal,
   locale: UiLocale, saas: boolean, observed: { last: PlanProgress }, onProgress?: PlanProgressReporter,
-  options?: PlanRequestOptions): Promise<{ plan: CanvasPlan; condensed?: PlanContextCondensed | null; newNodeModel?: string }> {
+  options?: PlanRequestOptions): Promise<{ plan: CanvasPlan; condensed?: PlanContextCondensed | null; newNodeModel?: string; teams?: boolean }> {
   const response = await canvasFetch(`${gatewayApiBase()}/canvas/plan`, {
     method: 'POST', credentials: 'include', signal,
     headers: { 'content-type': 'application/json', accept: 'text/event-stream, application/json' },
@@ -519,12 +534,14 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   let raw: unknown;
   let condensed: PlanContextCondensed | null | undefined;
   let newNodeModel: string | undefined;
+  let teams = false;
   // A plan of a run the host attached to rather than started: if it does not hold up here, it is not asked for again.
   let recovered = false;
   if (streaming) {
     const proposal = await readPlanStream(response.body!, locale, observed, onProgress);
     raw = proposal.plan;
     newNodeModel = proposal.newNodeModel;
+    teams = proposal.teams === true;
     recovered = proposal.recovered === true;
     // A set that cannot be read could let the plan write over what its view showed only in part: no plan is applied.
     if (Object.hasOwn(proposal, 'condensed')) {
@@ -553,7 +570,7 @@ async function planOnce(prompt: string, view: PlanView, doc: CanvasDocument, sig
   // operation this workspace does not support, which the prompt already rules out, so it is a decision
   // rather than a slip and asking again would spend another run to be told the same thing.
   if (saas) plan = saasPlan(plan, locale);
-  return { plan, ...(condensed !== undefined ? { condensed } : {}), ...(newNodeModel ? { newNodeModel } : {}) };
+  return { plan, ...(condensed !== undefined ? { condensed } : {}), ...(newNodeModel ? { newNodeModel } : {}), ...(teams ? { teams } : {}) };
 }
 
 export type CanvasPlanRecovery = { pending: boolean; operationId?: string; prompt?: string; matches?: boolean };
@@ -590,7 +607,7 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
   const scope = currentSaaSCanvas();
   const saas = scope !== null;
   const observed = { last: { stage: 'queued', characters: 0, nodes: 0, edges: 0, reasoning: 0, attempt: 1 } as PlanProgress };
-  const extras: PlanningExtras = { models: options?.models, runs: options?.runs, newNodeModel: options?.newNodeModel };
+  const extras: PlanningExtras = { models: options?.models, runs: options?.runs, newNodeModel: options?.newNodeModel, teams: options?.teams };
   const units = saas ? Math.min(MAX_PLAN_CONTEXT_UNITS, MAX_PLAN_PROMPT_UNITS - PLAN_REQUEST_JOIN_UNITS - prompt.length) - PLAN_CONTEXT_MARGIN : Infinity;
   const fit = (room: number) => fitPlanningContext(doc, messages, locale, options?.mediaKinds ?? [], extras, room, planningFocus(doc, prompt, extras, options?.selected), units);
   // The canvas alone is too large, or the room the request, its files and the selected knowledge leave is too small.
@@ -617,7 +634,7 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
       onProgress?.(progress);
     };
     try {
-      const { plan, condensed, newNodeModel } = await planOnce(prompt, view, doc, signal, locale, saas, observed, report, options);
+      const { plan, condensed, newNodeModel, teams } = await planOnce(prompt, view, doc, signal, locale, saas, observed, report, options);
       if (signal.aborted || currentSaaSCanvas() !== scope) throw new PlanFailure(canvasText(locale, 'planning.interrupted'), 'planning_scope_changed');
       // What the host kept with the request this plan's run was made from comes first, the whole canvas (null) too: a
       // resumed run's, or one another tab started, was made from that request rather than from the view built here.
@@ -627,6 +644,8 @@ export async function requestCanvasPlan(prompt: string, doc: CanvasDocument, mes
       // resume's named the one chosen then. A frame that names none (a request stored before requests named one, a host
       // without frames) leaves the plan unmarked.
       if (newNodeModel) markPlanNewNodeModel(plan, newNodeModel);
+      // And whether that request offered set_team: a resumed run's, or one another tab started, may not have.
+      if (teams) markPlanOffersTeams(plan);
       return plan;
     } catch (error) {
       // A late old-workspace failure must never turn the malformed-plan retry into an admission

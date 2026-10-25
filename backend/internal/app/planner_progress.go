@@ -71,13 +71,17 @@ const (
 // figure is an Agent that draws an interactive explainer figure with AwwO's figure kit.
 var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure", "image", "video", "model3d"}
 
+// planTeamTemplateIDs is the closed set of team templates a set_team may name (the canvas's NODE_TEAM_TEMPLATE_IDS in
+// nodeTeamTemplates.ts; TestPlanTeamTemplatesMatchTheCanvas keeps the two the same).
+var planTeamTemplateIDs = []string{"draft-review", "research-panel", "debate-verdict", "plan-build-check", "expert-review", "translate-review"}
+
 // planOperationTypes is the closed set of operations a proposal may contain; the plan gate
 // rejects any other, and progress names the newest one only as a member of this set.
-var planOperationTypes = []string{"add_node", "update_node", "set_task", "set_model", "set_input", "add_field", "update_field", "remove_field", "remove_node", "connect", "disconnect"}
+var planOperationTypes = []string{"add_node", "update_node", "set_task", "set_model", "set_team", "set_input", "add_field", "update_field", "remove_field", "remove_node", "connect", "disconnect"}
 
 // planNodeOperationTypes are the operations that concern one node, so progress may name that
 // node's template beside them; a connection concerns two, and naming one would misstate it.
-var planNodeOperationTypes = []string{"add_node", "update_node", "set_task", "set_model", "set_input", "add_field", "update_field", "remove_field", "remove_node"}
+var planNodeOperationTypes = []string{"add_node", "update_node", "set_task", "set_model", "set_team", "set_input", "add_field", "update_field", "remove_field", "remove_node"}
 
 var plannerTemplatePattern = regexp.MustCompile(`^"templateId"\s{0,8}:\s{0,8}"([a-z][a-z0-9]{0,15})"`)
 

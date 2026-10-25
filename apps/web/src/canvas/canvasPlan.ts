@@ -11,7 +11,9 @@ import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
-import { automaticEntry } from './nodeRuntime';
+import { SANDBOX_RUNTIME, automaticEntry } from './nodeRuntime';
+import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, newTeamRuntime, validateNodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
+import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
  *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
@@ -51,6 +53,10 @@ export type CanvasPlanOperation =
   | { type: 'set_task'; nodeId: string; constraints?: string[]; acceptanceCriteria?: string[] }
   /** A node's model (one the host offered the planner), and its reasoning effort; the runtime is AwwO's (nodeRuntime.ts). */
   | { type: 'set_model'; nodeId: string; model: string; effort?: string }
+  /** An Agent node's collaboration team, replacing any it has: a template's, or the members the plan writes. Never a
+   *  model, effort, runtime or tool (nodeTeamTemplates.ts buildNodeTeam). */
+  | { type: 'set_team'; nodeId: string; template: NodeTeamTemplateId }
+  | { type: 'set_team'; nodeId: string; mode: NodeTeamMode; maxRounds?: number; members: NodeTeamMemberBrief[] }
   | { type: 'set_input'; nodeId: string; fieldId: string; value: string }
   | { type: 'add_field'; nodeId: string; side: 'input' | 'output'; field: ContractField }
   | { type: 'update_field'; nodeId: string; side: 'input' | 'output'; fieldId: string; changes: CanvasPlanFieldChanges }
@@ -63,7 +69,7 @@ export type CanvasPlanOperation =
   | { type: 'disconnect'; edgeId: string };
 
 export type CanvasPlanOperationType = CanvasPlanOperation['type'];
-const OPERATION_TYPES = ['add_node', 'update_node', 'set_task', 'set_model', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
+const OPERATION_TYPES = ['add_node', 'update_node', 'set_task', 'set_model', 'set_team', 'set_input', 'add_field', 'update_field', 'remove_field', 'remove_node',
   'connect', 'set_edge_kind', 'set_execution', 'disconnect'] as const satisfies ReadonlyArray<CanvasPlanOperationType>;
 // An operation type added to CanvasPlanOperation but not listed above fails to compile here.
 const everyOperationListed: [Exclude<CanvasPlanOperationType, typeof OPERATION_TYPES[number]>] extends [never] ? true : never = true;
@@ -71,7 +77,7 @@ void everyOperationListed;
 /** Every operation type a plan may contain: the closed set planning progress may name. */
 export const CANVAS_PLAN_OPERATION_TYPES: ReadonlySet<string> = new Set(OPERATION_TYPES);
 /** The operation types that concern one node, beside which progress may name that node's template. */
-export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_task', 'set_model', 'set_input', 'add_field',
+export const CANVAS_PLAN_NODE_OPERATION_TYPES: ReadonlySet<string> = new Set(['add_node', 'update_node', 'set_task', 'set_model', 'set_team', 'set_input', 'add_field',
   'update_field', 'remove_field', 'remove_node'] satisfies CanvasPlanOperationType[]);
 
 export interface CanvasPlan { version: 1; summary: string; operations: CanvasPlanOperation[] }
@@ -90,9 +96,10 @@ export interface CanvasPlanModelChoice { runtime: string; model: string; availab
 export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice>; userChosen?: ReadonlyArray<{ model: string; name?: string }> }
 
 /** The fields of each node a plan's context showed only in part (canvasPlanning.ts fitPlanningContext): 'persona',
- *  'constraints' (its own items or a shared requirement it holds), 'acceptanceCriteria' and 'input:<field id>' (a form's
- *  fields and a media node's prompt too). The plan leaves them as they are, since its planner never saw them whole, and
- *  writes no text copied from a shortened one anywhere (applyCanvasPlan). An empty set: only the conversation was cut. */
+ *  'constraints' (its own items or a shared requirement it holds), 'acceptanceCriteria', 'input:<field id>' (a form's
+ *  fields and a media node's prompt too) and 'team' (a member's name, role or instructions). The plan leaves them as
+ *  they are, since its planner never saw them whole, and writes no text copied from a shortened one anywhere
+ *  (applyCanvasPlan). An empty set: only the conversation was cut. */
 export type PlanContextCondensed = ReadonlyMap<string, ReadonlySet<string>>;
 /** A PlanContextCondensed as the planning recovery journal keeps it beside its request (plannerRecovery.ts). */
 export type PlanContextCondensedJSON = Array<[string, string[]]>;
@@ -107,6 +114,12 @@ const sizedPlans = new WeakMap<object, string>();
  *  was made from named (planNewNodeModel.ts; "default" for the workspace default), which the host's plan frame says, a
  *  resume's too (canvasBridge.ts). The host then puts those nodes on it (assistantModel.ts planComponentModel). */
 export function markPlanNewNodeModel(plan: CanvasPlan, model: string): void { sizedPlans.set(plan, model); }
+const teamPlans = new WeakSet<object>();
+/** Say that the request a plan's run was made from offered set_team (planContextOffersTeams), which the host's plan frame
+ *  says, a resume's and another tab's run too (canvasBridge.ts). Only such a plan gives a node a team: a request that did
+ *  not offer it showed every team only as `team: true`, and a set_team would replace a team its planner never read. */
+export function markPlanOffersTeams(plan: CanvasPlan): void { teamPlans.add(plan); }
+export function planOffersTeams(plan: unknown): boolean { return plan !== null && typeof plan === 'object' && teamPlans.has(plan); }
 /** The model markPlanNewNodeModel gave a plan, or undefined where none was given (a request stored before plans said it,
  *  a host without plan frames). */
 export function planNewNodeModel(plan: unknown): string | undefined {
@@ -137,6 +150,11 @@ const CONDENSED_MARK = /另有\s{0,40}\d(?:[,，.'\s]{0,40}\d){0,12}\s{0,40}字\
 /** Whether a text carries shortened text from a plan's context, which a plan made from one must never write. */
 export const carriesCondensedText = (text: string | undefined): boolean => text !== undefined && CONDENSED_MARK.test(text);
 
+const TEAM_TEMPLATE_CHOICES = NODE_TEAM_TEMPLATE_IDS.map(id => `"${id}"`).join('|');
+/** A team member's text limits in a plan: the team editor's (nodeTeam.ts validateNodeTeam) and the API's (teams.go), so
+ *  every member the planner is shown can be written back. */
+const TEAM_LIMITS = { name: 128, role: 512, instructions: 16000 } as const;
+
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
@@ -145,6 +163,7 @@ add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
 set_model: {type:"set_model",nodeId:string,model:string,effort?:string}
+set_team: {type:"set_team",nodeId:string,template:${TEAM_TEMPLATE_CHOICES}} 或 {type:"set_team",nodeId:string,mode:"sequential"|"parallel"|"debate"|"review",maxRounds?:1到8的整数,members:[{name:string,role:string,instructions?:string}]}
 set_input: {type:"set_input",nodeId:string,fieldId:string,value:string}
 add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"html"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
 update_field: {type:"update_field",nodeId:string,side:"input"|"output",fieldId:string,changes:{label?:string,type?:上述字段类型,required?:boolean,help?:string,placeholder?:string}}
@@ -159,12 +178,17 @@ connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点�
 互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
 set_task 改任务要求：constraints=约束，acceptanceCriteria=可逐条核对交付的验收标准；给出的列表整体替换；每列表≤20条、每条≤2000字、合计≤12000字；新节点约束默认为原始请求，给它的 constraints 接在其后；@R1 等即 requirements 原文。
 set_model 是唯一能改模型的操作，只能改用 models 中的模型：model 写 id（"default"=工作区默认），effort 只能是该模型列出的档位；执行引擎由应用选择。
+set_team 把一个 Agent 节点配成协作团队，整体替换它已有的团队：template 写「协作团队模板」中一个模板的 id；或自己写 mode 和 1到8位 members（review至少2位；成员名称不重复，名称最多${TEAM_LIMITS.name}字符、职责最多${TEAM_LIMITS.role}字符、指令最多${TEAM_LIMITS.instructions}字符；maxRounds只用于debate和review，默认2）。成员顺序就是分工：sequential的最后一位交付，parallel和debate的最后一位汇总或裁决，review的最后一位审核。成员只写名称、职责和指令：模型、思考强度、执行框架和工具由用户设置，新成员继承节点模型，同名成员保留用户已选的设置。每位成员每轮都是一次模型调用，所以只在用户要求团队、多人协作、审核返工、辩论或多角度时使用；工作区Agent、表单和媒体节点不能配团队。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
 改变已连接字段类型或删除字段前须先disconnect。remove_node 明确删除该节点及其关联连线。
 只能修改白名单：禁止binding/runtime/model/effort/threads/issueId/preview/lastOutput/templateId等执行状态修改；禁止命令执行、创建真实Agent、发消息、运行节点、文件写入、部署、付款等副作用。布局由应用安排新增节点，不能提交x/y/w/h。
 最多100个操作、JSON最多120000字符、summary最多1000字符；ID/ref最多128字符，title/label最多200字符，persona最多8000字符，输入value最多16000字符，help/placeholder最多2000字符；每个节点每侧最多64字段。`;
 
 const LIMITS = { raw: 120000, operations: 100, id: 128, title: 200, persona: 8000, value: 16000, help: 2000, fields: 64 } as const;
+const SET_TEAM_LINE = CANVAS_PLAN_PROTOCOL.split('\n').find(line => line.startsWith('set_team:'))!;
+/** Whether a planning context offered set_team: its protocol has the set_team line only then (canvasPlanning.ts
+ *  planningProtocol), and with it the teams' members and the team templates. */
+export const planContextOffersTeams = (context: string | undefined): boolean => (context ?? '').split('\n').includes(SET_TEAM_LINE);
 
 const MEDIA_KIND_WORDS: Record<MediaKind, string> = { image: '图片', video: '视频', model3d: '3D 模型', audio: '音频' };
 /** How many of a plan's notes the canvas panel shows (CanvasSurface), the rest counted: applyCanvasPlan's grouped notes,
@@ -248,6 +272,11 @@ function optionalList(raw: Record<string, unknown>, key: 'constraints' | 'accept
   return Object.hasOwn(raw, key) ? { [key]: textList(raw[key], `${location}.${key}`) } : {};
 }
 const EFFORT_LEVEL = /^[a-z][a-z0-9_-]{0,31}$/;
+/** A team member's text, counted in characters as the team editor (nodeTeam.ts) and the plan gate (planning.go) count it. */
+function memberText(value: unknown, location: string, max: number, empty: boolean): string {
+  if (typeof value !== 'string' || Array.from(value).length > max || (!empty && !value.trim())) fail(`${location}必须是${empty ? '' : '非空'}字符串，最多 ${max} 字符。`);
+  return value;
+}
 
 function fieldChanges(value: unknown, location: string): CanvasPlanFieldChanges {
   const raw = object(value, location);
@@ -323,6 +352,30 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         const model = op.model;
         if (Object.hasOwn(op, 'effort') && (typeof op.effort !== 'string' || (op.effort !== '' && !EFFORT_LEVEL.test(op.effort)))) fail(`${location}.effort不是有效的思考强度档位。`);
         return { type: 'set_model', nodeId: nodeId(), model: model.trim(), ...(typeof op.effort === 'string' && op.effort ? { effort: op.effort } : {}) };
+      }
+      case 'set_team': {
+        if (Object.hasOwn(op, 'template')) {
+          keys(op, ['type', 'nodeId', 'template'], location);
+          if (!isNodeTeamTemplateId(op.template)) fail(`${location}.template不是可用的协作团队模板。`);
+          return { type: 'set_team', nodeId: nodeId(), template: op.template };
+        }
+        keys(op, ['type', 'nodeId', 'mode', 'maxRounds', 'members'], location);
+        if (!NODE_TEAM_MODES.includes(op.mode as NodeTeamMode)) fail(`${location}.mode必须是 sequential、parallel、debate 或 review。`);
+        if (Object.hasOwn(op, 'maxRounds') && (typeof op.maxRounds !== 'number' || !Number.isInteger(op.maxRounds) || op.maxRounds < 1 || op.maxRounds > 8)) fail(`${location}.maxRounds必须是 1 到 8 之间的整数。`);
+        if (!Array.isArray(op.members) || op.members.length < 1 || op.members.length > 8) fail(`${location}.members必须有 1 到 8 位成员。`);
+        if (op.mode === 'review' && op.members.length < 2) fail(`${location}审核模式至少需要两位成员。`);
+        const names = new Set<string>();
+        const members = op.members.map((value, index): NodeTeamMemberBrief => {
+          const at = `${location}.members[${index}]`;
+          const member = object(value, at);
+          keys(member, ['name', 'role', 'instructions'], at);
+          const name = memberText(member.name, `${at}.name`, TEAM_LIMITS.name, false).trim();
+          if (names.has(name)) fail(`${location}有重名成员「${name}」。`);
+          names.add(name);
+          return { name, role: memberText(member.role, `${at}.role`, TEAM_LIMITS.role, false).trim(),
+            instructions: Object.hasOwn(member, 'instructions') ? memberText(member.instructions, `${at}.instructions`, TEAM_LIMITS.instructions, true) : '' };
+        });
+        return { type: 'set_team', nodeId: nodeId(), mode: op.mode as NodeTeamMode, ...(typeof op.maxRounds === 'number' ? { maxRounds: op.maxRounds } : {}), members };
       }
       case 'update_node':
         keys(op, ['type', 'nodeId', 'title', 'persona'], location);
@@ -643,10 +696,12 @@ export const DEFAULT_MODEL_REFERENCE = 'default';
 
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
  *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. On a
- *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs). */
+ *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs). A set_team applies only where
+ *  the host runs node teams (`teams`) and the request the plan was made from offered set_team (planOffersTeams). */
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
-  models?: CanvasPlanModels, hosted = false): AppliedCanvasPlan {
+  models?: CanvasPlanModels, hosted = false, teams = false): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
+  const teamsOffered = planOffersTeams(value);
   // Every note is kept, so the count the panel gives of those it does not show is true.
   const adjustments: string[] = [];
   const adjust: Adjust = (zh, en) => { adjustments.push(locale === 'en' ? en : zh); };
@@ -705,6 +760,11 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   const skipped = new Set<string>();
   const addedNodeIds: string[] = [];
   const modelSetNodeIds = new Set<string>();
+  // Each node's team before this plan, and the nodes this plan gave a team (set_team).
+  const originalTeams = new Map(doc.nodes.flatMap(node => node.kind === 'session' && node.team ? [[node.id, node.team] as const] : []));
+  const teamedHere = new Set<string>();
+  // The members a note already said left their team with a model of their own, so a second set_team does not repeat it.
+  const droppedSaid = new Set<string>();
   const find = (reference: string): CanvasNode | undefined => draft.nodes.find(item => item.id === (refs.get(reference) ?? reference));
   const resolve = (reference: string): CanvasNode => {
     const node = find(reference);
@@ -867,12 +927,17 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           adjust(`没有改动「${title}」的模型：图片、视频和 3D 节点由媒体模型生成，表单没有模型`, `Left the model of “${title}” as it was: image, video and 3D nodes use media models, and a form has none`);
           break;
         }
-        if (node.team || node.agentRef) {
+        // A team this plan gave a node that had none follows the model wherever the plan puts it, as it would have had the
+        // plan set the model first: its members are all new and inherit the node's model. A team the node had before the
+        // plan runs as it is set up, whatever a set_team of the plan kept of it (members' runtimes, models and tools).
+        const planned = Boolean(node.team) && teamedHere.has(node.id) && !originalTeams.has(node.id);
+        if ((node.team && !planned) || node.agentRef) {
           adjust(`没有改动「${title}」的模型：它是团队或工作区 Agent，按自己的设置运行`, `Left the model of “${title}” as it was: a team or a workspace Agent runs as it is set up`);
           break;
         }
+        const follow = () => { if (node.team) node.team = { ...node.team, runtime: newTeamRuntime(node) }; };
         const wanted = op.model.trim();
-        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; modelSetNodeIds.add(node.id); break; }
+        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; follow(); modelSetNodeIds.add(node.id); break; }
         const choices = models?.choices ?? [];
         const folded = wanted.toLowerCase();
         const id = choices.find(choice => choice.model === wanted)?.model
@@ -890,11 +955,77 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           adjust(`没有把「${title}」改用「${wanted}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${wanted}”: this workspace has no such model ready`);
           break;
         }
+        // Never a model whose runtime runs no team: the team would stay behind on another runtime.
+        if (planned && !NODE_TEAM_RUNTIMES.includes(entry.runtime as NodeTeamRuntime)) {
+          adjust(`没有把「${title}」改用「${entry.name || entry.model}」：它的协作团队不能在这个模型的执行引擎上运行`,
+            `Did not switch “${title}” to “${entry.name || entry.model}”: its team cannot run on that model’s engine`);
+          break;
+        }
         const effort = op.effort && entry.efforts?.includes(op.effort) ? op.effort : '';
         if (op.effort && !effort) adjust(`「${title}」改用了「${entry.name || entry.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
           `“${title}” now uses “${entry.name || entry.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
         node.runtime = entry.runtime; node.model = entry.model; node.effort = effort;
+        follow();
         modelSetNodeIds.add(node.id);
+        break;
+      }
+      case 'set_team': {
+        if (skipped.has(op.nodeId)) break;
+        const node = resolve(op.nodeId);
+        const title = titleOf(node);
+        if (!teams) {
+          adjust(`没有给「${title}」配团队：此工作区现在没有能运行协作团队的执行引擎`, `Did not give “${title}” a team: this workspace has no engine that runs teams now`);
+          break;
+        }
+        if (!teamsOffered) {
+          adjust(`没有给「${title}」配团队：这份方案所依据的请求没有提供协作团队配置`, `Did not give “${title}” a team: the request this plan was made from did not offer teams`);
+          break;
+        }
+        if (node.kind !== 'session' || mediaKindOf(node.agentKind)) {
+          adjust(`没有给「${title}」配团队：只有 Agent 节点能配协作团队`, `Did not give “${title}” a team: only an Agent node can have one`);
+          break;
+        }
+        if (node.agentRef) {
+          adjust(`没有给「${title}」配团队：它使用工作区 Agent，按那个 Agent 的设置运行`, `Did not give “${title}” a team: it runs a workspace Agent as that Agent is set up`);
+          break;
+        }
+        // A sandbox node runs one agent in its sandbox computer; the API refuses a team on it (runtime_workers.go).
+        if (node.runtime === SANDBOX_RUNTIME) {
+          adjust(`没有给「${title}」配团队：它在沙箱电脑里运行，只能是单个 Agent`, `Did not give “${title}” a team: it runs in a sandbox computer, as one Agent`);
+          break;
+        }
+        // A team runs where its node runs (newTeamRuntime), which it cannot on an engine that runs no team.
+        if (node.runtime && !NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime)) {
+          adjust(`没有给「${title}」配团队：它的执行引擎不能运行协作团队`, `Did not give “${title}” a team: its engine does not run teams`);
+          break;
+        }
+        // A team the plan's context showed only in part could hold instructions the planner never read.
+        if (shownOf(node)?.partial('team')) { keptPartialAdjust(node, '协作团队', 'team', adjust); break; }
+        if ('members' in op && op.members.some(member => copied(member.name) || copied(member.role) || copied(member.instructions))) {
+          copiedAdjust(node, '协作团队', 'team', adjust, addedNodeIds.includes(node.id));
+          break;
+        }
+        const shape = 'template' in op ? nodeTeamTemplateShape(nodeTeamTemplate(op.template)!, locale)
+          : { mode: op.mode, maxRounds: op.maxRounds ?? 2, members: op.members };
+        // Against the team the node had before this plan: the user's member settings and limits are there, never in a
+        // team an earlier step of the same plan wrote.
+        const previous = originalTeams.get(node.id);
+        const team = buildNodeTeam(shape, node, previous);
+        // The editor's own checks, without a model catalogue: new members choose no model, so none can be missing.
+        if (validateNodeTeam(team, undefined, locale).length) {
+          adjust(`没有给「${title}」配团队：这个团队配置无效`, `Did not give “${title}” a team: the team is not valid`);
+          break;
+        }
+        if (team.maxRounds < shape.maxRounds) adjust(`「${title}」的 ${team.members.length} 人团队按 ${shape.maxRounds} 轮要超过一次运行最多 ${NODE_TEAM_MAX_CALLS} 次模型调用，已改为 ${team.maxRounds} 轮`,
+          `The team of ${team.members.length} on “${title}” would need more than the ${NODE_TEAM_MAX_CALLS} model calls one run may make in ${shape.maxRounds} rounds, so it has ${team.maxRounds}`);
+        // Members the user put on a model of their own who are not in the new team: their choice goes with them.
+        const dropped = (previous?.members ?? []).filter(member => member.model && !team.members.some(kept => kept.id === member.id)
+          && !droppedSaid.has(`${node.id}\n${member.id}`));
+        for (const member of dropped) droppedSaid.add(`${node.id}\n${member.id}`);
+        if (dropped.length) adjust(`「${title}」换了团队成员：原来单独选了模型的${dropped.map(member => `「${member.name}」`).join('、')}不在新团队里`,
+          `The team of “${title}” changed: ${dropped.map(member => `“${member.name}”`).join(', ')}, with a model of ${dropped.length === 1 ? 'its' : 'their'} own, ${dropped.length === 1 ? 'is' : 'are'} not in it`);
+        node.team = team;
+        teamedHere.add(node.id);
         break;
       }
       case 'set_input': if (!skipped.has(op.nodeId)) { const node = resolve(op.nodeId); setInput(node, op.fieldId, op.value, adjust, media, shownOf(node)); } break;

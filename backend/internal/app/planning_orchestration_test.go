@@ -102,7 +102,7 @@ func TestPlanProgressOperationsMatchTheCanvas(t *testing.T) {
 	if !slices.Equal(canvas, gate) {
 		t.Fatalf("progress operations %v differ from the canvas's %v", gate, canvas)
 	}
-	for _, name := range []string{"set_task", "set_model"} {
+	for _, name := range []string{"set_task", "set_model", "set_team"} {
 		if !slices.Contains(planNodeOperationTypes, name) {
 			t.Errorf("%s concerns one node but progress cannot name it", name)
 		}

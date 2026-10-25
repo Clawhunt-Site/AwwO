@@ -16,9 +16,13 @@ afterEach(() => { clearSaaSCanvas(); vi.resetAllMocks(); });
 
 describe('planner host capability boundary after online integration', () => {
   it('advertises the native Review/HTML protocol and only Go-supported SaaS operations', () => {
-    // The whole native protocol, but set_model, which only a host that offers its models can take.
-    expect(buildPlanningContext(emptyDocument(), [])).toContain(CANVAS_PLAN_PROTOCOL.split('\n').filter(line => !line.startsWith('set_model')).join('\n'));
-    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { models: [{ id: 'm', name: 'M' }] })).toContain(CANVAS_PLAN_PROTOCOL);
+    // The whole native protocol, but set_model, which only a host that offers its models can take, and set_team, which
+    // only a host that runs node teams can take.
+    const without = (...ops: string[]) => CANVAS_PLAN_PROTOCOL.split('\n').filter(line => !ops.some(op => line.startsWith(op))).join('\n');
+    expect(buildPlanningContext(emptyDocument(), [])).toContain(without('set_model', 'set_team'));
+    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { models: [{ id: 'm', name: 'M' }] })).toContain(without('set_team'));
+    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { teams: true })).toContain(without('set_model'));
+    expect(buildPlanningContext(emptyDocument(), [], 'zh', [], { models: [{ id: 'm', name: 'M' }], teams: true })).toContain(CANVAS_PLAN_PROTOCOL);
     activate();
     const context = buildPlanningContext(emptyDocument(), [], 'en');
     const protocol = context.split('\n\n')[0];
