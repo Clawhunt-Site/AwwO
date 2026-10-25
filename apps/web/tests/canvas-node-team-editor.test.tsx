@@ -180,6 +180,28 @@ describe('node team configuration', () => {
     expect(save.mock.lastCall![0]).toMatchObject({ runtime: 'pi', model: 'model-a',
       team: { runtime: 'pi', members: [expect.objectContaining({ runtime: '', model: '' }), expect.objectContaining({ runtime: '', model: '' })] } });
   });
+  // Sub-agent review 2026-10-25: the template picker could give a sandbox node a team the API then refuses, a question
+  // about a replacement outlived the team it was asked for, and members of a node without a runtime were said not to
+  // inherit its model.
+  it('offers no team on a sandbox node, which runs one Agent', () => {
+    render(<Harness initial={{ ...session(), runtime: 'sandbox', model: 'box' }} />);
+    expect(screen.getByRole('checkbox', { name: '启用多 Agent 协作' })).toBeDisabled();
+    expect(screen.getByLabelText('协作模板')).toBeDisabled();
+    expect(screen.getByText('沙箱电脑节点只运行一个 Agent，不能配协作团队。')).toBeInTheDocument();
+  });
+  it('forgets a replacement it asked about once the team it was for is turned off', async () => {
+    render(<Harness />); await enable();
+    fireEvent.change(screen.getByLabelText('协作模板'), { target: { value: 'draft-review' } });
+    expect(screen.getByRole('button', { name: '替换为此模板' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用多 Agent 协作' }));
+    await enable();
+    expect(screen.queryByRole('button', { name: '替换为此模板' })).toBeNull();
+  });
+  it('says members of a node without a runtime inherit its model, as the API runs it on OpenAI Agents', async () => {
+    render(<Harness initial={{ ...session(), runtime: '', model: '' }} runtimes={['pi', 'openai-agents']} runtimeTools={{ 'openai-agents': [] }} />);
+    await enable();
+    expect(member(1).getByRole('option', { name: '继承节点已绑定模型' })).toHaveValue('');
+  });
   it('does not enable teams when the host lacks Pi', () => {
     render(<Harness available={false} />); expect(screen.getByRole('checkbox')).toBeDisabled(); expect(screen.getByText(/当前运行环境未提供团队/)).toBeInTheDocument();
   });

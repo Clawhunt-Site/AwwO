@@ -157,9 +157,10 @@ export function createNodeTeam(node: { title: string; persona: string; model: st
   };
 }
 
-/** A member with an empty model inherits the node's model only on the node's runtime; this is the runtime the team
- * editor offers "inherit the bound node model" for. */
-const inheritingRuntime = (node: { runtime?: string }): string => node.runtime || 'pi';
+/** A member with an empty model inherits the node's model only on the node's runtime as the API resolves it, an empty one
+ * on DEFAULT_NODE_RUNTIME (runtime_workers.go resolveTeam, defaultRuntime); this is the runtime the team editor offers
+ * "inherit the bound node model" for. */
+export const inheritingRuntime = (node: { runtime?: string }): string => node.runtime || DEFAULT_NODE_RUNTIME;
 /** Point a member back at the node's model. Its own effort goes too: an explicit effort needs an explicit model, and an
  * inheriting member takes the node's effort with the node's model. */
 const followingNode = (member: NodeTeamMember): NodeTeamMember => {
@@ -184,8 +185,8 @@ export function inheritNodeModel(team: NodeTeam, indexes: readonly number[]): No
 }
 /** Carry a change of the node's model to the members that held the node's previous model as their own — every team
  * created before members inherited it copied the node's model into its first member. They inherit from now on. A
- * member with another model or its own effort keeps its choice, and a runtime change leaves the team to its own
- * runtime selector. Returns the same team when nothing follows. */
+ * member with another model or its own effort keeps its choice; a change of runtime is followNodeRuntime's. Returns the
+ * same team when nothing follows. */
 export function followNodeModel(team: NodeTeam, previous: { runtime?: string; model: string; effort?: string }, next: { runtime?: string }): NodeTeam {
   const runtime = inheritingRuntime(previous);
   if (!previous.model || runtime !== inheritingRuntime(next)) return team;
