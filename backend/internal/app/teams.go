@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -170,6 +171,10 @@ func jsTrim(s string) string {
 	})
 }
 
+// teamModes are the collaboration modes a team may have, as the canvas lists them (nodeTeam.ts NODE_TEAM_MODES,
+// TestTeamBoundsMatchTheCanvas); the plan gate (planTeam) takes the same.
+var teamModes = []string{"sequential", "parallel", "debate", "review"}
+
 func validateTeam(t *nodeTeam) error {
 	if t == nil {
 		return nil
@@ -177,14 +182,11 @@ func validateTeam(t *nodeTeam) error {
 	if t.Version != 1 || !validRuntime(t.Runtime) || t.MaxRounds < 1 || t.MaxRounds > 8 || t.MaxTurns < 1 || t.MaxTurns > 64 || t.TimeoutSeconds < 10 || t.TimeoutSeconds > 1800 || len(t.Members) < 1 || len(t.Members) > 8 {
 		return errors.New("Invalid team version, runtime, bounds or member count")
 	}
-	switch t.Mode {
-	case "sequential", "parallel", "debate":
-	case "review":
-		if len(t.Members) < 2 {
-			return errors.New("Review requires at least two members")
-		}
-	default:
+	if !slices.Contains(teamModes, t.Mode) {
 		return errors.New("Unsupported collaboration mode")
+	}
+	if t.Mode == "review" && len(t.Members) < 2 {
+		return errors.New("Review requires at least two members")
 	}
 	ids := map[string]bool{}
 	for _, m := range t.Members {

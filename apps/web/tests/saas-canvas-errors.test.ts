@@ -7,6 +7,10 @@ import { canvasFetch, configureSaaSCanvas, configureSaaSCanvasSave, clearSaaSCan
 import { fetchConversationIndex } from '../src/canvasAgentChat';
 import { canvasText } from '../src/canvas/i18n';
 import { failureCause } from '../src/canvas/surfaceMessages';
+import { NODE_TEAM_LIMITS, createNodeTeam, validateNodeTeam } from '../src/canvas/nodeTeam';
+// One past a team bound the editor refuses (validateNodeTeam), at the field the copy names.
+const refusedPast = (field: 'maxRounds' | 'maxTurns' | 'timeoutSeconds', bound: number) =>
+  validateNodeTeam({ ...createNodeTeam({ title: 'T', persona: '', model: '', runtime: 'pi' }), [field]: bound + 1 }).map(issue => issue.path).includes(field);
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 afterEach(() => { vi.unstubAllGlobals(); clearSaaSCanvas(); configureSaaSCanvasSave(null); document.documentElement.lang = ''; });
 it('tells a user with no personal engine to add a key while preserving real model errors', () => {
@@ -211,13 +215,12 @@ it('says what to do after every run failure, and never asks to restore a run sta
   expect(runErrorText('event_persistence_failed', 'zh')).toContain('已写出的部分可能留在对话里');
   // Not "did not start": the worker may have answered with an error after it began.
   for (const locale of ['zh', 'en'] as const) expect(runErrorText('runtime_rejected', locale)).not.toMatch(/没有开始|did not start/);
-  // A team's own limits name the setting and its editor's bound (nodeTeam.ts validateNodeTeam).
+  // A team's own limits name the setting and its editor's bound (nodeTeam.ts NODE_TEAM_LIMITS, which validateNodeTeam holds).
   expect(runErrorText('team_turn_budget_exhausted', 'zh')).toContain('「最多模型调用次数」');
-  expect(runErrorText('team_turn_budget_exhausted', 'zh')).toContain('最多 64 次');
+  expect(runErrorText('team_turn_budget_exhausted', 'zh')).toContain(`最多 ${NODE_TEAM_LIMITS.calls} 次`);
   expect(runErrorText('review_rounds_exhausted', 'en')).toContain('“Maximum rounds”');
-  expect(runErrorText('review_rounds_exhausted', 'en')).toContain('up to 8');
-  const team = readFileSync(resolve(process.cwd(), 'src/canvas/nodeTeam.ts'), 'utf8');
-  expect(team).toContain("['maxRounds', 1, 8], ['maxTurns', 1, 64]");
+  expect(runErrorText('review_rounds_exhausted', 'en')).toContain(`up to ${NODE_TEAM_LIMITS.rounds}`);
+  expect([refusedPast('maxTurns', NODE_TEAM_LIMITS.calls), refusedPast('maxRounds', NODE_TEAM_LIMITS.rounds)]).toEqual([true, true]);
   const editor = readFileSync(resolve(process.cwd(), 'src/canvas/NodeTeamEditor.tsx'), 'utf8');
   for (const label of ["rounds: '最多轮数'", "turns: '最多模型调用次数'", "rounds: 'Maximum rounds'", "turns: 'Maximum model calls'"]) expect(editor).toContain(label);
 });
@@ -227,9 +230,9 @@ it('names the node team setting a team timeout is lifted in, as its editor label
   expect(editor).toContain("timeout: 'Node timeout (seconds)'");
   expect(runErrorText('team_timeout', 'zh')).toContain('「节点超时（秒）」');
   expect(runErrorText('team_timeout', 'en')).toContain('“Node timeout (seconds)”');
-  // validateNodeTeam's own bound (nodeTeam.ts) is the most the copy offers.
-  expect(readFileSync(resolve(process.cwd(), 'src/canvas/nodeTeam.ts'), 'utf8')).toContain("['timeoutSeconds', 10, 1800]");
-  expect(runErrorText('team_timeout', 'zh')).toContain('最多 1800 秒');
+  // validateNodeTeam's own bound (nodeTeam.ts NODE_TEAM_LIMITS) is the most the copy offers.
+  expect(refusedPast('timeoutSeconds', NODE_TEAM_LIMITS.maxSeconds)).toBe(true);
+  expect(runErrorText('team_timeout', 'zh')).toContain(`最多 ${NODE_TEAM_LIMITS.maxSeconds} 秒`);
 });
 it('reads a failed plan as the canvas assistant’s, with no node to run again and no model to change', () => {
   for (const [locale, lang, kept, node] of [['zh', 'zh-CN', '画布保持原样', /这个节点|换一个模型|重新运行/], ['en', 'en', 'the canvas has not changed', /this node|choose another model|run it again/i]] as const) {

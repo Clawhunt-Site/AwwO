@@ -12,7 +12,7 @@ import type { UiLocale } from '../locale';
 import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
 import { SANDBOX_RUNTIME, automaticEntry } from './nodeRuntime';
-import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, newTeamRuntime, validateNodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
+import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, newTeamRuntime, validateNodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
@@ -151,9 +151,9 @@ const CONDENSED_MARK = /另有\s{0,40}\d(?:[,，.'\s]{0,40}\d){0,12}\s{0,40}字\
 export const carriesCondensedText = (text: string | undefined): boolean => text !== undefined && CONDENSED_MARK.test(text);
 
 const TEAM_TEMPLATE_CHOICES = NODE_TEAM_TEMPLATE_IDS.map(id => `"${id}"`).join('|');
-/** A team member's text limits in a plan: the team editor's (nodeTeam.ts validateNodeTeam) and the API's (teams.go), so
- *  every member the planner is shown can be written back. */
-const TEAM_LIMITS = { name: 128, role: 512, instructions: 16000 } as const;
+/** A team's limits in a plan: the team editor's and the API's (nodeTeam.ts NODE_TEAM_LIMITS), so every member the planner
+ *  is shown can be written back. */
+const TEAM_LIMITS = NODE_TEAM_LIMITS;
 
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
@@ -163,7 +163,7 @@ add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
 set_model: {type:"set_model",nodeId:string,model:string,effort?:string}
-set_team: {type:"set_team",nodeId:string,template:${TEAM_TEMPLATE_CHOICES}} 或 {type:"set_team",nodeId:string,mode:"sequential"|"parallel"|"debate"|"review",maxRounds?:1到8的整数,members:[{name:string,role:string,instructions?:string}]}
+set_team: {type:"set_team",nodeId:string,template:${TEAM_TEMPLATE_CHOICES}} 或 {type:"set_team",nodeId:string,mode:"sequential"|"parallel"|"debate"|"review",maxRounds?:1到${TEAM_LIMITS.rounds}的整数,members:[{name:string,role:string,instructions?:string}]}
 set_input: {type:"set_input",nodeId:string,fieldId:string,value:string}
 add_field: {type:"add_field",nodeId:string,side:"input"|"output",field:{id:string,label:string,type:"text"|"markdown"|"html"|"number"|"boolean"|"file",required:boolean,value:"",help?:string,placeholder?:string}}
 update_field: {type:"update_field",nodeId:string,side:"input"|"output",fieldId:string,changes:{label?:string,type?:上述字段类型,required?:boolean,help?:string,placeholder?:string}}
@@ -178,7 +178,7 @@ connect 使用字段ID（如schema、api，不加in:/out:前缀）；旧节点�
 互审Graph使用set_execution mode:review，maxRounds/reviewerNodeId/verdictFieldId必填；最终评审节点必须已存在且verdictFieldId指向其boolean输出，true通过、false继续。先创建节点和判定字段，再设置互审。工作流模式禁止携带互审额外字段。反馈环路和Agent绑定在用户启动时校验，此协议仅编辑结构，不启动运行。
 set_task 改任务要求：constraints=约束，acceptanceCriteria=可逐条核对交付的验收标准；给出的列表整体替换；每列表≤20条、每条≤2000字、合计≤12000字；新节点约束默认为原始请求，给它的 constraints 接在其后；@R1 等即 requirements 原文。
 set_model 是唯一能改模型的操作，只能改用 models 中的模型：model 写 id（"default"=工作区默认），effort 只能是该模型列出的档位；执行引擎由应用选择。
-set_team 把一个 Agent 节点配成协作团队，整体替换它已有的团队：template 写「协作团队模板」中一个模板的 id；或自己写 mode 和 1到8位 members（review至少2位；成员名称不重复，名称最多${TEAM_LIMITS.name}字符、职责最多${TEAM_LIMITS.role}字符、指令最多${TEAM_LIMITS.instructions}字符；maxRounds只用于debate和review，默认2）。成员顺序就是分工：sequential的最后一位交付，parallel和debate的最后一位汇总或裁决，review的最后一位审核。成员只写名称、职责和指令：模型、思考强度、执行框架和工具由用户设置，新成员继承节点模型，同名成员保留用户已选的设置。每位成员每轮都是一次模型调用，所以只在用户要求团队、多人协作、审核返工、辩论或多角度时使用；工作区Agent、表单和媒体节点不能配团队。
+set_team 把一个 Agent 节点配成协作团队，整体替换它已有的团队：template 写「协作团队模板」中一个模板的 id；或自己写 mode 和 1到${TEAM_LIMITS.members}位 members（review至少2位；成员名称不重复，名称最多${TEAM_LIMITS.name}字符、职责最多${TEAM_LIMITS.role}字符、指令最多${TEAM_LIMITS.instructions}字符；maxRounds只用于debate和review，默认2）。成员顺序就是分工：sequential的最后一位交付，parallel和debate的最后一位汇总或裁决，review的最后一位审核。成员只写名称、职责和指令：模型、思考强度、执行框架和工具由用户设置，新成员继承节点模型，同名成员保留用户已选的设置。每位成员每轮都是一次模型调用，所以只在用户要求团队、多人协作、审核返工、辩论或多角度时使用；工作区Agent、表单和媒体节点不能配团队。
 新增节点完整使用对应角色模板。字段值都是字符串；布尔值用"true"/"false"，数字用数字字符串，file为引用字符串。add_field.value必须为空；输入内容通过set_input填写。严禁生成或填写任何输出值。
 改变已连接字段类型或删除字段前须先disconnect。remove_node 明确删除该节点及其关联连线。
 只能修改白名单：禁止binding/runtime/model/effort/threads/issueId/preview/lastOutput/templateId等执行状态修改；禁止命令执行、创建真实Agent、发消息、运行节点、文件写入、部署、付款等副作用。布局由应用安排新增节点，不能提交x/y/w/h。
@@ -361,8 +361,10 @@ export function parseCanvasPlan(value: unknown): CanvasPlan {
         }
         keys(op, ['type', 'nodeId', 'mode', 'maxRounds', 'members'], location);
         if (!NODE_TEAM_MODES.includes(op.mode as NodeTeamMode)) fail(`${location}.mode必须是 sequential、parallel、debate 或 review。`);
-        if (Object.hasOwn(op, 'maxRounds') && (typeof op.maxRounds !== 'number' || !Number.isInteger(op.maxRounds) || op.maxRounds < 1 || op.maxRounds > 8)) fail(`${location}.maxRounds必须是 1 到 8 之间的整数。`);
-        if (!Array.isArray(op.members) || op.members.length < 1 || op.members.length > 8) fail(`${location}.members必须有 1 到 8 位成员。`);
+        if (Object.hasOwn(op, 'maxRounds') && (typeof op.maxRounds !== 'number' || !Number.isInteger(op.maxRounds) || op.maxRounds < 1 || op.maxRounds > TEAM_LIMITS.rounds)) {
+          fail(`${location}.maxRounds必须是 1 到 ${TEAM_LIMITS.rounds} 之间的整数。`);
+        }
+        if (!Array.isArray(op.members) || op.members.length < 1 || op.members.length > TEAM_LIMITS.members) fail(`${location}.members必须有 1 到 ${TEAM_LIMITS.members} 位成员。`);
         if (op.mode === 'review' && op.members.length < 2) fail(`${location}审核模式至少需要两位成员。`);
         const names = new Set<string>();
         const members = op.members.map((value, index): NodeTeamMemberBrief => {

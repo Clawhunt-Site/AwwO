@@ -37,6 +37,12 @@ export interface NodeTeam {
 }
 export interface NodeTeamIssue { path: string; message: string }
 export const NODE_TEAM_MODES: readonly NodeTeamMode[] = ['sequential', 'parallel', 'debate', 'review'];
+/** A team's bounds, which the API holds too (teams.go validateTeam, planning.go planTeam): TestTeamBoundsMatchTheCanvas
+ *  checks the API against these and NODE_TEAM_MODES. Texts count characters (code points). */
+export const NODE_TEAM_LIMITS = { members: 8, rounds: 8, calls: 64, minSeconds: 10, maxSeconds: 1800, id: 128, name: 128, role: 512,
+  instructions: 16000, model: 256 } as const;
+/** The runtime the API runs a node without one on (runtime_workers.go defaultRuntime), checked by TestTeamBoundsMatchTheCanvas. */
+export const DEFAULT_NODE_RUNTIME: NodeTeamRuntime = 'openai-agents';
 const record = (raw: unknown): Record<string, unknown> | null => raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
 
 /** Validate before execution/save, without coercing invalid imported configuration into a run. */
@@ -49,14 +55,15 @@ export function validateNodeTeam(raw: unknown, allowedModels?: ReadonlyArray<str
   if (team.version !== 1) issue('version', message('Unsupported team configuration version.', '不支持此团队配置版本。'));
   if (!NODE_TEAM_MODES.includes(team.mode as NodeTeamMode)) issue('mode', message('Choose a supported collaboration mode.', '请选择受支持的协作方式。'));
   if (!NODE_TEAM_RUNTIMES.includes(team.runtime as NodeTeamRuntime)) issue('runtime', message('Choose Pi or OpenAI Agents JS for the team.', '团队执行框架请选择 Pi 或 OpenAI Agents JS。'));
-  for (const [key, min, max] of [['maxRounds', 1, 8], ['maxTurns', 1, 64], ['timeoutSeconds', 10, 1800]] as const) {
+  for (const [key, min, max] of [['maxRounds', 1, NODE_TEAM_LIMITS.rounds], ['maxTurns', 1, NODE_TEAM_LIMITS.calls],
+    ['timeoutSeconds', NODE_TEAM_LIMITS.minSeconds, NODE_TEAM_LIMITS.maxSeconds]] as const) {
     if (typeof team[key] !== 'number' || !Number.isInteger(team[key]) || (team[key] as number) < min || (team[key] as number) > max) {
       const label = { maxRounds: '最多轮数', maxTurns: '最多模型调用次数', timeoutSeconds: '节点超时秒数' }[key];
       issue(key, message(`${key} must be an integer from ${min} to ${max}.`, `${label}必须是 ${min} 至 ${max} 的整数。`));
     }
   }
-  if (!Array.isArray(team.members) || team.members.length < 1 || team.members.length > 8) {
-    issue('members', message('A team must contain 1 to 8 members.', '团队必须包含 1 至 8 个成员。'));
+  if (!Array.isArray(team.members) || team.members.length < 1 || team.members.length > NODE_TEAM_LIMITS.members) {
+    issue('members', message(`A team must contain 1 to ${NODE_TEAM_LIMITS.members} members.`, `团队必须包含 1 至 ${NODE_TEAM_LIMITS.members} 个成员。`));
     return issues;
   }
   if (team.mode === 'review' && team.members.length < 2) issue('members', message('Review mode requires a worker and a reviewer.', '审核模式至少需要一位执行者和一位审核者。'));
@@ -66,7 +73,8 @@ export function validateNodeTeam(raw: unknown, allowedModels?: ReadonlyArray<str
     const prefix = `members.${index}`;
     const member = record(rawMember);
     if (!member) { issue(prefix, message('Member configuration must be an object.', '成员配置必须是对象。')); continue; }
-    for (const [field, required, max] of [['id', true, 128], ['name', true, 128], ['role', true, 512], ['instructions', false, 16000], ['model', false, 256]] as const) {
+    for (const [field, required, max] of [['id', true, NODE_TEAM_LIMITS.id], ['name', true, NODE_TEAM_LIMITS.name], ['role', true, NODE_TEAM_LIMITS.role],
+      ['instructions', false, NODE_TEAM_LIMITS.instructions], ['model', false, NODE_TEAM_LIMITS.model]] as const) {
       if (typeof member[field] !== 'string' || (required && !(member[field] as string).trim()) || [...(member[field] as string)].length > max) {
         const label = { id: '成员 ID', name: '名称', role: '职责', instructions: '专属指令', model: '模型' }[field];
         issue(`${prefix}.${field}`, message(`${field} ${required ? 'is required and ' : ''}must contain at most ${max} characters.`, `${label}${required ? '不能为空，且' : ''}最多 ${max} 个字符。`));
@@ -133,7 +141,7 @@ export function createNodeTeamMember(overrides: Partial<Omit<NodeTeamMember, 'id
  *  with no model of their own inherit the node's model (resolveTeam). Never a runtime picked by which workers answered a
  *  health check just now: a team chosen that way stays off its node's runtime after the worker is back. */
 export function newTeamRuntime(node: { runtime?: string }): NodeTeamRuntime {
-  return NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : 'openai-agents';
+  return NODE_TEAM_RUNTIMES.includes(node.runtime as NodeTeamRuntime) ? node.runtime as NodeTeamRuntime : DEFAULT_NODE_RUNTIME;
 }
 export function createNodeTeam(node: { title: string; persona: string; model: string; runtime?: string }, locale: 'zh' | 'en' = 'zh'): NodeTeam {
   const zh = locale === 'zh';

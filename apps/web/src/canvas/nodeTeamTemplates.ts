@@ -1,4 +1,4 @@
-import { createNodeTeamMember, newTeamRuntime, nodeTeamTurnEstimate, type NodeTeam, type NodeTeamMode } from './nodeTeam';
+import { NODE_TEAM_LIMITS, createNodeTeamMember, newTeamRuntime, nodeTeamTurnEstimate, type NodeTeam, type NodeTeamMode } from './nodeTeam';
 import type { UiLocale } from '../locale';
 
 /** The closed set of team template ids. The plan gate keeps the same list (planner_progress.go planTeamTemplateIDs). */
@@ -94,14 +94,14 @@ export const nodeTeamTemplateShape = (template: NodeTeamTemplate, locale: UiLoca
   ({ mode: template.mode, maxRounds: template.maxRounds, members: template[locale].members });
 
 /** The most model calls one team run may make (the editor's and the server's bound on maxTurns). */
-export const NODE_TEAM_MAX_CALLS = 64;
+export const NODE_TEAM_MAX_CALLS = NODE_TEAM_LIMITS.calls;
 // A thinking model's answer can take minutes, so a team gets 180 s for every call it plans, counted one after another
 // because members also wait for the workspace's free concurrency slots (a parallel team's workers queue on a workspace
 // that runs one call at a time). Within the team bound of 1800 s and never below the editor's default 300 s, which can cut a
 // two-round debate off before its verdict. The run's own deadline (AWWO_RUN_TIMEOUT) still bounds the whole run.
 const SECONDS_PER_CALL = 180;
 export const nodeTeamTimeoutFor = (team: Pick<NodeTeam, 'mode' | 'maxRounds'> & { members: readonly unknown[] }): number =>
-  Math.min(1800, Math.max(300, SECONDS_PER_CALL * nodeTeamTurnEstimate(team)));
+  Math.min(NODE_TEAM_LIMITS.maxSeconds, Math.max(300, SECONDS_PER_CALL * nodeTeamTurnEstimate(team)));
 /** The rounds a debate or a review of `count` members can finish within NODE_TEAM_MAX_CALLS, at most `rounds`: past it a
  *  debate's verdict or a review's last pass never runs and the team fails having spent every call
  *  (team_turn_budget_exhausted). Other modes do not use rounds. */
@@ -129,10 +129,10 @@ export function buildNodeTeam(shape: NodeTeamShape, node: { runtime?: string }, 
     return own ? { ...own, role, instructions, tools: [...own.tools] } : createNodeTeamMember({ name, role, instructions });
   });
   const team: NodeTeam = { version: 1, mode: shape.mode, runtime, maxRounds: nodeTeamFittingRounds(shape.mode, members.length, shape.maxRounds),
-    maxTurns: NODE_TEAM_MAX_CALLS, timeoutSeconds: 1800, members };
+    maxTurns: NODE_TEAM_MAX_CALLS, timeoutSeconds: NODE_TEAM_LIMITS.maxSeconds, members };
   return { ...team,
     maxTurns: Math.min(NODE_TEAM_MAX_CALLS, Math.max(nodeTeamTurnEstimate(team), members.length, previous?.maxTurns ?? 0)),
-    timeoutSeconds: Math.min(1800, Math.max(nodeTeamTimeoutFor(team), previous?.timeoutSeconds ?? 0)) };
+    timeoutSeconds: Math.min(NODE_TEAM_LIMITS.maxSeconds, Math.max(nodeTeamTimeoutFor(team), previous?.timeoutSeconds ?? 0)) };
 }
 
 export const createNodeTeamFromTemplate = (template: NodeTeamTemplate, node: { runtime?: string }, locale: UiLocale, previous?: NodeTeam): NodeTeam =>

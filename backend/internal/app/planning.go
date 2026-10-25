@@ -406,7 +406,7 @@ func planTeamText(v any, max int) bool {
 // trimmed, as the canvas compares them.
 func planTeam(op map[string]any) bool {
 	members, ok := op["members"].([]any)
-	if !planKeys(op, "type", "nodeId", "mode", "maxRounds", "members") || !planID(op["nodeId"]) || !oneOf(op["mode"], "sequential", "parallel", "debate", "review") ||
+	if !planKeys(op, "type", "nodeId", "mode", "maxRounds", "members") || !planID(op["nodeId"]) || !oneOf(op["mode"], teamModes...) ||
 		!ok || len(members) < 1 || len(members) > 8 || (op["mode"] == "review" && len(members) < 2) {
 		return false
 	}

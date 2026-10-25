@@ -1,10 +1,12 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -161,5 +163,118 @@ func TestPlanTeamTemplatesMatchTheCanvas(t *testing.T) {
 	}
 	if !slices.Equal(canvas, planTeamTemplateIDs) {
 		t.Fatalf("team templates %v differ from the canvas's %v", planTeamTemplateIDs, canvas)
+	}
+}
+
+// The canvas holds a team's bounds, modes and the runtime of a node without one in nodeTeam.ts (NODE_TEAM_LIMITS,
+// NODE_TEAM_MODES, DEFAULT_NODE_RUNTIME); the plan gate and the API's own team check must hold the same, at each bound.
+func TestTeamBoundsMatchTheCanvas(t *testing.T) {
+	source, e := os.ReadFile(filepath.Join("..", "..", "..", "apps", "web", "src", "canvas", "nodeTeam.ts"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	limits := map[string]int{}
+	block := regexp.MustCompile(`export const NODE_TEAM_LIMITS = \{([^}]*)\}`).FindSubmatch(source)
+	if block == nil {
+		t.Fatal("NODE_TEAM_LIMITS not found in nodeTeam.ts")
+	}
+	for _, kv := range regexp.MustCompile(`(\w+): (\d+)`).FindAllSubmatch(block[1], -1) {
+		n, _ := strconv.Atoi(string(kv[2]))
+		limits[string(kv[1])] = n
+	}
+	for _, key := range []string{"members", "rounds", "calls", "minSeconds", "maxSeconds", "id", "name", "role", "instructions", "model"} {
+		if _, ok := limits[key]; !ok {
+			t.Fatalf("NODE_TEAM_LIMITS has no %s: %v", key, limits)
+		}
+	}
+	modes := regexp.MustCompile(`export const NODE_TEAM_MODES[^=]*= \[([^\]]*)\]`).FindSubmatch(source)
+	runtime := regexp.MustCompile(`export const DEFAULT_NODE_RUNTIME[^=]*= '([a-z-]+)'`).FindSubmatch(source)
+	if modes == nil || runtime == nil {
+		t.Fatal("NODE_TEAM_MODES or DEFAULT_NODE_RUNTIME not found in nodeTeam.ts")
+	}
+	if got := defaultRuntime(""); got != string(runtime[1]) {
+		t.Errorf("the API runs a node without a runtime on %q, the canvas puts its team on %q", got, runtime[1])
+	}
+
+	text := func(n int) string { return strings.Repeat("界", n) }
+	members := func(n int) []any {
+		out := make([]any, n)
+		for i := range out {
+			out[i] = map[string]any{"name": fmt.Sprintf("M%d", i), "role": "r"}
+		}
+		return out
+	}
+	gate := func(patch map[string]any) bool {
+		op := map[string]any{"type": "set_team", "nodeId": "n", "mode": "parallel", "members": members(2), "maxRounds": 2}
+		for key, value := range patch {
+			op[key] = value
+		}
+		return validatePlan(planWith(t, op))
+	}
+	team := func(patch func(*nodeTeam)) error {
+		tm := &nodeTeam{Version: 1, Mode: "sequential", Runtime: runtimePI, MaxRounds: 2, MaxTurns: 8, TimeoutSeconds: 300,
+			Members: []teamMember{{ID: "m0", Name: "A", Role: "r", Context: "shared", Tools: []string{}}, {ID: "m1", Name: "B", Role: "r", Context: "shared", Tools: []string{}}}}
+		patch(tm)
+		return validateTeam(tm)
+	}
+	crowd := func(n int) []teamMember {
+		out := make([]teamMember, n)
+		for i := range out {
+			out[i] = teamMember{ID: fmt.Sprintf("m%d", i), Name: fmt.Sprintf("M%d", i), Role: "r", Context: "shared", Tools: []string{}}
+		}
+		return out
+	}
+	canvasModes := []string{}
+	for _, q := range regexp.MustCompile(`'([a-z]+)'`).FindAllSubmatch(modes[1], -1) {
+		canvasModes = append(canvasModes, string(q[1]))
+	}
+	if !slices.Equal(canvasModes, teamModes) {
+		t.Errorf("team modes %v differ from the canvas's %v", teamModes, canvasModes)
+	}
+	for _, mode := range canvasModes {
+		if !gate(map[string]any{"mode": mode}) || team(func(tm *nodeTeam) { tm.Mode = mode }) != nil {
+			t.Errorf("the canvas's mode %q is refused by the gate or by the API", mode)
+		}
+	}
+	// Each bound is admitted, and one past it refused, by the gate and by the API.
+	for name, c := range map[string]struct {
+		limit int
+		gate  func(n int) map[string]any
+		team  func(n int) func(*nodeTeam)
+	}{
+		"members": {limits["members"], func(n int) map[string]any { return map[string]any{"members": members(n)} },
+			func(n int) func(*nodeTeam) {
+				return func(tm *nodeTeam) { tm.Members = crowd(n); tm.MaxTurns = 64 }
+			}},
+		"rounds": {limits["rounds"], func(n int) map[string]any { return map[string]any{"mode": "debate", "maxRounds": n} },
+			func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.MaxRounds = n } }},
+		"name": {limits["name"], func(n int) map[string]any {
+			return map[string]any{"members": []any{map[string]any{"name": text(n), "role": "r"}, map[string]any{"name": "B", "role": "r"}}}
+		},
+			func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.Members[0].Name = text(n) } }},
+		"role": {limits["role"], func(n int) map[string]any {
+			return map[string]any{"members": []any{map[string]any{"name": "A", "role": text(n)}, map[string]any{"name": "B", "role": "r"}}}
+		},
+			func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.Members[0].Role = text(n) } }},
+		"instructions": {limits["instructions"], func(n int) map[string]any {
+			return map[string]any{"members": []any{map[string]any{"name": "A", "role": "r", "instructions": text(n)}, map[string]any{"name": "B", "role": "r"}}}
+		},
+			func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.Members[0].Instructions = text(n) } }},
+		"calls":      {limits["calls"], nil, func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.MaxTurns = n } }},
+		"maxSeconds": {limits["maxSeconds"], nil, func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.TimeoutSeconds = n } }},
+		"id":         {limits["id"], nil, func(n int) func(*nodeTeam) { return func(tm *nodeTeam) { tm.Members[0].ID = text(n) } }},
+		"model": {limits["model"], nil, func(n int) func(*nodeTeam) {
+			return func(tm *nodeTeam) { tm.Members[0].Model = strings.Repeat("m", n) }
+		}},
+	} {
+		if c.gate != nil && (!gate(c.gate(c.limit)) || gate(c.gate(c.limit+1))) {
+			t.Errorf("%s: the gate does not take the canvas's bound %d", name, c.limit)
+		}
+		if team(c.team(c.limit)) != nil || team(c.team(c.limit+1)) == nil {
+			t.Errorf("%s: the API does not take the canvas's bound %d", name, c.limit)
+		}
+	}
+	if team(func(tm *nodeTeam) { tm.TimeoutSeconds = limits["minSeconds"] }) != nil || team(func(tm *nodeTeam) { tm.TimeoutSeconds = limits["minSeconds"] - 1 }) == nil {
+		t.Errorf("the API does not take the canvas's shortest timeout %d", limits["minSeconds"])
 	}
 }

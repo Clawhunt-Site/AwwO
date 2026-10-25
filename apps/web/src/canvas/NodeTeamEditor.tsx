@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './canvasDoc';
 import { modelLabel, modelLabels } from '../modelLabels';
 import { useCanvasI18n } from './i18n';
-import { NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
+import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
 import { createNodeTeamFromTemplate, nodeTeamTemplate, nodeTeamTemplates, type NodeTeamTemplate, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
 /** An unset effort is omitted rather than stored as '' so saved teams keep their shape and fingerprint. */
@@ -186,11 +186,11 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
       </select></label>
       {runtimes.includes('openai-agents') || requestedRuntimes.includes('openai-agents') ? <p className="canvas-inspector-hint">{t.agentsNote}</p> : null}
       <div className="node-team-limits">
-        <label>{t.rounds}<input className="canvas-inspector-input" type="number" min={1} max={8} step={1} value={Number.isNaN(team.maxRounds) ? '' : team.maxRounds}
+        <label>{t.rounds}<input className="canvas-inspector-input" type="number" min={1} max={NODE_TEAM_LIMITS.rounds} step={1} value={Number.isNaN(team.maxRounds) ? '' : team.maxRounds}
           disabled={disabled || team.mode === 'sequential' || team.mode === 'parallel'} onChange={event => edit({ maxRounds: event.target.valueAsNumber })} /></label>
-        <label>{t.turns}<input className="canvas-inspector-input" type="number" min={1} max={64} step={1} value={Number.isNaN(team.maxTurns) ? '' : team.maxTurns}
+        <label>{t.turns}<input className="canvas-inspector-input" type="number" min={1} max={NODE_TEAM_LIMITS.calls} step={1} value={Number.isNaN(team.maxTurns) ? '' : team.maxTurns}
           disabled={disabled} onChange={event => edit({ maxTurns: event.target.valueAsNumber })} /></label>
-        <label>{t.timeout}<input className="canvas-inspector-input" type="number" min={10} max={1800} step={1} value={Number.isNaN(team.timeoutSeconds) ? '' : team.timeoutSeconds}
+        <label>{t.timeout}<input className="canvas-inspector-input" type="number" min={NODE_TEAM_LIMITS.minSeconds} max={NODE_TEAM_LIMITS.maxSeconds} step={1} value={Number.isNaN(team.timeoutSeconds) ? '' : team.timeoutSeconds}
           disabled={disabled} onChange={event => edit({ timeoutSeconds: event.target.valueAsNumber })} /></label>
       </div>
       <p className="canvas-inspector-hint">{t.budget.replace('{count}', String(nodeTeamTurnEstimate(team)))}</p>
@@ -212,9 +212,9 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
             <button type="button" aria-label={`${t.down} ${index + 1}`} disabled={disabled || index === team.members.length - 1} onClick={() => move(index, 1)}>↓</button>
             <button type="button" aria-label={`${t.remove} ${index + 1}`} disabled={disabled || team.members.length <= 1} onClick={() => edit({ members: team.members.filter((_, position) => position !== index) })}>×</button>
           </div>
-          <label>{t.name}<input className="canvas-inspector-input" value={member.name} maxLength={128} onChange={event => editMember(index, { name: event.target.value })} /></label>
-          <label>{t.role}<input className="canvas-inspector-input" value={member.role} maxLength={512} onChange={event => editMember(index, { role: event.target.value })} /></label>
-          <label>{t.instructions}<textarea className="canvas-inspector-persona" rows={3} value={member.instructions} maxLength={16000} onChange={event => editMember(index, { instructions: event.target.value })} /></label>
+          <label>{t.name}<input className="canvas-inspector-input" value={member.name} maxLength={NODE_TEAM_LIMITS.name} onChange={event => editMember(index, { name: event.target.value })} /></label>
+          <label>{t.role}<input className="canvas-inspector-input" value={member.role} maxLength={NODE_TEAM_LIMITS.role} onChange={event => editMember(index, { role: event.target.value })} /></label>
+          <label>{t.instructions}<textarea className="canvas-inspector-persona" rows={3} value={member.instructions} maxLength={NODE_TEAM_LIMITS.instructions} onChange={event => editMember(index, { instructions: event.target.value })} /></label>
           <label>{t.memberRuntime}<select className="canvas-inspector-input" value={member.runtime} onChange={event => editMember(index, { runtime: event.target.value as '' | NodeTeamRuntime, model: '', effort: '', tools: [] })}>
             <option value="">{t.inherit}（{nodeTeamRuntimeLabel(team.runtime)}）</option>
             {member.runtime && !runtimes.includes(member.runtime) ? <option value={member.runtime} disabled>{nodeTeamRuntimeLabel(member.runtime)} · {t.runtimeMissing}</option> : null}
@@ -242,7 +242,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
           </select></label>
         </fieldset>; })}
       </div>
-      <button type="button" aria-label={t.add} className="canvas-inspector-add-field" disabled={disabled || team.members.length >= 8} onClick={() => edit({ members: [...team.members, createNodeTeamMember({ name: `Agent ${team.members.length + 1}`, role: locale === 'zh' ? '协作者' : 'Contributor' })] })}>＋ {t.add}</button>
+      <button type="button" aria-label={t.add} className="canvas-inspector-add-field" disabled={disabled || team.members.length >= NODE_TEAM_LIMITS.members} onClick={() => edit({ members: [...team.members, createNodeTeamMember({ name: `Agent ${team.members.length + 1}`, role: locale === 'zh' ? '协作者' : 'Contributor' })] })}>＋ {t.add}</button>
       {!requestedRuntimes.includes('openai-agents') ? <p className="canvas-inspector-hint">{t.tools}</p> : null}
       {issues.length ? <div role="alert" className="canvas-inspector-outcome canvas-inspector-outcome--err"><strong>{t.errors}</strong><ul>{issues.map(issue => <li key={`${issue.path}-${issue.message}`}>{issueLabel(issue.path)}: {issue.message}</li>)}</ul></div> : null}
     </> : null}
