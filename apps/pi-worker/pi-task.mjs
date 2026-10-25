@@ -243,11 +243,13 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     if (finalMessage?.stopReason === 'error' && !text && !reasoningStarted) {
       // A provider's refusal of the request as larger than its model's window, said only of one made before any work:
       // an HTTP refusal of the call's one request in a JSON body that carries no work (the observer's
-      // refusedBeforeAnyWork; a refusal inside a stream may follow work that the API never sees, such as reasoning);
-      // read from its message here and never relayed (context-overflow.ts; loaded only on a failure).
+      // refusedBeforeAnyWork; a refusal inside a stream may follow work that the API never sees, such as reasoning), in
+      // the provider's own words (the observer's refusalWords: its error's message, code or type, never the agent
+      // library's message, which spells out the whole error, words of the request it echoes included); read here and
+      // never relayed (context-overflow.ts; loaded only on a failure).
       const { contextOverflow } = await import('../context-overflow.ts');
       await observer.settled();
-      if (observer.refusedBeforeAnyWork() && contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
+      if (observer.refusedBeforeAnyWork() && observer.refusalWords().some(words => contextOverflow(words))) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
     }
     if (!finalMessage || finalMessage.stopReason !== 'stop') {
       return await terminal({ type: 'failed', code: failureCode(finalMessage, observer.failureStatus()), message: MODEL_FAILURE_MESSAGE });

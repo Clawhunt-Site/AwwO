@@ -6,19 +6,34 @@ const failureStatus = value => Number.isInteger(value) && value >= 400 && value 
 export function emptyUsage(status = 'unavailable', reason = 'provider_missing') {
   return { status, source: 'none', reason, ...Object.fromEntries(TOKEN_FIELDS.map(key => [key, null])) };
 }
-// Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level or
-// one object down): the provider read the request.
-function countsWork(usage) {
-  const positive = value => typeof value === 'number' && value > 0;
-  return Boolean(object(usage) && Object.values(usage).some(value => positive(value) || (object(value) && Object.values(value).some(positive))));
+// Whether a provider's usage counts anything (a token read or written, a cost: a positive number, or words that are one,
+// anywhere in it, its arrays included): the provider read the request. Usage whose objects or arrays nest past 64
+// levels is taken to count. As the JavaScript worker's twin (openai-agents-worker/usage.mjs) counts it.
+function countsWork(usage, depth = 0) {
+  if (typeof usage === 'number' || typeof usage === 'string') return Number(usage) > 0;
+  if (!usage || typeof usage !== 'object') return false;
+  return depth > 64 || Object.values(usage).some(value => countsWork(value, depth + 1));
 }
-// Whether a refusal's body carries anything of the work it refused, at its top level or inside any of its fields (its
-// error, a provider's own envelope): usage that counts anything, or any of an answer (Chat Completions, Responses,
-// Anthropic, Gemini).
-function carriesWork(body) {
-  const answer = value => value != null && value !== '' && !(Array.isArray(value) && value.length === 0) && !(object(value) && Object.keys(value).length === 0);
-  return [body, ...Object.values(body).filter(object)].some(part => countsWork(part.usage) || countsWork(part.usage_metadata)
-    || ['choices', 'output', 'content', 'candidates'].some(key => answer(part[key])));
+// Whether a refusal's body carries anything of the work it refused, anywhere in it (its error, a provider's own
+// envelope, a detail under either): usage that counts anything (usage, usage_metadata or Gemini's usageMetadata), or
+// any of an answer (Chat Completions, Responses, Anthropic, Gemini), as the JavaScript worker's twin reads it. A body is
+// at most 64 KiB here, and one whose objects or arrays nest past 64 levels is taken to carry work.
+function carriesWork(value, depth = 0) {
+  const answer = item => item != null && item !== '' && !(Array.isArray(item) && item.length === 0) && !(object(item) && Object.keys(item).length === 0);
+  if (!value || typeof value !== 'object') return false;
+  if (depth > 64) return true;
+  if (Array.isArray(value)) return value.some(item => carriesWork(item, depth + 1));
+  return ['usage', 'usage_metadata', 'usageMetadata'].some(key => countsWork(value[key], depth + 1))
+    || ['choices', 'output', 'content', 'candidates'].some(key => answer(value[key]))
+    || Object.values(value).some(item => carriesWork(item, depth + 1));
+}
+// The provider's own words in a refusal's body, as the JavaScript worker reads them from its SDK's error (the body's
+// error field, which that SDK keeps alone): the error's message, or the error itself where it is only words, its code
+// and its type. Never anything else in the body, where a provider may echo words of the request.
+function providerWords(body) {
+  const error = object(body) ? body.error : undefined;
+  const words = typeof error === 'string' ? [error] : object(error) ? [error.message, error.code, error.type] : [];
+  return words.filter(item => typeof item === 'string');
 }
 export function normalizeUsage(raw, protocol, complete = true) {
   if (!object(raw)) return emptyUsage();
@@ -58,14 +73,15 @@ export function normalizeUsage(raw, protocol, complete = true) {
   return result;
 }
 
-// The parser observes the existing response stream without cloning/tee buffering (a refusal's body alone, small and
-// read once, is read beside the SDK through a tee). Oversized/invalid telemetry is ignored; original bytes always reach
-// the SDK.
+// The parser observes the existing response stream without cloning/tee buffering (a refusal's body alone, unless it is
+// typed a stream, is read once beside the SDK through a tee). Oversized/invalid telemetry is ignored; original bytes
+// always reach the SDK.
 export function createProviderObserver(protocol, { now = () => performance.now(), fetchImpl = globalThis.fetch, acceptedAtNs } = {}) {
   const born = now();
   let setupMs, started, ended, first, raw, complete = false, invalidFrame = false;
   // The call's requests (the agent library retries LLM Gate once), its last answer if that was a refusal (its status,
-  // and whether its body was JSON that carries no work), and the reads of refusal bodies not yet done.
+  // whether its body was JSON that carries no work, and the provider's own words in it), and the reads of refusal bodies
+  // not yet done.
   let requests = 0, refusal, unsettled = false;
   // The status the call's last request failed with, where the provider gave one (failureStatus): its answer's, when that
   // was a refusal, or the one an error frame inside its stream carried.
@@ -94,30 +110,53 @@ export function createProviderObserver(protocol, { now = () => performance.now()
       if (object(value.error) && failureStatus(value.error.status)) frameStatus = value.error.status;
     }
   }
-  // A refusal's body (any type: the SDK reads any as JSON it can) is read to its end beside the SDK, through a tee whose
-  // other half the SDK reads unchanged, at most 64 KiB of it kept and never relayed: refusal says whether it was JSON
-  // that carries no work (a body past 64 KiB, or not JSON, cannot say so). settled() waits for these reads.
+  // A refusal's body (any type but a stream: the SDK reads any as JSON it can) is read to its end beside the SDK, through
+  // a tee whose other half the SDK reads unchanged, at most 64 KiB of it (counted in bytes) kept and never relayed:
+  // refusal says whether it was JSON that carries no work (a body past 64 KiB, or not JSON, cannot say so), and the
+  // provider's own words in it. settled() waits for these reads. A tee's half cancelled alone waits for the other's read
+  // (the body is let go only once both are), so the SDK's half cancels this read too: an SDK done with the body before
+  // its end is never held up by it, and a body cut short so cannot say it carries no work.
   function readRefusal(response) {
     const [mine, theirs] = response.body.tee();
-    const answer = refusal = { status: response.status, clean: false };
+    const answer = refusal = { status: response.status, clean: false, words: [] };
+    const reader = mine.getReader(), source = theirs.getReader();
+    let dropped = false;
     reads.push((async () => {
-      const reader = mine.getReader(), decoder = new TextDecoder();
-      let text = '';
+      const decoder = new TextDecoder();
+      let text = '', bytes = 0;
       try {
         for (let next = await reader.read(); !next.done; next = await reader.read()) {
-          if ((text += decoder.decode(next.value, { stream: true })).length > 65_536) { await reader.cancel(); return; }
+          if ((bytes += next.value.byteLength) > 65_536) { await reader.cancel(); return; }
+          text += decoder.decode(next.value, { stream: true });
         }
+        if (dropped) return;
         const value = JSON.parse(text + decoder.decode());
         answer.clean = object(value) && !carriesWork(value);
+        answer.words = providerWords(value);
       } catch { /* a body that is not JSON, or breaks off, says nothing */ }
     })());
-    return new Response(theirs, { status: response.status, statusText: response.statusText, headers: response.headers });
+    const body = new ReadableStream({
+      async pull(controller) {
+        const next = await source.read();
+        if (next.done) controller.close(); else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        dropped = true;
+        return Promise.all([source.cancel(reason), reader.cancel(reason)]).then(() => undefined);
+      },
+    });
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   function observe(response) {
     refusedStatus = response.ok ? undefined : response.status;
-    if (!response.ok && response.body) { ended ??= now(); return readRefusal(response); }
-    refusal = undefined;
-    if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) { ended ??= now(); return response; }
+    const stream = Boolean(response.body && response.headers.get('content-type')?.toLowerCase().includes('text/event-stream'));
+    // An HTTP 4xx or 5xx is a refusal (a status past 599, which fetch passes through, could make no Response to read it
+    // through: it reaches the SDK as it came, typed a stream or not). One typed a stream has its usage read as any
+    // stream's, which a 429 or 5xx answered at once is charged by (plans.go creditCharge), and cannot say it carries no
+    // work.
+    if (response.status >= 400 && response.status <= 599 && response.body && !stream) { ended ??= now(); return readRefusal(response); }
+    refusal = response.ok ? undefined : { status: response.status, clean: false, words: [] };
+    if (!stream || response.status > 599) { ended ??= now(); return response; }
     const decoder = new TextDecoder();
     let line = '', skipping = false, skipLF = false;
     let dataLines = [], frameBytes = 0, frameInvalid = false;
@@ -182,9 +221,16 @@ export function createProviderObserver(protocol, { now = () => performance.now()
       catch (error) { ended ??= now(); throw error; }
     },
     // Whether the call was refused before any work: its one request answered with a 400, 413 or 422 (never a stream:
-    // work may come before a refusal inside one), in a body that was JSON and carries no work. Read after settled().
+    // work may come before a refusal inside one, and a refusal typed a stream cannot say it carries none), in a body
+    // that was JSON and carries no work. Read after settled().
     refusedBeforeAnyWork() {
       return requests === 1 && !unsettled && refusal?.clean === true && [400, 413, 422].includes(refusal.status);
+    },
+    // The provider's own words in the call's last refusal (providerWords: its error's message, code and type), which the
+    // child reads for a refusal of the request as too large (pi-task.mjs) and which never leave it; none for a refusal
+    // whose body was not JSON, was typed a stream or came without one. Read after settled().
+    refusalWords() {
+      return refusal?.words ?? [];
     },
     // The status the provider failed the call's last request with, where it gave one: the HTTP status of its refusal,
     // else the one an error frame inside its stream carried. Undefined for a request that ended any other way (a stream
