@@ -4,19 +4,22 @@ import asyncio
 import json
 import os
 import socket
+import struct
 import tempfile
 import threading
 import time
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
 import httpx2
 from agents import set_trace_processors
 from botocore.exceptions import ClientError, EventStreamError
+from urllib3.exceptions import ProtocolError
 
 from bedrock_bridge import (
-    BRIDGE_API_KEY, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
+    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
     call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache, with_summarized_thinking,
 )
 from bedrock_catalog import (
@@ -290,6 +293,9 @@ class ConfigTests(unittest.TestCase):
 
 
 class FakeStream:
+    """A stream's events, failing at `fail_after` with AWS's EventStreamError of `fail_code`, or with `fail_code` itself
+    when it is an exception (a failure AWS never reported, such as a connection reset)."""
+
     def __init__(self, events, fail_after=None, fail_code="modelStreamErrorException"):
         self.events = events
         self.fail_after = fail_after
@@ -301,6 +307,8 @@ class FakeStream:
             if self.closed:
                 return
             if self.fail_after is not None and index == self.fail_after:
+                if isinstance(self.fail_code, BaseException):
+                    raise self.fail_code
                 raise EventStreamError({"Error": {"Code": self.fail_code, "Message": "arn:aws:iam::563688183799:role/x"}}, "ConverseStream")
             yield event
 
@@ -468,6 +476,16 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         # A throttle after the stream began is still a rate limit, not an unknown model error.
         self.fail_code = "throttlingException"
         self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_RATE_LIMIT")
+        # AWS's own outage after the stream began is the service's; a stream lost on its way to AWS (a connection reset,
+        # which AWS never reported), with or without text before it, is the model's failure, billed as one: AWS may
+        # already have done the work (plans.go refusedBeforeOutput).
+        self.fail_code = "serviceUnavailableException"
+        self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_UNAVAILABLE")
+        for fail_after in (1, 2):
+            self.fail_after = fail_after
+            self.fail_code = ProtocolError("Connection broken", ConnectionResetError(104, "Connection reset by peer"))
+            reset = await self.run_model("bedrock.glm-5")
+            self.assertEqual((reset[-1]["type"], reset[-1]["code"]), ("failed", "MODEL_ERROR"), fail_after)
         self.fail_code = "modelStreamErrorException"
         self.fail_after = None
         self.events = [{"messageStart": {}}, {"contentBlockDelta": {"delta": {"text": "cut"}}}, {"messageStop": {"stopReason": "max_tokens"}}]
@@ -531,7 +549,16 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("arn", denied.message)
         stream = bridge_failure(EventStreamError({"Error": {"Code": "throttlingException", "Message": "x"}}, "ConverseStream"))
         self.assertEqual((stream.status, stream.kind), (429, "ThrottlingException"))
-        self.assertEqual(bridge_failure(OSError("reset")).status, 502)
+        # Neither an AWS exception nor an HTTP status: the way to AWS failed, which AWS never reported.
+        for error in (OSError("reset"), ProtocolError("Connection broken", ConnectionResetError(104, "Connection reset by peer"))):
+            reset = bridge_failure(error)
+            self.assertEqual((reset.status, reset.kind, reset.upstream), (502, BEDROCK_CONNECTION_FAILURE, True), repr(error))
+        self.assertEqual(BEDROCK_CONNECTION_FAILURE, "connection_error")
+        # An answer of AWS's that the bridge does not know is AWS's failure, as before: an error code it has no name for,
+        # and the empty code botocore gives a stream exception its service model lacks (RealEventStreamTests).
+        for code in ("someNewException", ""):
+            unknown = bridge_failure(EventStreamError({"Error": {"Code": code, "Message": "arn:aws:iam::1:role/x"}}, "ConverseStream"))
+            self.assertEqual((unknown.status, unknown.kind, unknown.upstream), (502, "api_error", True), code)
         from botocore.exceptions import NoCredentialsError
         self.assertEqual(bridge_failure(NoCredentialsError()).status, 401, "no usable AWS credentials is an authentication failure")
         self.assertEqual(classify_error(BridgeError(401, "api_error", "x"))["code"], "MODEL_AUTHENTICATION")
@@ -593,7 +620,9 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BridgeError) as throttled:
             ChunkMapper("m").map({"throttlingException": {"message": "slow"}})
         self.assertEqual(_error_body(throttled.exception)["error"]["status"], 429)
-        self.assertEqual(_error_body(bridge_failure(OSError("reset")))["error"]["status"], 502)
+        # Nor does a failure AWS never reported (a connection reset): AWS may already have done, and billed, the work.
+        self.assertEqual(_error_body(bridge_failure(OSError("reset")))["error"],
+                         {"message": "The Bedrock request failed", "type": "connection_error", "code": "connection_error"})
 
 
 OPUS = "global.anthropic.claude-opus-5-5"
@@ -769,6 +798,26 @@ class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "api_error", "status": 502, "stage": "stream", "upstream": False}])
 
+    async def test_a_failure_on_the_way_to_aws_is_no_profiles_refusal_and_its_frame_carries_no_status(self):
+        # A failure AWS never reported (a connection reset), as the stream opens or partway: the call's own failure on the
+        # way to AWS (upstream), with no status for the worker to take for AWS's outage, and the other profile never asked.
+        for fail_after in (0, 1):
+            with self.subTest(fail_after=fail_after):
+                reset = ProtocolError("Connection broken", ConnectionResetError(104, "Connection reset by peer"))
+                status, frames, client, facts = await self.call([{"events": text_turn("late"), "fail_after": fail_after, "fail_code": reset}])
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(frames[-1])["error"], {"message": "The Bedrock request failed", "type": "connection_error", "code": "connection_error"})
+                self.assertEqual([call["modelId"] for call in client.calls], [OPUS])
+                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "connection_error", "status": 502, "stage": "stream", "upstream": True}])
+        # A stream exception AWS reports that the service model lacks is AWS's own, and keeps its status.
+        status, frames, client, facts = await self.call([{"events": text_turn("late"), "fail_after": 1, "fail_code": "someNewException"}])
+        self.assertEqual(json.loads(frames[-1])["error"], {"message": "The Bedrock request failed", "type": "api_error", "code": "api_error", "status": 502})
+        # Before any stream it keeps the response's own status, as every failure there does.
+        status, frames, client, facts = await self.call([OSError("connection refused")])
+        self.assertEqual(status, 502)
+        self.assertEqual([call["modelId"] for call in client.calls], [OPUS])
+        self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "connection_error", "status": 502, "stage": "request", "upstream": True}])
+
     async def test_a_call_cancelled_while_it_is_sent_reads_nothing_more(self):
         sent, release = threading.Event(), threading.Event()
 
@@ -891,6 +940,85 @@ def local_client(url, seen=None):
         return boto3.session.Session().client("bedrock-runtime", region_name=region, endpoint_url=url, config=Config(
             read_timeout=read_timeout, connect_timeout=2, retries={"total_max_attempts": 1, "mode": "standard"}))
     return factory
+
+
+def event_message(headers, payload=b""):
+    """One AWS event-stream message as Bedrock sends it: its prelude (total and header lengths, their CRC), string
+    headers, payload and the message's CRC."""
+    encoded = b"".join(bytes([len(name)]) + name.encode() + b"\x07" + struct.pack(">H", len(value)) + value.encode()
+                       for name, value in headers.items())
+    prelude = struct.pack(">II", 12 + len(encoded) + len(payload) + 4, len(encoded))
+    prelude += struct.pack(">I", zlib.crc32(prelude))
+    message = prelude + encoded + payload
+    return message + struct.pack(">I", zlib.crc32(message))
+
+
+def answering_endpoint(test, body, length=None):
+    """A local endpoint that answers each ConverseStream request it reads whole with an event stream of `body`, saying
+    it is `length` bytes long (by default its own length: fewer cuts the stream off), and closes."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            with conn:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += conn.recv(65536)
+                head, _, rest = request.partition(b"\r\n\r\n")
+                sent = next((int(line.split(b":", 1)[1]) for line in head.split(b"\r\n") if line.lower().startswith(b"content-length:")), 0)
+                while len(rest) < sent:
+                    rest += conn.recv(65536)
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nx-amzn-RequestId: stub\r\n"
+                             + f"Content-Length: {len(body) if length is None else length}\r\nConnection: close\r\n\r\n".encode() + body)
+    threading.Thread(target=serve, daemon=True).start()
+    test.addCleanup(listener.close)
+    return f"http://127.0.0.1:{listener.getsockname()[1]}"
+
+
+class RealEventStreamTests(unittest.IsolatedAsyncioTestCase):
+    """What botocore itself makes of a Bedrock event stream that fails partway, read by the bridge: real botocore and
+    its ConverseStream model against a local endpoint, no AWS."""
+
+    START = event_message({":message-type": "event", ":event-type": "messageStart", ":content-type": "application/json"}, b'{"role":"assistant"}')
+
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, STUB_AWS))
+
+    async def call(self, body, length=None):
+        facts = []
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=10.0,
+                                             client_factory=local_client(answering_endpoint(self, body, length)), report=facts.append)
+        async with httpx2.AsyncClient(transport=transport) as http:
+            response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions",
+                                       json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("563688183799", response.text)
+        return json.loads([line[6:] for line in response.text.split("\n") if line.startswith("data: ")][-1])["error"], facts
+
+    async def test_an_exception_aws_reports_is_awss_whether_or_not_the_service_model_has_it(self):
+        def exception(kind):
+            return event_message({":message-type": "exception", ":exception-type": kind, ":content-type": "application/json"},
+                                 b'{"message":"arn:aws:iam::563688183799:role/x is throttled"}')
+        # One the model has keeps its name and status. One it lacks botocore raises with an empty code: still AWS's
+        # answer (api_error, 502), never a connection lost on the way.
+        for kind, want in (("throttlingException", ("ThrottlingException", 429)), ("someNewException", ("api_error", 502))):
+            with self.subTest(kind):
+                error, facts = await self.call(self.START + exception(kind))
+                self.assertEqual((error["type"], error.get("status")), want)
+                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": want[0], "status": want[1], "stage": "stream", "upstream": True}])
+
+    async def test_a_stream_cut_off_on_its_way_is_a_connection_failure_without_a_status(self):
+        # The endpoint promises more than it sends and closes: urllib3 raises inside botocore's stream, as it does for a
+        # connection reset.
+        error, facts = await self.call(self.START, length=len(self.START) + 64)
+        self.assertEqual(error, {"message": "The Bedrock request failed", "type": "connection_error", "code": "connection_error"})
+        self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "connection_error", "status": 502, "stage": "stream", "upstream": True}])
 
 
 class StalledStreamTests(unittest.IsolatedAsyncioTestCase):

@@ -473,7 +473,11 @@ func TestComputerFailureCodesAndLongFileNames(t *testing.T) {
 		"stream:unfinished": "computer_model_answer", "stream:error:429:throttlingException": "computer_model_provider", "stream:error:503:serviceUnavailableException": "computer_model_provider",
 		"stream:error:500:InternalServerException": "computer_model_provider", "stream:error:502:modelStreamErrorException": "computer_model_answer",
 		"stream:error:502:ModelErrorException": "computer_model_answer", "stream:error:400:validationException": "computer_model_answer",
-		"stream:error:api_error": "computer_model_answer", "stream:error:503": "computer_model_answer", "stream:truncated": "computer_model_answer"} {
+		"stream:error:api_error": "computer_model_answer", "stream:error:503": "computer_model_answer", "stream:truncated": "computer_model_answer",
+		// A failure on the way to AWS that AWS never reported (the bridge's connection_error, BEDROCK_CONNECTION_FAILURE in
+		// apps/bedrock-bridge.ts) reads as its earlier label api_error did: after the stream began, not AWS's outage;
+		// before it, the 502 the bridge answers.
+		"stream:error:connection_error": "computer_model_answer", "bedrock:502:connection_error": "computer_model_provider"} {
 		body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "PROVIDER_ERROR", "message": "x", "reason": reason, "detail": "finish:length"}})
 		if got := computerModelFailure(502, body, false); got != want {
 			t.Fatalf("a provider error with reason %q reads %q, want %q", reason, got, want)

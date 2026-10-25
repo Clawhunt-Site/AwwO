@@ -136,7 +136,8 @@ export interface BedrockSdk {
 export class BedrockBridgeError extends Error {
   status: number;
   type: string;
-  /** True when AWS reported the failure; the bridge's own refusals are not provider outages. */
+  /** True for AWS's answer or the way to it (the connection, the credentials); the bridge's own refusals are not
+   *  provider outages. */
   upstream: boolean;
   constructor(status: number, type: string, message: string, upstream = false) {
     super(message);
@@ -551,6 +552,16 @@ const SDK_STATUS: Record<string, number> = {
  *  provider gives it, and words the workers' reading of a refusal knows (context-overflow.ts). */
 export const BEDROCK_CONTEXT_LIMIT = { type: 'context_length_exceeded', message: 'Input is too long for requested model' } as const;
 
+/** The type of a failure on the way to AWS that AWS never reported: no AWS exception and no HTTP status, such as a
+ *  connection reset or a stream cut off or unreadable partway. Its body carries no status (errorBody), so a stream lost
+ *  this way after it began is not reported as the provider's outage, which a call refused at once is not billed for
+ *  (plans.go refusedBeforeOutput): AWS may already have done, and billed, the work. */
+export const BEDROCK_CONNECTION_FAILURE = 'connection_error';
+/** The names of errors this process makes itself (the JavaScript and Node errors a socket, a stream or a timer fails
+ *  with). Any other name is one AWS gave: the SDK throws an exception the stream reports but the SDK does not model, or
+ *  an error message, with AWS's own code as its name. */
+const LOCAL_ERROR_NAMES: ReadonlySet<string> = new Set(['', 'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AggregateError', 'AbortError', 'TimeoutError']);
+
 /** Status and type only: SDK messages can carry account IDs and role ARNs, which never leave the worker. A request AWS
  *  refused as larger than its model's window, read from its message here and only here, is told apart by its type
  *  (BEDROCK_CONTEXT_LIMIT): the workers answer it as the size refusal it is, not as a request the bridge got wrong. */
@@ -561,9 +572,12 @@ export function bridgeFailure(error: unknown): BedrockBridgeError {
   if (name === 'ValidationException' && contextOverflow(e.message)) {
     return new BedrockBridgeError(400, BEDROCK_CONTEXT_LIMIT.type, BEDROCK_CONTEXT_LIMIT.message, true);
   }
+  if (Object.hasOwn(SDK_STATUS, name)) return new BedrockBridgeError(SDK_STATUS[name], name, 'The Bedrock request failed', true);
   const httpStatus = Number.isInteger(e.$metadata?.httpStatusCode) ? e.$metadata!.httpStatusCode as number : undefined;
-  const status = SDK_STATUS[name] ?? (httpStatus && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 502);
-  return new BedrockBridgeError(status, Object.hasOwn(SDK_STATUS, name) ? name : 'api_error', 'The Bedrock request failed', true);
+  if (httpStatus && httpStatus >= 400 && httpStatus <= 599) return new BedrockBridgeError(httpStatus, 'api_error', 'The Bedrock request failed', true);
+  // An exception AWS named that the bridge does not know: AWS's own failure, as before.
+  if (!LOCAL_ERROR_NAMES.has(name)) return new BedrockBridgeError(502, 'api_error', 'The Bedrock request failed', true);
+  return new BedrockBridgeError(502, BEDROCK_CONNECTION_FAILURE, 'The Bedrock request failed', true);
 }
 
 const encoder = new TextEncoder();
@@ -571,12 +585,21 @@ const sse = (payload: Json | '[DONE]') => encoder.encode(`data: ${payload === '[
 // `status` lets the workers classify an AWS failure that arrives after the stream began, when the
 // HTTP status is already 200 (the OpenAI SDKs raise such a frame without a status of their own).
 // The bridge's own refusals (an event it cannot relay, a truncated stream) carry none, so they are
-// not reported as a provider outage.
-const errorBody = (error: BedrockBridgeError) => ({ error: { message: error.message, type: error.type, code: error.type, ...(error.upstream ? { status: error.status } : {}) } });
+// not reported as a provider outage; nor does a failure AWS never reported (BEDROCK_CONNECTION_FAILURE).
+// A failure before the stream began is classified by the response's own status, which it keeps.
+const errorBody = (error: BedrockBridgeError) => ({ error: { message: error.message, type: error.type, code: error.type,
+  ...(error.upstream && error.type !== BEDROCK_CONNECTION_FAILURE ? { status: error.status } : {}) } });
 
 function jsonError(error: BedrockBridgeError): Response {
   return new Response(JSON.stringify(errorBody(error)), { status: error.status, headers: { 'content-type': 'application/json' } });
 }
+
+const EVENT_STREAM_HEADERS = { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
+
+/** Whether an SDK error came after AWS answered the call with its HTTP 200: the SDK reads a stream's first event before
+ *  `send` returns, and stamps an error thrown while it does with the response's status (its deserialization middleware;
+ *  an error before AWS answered has no such stamp). */
+const afterAnswer = (error: unknown): boolean => plain(error) && plain(error.$metadata) && error.$metadata.httpStatusCode === 200;
 
 async function bodyText(body: unknown): Promise<string> {
   if (typeof body === 'string') return body;
@@ -754,9 +777,16 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
     } catch (error) {
       release();
       if (abort.signal.aborted) throw aborted();
+      const failure = bridgeFailure(error);
+      // The stream AWS answered with lost before its first event (a connection reset, a first message cut off): the
+      // SDK reads that event before `send` returns, so the loss comes here, stamped with AWS's 200. It is the stream's
+      // failure, after AWS took the call and while its model may already be working (one that thinks first sends
+      // nothing until it writes): answered as a failure after the stream began is, inside a 200, without a status.
+      if (failure.type === BEDROCK_CONNECTION_FAILURE && afterAnswer(error)) {
+        return new Response(sse(errorBody(failed(failure, active, 'stream'))), { status: 200, headers: EVENT_STREAM_HEADERS });
+      }
       // A refusal as too large from the other profile follows the first one's refusal: two requests, so not one made
       // before any work (the workers' rule): it goes out as AWS's validation failure it is.
-      const failure = bridgeFailure(error);
       return jsonError(failed(active !== model && failure.type === BEDROCK_CONTEXT_LIMIT.type
         ? new BedrockBridgeError(400, 'ValidationException', 'The Bedrock request failed', true) : failure, active, 'request'));
     }
@@ -804,6 +834,6 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
         release();
       },
     });
-    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' } });
+    return new Response(body, { status: 200, headers: EVENT_STREAM_HEADERS });
   };
 }

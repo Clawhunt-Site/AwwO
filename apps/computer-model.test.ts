@@ -339,6 +339,8 @@ test('a Bedrock stream that fails or ends early is a failed call, never a partia
     // The bridge ends a stream that stopped early with its own error frame; an AWS failure after the stream began keeps its status.
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; }, 'stream:error:api_error', undefined],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; }, 'stream:error:429:throttlingException', undefined],
+    // A stream lost on its way to AWS (a connection reset, which AWS never reported) names no AWS status either.
+    [async function* () { yield { messageStart: { role: 'assistant' } }; throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); }, 'stream:error:connection_error', undefined],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; }, 'answer', 'finish:length'],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'I' } } }; yield { messageStop: { stopReason: 'content_filtered' } }; }, 'answer', 'finish:content_filter'],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { reasoningContent: { text: 'private reasoning' } } } }; yield { messageStop: { stopReason: 'end_turn' } }; }, 'answer', 'empty'],

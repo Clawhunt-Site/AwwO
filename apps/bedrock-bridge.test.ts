@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  BEDROCK_BRIDGE_API_KEY, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockFactLine, bedrockOrigin, bridgeFailure, chatUsage,
+  BEDROCK_BRIDGE_API_KEY, BEDROCK_CONNECTION_FAILURE, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockFactLine, bedrockOrigin, bridgeFailure, chatUsage,
   childBedrockFetch, createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
   validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockCallFact, type BedrockSdk,
 } from './bedrock-bridge.ts';
@@ -238,9 +238,23 @@ test('SDK failures keep only a status and an exception type, never the account-b
   assert.doesNotMatch(denied.message, /arn|563688183799/);
   assert.equal(bridgeFailure({ name: 'ThrottlingException' }).status, 429);
   assert.equal(bridgeFailure({ name: 'Weird', $metadata: { httpStatusCode: 418 } }).status, 418);
-  const unknown = bridgeFailure(new Error('socket hang up'));
-  assert.equal(unknown.status, 502);
-  assert.equal(unknown.type, 'api_error');
+  // Neither an AWS exception nor an HTTP status: the way to AWS failed (a socket's, a stream's or a timer's own error),
+  // which AWS never reported.
+  for (const error of [new Error('socket hang up'), Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+    Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' }), new TypeError('terminated'), undefined,
+    // Every name the process gives its own errors.
+    ...['', 'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AggregateError', 'AbortError', 'TimeoutError'].map(name => Object.assign(new Error('x'), { name }))]) {
+    const unknown = bridgeFailure(error);
+    assert.deepEqual([unknown.status, unknown.type, unknown.upstream], [502, BEDROCK_CONNECTION_FAILURE, true], `${(error as Error | undefined)?.name}: ${String(error)}`);
+  }
+  assert.equal(BEDROCK_CONNECTION_FAILURE, 'connection_error');
+  // An exception AWS named that the bridge does not know (the SDK throws a stream exception it does not model, or an
+  // error message, with AWS's own code as its name) is AWS's failure, as before, with a status the workers read; so is a
+  // name that is only an object's own member (no longer a status taken from it).
+  for (const error of [Object.assign(new Error('arn:aws:iam::563688183799:role/x'), { name: 'InternalFailure' }), { name: 'Weird', $metadata: { httpStatusCode: 200 } }, { name: 'toString' }]) {
+    const named = bridgeFailure(error);
+    assert.deepEqual([named.status, named.type, named.upstream], [502, 'api_error', true], JSON.stringify(error));
+  }
 });
 
 test('auth records are closed shapes', () => {
@@ -387,6 +401,27 @@ test('request errors, provider errors and mid-stream failures surface as OpenAI-
   const citing = fakeSdk([{ messageStart: {} }, { contentBlockDelta: { delta: { citation: { title: 'doc' } } } }]);
   const citingFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: citing.sdk })(ENDPOINT, post(request()))).text());
   assert.deepEqual(JSON.parse(citingFrames.at(-1)!), { error: { message: 'Bedrock returned content the bridge cannot relay', type: 'api_error', code: 'api_error' } });
+  // Nor is a stream lost on its way to AWS, which AWS never reported (a connection reset partway): AWS may already have
+  // done, and billed, the work, so the workers must not take it for a refusal that cost nothing. Before the stream
+  // began, the same failure keeps the response's own status, as every failure there does.
+  const reset = fakeSdk(async function* () { yield { messageStart: {} }; throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); });
+  const resetFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: reset.sdk })(ENDPOINT, post(request()))).text());
+  assert.deepEqual(JSON.parse(resetFrames.at(-1)!), { error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } });
+  // A stream exception AWS reports that the SDK does not model is AWS's, and keeps its status.
+  const unmodelled = fakeSdk(async function* () { yield { messageStart: {} }; throw Object.assign(new Error('arn:aws:iam::563688183799:role/x'), { name: 'InternalFailure' }); });
+  const unmodelledFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: unmodelled.sdk })(ENDPOINT, post(request()))).text());
+  assert.deepEqual(JSON.parse(unmodelledFrames.at(-1)!), { error: { message: 'The Bedrock request failed', type: 'api_error', code: 'api_error', status: 502 } });
+  const refused = fakeSdk([], { fail: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+  const refusedResponse = await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: refused.sdk })(ENDPOINT, post(request()));
+  assert.equal(refusedResponse.status, 502);
+  assert.deepEqual(await refusedResponse.json(), { error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } });
+  // Lost after AWS answered but before its first event, which the real SDK reads before `send` returns (and stamps the
+  // loss with AWS's 200, pi-worker/bedrock-sdk.test.mjs): the stream's failure, inside a 200, its only frame.
+  const answered = fakeSdk([], { fail: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', $metadata: { httpStatusCode: 200 } }) });
+  const answeredResponse = await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: answered.sdk })(ENDPOINT, post(request()));
+  assert.equal(answeredResponse.status, 200);
+  assert.match(answeredResponse.headers.get('content-type') ?? '', /^text\/event-stream/);
+  assert.deepEqual(frames(await answeredResponse.text()).map(frame => JSON.parse(frame)), [{ error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } }]);
 
   const truncated = fakeSdk([{ messageStart: {} }, { contentBlockDelta: { delta: { text: 'cut' } } }]);
   const truncatedFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: truncated.sdk })(ENDPOINT, post(request()))).text());
@@ -540,6 +575,35 @@ test('no fallback without a fallback model, for any other failure, or a second t
     assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL], name);
     assert.deepEqual(run.facts, [{ event: 'failed', model: MODEL, error: name, status, stage: 'request', upstream: true }]);
   }
+  // A failure on the way to AWS is no profile's refusal, before the stream or as it opens: the call fails as it is, on
+  // the way to AWS (upstream), and after the stream began without a status for the workers.
+  const unsent = fallbackFetch([{ fail: new Error('socket hang up') }]);
+  assert.equal((await unsent.call()).status, 502);
+  assert.deepEqual(unsent.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(unsent.facts, [{ event: 'failed', model: MODEL, error: 'connection_error', status: 502, stage: 'request', upstream: true }]);
+  const cut = fallbackFetch([{ events: async function* () { throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); } }]);
+  const cutResponse = await cut.call();
+  assert.equal(cutResponse.status, 200);
+  assert.equal(JSON.parse(frames(await cutResponse.text()).at(-1)!).error.status, undefined);
+  assert.deepEqual(cut.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(cut.facts, [{ event: 'failed', model: MODEL, error: 'connection_error', status: 502, stage: 'stream', upstream: true }]);
+  // A stream AWS answered and lost before its first event (the real SDK's rejection, stamped with AWS's 200) is no
+  // profile's refusal either: the stream's failure, from the first profile, and from the other one after the first
+  // refused.
+  const stamped = () => Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', $metadata: { httpStatusCode: 200 } });
+  const lostFirst = fallbackFetch([{ fail: stamped() }]);
+  const lostFirstResponse = await lostFirst.call();
+  assert.equal(lostFirstResponse.status, 200);
+  assert.deepEqual(frames(await lostFirstResponse.text()).map(frame => JSON.parse(frame)), [{ error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } }]);
+  assert.deepEqual(lostFirst.inputs.map(input => input.modelId), [MODEL]);
+  assert.deepEqual(lostFirst.facts, [{ event: 'failed', model: MODEL, error: 'connection_error', status: 502, stage: 'stream', upstream: true }]);
+  const lostOther = fallbackFetch([{ fail: awsError('ThrottlingException', 429) }, { fail: stamped() }]);
+  const lostOtherResponse = await lostOther.call();
+  assert.equal(lostOtherResponse.status, 200);
+  assert.equal(JSON.parse(frames(await lostOtherResponse.text()).at(-1)!).error.type, 'connection_error');
+  assert.deepEqual(lostOther.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
+  assert.deepEqual(lostOther.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'ThrottlingException' },
+    { event: 'failed', model: FALLBACK, error: 'connection_error', status: 502, stage: 'stream', upstream: true }]);
   // Both profiles refuse: the call fails with the fallback's refusal, its message never relayed, and nothing more is asked.
   const both = fallbackFetch([{ fail: awsError('ThrottlingException', 429) }, { fail: awsError('ServiceUnavailableException', 503) }]);
   const bothResponse = await both.call();

@@ -169,10 +169,17 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
         }
         res.end(`data: ${JSON.stringify({ error: { message: 'The Bedrock stream reported an error', type: 'serviceUnavailableException', code: 'serviceUnavailableException', status: 503 } })}\n\n`);
         return;
-      } else if (mode === 'frame_unavailable' || mode === 'frame_rate_limited' || mode === 'frame_unknown' || mode === 'transient_broken') {
+      } else if (mode === 'frame_unavailable' || mode === 'frame_rate_limited' || mode === 'frame_unknown' || mode === 'transient_broken' || mode === 'frame_connection' || mode === 'frame_connection_only') {
         // A failure after the stream began, as the Bedrock bridge relays one: an error frame carrying the status of the
         // AWS failure (bedrock-bridge.ts errorBody), and one of the bridge's own, which carries none (also after a
-        // refused first request, for a Gate model's retry).
+        // refused first request, for a Gate model's retry); nor does a stream lost on its way to AWS, which AWS never
+        // reported (BEDROCK_CONNECTION_FAILURE), here before the model wrote anything.
+        if (mode === 'frame_connection' || mode === 'frame_connection_only') {
+          // With nothing before it: a stream AWS answered and lost before its first event.
+          if (mode === 'frame_connection') send({ role: 'assistant', content: '' });
+          res.end(`data: ${JSON.stringify({ error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } })}\n\n`);
+          return;
+        }
         send({ role: 'assistant', content: 'Hello ' });
         const aws = mode === 'frame_unavailable' ? ['ServiceUnavailableException', 503] : ['ThrottlingException', 429];
         res.end(`data: ${JSON.stringify({ error: mode === 'frame_unknown' || mode === 'transient_broken'
@@ -639,8 +646,9 @@ test('a call that did not finish keeps what ended it: its output cap, a declined
     ['frame_unavailable', 'MODEL_UNAVAILABLE'], ['frame_rate_limited', 'MODEL_RATE_LIMIT'],
     // A stop at the cap is that, whatever failed after it.
     ['length_then_unavailable', 'MODEL_OUTPUT_LIMIT'], ['reasoning_then_unavailable', 'MODEL_UNAVAILABLE'],
-    // A refusal that says none of these, and an error frame with no status of its own, stay the model's failure.
-    ['rejected', 'MODEL_ERROR'], ['frame_unknown', 'MODEL_ERROR'],
+    // A refusal that says none of these, and an error frame with no status of its own, stay the model's failure: so does
+    // a stream lost on its way to AWS before any output, which AWS may have billed (no free quick refusal: plans.go).
+    ['rejected', 'MODEL_ERROR'], ['frame_unknown', 'MODEL_ERROR'], ['frame_connection', 'MODEL_ERROR'], ['frame_connection_only', 'MODEL_ERROR'],
   ]) {
     const { last, events, requests } = await end(mode);
     assert.deepEqual(businessEvent(last), { type: 'failed', code, message: FAILURE_WORDS[code] }, mode);
