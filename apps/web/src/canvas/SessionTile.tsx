@@ -864,7 +864,9 @@ export const SessionTile = memo(function SessionTile({
       Array.from(panel?.querySelectorAll<HTMLElement>(selector) ?? []).filter(element => !closing?.contains(element));
     for (const candidate of [...first, ...outside('.canvas-composer-input:enabled'),
       ...outside(':is(button, textarea, select):enabled:not([tabindex="-1"])'), moreRef.current]) {
-      if (!candidate) continue;
+      // The named candidates are filtered here rather than by outside(), so the promise above holds for them too: no
+      // caller names a control inside what it closes today, and one that did would focus what is about to unmount.
+      if (!candidate || closing?.contains(candidate)) continue;
       candidate.focus({ preventScroll: true });
       if (document.activeElement === candidate) return;
     }
@@ -973,8 +975,18 @@ export const SessionTile = memo(function SessionTile({
     });
   };
   // Each of these moves the focus before closing, and only when the part actually holds it: a click that focused
-  // nothing, as Safari leaves it, moves nothing. The guide's 编辑 buttons and a drawer that closes by itself are not
-  // these — nothing of theirs unmounts under the focus.
+  // nothing, as Safari leaves it, moves nothing.
+  //
+  // Two neighbours are NOT handled here and DO still drop the focus, which the stranded original listed as out of its
+  // scope and this re-derivation keeps out of its own — stated plainly so the next reader is not told there is nothing
+  // to find:
+  //   - the guide's 编辑 buttons (editInputStructure, editDeliverableForm) close the guide, which unmounts the very
+  //     button pressed, and nothing in the form they open takes the focus. The focus then sits on the page's body,
+  //     where useCanvasKeys reads Backspace as a canvas key and deletes the selected node — which is this node. These
+  //     cannot use the pattern below, since they open a part in the same commit that closes one: they need the
+  //     deferred layout effect the sessions pair uses.
+  //   - a drawer that closes by itself (the effect that follows drawerShown) unmounts it with the focus inside.
+  // Both behave exactly as they do on main; nothing here made them worse.
   const closeTemplate = (event: { detail: number }) => {
     if (templateGuideRef.current?.contains(document.activeElement)) {
       focusFrom(templateGuideRef.current, templateToggleRef.current);

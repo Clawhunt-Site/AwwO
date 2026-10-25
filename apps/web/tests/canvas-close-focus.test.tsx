@@ -64,7 +64,9 @@ beforeEach(() => {
     return focus.apply(this, args as [FocusOptions?]);
   });
 });
-afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+// Every press() here is a detail-0 click, so it arms refuseHeldEnter's module guard; released between tests as the
+// sibling focus files do, or the next Enter assertion added to this file passes without the code under test.
+afterEach(() => { window.dispatchEvent(new Event('blur')); cleanup(); clearSaaSCanvas(); resetAllSessions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 /** From the keyboard: Enter or Space on a focused button is its click. */
 function press(button: HTMLElement) {
