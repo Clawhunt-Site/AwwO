@@ -194,10 +194,13 @@ function PaidMeter({ usage, plan, open, setOpen, reload }: { usage: RouteUsage; 
     <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t(`${name} 套餐`, `${name} plan`)} className="saas-route-usage" onClose={() => setOpen(false)}>
       <h2>{t(`${name} 套餐`, `${name} plan`)}</h2>
       <p>{period}</p>
+      {(credits.gift ?? 0) > 0 && <p>{t('其中的赠送点数由 AwwO 赠送，不是支付金额：和付费点数一起用，付费的先扣，同样本期有效。',
+        'Part of this period’s credits is a gift from AwwO rather than something you paid for: it is spent alongside the paid credits, which go first, and it lasts for this period as they do.')}</p>}
       <dl>
         <div className={empty ? 'is-out' : undefined}><dt>{t('本期剩余点数', 'Credits left this period')}</dt><dd>{formatCredits(credits.remaining, locale)} / {formatCredits(credits.granted, locale)}</dd></div>
         <div className={dailyOut ? 'is-out' : undefined}><dt>{t('默认模型今日次数', 'Default-model calls today')}</dt><dd>{Math.min(usage.daily.used, usage.daily.limit)} / {usage.daily.limit}</dd></div>
         {usage.planner && <PlannerRow allowance={usage.planner} />}
+        {(credits.gift ?? 0) > 0 && <div><dt>{t('其中赠送', 'Of that, gifted')}</dt><dd>{formatCredits(credits.gift ?? 0, locale)}</dd></div>}
         {(credits.carried ?? 0) > 0 && <div><dt>{t('上期超支（本期扣除）', 'Carried from last period')}</dt><dd>{formatCredits(credits.carried ?? 0, locale)}</dd></div>}
       </dl>
       {empty && <p className="saas-route-usage-out">{!plan.owner ? t('本期点数已用完：可以把节点换成默认模型继续；需要更多点数请联系工作区所有者。', 'This period’s credits are used up: switch nodes to the default model to keep going; ask the workspace’s owner for more.')

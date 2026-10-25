@@ -20,6 +20,10 @@ import (
 // $0.01 paid) instead of the free plan's route limits. An older workspace without route limits keeps its own
 // allowances: a plan never gives it less. Each admitted call and generation records the account and period it is
 // charged to (migration 026), and a period's spend is summed from those rows.
+//
+// A period's credits are what was paid for it, plus whatever the operator gifted the account for that period
+// (migration 044, gift_credits): a gift is spent only after the paid credits, and it lasts as long as the period
+// does, like them. Nothing ClawHunt reports can take a gift away; only the operator grants or withdraws one.
 
 type planLimits struct {
 	Credits     int `json:"credits"`
@@ -94,18 +98,36 @@ type activePlan struct {
 	PeriodEnd         time.Time
 	CancelAtPeriodEnd bool
 	Credits           int
-	// The charged period before this one, its credits and what was carried into it: what it spent beyond them
-	// comes off this period's credits.
-	PrevStart              *time.Time
-	PrevCredits, PrevCarry int
+	// Gift is what the operator gave this account beyond what it paid for this charged period (migration 044). It
+	// belongs to that period, as its paid credits do: a renewal grants the new period's credits and no gift, and
+	// the operator grants another if there is to be one. The period's paid credits are spent first, so a gift is
+	// drawn on only once they are gone. A gift rides a paid plan and never makes one: an account without an
+	// entitled plan spends none of it, and a period whose payment was refunded keeps its gift for as long as the
+	// period is the charged one.
+	//
+	// It is deliberately not carried over. The spend of a period keeps moving after it ends — a call still running
+	// at the renewal settles into it, a generation is accepted late — so any leftover worked out at the roll-over
+	// would be a snapshot of a number that then changes, which would either hand back credits the period had
+	// already spent or take away credits it had not (Codex round 1).
+	Gift int
+	// The charged period before this one, its credits and gift and what was carried into it: what it spent beyond
+	// them comes off this period's credits.
+	PrevStart                        *time.Time
+	PrevCredits, PrevCarry, PrevGift int
 	// Carry is that overspend, counted now (withCarry), so a call of the previous period that settles after the
 	// switch still lands in it.
 	Carry  int
 	Limits planLimits
 }
 
-// remaining is what the period still has after spent.
-func (p *activePlan) remaining(spent int64) int64 { return int64(p.Credits) - int64(p.Carry) - spent }
+// remaining is what the period still has after spent: its paid credits and its gift, less the overspend carried
+// into it.
+func (p *activePlan) remaining(spent int64) int64 {
+	return int64(p.Credits) + int64(p.Gift) - int64(p.Carry) - spent
+}
+
+// granted is what the period was given in all, paid and gifted.
+func (p *activePlan) granted() int64 { return int64(p.Credits) + int64(p.Gift) }
 
 var (
 	errCreditsExhausted = errors.New("credits_exhausted")
@@ -119,7 +141,7 @@ var (
 // retrying the renewal), a period that was paid for, and at most planGrace after that period.
 const planEntitles = `p.status IN ('active','trialing','past_due') AND p.credits > 0 AND clock_timestamp() < p.period_end + interval '1 day'`
 
-const planColumns = `p.user_id,p.plan,p.status,p.period_start,p.period_end,p.cancel_at_period_end,p.credits,p.prev_period_start,p.prev_credits,p.prev_carry`
+const planColumns = `p.user_id,p.plan,p.status,p.period_start,p.period_end,p.cancel_at_period_end,p.credits,p.gift_credits,p.prev_period_start,p.prev_credits,p.prev_carry,p.prev_gift`
 
 // entitledPlanSQL finds the entitled plan of a route-limited workspace's owner. Every workspace has exactly one
 // owner; a workspace without route limits is never on a plan.
@@ -130,7 +152,7 @@ const entitledPlanSQL = `SELECT ` + planColumns + `
 
 func scanPlan(row pgx.Row) (*activePlan, error) {
 	var p activePlan
-	if err := row.Scan(&p.UserID, &p.Plan, &p.Status, &p.PeriodStart, &p.PeriodEnd, &p.CancelAtPeriodEnd, &p.Credits, &p.PrevStart, &p.PrevCredits, &p.PrevCarry); err != nil {
+	if err := row.Scan(&p.UserID, &p.Plan, &p.Status, &p.PeriodStart, &p.PeriodEnd, &p.CancelAtPeriodEnd, &p.Credits, &p.Gift, &p.PrevStart, &p.PrevCredits, &p.PrevCarry, &p.PrevGift); err != nil {
 		if noRows(err) {
 			return nil, nil
 		}
@@ -244,7 +266,8 @@ func (a *App) planRunSlot(ctx context.Context, tx pgx.Tx, tid string, own worksp
 	return nil
 }
 
-// withCarry fills p.Carry: what the previous charged period spent beyond its credits and its own carry, counted now.
+// withCarry fills p.Carry: what the previous charged period spent beyond its credits and gift together and its own
+// carry, counted now.
 func withCarry(ctx context.Context, q querier, p *activePlan) error {
 	if p == nil || p.PrevStart == nil {
 		return nil
@@ -253,7 +276,7 @@ func withCarry(ctx context.Context, q querier, p *activePlan) error {
 	if err != nil {
 		return err
 	}
-	p.Carry = int(min(max(0, spent+int64(p.PrevCarry)-int64(p.PrevCredits)), math.MaxInt32))
+	p.Carry = int(min(max(0, spent+int64(p.PrevCarry)-int64(p.PrevCredits)-int64(p.PrevGift)), math.MaxInt32))
 	return nil
 }
 

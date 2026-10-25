@@ -4,8 +4,10 @@ export type PlanId = 'pro' | 'max';
 /** One row of GET /billing's catalog: what the plan gives. The charged price is Stripe's. */
 export type CatalogPlan = { id: PlanId; priceUsd: number; credits: number; dailyCalls: number; concurrentAgents: number; workspaces: number; mediaPerDay: number };
 export type AccountPlan = { id: PlanId; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean; entitled: boolean };
-// carried is what an earlier period spent beyond its credits; it comes off this period's.
-export type Credits = { granted: number; spent: number; carried?: number; remaining: number };
+// granted is what this period was given in all: what was paid for it plus `gift`, the part AwwO gifted the account
+// for this period (spent only after the paid credits, and lasting as long as the period, as they do). carried is
+// what an earlier period spent beyond its credits; it comes off this period's.
+export type Credits = { granted: number; gift?: number; spent: number; carried?: number; remaining: number };
 /** GET /billing: the catalog, whether checkout is open, and this account's plan with this period's credits. */
 export type Billing = { catalog: CatalogPlan[]; checkoutEnabled: boolean; plan: AccountPlan | null; credits: Credits | null; stale: boolean };
 

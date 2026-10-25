@@ -130,7 +130,7 @@ func (a *App) applyPlan(ctx context.Context, userID string, p *clawHuntPlan, ask
 	var synced time.Time
 	err = tx.QueryRow(ctx, "SELECT "+planColumns+",p.synced_at FROM user_plans p WHERE p.user_id=$1 FOR UPDATE", userID).
 		Scan(&stored.UserID, &stored.Plan, &stored.Status, &stored.PeriodStart, &stored.PeriodEnd, &stored.CancelAtPeriodEnd, &stored.Credits,
-			&stored.PrevStart, &stored.PrevCredits, &stored.PrevCarry, &synced)
+			&stored.Gift, &stored.PrevStart, &stored.PrevCredits, &stored.PrevCarry, &stored.PrevGift, &synced)
 	found := err == nil
 	if err != nil && !noRows(err) {
 		return err
@@ -170,13 +170,17 @@ func (a *App) applyPlan(ctx context.Context, userID string, p *clawHuntPlan, ask
 		_, err = tx.Exec(ctx, `UPDATE user_plans SET plan=$2,status=$3,period_end=$4,credits=$5,cancel_at_period_end=$6,synced_at=$7,retry_after=NULL WHERE user_id=$1`,
 			userID, plan, p.Status, end, max(0, credits), p.CancelAtPeriodEnd, asked)
 	case credits > 0 && found:
-		// A later period, paid: the stored one becomes the previous period.
+		// A later period, paid: the stored one becomes the previous period. A gift belonged to that period, so the
+		// new one starts without one (the operator grants another if there is to be one), and prev_gift keeps the
+		// gift the old period had, so its overspend is measured against its credits and gift together. Both are
+		// what the period was given, never anything worked out from a spend that still moves.
 		if err = withCarry(ctx, tx, &stored); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE user_plans SET plan=$2,status=$3,period_start=$4,period_end=$5,credits=$6,cancel_at_period_end=$7,
-			prev_period_start=$8,prev_credits=$9,prev_carry=$10,synced_at=$11,retry_after=NULL WHERE user_id=$1`,
-			userID, plan, p.Status, start, end, credits, p.CancelAtPeriodEnd, stored.PeriodStart, stored.Credits, stored.Carry, asked)
+			prev_period_start=$8,prev_credits=$9,prev_carry=$10,prev_gift=$11,gift_credits=0,gift_note='',synced_at=$12,retry_after=NULL WHERE user_id=$1`,
+			userID, plan, p.Status, start, end, credits, p.CancelAtPeriodEnd, stored.PeriodStart, stored.Credits, stored.Carry,
+			stored.Gift, asked)
 	case credits > 0:
 		// Two first answers at once: the first stored wins, and the next read brings the other's news.
 		_, err = tx.Exec(ctx, `INSERT INTO user_plans(user_id,plan,status,period_start,period_end,credits,cancel_at_period_end,synced_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
@@ -276,7 +280,8 @@ func (a *App) billingView(w http.ResponseWriter, r *http.Request) {
 	var row activePlan
 	var entitled bool
 	err = a.db.QueryRow(ctx, "SELECT "+planColumns+","+planEntitles+" FROM user_plans p WHERE p.user_id=$1", u.ID).
-		Scan(&row.UserID, &row.Plan, &row.Status, &row.PeriodStart, &row.PeriodEnd, &row.CancelAtPeriodEnd, &row.Credits, &row.PrevStart, &row.PrevCredits, &row.PrevCarry, &entitled)
+		Scan(&row.UserID, &row.Plan, &row.Status, &row.PeriodStart, &row.PeriodEnd, &row.CancelAtPeriodEnd, &row.Credits, &row.Gift,
+			&row.PrevStart, &row.PrevCredits, &row.PrevCarry, &row.PrevGift, &entitled)
 	if err != nil && !noRows(err) {
 		a.dbError(w, err)
 		return
@@ -301,10 +306,10 @@ func (a *App) billingView(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// creditsJSON is a period's credits as the web reads them: granted, spent, carried over from an earlier period's
-// overspend, and remaining.
+// creditsJSON is a period's credits as the web reads them: granted (what was paid for the period and what was
+// gifted), how much of that was a gift, spent, carried over from an earlier period's overspend, and remaining.
 func creditsJSON(p *activePlan, spent int64) map[string]any {
-	return map[string]any{"granted": p.Credits, "spent": spent, "carried": p.Carry, "remaining": max(0, p.remaining(spent))}
+	return map[string]any{"granted": p.granted(), "gift": p.Gift, "spent": spent, "carried": p.Carry, "remaining": max(0, p.remaining(spent))}
 }
 
 func planCatalogJSON() []map[string]any {
