@@ -254,6 +254,37 @@ func TestUsageAPIUnicodeGroupCursorRoundTrip(t *testing.T) {
 	}
 }
 
+// Without a range the admin summary is of the day up to the database's clock, which stamps completed_at, so a call that
+// has just completed is in it whichever way this process's clock differs from the database's (a test run on Windows
+// against a PostgreSQL in WSL sees a second or more either way).
+func TestUsageAPIAdminSummaryDefaultDayEndsAtTheDatabaseClock(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	owner, tenant, ownerID := h.register(t, "usage-summary-day@test.local")
+	run := seedUsageRun(t, h, tenant)
+	ctx := context.Background()
+	if _, e := h.db.Exec(ctx, "UPDATE users SET platform_role='admin' WHERE id=$1", ownerID); e != nil {
+		t.Fatal(e)
+	}
+	// Stamped as the ledger stamps a call's end (invocation_ledger.go), just before the summary is asked for.
+	if _, e := h.db.Exec(ctx, "INSERT INTO model_invocations(id,tenant_id,run_id,status,created_at,completed_at,completed_xid) VALUES('summary-now',$1,$2,'completed',clock_timestamp(),clock_timestamp(),pg_current_xact_id())", tenant, run); e != nil {
+		t.Fatal(e)
+	}
+	before := dbNow(t, h)
+	got := h.request(t, owner, "GET", "/admin/observability/summary?tenantId="+tenant, nil, 200)
+	after := dbNow(t, h)
+	if got["summary"].(map[string]any)["invocations"] != "1" {
+		t.Fatal("a call that had just completed is missing from the default day", got)
+	}
+	raw := got["freshness"].(map[string]any)["asOf"].(string)
+	asOf, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || asOf.Before(before) || asOf.After(after) {
+		t.Fatal("the default day does not end at the database's clock", before, raw, after, err)
+	}
+	if !strings.HasSuffix(raw, "Z") {
+		t.Fatal("the default day's asOf is not in UTC", raw)
+	}
+}
+
 func TestUsageLedgerSurvivesCompletedCanvasDeletion(t *testing.T) {
 	h := newHarness(t, "http://127.0.0.1:1")
 	owner, tenant, user := h.register(t, "usage-retained@test.local")

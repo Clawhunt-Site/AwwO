@@ -60,6 +60,20 @@ may not cover, so no prompt text is used: the patterns they share (the order of 
 on-screen text, vertical safe areas, banned effects, stills to check) informed `code-video-brief` and
 `vertical-reel`, written in AwwO's own words and checked for shared five-word runs against the whole collection.
 
+Read on 2026-10-24, figures only: the SimReady asset library's public search service (NVIDIA SimReady Central, over
+the `nvidia/simready-assets` dataset at revision `653d91e182011f357cf1644013cc94ddf194d349`) answers a query with
+each asset's own bounding box, mass and rigid-body count. `backend/internal/app/skills/physical-props.md` tabulates
+26 of those, written in AwwO's own words. **No asset, texture, USD text, metadata text or page text is copied**, so
+nothing of that library is distributed with AwwO and no license text travels with the skill: its `attribution:` is
+empty, as it is for every other skill AwwO wrote itself, and `scripts/build-skill-licences.mjs` carries no entry for
+it. Those figures are facts about the assets, not the assets. AwwO credits them anyway, by choice rather than by
+obligation: the skill carries each row's holder and license as data and requires any delivery that places a prop to
+name them in its bill of materials - CC-BY 4.0, Copyright (c) NVIDIA for the assets NVIDIA authored; CC-BY 4.0 for
+the two robot rows (Copyright (c) LucaDiRuscio and Standard Bots); BSD-3-Clause, Copyright (c) OnRobot A/S for the
+two gripper rows - each as that asset's own metadata records it. Should a later change copy any of that library's
+text or ship any of its files, that is adapted or redistributed material and belongs in the table above with its
+license text under `third_party/adapted/`.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`

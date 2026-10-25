@@ -7,6 +7,19 @@ import { resolveModelConfig } from './config.mjs';
 import { bedrockFactLine, createBedrockAuthResolver } from '../bedrock-bridge.ts';
 
 export const TASK_URL = new URL('./pi-task.mjs', import.meta.url);
+// The failures a child names that keep their code (pi-task.mjs), each with the words the other workers give it
+// (openai-agents-worker errors.mjs), never the child's: a provider's refusal of the request as larger than its model's
+// window, so the API settles it as that refusal; a stop at the model's output cap; a stop that declined the request;
+// and a provider's refusal of a credential, its rate limit and its outage. Any other failure is the model's, whatever
+// the child said.
+const CHILD_FAILURES = Object.freeze({
+  MODEL_CONTEXT_LIMIT: 'The model service refused the request as larger than the model\'s context window.',
+  MODEL_OUTPUT_LIMIT: 'The model response reached its configured output limit.',
+  MODEL_REFUSAL: 'The model declined the request.',
+  MODEL_AUTHENTICATION: 'The model service rejected its configured credentials.',
+  MODEL_RATE_LIMIT: 'The model service is rate limited.',
+  MODEL_UNAVAILABLE: 'The model service is unavailable.',
+});
 export const BEDROCK_CALL_URL = new URL('./bedrock-call.mjs', import.meta.url);
 // The parent alone reads the AWS credential chain; a Bedrock child only ever receives the
 // API key or the short-lived credentials resolved here, over the same private IPC as any key.
@@ -129,10 +142,9 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       else if (event.type === 'completed' && typeof event.text === 'string' && Buffer.byteLength(event.text) <= config.maxOutputBytes) {
         rememberTerminal({ type: 'completed', text: event.text });
       } else if (event.type === 'cancelled') rememberTerminal({ type: 'cancelled' });
-      // A provider's refusal of the request as larger than its model's window keeps its code (pi-task.mjs), so the API
-      // settles it as that refusal; any other failure is the model's, whatever the child said.
-      else if (event.code === 'MODEL_CONTEXT_LIMIT') rememberTerminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: 'The model service refused the request as larger than the model\'s context window.' });
-      else rememberTerminal({ type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
+      else if (event.type === 'failed' && typeof event.code === 'string' && Object.hasOwn(CHILD_FAILURES, event.code)) {
+        rememberTerminal({ type: 'failed', code: event.code, message: CHILD_FAILURES[event.code] });
+      } else rememberTerminal({ type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
     }
   });
   child.on('error', () => {

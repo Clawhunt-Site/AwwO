@@ -10,6 +10,29 @@ let started = false;
 // a reader needs to see that the model is working, not each token of its scratchpad.
 const REASONING_REPORT_MS = 500;
 const CONTEXT_LIMIT_MESSAGE = 'The model service refused the request as larger than the model\'s context window.';
+const MODEL_FAILURE_MESSAGE = 'The model request failed. Check the server provider configuration.';
+// The stops a provider makes for what the request asked or the model wrote: its content filter, and the model's own
+// refusal (the Anthropic protocol's refusal and sensitive stops).
+const DECLINED = new Set(['content_filter', 'refusal', 'sensitive']);
+// A provider's own name for a stop at the model's output cap (Chat Completions, Anthropic, and Anthropic's stop at the
+// model's window), kept on the message when what came after it failed the call (a stream error after the finish).
+const OUT_OF_ROOM = new Set(['length', 'max_tokens', 'model_context_window_exceeded']);
+
+// What ended a call that did not finish, in the codes the other workers give it (openai-agents-worker agent-runtime.mjs
+// and errors.mjs, the Python worker's errors.py) and the API reads (runs.go runtimeFailureCode): a stop at the model's
+// output cap, a stop that declined the request, and a refusal or stream error by the status the provider failed the
+// call's last request with (usage.mjs failureStatus). Anything else is the model's failure. Until 2026-10-24 Pi said
+// MODEL_ERROR for every one of them, which the API names runtime_failed: the reader was told only that the model
+// failed where a run had used all its output tokens (4 Claude Opus 5.5 canvas nodes and 6 Qwen plans in the 14 days
+// before), and a call the provider refused at once was billed as any failure (plans.go refusedBeforeOutput).
+function failureCode(message, status) {
+  if (message?.stopReason === 'length' || OUT_OF_ROOM.has(message?.rawStopReason)) return 'MODEL_OUTPUT_LIMIT';
+  if (DECLINED.has(message?.rawStopReason)) return 'MODEL_REFUSAL';
+  if (status === 401 || status === 403) return 'MODEL_AUTHENTICATION';
+  if (status === 429) return 'MODEL_RATE_LIMIT';
+  if (status >= 500) return 'MODEL_UNAVAILABLE';
+  return 'MODEL_ERROR';
+}
 
 function codePoints(text) {
   let count = 0;
@@ -210,6 +233,10 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
     const images = Array.isArray(request.images) && modelConfig.input?.includes('image')
       ? request.images.map((image) => ({ type: 'image', data: image.data, mimeType: image.mimeType })) : [];
     await activeSession.prompt(request.prompt, { expandPromptTemplates: false, ...(images.length ? { images } : {}) });
+    // The last reasoning count goes out before the run's end, even one the 500 ms coalescing held back: the API settles a
+    // call refused after its model reasoned as one that did work (runs.go facts.Reasoned for a planner and a node run
+    // alike since ee8e4c82, a planner's hidden tokens; plans.go creditCharge), however soon it was refused.
+    reportReasoning(true);
     await eventQueue;
     if (forbiddenTool) return await terminal({ type: 'failed', code: 'TOOLS_DISABLED', message: 'Tool execution is disabled.' });
     if (cancelled || finalMessage?.stopReason === 'aborted') return await terminal({ type: 'cancelled' });
@@ -222,12 +249,14 @@ async function run({ request, modelConfig, directory, agentDir, acceptedAtNs }) 
       await observer.settled();
       if (observer.refusedBeforeAnyWork() && contextOverflow(finalMessage.errorMessage)) return await terminal({ type: 'failed', code: 'MODEL_CONTEXT_LIMIT', message: CONTEXT_LIMIT_MESSAGE });
     }
-    if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Model did not complete successfully');
+    if (!finalMessage || finalMessage.stopReason !== 'stop') {
+      return await terminal({ type: 'failed', code: failureCode(finalMessage, observer.failureStatus()), message: MODEL_FAILURE_MESSAGE });
+    }
     text = finalMessage.content.filter((part) => part.type === 'text').map((part) => part.text).join('');
     if (!text.trim()) throw new Error('Model returned no answer');
     await terminal({ type: 'completed', text });
   } catch {
-    await terminal(cancelled ? { type: 'cancelled' } : { type: 'failed', code: 'MODEL_ERROR', message: 'The model request failed. Check the server provider configuration.' });
+    await terminal(cancelled ? { type: 'cancelled' } : { type: 'failed', code: 'MODEL_ERROR', message: MODEL_FAILURE_MESSAGE });
   } finally {
     unsubscribe?.();
     activeSession?.dispose();

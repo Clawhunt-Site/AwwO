@@ -11,7 +11,7 @@ import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { readCapabilities } from '../saas/capabilitiesApi';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
-import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -119,7 +119,7 @@ import { subscribePageErrors, type PageErrorReport } from './pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepairDecision, pageRepairDisplayText, pageRepairMessage, pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, savePageRepairRecord } from './pageRepair';
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
-import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, failureReason } from './surfaceMessages';
+import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, refusedNodeMessage, failureReason } from './surfaceMessages';
 import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
 import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
@@ -205,6 +205,24 @@ const PANEL_BOX = '.awwo-canvas-assistant--panel .awwo-assistant-composer textar
 const WELCOME_BOX = '.awwo-canvas-assistant--welcome .awwo-assistant-composer textarea';
 /** The message box of whichever holds the conversation, the side panel or the welcome: one is drawn at a time. */
 const MESSAGE_BOX = '.awwo-canvas-assistant .awwo-assistant-composer textarea';
+/** Whether `target` is in `scope`, or in a layer one of its controls opened elsewhere on the page and names with
+ *  aria-controls (a composer's 用户须知 is a portal into the body): the reader is with that part of the page there too.
+ *  Such a layer is a child of the body other than the one holding `scope`; anything else (the board) is answered without
+ *  looking through `scope`, and so is anything once `scope` is off the page (a panel closed meanwhile). */
+function inOrOwnedBy(scope: Element, target: Node): boolean {
+  if (!scope.isConnected) return false;
+  if (scope.contains(target)) return true;
+  const start = target instanceof Element ? target : target.parentElement;
+  let layer = start;
+  while (layer?.parentElement && layer.parentElement !== document.body) layer = layer.parentElement;
+  if (!layer || layer.parentElement !== document.body || layer.contains(scope)) return false;
+  const owned = new Set([...scope.querySelectorAll('[aria-controls]')].flatMap(control => (control.getAttribute('aria-controls') ?? '').split(/\s+/)));
+  owned.delete('');
+  for (let element = start; element && owned.size; element = element === layer ? null : element.parentElement) {
+    if (element.id && owned.has(element.id)) return true;
+  }
+  return false;
+}
 /** Whether Configure, open on this stage, raises the board above the assistant sidebar: the hosted app at 900 px and
  *  below does (awwo-workspace.css), so while it is open the sidebar covers nothing of the board. */
 const configureRaisesBoard = (root: HTMLElement) => Boolean(root.closest('.saas-canvas-shell'))
@@ -489,6 +507,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The workspace's image and video models. A failed read is reported in the inspector, never
   // shown as a workspace without media models.
   const [mediaState, setMediaState] = useState<MediaCatalogueState | undefined>(undefined);
+  // A run's own callback does not re-create itself when the catalogue arrives, and must still judge a media node's
+  // saved settings by the catalogue as it is now, as it reads the model palette through paletteRef.
+  const mediaStateRef = useRef(mediaState);
+  mediaStateRef.current = mediaState;
   const [mediaRefresh, setMediaRefresh] = useState(0);
   useEffect(() => {
     setMediaState(undefined);
@@ -664,6 +686,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [mediaState]);
   // A media node still set to a retired generator's model moves to the model offered now, with nothing said about it
   // (owner decision 2026-10-11). Its results stay: the move is not an edit that makes them stale.
+  // Settings a node's model no longer accepts are NOT dropped here: this catalogue is read once when the canvas
+  // opens, so a tab left open across a release that widened a model's choices holds a stale, narrower one, and
+  // deleting by it would silently and permanently lose a choice the server accepts (a silent patch leaves no undo
+  // entry, and the autosave carries it to the workspace). Such a node is named before its run instead
+  // (preflightGraphIssue), and the reader re-picks in its settings, where the offending parameter is already marked.
   useEffect(() => {
     if (readOnly) return;
     const moved = replaceRetiredMediaModels(docRef.current, mediaCatalogueOf(mediaState));
@@ -1792,7 +1819,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const reviewPolicy = !manualMessage && !collaboration ? runDocument.execution : undefined;
     const problem = collaboration ? '' : preflightIssueMessage(t, reviewPolicy
       ? preflightReviewGraphIssue(runNodes, runEdges, reviewPolicy, scope)
-      : preflightGraphIssue(runNodes, runEdges.filter(edge => edge.kind !== 'feedback'), scope, { conversation: Boolean(currentSaaSCanvas() && manualMessage) }), locale);
+      : preflightGraphIssue(runNodes, runEdges.filter(edge => edge.kind !== 'feedback'), scope,
+        { conversation: Boolean(currentSaaSCanvas() && manualMessage), media: mediaCatalogueOf(mediaStateRef.current) }), locale);
     if (problem) { refusedRevision.current = canvasPlanRevision(runDocument); setHandoffNote(problem); return; }
     setHandoffNote('');
     const ac = new AbortController();
@@ -1860,7 +1888,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           clearRunJournal(submissionStorage, pending.id);
           if (currentSaaSCanvas() !== cloud) return;
           journal.current = null; setRunning(false);
-          setHandoffNote(saasErrorMessage(error, locale)); runAbort.current = null; return;
+          // A refusal the service blamed on one node (a media node's saved model, type or settings, which it freezes
+          // for the whole scope before the run starts) names that node: its copy alone would not.
+          setHandoffNote(refusedNodeMessage(saasErrorMessage(error, locale), graphRefusedNodeId(error), runNodes, locale));
+          runAbort.current = null; return;
         }
         if (currentSaaSCanvas() !== cloud) return;
         setHandoffNote(error instanceof Error ? error.message : surfaceNotice(t, 'run_identity_unconfirmed'));
@@ -2442,9 +2473,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [canEditStructure, patchDoc, downstreamClosure, locale],
   );
-  // A part of a node its card changed (SessionTile's onPatchNode: its inputs, its outputs, a result published by hand),
-  // applied to the node as the document holds it now. A card's own copy is the node it last drew: two changes made
-  // before the next render would each put back what the other changed, or what the document cleared in between.
+  // A change a node's card made (SessionTile's onPatchNode: its inputs, its outputs, a result published by hand, another
+  // conversation opened), applied to the node as the document holds it now; saveNode's checks apply as to any save. A
+  // card's own copy is the node it last drew: two changes made before the next render would each put back what the other
+  // changed, or what the document cleared in between.
   const patchNode = useCallback((nodeId: string, change: (node: SessionNode) => SessionNode) => {
     const live = docRef.current.nodes.find(node => node.id === nodeId);
     if (live?.kind === 'session') saveNode(change(live));
@@ -2853,8 +2885,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Opening or closing the assistant (画布助手, or a request that brings it up) ends its stepping aside.
   const setAssistantOpen = useCallback((open: boolean) => { setStowedFor(null); setAssistantOpenState(open); }, []);
   useEffect(() => { if (stowedFor !== null && stowedFor !== focusedId) setStowedFor(null); }, [stowedFor, focusedId]);
-  // Whether an empty canvas's welcome holds the conversation in the latest render (set where the panel is decided, below).
+  // Whether an empty canvas's welcome holds the conversation in the latest render (set where the panel is decided, below),
+  // and whether it did as the message being handled went (set as the assistant begins to wait, below).
   const welcomeShownRef = useRef(false);
+  const waitFromWelcome = useRef(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
   // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
@@ -3137,7 +3171,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         // From an empty canvas's welcome the plan takes the conversation to the side panel, whose box comes up idle and
         // so does not take the focus back as it does after a message handled in the panel: a focus left on the page
         // goes there, as for a task's start. One that removed every node takes it back to the welcome the same way,
-        // where tasks do not keep the panel (with them, the panel's box takes the focus back itself).
+        // where tasks do not keep the panel (with them, the panel's own hand-back does, where the reader stayed with it).
         if (welcomeShownRef.current) refocusInCommit(PANEL_BOX);
         else if (!applied.doc.nodes.length) refocusInCommit(WELCOME_BOX);
       }
@@ -3390,8 +3424,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setAssistantOpen(true);
       // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box
       // had the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React
-      // draws the start in a scheduler task, which a frame can come before (see refocus).
-      refocusInCommit(PANEL_BOX);
+      // draws the start in a scheduler task, which a frame can come before (see refocus). Only where the welcome held the
+      // conversation as the message went and still does as the task starts: a node the reader added meanwhile took it
+      // away, and the reader with it (adding one from the models closes the assistant and opens the node); and one sent
+      // from the panel, whose last node the reader deleted meanwhile, is the panel's own hand-back's (panelWaitHeld:
+      // there the reader stayed with the panel, or not).
+      if (waitFromWelcome.current && welcomeShownRef.current) refocusInCommit(PANEL_BOX);
     } catch (error) {
       if (!mounted.current) return;
       const unconfirmed = error instanceof TaskStartUnconfirmed;
@@ -3841,7 +3879,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
         userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
-      refocusInCommit(PANEL_BOX);
+      // As for a task's start (startAssistantTask): from the welcome; the panel's own hand-back where it had the request.
+      if (waitFromWelcome.current && welcomeShownRef.current) refocusInCommit(PANEL_BOX);
     } catch (error) {
       if (!mounted.current) return;
       // A task that may exist joins the conversation as unconfirmed (out of the box, as it may not be sent again),
@@ -3922,7 +3961,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     refocus('.awwo-assistant-toggle');
   };
   const assistantPanel = assistantOpen && (viewerTasks || (!readOnly && (nodes.length > 0 || mentionedTasks.size > 0)))
-    ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} onClose={() => closeAssistant()} /> : undefined;
+    ? <CanvasAssistant mode="panel" {...assistantProps} unified={unified} focusBack={false} onClose={() => closeAssistant()} /> : undefined;
   // Whether the welcome holds the conversation: the workspace draws it on an empty canvas without the panel (below).
   welcomeShownRef.current = !readOnly && !assistantPanel && !nodes.length;
   // Stepped aside for the open node (focusNode): mounted, not drawn. A focus inside it as it steps aside goes to the
@@ -3940,35 +3979,45 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     setStowedFor(nodeId);
     if (held) refocusInCommit('.awwo-assistant-toggle');
   };
-  // Whether the reader's last focus or press was in the assistant's panel (read as the panel begins to wait, below).
+  // Whether the reader's last focus or press was in the assistant's panel, its 用户须知 included (read as the panel
+  // begins to wait, below).
   const readerInPanel = useRef(false);
   useEffect(() => {
     const track = (event: Event) => {
-      readerInPanel.current = event.target instanceof Node
-        && Boolean(rootRef.current?.closest('.awwo-workspace')?.querySelector('.awwo-planner-sidebar')?.contains(event.target));
+      const sidebar = rootRef.current?.closest('.awwo-workspace')?.querySelector('.awwo-planner-sidebar');
+      readerInPanel.current = event.target instanceof Node && Boolean(sidebar && inOrOwnedBy(sidebar, event.target));
     };
     document.addEventListener('focusin', track, true);
     document.addEventListener('pointerdown', track, true);
     return () => { document.removeEventListener('focusin', track, true); document.removeEventListener('pointerdown', track, true); };
   }, []);
-  // The panel's box takes a lost focus back once a message the panel handled is done (CanvasAssistant: it waits while
-  // busy or routing), which it cannot do hidden: stepped aside, 画布助手 takes it instead, in the commit that ends the
-  // wait, as an opened node's box does for its own reply (TileComposer): where the panel had the reader as the wait
-  // began (its box, disabled in that commit, still has the focus then; a press on a control the message takes away with
-  // it, a step of 接下来 or a recovery's 继续, already let it go) and they have not turned elsewhere since
-  // (watchReaderAway, and the canvas's keys). Beside the node the panel's own does as before.
+  // The panel's box is disabled while a message the panel handled waits (CanvasAssistant: busy or routing), which drops
+  // the focus to the page. Once the message is done the box takes a lost focus back (its own hand-back is off,
+  // focusBack), or 画布助手 does where the panel stepped aside meanwhile (a hidden box cannot), in the commit that ends
+  // the wait, as an opened node's box does for its own reply (TileComposer): only where the panel had the reader as the
+  // wait began (its box, disabled in that commit, still has the focus then; a press on a control the message takes away
+  // with it, a step of 接下来 or a recovery's 继续, already let it go) and they have not turned elsewhere since
+  // (watchReaderAway, and the canvas's keys), its 用户须知 counting as the panel's. A focus the reader took elsewhere
+  // meanwhile, to the page too (another node by key, a wheel, a press on the board), stays there: in the box the canvas's
+  // keys would no longer work. It is held as the panel the reader was with, so a panel closed meanwhile and opened again
+  // (by the plan, before closing hands 画布助手 the focus at the next frame) is another, and takes nothing. The wait also
+  // says whether it began in an empty canvas's welcome (for a task's start, which takes the conversation from there).
   const panelWaiting = planningBusy || Boolean(unified?.pending);
-  const panelWaitHeld = useRef(false);
+  const panelWaitHeld = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    const sidebar = rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>('.awwo-planner-sidebar');
+    const sidebar = rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>('.awwo-planner-sidebar') ?? null;
     if (!panelWaiting) {
-      if (panelWaitHeld.current && assistantStowedRef.current) moveLostFocus('.awwo-assistant-toggle');
-      panelWaitHeld.current = false;
+      const held = panelWaitHeld.current;
+      panelWaitHeld.current = null;
+      if (held?.isConnected) moveLostFocus(assistantStowedRef.current ? '.awwo-assistant-toggle' : PANEL_BOX);
       return undefined;
     }
-    panelWaitHeld.current = readerInPanel.current || Boolean(sidebar?.contains(document.activeElement));
-    if (!panelWaitHeld.current || !sidebar) return undefined;
-    const away = () => { panelWaitHeld.current = false; };
+    waitFromWelcome.current = welcomeShownRef.current;
+    const active = document.activeElement;
+    const held = sidebar && (readerInPanel.current || (active !== null && inOrOwnedBy(sidebar, active))) ? sidebar : null;
+    panelWaitHeld.current = held;
+    if (!held) return undefined;
+    const away = () => { panelWaitHeld.current = null; };
     // The canvas's navigation keys too, wherever pressed, as useCanvasKeys takes them (not in a field, nor while 成果
     // pauses them): Ctrl/⌘ with a digit recalls a waypoint (with Shift it saves one, which is no navigation), with 0
     // fits all, with E opens or closes a node, with [ or ] goes to the one before or after (opens it, or selects it with
@@ -3982,7 +4031,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (moves) away();
     };
     document.addEventListener('keydown', onCanvasKey, true);
-    const stopWatching = watchReaderAway(sidebar, away, { cameraKeys: false });
+    const stopWatching = watchReaderAway(held, away, { cameraKeys: false, tabKey: false, owns: target => inOrOwnedBy(held, target) });
     return () => { stopWatching(); document.removeEventListener('keydown', onCanvasKey, true); };
   }, [panelWaiting, moveLostFocus]);
   const panelShown = Boolean(assistantPanel) && !assistantStowed;

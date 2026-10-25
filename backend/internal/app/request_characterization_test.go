@@ -779,8 +779,12 @@ func awaitCharacterizedGraph(t *testing.T, h *harness, c *http.Cookie, path, wan
 	t.Fatalf("graph %s did not settle within %s", path, characterizationSettle)
 }
 
-func usageWindow() url.Values {
-	now := time.Now().UTC()
+// usageWindow is the hour up to the database's clock, which stamps the calls' completed_at, and a second to spare. On
+// this process's clock it left calls out whenever the database's clock ran more than about a second ahead of it (a
+// test run on Windows against a PostgreSQL in WSL).
+func usageWindow(t *testing.T, h *harness) url.Values {
+	t.Helper()
+	now := dbNow(t, h).UTC()
 	return url.Values{"from": {now.Add(-time.Hour).Format(time.RFC3339Nano)}, "to": {now.Add(time.Second).Format(time.RFC3339Nano)}}
 }
 
@@ -818,7 +822,7 @@ func TestPostgresRequestCharacterizationTeamMemberTurns(t *testing.T) {
 	readerInvocations := characterizationCall(t, h, reader, "GET", prefix+"/runs/"+runs[0]+"/invocations", nil, 200)
 	aggregates := map[string]characterizedResponse{}
 	for _, group := range []string{"agent", "model", "runtime"} {
-		query := usageWindow()
+		query := usageWindow(t, h)
 		query.Set("groupBy", group)
 		aggregates[group] = characterizationCall(t, h, c, "GET", prefix+"/usage?"+query.Encode(), nil, 200)
 	}

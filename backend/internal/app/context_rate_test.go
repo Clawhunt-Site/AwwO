@@ -466,6 +466,8 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 		{invocationFacts{WorkerCode: "CONTEXT_LIMIT"}, true},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", OutputBytes: 1}, false},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", HiddenTokens: 1}, false},
+		// Reasoning a node run was told about carries no count, and says just as much as a counted one.
+		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Reasoned: true}, false},
 		// A provider that reported usage read the request: it did work.
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: InvocationUsage{Status: "reported"}}, false},
 		{invocationFacts{WorkerCode: "MODEL_CONTEXT_LIMIT", Usage: InvocationUsage{Status: "partial"}}, false},

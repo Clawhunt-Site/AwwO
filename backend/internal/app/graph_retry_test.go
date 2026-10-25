@@ -685,8 +685,9 @@ func TestPostgresGraphCancelStopsAPendingRetry(t *testing.T) {
 	if up["startedAt"] != nil || up["endedAt"] != nil {
 		t.Fatal("times while waiting for a retry", up)
 	}
+	// retry_at is the database's now() plus the backoff, so it is measured against the database's clock.
 	var due time.Time
-	if e := h.db.QueryRow(context.Background(), "SELECT retry_at FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id='up'", tid, gid).Scan(&due); e != nil || time.Until(due) < 5*time.Second {
+	if e := h.db.QueryRow(context.Background(), "SELECT retry_at FROM graph_run_nodes WHERE tenant_id=$1 AND graph_id=$2 AND node_id='up'", tid, gid).Scan(&due); e != nil || due.Sub(dbNow(t, h)) < 5*time.Second {
 		t.Fatal("retry not due after its backoff", due, e)
 	}
 	if down := graphNodeResult(t, graph, "down"); down["state"] != "waiting" || down["runId"] != nil {

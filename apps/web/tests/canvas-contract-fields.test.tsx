@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ContractFields } from '../src/canvas/ContractFields';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import type { ContractField } from '../src/canvas/nodeContracts';
@@ -172,6 +172,25 @@ describe('node contract field editor', () => {
     expect(fields[0].id).not.toBe(fields[1].id);
     fireEvent.click(screen.getByRole('button', { name: '删除字段 1' }));
     expect(JSON.parse(screen.getByTestId('raw').textContent!)).toHaveLength(1);
+  });
+
+  it('adds a field under an id no field has, where one the list already holds took the next', () => {
+    // An editor's ids start again with each page load, so a field saved by an earlier page can hold the next one.
+    let put: (fields: ContractField[]) => void = () => {};
+    function Host() {
+      const [fields, setFields] = useState<ContractField[]>([]);
+      put = setFields;
+      return <><ContractFields fields={fields} onChange={setFields} label="输入" /><output data-testid="raw">{JSON.stringify(fields)}</output></>;
+    }
+    render(<Host />);
+    fireEvent.click(screen.getByRole('button', { name: '添加字段' }));
+    const [first] = JSON.parse(screen.getByTestId('raw').textContent!) as ContractField[];
+    const next = first.id.replace(/\d+$/, count => String(Number(count) + 1));
+    act(() => put([first, { ...first, id: next, label: '已保存的字段' }]));
+    fireEvent.click(screen.getByRole('button', { name: '添加字段' }));
+    const ids = (JSON.parse(screen.getByTestId('raw').textContent!) as ContractField[]).map(field => field.id);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('shows required validation and represents a file as a reference', () => {

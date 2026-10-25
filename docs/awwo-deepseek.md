@@ -140,8 +140,8 @@ fetch 解压后的正文，不受影响。
 这样回到这一版之前的状态：旧版 API 仍把 DeepSeek 列给平台管理员自己的、没有白名单的工作区，旧页面在那里会自己选它。要连这也避免，
 回滚 API 之前先从 worker 的模型目录拿掉 `deepseek-flash`（每个 worker 空闲时重启一次；worker 的默认模型不能在 DeepSeek 上）。
 
-worker 声明 `deepseek` 后，健康信息的 `platformProviders` 变成 `["llmgate", …, "deepseek"]`；主机脚本（`host/switch-api.sh` 等）的 worker 检查
-接受这几种列表，旧的发布工具若只认 `["llmgate", "bedrock"]` 要改那一行。
+worker 声明 `deepseek` 后，健康信息的 `platformProviders` 变成 `["llmgate", …, "deepseek"]`；发布工具包自带的受控 API 切换脚本的
+worker 检查接受这几种列表，旧的发布工具若只认 `["llmgate", "bedrock"]` 要改那一行。
 
 生产的 sandbox worker 读的是 JS worker（:8098，不在 API 的路径上）的模型目录文件。只要 :8098 还跑不认识 `deepseek` 的旧代码，就不能把 DeepSeek
 档案放进那个文件：它下次重启会拒绝启动，而 API 的切换脚本要求 :8098 健康。先升级或下线 :8098，再给 sandbox 加 DeepSeek。

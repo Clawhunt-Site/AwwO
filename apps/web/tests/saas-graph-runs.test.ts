@@ -5,7 +5,7 @@ import { clearRunJournal, journalSummary, loadRunJournal, reconcileRunJournal, s
 import { applyRecoveredDocument, recoveryJournalForDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
 import { SaaSApiError, type Tenant } from '../src/saas/api';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave, configureCanvasKnowledge, canvasKnowledgeRevisionIds } from '../src/saas/canvasBridge';
-import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph,
+import { GraphNotSubmittedError, graphAdmissionRejected, graphRecoveryJournal, graphRefusedNodeId, mergeGraphSnapshot, observeCloudGraph, submitCloudGraph,
   type GraphCollaborationTurn, type GraphObservation, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { graphRunSummary, graphRunWithoutDocument } from './saas-graph-run-summary-fixture';
 
@@ -471,5 +471,25 @@ describe('cloud graph admission', () => {
     const error = await submitCloudGraph('operation-a', ['a']).catch(error => error);
     expect(error).toBeInstanceOf(TypeError); expect(graphAdmissionRejected(error)).toBe(false);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the node a refusal of the whole canvas was refused for, and claims none where the service named none', async () => {
+    const refusal = async (body: unknown, status = 400) => {
+      configureSaaSCanvas({ tenant, canvasId: 'canvas-a' }); configureSaaSCanvasSave(async () => 17);
+      vi.stubGlobal('fetch', vi.fn(async () => json(body, status)));
+      return submitCloudGraph('operation-a', ['a']).catch(error => error);
+    };
+    // A media node's own saved settings refuse the whole canvas; the service carries that node's id.
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'media_params_invalid', message: 'Node media settings are invalid for its model', details: { nodeId: 'vid' } } })))
+      .toBe('vid');
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'node_setup_required', message: 'Initialize the node', details: { nodeId: 'vid' } } }, 409))).toBe('vid');
+    // The deployment's own refusals, and every other refusal, name no node: nothing is invented for them.
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'media_unavailable', message: 'Not configured', details: {} } }, 503))).toBeNull();
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'version_conflict', message: 'Changed' } }, 409))).toBeNull();
+    // A detail that is not a node's id is no node: an empty string, another type, a missing details object.
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'media_params_invalid', message: 'Invalid', details: { nodeId: '' } } }))).toBeNull();
+    expect(graphRefusedNodeId(await refusal({ error: { code: 'media_params_invalid', message: 'Invalid', details: { nodeId: 7 } } }))).toBeNull();
+    expect(graphRefusedNodeId(new GraphNotSubmittedError('never sent'))).toBeNull();
+    expect(graphRefusedNodeId(new TypeError('Failed to fetch'))).toBeNull();
   });
 });

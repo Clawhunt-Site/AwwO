@@ -40,9 +40,16 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 - Write in our own words. Sources that are "ideas only" (no licence, or a licence that forbids reuse) are never
   quoted. Apache-2.0 or MIT material may be adapted; say so in `attribution`, and keep the matching entry in
   `THIRD_PARTY_NOTICES.md`.
+- A skill that takes only **facts** from a source (measurements, figures) copies no text, so its `attribution` stays
+  empty and no licence text travels with it, whatever the source's licence: say where the facts came from in
+  `THIRD_PARTY_NOTICES.md` instead, pin the revision read, and state plainly that nothing was copied
+  (`physical-props` is the first such skill). An `attribution` clause is for copied or adapted text only, and one
+  that names a source `scripts/build-skill-licences.mjs` does not know fails `npm run check:skill-licences`.
 
 ## Adding a skill
 
 1. Add `<name>.md` with the frontmatter above.
 2. Run `go test ./internal/app -run 'TestBuiltinSkills'` from `backend/`.
-3. Mention it in the CHANGELOG. The planner and the node editor list it automatically.
+3. Mention it in the CHANGELOG. The skill library and a node's Configure panel list it automatically; the
+   planner does not attach skills (neither `canvasPlan.ts` nor `planning.go` knows about them), so a canvas
+   the assistant plans carries none until someone attaches them.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createSessionNode } from '../src/canvas/canvasDoc';
 import { canvasText, type CanvasTranslate } from '../src/canvas/i18n';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { runErrorCodes, runErrorText } from '../src/saas/canvasErrors';
@@ -10,6 +11,7 @@ import {
   preflightIssueMessage,
   recoveryDetailCodes,
   recoveryDetailMessage,
+  refusedNodeMessage,
   surfaceNotice,
 } from '../src/canvas/surfaceMessages';
 
@@ -172,6 +174,8 @@ describe('canvas surface messages', () => {
       [{ code: 'multiple_inputs', values: { nodeTitle: 'Review', field: 'Brief' }, message: 'legacy' }, /Review.*Brief/, /Review.*Brief/],
       [{ code: 'missing_inputs', values: { nodeTitle: 'Review', errors: ['Brief is required'] }, message: 'legacy' }, /Review/, /Review/],
       [{ code: 'cycle', values: { titles: ['API', 'UI'] }, message: 'legacy' }, /API, UI/, /API、UI/],
+      // Both languages say what to do about a catalogue that moved under an open canvas, not only to re-pick.
+      [{ code: 'media_params', values: { count: 2, titles: ['海报', '封面'] }, message: 'legacy' }, /2 node\(s\).*海报, 封面.*reload the page/, /2 个节点.*海报、封面.*刷新页面/],
     ];
 
     for (const [issue, english, chinese] of cases) {
@@ -179,5 +183,27 @@ describe('canvas surface messages', () => {
       expect(preflightIssueMessage(translate('zh'), issue, 'zh')).toMatch(chinese);
     }
     expect(preflightIssueMessage(translate('en'), null, 'en')).toBeNull();
+  });
+
+  // A canvas run freezes every media node in its scope before it starts, so one node's own saved state refuses the
+  // whole canvas: the service carries that node's id and the page, which owns the titles, puts it in front.
+  it('names the node a refused canvas run was refused for, and leaves a refusal that named none as it is', () => {
+    const nodes = [
+      { ...createSessionNode('image', { x: 0, y: 0 }), id: 'vid', title: '片头动画' },
+      { ...createSessionNode('image', { x: 0, y: 0 }), id: 'img', title: '海报' },
+    ];
+    const refusal = new SaaSApiError(400, 'media_params_invalid', '', { nodeId: 'vid' });
+    for (const locale of ['zh', 'en'] as const) {
+      const copy = saasErrorMessage(refusal, locale);
+      const named = refusedNodeMessage(copy, 'vid', nodes, locale);
+      expect(named).toBe(`“片头动画”${locale === 'zh' ? '：' : ': '}${copy}`);
+      // The copy the service worded is kept whole, and no other node is named.
+      expect(named).toContain(copy);
+      expect(named).not.toContain('海报');
+      // A refusal that named no node, and one naming a node this page no longer holds, read exactly as worded.
+      expect(refusedNodeMessage(copy, null, nodes, locale)).toBe(copy);
+      expect(refusedNodeMessage(copy, 'deleted', nodes, locale)).toBe(copy);
+      expect(refusedNodeMessage(copy, 'vid', [], locale)).toBe(copy);
+    }
   });
 });

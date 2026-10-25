@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { InspectorPanel, type InspectorPanelProps } from '../src/canvas/InspectorPanel';
-import { createSessionNode, sanitizeDocument, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
+import { createSessionNode, emptyDocument, sanitizeDocument, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
 import { canConnect, portsFor, reconcileEdges } from '../src/canvas/ports';
 import { createNodeTeam } from '../src/canvas/nodeTeam';
 import { LocaleProvider } from '../src/canvas/i18n';
 import { invalidMediaParams, parseMediaCatalogue, withMediaParam, type MediaCatalogue } from '../src/canvas/mediaCatalog';
 import { parseMediaOutput } from '../src/canvas/mediaOutput';
+import { replaceRetiredMediaModels } from '../src/canvas/retiredMediaModels';
+import { preflightGraphIssue } from '../src/canvas/runGraph';
 import { withAgentKind, type MediaCatalogueState } from '../src/canvas/MediaNodeSettings';
 import { TileTranscript } from '../src/canvas/TileTranscript';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
@@ -374,5 +376,72 @@ describe('media results', () => {
     const statuses = [...frames.matchAll(/"status":"([^"]+)"/g)].map(m => m[1]).filter(s => s.endsWith('…'));
     expect(statuses).toEqual(['排队等待生成…', '主通道暂不可用，已换用备用模型…', '排队等待备用模型生成…', '正在用备用模型生成…', '正在保存结果…']);
     expect(frames).toContain('"event":"done","status":"succeeded"');
+  });
+});
+
+// A node is saved only with settings its model takes, so a saved setting the model refuses is one whose choices
+// narrowed afterwards (an offer repointed to another generator, say). The server freezes every media node in a run's
+// scope before the run starts and refuses the whole canvas for one of them, so such a node must be found before the
+// run is sent, and healed where the page can heal it by itself.
+describe('settings a media model no longer accepts', () => {
+  // 图片 · 高清 as the offer had it when these nodes were saved, and after it was repointed to a generator whose
+  // resolutions are 2K alone (2026-10-22). Its id and every other model and choice stay as they were, so nothing
+  // here is a retired model: only one model's choices narrowed under nodes already holding one of them.
+  const offer = (resolutions: string[]) => parseMediaCatalogue({
+    configured: true, available: true, limits: { runsPerDay: 30, timeoutSeconds: 1200 },
+    models: [
+      { id: 'xt.seedream-5-pro', name: 'Seedream 5 Pro', label: ['图片 · 高清', 'Image · HD'], vendor: 'media', kind: 'image', mode: 'text-to-image',
+        prompt: { minLength: 1, maxLength: 32000 }, params: [
+          { name: 'resolution', type: 'enum', values: resolutions, default: '2K', label: ['分辨率', 'Resolution'] },
+          { name: 'imageNum', type: 'integer', min: 1, max: 4, default: 1, label: ['生成张数', 'Images'] }] },
+      { id: 'xt.omni-video', name: 'Omni video', label: ['视频 · 全能', 'Video · All-round'], vendor: 'media', kind: 'video', mode: 'text-to-video',
+        prompt: { minLength: 1, maxLength: 2500 }, params: [
+          { name: 'duration', type: 'enum', values: ['5', '10'], default: '5', label: ['时长（秒）', 'Duration (s)'] }] },
+    ],
+  });
+  const wide = offer(['2K', '1K']);
+  const narrowed = offer(['2K']);
+  const bound = (id: string, title: string, kind: 'image' | 'video', model: string, mediaParams?: SessionNode['mediaParams']): SessionNode => ({
+    ...createSessionNode(kind, { x: 0, y: 0 }), id, title, model, runtime: 'pi',
+    binding: { companyId: 'tenant-a', agentId: `agent-${id}`, agentName: title },
+    ...(mediaParams ? { mediaParams } : {}),
+  });
+  const poster = () => bound('img', '海报', 'image', 'xt.seedream-5-pro', { resolution: '1K', imageNum: 3 });
+  const clip = () => bound('vid', '片头动画', 'video', 'xt.omni-video', { duration: '10' });
+
+  it('refuses a run before it is sent and names every node that holds such a setting', () => {
+    const nodes = [clip(), poster()];
+    // Against the offer these nodes were saved under nothing is wrong, and with no catalogue to judge by (a local
+    // canvas, or one not read yet) nothing is judged here: the server refuses that run and names the node itself.
+    expect(preflightGraphIssue(nodes, [], undefined, { media: wide })).toBeNull();
+    expect(preflightGraphIssue(nodes, [], undefined, {})).toBeNull();
+    expect(preflightGraphIssue(nodes, [], undefined, { media: null })).toBeNull();
+    // Against the narrowed one the node that holds the setting is named, not the other media node.
+    expect(preflightGraphIssue(nodes, [], undefined, { media: narrowed })).toMatchObject({ code: 'media_params', values: { count: 1, titles: ['海报'] } });
+    // Every such node at once, in canvas order, so they are fixed in one pass rather than one refusal at a time.
+    const second = bound('one', '封面', 'image', 'xt.seedream-5-pro', { resolution: '1K' });
+    expect(preflightGraphIssue([...nodes, second], [], undefined, { media: narrowed }))
+      .toMatchObject({ code: 'media_params', values: { count: 2, titles: ['海报', '封面'] } });
+    // Only the nodes that will run are judged: the same canvas run of the clip alone goes ahead.
+    expect(preflightGraphIssue(nodes, [], ['vid'], { media: narrowed })).toBeNull();
+    // A message typed to that node is refused too: its own Send freezes the same settings.
+    expect(preflightGraphIssue(nodes, [], ['img'], { media: narrowed, conversation: true })).toMatchObject({ code: 'media_params' });
+    // A model this workspace is not offered leaves its settings unjudged: there is nothing to judge them by.
+    expect(preflightGraphIssue([bound('gone', '旧图', 'image', 'xt.not-offered', { resolution: '1K' })], [], undefined, { media: narrowed })).toBeNull();
+    // A node that holds no settings of its own runs on the model's defaults and is never a media problem.
+    expect(preflightGraphIssue([bound('plain', '插图', 'image', 'xt.seedream-5-pro')], [], undefined, { media: narrowed })).toBeNull();
+  });
+
+  // The refusal is a warning, never a change: the catalogue it is judged by is the one this page read when the canvas
+  // opened, so a tab open across a release that widened a model's choices holds a stale, narrower one. Deleting a
+  // setting by it would silently and permanently lose a choice the workspace accepts.
+  it('leaves the canvas exactly as it is, deleting no setting a stale catalogue would refuse', () => {
+    const kept = poster();
+    kept.lastOutput = { text: '{"type":"awwo.media"}', at: 1, source: 'run' };
+    const doc = { ...emptyDocument(), nodes: [kept, clip()] };
+    for (const offer of [wide, narrowed, null]) expect(replaceRetiredMediaModels(doc, offer)).toBeNull();
+    expect((doc.nodes[0] as SessionNode).mediaParams).toEqual({ resolution: '1K', imageNum: 3 });
+    // And a run refused for it stays refused until the reader changes the node, rather than quietly becoming runnable.
+    expect(preflightGraphIssue(doc.nodes, [], undefined, { media: narrowed })).toMatchObject({ code: 'media_params' });
   });
 });

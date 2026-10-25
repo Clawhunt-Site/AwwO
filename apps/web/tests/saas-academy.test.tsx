@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AcademyLauncher, AcademyProvider, preloadAcademy } from '../src/saas/Academy';
 import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration } from '../src/saas/academyCatalog';
@@ -9,6 +9,8 @@ import { caseURL, canOpenCase, openCase } from '../src/saas/caseLink';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { ProductionCases } from '../src/saas/ProductionCases';
 import { agentCount, PRODUCTION_CASES } from '../src/saas/productionCatalog';
+import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
+import chordCanvas from '../src/saas/production-canvases/the-long-chord';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { SaaSApp } from '../src/saas/SaaSApp';
 
@@ -22,6 +24,11 @@ const EN_NUMBERS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven
 const ZH_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const zhNumber = (n: number) => n < 10 ? (n === 2 ? '两' : ZH_DIGITS[n]) : `${n >= 20 ? ZH_DIGITS[Math.floor(n / 10)] : ''}十${n % 10 ? ZH_DIGITS[n % 10] : ''}`;
 const caseOf = (id?: string) => PRODUCTION_CASES.find(item => item.id === id);
+/** A real calendar day written YYYY-MM-DD, as the catalog's dates are (any year). */
+const isDay = (day: string) => {
+  const [year, month, date] = day.split('-').map(Number);
+  return /^\d{4}-\d\d-\d\d$/.test(day) && new Date(Date.UTC(year, month - 1, date)).toISOString().slice(0, 10) === day;
+};
 const library = (locale: 'zh' | 'en' = 'en') => { localStorage.setItem('superclaw_locale', locale); return render(<SaaSPreferencesProvider><AcademyProvider><AcademyLauncher /></AcademyProvider></SaaSPreferencesProvider>); };
 /** The Academy's dialog once its part of the site has loaded (its frame shows the same title while it loads). */
 const loaded = (name: string) => waitFor(() => {
@@ -52,7 +59,7 @@ it('lists every video once, by section, each staged by its checksum outside the 
     expect(video.src, video.id).toBe(`/showcase/staged/academy/${video.sha256.slice(0, 16)}.mp4`);
     expect(video.bytes, video.id).toBeGreaterThan(1_000_000);
     expect(video.seconds, video.id).toBeGreaterThan(60);
-    expect(video.recordedOn, video.id).toMatch(/^2026-\d\d-\d\d$/);
+    expect(isDay(video.recordedOn), video.id).toBe(true);
   }
   expect(existsSync(resolve(WEB, 'showcase', 'staged'))).toBe(false);
   expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(4);
@@ -88,6 +95,95 @@ it('words every video in both languages, names no media provider, and counts eac
     expect(zh.match(/(?:由|：)([零一二两三四五六七八九十]+)个 Agent/)?.[1], video.id).toBe(zhNumber(agents));
   }
 });
+
+it('logs each update of a published video, newest first, the latest no earlier than its recording, in both languages', () => {
+  const updated = ACADEMY_VIDEOS.filter(video => video.changes?.length);
+  expect(updated.length).toBeGreaterThan(0);
+  for (const video of updated) {
+    const days = video.changes!.map(change => change.on);
+    expect(days, video.id).toEqual([...days].sort().reverse());
+    // The latest update is the recording the video holds now, or one after it (a span recorded again); an earlier
+    // update may predate a later recording of the whole video.
+    expect(days[0] >= video.recordedOn, video.id).toBe(true);
+    for (const change of video.changes!) {
+      expect(isDay(change.on), `${video.id} ${change.on}`).toBe(true);
+      expect(change.text.en.trim(), video.id).not.toBe('');
+      expect(change.text.en, video.id).not.toMatch(CHINESE);
+      expect(change.text.zh, video.id).toMatch(CHINESE);
+      for (const text of [change.text.en, change.text.zh]) expect(text, video.id).not.toMatch(PROVIDERS);
+    }
+  }
+});
+
+it('notes what changed since a video was recorded, each at a moment of the video, in both languages', () => {
+  for (const video of ACADEMY_VIDEOS) {
+    const notes = video.notes ?? [];
+    const at = notes.map(note => note.at);
+    expect(at, video.id).toEqual([...new Set(at)].sort((a, b) => a - b));
+    for (const note of notes) {
+      expect(Number.isInteger(note.at) && note.at >= 0 && note.at < video.seconds, `${video.id} at ${note.at}`).toBe(true);
+      expect(isDay(note.since), `${video.id} ${note.since}`).toBe(true);
+      expect(note.since >= video.recordedOn, video.id).toBe(true);
+      expect(note.text.en.trim(), video.id).not.toBe('');
+      expect(note.text.en, video.id).not.toMatch(CHINESE);
+      expect(note.text.zh, video.id).toMatch(CHINESE);
+      for (const text of [note.text.en, note.text.zh]) expect(text, video.id).not.toMatch(PROVIDERS);
+    }
+  }
+});
+
+it('keeps what THE LONG CHORD’s tutorial says a copy costs true to the case and to AwwO’s prices', () => {
+  // Its recording of Episode I (2026-10-24, the file efc0ebb3…) says: "Running the copy makes all two hundred and
+  // eighty-two pictures, clips and sounds again: at the case's settings, about sixty-four thousand credits of media, more
+  // than six months of the Max plan, and more generations than any plan makes in a day." A change to the case's media or
+  // to AwwO's prices that breaks this is a note for the video (academyCatalog.ts) or a new recording; change this test
+  // with it, to what the note or the new recording says.
+  const video = ACADEMY_VIDEOS.find(entry => entry.id === 'the-long-chord');
+  if (!video?.sha256.startsWith('efc0ebb313f19c39')) throw new Error('THE LONG CHORD’s tutorial is not the recording these figures are from: check what the new one says');
+  const media = PRODUCTION_RUN_SUMMARY['the-long-chord'].media!.total;
+  const { credits, mediaNodes, monthly, mostPerDay } = chordCopyPrice();
+  expect(media).toBe(282);
+  expect(mediaNodes).toBe(media);
+  expect(Math.abs(credits - 64_000)).toBeLessThan(1_000);
+  expect(Math.floor(credits / monthly.max)).toBe(6);
+  expect(media).toBeGreaterThan(mostPerDay);
+});
+
+/** What a copy of THE LONG CHORD's case spends on its media: each media node of the case canvas at its own settings,
+ *  priced as mediaCreditsFor (backend/internal/app/plans.go) prices a generation, from that file's price table and
+ *  plans, so a price or a plan that changes there fails the video's spoken figures here. The settings' multipliers (a video's
+ *  length and resolution, a picture's count, size and quality) mirror mediaCreditsFor's: a change to those rules there
+ *  needs the same change here. */
+function chordCopyPrice() {
+  const plans = readFileSync(resolve(WEB, '../../backend/internal/app/plans.go'), 'utf8');
+  const table = /var mediaBaseCredits = map\[string\]int\{([\s\S]*?)\n\}/.exec(plans)![1];
+  const constant = (name: string) => Number(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`).exec(plans)![1]);
+  const base = new Map([...table.matchAll(/"([a-z0-9.-]+)":\s*(\w+)/g)].map(([, model, value]) => [model, /^\d+$/.test(value) ? Number(value) : constant(value)]));
+  const plan = (id: string) => /\{Credits: (\d+),[^}]*MediaPerDay: (\d+)/.exec(new RegExp(`"${id}": (\\{[^}]*\\})`).exec(plans)![1])!.slice(1).map(Number);
+  const text = (value: unknown) => String(value ?? '').toLowerCase();
+  const large = (value: unknown) => text(value).includes('4k') || text(value).split(/[x*: ]/).some(part => /^\d+$/.test(part) && Number(part) > 2048);
+  let credits = 0, mediaNodes = 0;
+  for (const node of chordCanvas.nodes) {
+    if (node.kind !== 'session' || !['image', 'video', 'audio'].includes(node.agentKind)) continue;
+    const price = base.get(node.model);
+    expect(price, node.model).toBeGreaterThan(0);
+    const params = node.mediaParams ?? {};
+    let n = price!;
+    if (node.agentKind === 'video') {
+      n *= Math.max(1, (Number(params.duration) || 5) / 5);
+      if (large(params.resolution) || large(params.size)) n *= 2;
+      else if (text(params.resolution).includes('1080') || /1080|1792/.test(text(params.size))) n *= 1.5;
+    } else if (node.agentKind === 'image') {
+      n *= Math.max(1, Number(params.imageNum) || 1);
+      if (['resolution', 'size', 'width', 'height'].some(key => large(params[key]))) n *= 2;
+      if (['high', '2', '4'].includes(text(params.quality))) n *= 2;
+    }
+    credits += Math.ceil(n);
+    mediaNodes += 1;
+  }
+  const [pro, max] = [plan('pro'), plan('max')];
+  return { credits, mediaNodes, monthly: { pro: pro[0], max: max[0] }, mostPerDay: Math.max(pro[1], max[1]) };
+}
 
 it('keeps every other part of the address as it moves the Academy’s own', () => {
   expect(readAcademyLink('?tenant=t1')).toBeNull();
@@ -134,7 +230,7 @@ it('opens from its button on the videos by section, filters them, plays one, and
   expect(video).toHaveAttribute('preload', 'metadata');
   expect(video.autoplay).toBe(true);
   expect(window.location.search).toBe('?academy=umber-photo');
-  expect(within(dialog).getByText(`${academyDuration(umber.seconds)} · English narration, English and Chinese subtitles · Recorded 19 October 2026`)).toBeVisible();
+  expect(within(dialog).getByText(`${academyDuration(umber.seconds)} · English narration, English and Chinese subtitles · Recorded ${noteDay(umber.recordedOn, 'en')}`)).toBeVisible();
   expect(within(dialog).getByText(`3 of ${ACADEMY_VIDEOS.filter(item => item.section === 'flagship').length}`)).toBeVisible();
   // Up next: the three after it, within the filter.
   const upNext = within(dialog).getByRole('navigation', { name: 'Up next' });
@@ -154,6 +250,55 @@ it('opens from its button on the videos by section, filters them, plays one, and
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(window.location.search).toBe('');
   expect(screen.getByRole('button', { name: 'Academy' })).toHaveFocus();
+});
+
+/** The day a note shows, as the dialog writes it. */
+const noteDay = (day: string, locale: 'en' | 'zh') => new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' })
+  .format(new Date(`${day}T00:00:00Z`));
+
+it('shows what changed since a video was recorded, and plays it from the moment each note names', async () => {
+  library();
+  const dialog = await openLibrary();
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  // The first video with two notes or more, whichever it is as spans are recorded again.
+  const noted = ACADEMY_VIDEOS.find(video => (video.notes?.length ?? 0) >= 2);
+  if (!noted) throw new Error('no video has two notes any more: test the notes on a catalog of the test’s own');
+  const [first, last] = [noted.notes![0], noted.notes![noted.notes!.length - 1]];
+  fireEvent.click(within(dialog).getByRole('button', { name: noted.title.en }));
+  const notes = within(dialog).getByRole('region', { name: 'Changed since recording' });
+  expect(within(notes).getAllByRole('listitem').map(item => within(item).getByRole('button').textContent))
+    .toEqual(noted.notes!.map(note => academyDuration(note.at)));
+  for (const note of noted.notes!) {
+    const item = within(notes).getByText(note.text.en).closest('li')!;
+    expect(within(item).getByText(`Since ${noteDay(note.since, 'en')}`)).toHaveAttribute('datetime', note.since);
+  }
+  const video = dialog.querySelector('video')!;
+  // jsdom has no scrollIntoView: the video comes back into view above the notes.
+  const scroll = vi.fn();
+  Object.defineProperty(video, 'scrollIntoView', { value: scroll, configurable: true });
+  // The focus stays on the note, to read on from there.
+  const later = within(notes).getByRole('button', { name: `Play from ${academyDuration(last.at)}` });
+  later.focus();
+  fireEvent.click(later);
+  expect(video.currentTime).toBe(last.at);
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+  expect(later).toHaveFocus();
+  // An older browser's play() returns no promise, and a refused play leaves the video paused there: neither throws.
+  play.mockReturnValueOnce(undefined as unknown as Promise<void>).mockRejectedValueOnce(new DOMException('refused', 'NotAllowedError'));
+  const earlier = within(notes).getByRole('button', { name: `Play from ${academyDuration(first.at)}` });
+  fireEvent.click(earlier);
+  expect(video.currentTime).toBe(first.at);
+  fireEvent.click(later);
+  await act(async () => {});
+  expect([video.currentTime, play.mock.calls.length, scroll.mock.calls.length]).toEqual([last.at, 3, 3]);
+  // A video that did not load plays from no note: their times say so and keep the focus, under its "Try again".
+  fireEvent.error(video);
+  expect(earlier).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(earlier);
+  expect([video.currentTime, play.mock.calls.length]).toEqual([last.at, 3]);
+  expect(later).toHaveFocus();
+  expect(within(dialog).getByRole('alert')).toHaveTextContent('This video could not be loaded.');
 });
 
 it('opens from a link, on the video it names, which waits for its play button; an unknown one opens the library', async () => {
@@ -186,11 +331,71 @@ it('reads in Chinese in the Chinese interface, the case names in English', async
   expect(within(card).getByText('Pixel platformer')).toHaveAttribute('lang', 'en');
   expect(within(card).getByText(pixel.summary.zh)).toBeVisible();
   fireEvent.click(button);
-  expect(within(dialog).getByText(`${academyDuration(pixel.seconds)} · 英文讲解，中英字幕 · 录于 2026年10月14日`)).toBeVisible();
+  expect(within(dialog).getByText(`${academyDuration(pixel.seconds)} · 英文讲解，中英字幕 · 录于 ${noteDay(pixel.recordedOn, 'zh')}`)).toBeVisible();
   expect(within(dialog).getByText(/^按四个部分写需求/)).toBeVisible();
   // No case library here, and no canvas page whose home page has one: nothing would open the case.
   expect(within(dialog).queryByRole('link', { name: '打开这个案例' })).toBeNull();
   expect(within(dialog).queryByRole('button', { name: '打开这个案例' })).toBeNull();
+});
+
+it('marks an updated video on its card and lists its updates beside it, in English and Chinese', async () => {
+  // A video updated after it was first published, whichever it is.
+  const updated = ACADEMY_VIDEOS.find(video => video.changes?.length);
+  if (!updated) throw new Error('no video has an update: test the updates on a catalog of the test’s own');
+  const latest = updated.changes![0];
+  const short = (day: string, locale: 'en' | 'zh') => new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+    .format(new Date(`${day}T00:00:00Z`));
+  // The mark's words as docs/academy.md gives them: "Updated 24 Oct", 「10月24日更新」.
+  expect([short('2026-10-24', 'en'), short('2026-10-24', 'zh')]).toEqual(['24 Oct', '10月24日']);
+  library();
+  const dialog = await openLibrary();
+  const card = within(dialog).getByRole('button', { name: updated.title.en });
+  expect(card).toHaveAccessibleDescription(`Updated ${short(latest.on, 'en')} ${updated.summary.en}`);
+  expect(within(card.closest('li')!).getByText(`Updated ${short(latest.on, 'en')}`)).toBeVisible();
+  // Only updated videos carry the mark.
+  expect(within(dialog).getAllByText(/^Updated /)).toHaveLength(ACADEMY_VIDEOS.filter(video => video.changes?.length).length);
+  fireEvent.click(card);
+  const updates = within(dialog).getByRole('region', { name: 'Updates' });
+  expect(within(updates).getAllByRole('listitem')).toHaveLength(updated.changes!.length);
+  expect(within(updates).getByText(latest.text.en)).toBeVisible();
+  expect(within(updates).getByText(noteDay(latest.on, 'en'))).toHaveAttribute('datetime', latest.on);
+  cleanup();
+  library('zh');
+  fireEvent.click(screen.getByRole('button', { name: '教程' }));
+  const zh = await loaded('从真实画布学会 AwwO');
+  const zhCard = within(zh).getByRole('button', { name: updated.title.zh });
+  expect(zhCard).toHaveAccessibleDescription(`${short(latest.on, 'zh')}更新 ${updated.summary.zh}`);
+  expect(within(zhCard.closest('li')!).getByText(`${short(latest.on, 'zh')}更新`)).toBeVisible();
+  fireEvent.click(zhCard);
+  const zhUpdates = within(zh).getByRole('region', { name: '更新记录' });
+  expect(within(zhUpdates).getByText(latest.text.zh)).toBeVisible();
+  expect(within(zhUpdates).getByText(noteDay(latest.on, 'zh'))).toHaveAttribute('datetime', latest.on);
+});
+
+it('shows a video’s notes in Chinese in the Chinese interface', async () => {
+  // An English-narrated video's note, shown in the interface's language, not the narration's: the catalog's own while
+  // one has a note, else a note of the test's own on such a video (since 2026-10-25 none has one: every span such a
+  // note named has been recorded again).
+  const noted = ACADEMY_VIDEOS.find(video => video.voice === 'en' && video.notes?.length)
+    ?? ACADEMY_VIDEOS.find(video => video.voice === 'en')!;
+  const own = noted.notes;
+  if (!own?.length) {
+    noted.notes = [{ at: 30, since: noted.recordedOn, text: {
+      en: 'A note of the test’s own.', zh: '一条测试自己的说明。' } }];
+  }
+  try {
+    const note = noted.notes![0];
+    window.history.replaceState({}, '', `/?academy=${noted.id}`);
+    library('zh');
+    const dialog = await screen.findByRole('dialog', { name: noted.title.zh });
+    const notes = within(dialog).getByRole('region', { name: '录制之后的变化' });
+    expect(within(notes).getByRole('button', { name: `从 ${academyDuration(note.at)} 播放` })).toHaveTextContent(academyDuration(note.at));
+    const item = within(notes).getByText(note.text.zh).closest('li')!;
+    expect(within(item).getByText(`${noteDay(note.since, 'zh')}起`)).toHaveAttribute('datetime', note.since);
+  } finally {
+    if (own === undefined) delete noted.notes;
+    else noted.notes = own;
+  }
 });
 
 it('opens a case through a library that shows up after it, and from a page with a canvas open by a link to its workspace’s home page', async () => {

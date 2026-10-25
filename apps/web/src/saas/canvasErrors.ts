@@ -71,7 +71,9 @@ const runErrors: Record<string, [string, string]> = {
   // runtime failure: a refusal wants a reworded task, a rejected key wants the
   // connection fixed, and a rate limit or outage wants time or another model.
   model_refused: ['模型拒绝了这个请求，请调整任务内容后重试。', 'The model declined this request. Adjust the task and try again.'],
-  provider_auth_failed: ['模型服务拒绝了所配置的凭据，请检查该模型连接的 API 密钥。', 'The model provider rejected the configured credentials. Check the API key of this model connection.'],
+  // A hosted model's credentials are the service's, which the reader cannot check: only a model they connected
+  // themselves (我的引擎, and every model of the local edition) has a key of theirs.
+  provider_auth_failed: ['模型服务拒绝了这个模型的凭据，这次没有完成。请换一个模型；如果是你自己连接的模型，请在「我的引擎」里检查它的 API 密钥。', 'The model provider rejected this model’s credentials, so this did not finish. Choose another model; if it is a model you connected yourself, check its API key in My engines.'],
   provider_rate_limited: ['模型服务触发了速率限制，这次没有完成。请过几分钟重新运行，或换一个模型。', 'The model provider is rate limited, so this did not finish. Run it again in a few minutes, or choose another model.'],
   // Also a call that stayed silent for 15 minutes (the Python worker's Bedrock idle limit, since 2026-10-19).
   provider_unavailable: ['模型服务暂时不可用，这次没有完成。请稍后重新运行，或换一个模型。', 'The model provider is unavailable right now, so this did not finish. Run it again later, or choose another model.'],
@@ -189,6 +191,10 @@ const planErrors: Record<string, [string, string]> = {
   output_limit: ['这次的规划太长，超过了画布助手一次能写的上限，画布保持原样。请把要求分成几步，一次说一部分。', 'The plan was longer than the canvas assistant can write in one go, and the canvas has not changed. Split the request into steps and send one at a time.'],
   runtime_session_busy: ['画布助手上一次的规划还没有结束，这次没有开始。请等它结束后再发送。', 'The canvas assistant’s previous plan has not finished, so this one did not start. Send it again once that one ends.'],
   provider_rate_limited: ['画布助手的模型服务触发了速率限制，这次规划没有完成，画布保持原样。请过几分钟再发送。', 'The canvas assistant’s model provider is rate limited, so this plan did not finish and the canvas has not changed. Send it again in a few minutes.'],
+  // The service chooses the canvas assistant's model, not the reader: there is no model to change. Its key is the
+  // reader's only where they connected that model themselves (the local edition plans on the reader's own key).
+  provider_auth_failed: ['画布助手的模型服务拒绝了凭据，这次规划没有完成，画布保持原样。如果画布助手用的是你自己连接的模型，请在「我的引擎」里检查它的 API 密钥；否则请稍后再发送，一直这样就联系管理员。', 'The canvas assistant’s model provider rejected its credentials, so this plan did not finish and the canvas has not changed. If the assistant uses a model you connected yourself, check its API key in My engines; otherwise send it again later, and contact an administrator if it keeps happening.'],
+  model_refused: ['画布助手的模型拒绝了这个请求，画布保持原样。请换个说法，再发送一次。', 'The canvas assistant’s model declined this request, and the canvas has not changed. Put it another way and send it again.'],
   server_restarted: planRestart,
   'API restarted before completion': planRestart,
   interrupted: planInterrupted,

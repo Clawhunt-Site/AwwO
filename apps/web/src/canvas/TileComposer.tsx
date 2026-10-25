@@ -16,7 +16,7 @@
 // It is a composite box: files of any type go with the words (the "+" button, a drop or a paste), shown as
 // chips and carried as lines at the end of the message (ComposerAttachments.tsx).
 
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
@@ -88,6 +88,15 @@ export interface TileComposerProps {
   attachNodeId?: string;
   /** An image, video or 3D node: what its generator does with attached files, which the box says when files are attached. */
   mediaNode?: MediaComposerInfo;
+  /** For the node's starter prompts, which are drawn outside the box. */
+  ref?: Ref<TileComposerHandle>;
+}
+
+/** What the node around the composer may write into it. */
+export interface TileComposerHandle {
+  /** Adds a prompt after the words the box shows, a blank line between. Through the box, which keeps its files: one that
+   *  has just landed too, whose answer is not drawn yet (useComposerAttachments). */
+  addPrompt: (prompt: string) => void;
 }
 
 /** The notice under a media node's attachments: which picture is used, or why none is. */
@@ -108,29 +117,40 @@ function mediaAttachmentNotice(t: ReturnType<typeof useCanvasI18n>['t'], media: 
  * fits all, with Shift and a digit from 1 to 9 only saves one); a wheel outside its node, which moves the canvas or scrolls something
  * else (over its own opened node a wheel scrolls it); or the focus gone into a frame, a preview, which gives the page no
  * focusin. Typing, editing chords and the browser's own keys do not count (AltGr's digits do: the canvas moves its camera
- * for them). Listens in the capture phase, as a press on a node stops at its tile. Returns the cleanup. `cameraKeys:
- * false` leaves the camera keys to the caller (the assistant's panel counts them as the canvas takes them).
+ * for them). Listens in the capture phase, as a press on a node stops at its tile. Returns the cleanup. The assistant's
+ * panel sets three options: `cameraKeys: false` leaves the camera keys to it (it counts them as the canvas takes them);
+ * `tabKey: false` counts a Tab only where it takes the focus off the page, to the browser's own toolbar: the window loses
+ * the focus before a focusin or the Tab's keyup comes (pressed on the page once the box dropped the focus, the browser
+ * goes on from the box, into the panel's toolbar; a Tab to elsewhere on the page brings a focusin there, which counts);
+ * `owns` counts more as the composer's own (a layer one of its controls opened on the page, as its 用户须知).
  */
-export function watchReaderAway(composer: HTMLElement, away: () => void, { cameraKeys = true }: { cameraKeys?: boolean } = {}): () => void {
+export function watchReaderAway(composer: HTMLElement, away: () => void,
+  { cameraKeys = true, tabKey = true, owns }: { cameraKeys?: boolean; tabKey?: boolean; owns?: (target: Node) => boolean } = {}): () => void {
   const node = composer.closest('.canvas-tile') ?? composer;
-  const outside = (event: Event, scope: Element) => !(event.target instanceof Node && scope.contains(event.target));
-  const onPress = (event: Event) => { if (outside(event, composer)) away(); };
+  const outside = (event: Event, scope: Element) => !(event.target instanceof Node && (scope.contains(event.target) || Boolean(owns?.(event.target))));
+  // A Tab pressed with tabKey false whose move the page has not seen yet (a focusin, its keyup).
+  let tabbing = false;
+  const onPress = (event: Event) => { tabbing = false; if (outside(event, composer)) away(); };
   const onKey = (event: DocumentEventMap['keydown']) => {
     const camera = cameraKeys && (event.ctrlKey || event.metaKey) && ((/^Digit[1-9]$/.test(event.code) && !event.shiftKey) || event.code === 'Digit0' || event.key === '0');
-    if ((camera || event.key === 'Escape' || event.key === 'Tab') && outside(event, composer)) away();
+    if ((camera || event.key === 'Escape' || (tabKey && event.key === 'Tab')) && outside(event, composer)) away();
+    if (!tabKey && event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) tabbing = true;
   };
+  const onKeyUp = (event: DocumentEventMap['keyup']) => { if (event.key === 'Tab') tabbing = false; };
   const onWheel = (event: Event) => { if (outside(event, node)) away(); };
-  const onBlur = () => { if (document.activeElement instanceof HTMLIFrameElement) away(); };
+  const onBlur = () => { if (tabbing || document.activeElement instanceof HTMLIFrameElement) away(); tabbing = false; };
   const options = { capture: true, passive: true };
   document.addEventListener('pointerdown', onPress, options);
   document.addEventListener('focusin', onPress, options);
   document.addEventListener('keydown', onKey, options);
+  if (!tabKey) document.addEventListener('keyup', onKeyUp, options);
   document.addEventListener('wheel', onWheel, options);
   window.addEventListener('blur', onBlur);
   return () => {
     document.removeEventListener('pointerdown', onPress, options);
     document.removeEventListener('focusin', onPress, options);
     document.removeEventListener('keydown', onKey, options);
+    document.removeEventListener('keyup', onKeyUp, options);
     document.removeEventListener('wheel', onWheel, options);
     window.removeEventListener('blur', onBlur);
   };
@@ -170,7 +190,7 @@ function useFocusBackOnUnlock(composer: RefObject<HTMLElement | null>, box: RefO
   }, [locked, composer]);
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode, ref }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -181,6 +201,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
   const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
   const attach = useComposerAttachments({ value: input, onChange: setInput, nodeId: attachNodeId, disabled });
   const waitReason = attach.busy ? t('attach.waiting') : undefined;
+  const { setBody } = attach;
+  useImperativeHandle(ref, () => ({ addPrompt: prompt => setBody(body => body ? `${body}\n\n${prompt}` : prompt) }), [setBody]);
   const composerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useFocusBackOnUnlock(composerRef, inputRef, disabled);

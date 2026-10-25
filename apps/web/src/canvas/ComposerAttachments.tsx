@@ -108,8 +108,12 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
     if (item) attach(item);
   }, [attach]);
 
-  const setBody = useCallback((next: string) => {
-    latest.current.onChange(joinAttachments(next, composed().attachments, latest.current.locale));
+  /** The words, the files kept: those this box added and not drawn yet too. So whatever else puts words in the box (an
+   *  example, a starter prompt) goes through here: built from the drawn value alone, it would drop a file that just landed.
+   *  A function is handed the words the box last drew (only files are kept between renders, not words). */
+  const setBody = useCallback((next: string | ((body: string) => string)) => {
+    const current = composed();
+    latest.current.onChange(joinAttachments(typeof next === 'function' ? next(current.body) : next, current.attachments, latest.current.locale));
   }, [composed]);
 
   const add = useCallback((files: File[]) => {

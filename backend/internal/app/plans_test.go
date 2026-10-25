@@ -153,73 +153,73 @@ func TestCreditChargeIsTheUsageOrAnEstimateThatErrsHigh(t *testing.T) {
 	n := func(v int64) *int64 { return &v }
 	reported := InvocationUsage{Status: "reported", Source: "provider_raw", InputTokens: n(3000), OutputTokens: n(4000)}
 	// 3k in + 4k out at $2 / $10 = 46,000 microdollars, × 1.5 = 6.9 → 7 credits: below the reserve, and charged as is.
-	if got := creditCharge(12, false, false, true, reported, price, 0, 0, 0, 0); got != 7 {
+	if got := creditCharge(12, false, false, true, reported, price, 0, 0, 0, false, 0); got != 7 {
 		t.Fatal("reported usage", got)
 	}
-	if got := creditCharge(12, true, false, true, reported, price, 0, 0, 0, 0); got != 0 {
+	if got := creditCharge(12, true, false, true, reported, price, 0, 0, 0, false, 0); got != 0 {
 		t.Fatal("not incurred", got)
 	}
-	if got := creditCharge(12, false, true, true, missingUsage("unknown", "transport_unknown"), price, 1000, 0, 0, 0); got != 0 {
+	if got := creditCharge(12, false, true, true, missingUsage("unknown", "transport_unknown"), price, 1000, 0, 0, false, 0); got != 0 {
 		t.Fatal("refused before any output", got)
 	}
 	unknown := missingUsage("unknown", "cancelled_after_admission")
 	// Unreported and small: the reserve.
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, 0); got != 12 {
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, false, 0); got != 12 {
 		t.Fatal("small unreported call", got)
 	}
 	// Unreported and large: 256 KiB sent (131,072 tokens at 2 bytes) and 64 KiB streamed (32,768): 262,144 +
 	// 327,680 = 589,824 microdollars, × 1.5 → 89 credits.
-	if got := creditCharge(12, false, false, true, unknown, price, 256<<10, 64<<10, 0, 0); got != 89 {
+	if got := creditCharge(12, false, false, true, unknown, price, 256<<10, 64<<10, 0, false, 0); got != 89 {
 		t.Fatal("large unreported call", got)
 	}
 	// Partly reported: the larger of the partial usage, the estimate and the reserve.
 	partial := InvocationUsage{Status: "partial", Source: "provider_raw", InputTokens: n(100000), OutputTokens: n(1000)}
-	if got := creditCharge(12, false, false, true, partial, price, 0, 0, 0, 0); got != 32 {
+	if got := creditCharge(12, false, false, true, partial, price, 0, 0, 0, false, 0); got != 32 {
 		t.Fatal("partial usage", got)
 	}
 	// A price snapshot that cannot price anything still charges the reserve.
-	if got := creditCharge(12, false, false, true, unknown, nil, 1<<20, 1<<20, 0, 0); got != 12 {
+	if got := creditCharge(12, false, false, true, unknown, nil, 1<<20, 1<<20, 0, false, 0); got != 12 {
 		t.Fatal("unpriceable snapshot", got)
 	}
 	// Reported usage wins over a refusal code: billed tokens are billed.
-	if got := creditCharge(12, false, true, true, reported, price, 0, 0, 0, 0); got != 7 {
+	if got := creditCharge(12, false, true, true, reported, price, 0, 0, 0, false, 0); got != 7 {
 		t.Fatal("reported usage with a refusal code", got)
 	}
 	// A call that left no trace of reaching the provider costs its reserve, whatever its request's size.
-	if got := creditCharge(12, false, false, false, unknown, price, 1<<20, 0, 0, time.Minute); got != 12 {
+	if got := creditCharge(12, false, false, false, unknown, price, 1<<20, 0, 0, false, time.Minute); got != 12 {
 		t.Fatal("unreached call", got)
 	}
 	// Time before the first streamed text is hidden reasoning: a minute is 7,200 tokens. With 4,000 bytes sent and
 	// 2,000 streamed: 4,000 + 10,000 + 72,000 = 86,000 microdollars, × 1.5 → 13 credits.
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, time.Minute); got != 13 {
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, false, time.Minute); got != 13 {
 		t.Fatal("hidden reasoning", got)
 	}
 	// Cancelled while the model reasoned, before any text: five minutes is 36,000 tokens, past the old 32,000 cap, so
 	// 4,000 + 360,000 microdollars, × 1.5 → 55 credits; ten minutes (72,000) is capped at the catalog's 65,536 per
 	// call, so 4,000 + 655,360 microdollars, × 1.5 → 99 credits.
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, 5*time.Minute); got != 55 {
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, false, 5*time.Minute); got != 55 {
 		t.Fatal("cancelled while reasoning for five minutes", got)
 	}
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, 10*time.Minute); got != 99 {
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 0, 0, false, 10*time.Minute); got != 99 {
 		t.Fatal("cancelled while reasoning", got)
 	}
 	// A report of no output for a call that streamed some is not believed: it is estimated.
 	zeroOut := InvocationUsage{Status: "reported", Source: "provider_raw", InputTokens: n(3000), OutputTokens: n(0)}
-	if got := creditCharge(12, false, false, true, zeroOut, price, 4000, 200000, 0, 0); got != 151 {
+	if got := creditCharge(12, false, false, true, zeroOut, price, 4000, 200000, 0, false, 0); got != 151 {
 		t.Fatal("a report of no output", got)
 	}
 	// Partly reported usage counts even when the call was then refused.
-	if got := creditCharge(12, false, true, true, InvocationUsage{Status: "partial", Source: "provider_raw", InputTokens: n(100000), OutputTokens: n(1000)}, price, 0, 0, 0, 0); got != 32 {
+	if got := creditCharge(12, false, true, true, InvocationUsage{Status: "partial", Source: "provider_raw", InputTokens: n(100000), OutputTokens: n(1000)}, price, 0, 0, 0, false, 0); got != 32 {
 		t.Fatal("partial usage and a refusal", got)
 	}
 	// Reasoning reported (a planner's) and the time before the first text are one estimate, the larger: 20,000
 	// characters and 90 s (10,800 tokens) is 20,000 hidden tokens, so 4,000 + 10,000 + 200,000 microdollars → 33.
-	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 20000, 90*time.Second); got != 33 {
+	if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 20000, false, 90*time.Second); got != 33 {
 		t.Fatal("planner reasoning", got)
 	}
 	// A report its price cannot read (no input count) still says the provider worked: never free, even with a refusal.
 	unreadable := InvocationUsage{Status: "reported", Source: "provider_raw", OutputTokens: n(4000)}
-	if got := creditCharge(12, false, true, true, unreadable, price, 4000, 0, 0, 0); got != 12 {
+	if got := creditCharge(12, false, true, true, unreadable, price, 4000, 0, 0, false, 0); got != 12 {
 		t.Fatal("an unreadable report with a refusal code", got)
 	}
 	if !refusedBeforeOutput("provider_rate_limited", "MODEL_RATE_LIMIT", 0, 0) || refusedBeforeOutput("provider_rate_limited", "", 10, 0) || refusedBeforeOutput("runtime_failed", "", 0, 0) {
@@ -232,12 +232,25 @@ func TestCreditChargeIsTheUsageOrAnEstimateThatErrsHigh(t *testing.T) {
 		t.Fatal("late refusals")
 	}
 	// A quick refusal after reasoning the run was told about (a planner throttled mid-thought) is not free.
-	if got := creditCharge(12, false, true, true, unknown, price, 4000, 0, 5000, 2*time.Second); got != 12 {
+	if got := creditCharge(12, false, true, true, unknown, price, 4000, 0, 5000, false, 2*time.Second); got != 12 {
 		t.Fatal("a refusal after reported reasoning", got)
+	}
+	// And a run told its model was reasoning without a count of it (every node run, and a planner run refused in the
+	// moment after the start) says the same: the provider worked, so its refusal costs the reserve and not nothing.
+	if got := creditCharge(12, false, true, true, unknown, price, 4000, 0, 0, true, 2*time.Second); got != 12 {
+		t.Fatal("a refusal after reasoning with no count", got)
+	}
+	// What it is not is a quantity. It settles a refusal and never enters the estimate, because the counts behind it
+	// are characters and this adds up tokens: the same call reaching the provider costs what the bytes and the time
+	// say either way, with no third of a credit added for having reasoned.
+	for _, reasoned := range []bool{false, true} {
+		if got := creditCharge(12, false, false, true, unknown, price, 4000, 2000, 0, reasoned, time.Minute); got != 13 {
+			t.Fatal("reasoning without a count changed an estimate", reasoned, got)
+		}
 	}
 	// Token counts a report carried are never estimated below: 100,000 output tokens reported without an input
 	// count is 2,000 in (4,000 bytes) + 100,000 out = 1,004,000 microdollars, × 1.5 → 151 credits.
-	if got := creditCharge(12, false, false, true, InvocationUsage{Status: "reported", Source: "provider_raw", OutputTokens: n(100000)}, price, 4000, 0, 0, 0); got != 151 {
+	if got := creditCharge(12, false, false, true, InvocationUsage{Status: "reported", Source: "provider_raw", OutputTokens: n(100000)}, price, 4000, 0, 0, false, 0); got != 151 {
 		t.Fatal("reported token counts in the estimate", got)
 	}
 	// Hidden time ends at the call's terminal event, not when it was recorded afterwards.
@@ -706,8 +719,12 @@ func TestPostgresOverspendIsCarriedIntoTheNextPeriod(t *testing.T) {
 	}
 	settleNewest(t, h, tid, intp(2150))
 	ctx := context.Background()
+	// The next period's answer is asked at nextAsked; older stands for a read asked a moment before it whose answer
+	// comes back after it.
+	nextAsked := dbNow(t, h)
+	older := nextAsked.Add(-time.Millisecond)
 	next := paidPlan("pro", now.Add(-time.Minute).Unix(), now.Add(30*24*time.Hour).Unix(), map[string]int64{"pro": 2000})
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, next), time.Now()); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, next), nextAsked); e != nil {
 		t.Fatal(e)
 	}
 	p, e := accountPlan(ctx, h.db, uid)
@@ -723,13 +740,13 @@ func TestPostgresOverspendIsCarriedIntoTheNextPeriod(t *testing.T) {
 	}
 	// A later answer about the same period keeps the carry; an answer to an older request changes nothing.
 	same := paidPlan("max", now.Add(-time.Minute).Unix(), now.Add(30*24*time.Hour).Unix(), map[string]int64{"pro": 1000, "max": 5000})
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), time.Now().Add(-time.Hour)); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), older); e != nil {
 		t.Fatal(e)
 	}
 	if p, _ = accountPlan(ctx, h.db, uid); p.Plan != "pro" || p.Credits != 2000 {
 		t.Fatal("an older answer applied", p)
 	}
-	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), time.Now()); e != nil {
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, same), dbNow(t, h)); e != nil {
 		t.Fatal(e)
 	}
 	if p, _ = accountPlan(ctx, h.db, uid); withCarry(ctx, h.db, p) != nil || p.Plan != "max" || p.Credits != 6000 || p.Carry != 150 {
@@ -1236,7 +1253,9 @@ func TestPostgresPaidPlanGenerationsSpendCreditsInsteadOfTheMediaRouteLimit(t *t
 	}
 }
 
-// dbNow is the test database's clock, as a plan read stamps it.
+// dbNow is the test database's clock, as a plan read stamps it. Ask a test's plan answers at it, never at time.Now():
+// applyPlan ignores an answer asked before the stored one's synced_at, which is on the database's clock, and this
+// process's clock can run up to a second ahead of it or behind it (a test run on Windows against a PostgreSQL in WSL).
 func dbNow(t *testing.T, h *harness) time.Time {
 	t.Helper()
 	now, err := h.a.databaseNow(context.Background())

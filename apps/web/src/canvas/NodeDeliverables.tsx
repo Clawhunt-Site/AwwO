@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileText, RotateCcw } from 'lucide-react';
 import { caseRunLabel, type AssembleNode, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
@@ -78,6 +78,12 @@ export interface NodeDeliverablesProps {
   node: SessionNode | AssembleNode;
   readOnly: boolean;
   onUpdateNode?: (node: SessionNode | AssembleNode) => void;
+  /** The output form's changes, as changes of the form its owner holds when they come (ContractFields' onChange), which this
+   *  render's node may lag behind: an output's file and an edit made before the next render keep each other. Without it
+   *  they go to onUpdateNode as whole nodes, each built on those made since the last render; a publication (发布输出)
+   *  goes there as this render's node with its result, so in such a host it and a change before the next render undo each
+   *  other. */
+  onChangeOutputs?: (change: (outputs: ContractField[]) => ContractField[]) => void;
   /** 'result' shows only what the node published, as the canvas's 成果 view does: no editors, and not an
    *  earlier conversation's result. The tile drawer is 'drawer'. */
   presentation?: 'drawer' | 'result';
@@ -114,7 +120,7 @@ function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: ()
 }
 
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
-export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId, canvasEntries }: NodeDeliverablesProps) {
+export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId, canvasEntries }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
   const resolveAsset = useMemo(() => canvasEntries?.length ? canvasResolver(canvasEntries) : undefined, [canvasEntries]);
   const editor = useRef<HTMLDetailsElement>(null);
@@ -146,10 +152,19 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
   const showRawOutput = output && !media && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
 
-  const updateFields = (fields: ContractField[]) => {
+  // Without onChangeOutputs each change builds on the ones made since this render (files landing in two fields at once),
+  // until the render that draws the owner's answer (asked for with each change, as SessionTile's writeNode does).
+  const unrendered = useRef<ContractField[] | null>(null);
+  const [, setWholeNodeWrites] = useState(0);
+  useLayoutEffect(() => { unrendered.current = null; });
+  const updateFields = (change: (outputs: ContractField[]) => ContractField[]) => {
     if (locked) return;
     setPublishErrors([]);
-    onUpdateNode?.({ ...node, contract: { ...contract, outputs: fields } });
+    if (onChangeOutputs) { onChangeOutputs(change); return; }
+    const outputs = change(unrendered.current ?? contract.outputs);
+    unrendered.current = outputs;
+    onUpdateNode?.({ ...node, contract: { ...contract, outputs } });
+    setWholeNodeWrites(count => count + 1);
   };
   const publishOutput = () => {
     if (locked || !contract.outputs.length) return;
@@ -193,8 +208,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, presentation = 
       <p className="awwo-field-hint">{deliveryProfiles(locale).find(profile => profile.id === deliveryProfile)!.description}</p>
       <button type="button" onClick={() => {
         try {
-          const next = appendDeliveryProfile(contract, deliveryProfile, locale);
-          if (next !== contract) updateFields(next.outputs);
+          // Asked of the form this render shows, made to the form as its owner holds it (a file may have landed since).
+          if (appendDeliveryProfile(contract, deliveryProfile, locale) !== contract) {
+            updateFields(outputs => appendDeliveryProfile({ ...contract, outputs }, deliveryProfile, locale).outputs);
+          }
         } catch (error) { setPublishErrors([error instanceof Error ? error.message : String(error)]); }
       }}>{locale === 'zh' ? '添加到交付' : 'Add requirement'}</button>
       <p className="awwo-field-hint">{deliveryCapabilityNotice(locale)}</p>

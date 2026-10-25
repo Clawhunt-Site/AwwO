@@ -19,6 +19,7 @@ import type { UiLocale } from '../locale';
 import { nodeContract, type AssembleNode, type CanvasEdge, type CanvasNode, type FormNode, type SessionNode } from './canvasDoc';
 import { assembleTemplate } from './assembleNode';
 import { EDIT_CLOUD_ONLY } from './editNode';
+import { invalidMediaParams, mediaKindOf, mediaModelsOf, type MediaCatalogue } from './mediaCatalog';
 import { mediaInputText } from './mediaOutput';
 import { parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
 import { isMediaSourceNode, isSoftMediaFeed, reconcileEdges } from './ports';
@@ -119,7 +120,7 @@ export function findCycle(nodes: ReadonlyArray<CanvasNode>, edges: ReadonlyArray
 
 /** Pre-flight problems that make a run impossible — reported up front, never mid-run. */
 export type PreflightIssueCode = 'empty_graph' | 'empty_scope' | 'unbound_nodes' | 'multiple_inputs' | 'missing_inputs' | 'cycle' | 'invalid_team'
-  | 'edit_timeline';
+  | 'edit_timeline' | 'media_params';
 export interface PreflightIssue {
   code: PreflightIssueCode;
   values: Record<string, string | number | string[]>;
@@ -131,7 +132,9 @@ export function preflightGraphIssue(
   nodes: ReadonlyArray<CanvasNode>,
   edges: ReadonlyArray<CanvasEdge>,
   scope?: ReadonlyArray<string>,
-  options: { conversation?: boolean } = {},
+  /** `media`: the workspace's media catalogue, which a media node's saved settings are judged against. Without it
+   *  (a local canvas, or a catalogue not read yet) they are not judged here and the server refuses the run instead. */
+  options: { conversation?: boolean; media?: MediaCatalogue | null } = {},
 ): PreflightIssue | null {
   if (nodes.length === 0) return { code: 'empty_graph', values: {}, message: '画布上还没有节点。' };
   // Only nodes that will actually EXECUTE are validated. Refusing a whole run because an unwired
@@ -143,6 +146,27 @@ export function preflightGraphIssue(
   if (unbound.length) {
     const titles = unbound.map((n) => n.title);
     return { code: 'unbound_nodes', values: { count: unbound.length, titles }, message: `有 ${unbound.length} 个会话节点未绑定真实 Agent：${titles.join('、')}。先在配置里绑定。` };
+  }
+  // A canvas run freezes the model and settings of every media node in its scope before it starts, so one setting a
+  // model does not take refuses the whole canvas (media_runs.go). A node is saved only with settings that fitted
+  // (mediaSetupProblem), so such a setting is one whose model narrowed its choices afterwards, or one a copied case
+  // brought from another workspace. Name every such node at once, so the reader fixes them in one pass instead of
+  // meeting them one refusal at a time. Judged only against a catalogue the caller passes; it may be the one this
+  // page read when the canvas opened, so this refusal is a warning the reader can clear (re-pick, or reload for a
+  // newer catalogue), never a change to their canvas — the same catalogue already decides what a node may be saved
+  // with (MediaNodeSettings).
+  const unaccepted = options.media
+    ? runnable.filter((node): node is SessionNode => {
+      if (node.kind !== 'session') return false;
+      const kind = mediaKindOf(node.agentKind);
+      const model = kind ? mediaModelsOf(options.media, kind).find(entry => entry.id === node.model) : undefined;
+      return Boolean(model && invalidMediaParams(model, node.mediaParams).length);
+    })
+    : [];
+  if (unaccepted.length) {
+    const titles = unaccepted.map(node => node.title);
+    return { code: 'media_params', values: { count: unaccepted.length, titles },
+      message: `有 ${unaccepted.length} 个节点的生成设置不被它的模型接受：${titles.join('、')}。请打开它们重新选择。` };
   }
   const validEdges = reconcileEdges(nodes, edges);
   for (const node of runnable) {

@@ -142,6 +142,17 @@ it('names the worker failures the API maps instead of showing the generic runtim
   // The raw worker codes themselves are never run codes; they still show as their own text.
   expect(canvasErrorMessage('diagnostic 456', 'MODEL_REFUSAL')).toBe('diagnostic 456');
 });
+// A hosted model's credentials are the service's: its reader can only choose another model. Only a model they connected
+// themselves has a key of theirs to check (Pi names a refused credential since 2026-10-24).
+it('sends a refused credential to another model first, and to its key only for a model the reader connected', () => {
+  for (const [locale, other, own] of [['zh', '请换一个模型', '如果是你自己连接的模型，请在「我的引擎」里检查它的 API 密钥'],
+    ['en', 'Choose another model', 'if it is a model you connected yourself, check its API key in My engines']] as const) {
+    const text = runErrorText('provider_auth_failed', locale)!;
+    expect(text.indexOf(other)).toBeGreaterThan(-1);
+    expect(text.indexOf(own)).toBeGreaterThan(text.indexOf(other));
+  }
+  expect(runErrorText('provider_auth_failed', 'en')).not.toMatch(/Check the API key of this model connection/);
+});
 // Owner 2026-10-21: 「运行超时，请缩小任务范围后重试」 came up again and again; an error has to say what to do. Nearly every
 // timeout in production was a call that never wrote a word, and running the node again was what finished it.
 it('tells a timed-out run to run again first, then to change the model or split the work, never to shrink the task', () => {
@@ -223,8 +234,9 @@ it('names the node team setting a team timeout is lifted in, as its editor label
 it('reads a failed plan as the canvas assistant’s, with no node to run again and no model to change', () => {
   for (const [locale, lang, kept, node] of [['zh', 'zh-CN', '画布保持原样', /这个节点|换一个模型|重新运行/], ['en', 'en', 'the canvas has not changed', /this node|choose another model|run it again/i]] as const) {
     document.documentElement.lang = lang;
-    for (const code of ['run_timeout', 'runtime_failed', 'provider_unavailable', 'provider_rate_limited', 'output_limit', 'runtime_session_busy',
-      'API restarted before completion', 'interrupted', 'execution_interrupted', 'runtime_stream_ended', 'invalid_runtime_event', 'accounting_commit_failed']) {
+    for (const code of ['run_timeout', 'runtime_failed', 'provider_unavailable', 'provider_rate_limited', 'provider_auth_failed', 'model_refused',
+      'output_limit', 'runtime_session_busy', 'API restarted before completion', 'interrupted', 'execution_interrupted', 'runtime_stream_ended',
+      'invalid_runtime_event', 'accounting_commit_failed']) {
       const text = planErrorMessage('Pi execution failed', code);
       expect(text, code).not.toMatch(node);
       expect(text, code).not.toBe(runErrorText(code, locale));

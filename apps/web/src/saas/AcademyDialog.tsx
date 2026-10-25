@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { ArrowLeft, ArrowRight, GraduationCap, Play, RotateCcw, X } from 'lucide-react';
 import { localeHtmlLang, type UiLocale } from '../locale';
 import { useSaaSPreferences } from './preferences';
-import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, type AcademySection, type AcademyVideo } from './academyCatalog';
+import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, type AcademyChange, type AcademyNote, type AcademySection, type AcademyVideo } from './academyCatalog';
 import { PRODUCTION_CASES, type ProductionCase } from './productionCatalog';
 import { canOpenCase, caseURL, openCase, subscribeCaseOpeners } from './caseLink';
 import { currentSaaSCanvas, subscribeSaaSCanvas } from './canvasBridge';
@@ -32,18 +32,28 @@ function recorded(day: string, locale: UiLocale) {
   return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(date);
 }
 
+/** 24 Oct, 10月24日. */
+function shortDay(day: string, locale: UiLocale) {
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${day}T00:00:00Z`));
+}
+
 function VideoCard({ video, locale, t, onPlay }: { video: AcademyVideo; locale: UiLocale; t: T; onPlay: (video: AcademyVideo) => void }) {
   const id = useId();
   const item = caseOf(video);
+  // The latest update, on the poster and in what the card's button describes.
+  const updated = video.changes?.[0];
   return <li className="academy-card">
     <div className="academy-card-media">
       <img src={posterOf(video)} alt="" loading="lazy" decoding="async" />
       <span className="academy-card-play" aria-hidden="true"><Play size={18} /></span>
+      {updated && <span id={`${id}-updated`} className="academy-card-updated">
+        {t(`${shortDay(updated.on, locale)}更新`, `Updated ${shortDay(updated.on, locale)}`)}</span>}
       <span className="academy-card-duration"><Play size={9} aria-hidden="true" />{academyDuration(video.seconds)}</span>
     </div>
     <div className="academy-card-copy">
       {item && <span className="academy-card-case" lang="en">{item.title}</span>}
-      <h4><button type="button" className="academy-card-open" aria-describedby={`${id}-summary`} data-video-id={video.id} onClick={() => onPlay(video)}>{video.title[locale]}</button></h4>
+      <h4><button type="button" className="academy-card-open" aria-describedby={updated ? `${id}-updated ${id}-summary` : `${id}-summary`} data-video-id={video.id}
+        onClick={() => onPlay(video)}>{video.title[locale]}</button></h4>
       <p id={`${id}-summary`} className="academy-card-summary">{video.summary[locale]}</p>
     </div>
   </li>;
@@ -72,6 +82,36 @@ function Library({ filter, setFilter, locale, t, onPlay }: { filter: Filter; set
   </>;
 }
 
+/** How the video was updated after it was first published, newest first. */
+function Updates({ changes, locale, t }: { changes: ReadonlyArray<AcademyChange>; locale: UiLocale; t: T }) {
+  const id = useId();
+  return <section className="academy-updates" aria-labelledby={id}>
+    <h3 id={id}>{t('更新记录', 'Updates')}</h3>
+    <ol role="list">{changes.map(change => <li key={`${change.on} ${change.text.en}`}>
+      <time dateTime={change.on}>{recorded(change.on, locale)}</time>
+      <p>{change.text[locale]}</p>
+    </li>)}</ol>
+  </section>;
+}
+
+/** What has changed since the video was recorded: each note plays the video from where its span starts. While the video
+ *  did not load its times say they are unavailable, and keep the focus they have. */
+function Notes({ notes, unavailable, locale, t, onPlayFrom }: { notes: ReadonlyArray<AcademyNote>; unavailable: boolean; locale: UiLocale; t: T;
+  onPlayFrom: (at: number) => void }) {
+  const id = useId();
+  return <section className="academy-notes" aria-labelledby={id}>
+    <h3 id={id}>{t('录制之后的变化', 'Changed since recording')}</h3>
+    <ol role="list">{notes.map(note => <li key={note.at}>
+      <button type="button" className="academy-note-at" onClick={() => onPlayFrom(note.at)} aria-disabled={unavailable || undefined}
+        aria-label={t(`从 ${academyDuration(note.at)} 播放`, `Play from ${academyDuration(note.at)}`)}><Play size={9} aria-hidden="true" />{academyDuration(note.at)}</button>
+      <div>
+        <p className="academy-note-text">{note.text[locale]}</p>
+        <p className="academy-note-since"><time dateTime={note.since}>{t(`${recorded(note.since, locale)}起`, `Since ${recorded(note.since, locale)}`)}</time></p>
+      </div>
+    </li>)}</ol>
+  </section>;
+}
+
 function Player({ video, list, autoPlay, locale, t, onPick, onClose }: { video: AcademyVideo; list: ReadonlyArray<AcademyVideo>; autoPlay: boolean; locale: UiLocale; t: T;
   onPick: (video: AcademyVideo | null) => void; onClose: () => void }) {
   const element = useRef<HTMLVideoElement>(null);
@@ -96,6 +136,16 @@ function Player({ video, list, autoPlay, locale, t, onPick, onClose }: { video: 
   const library = useSyncExternalStore(subscribeCaseOpeners, canOpenCase);
   // A canvas page sets its canvas once the canvas has loaded, which can be after the Academy (opened from a link) drew.
   const canvas = useSyncExternalStore(subscribeSaaSCanvas, currentSaaSCanvas);
+  // A click lets it play with its sound; a play the browser still refuses leaves it paused at that moment, for its own
+  // play button (an older browser's play() returns no promise). The video sits above the notes, so a note read further
+  // down brings it back into view.
+  const playFrom = (at: number) => {
+    const media = element.current;
+    if (!media || failed) return;
+    media.currentTime = at;
+    Promise.resolve(media.play()).catch(() => {});
+    media.scrollIntoView?.({ block: 'nearest' });
+  };
   const label = <>{t('打开这个案例', 'Open the case')}<ArrowRight size={15} aria-hidden="true" /></>;
   const openTheCase = item && (library
     ? <button type="button" className="saas-primary academy-open-case" onClick={() => { onClose(); openCase(item.id); }}>{label}</button>
@@ -106,18 +156,23 @@ function Player({ video, list, autoPlay, locale, t, onPick, onClose }: { video: 
       {index >= 0 && <span className="academy-position">{t(`第 ${index + 1} / ${list.length} 个`, `${index + 1} of ${list.length}`)}</span>}
     </div>
     <div className="academy-player-grid">
-      <div className="academy-stage">
-        {/* tabIndex: a video with controls is in the tab order already; said, so the focus can come back to it everywhere. */}
-        <video key={video.id} ref={element} className="academy-video" src={video.src} poster={posterOf(video)} controls playsInline preload="metadata" autoPlay={autoPlay}
-          tabIndex={0} hidden={failed} onError={() => setFailed(true)} aria-label={video.title[locale]} />
-        {failed && <div className="academy-video-failed" role="alert"><p>{t('这个视频没能加载。', 'This video could not be loaded.')}</p>
-          <button type="button" ref={retryButton} onClick={() => { retrying.current = true; setFailed(false); element.current?.load(); }}><RotateCcw size={15} aria-hidden="true" />{t('重试', 'Try again')}</button></div>}
+      {/* The notes go under the video, in its column: the side keeps the case's link and what comes next in view. */}
+      <div className="academy-player-main">
+        <div className="academy-stage">
+          {/* tabIndex: a video with controls is in the tab order already; said, so the focus can come back to it everywhere. */}
+          <video key={video.id} ref={element} className="academy-video" src={video.src} poster={posterOf(video)} controls playsInline preload="metadata" autoPlay={autoPlay}
+            tabIndex={0} hidden={failed} onError={() => setFailed(true)} aria-label={video.title[locale]} />
+          {failed && <div className="academy-video-failed" role="alert"><p>{t('这个视频没能加载。', 'This video could not be loaded.')}</p>
+            <button type="button" ref={retryButton} onClick={() => { retrying.current = true; setFailed(false); element.current?.load(); }}><RotateCcw size={15} aria-hidden="true" />{t('重试', 'Try again')}</button></div>}
+        </div>
+        {video.notes?.length ? <Notes notes={video.notes} unavailable={failed} locale={locale} t={t} onPlayFrom={playFrom} /> : null}
       </div>
       <div className="academy-player-copy">
         {item && <p className="academy-player-case" lang="en">{item.title}</p>}
         <p className="academy-player-meta">{[academyDuration(video.seconds), voice, t(`录于 ${recorded(video.recordedOn, locale)}`, `Recorded ${recorded(video.recordedOn, locale)}`)].join(' · ')}</p>
         <p className="academy-player-summary">{video.summary[locale]}</p>
         {video.section === 'build' && <p className="academy-player-how">{pick(SECTION_COPY.build.note, t)}</p>}
+        {video.changes?.length ? <Updates changes={video.changes} locale={locale} t={t} /> : null}
         {openTheCase && <div className="academy-player-actions">{openTheCase}</div>}
         {upNext.length > 0 && <nav className="academy-up-next" aria-label={t('接下来', 'Up next')}><h3>{t('接下来', 'Up next')}</h3>
           <ol role="list">{upNext.map(value => <li key={value.id}><button type="button" onClick={() => onPick(value)}>

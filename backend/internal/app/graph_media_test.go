@@ -3,6 +3,8 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +76,86 @@ func TestPostgresGraphRunGeneratesMediaNodes(t *testing.T) {
 	}
 	if submits, _ := rh.counts(); submits != 2 {
 		t.Fatal("paid past the daily allowance", submits)
+	}
+}
+
+// A canvas run freezes the model and settings of every media node in its scope before it starts, so one node's own
+// saved state refuses the whole canvas. A refusal that node caused names it (`details.nodeId`), which a canvas of
+// hundreds of nodes would otherwise leave the reader to find; the deployment's own refusals name no node, and a
+// node's own Send, whose caller chose the node, carries no details as before.
+func TestPostgresGraphMediaRefusalNamesTheNodeItRefusedFor(t *testing.T) {
+	h, rh := newMediaHarness(t)
+	c, tid, _ := h.register(t, "media-graph-refusal@example.test")
+	base := "/tenants/" + tid
+	cid, canvas := mediaCanvas(t, h, c, tid, mediaDraftNode("img", "rh.seedream-v5-pro", "a poster"),
+		mediaNode("vid", "video", "rh.kling-v3-pro", map[string]any{"duration": "10"}))
+	// The clip node's own session and Agent, for its own Send and for taking its model out from under it below.
+	// "img" and "vid" below are the document's node ids, which are what a refusal carries.
+	session := setupNodeAt(canvas, 1)["issueId"].(string)
+	agent := setupNodeAt(canvas, 1)["binding"].(map[string]any)["agentId"].(string)
+	graphRun := func(status int) map[string]any {
+		t.Helper()
+		return h.request(t, c, "POST", base+"/canvases/"+cid+"/graph-runs",
+			map[string]any{"operationId": randomID(), "documentVersion": canvas["version"]}, status)
+	}
+	// A value the model no longer takes, as a model whose choices narrowed since the node was saved leaves behind.
+	setupNodeAt(canvas, 1)["mediaParams"] = map[string]any{"duration": "99"}
+	canvas = h.saveDocument(t, c, tid, cid, canvas)
+	// The node at fault, not merely the first media node the run reached (which is "img", and is fine).
+	if got := graphRun(400); errorCode(got) != "media_params_invalid" || errorDetails(got)["nodeId"] != "vid" {
+		t.Fatal("a canvas refused for one node's settings", got)
+	}
+	// A type this node is no longer set up for is its own state too, and says so.
+	setupNodeAt(canvas, 1)["agentKind"] = "image"
+	canvas = h.saveDocument(t, c, tid, cid, canvas)
+	if got := graphRun(409); errorCode(got) != "node_setup_required" || errorDetails(got)["nodeId"] != "vid" {
+		t.Fatal("a canvas refused for one node's changed type", got)
+	}
+	setupNodeAt(canvas, 1)["agentKind"] = "video"
+	canvas = h.saveDocument(t, c, tid, cid, canvas)
+	// A model this host does not have at all is the node's saved state too (its model is read from its Agent).
+	if _, e := h.db.Exec(t.Context(), "UPDATE agents SET model=$3 WHERE tenant_id=$1 AND id=$2", tid, agent, "rh.not-a-model"); e != nil {
+		t.Fatal(e)
+	}
+	if got := graphRun(400); errorCode(got) != "model_unavailable" || errorDetails(got)["nodeId"] != "vid" {
+		t.Fatal("a canvas refused for one node's unknown model", got)
+	}
+	if _, e := h.db.Exec(t.Context(), "UPDATE agents SET model=$3 WHERE tenant_id=$1 AND id=$2", tid, agent, "rh.kling-v3-pro"); e != nil {
+		t.Fatal(e)
+	}
+	// A model this workspace may not use is the node's own too; here every media node is refused, so the refusal
+	// names the first one the run reached.
+	h.a.cfg.MediaUnrestrictedWorkspaces = false
+	if got := graphRun(403); errorCode(got) != "model_not_allowed" || errorDetails(got)["nodeId"] != "img" {
+		t.Fatal("a canvas refused for a model not open to it", got)
+	}
+	h.a.cfg.MediaUnrestrictedWorkspaces = true
+
+	// The deployment's own refusals are no node's fault and name none: neither generation it does not run at all,
+	// nor a host that cannot store what a generation would make.
+	key := h.a.cfg.RunningHubAPIKey
+	h.a.cfg.RunningHubAPIKey = ""
+	if got := graphRun(503); errorCode(got) != "media_unavailable" || len(errorDetails(got)) != 0 {
+		t.Fatal("generation unconfigured named a node", got)
+	}
+	h.a.cfg.RunningHubAPIKey = key
+	dir := h.a.cfg.MediaDir
+	blocked := filepath.Join(t.TempDir(), "not-a-directory")
+	if e := os.WriteFile(blocked, []byte("x"), 0o600); e != nil {
+		t.Fatal(e)
+	}
+	h.a.cfg.MediaDir = blocked
+	if got := graphRun(503); errorCode(got) != "media_storage_unavailable" || len(errorDetails(got)) != 0 {
+		t.Fatal("unusable media storage named a node", got)
+	}
+	h.a.cfg.MediaDir = dir
+
+	// A node's own Send is a run of the node its caller named: its refusal carries no details, as before.
+	if got := h.mediaRun(t, c, tid, session, "a cat in a hat", 400); errorCode(got) != "media_params_invalid" || len(errorDetails(got)) != 0 {
+		t.Fatal("a node's own Send named a node back to its sender", got)
+	}
+	if submits, _ := rh.counts(); submits != 0 {
+		t.Fatal("a refused admission reached the provider", submits)
 	}
 }
 

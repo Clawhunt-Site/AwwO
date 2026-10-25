@@ -142,3 +142,49 @@ test('a call is refused before any work only by an HTTP 400, 413 or 422 to its o
   assert.ok(performance.now() - started >= 1900);
   assert.equal(endless.refusedBeforeAnyWork(), false);
 });
+
+test('a call failed with the status of its last request: its refusal, else an error frame that carries one', async () => {
+  const json = { 'content-type': 'application/json' };
+  const stream = { 'content-type': 'text/event-stream' };
+  const frame = error => `data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: ${JSON.stringify({ error })}\n\n`;
+  for (const [body, status, headers, failed] of [
+    ['{"error":{"type":"rate_limit_error"}}', 429, json, 429],
+    ['{"error":{"type":"overloaded"}}', 503, json, 503],
+    // With no body, and with one that is not JSON.
+    [null, 502, json, 502],
+    ['<html>Forbidden</html>', 403, { 'content-type': 'text/html' }, 403],
+    // An error frame inside a stream that answered 200: the status the Bedrock bridge carries in one, and none for a
+    // frame without it, or with one out of range or not a number.
+    [frame({ type: 'ServiceUnavailableException', status: 503 }), 200, stream, 503],
+    [frame({ type: 'ThrottlingException', status: 429 }), 200, stream, 429],
+    [frame({ type: 'api_error' }), 200, stream, undefined],
+    [frame({ type: 'odd', status: 200 }), 200, stream, undefined],
+    [frame({ type: 'odd', status: '503' }), 200, stream, undefined],
+    [frame('503'), 200, stream, undefined],
+    // An answer that finished, and one that is not a stream.
+    ['data: {"choices":[{"delta":{"content":"done"}}]}\n\ndata: [DONE]\n\n', 200, stream, undefined],
+    ['{"choices":[]}', 200, json, undefined],
+  ]) {
+    const observer = createProviderObserver('chat_completions', { fetchImpl: async () => new Response(body, { status, headers }) });
+    assert.equal(observer.failureStatus(), undefined);
+    const response = await observer.fetch('http://127.0.0.1/provider');
+    assert.equal(await response.text(), body ?? '');
+    assert.equal(observer.failureStatus(), failed, `${status} ${String(body).slice(0, 80)}`);
+  }
+  // Only the last request says: a refusal answered on its retry, an outage after a refusal, a refusal after a broken
+  // stream, and a request that never got an answer.
+  const answers = [
+    () => new Response('{}', { status: 429, headers: json }),
+    () => new Response('data: [DONE]\n\n', { headers: stream }),
+    () => new Response(frame({ status: 503 }), { headers: stream }),
+    () => new Response('{}', { status: 401, headers: json }),
+    () => { throw new TypeError('fetch failed'); },
+  ];
+  const expected = [429, undefined, 503, 401, undefined];
+  let call = 0;
+  const retried = createProviderObserver('chat_completions', { fetchImpl: async () => answers[call++]() });
+  for (const status of expected) {
+    try { await (await retried.fetch('http://127.0.0.1/provider')).text(); } catch { /* the last request gets no answer */ }
+    assert.equal(retried.failureStatus(), status);
+  }
+});

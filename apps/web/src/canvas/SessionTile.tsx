@@ -42,9 +42,8 @@ import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
-import { mediaComposerInfo, TileComposer } from './TileComposer';
+import { mediaComposerInfo, TileComposer, type TileComposerHandle } from './TileComposer';
 import type { UploadCounts } from './ComposerAttachments';
-import { joinAttachments, splitAttachments } from './attachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
 import { MediaWiringGuide } from './MediaWiringGuide';
@@ -350,10 +349,13 @@ export interface SessionTileProps {
   onToggleFocus?: (nodeId: string) => void;
   onConfigure?: (nodeId: string) => void;
   onDelete?: (nodeId: string) => void;
-  /** The document owner records edits and preserves undo/redo and run locks. */
+  /** The document owner records edits and preserves undo/redo and run locks. Without onPatchNode the card's changes come
+   *  here as whole nodes, each built on those made since its last render: an owner that refuses a change or rewrites one
+   *  (a result it makes stale) takes onPatchNode too, or a change before the next render would put back what it did. */
   onUpdateNode?: (node: CanvasNode) => void;
-  /** A part of the node this card changed (its inputs, its outputs, a result published by hand), which the document owner
-   *  applies to the node as its document holds it and records as onUpdateNode does. */
+  /** A change this card made to the node (its inputs, its outputs, a result published by hand, another conversation opened),
+   *  which the document owner applies to the node as its document holds it and records as onUpdateNode does. It calls
+   *  `change` at most once, before it returns: the card reads what the change made (the output form, for the drawer's edit). */
   onPatchNode?: (nodeId: string, change: (node: SessionNode) => SessionNode) => void;
   onRunNode?: (nodeId: string) => void;
   /** Models this node's chat can switch to, shown as a picker in its composer (a stable array per node kind). */
@@ -533,14 +535,19 @@ export const SessionTile = memo(function SessionTile({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
+  // The drafts as this box last changed them, also before that change is drawn (a file landing in the box, then a click).
+  const boxDrafts = useRef<Record<string, string>>({});
   const composerDraft = localDrafts[storeKey] ?? currentThread?.draft ?? '';
   const setComposerDraft = (value: string) => {
     if (viewOnlyRef.current) return;
+    boxDrafts.current[storeKey] = value;
     setLocalDrafts(previous => ({ ...previous, [storeKey]: value }));
     if (node.kind !== 'session' || !currentThread) return;
     if (onDraftChange) onDraftChange(nodeId, currentThread.id, value);
-    else onUpdateNode?.(updateNodeDraft(node, value));
+    else writeNode(current => updateNodeDraft(current, value, currentThread.id));
   };
+  // The starter prompts write into the message box through it, as typing does, so a file landing there is not lost.
+  const composerHandle = useRef<TileComposerHandle>(null);
   const lod: TileLod = compact ? 'card' : lodFor(frame, scale, focused);
   // Zoomed out past this, a compact card's 11px state chip is under 9px on screen: `data-zoom="far"` lets the
   // card hide the chips its dot, ring and border already show and give the row to the title.
@@ -837,47 +844,69 @@ export const SessionTile = memo(function SessionTile({
   const contract = sessionNode?.contract ?? emptyContract();
   const NodeIcon = node.kind === 'form' ? FileText : node.kind === 'assemble' ? Layers : node.kind === 'edit' ? Clapperboard : node.agentKind === 'coding' ? Code2 : node.agentKind === 'image' ? Image : node.agentKind === 'video' ? Video
     : node.agentKind === 'model3d' ? Box : node.agentKind === 'audio' ? Music : Bot;
-  // The inputs and the deliverables change their own part of the node, which the document owner applies to the node as
-  // its document holds it (onPatchNode), not to this render's copy. So two changes made before the next render (an
-  // input's file and an output's landing at once, as closed inputs go on uploading) put back neither what the other
-  // changed nor what the canvas cleared in between (a result an input change made stale, which would come back as if
-  // published by hand).
+  // The tile changes its node as the document holds it (onPatchNode), not this render's copy. So changes made before the
+  // next render (an input's file and an output's landing at once, as closed inputs go on uploading; a field added or a
+  // conversation opened as a file lands) put back neither what another changed nor what the canvas cleared in between (a
+  // result an input change made stale, which would come back as if published by hand). A host without onPatchNode takes
+  // whole nodes: there each change builds on those made since this render, until the render that draws the host's answer
+  // (one is asked for with each change, so a change the host refused, drawing nothing, is not built on after it).
+  const unrendered = useRef<SessionNode | null>(null);
+  const [, setWholeNodeWrites] = useState(0);
+  useLayoutEffect(() => { unrendered.current = null; });
   const writeNode = (change: (current: SessionNode) => SessionNode) => {
     if (node.kind !== 'session') return;
-    if (onPatchNode) onPatchNode(nodeId, change);
-    else onUpdateNode?.(change(node));
+    if (onPatchNode) { onPatchNode(nodeId, change); return; }
+    const next = change(unrendered.current ?? node);
+    unrendered.current = next;
+    onUpdateNode?.(next);
+    setWholeNodeWrites(count => count + 1);
   };
   // An edit of the inputs takes the delivery back as one of the drawer's form does (invalidateOutputs), so it starts or
-  // carries the same edit in progress (updateDeliverables, below): the drawer that opened by itself for that delivery
-  // stays open beside the inputs, at its share of the width, instead of closing under the reader's keystroke. It starts
-  // one only where there is a delivery to take back, and keeps the share only of a drawer shown when it starts (Configure,
-  // laid over the node at its own width, takes none). Its output form is this render's node's with the change applied,
-  // which an edit of the inputs leaves as it is, unless the drawer's form has set its edit since this render (an
-  // output's file landing at the same moment, first): that edit's form is the one the document holds, and it stays.
-  const updateFields = (fields: ContractField[]) => {
+  // carries the same edit in progress (changeOutputs, below): the drawer that opened by itself for that delivery stays
+  // open beside the inputs, at its share of the width, instead of closing under the reader's keystroke. It starts one only
+  // where there is a delivery to take back, and keeps the share only of a drawer shown when it starts (Configure, laid
+  // over the node at its own width, takes none). Its output form is this render's node's with the change applied, which
+  // an edit of the inputs leaves as it is, unless the drawer's form has set its edit since this render (an output's file
+  // landing at the same moment, first): that edit's form is the one the document holds, and it stays. The field's change
+  // itself is made to the inputs as the node holds them then (ContractFields' onChange).
+  const updateFields = (change: (fields: ContractField[]) => ContractField[]) => {
     if (viewOnlyRef.current || node.kind !== 'session' || readOnly) return;
-    const change = (current: SessionNode): SessionNode => ({ ...current, contract: { ...(current.contract ?? emptyContract()), inputs: fields } });
+    const changeNode = (current: SessionNode): SessionNode => {
+      const currentContract = current.contract ?? emptyContract();
+      return { ...current, contract: { ...currentContract, inputs: change(currentContract.inputs) } };
+    };
     if (currentThread && (editing || node.lastOutput)) {
-      const next = { form: outputFormKey(change(node)), thread: currentThread.id,
+      const next = { form: outputFormKey(changeNode(node)), thread: currentThread.id,
         share: editing ? editing.share : shownContent === 'delivery' && deliverablesOpen };
       setFormEdit(pending => pending !== formEdit && pending?.thread === next.thread ? pending : next);
     }
-    writeNode(change);
+    writeNode(changeNode);
   };
-  // What the deliverables change, against this render's node: their outputs, or a result published by hand. A change of
-  // the drawer's form (an edit of NodeDeliverables' fields, or the publication that ends them) also starts or carries the
-  // edit in progress, which keeps the drawer open while it has taken the delivery back (above), with the node it was made
-  // on, for a keystroke the canvas refuses.
+  // A change of the drawer's output form, made to the outputs as the node holds them then, starts or carries the edit in
+  // progress (it keeps the drawer open while it has taken the delivery back, above) with the form it made, and the node it
+  // was made on, for a keystroke the canvas refuses.
+  const changeOutputs = (change: (fields: ContractField[]) => ContractField[]) => {
+    if (node.kind !== 'session' || !currentThread) return;
+    const made: { form?: string } = {};
+    writeNode(current => {
+      const currentContract = current.contract ?? emptyContract();
+      const next = { ...current, contract: { ...currentContract, outputs: change(currentContract.outputs) } };
+      made.form = outputFormKey(next);
+      return next;
+    });
+    if (made.form !== undefined) {
+      setFormEdit({ form: made.form, thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery', base: node });
+    }
+  };
+  // What else the deliverables change, made from this render's node: a result published by hand, written alone. Nothing
+  // else comes this way: NodeDeliverables sends every change of its form to changeOutputs, which it is given whenever it is
+  // given this. The publication ends the edit in progress.
   const updateDeliverables = (next: CanvasNode) => {
     if (next.kind === 'session' && currentThread) {
       setFormEdit({ form: outputFormKey(next), thread: currentThread.id, share: editing ? editing.share : shownContent === 'delivery', base: node });
     }
     if (next.kind !== 'session' || node.kind !== 'session') { onUpdateNode?.(next); return; }
-    writeNode(current => ({
-      ...current,
-      ...(next.contract?.outputs !== node.contract?.outputs ? { contract: { ...(current.contract ?? emptyContract()), outputs: next.contract?.outputs ?? [] } } : {}),
-      ...(next.lastOutput !== node.lastOutput ? { lastOutput: next.lastOutput } : {}),
-    }));
+    if (next.lastOutput !== node.lastOutput) writeNode(current => ({ ...current, lastOutput: next.lastOutput }));
   };
   const changeThread = (id?: string) => {
     if (node.kind !== 'session' || busy) return;
@@ -886,8 +915,16 @@ export const SessionTile = memo(function SessionTile({
       return;
     }
     if (readOnly) return;
-    const withDraft = updateNodeDraft(node, composerDraft);
-    onUpdateNode?.(id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft));
+    // From the node as its document holds it (writeNode): this render's copy would put back what came after it, a file
+    // that landed in the inputs, a draft or preview the canvas wrote. The box's draft goes with the conversation the box
+    // showed, as the box last changed it (a file may have landed in it since this render); one it did not change stays as
+    // the document holds it.
+    const shownThread = currentThread?.id;
+    const boxDraft = Object.hasOwn(boxDrafts.current, storeKey) ? boxDrafts.current[storeKey] : undefined;
+    writeNode(current => {
+      const withDraft = boxDraft === undefined ? current : updateNodeDraft(current, boxDraft, shownThread);
+      return id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft);
+    });
   };
   const toggleDeliverables = () => {
     if (node.kind !== 'session') return;
@@ -901,7 +938,7 @@ export const SessionTile = memo(function SessionTile({
     // now); an open reaches it too, and once recorded the drawer's rule shows the drawer and the hold ends with that.
     if (!next) setDrawerHeld(false);
     if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
-    else onUpdateNode?.({ ...node, deliverablesOpen: next });
+    else writeNode(current => ({ ...current, deliverablesOpen: next }));
   };
   const editInputStructure = () => { setTemplateOpen(false); setInputSchemaOpen(true); setInputOpen(true); setInputsTakeColumn(true); };
   const editDeliverableForm = () => {
@@ -1149,13 +1186,13 @@ export const SessionTile = memo(function SessionTile({
                     <div className="awwo-node-empty" data-template={template?.id} data-media={!template && mediaKind ? mediaKind : undefined}>
                       {template ? <span className="awwo-node-empty-glyph"><AgentGlyph templateId={template.id} size={22} /></span> : null}
                       <strong>{template?.emptyTitle ?? (mediaKind ? t(MEDIA_EMPTY_TITLE[mediaKind]) : t('tile.startHere'))}</strong><span>{template?.emptyDescription ?? (mediaKind ? t('media.emptyDescription') : t(node.binding || initializeOnSend ? 'tile.startBound' : 'tile.startUnbound'))}</span>
-                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => { const parts = splitAttachments(composerDraft); setComposerDraft(joinAttachments(parts.body ? `${parts.body}\n\n${starter.prompt}` : starter.prompt, parts.attachments, locale)); }}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
+                      {expanded && template ? <div className="awwo-starter-prompts">{template.starterPrompts.map(starter => <button key={starter.label} type="button" disabled={readOnly} title={t('tile.addStarter')} onClick={() => composerHandle.current?.addPrompt(starter.prompt)}>{starter.label}<ChevronRight size={12} /></button>)}</div> : null}
                       {expanded && !template && mediaKind && !viewOnly ? <MediaWiringGuide kind={mediaKind} simple={simple} /> : null}
                     </div>
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
-                  {expanded ? <TileComposer deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
+                  {expanded ? <TileComposer ref={composerHandle} deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
                     attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
@@ -1167,7 +1204,7 @@ export const SessionTile = memo(function SessionTile({
                 </div>
               </div>
               {expanded && (deliverablesOpen || configurationPanel) ? <section className="awwo-node-delivery-drawer" role="region" aria-label={t(configurationPanel ? 'tile.nodeConfiguration' : 'tile.deliverables')}>
-                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode ? updateDeliverables : undefined}
+                {configurationPanel || <><header><span><FileText size={14} />{t('tile.deliverables')}</span>{onOpenStudio && node.lastOutput ? <button type="button" className="awwo-drawer-studio" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={14} /></button> : null}<button type="button" aria-label={t('tile.closeDeliverables')} onClick={toggleDeliverables}><X size={15} /></button></header><NodeDeliverables key={storeKey} node={node} readOnly={readOnly} onUpdateNode={onUpdateNode ? updateDeliverables : undefined} onChangeOutputs={onUpdateNode ? changeOutputs : undefined}
                   editorOpen={deliverablesEditorOpen}
                   editorRequest={deliverablesEditorRequest}
                   canvasEntries={canvasEntries}

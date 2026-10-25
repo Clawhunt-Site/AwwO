@@ -56,9 +56,14 @@ type invocationFacts struct {
 	// Sent is when the API sent the call to its worker, before anything it records meanwhile: the time a size refusal
 	// must come within counts from it (sinceSent, sizeRefusal).
 	Sent time.Time
-	// HiddenTokens is the reasoning a run was told about but never streamed (a planner's), and WorkerCode the
-	// worker's own failure code: what settles an unreported or refused call's charge.
+	// HiddenTokens is how much reasoning a run was told about but never streamed, in the counted characters a
+	// planner run reports; Reasoned is whether any run's model was reported reasoning at all, which a node run
+	// reports without a count and a planner run can too (a reasoning model's first word is that it has begun,
+	// before a character of it exists). The two are deliberately separate: what proves the provider did work is
+	// not a magnitude anything may be priced from. WorkerCode is the worker's own failure code. Together they
+	// settle an unreported or refused call's charge.
 	HiddenTokens int64
+	Reasoned     bool
 	WorkerCode   string
 }
 
@@ -352,7 +357,7 @@ func (a *App) settleInvocation(ctx context.Context, tx pgx.Tx, tid, id, status, 
 		// A call reached the provider once its stream began, even if it was cancelled while the model reasoned.
 		reached := f.Terminal || f.OutputBytes > 0 || !f.Streamed.IsZero()
 		unseen := f.unseen(time.Now())
-		n := creditCharge(*reserve, costStatus == "not_incurred", refusedBeforeOutput(code, f.WorkerCode, f.OutputBytes, unseen), reached, u, price, f.InputBytes, f.OutputBytes, f.HiddenTokens, unseen)
+		n := creditCharge(*reserve, costStatus == "not_incurred", refusedBeforeOutput(code, f.WorkerCode, f.OutputBytes, unseen), reached, u, price, f.InputBytes, f.OutputBytes, f.HiddenTokens, f.Reasoned, unseen)
 		charge = &n
 	}
 	tm := f.Timing

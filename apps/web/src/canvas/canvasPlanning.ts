@@ -437,11 +437,13 @@ function malformedPlan(error: unknown): boolean {
 
 /** The codes of a plan run that may have been cut short by its model service: its call failed for a reason the host
  * cannot name (runtime_failed), the service could not be reached (provider_unavailable), or the worker's stream ended
- * without an answer (runtime_stream_ended). Pi, which runs every hosted plan, reports every model failure but a size
- * refusal as MODEL_ERROR (runner.mjs), which is runtime_failed: a stream the service broke off, but also a throttle, a
- * content filter or a refused credential. So one is asked for again only from a run that had been answering
- * (PROVIDER_RETRY_AFTER_MS, PROVIDER_RETRY_BEFORE_MS). A run whose model wrote its whole output budget is output_limit
- * where its worker reported its usage (runs.go plannerSpentOutput), which is not asked for again. */
+ * without an answer (runtime_stream_ended). Pi, which runs every hosted plan, reported every model failure but a size
+ * refusal as MODEL_ERROR (runtime_failed) until its release of 2026-10-24, which names a throttle, a content filter, a
+ * refused credential and a stop at the output cap (pi-task.mjs failureCode), none of them asked for again; an outage
+ * (provider_unavailable) may still be a refusal that came at once. So one is asked for again only from a run that had
+ * been answering (PROVIDER_RETRY_AFTER_MS, PROVIDER_RETRY_BEFORE_MS). A run whose model wrote its whole output budget
+ * is output_limit (MODEL_OUTPUT_LIMIT, or its reported usage: runs.go plannerSpentOutput), which is not asked for
+ * again. */
 const PROVIDER_FAULTS: ReadonlySet<string> = new Set(['runtime_failed', 'provider_unavailable', 'runtime_stream_ended']);
 function providerFault(error: unknown): boolean {
   return error instanceof PlanFailure && PROVIDER_FAULTS.has(error.code);

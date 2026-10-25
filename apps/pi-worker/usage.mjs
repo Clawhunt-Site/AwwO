@@ -2,6 +2,7 @@
 export const TOKEN_FIELDS = Object.freeze(['inputTokens', 'outputTokens', 'cachedInputTokens', 'cacheWriteTokens', 'reasoningTokens', 'providerTotalTokens', 'computedTotalTokens']);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
+const failureStatus = value => Number.isInteger(value) && value >= 400 && value <= 599;
 export function emptyUsage(status = 'unavailable', reason = 'provider_missing') {
   return { status, source: 'none', reason, ...Object.fromEntries(TOKEN_FIELDS.map(key => [key, null])) };
 }
@@ -66,6 +67,9 @@ export function createProviderObserver(protocol, { now = () => performance.now()
   // The call's requests (the agent library retries LLM Gate once), its last answer if that was a refusal (its status,
   // and whether its body was JSON that carries no work), and the reads of refusal bodies not yet done.
   let requests = 0, refusal, unsettled = false;
+  // The status the call's last request failed with, where the provider gave one (failureStatus): its answer's, when that
+  // was a refusal, or the one an error frame inside its stream carried.
+  let refusedStatus, frameStatus;
   const reads = [];
   function consume(value) {
     if (!object(value)) return;
@@ -85,6 +89,9 @@ export function createProviderObserver(protocol, { now = () => performance.now()
     } else {
       if (value.choices?.some(choice => typeof choice.delta?.content === 'string' && choice.delta.content.length)) first ??= now();
       if (object(value.usage)) raw = value.usage;
+      // An error frame inside a stream that answered 200, which the OpenAI SDKs raise with no status of their own: the
+      // status it carries, as the Bedrock bridge's frame does for an AWS failure (bedrock-bridge.ts errorBody).
+      if (object(value.error) && failureStatus(value.error.status)) frameStatus = value.error.status;
     }
   }
   // A refusal's body (any type: the SDK reads any as JSON it can) is read to its end beside the SDK, through a tee whose
@@ -107,6 +114,7 @@ export function createProviderObserver(protocol, { now = () => performance.now()
     return new Response(theirs, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   function observe(response) {
+    refusedStatus = response.ok ? undefined : response.status;
     if (!response.ok && response.body) { ended ??= now(); return readRefusal(response); }
     refusal = undefined;
     if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) { ended ??= now(); return response; }
@@ -163,6 +171,7 @@ export function createProviderObserver(protocol, { now = () => performance.now()
   return {
     async fetch(input, init) {
       requests += 1;
+      refusedStatus = frameStatus = undefined;
       if (started === undefined) {
         started = now();
         setupMs = typeof acceptedAtNs === 'string' && /^[0-9]{1,30}$/.test(acceptedAtNs) ? Math.max(0, Number((process.hrtime.bigint() - BigInt(acceptedAtNs)) / 1_000_000n)) : Math.max(0, Math.floor(started - born));
@@ -176,6 +185,12 @@ export function createProviderObserver(protocol, { now = () => performance.now()
     // work may come before a refusal inside one), in a body that was JSON and carries no work. Read after settled().
     refusedBeforeAnyWork() {
       return requests === 1 && !unsettled && refusal?.clean === true && [400, 413, 422].includes(refusal.status);
+    },
+    // The status the provider failed the call's last request with, where it gave one: the HTTP status of its refusal,
+    // else the one an error frame inside its stream carried. Undefined for a request that ended any other way (a stream
+    // that broke off, a transport failure), and for one that answered, unless such a frame came.
+    failureStatus() {
+      return failureStatus(refusedStatus) ? refusedStatus : frameStatus;
     },
     // Waits for every refusal body's read (readRefusal), at most 2 s: one still unread then cannot say it carries no work.
     async settled() {
