@@ -270,7 +270,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 ## 本机版连接（云端中转）
 
-AwwO 本地版可以让线上站点替它调用线上提供的模型，每次调用计入一个线上工作区（`relay.go`、`relay_call.go`、`relay_completion.go`、`relay_limits.go`）。默认关闭：`AWWO_RELAY=on` 开启，并须设置 `AWWO_RELAY_WORKER_URL`（本机回环上的 Pi 执行器：它的目录就是提供的模型，`/health` 报告 `computerBedrock` 时才提供 Bedrock 模型，报告的 `maxConcurrency` 是中转同时运行的调用数，建议 16）、`AWWO_RELAY_WORKER_TOKEN`（≥ 32 个字符）和 `AWWO_TRUSTED_PROXY_CIDRS`（API 前面的代理；不设时所有调用者共用代理的地址，按地址计的限制会落到所有人头上）。本地版与个人 Key 模式下拒绝启动。
+AwwO 本地版可以让线上站点替它调用线上提供的模型，每次调用计入一个线上工作区（`relay.go`、`relay_call.go`、`relay_completion.go`、`relay_limits.go`）。默认关闭：`AWWO_RELAY=on` 开启，并须设置 `AWWO_RELAY_WORKER_URL`（本机回环上的 Pi 执行器：中转只提供它目录里的 Bedrock 模型，且只在 `/health` 报告 `computerBedrock` 时提供；Pi 执行器自己的默认模型总在目录第一位、不会是 Bedrock 模型，中转从不提供它，与 ClawHunt 隐私政策第 08 条说的一致，报告的 `maxConcurrency` 是中转同时运行的调用数，建议 16）、`AWWO_RELAY_WORKER_TOKEN`（≥ 32 个字符）和 `AWWO_TRUSTED_PROXY_CIDRS`（API 前面的代理；不设时所有调用者共用代理的地址，按地址计的限制会落到所有人头上）。本地版与个人 Key 模式下拒绝启动。
 
 | 方法与路径（省略 /api/v1） | 请求 | 说明 |
 | --- | --- | --- |

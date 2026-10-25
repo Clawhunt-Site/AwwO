@@ -24,7 +24,10 @@ type fakeRelayWorker struct {
 	capacity atomic.Int32
 }
 
+// relayHealth is a Pi worker's health as the relay worker's: its own default model first (an LLM Gate one, as a Pi
+// worker's default always is), then its Bedrock models.
 const relayHealth = `{"ready":true,"computerBedrock":true,"models":[
+	{"id":"qwen3.8-27b-p6","name":"Qwen 3.8","provider":"llmgate","protocol":"chat_completions","contextWindow":131072,"maxOutputTokens":16384},
 	{"id":"bedrock.claude-opus-5-5","name":"Claude Opus 5.5","provider":"bedrock","providerModel":"global.anthropic.claude-opus-5-5","protocol":"chat_completions","contextWindow":200000,"maxOutputTokens":32000,"proseBytesPerToken":3.4},
 	{"id":"bedrock.glm-5","name":"GLM-5","provider":"bedrock","contextWindow":128000,"maxOutputTokens":16000},
 	{"id":"broken","provider":"bedrock","contextWindow":1000,"maxOutputTokens":10}]}`
@@ -370,6 +373,9 @@ func TestPostgresRelayListsTheModelsTheWorkspaceMayUse(t *testing.T) {
 	if strings.Contains(body, "global.anthropic") {
 		t.Fatal("the provider's own names stay here", body)
 	}
+	if strings.Contains(body, "qwen") {
+		t.Fatal("the worker's own default model, which is not a Bedrock one, offered", body)
+	}
 	execSQL(t, h, "UPDATE tenants SET allowed_models='{bedrock.glm-5}' WHERE id=$1", tid)
 	_, body = sendRelay(t, h, key, "GET", relayModelsRoute, "")
 	if !strings.Contains(body, "bedrock.glm-5") || strings.Contains(body, "opus") {
@@ -442,6 +448,8 @@ func TestPostgresRelayedCallRunsAsOneOfTheWorkspacesCalls(t *testing.T) {
 		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"there"}]}`, "invalid_request", 400},
 		{`{"model":"nope","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"broken","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
+		// The worker's own default model: not a Bedrock one, so never sent on.
+		{`{"model":"qwen3.8-27b-p6","stream":true,"messages":[{"role":"user","content":"hi"}]}`, "model_not_found", 404},
 		{`{"model":"bedrock.glm-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", 120000) + `"}]}`, "context_length_exceeded", 400},
 		{`{"model":"bedrock.claude-opus-5-5","stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", relayBodyLimit) + `"}]}`, "maximum context length: its request is larger than 504 KiB", 413},
 	} {
