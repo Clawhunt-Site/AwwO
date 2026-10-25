@@ -488,9 +488,10 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 	for body, want := range map[string]bool{
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:413:context_length_exceeded","detail":"before-output"}}`: true,
-		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded","detail":"before-output"}}`: true,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"bedrock:400:context_length_exceeded"}}`:                           true,
-		// Inside a 200 it may follow work, whatever the worker says.
+		// A 422 is another refusal, as in the workers, whatever an older worker labelled it (owner 2026-10-25); and inside
+		// a 200 it may follow work, whatever the worker says.
+		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:422:context_length_exceeded","detail":"before-output"}}`: false,
 		`{"error":{"code":"PROVIDER_ERROR","reason":"provider:200:context_length_exceeded","detail":"before-output"}}`: false,
 		// A provider's label without the worker's word that its body carries no work is a refusal beside work, or an
 		// older worker's label of one.
@@ -512,6 +513,13 @@ func TestSizeRefusalIsOnlyAProviderRefusalBeforeAnyWork(t *testing.T) {
 	}
 	if computerSizeRefusal(413, []byte(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:400:context_length_exceeded","detail":"before-output"}}`)) {
 		t.Error("a status other than the worker's 502 for a provider's refusal")
+	}
+	// Of every status from 400 to 599, only a 400's or a 413's label is a provider's size refusal, as in the workers.
+	for status := 400; status <= 599; status++ {
+		body := fmt.Sprintf(`{"error":{"code":"PROVIDER_ERROR","reason":"provider:%d:context_length_exceeded","detail":"before-output"}}`, status)
+		if got := computerSizeRefusal(502, []byte(body)); got != (status == 400 || status == 413) {
+			t.Errorf("computerSizeRefusal(502, %s) = %v", body, got)
+		}
 	}
 }
 

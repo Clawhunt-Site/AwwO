@@ -1132,7 +1132,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			// quickRefusal after its model had produced reasoning settled at nothing, which is what this closes
 			// (owner 2026-10-24: 「计费缺口按你的建议改」). For sizeRefusal it is defence in depth rather than a
 			// live gap — no shipped worker reports a context limit once reasoning has begun (pi-task.mjs gates on
-			// !reasoningStarted, and the Python worker's on a 400/413/422 before any stream) — so it guards the
+			// !reasoningStarted, and the Python worker's on a 400/413 before any stream) — so it guards the
 			// combination against a worker that one day could.
 			//
 			// Only above zero, which is the worker's own distinction: its contract is "null for nothing, 0 when it
