@@ -557,3 +557,34 @@ describe('an attachment chip’s own ✕', () => {
     expect(document.activeElement).toBe(within(drawer).getByLabelText('素材的值'));
   });
 });
+
+// Where no reopening control is drawn, the hand-off puts the focus in the message box — and an Enter held down on the
+// close button would then send the draft waiting there. Found by Codex reviewing this re-derivation: before the
+// hand-off the focus fell to the page's body, where the repeats did nothing, so handing it on introduced the hazard.
+// What this asserts is the send, not the event's defaultPrevented: the composer itself prevents the default to send,
+// so a refused repeat and a sent draft both report false.
+it('refuses an Enter held down on a part closed with no control to reopen it, so no draft is sent', () => {
+  // refuseHeldEnter keeps its guard in module state, released by a keyup, another key or the window losing the focus.
+  // An earlier test here can leave it armed, which would refuse this test's repeat and hide the very regression it
+  // pins, so release it first. (A reader's own keyup does this in a browser.)
+  fireEvent.keyUp(document.body, { key: 'Enter', code: 'Enter' });
+  const onSend = vi.fn();
+  const node = templated();
+  const view = render(<TileHost initial={node} onSend={onSend} />);
+  fireEvent.click(screen.getByRole('button', { name: '模板指引', exact: true }));
+  fireEvent.change(composerBox(), { target: { value: '还没写完' } });
+  // The reader switches to the simple view with the guide open: its toggle in the chat heading is no longer drawn.
+  view.rerender(<TileHost initial={node} mode="simple" onSend={onSend} />);
+  const guide = screen.getByRole('region', { name: '模板指引', exact: true });
+  press(within(guide).getByRole('button', { name: '收起模板指引', exact: true }));
+  expect(screen.queryByRole('region', { name: '模板指引', exact: true })).toBeNull();
+  // Nothing is left to reopen it, so the focus goes to the box holding the unfinished draft.
+  expect(document.activeElement).toBe(composerBox());
+  expect(onSend).not.toHaveBeenCalled();
+  fireEvent.keyDown(composerBox(), { key: 'Enter', code: 'Enter', repeat: true });
+  expect(onSend).not.toHaveBeenCalled();
+  // A key let go and pressed again is a fresh press, not a repeat, and is not refused.
+  fireEvent.keyUp(composerBox(), { key: 'Enter', code: 'Enter' });
+  fireEvent.keyDown(composerBox(), { key: 'Enter', code: 'Enter' });
+  expect(onSend).toHaveBeenCalledTimes(1);
+});

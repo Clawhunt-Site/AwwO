@@ -56,6 +56,7 @@ import { EditTileBody, editPreview } from './EditTileBody';
 import type { AssembleInputView } from './assembleNode';
 import { ReworkFindingsNote } from './ReworkFindingsNote';
 import { NodeBrief, NodeFailure } from './NodeBrief';
+import { refuseHeldEnter } from './heldEnter';
 import { useShortColumn } from './useShortColumn';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
@@ -852,6 +853,10 @@ export const SessionTile = memo(function SessionTile({
    * A control that is not drawn takes no focus (the conversation gives way to the opened inputs, awwo-node.css), which
    * is why each candidate is tried rather than the first one trusted. Nothing scrolls for it: the canvas root clips, so
    * a scroll would shift the canvas under the reader.
+   *
+   * Each caller arms refuseHeldEnter itself rather than this doing it, since the sessions pair hands over from a layout
+   * effect that has no press to read. Arming matters most where no reopening control is drawn (the simple view): the
+   * focus then goes to the message box, and an Enter held down on the close button would send the draft waiting there.
    */
   const focusFrom = (closing: Element | null, ...first: (HTMLElement | null)[]) => {
     const panel = chatRef.current?.querySelector('.awwo-node-panel--conversation');
@@ -932,8 +937,11 @@ export const SessionTile = memo(function SessionTile({
   };
   // The drawer's own ✕, which toggleDeliverables alone would close from under the focus. Also reached on a drawer an
   // edit in progress holds open.
-  const closeDeliverables = () => {
-    if (deliveryDrawerRef.current?.contains(document.activeElement)) focusFrom(deliveryDrawerRef.current, deliverablesToggleRef.current);
+  const closeDeliverables = (event: { detail: number }) => {
+    if (deliveryDrawerRef.current?.contains(document.activeElement)) {
+      focusFrom(deliveryDrawerRef.current, deliverablesToggleRef.current);
+      refuseHeldEnter(event);
+    }
     toggleDeliverables();
   };
   // What else the deliverables change, made from this render's node: a result published by hand, written alone. Nothing
@@ -967,20 +975,25 @@ export const SessionTile = memo(function SessionTile({
   // Each of these moves the focus before closing, and only when the part actually holds it: a click that focused
   // nothing, as Safari leaves it, moves nothing. The guide's 编辑 buttons and a drawer that closes by itself are not
   // these — nothing of theirs unmounts under the focus.
-  const closeTemplate = () => {
-    if (templateGuideRef.current?.contains(document.activeElement)) focusFrom(templateGuideRef.current, templateToggleRef.current);
+  const closeTemplate = (event: { detail: number }) => {
+    if (templateGuideRef.current?.contains(document.activeElement)) {
+      focusFrom(templateGuideRef.current, templateToggleRef.current);
+      refuseHeldEnter(event);
+    }
     setTemplateOpen(false);
   };
   // The sessions list and the chat heading's 展开 Session 列表 take each other's place, so neither can hand the focus
   // on before closing: the control to give it to is drawn by the same commit that removes the other. Each notes that
   // it held the focus, and the layout effect below hands it over once the replacement exists.
   const sessionsFocusMoves = useRef(false);
-  const collapseSessions = () => {
+  const collapseSessions = (event: { detail: number }) => {
     sessionsFocusMoves.current = Boolean(sessionsListRef.current?.contains(document.activeElement));
+    if (sessionsFocusMoves.current) refuseHeldEnter(event);
     setSessionsOpen(false);
   };
-  const expandSessions = () => {
+  const expandSessions = (event: { detail: number }) => {
     sessionsFocusMoves.current = document.activeElement === sessionsToggleRef.current;
+    if (sessionsFocusMoves.current) refuseHeldEnter(event);
     setSessionsOpen(true);
   };
   useLayoutEffect(() => {
@@ -1017,8 +1030,11 @@ export const SessionTile = memo(function SessionTile({
   // that takes it (the opened inputs hide the conversation's own, and a hidden control takes no focus), else to the
   // node's own menu button. Only a focus inside the drawer moves (a click that focused nothing, as in Safari, leaves it
   // where it was), and nothing scrolls for it (the canvas root clips, so a scroll would shift it).
-  const closeInput = () => {
-    if (inputDrawerRef.current?.contains(document.activeElement)) focusFrom(inputDrawerRef.current, inputToggleRef.current, sessionInputRef.current);
+  const closeInput = (event: { detail: number }) => {
+    if (inputDrawerRef.current?.contains(document.activeElement)) {
+      focusFrom(inputDrawerRef.current, inputToggleRef.current, sessionInputRef.current);
+      refuseHeldEnter(event);
+    }
     setInputOpen(false); setInputSchemaOpen(false);
   };
   // The opened inputs take the column while no run is going (has-inputs): the replies wait, and a rework note's findings
