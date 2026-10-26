@@ -63,7 +63,7 @@ payload 的组装与 Windows 的相同（执行器的依赖按镜像的方式安
 
 workers 的 npm 包许可证与 Windows 的共用 `third_party/npm-packages`；只为一种机器构建的包（esbuild 的）记着它的机器（`PROVENANCE.json` 的 `machine`），各自的 `--check`（`node scripts/awwo-npm-licences.mjs --check`，以及 `--machine darwin-arm64 --from <在别处为 Mac 安装的 workers>`）不把另一种机器的包当作多余。
 
-应用的签名是 ad-hoc 的，没有 Apple Developer ID 签名与公证：从网上下载后第一次打开，macOS 会阻止它，需要在「系统设置 → 隐私与安全性」中选择「仍要打开」。在 Mac 上构建、安装和验收它的步骤见 [awwo-local-mac-acceptance.md](awwo-local-mac-acceptance.md)。
+应用的签名是 ad-hoc 的，没有 Apple Developer ID 签名与公证：从网上下载后第一次打开，macOS 会阻止它，需要在「系统设置 → 隐私与安全性」中选择「仍要打开」。在 Mac 上构建、安装和验收它的步骤见 awwo-local-mac-acceptance.md。
 
 ## 从代码库运行
 

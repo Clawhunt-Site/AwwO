@@ -1,8 +1,8 @@
 # AwwO Go 多运行时多租户 SaaS 架构
 
-初始设计：2026-09-07；节点团队、后台整图与节点初始化更新：2026-09-08。初始基线为 Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）；节点初始化工作分支为 `codex/awwo-node-setup-20260908`，基于 `d0fb9a7`。本文记录实现契约，本轮最终 SHA 与实测结果由独立验收报告记录；此前结果见 [本地验收](awwo-saas-verification.md)及[真实模型验收](awwo-real-provider-acceptance-20260908.md)，不自动覆盖新增能力。
+初始设计：2026-09-07；节点团队、后台整图与节点初始化更新：2026-09-08。初始基线为 Forgejo `ClawHunt-Store/AwwO` 的 `main@6e1dc158a79e2f18c7bdf82610a353883b883f31`（0.3.0）；节点初始化工作分支为 `codex/awwo-node-setup-20260908`，基于 `d0fb9a7`。本文记录实现契约，本轮最终 SHA 与实测结果由独立验收报告记录；此前结果见 本地验收及真实模型验收，不自动覆盖新增能力。
 
-执行约束见 [设计与开发规范](awwo-saas-design-standards.md)；原页面功能、接口映射、实际覆盖与待补差距见 [前端逐项对接清单](awwo-saas-frontend-contract.md)。后端交付以现有前端的操作和数据契约为验收依据。
+执行约束见 设计与开发规范；原页面功能、接口映射、实际覆盖与待补差距见 [前端逐项对接清单](awwo-saas-frontend-contract.md)。后端交付以现有前端的操作和数据契约为验收依据。
 
 ## 1. 产品范围与现状
 

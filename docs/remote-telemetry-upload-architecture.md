@@ -4,13 +4,13 @@
 >
 > **范围**：在装机端/CLI 端把本地采集的诊断与审计数据**主动上报**到运营方自建的远程收集服务器，供运营集中排查错误、优化数据。
 >
-> **本文是 [`observability-diagnostics-roadmap.md`](observability-diagnostics-roadmap.md) 的"远程上报"扩展分支。** 该路线图的本地采集/落盘/导出地基是本设计的数据来源；本设计在其之上新增"上报通道 + 远程 server"。
+> **本文是 `observability-diagnostics-roadmap.md` 的"远程上报"扩展分支。** 该路线图的本地采集/落盘/导出地基是本设计的数据来源；本设计在其之上新增"上报通道 + 远程 server"。
 
 ---
 
 ## 0. ⚠️ 铁律变更声明（业主拍板，必须留痕）
 
-本设计**有意推翻**以下两条原先由业主拍板、写入 [`CLAUDE.md`](../CLAUDE.md) 与 [`observability-diagnostics-roadmap.md`](observability-diagnostics-roadmap.md) §0/§3 的硬约束：
+本设计**有意推翻**以下两条原先由业主拍板、写入 `CLAUDE.md` 与 `observability-diagnostics-roadmap.md` §0/§3 的硬约束：
 
 | 原铁律 | 出处 | 本设计的变更 |
 |---|---|---|

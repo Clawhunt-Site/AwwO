@@ -342,7 +342,7 @@ def test_v1_developer_submission_contract_uploads_artifact_and_returns_sanitized
     assert payload["artifact_uploaded"] is True
     joined = json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in joined
-    assert "/Users/leongong" not in joined
+    assert "/Users/dev-user" not in joined
     assert signing_key not in joined
     assert "SUPERCLAW_PLUGIN_SIGNING_PRIVATE_KEY" not in joined
 
@@ -517,7 +517,7 @@ def test_v1_capability_review_submission_accepts_devtool_contract_without_auto_a
     assert rejected.status_code == 400
     assert "auto-approve" in rejected.json()["detail"]
     assert str(tmp_path) not in joined
-    assert "/Users/leongong" not in joined
+    assert "/Users/dev-user" not in joined
     assert "private_key" not in joined
 
 
@@ -560,7 +560,7 @@ def test_api_admin_capability_review_publishes_sync_and_download_ref(tmp_path: P
     assert download.json()["download_url"] == "superclaw-local://capabilities/skill/skill.release-notes/versions/0.2.0/artifact"
     joined = json.dumps({"reviewed": reviewed.json(), "sync": sync.json(), "download": download.json()}, sort_keys=True)
     assert str(tmp_path) not in joined
-    assert "/Users/leongong" not in joined
+    assert "/Users/dev-user" not in joined
     assert "private_key" not in joined
 
     revoked = client.post(
@@ -715,7 +715,7 @@ def test_v1_clawhunt_ingestion_contract_stages_reusable_delivery_without_path_le
     assert payload["requires_signing"] is True
     joined = json.dumps(payload, sort_keys=True)
     assert str(tmp_path) not in joined
-    assert "/Users/leongong" not in joined
+    assert "/Users/dev-user" not in joined
     assert "SUPERCLAW_PLUGIN_ROOT_PUBLIC_KEY" not in joined
     job_record = next((cloud_root / "clawhunt-ingestions" / "jobs").glob("ing_*.json"))
     assert json.loads(job_record.read_text(encoding="utf-8"))["package_ref"] == payload["package_ref"]
@@ -1053,14 +1053,14 @@ def test_v1_evidence_upload_accepts_summary_and_rejects_raw_leakage(tmp_path: Pa
     accepted = client.post("/v1/evidence/plugin-invocations", json={"summary": safe_summary})
     rejected = client.post(
         "/v1/evidence/plugin-invocations",
-        json={"summary": {**safe_summary, "output": "raw workspace /Users/leongong/Documents/superClaw ghp_abcdefghijklmnop"}},
+        json={"summary": {**safe_summary, "output": "raw workspace /Users/dev-user/Documents/superClaw ghp_abcdefghijklmnop"}},
     )
 
     assert accepted.status_code == 200
     assert accepted.json()["ok"] is True
     saved = next((cloud_root / "evidence").glob("*.json")).read_text(encoding="utf-8")
     assert "output_digest" in saved
-    assert "/Users/leongong" not in saved
+    assert "/Users/dev-user" not in saved
     assert rejected.status_code == 400
     assert "raw output" in rejected.json()["detail"]
 

@@ -102,7 +102,7 @@ python scripts/bedrock-catalog-check.py --region us-east-1 --profile <aws-profil
       "Resource": [
         "arn:aws:bedrock:*::foundation-model/*",
         "arn:aws:bedrock:::foundation-model/*",
-        "arn:aws:bedrock:us-east-1:563688183799:inference-profile/*"
+        "arn:aws:bedrock:us-east-1:123456789012:inference-profile/*"
       ]
     },
     {

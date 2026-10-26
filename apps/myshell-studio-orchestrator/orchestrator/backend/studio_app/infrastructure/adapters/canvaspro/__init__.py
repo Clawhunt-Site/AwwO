@@ -1,1 +1,0 @@
-"""AI CanvasPro infrastructure adapter."""

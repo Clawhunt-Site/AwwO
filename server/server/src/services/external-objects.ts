@@ -356,15 +356,12 @@ export function externalObjectService(
     resolvers?: ExternalObjectResolver[];
     pluginWorkerManager?: PluginWorkerManager;
     github?: GitHubExternalObjectProviderOptions | false;
-    enabled?: boolean | (() => boolean | Promise<boolean>);
+    enabled?: boolean | ((connection: Db) => boolean | Promise<boolean>);
   } = {},
 ) {
   const githubProvider = opts.github === false ? null : createGitHubExternalObjectProvider(db, opts.github);
-  const pluginProviderDetector = opts.pluginWorkerManager
-    ? createPluginProviderDetector(db, opts.pluginWorkerManager)
-    : null;
-  const detectorRegistry = createExternalObjectDetectorRegistry([
-    ...(pluginProviderDetector ? [pluginProviderDetector] : []),
+  const detectorsFor = (connection: Db) => createExternalObjectDetectorRegistry([
+    ...(opts.pluginWorkerManager ? [createPluginProviderDetector(connection, opts.pluginWorkerManager)] : []),
     ...(opts.detectors ?? []),
     ...(githubProvider ? [githubProvider.detector] : []),
   ]);
@@ -373,8 +370,8 @@ export function externalObjectService(
     ...(githubProvider?.resolvers ?? []),
   ]);
 
-  async function isEnabled() {
-    if (typeof opts.enabled === "function") return await opts.enabled();
+  async function isEnabled(connection: Db = db) {
+    if (typeof opts.enabled === "function") return await opts.enabled(connection);
     return opts.enabled ?? true;
   }
 
@@ -448,7 +445,7 @@ export function externalObjectService(
     await dbOrTx.delete(externalObjectMentions).where(sourceWhere(input));
     if (urls.length === 0) return;
 
-    const detections = await detectorRegistry.detect({
+    const detections = await detectorsFor(dbOrTx).detect({
       companyId: input.companyId,
       urls,
       sourceContext: input,
@@ -488,7 +485,7 @@ export function externalObjectService(
   }
 
   async function syncIssue(issueId: string, dbOrTx: any = db) {
-    if (!(await isEnabled())) return;
+    if (!(await isEnabled(dbOrTx))) return;
     const runSync = async (tx: any) => {
       const issue = await issueById(issueId, tx);
       if (!issue) throw notFound("Issue not found");
@@ -516,7 +513,8 @@ export function externalObjectService(
 
   async function syncComment(commentId: string, dbOrTx: any = db) {
     const runSync = async (tx: any) => {
-      if (!(await isEnabled())) return;
+      // PGlite has one connection: a root query while tx is held deadlocks.
+      if (!(await isEnabled(tx))) return;
       const comment = await tx
         .select({
           id: issueComments.id,
@@ -548,7 +546,8 @@ export function externalObjectService(
 
   async function syncDocument(documentId: string, dbOrTx: any = db) {
     const runSync = async (tx: any) => {
-      if (!(await isEnabled())) return;
+      // PGlite has one connection: a root query while tx is held deadlocks.
+      if (!(await isEnabled(tx))) return;
       const document = await tx
         .select({
           documentId: documents.id,

@@ -110,6 +110,16 @@ _RUNTIME_CONFIG_SPECS = {
     "semantic_skill_autotrigger": RuntimeConfigSpec("semantic_skill_autotrigger", "shell", "Let the chat agent semantically discover and apply a relevant native skill without an explicit @skill (default on). The available-skill catalog it sees is built fail-closed (only real registered skills) and bounded; turn off to require explicit @skill.", default="true", ui_section="advanced"),
     "CLAWHUNT_BASE_URL": RuntimeConfigSpec("CLAWHUNT_BASE_URL", "clawhunt", "Base URL for ClawHunt API requests. Resolved per-environment from APP_ENV (staging/production); set this only to override the built-in default (e.g. point a local dev build at http://127.0.0.1:8787).", default=None, ui_section="basic"),
     "SUPERCLAW_CODEX_EXECUTABLE": RuntimeConfigSpec("SUPERCLAW_CODEX_EXECUTABLE", "backend", "Path to the local Codex executable.", ui_section="basic"),
+    "SUPERCLAW_CANVAS_PLANNER_PROVIDER": RuntimeConfigSpec(
+        "SUPERCLAW_CANVAS_PLANNER_PROVIDER", "backend",
+        "Canvas planning provider. Unset keeps the environment default (disabled in production/staging). Restart the desktop after changing this value.",
+        choices=("disabled", "codex", "openai"),
+    ),
+    "SUPERCLAW_CANVAS_PLANNER_CLI_PATH": RuntimeConfigSpec(
+        "SUPERCLAW_CANVAS_PLANNER_CLI_PATH", "backend",
+        "Optional Codex executable for canvas planning; unset resolves codex from PATH. Restart the desktop after changing this path.",
+        ui_type="path",
+    ),
     "SUPERCLAW_CODEX_MODE": RuntimeConfigSpec("SUPERCLAW_CODEX_MODE", "backend", "Codex execution mode.", default="exec"),
     "SUPERCLAW_CODEX_MODEL": RuntimeConfigSpec("SUPERCLAW_CODEX_MODEL", "backend", "Codex model override (codex exec / app-server; legacy CLI mode refuses it).", default="configured-default"),
     "SUPERCLAW_HTTP_MODEL": RuntimeConfigSpec("SUPERCLAW_HTTP_MODEL", "backend", "Model forwarded in the HTTP backend request body (the endpoint owns whether to honor it).", default="configured-default"),

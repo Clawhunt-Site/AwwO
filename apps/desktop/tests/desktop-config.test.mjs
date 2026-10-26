@@ -57,7 +57,9 @@ assert.ok(prepareMacosBundleSource.includes("resolveBuildAppEnv"));
 assert.ok(prepareMacosBundleSource.includes("build-profile.json"));
 
 assert.equal(tauriConfig.productName, "ClawHunt");
-assert.equal(tauriConfig.version, "0.1.0");
+assert.match(tauriConfig.version, /^\d+\.\d+\.\d+$/);
+const cargoManifest = fs.readFileSync(path.join(appRoot, "src-tauri", "Cargo.toml"), "utf8");
+assert.equal(cargoManifest.match(/^version = "([^"]+)"/m)?.[1], tauriConfig.version);
 assert.equal(tauriConfig.identifier, "store.clawhunt.superclaw");
 assert.equal(packageJson.version, tauriConfig.version);
 assert.equal(tauriConfig.build.devUrl, "http://127.0.0.1:5173");
@@ -78,7 +80,11 @@ assert.ok(typeof tauriConfig.app.security.csp === "string");
 assert.ok(tauriConfig.app.security.csp.includes("connect-src"));
 assert.ok(tauriConfig.app.security.csp.includes("img-src"));
 assert.ok(tauriConfig.app.security.csp.includes("https:"));
-assert.deepEqual(tauriConfig.bundle.icon, ["icons/icon.png"]);
+assert.ok(tauriConfig.bundle.icon.includes("icons/icon.ico"));
+assert.ok(tauriConfig.bundle.icon.includes("icons/icon.png"));
+for (const icon of tauriConfig.bundle.icon) {
+  assert.ok(fs.existsSync(path.join(appRoot, "src-tauri", icon)), `Missing bundle icon: ${icon}`);
+}
 assert.ok(fs.existsSync(path.join(appRoot, "scripts", "prepare-macos-bundle.mjs")));
 assert.ok(fs.existsSync(path.join(appRoot, "scripts", "macos-entitlements.plist")));
 assert.ok(prepareMacosBundleSource.includes("Contents\", \"_CodeSignature\""));

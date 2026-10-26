@@ -232,10 +232,10 @@ test('usage is reported only when complete and never invents a total', () => {
 });
 
 test('SDK failures keep only a status and an exception type, never the account-bearing message', () => {
-  const denied = bridgeFailure(Object.assign(new Error('User: arn:aws:sts::563688183799:assumed-role/x is not authorized'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }));
+  const denied = bridgeFailure(Object.assign(new Error('User: arn:aws:sts::123456789012:assumed-role/x is not authorized'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }));
   assert.equal(denied.status, 403);
   assert.equal(denied.type, 'AccessDeniedException');
-  assert.doesNotMatch(denied.message, /arn|563688183799/);
+  assert.doesNotMatch(denied.message, /arn|123456789012/);
   assert.equal(bridgeFailure({ name: 'ThrottlingException' }).status, 429);
   assert.equal(bridgeFailure({ name: 'Weird', $metadata: { httpStatusCode: 418 } }).status, 418);
   // Neither an AWS exception nor an HTTP status: the way to AWS failed (a socket's, a stream's or a timer's own error),
@@ -251,7 +251,7 @@ test('SDK failures keep only a status and an exception type, never the account-b
   // An exception AWS named that the bridge does not know (the SDK throws a stream exception it does not model, or an
   // error message, with AWS's own code as its name) is AWS's failure, as before, with a status the workers read; so is a
   // name that is only an object's own member (no longer a status taken from it).
-  for (const error of [Object.assign(new Error('arn:aws:iam::563688183799:role/x'), { name: 'InternalFailure' }), { name: 'Weird', $metadata: { httpStatusCode: 200 } }, { name: 'toString' }]) {
+  for (const error of [Object.assign(new Error('arn:aws:iam::123456789012:role/x'), { name: 'InternalFailure' }), { name: 'Weird', $metadata: { httpStatusCode: 200 } }, { name: 'toString' }]) {
     const named = bridgeFailure(error);
     assert.deepEqual([named.status, named.type, named.upstream], [502, 'api_error', true], JSON.stringify(error));
   }
@@ -381,11 +381,11 @@ test('request errors, provider errors and mid-stream failures surface as OpenAI-
   assert.equal(notJson.status, 400);
   assert.equal(quiet.sent.length, 0);
 
-  const denied = fakeSdk([], { fail: Object.assign(new Error('arn:aws:iam::563688183799:role/x'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }) });
+  const denied = fakeSdk([], { fail: Object.assign(new Error('arn:aws:iam::123456789012:role/x'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }) });
   const deniedResponse = await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: denied.sdk })(ENDPOINT, post(request()));
   assert.equal(deniedResponse.status, 403);
   const deniedText = await deniedResponse.text();
-  assert.doesNotMatch(deniedText, /arn|563688183799/);
+  assert.doesNotMatch(deniedText, /arn|123456789012/);
   assert.equal(JSON.parse(deniedText).error.code, 'AccessDeniedException');
   assert.equal(denied.sent[0].destroyed, true);
 
@@ -408,7 +408,7 @@ test('request errors, provider errors and mid-stream failures surface as OpenAI-
   const resetFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: reset.sdk })(ENDPOINT, post(request()))).text());
   assert.deepEqual(JSON.parse(resetFrames.at(-1)!), { error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } });
   // A stream exception AWS reports that the SDK does not model is AWS's, and keeps its status.
-  const unmodelled = fakeSdk(async function* () { yield { messageStart: {} }; throw Object.assign(new Error('arn:aws:iam::563688183799:role/x'), { name: 'InternalFailure' }); });
+  const unmodelled = fakeSdk(async function* () { yield { messageStart: {} }; throw Object.assign(new Error('arn:aws:iam::123456789012:role/x'), { name: 'InternalFailure' }); });
   const unmodelledFrames = frames(await (await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: unmodelled.sdk })(ENDPOINT, post(request()))).text());
   assert.deepEqual(JSON.parse(unmodelledFrames.at(-1)!), { error: { message: 'The Bedrock request failed', type: 'api_error', code: 'api_error', status: 502 } });
   const refused = fakeSdk([], { fail: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
@@ -481,7 +481,7 @@ test('cancellation aborts the provider request and the stream', async () => {
 // The model's other inference profile (the catalog's fallbackTarget), asked once when its profile refuses the call.
 const FALLBACK = 'us.anthropic.claude-opus-5-5';
 const ANSWER = [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { text: 'OK' } } }, { messageStop: { stopReason: 'end_turn' } }, { metadata: { usage: { inputTokens: 3, outputTokens: 1 } } }];
-const awsError = (name: string, status: number) => Object.assign(new Error(`arn:aws:iam::563688183799:user/machine/x is refused (${name})`), { name, $metadata: { httpStatusCode: status } });
+const awsError = (name: string, status: number) => Object.assign(new Error(`arn:aws:iam::123456789012:user/machine/x is refused (${name})`), { name, $metadata: { httpStatusCode: status } });
 type Step = { fail?: unknown; events?: unknown[] | (() => AsyncIterable<unknown>) };
 
 /** An SDK whose sends play `steps` in order, recording each send's input and how many streams were closed early. */
@@ -609,7 +609,7 @@ test('no fallback without a fallback model, for any other failure, or a second t
   const bothResponse = await both.call();
   assert.equal(bothResponse.status, 503);
   const bothText = await bothResponse.text();
-  assert.doesNotMatch(bothText, /arn|563688183799/);
+  assert.doesNotMatch(bothText, /arn|123456789012/);
   assert.deepEqual(both.inputs.map(input => input.modelId), [MODEL, FALLBACK]);
   assert.deepEqual(both.facts, [{ event: 'fallback', from: MODEL, to: FALLBACK, after: 'ThrottlingException' },
     { event: 'failed', model: FALLBACK, error: 'ServiceUnavailableException', status: 503, stage: 'request', upstream: true }]);
@@ -622,7 +622,7 @@ test('no fallback without a fallback model, for any other failure, or a second t
 });
 
 test('a request AWS refuses as larger than its model\'s window is named so, without AWS\'s message, and not sent to the other profile', async () => {
-  const tooLong = Object.assign(new Error('Input is too long for requested model. (arn:aws:iam::563688183799:user/machine/x)'), { name: 'ValidationException', $metadata: { httpStatusCode: 400 } });
+  const tooLong = Object.assign(new Error('Input is too long for requested model. (arn:aws:iam::123456789012:user/machine/x)'), { name: 'ValidationException', $metadata: { httpStatusCode: 400 } });
   const refused = bridgeFailure(tooLong);
   assert.deepEqual([refused.status, refused.type, refused.message, refused.upstream], [400, 'context_length_exceeded', 'Input is too long for requested model', true]);
   // Anthropic's words for an input that leaves no room for the output limit are the same refusal.
@@ -634,7 +634,7 @@ test('a request AWS refuses as larger than its model\'s window is named so, with
   const response = await run.call();
   assert.equal(response.status, 400);
   const text = await response.text();
-  assert.doesNotMatch(text, /arn|563688183799/);
+  assert.doesNotMatch(text, /arn|123456789012/);
   assert.deepEqual(JSON.parse(text).error, { message: 'Input is too long for requested model', type: 'context_length_exceeded', code: 'context_length_exceeded', status: 400 });
   assert.deepEqual(run.inputs.map(input => input.modelId), [MODEL]);
   assert.deepEqual(run.facts, [{ event: 'failed', model: MODEL, error: 'context_length_exceeded', status: 400, stage: 'request', upstream: true }]);

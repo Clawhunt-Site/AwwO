@@ -1155,7 +1155,7 @@ export function issueRoutes(
   }) ?? noopTaskWatchdogService();
   const externalObjectsSvc = externalObjectService(db, {
     pluginWorkerManager: opts.pluginWorkerManager,
-    enabled: async () => (await instanceSettings.getExperimental()).enableExternalObjects === true,
+    enabled: async (connection) => (await instanceSettingsService(connection).getExperimental()).enableExternalObjects === true,
   });
   const routinesSvc = routineService(db, {
     pluginWorkerManager: opts.pluginWorkerManager,

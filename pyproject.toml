@@ -57,8 +57,3 @@ filterwarnings = [
 extend-exclude = ["third_party"]
 
 [tool.ruff.lint.per-file-ignores]
-# Imported MyShell browser/CDP compatibility workers retain their upstream compact style.
-"apps/myshell-studio-orchestrator/orchestrator/backend/bridge_worker.py" = ["E401", "E701", "E722", "F401"]
-"apps/myshell-studio-orchestrator/orchestrator/backend/inject_cookies.py" = ["E401", "E701", "E722"]
-"apps/myshell-studio-orchestrator/orchestrator/backend/myshell_bridge.py" = ["E401", "E701", "E722"]
-"apps/myshell-studio-orchestrator/orchestrator/backend/orchestrator.py" = ["E401", "E701", "E722", "F401", "F541", "F841"]

@@ -37,8 +37,6 @@ venv
 data
 artifacts
 runtime
-!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime
-!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/**
 ledgers
 screenshots
 recordings
@@ -75,9 +73,6 @@ scripts
 # The image build needs this one: it applies each vendored workspace package's publishConfig so the
 # control plane resolves @paperclipai/* to its BUILT dist instead of TypeScript source.
 !scripts/apply-workspace-publish-config.mjs
-!apps/myshell-studio-orchestrator/scripts/
-apps/myshell-studio-orchestrator/scripts/*
-!apps/myshell-studio-orchestrator/scripts/prepare-canvaspro-static.sh
 skills
 
 # --- 杂项 / OS 与编辑器垃圾 ---

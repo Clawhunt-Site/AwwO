@@ -2288,7 +2288,7 @@ def test_cli_shell_exposes_config_login_and_status_commands(tmp_path, monkeypatc
     assert result.exit_code == 0, result.output
     assert "SuperClaw Runtime Shell" in result.output
     assert "APP_ENV=staging" in result.output
-    assert "CLAWHUNT_BASE_URL=https://staging.clawhunt.store" in result.output
+    assert "CLAWHUNT_BASE_URL=https://staging.example.com" in result.output
     assert "CLAWHUNT_BASE_URL=set" in result.output
     assert "CLAWHUNT_AGENT_API_KEY=set" in result.output
     assert '"id": "agent_test"' in result.output

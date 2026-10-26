@@ -29,7 +29,7 @@ describe("appEnvironment", () => {
   });
 
   it("folds legacy/shorthand aliases to staging, prod → production", () => {
-    for (const dev of ["development", "dev", "local", "test", "stage", "DEV"]) {
+    for (const dev of ["test", "stage"]) {
       expect(appEnvironment(dev)).toBe("staging");
     }
     expect(appEnvironment("prod")).toBe("production");
@@ -64,7 +64,7 @@ describe("appEnvironment", () => {
       expect(appEnvironment("production")).toBe("production");
       process.env.APP_ENV = "staging";
       // officialRootPublicKey / clawhuntBaseUrl must still resolve to the STAGING values.
-      expect(clawhuntBaseUrl()).toBe("https://staging.clawhunt.store");
+      expect(clawhuntBaseUrl()).toBe("https://staging.example.com");
       const stagingKey = officialRootPublicKey();
       process.env.APP_ENV = "production";
       expect(officialRootPublicKey()).not.toBe(stagingKey); // not collapsed/remapped
@@ -98,7 +98,7 @@ describe("officialRootPublicKey", () => {
 describe("clawhuntBaseUrl + production-contamination guard", () => {
   it("resolves the per-environment default", () => {
     process.env.APP_ENV = "staging";
-    expect(clawhuntBaseUrl()).toBe("https://staging.clawhunt.store");
+    expect(clawhuntBaseUrl()).toBe("https://staging.example.com");
     process.env.APP_ENV = "production";
     expect(clawhuntBaseUrl()).toBe("https://clawhunt.store");
   });
@@ -140,8 +140,8 @@ describe("clawhuntBaseUrl + production-contamination guard", () => {
 describe("catalog URLs", () => {
   it("derive from the ClawHunt base URL by default", () => {
     process.env.APP_ENV = "staging";
-    expect(capabilityWorkshopCatalogUrl()).toBe("https://staging.clawhunt.store/v1/capabilities/published");
-    expect(pluginMarketplaceCatalogUrl()).toBe("https://staging.clawhunt.store/api/plugins/marketplace-catalog");
+    expect(capabilityWorkshopCatalogUrl()).toBe("https://staging.example.com/v1/capabilities/published");
+    expect(pluginMarketplaceCatalogUrl()).toBe("https://staging.example.com/api/plugins/marketplace-catalog");
   });
 
   it("honour explicit overrides", () => {
@@ -150,4 +150,16 @@ describe("catalog URLs", () => {
     expect(capabilityWorkshopCatalogUrl()).toBe("http://test/feed");
     expect(pluginMarketplaceCatalogUrl()).toBe("http://test/mkt");
   });
+});
+
+
+it("isolates local development endpoints and trust from staging", () => {
+  process.env.APP_ENV = "development";
+  expect(appEnvironment()).toBe("development");
+  expect(appEnvironment("dev")).toBe("development");
+  expect(appEnvironment("local")).toBe("development");
+  expect(clawhuntBaseUrl()).toBe("http://127.0.0.1:8787");
+  expect(officialRootPublicKey()).toBe("");
+  process.env.CLAWHUNT_BASE_URL = "https://clawhunt.store";
+  expect(() => clawhuntBaseUrl()).toThrow(/cross-environment contamination/);
 });

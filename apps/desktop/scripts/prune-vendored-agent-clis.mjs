@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -39,51 +38,85 @@ export function shouldKeepVendoredAgentClis(env = process.env) {
 }
 
 function dirSizeBytes(dir) {
-  // `du -sk` is the cheapest portable size; callers run this macOS/Linux-only.
-  const out = execFileSync("du", ["-sk", dir], { encoding: "utf8" });
-  return Number(out.split("\t")[0]) * 1024;
+  let total = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile()) {
+        try {
+          total += fs.statSync(full).size;
+        } catch {
+          // symlink or vanishing file — skip
+        }
+      }
+    }
+  }
+  return total;
+}
+
+// Convert a `*foo-*` glob into a RegExp (only the simple `*` wildcard is used).
+// Like `find -name`, match the directory's basename, never its ancestors.
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
+}
+
+function findMatches(root, maxDepth) {
+  const patterns = VENDORED_AGENT_CLI_GLOBS.map(globToRegExp);
+  const matches = [];
+  const walk = (dir, depth) => {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (patterns.some((re) => re.test(entry.name))) {
+        matches.push(full);
+      } else {
+        walk(full, depth + 1);
+      }
+    }
+  };
+  walk(root, 1);
+  return matches;
 }
 
 /**
- * Remove the vendored agent CLI platform binaries under `root`. Returns
- * `{ removed: string[], freedBytes: number }` (paths relative to root). A tree
- * with nothing to prune is a legitimate no-op, not an error.
+ * Prune vendored agent-CLI platform binaries from `root`.
+ * Returns `{ removed: string[], freedBytes: number }`.
  */
 export function pruneVendoredAgentCliBinaries(root, { log = console.log } = {}) {
-  const args = [root, "-maxdepth", "8", "("];
-  VENDORED_AGENT_CLI_GLOBS.forEach((glob, i) => {
-    if (i > 0) args.push("-o");
-    args.push("-name", glob);
-  });
-  args.push(")");
-  const matches = execFileSync("find", args, {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  })
-    .split("\n")
-    .filter(Boolean);
-  // Drop nested matches (a hit inside an already-listed parent) so each top-level
-  // package is sized and removed exactly once.
-  const top = matches.filter(
-    (m) => !matches.some((p) => p !== m && m.startsWith(p + path.sep)),
-  );
+  const matches = findMatches(root, 8);
+
+  if (matches.length === 0) {
+    log("no vendored agent-CLI platform trees found — nothing to remove");
+    return { removed: [], freedBytes: 0 };
+  }
+
   let freedBytes = 0;
   const removed = [];
-  for (const target of top) {
-    if (!fs.existsSync(target)) continue; // already gone under a removed parent
-    freedBytes += dirSizeBytes(target);
-    fs.rmSync(target, { recursive: true, force: true });
-    removed.push(path.relative(root, target));
+  for (const dir of matches) {
+    const size = dirSizeBytes(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    freedBytes += size;
+    removed.push(path.relative(root, dir));
+    log(`pruned ${dir} (${(size / 1024 / 1024).toFixed(1)} MB)`);
   }
-  removed.sort();
-  const freedMb = Number((freedBytes / (1024 * 1024)).toFixed(0));
-  if (removed.length === 0) {
-    // Not an error: a stripped lockfile, a non-darwin host, or an already-pruned
-    // tree all legitimately leave nothing to remove. Make the no-op auditable.
-    log("BYO prune: no vendored agent CLI binaries found (nothing to remove)");
-  } else {
-    log(`BYO prune: removed ${removed.length} vendored agent CLI binary package(s), freed ~${freedMb}MB`);
-    for (const rel of removed) log(`  - ${rel}`);
-  }
-  return { removed, freedBytes };
+
+  return { removed: removed.sort(), freedBytes };
 }

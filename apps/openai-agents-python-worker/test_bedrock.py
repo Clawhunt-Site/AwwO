@@ -309,7 +309,7 @@ class FakeStream:
             if self.fail_after is not None and index == self.fail_after:
                 if isinstance(self.fail_code, BaseException):
                     raise self.fail_code
-                raise EventStreamError({"Error": {"Code": self.fail_code, "Message": "arn:aws:iam::563688183799:role/x"}}, "ConverseStream")
+                raise EventStreamError({"Error": {"Code": self.fail_code, "Message": "arn:aws:iam::123456789012:role/x"}}, "ConverseStream")
             yield event
 
     def close(self):
@@ -451,19 +451,19 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([tool["toolSpec"]["name"] for tool in self.record["input"]["toolConfig"]["tools"]], ["calculator"])
 
     async def test_provider_failures_map_to_known_codes(self):
-        self.fail = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "User: arn:aws:sts::563688183799:assumed-role/x"},
+        self.fail = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "User: arn:aws:sts::123456789012:assumed-role/x"},
                                  "ResponseMetadata": {"HTTPStatusCode": 403}}, "ConverseStream")
         denied = await self.run_model("bedrock.glm-5")
         self.assertEqual((denied[-1]["type"], denied[-1]["code"]), ("failed", "MODEL_AUTHENTICATION"))
-        self.assertNotIn("563688183799", json.dumps(denied))
+        self.assertNotIn("123456789012", json.dumps(denied))
         self.fail = ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow"}, "ResponseMetadata": {"HTTPStatusCode": 429}}, "ConverseStream")
         self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_RATE_LIMIT")
         # A request larger than the model's window is that refusal, not a request the worker got wrong; AWS's words stay.
-        self.fail = ClientError({"Error": {"Code": "ValidationException", "Message": "Input is too long for requested model. arn:aws:iam::563688183799:user/x"},
+        self.fail = ClientError({"Error": {"Code": "ValidationException", "Message": "Input is too long for requested model. arn:aws:iam::123456789012:user/x"},
                                  "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream")
         too_long = await self.run_model("bedrock.glm-5")
         self.assertEqual((too_long[-1]["type"], too_long[-1]["code"]), ("failed", "MODEL_CONTEXT_LIMIT"))
-        self.assertNotIn("563688183799", json.dumps(too_long))
+        self.assertNotIn("123456789012", json.dumps(too_long))
         self.fail = ClientError({"Error": {"Code": "ValidationException", "Message": "The provided model identifier is invalid."},
                                  "ResponseMetadata": {"HTTPStatusCode": 400}}, "ConverseStream")
         self.assertEqual((await self.run_model("bedrock.glm-5"))[-1]["code"], "MODEL_REQUEST_REJECTED")
@@ -630,7 +630,7 @@ OPUS_US = "us.anthropic.claude-opus-5-5"
 
 
 def aws_error(code, status):
-    return ClientError({"Error": {"Code": code, "Message": "arn:aws:iam::563688183799:user/machine/x is refused"},
+    return ClientError({"Error": {"Code": code, "Message": "arn:aws:iam::123456789012:user/machine/x is refused"},
                         "ResponseMetadata": {"HTTPStatusCode": status}}, "ConverseStream")
 
 
@@ -998,13 +998,13 @@ class RealEventStreamTests(unittest.IsolatedAsyncioTestCase):
             response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions",
                                        json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("563688183799", response.text)
+        self.assertNotIn("123456789012", response.text)
         return json.loads([line[6:] for line in response.text.split("\n") if line.startswith("data: ")][-1])["error"], facts
 
     async def test_an_exception_aws_reports_is_awss_whether_or_not_the_service_model_has_it(self):
         def exception(kind):
             return event_message({":message-type": "exception", ":exception-type": kind, ":content-type": "application/json"},
-                                 b'{"message":"arn:aws:iam::563688183799:role/x is throttled"}')
+                                 b'{"message":"arn:aws:iam::123456789012:role/x is throttled"}')
         # One the model has keeps its name and status. One it lacks botocore raises with an empty code: still AWS's
         # answer (api_error, 502), never a connection lost on the way.
         for kind, want in (("throttlingException", ("ThrottlingException", 429)), ("someNewException", ("api_error", 502))):

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -30,7 +30,30 @@ import path from "node:path";
 // (system frameworks ship exactly this symlinked shape).
 
 function md5(file) {
-  return execFileSync("md5", ["-q", file], { encoding: "utf8" }).trim();
+  return crypto.createHash("md5").update(fs.readFileSync(file)).digest("hex");
+}
+
+// Cross-platform walk: find all `*.dylib` regular files under `root`.
+function findDylibs(root) {
+  const results = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name.endsWith(".dylib")) {
+        results.push(full);
+      }
+    }
+  };
+  walk(root);
+  return results;
 }
 
 /**
@@ -41,12 +64,7 @@ function md5(file) {
 export function dedupNativeDylibs(root, { log = console.log } = {}) {
   let files;
   try {
-    files = execFileSync("find", [root, "-type", "f", "-name", "*.dylib"], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    })
-      .split("\n")
-      .filter(Boolean);
+    files = findDylibs(root);
   } catch {
     files = [];
   }
@@ -65,13 +83,26 @@ export function dedupNativeDylibs(root, { log = console.log } = {}) {
       continue;
     }
     if (st.isSymbolicLink() || !st.isFile()) continue; // skip existing symlinks
+    if (st.nlink > 1) continue; // already a hard link (idempotent re-run on Windows)
     const dir = path.dirname(full);
     const key = JSON.stringify([dir, md5(full)]);
     const canonical = canonicalByKey.get(key);
     if (canonical) {
       freedBytes += st.size;
       fs.rmSync(full);
-      fs.symlinkSync(canonical, full); // relative, same directory
+      // Prefer a relative symlink (same directory) so @loader_path/../lib
+      // resolution is preserved. On Windows, file symlinks need admin or
+      // Developer Mode (EPERM otherwise); fall back to a hard link, which is
+      // content-equivalent and works everywhere.
+      try {
+        fs.symlinkSync(canonical, full); // relative, same directory
+      } catch (err) {
+        if (err && err.code === "EPERM") {
+          fs.linkSync(path.join(dir, canonical), full);
+        } else {
+          throw err;
+        }
+      }
       linked.push(path.relative(root, full));
     } else {
       canonicalByKey.set(key, path.basename(full));

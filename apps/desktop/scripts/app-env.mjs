@@ -7,25 +7,23 @@
 // (adversarial review). Kept as a separate, side-effect-free module so it is unit
 // testable (prepare-macos-bundle.mjs runs codesign/ditto at import time).
 
-// Only two environments — staging (the test server) and production. Every legacy /
-// shorthand non-production spelling folds to staging so an old build command keeps
-// working; "prod" folds to production. (Mirrors superclaw.environment._APP_ENV_ALIASES.)
+// Canonical build identities: local development, staging acceptance and production.
 const APP_ENV_ALIASES = {
-  development: "staging",
-  dev: "staging",
-  local: "staging",
+  development: "development",
+  dev: "development",
+  local: "development",
   test: "staging",
   stage: "staging",
   prod: "production",
 };
-const APP_ENV_CHOICES = new Set(["staging", "production"]);
+const APP_ENV_CHOICES = new Set(["development", "staging", "production"]);
 
 export function normalizeAppEnv(raw) {
   if (!raw) return "";
   const value = String(raw).trim().toLowerCase();
   const normalized = APP_ENV_ALIASES[value] || value;
   if (!APP_ENV_CHOICES.has(normalized)) {
-    throw new Error(`APP_ENV must be one of staging/production (got "${raw}")`);
+    throw new Error(`APP_ENV must be one of development/staging/production (got "${raw}")`);
   }
   return normalized;
 }

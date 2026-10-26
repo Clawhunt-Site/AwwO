@@ -6,6 +6,16 @@ import { test } from "node:test";
 
 import { dedupNativeDylibs } from "../scripts/dedup-native-dylibs.mjs";
 
+const IS_WIN = process.platform === "win32";
+
+// On Windows, file symlinks may not be available (EPERM without admin/DevMode),
+// so the fallback is a hard link. This helper checks that a path is "linked"
+// (symlink OR hard link with nlink > 1).
+function isLinked(p) {
+  const st = fs.lstatSync(p);
+  return st.isSymbolicLink() || (st.isFile() && st.nlink > 1);
+}
+
 // Mirror embedded-postgres's native/lib: a version-alias family shipped as 3
 // byte-identical copies, plus a distinct lib, plus a same-named copy in ANOTHER
 // directory (which must NOT be collapsed across dirs).
@@ -41,9 +51,11 @@ test("collapses same-dir byte-identical dylibs to relative symlinks, keeps the f
 
     for (const alias of ["libfoo.dylib", "libfoo.1.dylib"]) {
       const p = path.join(lib, alias);
-      assert.ok(fs.lstatSync(p).isSymbolicLink(), `${alias} must become a symlink`);
-      // relative, same-dir (basename only) — preserves @loader_path/../lib resolution
-      assert.equal(fs.readlinkSync(p), "libfoo.1.2.dylib", `${alias} must point at the canonical sibling`);
+      assert.ok(isLinked(p), `${alias} must become a symlink or hard link`);
+      if (!IS_WIN) {
+        // relative, same-dir (basename only) — preserves @loader_path/../lib resolution
+        assert.equal(fs.readlinkSync(p), "libfoo.1.2.dylib", `${alias} must point at the canonical sibling`);
+      }
       // resolves to identical content
       assert.deepEqual(fs.readFileSync(p), fs.readFileSync(canonical), `${alias} must resolve to canonical bytes`);
     }

@@ -163,7 +163,7 @@ def test_distribution_publish_binds_each_capability_kind_to_digest_version_and_o
     assert decision.artifact_ref.startswith("superclaw-object://capabilities/")
     rendered = json.dumps(decision.record, sort_keys=True)
     assert str(tmp_path) not in rendered
-    assert "/Users/leongong" not in rendered
+    assert "/Users/dev-user" not in rendered
     assert "private_key" not in rendered
     assert decision.status_path.exists()
     assert decision.audit_path.read_text(encoding="utf-8").count("\n") == 1

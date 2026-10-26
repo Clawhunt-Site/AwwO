@@ -41,6 +41,15 @@ def test_resolve_gateway_port_default_and_env(monkeypatch) -> None:
     assert gr.resolve_gateway_port() == 8796  # invalid -> default
 
 
+def test_frozen_gateway_uses_an_independent_port(monkeypatch) -> None:
+    monkeypatch.setattr(gr.sys, "frozen", True, raising=False)
+    monkeypatch.delenv("SUPERCLAW_GATEWAY_PORT", raising=False)
+    monkeypatch.setattr(gr, "_find_free_port", lambda host: 49123, raising=False)
+    assert gr.resolve_gateway_port() == 49123
+    monkeypatch.setenv("SUPERCLAW_GATEWAY_PORT", "9100")
+    assert gr.resolve_gateway_port() == 9100
+
+
 def test_resolve_gateway_dir_env_override(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv("SUPERCLAW_GATEWAY_DIR", str(tmp_path))

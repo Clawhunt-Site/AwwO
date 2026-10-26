@@ -55,8 +55,8 @@ export function workerEnvironment(directory, executable = process.execPath) {
   };
 }
 
-// createSandbox defaults to the Docker workspace. Another host (the AgentCore trial kit in
-// deploy/agentcore-trial) passes a factory with the same signature and WorkspaceSandbox contract.
+// createSandbox defaults to the Docker workspace. Another host passes a factory with the same
+// signature and WorkspaceSandbox contract.
 export async function startIsolatedRun({ config, request, onEvent, onExit, onDiagnostic = (_diagnostic) => {} }, { taskURL = TASK_URL, bedrockAuth = resolveBedrockAuth, createSandbox = createWorkspaceSandbox } = {}) {
   validateRequest(request);
   authorizeTools(config, request);

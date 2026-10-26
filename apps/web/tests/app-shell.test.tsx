@@ -684,7 +684,7 @@ describe('App shell', () => {
       if (path === '/api/desktop/onboarding') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
             quickstart_path: 'docs/desktop-beta-quickstart.md',
             status_url: '/api/desktop/onboarding',
             summary: { ready: false, ready_count: 2, total_count: 6 },
@@ -713,7 +713,7 @@ describe('App shell', () => {
                 ready: true,
                 detail: 'Acceptance passed at 2026-06-04T12:00:00Z.',
                 remediation:
-                  'Run `npm --prefix apps/desktop run test:beta-acceptance` and review `/Users/leongong/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json`.',
+                  'Run `npm --prefix apps/desktop run test:beta-acceptance` and review `/Users/dev-user/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json`.',
               },
               {
                 title: 'ClawHunt login',
@@ -765,8 +765,8 @@ describe('App shell', () => {
       if (path === '/api/desktop/toolchain') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: true,
             tools: [
               { name: 'python3', label: 'Python 3', available: true, detail: 'Python 3.12.8', remediation: 'Install Python 3.11+.' },
@@ -790,10 +790,10 @@ describe('App shell', () => {
       if (path === '/api/desktop/acceptance') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: true,
-            report_path: '/Users/leongong/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json',
+            report_path: '/Users/dev-user/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json',
             status_url: '/api/desktop/acceptance',
             generate_command: 'npm --prefix apps/desktop run test:beta-acceptance',
             quickstart_path: 'docs/desktop-beta-quickstart.md',
@@ -831,8 +831,8 @@ describe('App shell', () => {
       if (path === '/api/tui/acceptance') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            report_path: '/Users/leongong/Documents/superClaw/.superclaw/tui/tui-acceptance.json',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            report_path: '/Users/dev-user/Documents/superClaw/.superclaw/tui/tui-acceptance.json',
             status_url: '/api/tui/acceptance',
             generate_command: 'PYTHONPATH=packages/superclaw/src .venv/bin/python -m superclaw.cli tui-acceptance',
             exists: true,
@@ -919,7 +919,7 @@ describe('App shell', () => {
         if (workspaceCreateConflict) {
           return new Response(
             JSON.stringify({
-              detail: `a directory named '${String(body.name)}' already exists under /Users/leongong/SuperClaw; rename the project, or use 'attach existing directory' (requires trust)`,
+              detail: `a directory named '${String(body.name)}' already exists under /Users/dev-user/SuperClaw; rename the project, or use 'attach existing directory' (requires trust)`,
             }),
             { status: 422, headers: { 'Content-Type': 'application/json' } },
           );
@@ -1885,7 +1885,7 @@ describe('App shell', () => {
                   description: 'Chrome User Data root directory Pay-Switch drives for live local payment. Leave empty to auto-discover.',
                   default: '',
                   configured: true,
-                  value: '/Users/leongong/Library/Application Support/Google/Chrome',
+                  value: '/Users/dev-user/Library/Application Support/Google/Chrome',
                   updated_at: '2026-06-08T00:00:00Z',
                 },
                 {
@@ -1944,7 +1944,7 @@ describe('App shell', () => {
                 label: 'Leon — leon@example.test',
                 name: 'Leon',
                 email: 'leon@example.test',
-                user_data_dir: '/Users/leongong/Library/Application Support/Google/Chrome',
+                user_data_dir: '/Users/dev-user/Library/Application Support/Google/Chrome',
               },
             ],
           }),
@@ -1972,7 +1972,7 @@ describe('App shell', () => {
                 text: 'PaySwitch Browser Relay install instructions resolved.',
                 browser_extension: browserExtension,
                 install: {
-                  extension_dir: '/Users/leongong/Documents/payswitch/payswitch/browser_extension',
+                  extension_dir: '/Users/dev-user/Documents/payswitch/payswitch/browser_extension',
                   load_url: 'chrome://extensions/',
                   relay_base_url: 'http://127.0.0.1:8787',
                   relay_token_present: true,
@@ -3414,7 +3414,7 @@ describe('App shell', () => {
 
         fireEvent.click(within(dialog).getAllByRole('button', { name: 'Install Browser Relay' })[0]);
         expect(
-          await screen.findByText('/Users/leongong/Documents/payswitch/payswitch/browser_extension'),
+          await screen.findByText('/Users/dev-user/Documents/payswitch/payswitch/browser_extension'),
         ).toBeInTheDocument();
         expect(await screen.findByText(/relay token ready in PaySwitch/)).toBeInTheDocument();
         expect(screen.queryByText('secret-relay-token')).not.toBeInTheDocument();
@@ -3705,11 +3705,11 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
-          updateGuidePath: '/Users/leongong/Documents/superClaw/docs/desktop-manual-update.md',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
+          updateGuidePath: '/Users/dev-user/Documents/superClaw/docs/desktop-manual-update.md',
           workspaceUpdateCommand:
             'git pull --ff-only && .venv/bin/python -m pip install -e ".[dev,tui]" && npm install --prefix apps/web && npm install --prefix apps/desktop && npm run build --prefix apps/web && npm run tauri:build --prefix apps/desktop',
         };
@@ -6421,7 +6421,7 @@ describe('App shell', () => {
       if (path === '/api/desktop/onboarding') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
             quickstart_path: 'docs/desktop-beta-quickstart.md',
             status_url: '/api/desktop/onboarding',
             summary: { ready: false, ready_count: 2, total_count: 6 },
@@ -6446,8 +6446,8 @@ describe('App shell', () => {
       if (path === '/api/desktop/toolchain') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: false,
             tools: [],
             summary: { required_count: 0, ready_count: 0, source_build_ready: true },
@@ -6459,8 +6459,8 @@ describe('App shell', () => {
       if (path === '/api/desktop/acceptance') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: false,
             report_path: '/tmp/desktop-beta-acceptance.json',
             status_url: '/api/desktop/acceptance',
@@ -6483,8 +6483,8 @@ describe('App shell', () => {
       if (path === '/api/tui/acceptance') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            report_path: '/Users/leongong/Documents/superClaw/.superclaw/tui/tui-acceptance.json',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            report_path: '/Users/dev-user/Documents/superClaw/.superclaw/tui/tui-acceptance.json',
             status_url: '/api/tui/acceptance',
             generate_command: 'PYTHONPATH=packages/superclaw/src .venv/bin/python -m superclaw.cli tui-acceptance',
             exists: false,
@@ -7566,10 +7566,10 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
         };
       }
       if (command === 'desktop_runtime_start') {
@@ -7682,10 +7682,10 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
         };
       }
       if (command === 'desktop_runtime_start') {
@@ -7738,10 +7738,10 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
         };
       }
       if (command === 'desktop_runtime_start') {
@@ -7911,7 +7911,7 @@ describe('App shell', () => {
 
     const input = await screen.findByLabelText('Direct chat prompt');
     fireEvent.change(input, {
-      target: { value: 'Review /Users/leongong/Desktop/Myshell/Model/example.png before answering.' },
+      target: { value: 'Review /Users/dev-user/Desktop/Myshell/Model/example.png before answering.' },
     });
     fireEvent.click(await screen.findByRole('button', { name: 'Submit chat turn' }));
 
@@ -7919,7 +7919,7 @@ describe('App shell', () => {
       expect(latestChatTurnRequest?.attachments).toEqual([
         expect.objectContaining({
           kind: 'local_path',
-          path: '/Users/leongong/Desktop/Myshell/Model/example.png',
+          path: '/Users/dev-user/Desktop/Myshell/Model/example.png',
           source: 'path',
         }),
       ]);
@@ -7987,10 +7987,10 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
         };
       }
       if (command === 'desktop_runtime_start') {
@@ -8029,10 +8029,10 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
         };
       }
       if (command === 'desktop_runtime_start') {
@@ -8085,11 +8085,11 @@ describe('App shell', () => {
           version: '0.1.0',
           releaseChannel: 'beta',
           updateMode: 'manual',
-          workspaceRoot: '/Users/leongong/Documents/superClaw',
+          workspaceRoot: '/Users/dev-user/Documents/superClaw',
           webDevUrl: 'http://127.0.0.1:5173',
-          webDistPath: '/Users/leongong/Documents/superClaw/apps/web/dist',
-          cliExecutable: '/Users/leongong/Documents/superClaw/.venv/bin/superclaw',
-          updateGuidePath: '/Users/leongong/Documents/superClaw/docs/desktop-manual-update.md',
+          webDistPath: '/Users/dev-user/Documents/superClaw/apps/web/dist',
+          cliExecutable: '/Users/dev-user/Documents/superClaw/.venv/bin/superclaw',
+          updateGuidePath: '/Users/dev-user/Documents/superClaw/docs/desktop-manual-update.md',
           workspaceUpdateCommand:
             'git pull --ff-only && .venv/bin/python -m pip install -e ".[dev,tui]" && npm install --prefix apps/web && npm install --prefix apps/desktop && npm run build --prefix apps/web && npm run tauri:build --prefix apps/desktop',
         };
@@ -8225,7 +8225,7 @@ describe('App shell', () => {
       if (path === '/api/desktop/onboarding') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
             quickstart_path: 'docs/desktop-beta-quickstart.md',
             status_url: '/api/desktop/onboarding',
             summary: { ready: false, ready_count: 5, total_count: 6 },
@@ -8233,13 +8233,13 @@ describe('App shell', () => {
               { title: 'Runtime service', ready: true, detail: '0.1.0 / backend codex / mode auto', remediation: 'The local ClawHunt runtime is already serving the control-plane APIs.' },
               { title: 'Desktop toolchain', ready: true, detail: '5/5 source-build tools are ready.', remediation: 'Desktop source-build toolchain is ready.' },
               { title: 'Dependency doctor', ready: true, detail: '4/4 supported desktop agents are ready.', remediation: 'Desktop agent dependencies are already available.' },
-              { title: 'Beta acceptance', ready: false, detail: 'Acceptance needs review: workbench_smoke.', remediation: 'Run `npm --prefix apps/desktop run test:beta-acceptance` and review `/Users/leongong/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json`.' },
+              { title: 'Beta acceptance', ready: false, detail: 'Acceptance needs review: workbench_smoke.', remediation: 'Run `npm --prefix apps/desktop run test:beta-acceptance` and review `/Users/dev-user/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json`.' },
               { title: 'ClawHunt login', ready: true, detail: 'Agent key is linked.', remediation: 'Sign in with a ClawHunt account, then create or paste an agent key before browsing or submitting market work.' },
               { title: 'Plugin trust root', ready: true, detail: 'Registry signature root is configured.', remediation: 'Configure the plugin public key before relying on marketplace installs.' },
             ],
             dependency_targets: [
               { name: 'codex', label: 'Codex', installed: true, detail: '/opt/homebrew/bin/codex', remediation: 'Ready for desktop use.' },
-              { name: 'hermes', label: 'Hermes', installed: true, detail: '/Users/leongong/.local/bin/hermes', remediation: 'Ready for desktop use.' },
+              { name: 'hermes', label: 'Hermes', installed: true, detail: '/Users/dev-user/.local/bin/hermes', remediation: 'Ready for desktop use.' },
               { name: 'claude', label: 'Claude Code', installed: true, detail: '/opt/homebrew/bin/claude', remediation: 'Ready for desktop use.' },
               { name: 'openclaw', label: 'OpenClaw', installed: true, detail: '/opt/homebrew/bin/openclaw', remediation: 'Ready for desktop use.' },
             ],
@@ -8250,15 +8250,15 @@ describe('App shell', () => {
       if (path === '/api/desktop/toolchain') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: true,
             tools: [
               { name: 'python3', label: 'Python 3', available: true, detail: 'Python 3.12.8', remediation: 'Install Python 3.11+.' },
               { name: 'node', label: 'Node.js', available: true, detail: 'v22.0.0', remediation: 'Install Node.js.' },
               { name: 'npm', label: 'npm', available: true, detail: '10.0.0', remediation: 'Install npm.' },
               { name: 'cargo', label: 'Cargo', available: true, detail: 'cargo 1.80.0', remediation: 'Install Cargo.' },
-              { name: 'tauri', label: 'Tauri CLI', available: true, detail: '/Users/leongong/Documents/superClaw/apps/desktop/node_modules/.bin/tauri', remediation: 'Ready.' },
+              { name: 'tauri', label: 'Tauri CLI', available: true, detail: '/Users/dev-user/Documents/superClaw/apps/desktop/node_modules/.bin/tauri', remediation: 'Ready.' },
             ],
             summary: { required_count: 5, ready_count: 5, source_build_ready: true },
             status_url: '/api/desktop/toolchain',
@@ -8269,10 +8269,10 @@ describe('App shell', () => {
       if (path === '/api/desktop/acceptance') {
         return new Response(
           JSON.stringify({
-            workspace_root: '/Users/leongong/Documents/superClaw',
-            desktop_root: '/Users/leongong/Documents/superClaw/apps/desktop',
+            workspace_root: '/Users/dev-user/Documents/superClaw',
+            desktop_root: '/Users/dev-user/Documents/superClaw/apps/desktop',
             source_workspace: true,
-            report_path: '/Users/leongong/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json',
+            report_path: '/Users/dev-user/Documents/superClaw/.superclaw/desktop/desktop-beta-acceptance.json',
             status_url: '/api/desktop/acceptance',
             generate_command: 'npm --prefix apps/desktop run test:beta-acceptance',
             quickstart_path: 'docs/desktop-beta-quickstart.md',
@@ -8499,7 +8499,7 @@ describe('App shell', () => {
     // below verify (requests flow through the desktop base URL with the desktop token).
     fireEvent.click(await screen.findByRole('button', { name: 'Diagnostics' }));
     expect(await screen.findByText('ClawHunt 0.1.0 (beta)')).toBeInTheDocument();
-    expect(await screen.findByText('/Users/leongong/Documents/superClaw/docs/desktop-manual-update.md')).toBeInTheDocument();
+    expect(await screen.findByText('/Users/dev-user/Documents/superClaw/docs/desktop-manual-update.md')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Copy update command' })).toBeInTheDocument();
     const desktopAccountButton = screen.getByRole('button', { name: 'Open account menu' });
     expect(within(desktopAccountButton).getByText('desktop-agent')).toBeInTheDocument();

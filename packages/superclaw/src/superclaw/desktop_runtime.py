@@ -498,6 +498,14 @@ def _windows_kill(pid: int, *, tree: bool) -> bool:
     whole child tree when a group teardown was requested — and never touch the
     POSIX single-pid path on Windows, for either ``--tree`` or ``--no-tree``.
     """
+    # taskkill can report a failed tree operation when a child exits while it is
+    # enumerating the tree, even though the owned service is fully stopped.
+    # Preserve the pre-kill descendants so a nonzero result is accepted only
+    # when every observed process is gone, never merely because the parent died.
+    try:
+        observed_pids = [pid, *_descendant_pids(pid, strict=True)] if tree else [pid]
+    except (OSError, RuntimeError):
+        observed_pids = None
     cmd = ["taskkill", "/F", "/PID", str(pid)]
     if tree:
         cmd.insert(2, "/T")  # taskkill /F /T /PID <pid>
@@ -510,7 +518,9 @@ def _windows_kill(pid: int, *, tree: bool) -> bool:
         )
     except (OSError, ValueError):
         return False
-    return result.returncode == 0
+    return result.returncode == 0 or (
+        observed_pids is not None and all(not _pid_exists(target) for target in observed_pids)
+    )
 
 
 def _eligible_process_group(pid: int) -> int | None:
@@ -605,29 +615,33 @@ def shutdown_process_pid(
     return not _alive()
 
 
-def _descendant_pids(root: int) -> list[int]:
+def _descendant_pids(root: int, *, strict: bool = False) -> list[int]:
     """All processes whose ancestry leads back to ``root`` (children, grandchildren,
     …), via ``ps``. A spawned backend starts a NEW session (start_new_session=True),
     so it leaves the service's process group — but it stays a *descendant* by ppid
-    while the service lives, so a tree walk still reaches it. Empty on failure /
-    Windows."""
+    while the service lives, so a tree walk still reaches it. On Windows use the
+    native process snapshot, which also works in the frozen backend."""
     if os.name == "nt":
-        return []
-    try:
-        result = subprocess.run(
-            ["ps", "-Ao", "pid=,ppid="],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return []
-    if result.returncode != 0:
-        return []
+        from superclaw.node_runtime import NodeServerSupervisor
+        rows = NodeServerSupervisor._windows_iter_processes(strict=True) if strict else NodeServerSupervisor._windows_iter_processes()
+        lines = [f"{pid} {ppid}" for pid, ppid, _ in rows]
+    else:
+        try:
+            result = subprocess.run(
+                ["ps", "-Ao", "pid=,ppid="],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return []
+        if result.returncode != 0:
+            return []
+        lines = result.stdout.splitlines()
     children: dict[int, list[int]] = {}
-    for line in result.stdout.splitlines():
+    for line in lines:
         parts = line.split()
         if len(parts) != 2:
             continue
@@ -649,6 +663,65 @@ def _descendant_pids(root: int) -> list[int]:
     return out
 
 
+def _owned_windows_descendants(root: int, rows: list[tuple[int, int, str]], created: dict[int, int]) -> list[int]:
+    """Validate every ancestry edge, rejecting stale Windows parent PIDs."""
+    owned = {root} if root in created else set()
+    ordered: list[int] = []
+    while True:
+        added = False
+        for pid, parent, _ in rows:
+            if pid in owned or parent not in owned or pid not in created:
+                continue
+            if created[pid] < created[parent]:
+                continue
+            owned.add(pid)
+            ordered.append(pid)
+            added = True
+        if not added:
+            return ordered
+
+
+def _terminate_own_windows_descendants() -> None:
+    # Keep process handles open across a second ancestry snapshot and termination.
+    # Creation times reject orphaned children whose old parent PID was reused;
+    # terminating by the held HANDLE prevents a snapshot-to-kill PID reuse race.
+    import ctypes
+    from ctypes import wintypes
+    from superclaw.node_runtime import NodeServerSupervisor
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    k32.GetProcessTimes.restype = wintypes.BOOL
+    k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k32.TerminateProcess.restype = wintypes.BOOL
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    k32.CloseHandle.restype = wintypes.BOOL
+    root = os.getpid()
+    handles: dict[int, Any] = {}
+    created: dict[int, int] = {}
+    try:
+        for pid in [root, *_descendant_pids(root)]:
+            access = 0x1000 if pid == root else 0x1000 | 0x0001 | 0x00100000
+            handle = k32.OpenProcess(access, False, pid)
+            if not handle:
+                continue
+            handles[pid] = handle
+            timestamps = [wintypes.FILETIME() for _ in range(4)]
+            if k32.GetProcessTimes(handle, *(ctypes.byref(stamp) for stamp in timestamps)):
+                created[pid] = (timestamps[0].dwHighDateTime << 32) | timestamps[0].dwLowDateTime
+        rows = NodeServerSupervisor._windows_iter_processes()
+        for pid in reversed(_owned_windows_descendants(root, rows, created)):
+            if k32.TerminateProcess(handles[pid], 0):
+                k32.WaitForSingleObject(handles[pid], 2000)
+    finally:
+        for handle in handles.values():
+            k32.CloseHandle(handle)
+
+
 def terminate_own_process_group(*, grace_seconds: float = 2.0) -> None:
     """Reap this sidecar's entire subtree on UI death, then exit.
 
@@ -663,8 +736,12 @@ def terminate_own_process_group(*, grace_seconds: float = 2.0) -> None:
          self-death-before-escalation race. SIGKILL is fine here: the UI is already
          gone, and SQLite WAL state is crash-safe.
     """
-    if os.name == "nt":  # No POSIX sessions; the desktop watchdog path is POSIX.
+    if os.name == "nt":
+        # Terminate descendants before our own frozen worker exits; otherwise
+        # Node/gateway children become orphans and keep their ports/data open.
+        _terminate_own_windows_descendants()
         os._exit(0)
+        return
     me = os.getpid()
     descendants = _descendant_pids(me)
     for pid in descendants:

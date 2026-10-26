@@ -133,6 +133,7 @@ import {
 } from "@paperclipai/adapter-pi-local";
 import {
   execute as clawworkExecute,
+  resolveClawworkExecutable,
   testEnvironment as clawworkTestEnvironment,
   sessionCodec as clawworkSessionCodec,
   listClawworkModels,
@@ -424,7 +425,7 @@ const clawworkLocalAdapter: ServerAdapterModule = {
   // ClawWork is the vendored SuperClaw relay harness (not an npm package): no
   // sandbox self-install. A missing harness fails closed in test.ts / execute.ts.
   getRuntimeCommandSpec: (config) => {
-    const command = readConfiguredCommand(config, "clawwork");
+    const command = resolveClawworkExecutable(config).executable;
     return { command, detectCommand: command, installCommand: null };
   },
   agentConfigurationDoc: clawworkAgentConfigurationDoc,

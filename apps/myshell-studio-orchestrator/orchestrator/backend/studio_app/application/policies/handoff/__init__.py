@@ -1,1 +1,0 @@
-"""Studio handoff policy modules."""

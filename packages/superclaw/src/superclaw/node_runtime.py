@@ -771,11 +771,16 @@ class NodeServerSupervisor:
     # --- pure-ctypes process primitives (frozen-safe; no subprocess) ---------
 
     @staticmethod
-    def _windows_iter_processes() -> "list[tuple[int, int, str]]":
+    def _windows_iter_processes(*, strict: bool = False) -> "list[tuple[int, int, str]]":
         """[(pid, ppid, image_base_name_lower), ...] for all live processes via a
-        Toolhelp snapshot (ctypes). Empty list on any failure."""
-        if os.name != "nt":
+        Toolhelp snapshot (ctypes). Empty list on failure, or raise when strict."""
+        def failed() -> list[tuple[int, int, str]]:
+            if strict:
+                raise RuntimeError("Windows process snapshot unavailable")
             return []
+
+        if os.name != "nt":
+            return failed()
         import ctypes
         from ctypes import wintypes
 
@@ -799,21 +804,29 @@ class NodeServerSupervisor:
         try:
             k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         except OSError:
-            return out
+            return failed()
         k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        for name in ("Process32FirstW", "Process32NextW"):
+            func = getattr(k32, name)
+            func.restype = wintypes.BOOL
+            func.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
         snap = k32.CreateToolhelp32Snapshot(th32cs_snapprocess, 0)
         invalid = ctypes.cast(-1, wintypes.HANDLE).value
         if not snap or snap == invalid:
-            return out
+            return failed()
         try:
             entry = PROCESSENTRY32W()
             entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
             if not k32.Process32FirstW(snap, ctypes.byref(entry)):
-                return out
+                return failed()
             while True:
                 out.append((int(entry.th32ProcessID), int(entry.th32ParentProcessID), entry.szExeFile.lower()))
                 if not k32.Process32NextW(snap, ctypes.byref(entry)):
+                    if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                        return failed()
                     break
         finally:
             k32.CloseHandle(snap)

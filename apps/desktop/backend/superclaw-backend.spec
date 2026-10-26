@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec that freezes the ClawHunt Python backend (FastAPI service +
-orchestrator + Typer CLI) into a self-contained onefile executable for the
-macOS app.
+orchestrator + Typer CLI). Windows uses onedir to avoid repeated extraction;
+macOS keeps its signed onefile app layout.
 
 Build from the repo root:
     .venv/bin/pyinstaller --noconfirm --clean \
@@ -82,13 +82,16 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# Windows must not unpack the full Python distribution for every desktop
+# start/stop/service subprocess. Keep macOS's signed onefile layout unchanged.
+windows_onedir = os.name == 'nt'
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    *([] if windows_onedir else [a.binaries, a.datas]),
     [],
     name="superclaw-backend",
+    exclude_binaries=windows_onedir,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -102,3 +105,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+if windows_onedir:
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='superclaw-backend')

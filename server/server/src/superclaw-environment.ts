@@ -10,14 +10,15 @@
  */
 
 export const APP_ENV_NAME = "APP_ENV";
-export const APP_ENV_CHOICES = ["staging", "production"] as const;
+export const APP_ENV_CHOICES = ["development", "staging", "production"] as const;
 export const DEFAULT_APP_ENV = "staging";
 
 const CLAWHUNT_BASE_URL_ENV = "CLAWHUNT_BASE_URL";
 
 // Per-environment ClawHunt endpoints (single source of truth — mirror of the kernel).
 const CLAWHUNT_BASE_URLS: Record<string, string> = {
-  staging: "https://staging.clawhunt.store",
+  development: "http://127.0.0.1:8787",
+  staging: "https://staging.example.com",
   production: "https://clawhunt.store",
 };
 
@@ -51,9 +52,9 @@ function ownLookup<T>(table: Record<string, T>, key: string): T | undefined {
 
 // Every legacy/shorthand non-production spelling folds to staging; prod → production.
 const APP_ENV_ALIASES: Record<string, string> = {
-  development: "staging",
-  dev: "staging",
-  local: "staging",
+  development: "development",
+  dev: "development",
+  local: "development",
   test: "staging",
   stage: "staging",
   prod: "production",
@@ -158,9 +159,9 @@ function guardNoProductionContamination(url: string): void {
         `talk to production. Remove the stale ${APP_ENV_NAME} / ${CLAWHUNT_BASE_URL_ENV} override.`,
     );
   }
-  if (appEnvironment() === "staging") {
+  if (appEnvironment() !== "production") {
     throw new Error(
-      `cross-environment contamination: ${APP_ENV_NAME}=staging resolved ${CLAWHUNT_BASE_URL_ENV} ` +
+      `cross-environment contamination: ${APP_ENV_NAME}=${appEnvironment()} resolved ${CLAWHUNT_BASE_URL_ENV} ` +
         `to the production endpoint (${url}). Staging must never talk to production. Remove the ` +
         `stale ${CLAWHUNT_BASE_URL_ENV} override, or declare ${APP_ENV_NAME}=production to target it.`,
     );

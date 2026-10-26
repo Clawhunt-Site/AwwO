@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { normalizeAppEnv, resolveBuildAppEnv } from "../scripts/app-env.mjs";
 
 // Aliases normalize to canonical APP_ENV values (so the baked profile is never an alias).
-// There are only two environments: every non-production spelling folds to staging.
+// Development remains separate from online acceptance.
 assert.equal(normalizeAppEnv("prod"), "production");
 assert.equal(normalizeAppEnv("stage"), "staging");
-assert.equal(normalizeAppEnv("DEV"), "staging");
-assert.equal(normalizeAppEnv("development"), "staging");
+assert.equal(normalizeAppEnv("DEV"), "development");
+assert.equal(normalizeAppEnv("development"), "development");
 assert.equal(normalizeAppEnv("  Staging "), "staging");
 assert.equal(normalizeAppEnv(""), "");
 assert.equal(normalizeAppEnv(undefined), "");
@@ -28,3 +28,6 @@ assert.throws(
 );
 
 console.log("desktop-app-env.test.mjs ok");
+
+assert.equal(resolveBuildAppEnv("local", "development"), "development");
+assert.throws(() => resolveBuildAppEnv("development", "staging"), /environment mismatch/);

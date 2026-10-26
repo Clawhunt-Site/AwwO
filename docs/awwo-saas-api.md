@@ -1,6 +1,6 @@
 # AwwO SaaS API v1
 
-适用分支：`codex/awwo-node-setup-20260908`；worktree：`/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-node-setup-20260908`。更新日期：2026-09-08。本文记录实现契约，不代表本轮真实模型或生产验收已通过。
+适用分支：`codex/awwo-node-setup-20260908`；worktree：`/Users/dev-user/Desktop/projects/workspace/awwo-node-setup-20260908`。更新日期：2026-09-08。本文记录实现契约，不代表本轮真实模型或生产验收已通过。
 
 实现：`backend/internal/app/`。本地前端同源代理 `/api/v1`；直接访问 Go 默认为 `http://127.0.0.1:8087/api/v1`。所有受保护端点使用 `awwo_session` HttpOnly cookie；health、注册和登录不要求已有会话。JSON 写请求使用 `Content-Type: application/json`，未声明的字段会被拒绝。请求携带 Origin 时必须与 `AWWO_PUBLIC_ORIGIN` 一致，跨站 Fetch 请求被拒绝；非浏览器客户端可省略 Origin，仍需有效登录 cookie。不会通过 JSON 返回模型密钥或原始登录 session token；邀请创建响应单独返回一次邀请凭据。
 

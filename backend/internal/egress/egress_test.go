@@ -511,8 +511,8 @@ func TestRefusalsSayWhyWithoutReachingAnything(t *testing.T) {
 }
 
 func TestParseDeny(t *testing.T) {
-	deny, err := ParseDeny("152.32.145.74, 10.40.0.0/16 , ::ffff:203.0.114.7")
-	if err != nil || len(deny) != 3 || !deny[0].Contains(netip.MustParseAddr("152.32.145.74")) || !deny[1].Contains(netip.MustParseAddr("10.40.186.146")) {
+	deny, err := ParseDeny("203.0.113.74, 10.40.0.0/16 , ::ffff:203.0.114.7")
+	if err != nil || len(deny) != 3 || !deny[0].Contains(netip.MustParseAddr("203.0.113.74")) || !deny[1].Contains(netip.MustParseAddr("10.40.186.146")) {
 		t.Fatal(deny, err)
 	}
 	for _, bad := range []string{"not-an-address", "fe80::1%eth0", "::ffff:0.0.0.0/90"} {
@@ -521,7 +521,7 @@ func TestParseDeny(t *testing.T) {
 		}
 	}
 	p := &Proxy{Deny: deny}
-	for _, refused := range []string{"152.32.145.74", "::ffff:152.32.145.74", "203.0.114.7", "::ffff:203.0.114.7"} {
+	for _, refused := range []string{"203.0.113.74", "::ffff:203.0.113.74", "203.0.114.7", "::ffff:203.0.114.7"} {
 		if p.allowed(netip.MustParseAddr(refused)) {
 			t.Errorf("%s allowed", refused)
 		}

@@ -37,8 +37,28 @@ function buildApp(deploymentMode: "local_trusted" | "authenticated") {
 }
 
 describe("chat runtime inventory routes", () => {
+  it("does not advertise an enabled but missing CLI as available", async () => {
+    const adapter = { type: "codex_local", models: [], getRuntimeCommandSpec: () => ({ command: "codex" }) };
+    mockListServerAdapters.mockReturnValue([adapter]);
+    mockListEnabledServerAdapters.mockReturnValue([adapter]);
+    mockEnsureCommandResolvable.mockRejectedValueOnce(new Error("not installed"));
+    const res = await request(buildApp("local_trusted")).get("/api/agents");
+    expect(res.body.agents[0]).toMatchObject({ available: false, readiness: "missing" });
+    expect(res.body.summary.ready_count).toBe(0);
+  });
+
+  it("distinguishes installed CLI from authenticated live readiness", async () => {
+    const adapter = { type: "codex_local", models: [], getRuntimeCommandSpec: () => ({ command: "codex" }) };
+    mockListServerAdapters.mockReturnValue([adapter]);
+    mockListEnabledServerAdapters.mockReturnValue([adapter]);
+    const res = await request(buildApp("local_trusted")).get("/api/agents");
+    expect(res.body.agents[0]).toMatchObject({ available: true, readiness: "installed", executable: "codex" });
+    expect(res.body.agents[0].reason).toMatch(/not verified/i);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnsureCommandResolvable.mockReset();
     mockListEnabledServerAdapters.mockReturnValue([]);
     // Default: the probed CLI resolves on PATH (override per-test to simulate
     // a missing/uninstalled runtime).
@@ -47,11 +67,11 @@ describe("chat runtime inventory routes", () => {
 
   it("projects /api/backends with model select + per-adapter effort capability + enabled availability", async () => {
     mockListServerAdapters.mockReturnValue([
-      { type: "claude_local", models: [{ id: "claude-opus-4-8", label: "Opus" }, { id: "x", label: "X" }] },
+      { type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [{ id: "claude-opus-4-8", label: "Opus" }, { id: "x", label: "X" }] },
       { type: "codex", models: [] },
     ]);
     // claude_local enabled; "codex" registered but DISABLED.
-    mockListEnabledServerAdapters.mockReturnValue([{ type: "claude_local", models: [] }]);
+    mockListEnabledServerAdapters.mockReturnValue([{ type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [] }]);
     const res = await request(buildApp("local_trusted")).get("/api/backends");
     expect(res.status).toBe(200);
     const [first, second] = res.body.backends;
@@ -104,29 +124,29 @@ describe("chat runtime inventory routes", () => {
     expect(res.status).toBe(200);
     const [only] = res.body.backends;
     expect(only.name).toBe("gemini_local");
-    expect(only.available).toBe(true);
+    expect(only.available).toBe(false);
     expect(only.chat_capable).toBe(false);
     expect(only.chat_tier).toBeNull();
     mockIsBuiltinAdapterActive.mockImplementation(() => true);
   });
 
-  it("/api/agents returns the inventory plus a summary (ready_count = enabled count)", async () => {
+  it("/api/agents returns the inventory plus a summary (installed_count reflects detected CLIs)", async () => {
     mockListServerAdapters.mockReturnValue([
-      { type: "claude_local", models: [] },
+      { type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [] },
       { type: "codex_local", models: [] },
     ]);
     // Only claude_local enabled → ready_count is 1 of 2 registered.
-    mockListEnabledServerAdapters.mockReturnValue([{ type: "claude_local", models: [] }]);
+    mockListEnabledServerAdapters.mockReturnValue([{ type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [] }]);
     const res = await request(buildApp("local_trusted")).get("/api/agents");
     expect(res.status).toBe(200);
-    expect(res.body.summary).toEqual({ count: 2, ready_count: 1 });
+    expect(res.body.summary).toEqual({ count: 2, ready_count: 0, installed_count: 1 });
     expect(res.body.agents[0].name).toBe("claude_local");
     expect(res.body.agents[0].available).toBe(true);
     expect(res.body.agents[1].available).toBe(false);
   });
 
   it("/api/agents/:backend/models projects the adapter's model ids as a string[]", async () => {
-    mockGetServerAdapter.mockReturnValue({ type: "claude_local", models: [{ id: "m1", label: "M1" }] });
+    mockGetServerAdapter.mockReturnValue({ type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [{ id: "m1", label: "M1" }] });
     const res = await request(buildApp("local_trusted")).get("/api/agents/claude_local/models");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ name: "claude_local", source: "static_contract" });
@@ -193,7 +213,7 @@ describe("chat runtime inventory routes", () => {
           throw new Error("external adapter boom");
         },
       },
-      { type: "claude_local", models: [], getRuntimeCommandSpec: () => ({ command: "claude" }) },
+      { type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [] },
     ]);
     mockEnsureCommandResolvable.mockResolvedValue(undefined);
     const res = await request(buildApp("local_trusted")).get("/api/agents/probe");
@@ -226,7 +246,7 @@ describe("chat runtime inventory routes", () => {
 
   it("/api/agents/probe?depth=deep isolates a throwing testEnvironment to runtime_fail (no 500)", async () => {
     const testEnvironment = vi.fn().mockRejectedValue(new Error("testEnvironment exploded"));
-    mockListServerAdapters.mockReturnValue([{ type: "claude_local", models: [], testEnvironment }]);
+    mockListServerAdapters.mockReturnValue([{ type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [], testEnvironment }]);
     const res = await request(buildApp("local_trusted")).get("/api/agents/probe?backend=claude_local&depth=deep");
     expect(res.status).toBe(200);
     expect(res.body.probes[0]).toMatchObject({ backend: "claude_local", verdict: "runtime_fail", depth: "live", present: false });
@@ -256,7 +276,7 @@ describe("chat runtime inventory routes", () => {
       testedAt: "2026-06-29T00:00:00.000Z",
     });
     mockListServerAdapters.mockReturnValue([
-      { type: "claude_local", models: [{ id: "m", label: "M" }], testEnvironment },
+      { type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [{ id: "m", label: "M" }], testEnvironment },
     ]);
     const res = await request(buildApp("local_trusted")).get("/api/agents/probe?backend=claude_local&depth=deep");
     expect(res.status).toBe(200);
@@ -295,7 +315,7 @@ describe("chat runtime inventory routes", () => {
   });
 
   it("/api/agents/probe?depth=deep without ?backend= is refused (deep is manual, single-runtime)", async () => {
-    mockListServerAdapters.mockReturnValue([{ type: "claude_local", models: [] }]);
+    mockListServerAdapters.mockReturnValue([{ type: "claude_local", getRuntimeCommandSpec: () => ({ command: "claude" }), models: [] }]);
     const res = await request(buildApp("local_trusted")).get("/api/agents/probe?depth=deep");
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("DEEP_PROBE_REQUIRES_BACKEND");

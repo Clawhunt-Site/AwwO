@@ -33,7 +33,7 @@ function message(headers, payload) {
 }
 const event = (type, value) => message({ ':message-type': 'event', ':event-type': type, ':content-type': 'application/json' }, JSON.stringify(value));
 const exception = type => message({ ':message-type': 'exception', ':exception-type': type, ':content-type': 'application/json' },
-  JSON.stringify({ message: 'arn:aws:iam::563688183799:role/x is refused' }));
+  JSON.stringify({ message: 'arn:aws:iam::123456789012:role/x is refused' }));
 const START = event('messageStart', { role: 'assistant' });
 const reset = () => Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', errno: -104, syscall: 'read' });
 
@@ -61,7 +61,7 @@ async function call(script) {
     sdk: { BedrockRuntimeClient, ConverseStreamCommand }, clientOptions: { requestHandler: scripted(script) }, report: fact => facts.push(fact) });
   const response = await bridge(ENDPOINT, REQUEST);
   const text = await response.text();
-  assert.doesNotMatch(text, /arn:aws|563688183799/);
+  assert.doesNotMatch(text, /arn:aws|123456789012/);
   const frames = response.headers.get('content-type')?.startsWith('text/event-stream')
     ? text.split('\n\n').filter(Boolean).map(frame => frame.replace(/^data: /, '')) : [];
   return { status: response.status, json: frames.length ? undefined : JSON.parse(text), frames, facts };

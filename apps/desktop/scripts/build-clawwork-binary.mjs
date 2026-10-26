@@ -73,7 +73,7 @@ if (!fs.existsSync(path.join(harness, "package-lock.json"))) {
   );
 }
 console.log(`installing ClawWork harness deps (npm ci) at ${harness}...`);
-execFileSync("npm", ["ci"], { cwd: harness, stdio: "inherit" });
+execFileSync("npm", ["ci", "--include=dev"], { cwd: harness, stdio: "inherit" });
 
 // `build:binary` compiles the workspaces (tui/agent/ai via tsgo) then
 // `bun build --compile` + copy-binary-assets. The COMPILE steps do NOT

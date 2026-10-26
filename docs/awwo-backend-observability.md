@@ -1,6 +1,6 @@
 # AwwO 后端可观测性与用量接口
 
-本文记录 2026-09-13 后端实现候选的实际接口和边界。工作目录基于 `1ffef64`，完整检查、真实调用与截图见[后端验收报告](awwo-backend-observability-acceptance-20260913.md)；最终提交及发布状态单独记录，本文不是上线证明。适用范围是 Go API、PostgreSQL、Pi worker、OpenAI Agents worker 和后台启动配置。
+本文记录 2026-09-13 后端实现候选的实际接口和边界。工作目录基于 `1ffef64`，完整检查、真实调用与截图见后端验收报告；最终提交及发布状态单独记录，本文不是上线证明。适用范围是 Go API、PostgreSQL、Pi worker、OpenAI Agents worker 和后台启动配置。
 
 ## 1. 责任范围与数据来源
 
@@ -171,7 +171,7 @@ Go 在派发前将对应模型的 version/currency/catalogKey/rates/semantics/ro
 
 ## 8. 验证记录与验收要求
 
-集成结果见[2026-09-13 后端验收报告](awwo-backend-observability-acceptance-20260913.md)：全量 Go/PostgreSQL race 121 顶层 / 252 含子测试通过、Pi 47、OpenAI Agents 54、启动器 11、双 SDK 协议栈 1 全部通过且无测试 skip；追加冻结价格和游标回归 3 顶层 / 5 含子测试通过。四组真实 gpt-5.6 图执行加一次 Computer Use 团队执行共 12 次调用均报告真实 usage；三个管理 metrics 为 200，业务路径隔离正确。12 条实际 OTLP 父子链、13 个 async root Link、24h/30d 窗口对账及测试内容隐私检查通过。报告同时列出尚未配置真实价格、浏览器直接展示 JSON 被客户端阻断和未部署边界。
+集成结果见2026-09-13 后端验收报告：全量 Go/PostgreSQL race 121 顶层 / 252 含子测试通过、Pi 47、OpenAI Agents 54、启动器 11、双 SDK 协议栈 1 全部通过且无测试 skip；追加冻结价格和游标回归 3 顶层 / 5 含子测试通过。四组真实 gpt-5.6 图执行加一次 Computer Use 团队执行共 12 次调用均报告真实 usage；三个管理 metrics 为 200，业务路径隔离正确。12 条实际 OTLP 父子链、13 个 async root Link、24h/30d 窗口对账及测试内容隐私检查通过。报告同时列出尚未配置真实价格、浏览器直接展示 JSON 被客户端阻断和未部署边界。
 
 本轮存储/接口专项已在独立本地 PostgreSQL 上执行 race 测试：13 个顶层测试 / 含子测试 23 项，0 失败、0 跳过，7.443 秒。覆盖迁移十种矩阵、checksum 漂移、冻结来源回填、严格价格 schema / 舍入 / 溢出、角色与租户隔离、费用字段裁剪、NULL/超安全整数、审计、保留边界、数据库故障、画布删除后账本保留，以及延迟提交的 MVCC 分页。
 

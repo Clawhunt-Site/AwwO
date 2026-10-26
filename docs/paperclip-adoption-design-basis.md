@@ -75,7 +75,7 @@ Chat（理解用户意图）→ Skill / Plugin / Company / 扩展（能力层）
 
 ## 4. Paperclip 插件 RPC 协议——完整取舍矩阵（v4：钉到权威 checkout，源码穷举）
 
-> **权威源锚**：`/Users/leongong/Documents/paperclip-ref` @ **`6756ae8`**（2026-06-18）。本矩阵行号一律基于此 checkout（非旧 `Desktop/LeonProject/paperclip`）。计数（已对源核准）：**Host→Worker 20 方法 + Host→Worker 2 通知 + Worker→Host 93 方法 + Worker→Host 4 通知 = 全量逐项处置**。
+> **权威源锚**：`/Users/dev-user/Documents/paperclip-ref` @ **`6756ae8`**（2026-06-18）。本矩阵行号一律基于此 checkout（非旧 `Desktop/projects/paperclip`）。计数（已对源核准）：**Host→Worker 20 方法 + Host→Worker 2 通知 + Worker→Host 93 方法 + Worker→Host 4 通知 = 全量逐项处置**。
 > 文件：`packages/plugins/sdk/src/protocol.ts`（接口 `HostToWorkerMethods` ~:582–633、`WorkerToHostMethods` ~:680–1345、`WorkerToHostNotifications` ~:1360+）；gate 映射 `host-client-factory.ts` `METHOD_CAPABILITY_MAP` ~:354–488；UI bridge `ui/src/plugins/bridge.ts`。处置词汇：`保留=one-shot-sidecar-tool` / `保留=受治理 host-RPC` / `丢弃=drop-saas(常驻/job/webhook/UI-slot/stream)` / `重映射=super-kernel-MCP` / `重映射=内核store` / `重映射=内核可观测` / `归 adapter execution-target`。
 > **承重守卫（务必在重映射的 MCP 面保留）**：所有 company-scoped 方法过 `requireInvocationCompanyScope`（`host-client-factory.ts:556–591`）的 fail-closed 作用域门。
 
@@ -179,7 +179,7 @@ Chat（理解用户意图）→ Skill / Plugin / Company / 扩展（能力层）
 
 ## 6. 给评审者的对抗任务（Codex + AGY 各自独立做，交叉验证）
 
-阅读本文档 + 双方真实源码核实（**Paperclip 权威源=`/Users/leongong/Documents/paperclip-ref` @`6756ae8`**，super 最新 main=`packages/superclaw/src/superclaw` 与 `apps/api/main.py`），批判性验收（挑错不夸奖、不骑墙）：
+阅读本文档 + 双方真实源码核实（**Paperclip 权威源=`/Users/dev-user/Documents/paperclip-ref` @`6756ae8`**，super 最新 main=`packages/superclaw/src/superclaw` 与 `apps/api/main.py`），批判性验收（挑错不夸奖、不骑墙）：
 
 1. **v2 的 4 个阻断是否真消除**：§4 全协议矩阵是否完整且处置正确（尤其 getData/performAction=UI-slot、executeTool=唯一保留、environment*=adapter、核心域=内核 MCP）？§原则2 是否已从"声明"改为"目标+验收证据+点名 HOME 缺口"（附录 A）？§5 是否补齐权限/adapter-capability/session-projection 三类？§2.3 G1–G10 是否覆盖现有 claude 策略门？
 2. **七条原则自洽性**：原则 2（fs+env/secrets 目标边界）与原则 3（远程/联网自由）、原则 5（不新增 blanket 沙箱）是否一致可落地？

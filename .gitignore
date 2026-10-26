@@ -19,8 +19,6 @@ coverage/
 *.log
 artifacts/
 runtime/
-!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/
-!apps/myshell-studio-orchestrator/orchestrator/backend/studio_app/infrastructure/runtime/*.py
 ledgers/
 screenshots/
 recordings/

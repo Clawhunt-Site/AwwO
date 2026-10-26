@@ -687,6 +687,7 @@ def test_shutdown_process_pid_windows_uses_taskkill(monkeypatch):
         return _Result()
 
     monkeypatch.setattr(desktop_runtime.os, "name", "nt")
+    monkeypatch.setattr(desktop_runtime, "_descendant_pids", lambda pid, **kwargs: [])
     monkeypatch.setattr(desktop_runtime.subprocess, "run", _fake_run)
 
     stopped = desktop_runtime.shutdown_process_pid(4321, process_group=True)
@@ -720,6 +721,51 @@ def test_shutdown_process_pid_windows_no_tree_still_uses_taskkill(monkeypatch):
 
     assert stopped is True
     assert captured["cmd"] == ["taskkill", "/F", "/PID", "4321"]  # no /T
+
+
+@pytest.mark.parametrize("survivors,expected", [(set(), True), ({4321}, False), ({4322}, False)])
+def test_windows_tree_stop_checks_processes_after_taskkill_race(monkeypatch, survivors, expected):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(desktop_runtime, "_descendant_pids", lambda pid, **kwargs: [4322])
+    monkeypatch.setattr(desktop_runtime, "_pid_exists", lambda pid: pid in survivors)
+    monkeypatch.setattr(desktop_runtime.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=128))
+
+    assert desktop_runtime._windows_kill(4321, tree=True) is expected
+
+
+def test_windows_tree_stop_does_not_accept_failed_snapshot(monkeypatch):
+    from types import SimpleNamespace
+
+    def unavailable(pid, **kwargs):
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(desktop_runtime, "_descendant_pids", unavailable)
+    monkeypatch.setattr(desktop_runtime, "_pid_exists", lambda pid: False)
+    monkeypatch.setattr(desktop_runtime.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=128))
+
+    assert desktop_runtime._windows_kill(4321, tree=True) is False
+
+
+@pytest.mark.skipif(desktop_runtime.os.name != "nt", reason="Windows Toolhelp failure contract")
+@pytest.mark.parametrize("snapshot", [0, 42])
+def test_windows_strict_process_snapshot_rejects_unavailable_or_partial_results(monkeypatch, snapshot):
+    import ctypes
+    from types import SimpleNamespace
+    from superclaw.node_runtime import NodeServerSupervisor
+
+    kernel = SimpleNamespace(
+        CreateToolhelp32Snapshot=lambda *args: snapshot,
+        Process32FirstW=lambda *args: True,
+        Process32NextW=lambda *args: False,
+        CloseHandle=lambda *args: True,
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 6)  # not end of enumeration
+
+    assert NodeServerSupervisor._windows_iter_processes() == []
+    with pytest.raises(RuntimeError, match="snapshot unavailable"):
+        NodeServerSupervisor._windows_iter_processes(strict=True)
 
 
 def _supervisor_with_marker(tmp_path, *, pid, signature="SIG"):
@@ -1073,6 +1119,42 @@ def test_terminate_own_process_group_reaps_descendants_then_group(monkeypatch):
     assert kills == [(101, sigterm), (102, sigterm), (101, force), (102, force)]
     # Own group is reaped LAST, with a single atomic SIGKILL (no SIGTERM-self race).
     assert killpgs == [(5000, force)]
+
+
+def test_windows_watchdog_reaps_children_before_exiting(monkeypatch):
+    events = []
+    monkeypatch.setattr(desktop_runtime.os, "name", "nt")
+    monkeypatch.setattr(desktop_runtime.os, "getpid", lambda: 99)
+    monkeypatch.setattr(desktop_runtime, "_terminate_own_windows_descendants", lambda: events.append("children"))
+    monkeypatch.setattr(desktop_runtime.os, "_exit", lambda code: events.append("exit"))
+    desktop_runtime.terminate_own_process_group(grace_seconds=0)
+    assert events == ["children", "exit"]
+
+
+def test_windows_owned_tree_rejects_reused_parent_and_unknown_identity():
+    rows = [(101, 99, "node"), (102, 101, "worker"),
+            (201, 99, "unrelated-orphan"), (202, 201, "worker"), (301, 99, "unknown")]
+    created = {99: 100, 101: 110, 102: 120, 201: 50, 202: 130}
+    assert desktop_runtime._owned_windows_descendants(99, rows, created) == [101, 102]
+    assert desktop_runtime._owned_windows_descendants(99, rows, {}) == []
+
+
+def test_windows_owned_tree_uses_fresh_parent_relationship():
+    # A candidate PID was reused before opening its handle; the fresh snapshot
+    # associates that new process with a different parent, so it must survive.
+    assert desktop_runtime._owned_windows_descendants(
+        99, [(101, 88, "other"), (102, 101, "worker")], {99: 100, 101: 200, 102: 210},
+    ) == []
+
+
+def test_windows_descendants_do_not_include_unrelated_processes(monkeypatch):
+    from superclaw.node_runtime import NodeServerSupervisor
+    monkeypatch.setattr(desktop_runtime.os, "name", "nt")
+    monkeypatch.setattr(NodeServerSupervisor, "_windows_iter_processes", lambda: [
+        (99, 1, "python.exe"), (101, 99, "node.exe"),
+        (102, 101, "worker.exe"), (200, 1, "node.exe"),
+    ])
+    assert desktop_runtime._descendant_pids(99) == [101, 102]
 
 
 def test_build_service_command_watch_ui_pid(tmp_path):

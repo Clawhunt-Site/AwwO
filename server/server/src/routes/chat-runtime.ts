@@ -65,6 +65,24 @@ function toBackendInfo(adapter: AdapterLike, available: boolean) {
   };
 }
 
+async function runtimeInventory() {
+  const enabled = new Set(listEnabledServerAdapters().map((adapter) => adapter.type));
+  return Promise.all(listServerAdapters().map(async (adapter) => {
+    if (!enabled.has(adapter.type)) {
+      return { ...toBackendInfo(adapter, false), readiness: "disabled", reason: "Runtime is disabled." };
+    }
+    const probe = await probeLightweight(adapter);
+    const installed = probe.present && probe.depth === "shallow";
+    // Registration is not installation, and installation is not authentication.
+    return {
+      ...toBackendInfo(adapter, installed),
+      readiness: installed ? "installed" : probe.present ? "unverified" : "missing",
+      reason: installed ? "CLI installed; authentication and execution not verified." : probe.detail,
+      executable: installed ? probe.executable : null,
+    };
+  }));
+}
+
 // Sentinel company id for company-external global runtime probes. Deep probes run
 // host-local (executionTarget: null) and never touch per-company secrets/state; the
 // sentinel makes that explicit and keeps any incidental adapter logging from
@@ -80,6 +98,7 @@ type RuntimeProbeResult = {
   detail: string;
   depth: string;
   present: boolean;
+  executable?: string;
   version?: string | null;
   models_count?: number | null;
   default_model?: string | null;
@@ -131,6 +150,7 @@ async function probeLightweight(adapter: ServerAdapterModule): Promise<RuntimePr
         verdict: "runtime_present",
         depth: "shallow",
         present: true,
+        executable: detectCommand,
         detail: `CLI present on PATH: ${detectCommand} — run a deep test to verify live reachability.`,
         latency_ms: Date.now() - startedAt,
       };
@@ -234,17 +254,16 @@ export function chatRuntimeRoutes(opts: { deploymentMode: DeploymentMode }) {
     next();
   };
 
-  router.get("/backends", gate, (_req, res) => {
-    const enabled = new Set(listEnabledServerAdapters().map((a) => a.type));
-    res.json({ backends: listServerAdapters().map((a) => toBackendInfo(a, enabled.has(a.type))) });
+  router.get("/backends", gate, async (_req, res) => {
+    res.json({ backends: await runtimeInventory() });
   });
 
-  router.get("/agents", gate, (_req, res) => {
-    const enabled = new Set(listEnabledServerAdapters().map((a) => a.type));
-    const backends = listServerAdapters().map((a) => toBackendInfo(a, enabled.has(a.type)));
-    // ready_count counts only ENABLED runtimes (disabled ones read as unavailable).
-    const readyCount = backends.filter((backend) => backend.available).length;
-    res.json({ agents: backends, summary: { count: backends.length, ready_count: readyCount } });
+  router.get("/agents", gate, async (_req, res) => {
+    const backends = await runtimeInventory();
+    res.json({ agents: backends, summary: {
+      count: backends.length, ready_count: 0,
+      installed_count: backends.filter((backend) => backend.available).length,
+    } });
   });
 
   // Literal `/agents/probe` is registered before the parametric model route and

@@ -2,11 +2,11 @@
 
 本项目以现有前端为产品基准，Go 承接身份、租户、持久 DAG、节点团队与运行治理，Pi 承接真实文本推理。2026-09-08 增加每节点 1–8 位成员的手动团队配置、每成员模型目录选择和后台整图记录；源码接通、实际验收与公网发布分别记录。
 
-本文初版基于 2026-09-07 的 `feat/awwo-go-pi-saas`，此前文档基准为 `847d045e569d2b6c7bceb961f27b2c69aba0ec79`。当前增强分支 `codex/awwo-node-teams-20260908`，worktree `/Users/leongong/Desktop/LeonProjects/gho_workspace/awwo-saas-20260907`。本次团队与后台图的最终 SHA、测试及截图单独报告；此前 [基础验收](awwo-saas-verification.md)、[整改](awwo-fable-remediation-20260907.md)、[真实模型验收](awwo-real-provider-acceptance-20260908.md)仅覆盖各自版本范围。
+本文初版基于 2026-09-07 的 `feat/awwo-go-pi-saas`，此前文档基准为 `847d045e569d2b6c7bceb961f27b2c69aba0ec79`。当前增强分支 `codex/awwo-node-teams-20260908`，worktree `/Users/dev-user/Desktop/projects/workspace/awwo-saas-20260907`。本次团队与后台图的最终 SHA、测试及截图单独报告；此前 基础验收、整改、真实模型验收仅覆盖各自版本范围。
 
-项目约束、分工与交付门见 [设计与开发规范](awwo-saas-design-standards.md)。
+项目约束、分工与交付门见 设计与开发规范。
 
-2026-09-07 Fable 整改更新：当前分支为 `feat/awwo-computer-use-acceptance-20260907`，整改基准 `a83d2acee3732e95c2f115b107f31af25c335c13`。新增列表分页、工作区创建、画布生命周期、账号配色及运行错误本地化；本轮证据与未通过边界以 [整改记录](awwo-fable-remediation-20260907.md) 为准，下面历史证据不自动代表新增功能完成 GUI 验收。
+2026-09-07 Fable 整改更新：当前分支为 `feat/awwo-computer-use-acceptance-20260907`，整改基准 `a83d2acee3732e95c2f115b107f31af25c335c13`。新增列表分页、工作区创建、画布生命周期、账号配色及运行错误本地化；本轮证据与未通过边界以 整改记录 为准，下面历史证据不自动代表新增功能完成 GUI 验收。
 
 ## 1. 现役入口与复用原则
 
@@ -124,7 +124,7 @@ Pi 当前承担真实文本推理和规划输出；成员从服务器模型目�
 
 ## 6. 验收证据与后续执行顺序
 
-已有实际验收记录见 [本地验收记录](awwo-saas-verification.md)；安装、配置和启动见 [SaaS 开发说明](awwo-saas-development.md)；系统边界见 [架构设计](awwo-saas-architecture.md)。本轮新增结果单列在验收记录中，不扩大此前基础版本结果的证明范围。
+已有实际验收记录见 本地验收记录；安装、配置和启动见 [SaaS 开发说明](awwo-saas-development.md)；系统边界见 [架构设计](awwo-saas-architecture.md)。本轮新增结果单列在验收记录中，不扩大此前基础版本结果的证明范围。
 
 | 证据层级 | 既有证据 | 可证明与不可证明 |
 | --- | --- | --- |
@@ -132,7 +132,7 @@ Pi 当前承担真实文本推理和规划输出；成员从服务器模型目�
 | 前端自动化 | SaaS、原账户、原画布相关测试，以及 typecheck/build；最新命令、文件和用例数以验收记录为准 | 可证明测试覆盖的隔离、持久草稿、账户/邀请/权限、运行和规划适配行为。旧批次用例数不代表本轮总量，不重复相加。 |
 | 本地真实浏览器 | 原画布保存重载、账户改名重载、语言主题持久、邀请注册后确认 reader、原图只读、运行状态说明、平台配额及审计分页/JSON 下载 | 可证明验收记录中的实际 UI 链路；未从这些动作推导真实模型执行成功。 |
 | 进程与协议 fixture | Go → Pi HTTP → 真实 Pi SDK/子进程 → 本地模型协议 fixture → PostgreSQL；浏览器 fixture 可从同一个原画布入口驱动此链路 | 可证明已执行记录中的真实进程协作、协议处理与 UI 回显；`--self-test` 仅验证 fixture 自身，fixture 输出不是商业或自建 provider 验收。 |
-| 真实模型、部署 | 既有真实模型结果见 [2026-09-08 报告](awwo-real-provider-acceptance-20260908.md)；新团队/后台图按本轮报告；公网与容器运行分别记录 | 不把旧模型成功扩大为新增四模式或生产准备度。 |
+| 真实模型、部署 | 既有真实模型结果见 2026-09-08 报告；新团队/后台图按本轮报告；公网与容器运行分别记录 | 不把旧模型成功扩大为新增四模式或生产准备度。 |
 
 前端独立检查入口（仓库根目录）：
 
@@ -142,6 +142,6 @@ npm run typecheck:saas --prefix apps/web
 npm run build:saas --prefix apps/web
 ```
 
-原画布相关回归的精确命令及文件清单保留在 [本地验收记录](awwo-saas-verification.md)。历史默认 `npm test --prefix apps/web` 曾因未安装的 `server/ui` MDX 依赖启动失败；本轮实际原 Web 测试已通过 91 文件、1,005 项及 static-ui，详见 [整改记录](awwo-fable-remediation-20260907.md)。这仍不是所有工程、实际模型与浏览器验收的总通过结论。
+原画布相关回归的精确命令及文件清单保留在 本地验收记录。历史默认 `npm test --prefix apps/web` 曾因未安装的 `server/ui` MDX 依赖启动失败；本轮实际原 Web 测试已通过 91 文件、1,005 项及 static-ui，详见 整改记录。这仍不是所有工程、实际模型与浏览器验收的总通过结论。
 
 每项工作按以下顺序关闭：先更新本表契约和状态 → 在原入口实施最小适配 → 补行为/权限/失败路径测试 → 真实浏览器按该行可观察验收执行 → 涉及模型的再做实际 provider 验收 → 更新证据及剩余差距。文档、代码提交、合并、推送与公网部署分别记录；本文不授权后几项操作。
