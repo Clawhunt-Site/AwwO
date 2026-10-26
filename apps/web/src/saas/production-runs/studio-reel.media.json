@@ -1,0 +1,62 @@
+{
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/studio-reel/0d25b87eb7e0d65a.jpg",
+  "type": "image/jpeg",
+  "bytes": 4424,
+  "sha256": "0d25b87eb7e0d65a32b0a956a310d61cc89e75112e9103df0cbc6aa8dfa234b5"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/studio-reel/08317fdd1e48a0b5.jpg",
+  "type": "image/jpeg",
+  "bytes": 4903,
+  "sha256": "08317fdd1e48a0b5806822243d0a37350d00eea5a965d1642b97af1b519f88d5"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/studio-reel/0ad83e3242b6a8bc.jpg",
+  "type": "image/jpeg",
+  "bytes": 7504,
+  "sha256": "0ad83e3242b6a8bcb4b674c0ed88b716a1fa4dab6ca5532d8d2875e94896542c"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/studio-reel/642dc4eca72f1d89.jpg",
+  "type": "image/jpeg",
+  "bytes": 18758,
+  "sha256": "642dc4eca72f1d891833e3a06c6ad7b66b1e00ed4813c26a8412c5f2bdcfac82"
+ },
+ "edit/still-005.jpg": {
+  "src": "/showcase/media/studio-reel/c9da36b18b997cfc.jpg",
+  "type": "image/jpeg",
+  "bytes": 17104,
+  "sha256": "c9da36b18b997cfcf318bee61b6eeca28f0ac98e83c2183758d4dc3ea2aaec26"
+ },
+ "edit/still-006.jpg": {
+  "src": "/showcase/media/studio-reel/697321c39a108848.jpg",
+  "type": "image/jpeg",
+  "bytes": 16610,
+  "sha256": "697321c39a1088487735c6ff093a7b70fb47c70c329cb63413abb0ecb09fe8ae"
+ },
+ "edit/still-007.jpg": {
+  "src": "/showcase/media/studio-reel/e3e6e370b58a5eb0.jpg",
+  "type": "image/jpeg",
+  "bytes": 10778,
+  "sha256": "e3e6e370b58a5eb03c59bac7c65759f80e0da66860606ec9db76866d6d033f4b"
+ },
+ "edit/still-008.jpg": {
+  "src": "/showcase/media/studio-reel/c1b0c9894174a7a2.jpg",
+  "type": "image/jpeg",
+  "bytes": 26635,
+  "sha256": "c1b0c9894174a7a243cdaab1cf42085ee2cb411630a6ffc2cd84a403749559a8"
+ },
+ "edit/studio-reel.mp4": {
+  "src": "/showcase/staged/studio-reel/7ad7351961117b33.mp4",
+  "type": "video/mp4",
+  "bytes": 1442875,
+  "sha256": "7ad7351961117b3365118b1c881c7832ac5584cbcc055c71b3dfaa7845db757e",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/studio-reel/97efa81a4c32f199.mp4",
+   "bytes": 2336585,
+   "sha256": "97efa81a4c32f199c3275bed18b71e7a5b0417994e61b1957005b99a10ef78d0"
+  }
+ }
+}

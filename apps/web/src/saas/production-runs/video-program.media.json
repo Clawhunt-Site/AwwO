@@ -1,0 +1,32 @@
+{
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/video-program/e13b64880ef722d2.jpg",
+  "type": "image/jpeg",
+  "bytes": 127410,
+  "sha256": "e13b64880ef722d2de00552402b4d292146947c4244cc34da96073de1995b59a"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/video-program/1fcf5c619aa9fcd2.jpg",
+  "type": "image/jpeg",
+  "bytes": 130407,
+  "sha256": "1fcf5c619aa9fcd20143bcf8839bdfe07c0bb96951646101402b48361d9ceacf"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/video-program/de9b64f27f77e2c2.jpg",
+  "type": "image/jpeg",
+  "bytes": 132672,
+  "sha256": "de9b64f27f77e2c2b9326462f2053578accd90a5687a20b123cf30a58be8f27d"
+ },
+ "edit/video-program.mp4": {
+  "src": "/showcase/staged/video-program/d2b59bd527dab44b.mp4",
+  "type": "video/mp4",
+  "bytes": 2152904,
+  "sha256": "d2b59bd527dab44b3834141666bcb048d3cacf8b243f38c99351798007185a81",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/video-program/e092bf3f38574303.mp4",
+   "bytes": 2328712,
+   "sha256": "e092bf3f38574303f97c515646d95cb8f82eef9c7f7971c97304b96d254a6b69"
+  }
+ }
+}

@@ -39,6 +39,24 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "brass-wolf": {
+    "completed": 12,
+    "total": 12,
+    "seconds": 12200,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
+  },
+  "canvas-live": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 11673,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
+  },
   "car-plant": {
     "completed": 8,
     "total": 8,
@@ -88,6 +106,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "launch-film": {
+    "completed": 11,
+    "total": 11,
+    "seconds": 13808,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
+  },
   "mars-mission": {
     "completed": 8,
     "total": 8,
@@ -122,6 +149,15 @@
       "completed": 4,
       "total": 4
     }
+  },
+  "night-island": {
+    "completed": 11,
+    "total": 11,
+    "seconds": 1986,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
   },
   "pallward": {
     "completed": 28,
@@ -181,6 +217,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "rings-of-awwo": {
+    "completed": 12,
+    "total": 12,
+    "seconds": 17211,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
+  },
   "roost-team": {
     "completed": 19,
     "total": 19,
@@ -188,6 +233,15 @@
     "delivered": true,
     "capturedOn": "2026-10-19",
     "model": "Claude Opus 4.8",
+    "runtime": "sandbox"
+  },
+  "run-token": {
+    "completed": 12,
+    "total": 12,
+    "seconds": 12582,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
     "runtime": "sandbox"
   },
   "shanhai-vn": {
@@ -202,6 +256,15 @@
       "completed": 6,
       "total": 6
     }
+  },
+  "studio-reel": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 3390,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
   },
   "summer-ad": {
     "completed": 6,
@@ -232,6 +295,15 @@
     "delivered": true,
     "capturedOn": "2026-10-17",
     "model": "Claude Opus 4.8",
+    "runtime": "sandbox"
+  },
+  "video-program": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 4928,
+    "delivered": true,
+    "capturedOn": "2026-10-26",
+    "model": "Claude Opus 5.5",
     "runtime": "sandbox"
   }
 }

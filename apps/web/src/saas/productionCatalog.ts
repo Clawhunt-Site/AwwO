@@ -75,6 +75,66 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE]],
     deliverable: 'Episode I: a film in three acts with dialogue, score, subtitles and end cards',
   },
+  // The films written as code (2026-10-26; recorded canvases too): each answers an Opus 5.5 video prompt from YouMind's
+  // collection. A Director writes the brief and the timing sheet, builders in sandbox computers write the kernel, the
+  // scenes and the sound, an assembly pastes them into one page with no model, a tester checks it, an editor cuts it
+  // into pieces, and the edit node renders the page's picture and sound into the film, with no model.
+  {
+    id: 'launch-film', kind: 'film', recording: true, excerpt: true, footage: 'launch-film-real',
+    title: 'AwwO · launch film',
+    brief: 'A launch film for AwwO in the manner of a flagship product film, every frame three.js: a floating display shows the canvas at work as code-drawn interface, with only word-for-word facts on screen.',
+    stages: [['Director'], ['Kernel', 'Display and studio', 'Screen interface', 'Camera and cuts', 'Lines and end card', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'An 18-second launch film with its sound, every frame drawn in three.js',
+  },
+  {
+    id: 'studio-reel', kind: 'film', recording: true, excerpt: true, footage: 'studio-reel-real',
+    title: 'AwwO Studio · Showreel',
+    brief: 'A 30-second motion-graphics showreel with every graphic made from scratch in code, as if AwwO were a branding studio for startup founders: identities for six invented startups cut to a 128 BPM beat, ending on AwwO’s own mark.',
+    stages: [['Director'], ['Kernel', 'Startups 1-3', 'Startups 4-6', 'AwwO Studio frames', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 30-second showreel with its sound, every graphic drawn in code',
+  },
+  {
+    id: 'brass-wolf', kind: 'film', recording: true, excerpt: true, footage: 'brass-wolf-real',
+    title: 'Brass Wolf',
+    brief: 'A steampunk mechanical wolf, modelled piece by piece in code by one agent and walked by another, crossing the pipes of a boiler room in three.js and ending on a howl.',
+    stages: [['Director'], ['Kernel', 'Wolf model', 'Gait and howl', 'Boiler room', 'Steam and light', 'Camera and words', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 20-second three.js film with its sound, the wolf modelled and walked in code',
+  },
+  {
+    id: 'night-island', kind: 'film', recording: true, excerpt: true, footage: 'night-island-real',
+    title: 'Night island',
+    brief: 'A floating island at night drawn on an HTML canvas from TypeScript: rain, a campfire, moonlight through drifting clouds, and a wolf cub that howls at the moon once in every loop.',
+    stages: [['Director'], ['Kernel', 'Sky, moon and mist', 'The island', 'Wolf cub', 'Rain and fire', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 15-second seamless loop with its sound, drawn on an HTML canvas',
+  },
+  {
+    id: 'rings-of-awwo', kind: 'film', recording: true, excerpt: true, footage: 'rings-of-awwo-real',
+    title: 'The rings of AwwO',
+    brief: 'A data film of AwwO’s own growth: the public repository’s first 51 days and 789 commits drawn as a city of code, district by district and ring by ring.',
+    stages: [['Director'], ['Kernel', 'Ground and districts', 'Buildings', 'Rings and timeline', 'Captions', 'Camera', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 64-second data film with its sound, every number from the repository’s history',
+  },
+  {
+    id: 'run-token', kind: 'film', recording: true, excerpt: true, footage: 'run-token-real',
+    title: 'Run token',
+    brief: 'A beat-synced three.js film: a glowing run token bounces from canvas node to canvas node, lighting each one on the beat, through a cave, along a track and onto a stage, one classical piece for each, with a few jokes on the way.',
+    stages: [['Director'], ['Kernel', 'Scene 1: the cave', 'Scene 2: the track', 'Scene 3: the stage', 'Token and camera', 'Speech bubbles', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 48-second beat-synced film with its score, written as code',
+  },
+  {
+    id: 'video-program', kind: 'film', recording: true, excerpt: true, footage: 'video-program-real',
+    title: 'A video is a program',
+    brief: 'A 12-second seamless loop that explains how AwwO turns a page into a video: an X-ray wolf whose every pose is computed from the frame number, with a frame counter, a contact strip and AwwO’s own render rules on screen.',
+    stages: [['Director'], ['Kernel', 'X-ray wolf', 'Counter, strip and tabs', 'Mode lines', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 12-second seamless loop at 60 fps with its sound',
+  },
+  {
+    id: 'canvas-live', kind: 'film', recording: true, excerpt: true, footage: 'canvas-live-real',
+    title: 'One canvas, live',
+    brief: 'A 20-second live dashboard of a real AwwO canvas run, drawn in code: the Umber photo editor’s 13 nodes, the first run that left three unfinished, the runs that finished them while keeping the rest, and the self-test’s 63 of 64.',
+    stages: [['Director'], ['Kernel', 'Canvas graph', 'Prompt and log', 'Header and counters', SOUND], [ASSEMBLY_ROLE], ['Test and fix'], ['Editor'], [EDIT_ROLE]],
+    deliverable: 'A 20-second dashboard film of a real canvas run, with its sound',
+  },
   // The flagship cases (flagshipWorkflows.ts): large systems written in a clean room by agents that work in sandbox
   // computers, assembled with no model and tested in a real browser.
   {

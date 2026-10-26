@@ -420,6 +420,42 @@ it('copies a film case from the workspace home as the canvas that ran, with noth
   expect(sent.nodes.every((node: any) => node.lastOutput === null)).toBe(true);
 });
 
+it('copies a film written as code with its agents in their sandbox computers, on the chosen model where the sandbox offers it', async () => {
+  const canvas = (await import('../src/saas/production-canvases/studio-reel')).default;
+  for (const [offered, model] of [[true, 'shared-model'], [false, '']] as const) {
+    const posts: { url: string; body: any }[] = [];
+    const runtime = { available: true, configured: true, plannerAvailable: true,
+      runtimes: [{ id: 'openai-agents', name: 'OpenAI Agents', available: true, configured: true, tools: [] },
+        ...(offered ? [{ id: 'sandbox', name: 'Sandbox computer', available: true, configured: true, tools: [] }] : [])],
+      models: [{ id: 'shared-model', label: 'Catalog model', runtime: 'openai-agents' }, ...(offered ? [{ id: 'shared-model', name: 'Sandbox model', runtime: 'sandbox' }] : [])] };
+    vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/runtime')) return json(runtime);
+      if (url.endsWith('/canvases') && init.method === 'POST') { const body = JSON.parse(init.body as string); posts.push({ url, body }); return json({ id: 'new-copy', document: body.document }, 201); }
+      if (url.includes('/canvases?')) return json({ items: [], nextCursor: null });
+      throw new Error(`Unexpected endpoint: ${url}`);
+    }));
+    const onOpen = vi.fn();
+    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+    const setup = await openCopy('AwwO Studio · Showreel');
+    await within(setup).findByRole('option', { name: 'Catalog model' });
+    fireEvent.change(within(setup).getByRole('combobox', { name: 'Execution model' }), { target: { value: JSON.stringify(['openai-agents', 'shared-model']) } });
+    expect(within(setup).getByText(offered ? 'Its agents keep working in their sandbox computers, on this model.' : /does not run in a sandbox computer/)).toBeVisible();
+    fireEvent.click(within(setup).getByRole('button', { name: 'Copy with model' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
+    const sent = posts[0].body.document;
+    expect(sent.nodes.map((node: any) => node.id).sort()).toEqual(canvas.nodes.map(node => node.id).sort());
+    // Every agent stays in its sandbox computer, on the chosen model only where the sandbox offers it; nothing is
+    // pre-filled, the assembly's page and the edit's film included.
+    for (const node of sent.nodes) {
+      expect(node.lastOutput, node.id).toBeNull();
+      if (node.kind === 'session') expect([node.runtime, node.model], node.id).toEqual(['sandbox', model]);
+    }
+    expect(sent.nodes.filter((node: any) => node.kind === 'assemble')).toHaveLength(1);
+    cleanup();
+  }
+});
+
 it('creates nothing from a film case whose stored canvas is not the one its record pins', async () => {
   const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
   const record = (await actual(FILM))!;

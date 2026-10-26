@@ -1,0 +1,44 @@
+{
+ "edit/canvas-live.mp4": {
+  "src": "/showcase/staged/canvas-live/56a8f59c161ce439.mp4",
+  "type": "video/mp4",
+  "bytes": 1690977,
+  "sha256": "56a8f59c161ce439f3a3b7b0a893cfaa60ea78b930d0f980154ebcc3e98023ca",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/canvas-live/c77e2c900074bb5c.mp4",
+   "bytes": 1735327,
+   "sha256": "c77e2c900074bb5c0a0258838d2ae2d4b02a9f04d4c7b69c24f711377fd12976"
+  }
+ },
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/canvas-live/96ab21857a9aa017.jpg",
+  "type": "image/jpeg",
+  "bytes": 72511,
+  "sha256": "96ab21857a9aa017e941c3e9c1a58842902dbf48ed294be6c181050d5a7b897d"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/canvas-live/09d42e1aa44d8f65.jpg",
+  "type": "image/jpeg",
+  "bytes": 93705,
+  "sha256": "09d42e1aa44d8f65fb21dc0f6b0636cf836cb5efb17195aa60c7d91449f51c61"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/canvas-live/1033d3495de20bbb.jpg",
+  "type": "image/jpeg",
+  "bytes": 103278,
+  "sha256": "1033d3495de20bbbd4b0b1f48e0868b06a5c803d02e99e4c24db15a3b23bb999"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/canvas-live/3406ea798c3bffa9.jpg",
+  "type": "image/jpeg",
+  "bytes": 102450,
+  "sha256": "3406ea798c3bffa9e8b250edbcdb74a05d2aa0f27018d7d68f32c3dd5443e9b0"
+ },
+ "edit/still-005.jpg": {
+  "src": "/showcase/media/canvas-live/bb0fc52e7841a80b.jpg",
+  "type": "image/jpeg",
+  "bytes": 89098,
+  "sha256": "bb0fc52e7841a80bb9a39b3bdc32198f32d15896f84c4b93eaaecafcd04b04fb"
+ }
+}

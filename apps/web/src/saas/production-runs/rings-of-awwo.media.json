@@ -1,0 +1,110 @@
+{
+ "edit/rings-of-awwo.mp4": {
+  "src": "/showcase/staged/rings-of-awwo/2f870586edb5f159.mp4",
+  "type": "video/mp4",
+  "bytes": 8055370,
+  "sha256": "2f870586edb5f1591566a682d51a52ac9b99ea5a5cf6b6312522ca3ba6c2a749",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/rings-of-awwo/7e14c18c8af14e3b.mp4",
+   "bytes": 24557801,
+   "sha256": "7e14c18c8af14e3bf2349e2fdfc079cf297d2278606adcc782197676d31f7bbe"
+  }
+ },
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/rings-of-awwo/b328a24102b4f80a.jpg",
+  "type": "image/jpeg",
+  "bytes": 14593,
+  "sha256": "b328a24102b4f80a3102e05b2b4b6e916f342781fbabf8e55cc9fb7e79ecccc9"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/rings-of-awwo/e06423f50102192e.jpg",
+  "type": "image/jpeg",
+  "bytes": 36940,
+  "sha256": "e06423f50102192e833b66dd2de54af3c07d25d4e0f75b350c055b94a1e7140c"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/rings-of-awwo/26e7aacba29dde6b.jpg",
+  "type": "image/jpeg",
+  "bytes": 48974,
+  "sha256": "26e7aacba29dde6b2efeae4c057e25685cb2c43ea3ed80eeeb2f3d1af237c87c"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/rings-of-awwo/ee91551ffdbb6a32.jpg",
+  "type": "image/jpeg",
+  "bytes": 48357,
+  "sha256": "ee91551ffdbb6a32c1184bdc6c306ef603900444fdbd85911a94c73a6e717af8"
+ },
+ "edit/still-005.jpg": {
+  "src": "/showcase/media/rings-of-awwo/262c86bb87eacdb2.jpg",
+  "type": "image/jpeg",
+  "bytes": 52468,
+  "sha256": "262c86bb87eacdb286ec1f828e16a3d5286cd9c6ff5159a38ae5c110b4497f26"
+ },
+ "edit/still-006.jpg": {
+  "src": "/showcase/media/rings-of-awwo/ba8392c685828afc.jpg",
+  "type": "image/jpeg",
+  "bytes": 57345,
+  "sha256": "ba8392c685828afc7b8b6ed14a9da06c1208789763ce065997ae2e962a92b687"
+ },
+ "edit/still-007.jpg": {
+  "src": "/showcase/media/rings-of-awwo/3395b3ffd5476fff.jpg",
+  "type": "image/jpeg",
+  "bytes": 55534,
+  "sha256": "3395b3ffd5476fff6742e11b19235a1238132fcb8ccaef0cb32378cf314e8a8c"
+ },
+ "edit/still-008.jpg": {
+  "src": "/showcase/media/rings-of-awwo/aa28cd8fe7c5eae5.jpg",
+  "type": "image/jpeg",
+  "bytes": 50224,
+  "sha256": "aa28cd8fe7c5eae5b32681277cbdb4641cb8cc25ddba388cedc778bb38d23811"
+ },
+ "edit/still-009.jpg": {
+  "src": "/showcase/media/rings-of-awwo/052c1fe8a2bf1b09.jpg",
+  "type": "image/jpeg",
+  "bytes": 57653,
+  "sha256": "052c1fe8a2bf1b09fffc12ee7667b3017e5b63e9bd26748ae9cc9b35860c7b2c"
+ },
+ "edit/still-010.jpg": {
+  "src": "/showcase/media/rings-of-awwo/0ae44b2063c807fa.jpg",
+  "type": "image/jpeg",
+  "bytes": 50108,
+  "sha256": "0ae44b2063c807fa30dc609f5284aaef92d34b6cb0aac3fa26b45fdf022acf44"
+ },
+ "edit/still-011.jpg": {
+  "src": "/showcase/media/rings-of-awwo/3878004b61d4e0a9.jpg",
+  "type": "image/jpeg",
+  "bytes": 55081,
+  "sha256": "3878004b61d4e0a978248f827c8aedace7966f4020a8b00aeabb7a723aa1b815"
+ },
+ "edit/still-012.jpg": {
+  "src": "/showcase/media/rings-of-awwo/10332da92dafc87b.jpg",
+  "type": "image/jpeg",
+  "bytes": 55092,
+  "sha256": "10332da92dafc87b1b18249f2dcbc5f52a490c36c5754e52de8ccc30fa6084a5"
+ },
+ "edit/still-013.jpg": {
+  "src": "/showcase/media/rings-of-awwo/55eea1ff8c9ff37b.jpg",
+  "type": "image/jpeg",
+  "bytes": 66635,
+  "sha256": "55eea1ff8c9ff37b54dcf7b8da2b844aac0ff01d2f06461884fbfc908146070d"
+ },
+ "edit/still-014.jpg": {
+  "src": "/showcase/media/rings-of-awwo/5191d6dc86e3cbbb.jpg",
+  "type": "image/jpeg",
+  "bytes": 73407,
+  "sha256": "5191d6dc86e3cbbb528ad79bc88323033cd56ca0767066609b52a496403be11a"
+ },
+ "edit/still-015.jpg": {
+  "src": "/showcase/media/rings-of-awwo/01934e41a58288b6.jpg",
+  "type": "image/jpeg",
+  "bytes": 77910,
+  "sha256": "01934e41a58288b67d12c7130835bbde3fc49e3c96dd6de767aa8a0dc940c446"
+ },
+ "edit/still-016.jpg": {
+  "src": "/showcase/media/rings-of-awwo/fbf19c898aeafcc5.jpg",
+  "type": "image/jpeg",
+  "bytes": 68881,
+  "sha256": "fbf19c898aeafcc587dccfcccbf9805c52e390579b4cba64851c2663176d269f"
+ }
+}

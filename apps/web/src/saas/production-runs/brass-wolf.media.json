@@ -1,0 +1,44 @@
+{
+ "edit/brass-wolf.mp4": {
+  "src": "/showcase/staged/brass-wolf/792fbab970eecf93.mp4",
+  "type": "video/mp4",
+  "bytes": 4892355,
+  "sha256": "792fbab970eecf931f08a4234be7d127e0fc4cd5b58f0402ace13b6328ea3705",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/brass-wolf/cc4f917762d872d2.mp4",
+   "bytes": 8543949,
+   "sha256": "cc4f917762d872d25c38a3d3af4e8b08868fe0f13fadada130bedb71fb2a46ce"
+  }
+ },
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/brass-wolf/722e007c4cda427c.jpg",
+  "type": "image/jpeg",
+  "bytes": 49507,
+  "sha256": "722e007c4cda427c4d31e99544b6ff2e78b5a560644413076970fd4152d66109"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/brass-wolf/a55e8c47353824d4.jpg",
+  "type": "image/jpeg",
+  "bytes": 47035,
+  "sha256": "a55e8c47353824d48bb2a26fe5f290b29193633f7266f118974f9a4e5aa5e91d"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/brass-wolf/2db24b77c28fec29.jpg",
+  "type": "image/jpeg",
+  "bytes": 28180,
+  "sha256": "2db24b77c28fec297cee26676ef7bb48a32b87521a616b45deb7aa4790f78be2"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/brass-wolf/0115dc49f8a023c3.jpg",
+  "type": "image/jpeg",
+  "bytes": 44270,
+  "sha256": "0115dc49f8a023c3976ccf5e9e61ebd7c036c70e4963eacfded5b9202b395cd6"
+ },
+ "edit/still-005.jpg": {
+  "src": "/showcase/media/brass-wolf/150c095801a24796.jpg",
+  "type": "image/jpeg",
+  "bytes": 50486,
+  "sha256": "150c095801a24796496b59581c17d703989f122235942a397635881ff335434a"
+ }
+}

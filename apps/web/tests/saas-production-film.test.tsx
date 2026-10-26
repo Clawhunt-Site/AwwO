@@ -30,6 +30,8 @@ const unnamed = (text: string) => text.replace(HARMLESS, ' ');
 // What each film case delivers: a record rooted at another edit would show another film.
 const DELIVERED: Readonly<Record<string, string>> = {
   'the-long-chord': 'episode-1.mp4',
+  // The films written as code: each edit names its film as the editor's timeline does.
+  ...Object.fromEntries(['launch-film', 'studio-reel', 'brass-wolf', 'night-island', 'rings-of-awwo', 'run-token', 'video-program', 'canvas-live'].map(id => [id, `${id}.mp4`])),
 };
 // The film cases with spoken lines, whose last edit delivered subtitles; a film written as code has none.
 const SUBTITLED: ReadonlySet<string> = new Set(['the-long-chord']);

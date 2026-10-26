@@ -1,0 +1,38 @@
+{
+ "edit/night-island.mp4": {
+  "src": "/showcase/staged/night-island/98fbc0168c14cd36.mp4",
+  "type": "video/mp4",
+  "bytes": 3394749,
+  "sha256": "98fbc0168c14cd3662a95074875f03b264bb639239bed4063aa0e086b5f7e5d5",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/night-island/7d063b500f7771a1.mp4",
+   "bytes": 9815869,
+   "sha256": "7d063b500f7771a1574d6aea3748434b4bd2bbf0e1ae8ea50514525a6a8145a2"
+  }
+ },
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/night-island/147184dda6b495ea.jpg",
+  "type": "image/jpeg",
+  "bytes": 27116,
+  "sha256": "147184dda6b495eada6612b927adfd262321359f8fb03d16def2509813a090d9"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/night-island/4debcc272bce3a64.jpg",
+  "type": "image/jpeg",
+  "bytes": 26157,
+  "sha256": "4debcc272bce3a6426638d53a68b7b09148ef44b57f866fa43c63c19a136140b"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/night-island/ee3ecd075ce6d553.jpg",
+  "type": "image/jpeg",
+  "bytes": 26911,
+  "sha256": "ee3ecd075ce6d553433f726f8cbf17a08aac86aca0786447fa8523b79e25b9f6"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/night-island/ca61dc18ec981358.jpg",
+  "type": "image/jpeg",
+  "bytes": 26330,
+  "sha256": "ca61dc18ec981358701ead36a5169f8cc0d2c62769871a80a7fd905ae28811d5"
+ }
+}
