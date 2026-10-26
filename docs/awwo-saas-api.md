@@ -240,7 +240,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | 方法与后缀 | 请求 / 查询 | 说明 |
 | --- | --- | --- |
 | GET /capabilities | 无 | `{skills,skillRegistry,memory,webReader,render}`：各项 enabled、上限，以及 webReader/render 今日已用次数 |
-| GET /skills | 无 | `{items,limits}`：26 个内置技能（`builtin:<name>`）与本工作区技能（`workspace:<id>`）的摘要，不含正文 |
+| GET /skills | 无 | `{items,limits}`：40 个内置技能（`builtin:<name>`）与本工作区技能（`workspace:<id>`）的摘要，不含正文 |
 | GET /skills/{ref} | 无 | 一个技能的全文；已归档或属于其他工作区的技能统一 404 |
 | POST /skills | name, title, description, body, category?, applies? 或 markdown（SKILL.md） | 201；正文 ≤ 12 KiB，名称在工作区内唯一（`skill_name_conflict`），最多 100 个（`skill_limit`）；隐藏字符一律拒绝 |
 | PUT /skills/{id} | version + 要改的字段 | 比较并交换，版本陈旧 409；每个版本都保留在 `tenant_skill_revisions` |
