@@ -67,6 +67,12 @@ func TestGraphOutputPolicyAllowsThePreviewLibrary(t *testing.T) {
 		!strings.Contains(page, "never paste the source of three.js or any other library") {
 		t.Fatal("HTML policy does not name the supplied library", page)
 	}
+	// three.js r186 as ES modules, which every preview and the sandbox page checker supply, is allowed by its exact
+	// import map; without it a skill or brief that asked for the modules was overruled by "no external libraries".
+	if !strings.Contains(page, "three.js r186 as ES modules through exactly the import map "+previewModulesImportMap) ||
+		!strings.Contains(page, "literal 'three/addons/...' paths in one module script") {
+		t.Fatal("HTML policy does not name the supplied three.js modules", page)
+	}
 	// A figure node's instructions name the figure kit's URL; the policy must not forbid the tag they require.
 	if !strings.Contains(page, "a script whose exact URL the node instructions say AwwO supplies") {
 		t.Fatal("HTML policy forbids the script a node's instructions say AwwO supplies", page)
