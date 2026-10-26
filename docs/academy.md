@@ -95,9 +95,10 @@ THE LONG CHORD's first recording of 2026-10-21, nine motion versions of 2026-10-
 again, four draft renders of the two how-tos of 2026-10-25). Then went 23 that only AwwO Local 0.1.0 and 0.1.1 named
 (1.64 GB: the earlier versions of the flagships, THE LONG CHORD and the 17 build videos), so those builds' Academy no
 longer plays them. 35 stay (2.01 GB): the catalog's 29, and the six how-tos' versions from before their title cards were
-renumbered. The AwwO Local builds published before that (Windows 0.1.2, macOS 0.10.0) and a rollback to an earlier
-release still play those six; they go once a local build with this catalog ships. Each is staged once on the host,
-outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
+renumbered. AwwO Local for Windows plays the renumbered ones from 0.1.3 (2026-10-26) on; Windows 0.1.2 installs,
+macOS 0.10.0 and a rollback to an earlier release still play those six, which go once the Mac build is replaced too.
+Each is staged once on the host, outside every release, under
+`/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
 
