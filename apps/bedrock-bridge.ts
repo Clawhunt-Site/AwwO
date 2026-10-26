@@ -373,6 +373,42 @@ export function withClaudeThinking(command: Json, budget: number): Json {
 }
 
 /**
+ * Models that think on every call, cannot be told not to, and send nothing while they think unless they are asked for
+ * a summary of it, by Converse model ID without the inference profile's prefix: Claude Opus 5.5. Without the summary
+ * nothing, not even messageStart, arrives until its thinking ends: up to 192.5 s was seen on 2026-10-21, and on
+ * 2026-10-26 a page node on the Pi worker was cut three times by Pi's 300 s wait for a call's first event (each call
+ * 300,064-300,092 ms, no tokens). With the summary the thinking streams within seconds. The Python worker's bridge asks
+ * the same since 2026-10-21 (bedrock_bridge.py SUMMARIZED_THINKING_MODELS), of single calls only (its runs make one call
+ * with text history, sometimes offering tools): 417 completed by 2026-10-26, none refused by Bedrock as invalid.
+ */
+export const SUMMARIZED_THINKING_MODELS: ReadonlySet<string> = new Set(['anthropic.claude-opus-5-5']);
+const SUMMARIZED_THINKING = { type: 'adaptive', display: 'summarized' } as const;
+// An inference profile's prefix, as bedrock-catalog.ts reads it.
+const PROFILE_PREFIX = /^(?:global|us|eu|apac|jp|au|ca)\./;
+
+/**
+ * Asks a model of SUMMARIZED_THINKING_MODELS to stream a summary of the thinking it does anyway, so that its stream is
+ * not silent while it thinks. The summary arrives as reasoning content, which a worker counts or passes over and never
+ * shows. Only a request of the shape the Python worker's bridge sends it in gets the field: no tool turns in its history
+ * (with thinking asked for, Bedrock may want each earlier thinking block back with its signature, which no caller keeps:
+ * the chunk mapper drops signatures), no sampling settings and no forced tool choice (both refused beside thinking where
+ * thinking can be turned on). Pi's node runs offer no tools, so each of their calls gets it; a tool loop's first call
+ * does, its later ones are sent as before. Any other request or model, and a command that already carries model fields
+ * (an operator's thinking budget, which Opus 5.5 refuses), is returned unchanged.
+ */
+export function withSummarizedThinking(command: Json): Json {
+  const modelId = typeof command.modelId === 'string' ? command.modelId.replace(PROFILE_PREFIX, '') : '';
+  if (!SUMMARIZED_THINKING_MODELS.has(modelId) || command.additionalModelRequestFields !== undefined) return command;
+  const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
+  if (messages.some(m => Array.isArray(m.content) && m.content.some(block => 'toolUse' in block || 'toolResult' in block))) return command;
+  const inference = plain(command.inferenceConfig) ? command.inferenceConfig : {};
+  if (inference.temperature !== undefined || inference.topP !== undefined) return command;
+  const choice = plain(command.toolConfig) && plain(command.toolConfig.toolChoice) ? command.toolConfig.toolChoice : {};
+  if ('any' in choice || 'tool' in choice) return command;
+  return { ...command, additionalModelRequestFields: { thinking: { ...SUMMARIZED_THINKING } } };
+}
+
+/**
  * Claude explicit prompt caching for one Converse command, where the operator turned it on for the profile
  * (AWWO_BEDROCK_PROMPT_CACHE_MODELS). Only a request that re-sends an earlier exchange — a conversation with
  * history, or a tool loop — gets cache checkpoints, because only its prefix is sent again: after the tool
@@ -722,6 +758,7 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       try { body = JSON.parse(raw); } catch { return reject('The request body is not JSON'); }
       command = toConverseInput(body, model);
       if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
+      command = withSummarizedThinking(command);
       if (promptCache) command = withClaudePromptCache(command);
       singleToolCall = (body as Json).parallel_tool_calls === false;
     } catch (error) { return jsonError(failed(bridgeFailure(error), model, 'request')); }

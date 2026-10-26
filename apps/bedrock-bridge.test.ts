@@ -3,13 +3,17 @@ import test from 'node:test';
 import {
   BEDROCK_BRIDGE_API_KEY, BEDROCK_CONNECTION_FAILURE, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockFactLine, bedrockOrigin, bridgeFailure, chatUsage,
   childBedrockFetch, createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
-  validThinkingBudget, withClaudePromptCache, withClaudeThinking, type BedrockCallFact, type BedrockSdk,
+  SUMMARIZED_THINKING_MODELS, validThinkingBudget, withClaudePromptCache, withClaudeThinking, withSummarizedThinking, type BedrockCallFact,
+  type BedrockSdk,
 } from './bedrock-bridge.ts';
 
 const MODEL = 'global.anthropic.claude-opus-5-5';
 const REGION = 'us-east-1';
 const ENDPOINT = `${bedrockBridgeBaseURL(REGION)}/chat/completions`;
 const BEARER = { bearerToken: 'ABSKbedrockkey000000000000000000' };
+// What Claude Opus 5.5 (MODEL) is asked for on every call (withSummarizedThinking), and a Claude model that is not.
+const SUMMARY = { thinking: { type: 'adaptive', display: 'summarized' } };
+const OPUS_48 = 'global.anthropic.claude-opus-4-8';
 
 const request = (overrides: Record<string, unknown> = {}) => ({
   model: MODEL, stream: true, stream_options: { include_usage: true }, store: false, max_tokens: 512,
@@ -756,10 +760,14 @@ test('the fetch sends the thinking budget it was configured with, and refuses an
   assert.ok(chunks.some(chunk => chunk.choices?.[0]?.delta?.reasoning_content === 'plan'), 'reasoning streams as reasoning content');
   assert.ok(chunks.some(chunk => chunk.choices?.[0]?.delta?.content === 'OK'));
   assert.deepEqual(sent[0].input.additionalModelRequestFields, { thinking: { type: 'enabled', budget_tokens: 2048 } });
-  // Without a budget the same request carries no thinking field.
+  // Without a budget, Claude Opus 5.5 is asked for its thinking as a summary (withSummarizedThinking), and another model
+  // gets no thinking field.
   const plainFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk });
   await (await plainFetch(ENDPOINT, post(request({ max_tokens: 8000 })))).text();
-  assert.equal(sent[1].input.additionalModelRequestFields, undefined);
+  assert.deepEqual(sent[1].input.additionalModelRequestFields, SUMMARY);
+  const otherFetch = createBedrockFetch({ region: REGION, model: OPUS_48, auth: BEARER, sdk });
+  await (await otherFetch(ENDPOINT, post(request({ model: OPUS_48, max_tokens: 8000 })))).text();
+  assert.equal(sent[2].input.additionalModelRequestFields, undefined);
 });
 
 
@@ -811,10 +819,60 @@ test('the fetch sends cache checkpoints only when the operator turned the cache 
   assert.equal(JSON.stringify(sent[0].input).split('"cachePoint"').length - 1, 3);
   // Usage keeps counting every prompt token, reads and writes included, with the reads as cached tokens.
   assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 2043, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 2000 } });
-  // Off (the default) and false send exactly the request the bridge sent before.
+  // Off (the default) and false send exactly the request the bridge sent before: a tool loop's history keeps Claude
+  // Opus 5.5's request as it was too (withSummarizedThinking).
   for (const options of [{}, { promptCache: false }]) {
     const plainFetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk, ...options });
     await (await plainFetch(ENDPOINT, post(body))).text();
     assert.deepEqual(sent.at(-1)!.input, toConverseInput(body, MODEL));
   }
+});
+
+test('Claude Opus 5.5 is asked for its thinking as a summary, on every profile, only in a request of the Python worker\'s shape', () => {
+  assert.deepEqual([...SUMMARIZED_THINKING_MODELS], ['anthropic.claude-opus-5-5']);
+  const user = { role: 'user', content: [{ text: 'Hello' }] };
+  for (const model of [MODEL, 'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5']) {
+    const plain = toConverseInput(request({ model }), model);
+    assert.deepEqual(withSummarizedThinking(plain), { modelId: model, messages: [user], system: [{ text: 'Be brief.' }],
+      inferenceConfig: { maxTokens: 512 }, additionalModelRequestFields: { thinking: { type: 'adaptive', display: 'summarized' } } }, model);
+    assert.equal(plain.additionalModelRequestFields, undefined, 'the input command is not mutated');
+  }
+  // Tools offered, with no tool turn yet (a tool loop's first call): asked too, its tools as they were.
+  const offered = toConverseInput(request({ tools: TIME_TOOL }), MODEL);
+  assert.deepEqual(withSummarizedThinking(offered), { ...offered, additionalModelRequestFields: SUMMARY });
+  // A tool loop's history, sampling settings and a forced tool choice keep the request exactly as it was.
+  for (const [label, body] of [['tool history', request({ tools: TIME_TOOL, messages: TOOL_LOOP })], ['temperature', request({ temperature: 0.2 })],
+    ['top_p', request({ top_p: 0.9 })], ['required tool', request({ tools: TIME_TOOL, tool_choice: 'required' })],
+    ['named tool', request({ tools: TIME_TOOL, tool_choice: { type: 'function', function: { name: 'current_time' } } })]] as const) {
+    const command = toConverseInput(body, MODEL);
+    assert.equal(withSummarizedThinking(command), command, label);
+  }
+  // Another model, a name that only looks like it, and an operator's thinking budget are left exactly as they were.
+  for (const model of [OPUS_48, 'us.anthropic.claude-sonnet-4-5', 'anthropic.claude-opus-5-5-v2', 'xglobal.anthropic.claude-opus-5-5', 'deepseek.v3']) {
+    const command = toConverseInput(request({ model }), model);
+    assert.equal(withSummarizedThinking(command), command, model);
+  }
+  const budgeted = withClaudeThinking(toConverseInput(request({ max_tokens: 8000 }), MODEL), 2048);
+  assert.equal(withSummarizedThinking(budgeted), budgeted);
+  assert.equal(withSummarizedThinking({ messages: [] }).additionalModelRequestFields, undefined, 'a command without a model ID');
+});
+
+test('the fetch asks Claude Opus 5.5 for the summary, on its other profile too, relays it as reasoning content, and leaves a tool loop as it was', async () => {
+  const events = [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { reasoningContent: { text: 'Laying out the islands' } } } },
+    { contentBlockDelta: { delta: { reasoningContent: { signature: 'sig' } } } }, { contentBlockStop: {} },
+    { contentBlockDelta: { delta: { text: '<!doctype html>' } } }, { messageStop: { stopReason: 'end_turn' } },
+    { metadata: { usage: { inputTokens: 30, outputTokens: 90 } } }];
+  const script = scriptedSdk([{ fail: awsError('ThrottlingException', 429) }, { events }, { events }]);
+  const fetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: script.sdk, fallbackModel: FALLBACK });
+  const response = await fetch(ENDPOINT, post(request({ tools: TIME_TOOL })));
+  assert.equal(response.status, 200);
+  const deltas = frames(await response.text()).slice(0, -1).map(frame => JSON.parse(frame).choices?.[0]?.delta ?? {});
+  assert.deepEqual(script.inputs.map(input => [input.modelId, input.additionalModelRequestFields]), [[MODEL, SUMMARY], [FALLBACK, SUMMARY]]);
+  assert.deepEqual(deltas.filter(delta => 'reasoning_content' in delta), [{ reasoning_content: 'Laying out the islands' }], 'the signature is dropped');
+  assert.ok(deltas.some(delta => delta.content === '<!doctype html>'));
+  // The same model's next call of the loop, with the tool turn in its history, carries no thinking field.
+  await (await fetch(ENDPOINT, post(request({ tools: TIME_TOOL, messages: TOOL_LOOP })))).text();
+  assert.equal(script.inputs.length, 3);
+  assert.equal(script.inputs[2].additionalModelRequestFields, undefined);
+  assert.deepEqual(script.inputs[2], toConverseInput(request({ tools: TIME_TOOL, messages: TOOL_LOOP }), MODEL));
 });
