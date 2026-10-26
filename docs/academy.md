@@ -87,11 +87,14 @@ free plan holds until the promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (1.91 GB) are too large for a release. A staged file stays when no catalog names it any more (nothing removes
-one); among them are the first cut's (1.39 GB), THE LONG CHORD's first recording (0.06 GB, replaced on 2026-10-21), the
-earlier motion versions of the six flagships recorded again on 2026-10-24 (0.46 GB), the 17 build videos' versions from
-before their step 3 was recorded again on 2026-10-25 (1.18 GB), the six how-tos' versions from before their title cards
-were renumbered (0.10 GB) and nine motion versions staged on 2026-10-22 before their sound was encoded again (0.44 GB). Each is staged once on the host,
+The files (1.91 GB) are too large for a release. Nothing removes a staged file by itself, and one stays while something
+still plays it: the live catalog, a release a rollback goes to, or an AwwO Local build, whose local web server sends a
+video it lacks to this site (`stagedFallback` in `scripts/awwo-local-web.mjs`), so an old build plays the files its
+own catalog names. On 2026-10-26 the 41 that nothing played any more were removed by hand (1.97 GB: the first cut and
+THE LONG CHORD's first recording of 2026-10-21, nine motion versions of 2026-10-22 from before their sound was encoded
+again, four draft renders of the two how-tos of 2026-10-25). The 58 that stay (3.65 GB) include what older AwwO Local
+builds still play: the earlier versions of the flagships and of the 17 build videos, and the six how-tos' versions from
+before their title cards were renumbered. Each is staged once on the host,
 outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
