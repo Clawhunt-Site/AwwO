@@ -1,9 +1,152 @@
 import AppKit
 import WebKit
 import Darwin
+import Security
 
-private enum WorkspaceMode { case cloud, local }
+private enum WorkspaceMode: String { case cloud, local }
 private final class RuntimeOutputBuffer { var data = Data() }
+
+// AwwO 本地版 in this app (docs/awwo-local-edition.md): the payload apps/macos/build.ts puts in Contents/Resources/payload
+// (scripts/awwo-local-package-macos.mjs), its runtime started with the flags AwwO Local's Windows window gives it,
+// and this account's data in a folder of the app's own, apart from the folder an earlier build's local mode used
+// (~/Library/Application Support/AwwO Local, which is never touched).
+private struct LocalPaths {
+    let node: URL
+    let script: URL
+    let code: URL
+    let build: URL
+    /// ~/Library/Application Support/store.clawhunt.awwo.local: state/ (the runtime's data folder), logs/ (the runtime's
+    /// own log, its standard error, which holds no secret) and credentials-shown.
+    let home: URL
+    var state: URL { home.appendingPathComponent("state", isDirectory: true) }
+    var logs: URL { home.appendingPathComponent("logs", isDirectory: true) }
+    var credentialsShown: URL { home.appendingPathComponent("credentials-shown") }
+
+    /// The payload's paths, or nil for an app built without one (the hosted service's client alone).
+    static func inBundle() -> LocalPaths? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let payload = resources.appendingPathComponent("payload", isDirectory: true)
+        let code = payload.appendingPathComponent("app", isDirectory: true)
+        let build = payload.appendingPathComponent("build", isDirectory: true)
+        let paths = LocalPaths(node: build.appendingPathComponent("node/bin/node"), script: code.appendingPathComponent("scripts/awwo-local.mjs"),
+            code: code, build: build, home: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/store.clawhunt.awwo.local", isDirectory: true))
+        let files = FileManager.default
+        return files.isExecutableFile(atPath: paths.node.path) && files.fileExists(atPath: paths.script.path) ? paths : nil
+    }
+}
+
+/// What the runtime's ready event (scripts/awwo-local.mjs --events) must say for this window to open it: the data
+/// folder's own address, which a browser opens (http, one name under .localhost, its port), and the window's (the same
+/// port on 127.0.0.1, which the runtime answers only with this launch's cookie: macOS resolves *.localhost names only
+/// from macOS 26 on), for this data folder.
+private enum LocalReady {
+    static func parse(_ event: [String: Any], state: URL) -> (browser: URL, window: URL)? {
+        // Compared as paths: a file URL ends in "/" only where it was made for a folder (or found one on disk).
+        guard event["event"] as? String == "ready",
+            let browserValue = event["url"] as? String, let browser = URL(string: browserValue),
+            let windowValue = event["window"] as? String, let window = URL(string: windowValue),
+            let stateValue = event["stateDir"] as? String,
+            URL(fileURLWithPath: stateValue).standardizedFileURL.path == state.standardizedFileURL.path else { return nil }
+        guard browser.scheme == "http", let host = browser.host, isLocalhostName(host),
+            let port = browser.port, (1...65535).contains(port), plainOrigin(browser) else { return nil }
+        guard window.scheme == "http", window.host == "127.0.0.1", window.port == port, plainOrigin(window) else { return nil }
+        return (browser, window)
+    }
+    /// An origin alone: no credentials, path, query or fragment.
+    private static func plainOrigin(_ url: URL) -> Bool {
+        url.user == nil && url.password == nil && (url.path.isEmpty || url.path == "/") && url.query == nil && url.fragment == nil
+    }
+    /// One name under .localhost, as the runtime names a data folder (awwo-<instance>.localhost, localOrigin in
+    /// scripts/awwo-local-lib.mjs): lowercase letters, digits and inner hyphens, at most 63 of them.
+    static func isLocalhostName(_ host: String) -> Bool {
+        guard host.hasSuffix(".localhost") else { return false }
+        let label = host.dropLast(".localhost".count)
+        guard (1...63).contains(label.count), label.first != "-", label.last != "-" else { return false }
+        return label.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
+    }
+}
+
+/// The window's cookie (its launch's; the runtime keeps its sign-in) is for the host 127.0.0.1, which every port of it
+/// shares, other accounts' servers too: a page of the app that loaded anything from another port of 127.0.0.1 while its
+/// runtime runs would give that server the cookie, which is the window's way in, and with it the person's workspace. So
+/// the window loads nothing from 127.0.0.1 but its own address: a WebKit
+/// content rule list (block, then its own port let through). URLs are matched as WebKit writes them, the host's other
+/// spellings (127.1, 2130706433) as 127.0.0.1; one with user information before the host (x@127.0.0.1) is blocked by a
+/// rule of its own, and never let through. Rules have no alternation, and ^ and $ only at their ends.
+private enum LoopbackRule {
+    static func identifier(port: Int) -> String { "AwwOLocalLoopback\(port)" }
+    static func json(port: Int) -> String {
+        """
+        [{"trigger":{"url-filter":"^[a-z]+://127\\\\.0\\\\.0\\\\.1[:/]"},"action":{"type":"block"}},\
+        {"trigger":{"url-filter":"^[a-z]+://.*@127\\\\.0\\\\.0\\\\.1[:/]"},"action":{"type":"block"}},\
+        {"trigger":{"url-filter":"^http://127\\\\.0\\\\.0\\\\.1:\(port)/"},"action":{"type":"ignore-previous-rules"}}]
+        """
+    }
+}
+
+/// This launch's token for the window's address (AWWO_LOCAL_SHELL_TOKEN, SHELL_TOKEN in scripts/awwo-local-lib.mjs):
+/// given to the runtime in its environment, never on its command line, and set as the window's cookie in its own
+/// WebKit store, which no browser has.
+private enum ShellToken {
+    static let environmentName = "AWWO_LOCAL_SHELL_TOKEN"
+    static let cookieName = "awwo_shell"
+
+    /// 32 random bytes as base64url without padding: 43 characters.
+    static func make() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw LaunchError("无法生成本机窗口的令牌。") }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+    static func isValid(_ token: String) -> Bool {
+        token.utf8.count == 43 && token.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }
+    }
+    /// The window's cookie: for 127.0.0.1 alone (a host cookie), every path, for this session, unreadable by the page.
+    static func cookie(_ token: String) -> HTTPCookie? {
+        HTTPCookie(properties: [.name: cookieName, .value: token, .domain: "127.0.0.1", .path: "/",
+            .discard: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"])
+    }
+}
+
+/// What stopping a leftover database came to: none was running (or the data folder is not one a runtime made its own,
+/// or a runtime holds it, whose own the database is), one was stopped, or one is still running after both a fast and an
+/// immediate stop.
+private enum LeftoverDatabase { case notRunning, stopped, stillRunning }
+
+/// Stops the PostgreSQL a runtime that ended without stopping it left running (ended at the stop's deadline or from
+/// outside, or crashed): pg_ctl starts the server outside the runtime's processes, so it outlives them. Only in a data
+/// folder a runtime made its own (its local.env and the runtime.lock it made: a folder the runtime refused as
+/// another's has neither of its own, and is never written to or stopped in), and with no runtime on it, whose lock
+/// (runtime.lock, the flock a runtime takes) is held until the server has stopped. A fast stop (open sessions are
+/// ended, the server checkpoints) is tried for a minute, then an immediate one.
+private func stopLeftoverDatabase(_ paths: LocalPaths) -> LeftoverDatabase {
+    let pgCtl = paths.build.appendingPathComponent("pgsql/bin/pg_ctl")
+    let data = paths.state.appendingPathComponent("postgres", isDirectory: true)
+    let files = FileManager.default
+    guard files.isExecutableFile(atPath: pgCtl.path), files.fileExists(atPath: data.appendingPathComponent("postmaster.pid").path),
+        files.fileExists(atPath: paths.state.appendingPathComponent("local.env").path) else { return .notRunning }
+    let lock = open(paths.state.appendingPathComponent("runtime.lock").path, O_RDWR | O_EXLOCK | O_NONBLOCK | O_CLOEXEC)
+    guard lock >= 0 else { return .notRunning }
+    defer { close(lock) }
+    func pgctl(_ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = pgCtl
+        process.arguments = ["-D", data.path] + arguments
+        process.environment = ["PATH": "/usr/bin:/bin", "LC_MESSAGES": "C"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return -1 }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+    // pg_ctl status: 0 while the server runs, 3 when it does not.
+    guard pgctl(["status"]) == 0 else { return .notRunning }
+    if pgctl(["-m", "fast", "-w", "-t", "60", "stop"]) == 0 || pgctl(["status"]) == 3 { return .stopped }
+    if pgctl(["-m", "immediate", "-w", "-t", "30", "stop"]) == 0 || pgctl(["status"]) == 3 { return .stopped }
+    return .stillRunning
+}
 
 // A one-shot ownership record used only while stopping this app's runtime.
 // Birth times come from the kernel (microsecond precision), not command strings.
@@ -41,7 +184,9 @@ private final class RuntimeStopOwnership {
     private var owned: [pid_t: OwnedProcessIdentity]
 
     init(pid: pid_t) throws {
-        guard pid > 1, pid != getpid(), let root = OwnedProcessIdentity.read(pid), !root.zombie else {
+        // The runtime is this app's own child: a pid that another process has taken since (the runtime ended and was
+        // reaped) is not taken for it.
+        guard pid > 1, pid != getpid(), let root = OwnedProcessIdentity.read(pid), !root.zombie, root.parent == getpid() else {
             throw LaunchError("无法验证本次运行进程的身份，未执行强制清理。")
         }
         self.root = root
@@ -151,25 +296,22 @@ private final class RuntimeStopOwnership {
         }
     }
 
-    func forceCleanup(termGrace: TimeInterval = 1, killGrace: TimeInterval = 3) throws {
-        // Freeze only the exact supervisor we launched, preventing new detached
-        // children while its already-owned groups are reclaimed. Kill it last.
-        try signalExact(root, SIGSTOP)
-        defer { if root.matches(OwnedProcessIdentity.read(root.pid)) { try? signalExact(root, SIGCONT) } }
+    /// Ends a runtime that did not stop in time. Only the runtime itself is signalled: each wrapper it started ends its
+    /// service, and that service's process group, once its pipe from the runtime closes (scripts/awwo-local-reaper.mjs),
+    /// where a signal to the wrapper would end the service at once too. What of the processes it started is still
+    /// there `childGrace` later (a process of its own group, as the managed execution's core) is ended by its exact
+    /// identity. The database it started runs outside its processes and is stopped after (stopLeftoverDatabase).
+    func forceCleanup(childGrace: TimeInterval = 10, killGrace: TimeInterval = 3) throws {
         observe(try snapshot())
-        try signalChildren(SIGTERM)
-        let termDeadline = Date().addingTimeInterval(termGrace)
-        while try hasSurvivors(), Date() < termDeadline { usleep(50_000) }
+        try signalExact(root, SIGKILL)
+        let childDeadline = Date().addingTimeInterval(childGrace)
+        while try hasSurvivors(includeRoot: true), Date() < childDeadline { usleep(50_000) }
         let killDeadline = Date().addingTimeInterval(killGrace)
-        while try hasSurvivors(), Date() < killDeadline {
+        while try hasSurvivors(includeRoot: true), Date() < killDeadline {
             try signalChildren(SIGKILL)
             usleep(50_000)
         }
-        guard try !hasSurvivors() else { throw LaunchError("仍有本机子进程未退出，尚未切换环境。请重试关闭。") }
-        try signalExact(root, SIGKILL)
-        let rootDeadline = Date().addingTimeInterval(killGrace)
-        while try hasSurvivors(includeRoot: true), Date() < rootDeadline { usleep(50_000) }
-        guard try !hasSurvivors(includeRoot: true) else { throw LaunchError("本机运行进程尚未退出，环境切换已取消。") }
+        guard try !hasSurvivors(includeRoot: true) else { throw LaunchError("仍有本机子进程未退出。请重试关闭。") }
     }
 }
 
@@ -339,34 +481,48 @@ private func makeWorkspaceWindow() -> NSWindow {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler, NSMenuItemValidation {
     private let bundleID = "store.clawhunt.awwo.local"
-    private let stateDirectory = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/AwwO Local", isDirectory: true)
-    // The production package deliberately contains no independent local runtime.
-    // Keep the proven process cleanup implementation for old local sessions, but
-    // never expose or start it from this hosted production package.
-    private let supportsLocalWorkspace = false
+    /// The local edition's files, where this build carries them (AWWO_MAC_LOCAL_PAYLOAD in build.ts); nil in a build of
+    /// the hosted service's client alone, which never offers the local workspace.
+    private let localPaths = LocalPaths.inBundle()
+    private var supportsLocalWorkspace: Bool { localPaths != nil }
+    /// The workspace last opened, opened again at the next launch; none chosen yet, the window asks.
+    private let modeDefault = "AwwOWorkspaceMode"
     private let cloudURL = NavigationPolicy.cloudURL
     private let cloudDataStore = WKWebsiteDataStore(forIdentifier: UUID(uuidString: "C4B6F31C-57B1-49F0-873B-DA03351FAE72")!)
+    /// The local workspace's own store: its window's cookie (the runtime keeps its sign-in) and the page's own data,
+    /// apart from the cloud's and from what an earlier build's local mode left in the default store.
+    private let localDataStore = WKWebsiteDataStore(forIdentifier: UUID(uuidString: "5D3A8C21-7F4E-4B9A-A6E2-1C0F9B7D3E58")!)
     private var mode: WorkspaceMode = .cloud
     private var generation = UUID()
     private var pendingMode: WorkspaceMode?
+    /// A restart of the local workspace asked during a stop, and whether it resets the sign-in password.
+    private var pendingReset = false
     private var switching = false
+    private var choosing = false
     private var pageLoadFailed = false
     private let pageLoad = NavigationLoadMonitor()
     private let outputQueue = DispatchQueue(label: "store.clawhunt.awwo.local.runtime-output")
     private var runtime: Process?
     private var outputPipe: Pipe?
+    /// The runtime's standard input: closing it is its stop in order (--stop-on-stdin-close).
+    private var runtimeInput: Pipe?
     private var logHandle: FileHandle?
-    private var startupTimer: Timer?
     private var shutdownTimer: Timer?
     private var stopOwnership: RuntimeStopOwnership?
     private var forcedCleanupRunning = false
     private var cleanupNeedsAttention = false
+    /// A runtime has ended and the database it may have left is being stopped: what follows waits for it.
+    private var cleaning = false
     private var pendingExitStatus: Int32?
     private var terminating = false
     private var terminationReplied = false
     private var runtimeFailed = false
+    /// The error the runtime last reported: what its end is shown with, when it stops by itself.
+    private var runtimeError: String?
+    /// This launch's token (ShellToken), the window's address (127.0.0.1) and the browser's (the data folder's name).
+    private var shellToken: String?
     private var localURL: URL?
+    private var browserURL: URL?
     private var downloads: [ObjectIdentifier: WKDownload] = [:]
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -375,6 +531,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var statusDetail: NSTextField!
     private var spinner: NSProgressIndicator!
     private var loginRecoveryActions: NSStackView!
+    private var workspaceChoices: NSStackView!
+    private var retryButton: NSButton!
     private var mainSiteLoginAvailable = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -386,7 +544,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         makeMenu()
         makeWindow()
-        beginWorkspace(.cloud)
+        // The workspace last opened; a build with the local edition asks once which to open, one without it has the
+        // cloud alone.
+        switch UserDefaults.standard.string(forKey: modeDefault).flatMap(WorkspaceMode.init(rawValue:)) {
+        case .some(.local) where supportsLocalWorkspace: beginWorkspace(.local)
+        case .some(.cloud): beginWorkspace(.cloud)
+        default: if supportsLocalWorkspace { offerWorkspaces() } else { beginWorkspace(.cloud) }
+        }
+    }
+
+    /// The first launch of a build with the local edition: which workspace to open (the menu 工作区 switches later).
+    private func offerWorkspaces() {
+        choosing = true
+        window.title = "AwwO"
+        statusView.isHidden = false
+        spinner.stopAnimation(nil)
+        retryButton.isHidden = true
+        loginRecoveryActions.isHidden = true
+        workspaceChoices.isHidden = false
+        statusHeading.stringValue = "选择工作区"
+        statusDetail.stringValue = "线上工作区使用你的 AwwO 账号，与网站同步。本机工作区（AwwO 本地版）在这台 Mac 上运行，账号、画布和记录只保存在这里，模型使用你自己的 Key。之后可从菜单「工作区」切换。"
+    }
+    @objc private func chooseCloud() { chooseWorkspace(.cloud) }
+    @objc private func chooseLocal() { chooseWorkspace(.local) }
+    private func chooseWorkspace(_ selected: WorkspaceMode) {
+        guard choosing, !terminating, selected == .cloud || supportsLocalWorkspace else { return }
+        choosing = false
+        workspaceChoices.isHidden = true
+        retryButton.isHidden = false
+        beginWorkspace(selected)
     }
 
     private func makeMenu() {
@@ -397,6 +583,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         appItem.submenu = appMenu
         addItem("关于 AwwO", action: #selector(showAbout), to: appMenu)
         appMenu.addItem(.separator())
+        if supportsLocalWorkspace {
+            // The local workspace's menu, named as AwwO Local's on Windows (apps/windows-local), which the app's own
+            // pages name where a checkout's person would run an npm command (--shell macos).
+            addItem("重新启动 Restart", action: #selector(restartLocal), to: appMenu)
+            addItem("在浏览器中打开 Open in browser", action: #selector(openLocalInBrowser), to: appMenu)
+            appMenu.addItem(.separator())
+            addItem("打开数据目录 Open the data folder", action: #selector(openDataDirectory), to: appMenu)
+            addItem("打开日志 Open the logs", action: #selector(openLog), to: appMenu)
+            appMenu.addItem(.separator())
+            addItem("重置登录密码（重新启动） Reset the sign-in password (restarts)", action: #selector(resetLocalPassword), to: appMenu)
+            appMenu.addItem(.separator())
+        }
         addItem("隐藏 AwwO", action: #selector(NSApplication.hide(_:)), key: "h", to: appMenu, target: NSApp)
         addItem("退出 AwwO", action: #selector(NSApplication.terminate(_:)), key: "q", to: appMenu, target: NSApp)
 
@@ -424,6 +622,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         viewMenu.addItem(.separator())
         addItem("刷新", action: #selector(reloadPage), key: "r", to: viewMenu)
         addItem("在默认浏览器中打开", action: #selector(openInBrowser), to: viewMenu)
+
+        if supportsLocalWorkspace {
+            let workspaceMenu = NSMenu(title: "工作区")
+            let workspaceItem = NSMenuItem(title: "工作区", action: nil, keyEquivalent: "")
+            workspaceItem.submenu = workspaceMenu
+            menu.addItem(workspaceItem)
+            addItem("线上工作区 AwwO Cloud", action: #selector(switchToCloud), to: workspaceMenu)
+            addItem("本机工作区 AwwO 本地版", action: #selector(switchToLocal), to: workspaceMenu)
+        }
         NSApp.mainMenu = menu
     }
 
@@ -459,14 +666,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         spinner = NSProgressIndicator()
         spinner.style = .spinning
         spinner.startAnimation(nil)
-        let retryButton = NSButton(title: "重新载入", target: self, action: #selector(reloadPage))
+        retryButton = NSButton(title: "重新载入", target: self, action: #selector(reloadPage))
         loginRecoveryActions = NSStackView(views: [
             NSButton(title: "登录主站", target: self, action: #selector(openMainSiteLogin)),
             NSButton(title: "返回 AwwO 首页", target: self, action: #selector(openWorkspaceHome))
         ])
         loginRecoveryActions.spacing = 12
         loginRecoveryActions.isHidden = true
-        let stack = NSStackView(views: [spinner, statusHeading, statusDetail, loginRecoveryActions, retryButton])
+        workspaceChoices = NSStackView(views: [
+            NSButton(title: "线上工作区", target: self, action: #selector(chooseCloud)),
+            NSButton(title: "本机工作区（AwwO 本地版）", target: self, action: #selector(chooseLocal))
+        ])
+        workspaceChoices.spacing = 12
+        workspaceChoices.isHidden = true
+        let stack = NSStackView(views: [spinner, statusHeading, statusDetail, loginRecoveryActions, workspaceChoices, retryButton])
         stack.orientation = .vertical
         stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -482,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func makeWebView() {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = mode == .cloud ? cloudDataStore : .default()
+        configuration.websiteDataStore = mode == .cloud ? cloudDataStore : localDataStore
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         if mode == .local {
             configuration.userContentController.add(self, name: "localDiagnostics")
@@ -513,7 +726,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         ])
     }
 
+    /// Takes the page down, and with it the local workspace's addresses: they were its runtime's, whose port is anyone's
+    /// once that runtime stops (retireLocalPage), so no later action loads one again in a new page (beginWorkspace sets
+    /// them when the next runtime is ready).
     private func removeWebView() {
+        localURL = nil
+        browserURL = nil
         pageLoad.reset()
         for sheet in window?.sheets ?? [] { window?.endSheet(sheet, returnCode: .cancel) }
         for download in downloads.values { download.cancel { _ in } }
@@ -526,14 +744,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView = nil
     }
 
-    private func beginWorkspace(_ selected: WorkspaceMode) {
+    private func beginWorkspace(_ selected: WorkspaceMode, resetPassword: Bool = false) {
         guard selected == .cloud || supportsLocalWorkspace else { return }
         mode = selected
+        UserDefaults.standard.set(selected.rawValue, forKey: modeDefault)
         switching = false
         pendingMode = nil
+        pendingReset = false
         runtimeFailed = false
+        runtimeError = nil
         pageLoadFailed = false
         localURL = nil
+        browserURL = nil
         window.title = selected == .cloud ? "AwwO" : "AwwO · 本机工作区（独立数据）"
         makeWebView()
         statusView.isHidden = false
@@ -545,49 +767,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             statusDetail.stringValue = "awwo.clawhunt.store · 使用现有线上账号与历史记录。"
             loadPage(cloudURL)
         } else {
-            statusHeading.stringValue = "正在启动本机工作区"
-            statusDetail.stringValue = "本机账号与数据独立保存，不同步线上工作区。"
-            startRuntime()
+            statusHeading.stringValue = "正在启动 AwwO 本地版"
+            statusDetail.stringValue = "本机账号与数据独立保存，不同步线上工作区。第一次启动要建立数据库，可能需要几分钟。"
+            startRuntime(resetPassword: resetPassword)
         }
     }
 
     @objc private func switchToCloud() { switchWorkspace(.cloud) }
     @objc private func switchToLocal() { switchWorkspace(.local) }
-    private func switchWorkspace(_ selected: WorkspaceMode) {
-        guard !terminating, !switching, selected != mode,
+    private func switchWorkspace(_ selected: WorkspaceMode, resetPassword: Bool = false) {
+        if choosing { chooseWorkspace(selected); return }
+        // Another workspace, or the local one again (a restart).
+        guard !terminating, !switching, !cleaning, selected != mode || selected == .local,
             selected == .cloud || supportsLocalWorkspace else { return }
         generation = UUID()
         switching = true
         pendingMode = selected
-        startupTimer?.invalidate()
+        pendingReset = resetPassword
         removeWebView()
         statusView.isHidden = false
         spinner.startAnimation(nil)
-        if let process = runtime, process.isRunning || cleanupNeedsAttention || stopOwnership != nil {
-            statusHeading.stringValue = "正在关闭本机服务"
-            statusDetail.stringValue = "等待本地数据库安全关闭后，进入线上工作区。"
-            stopRuntime(process)
+        if let process = runtime {
+            statusHeading.stringValue = selected == .local ? "正在重新启动 AwwO 本地版" : "正在关闭本机服务"
+            statusDetail.stringValue = "AwwO 本地版正在有序停止：先停 API，再停执行服务和数据库（最多几分钟）。"
+            // One that has exited already has its end on its way (runtimeExited, queued): that stops what it left
+            // running, then opens the workspace asked for (pendingMode).
+            if process.isRunning || cleanupNeedsAttention || stopOwnership != nil { stopRuntime(process) }
         } else {
-            runtime = nil
-            beginWorkspace(selected)
+            beginWorkspace(selected, resetPassword: resetPassword)
         }
     }
 
+    /// Stops the local workspace's runtime in order and starts it again (menu 重新启动); with a new sign-in password
+    /// (重置登录密码), whose admin-credentials.txt opens once it is ready.
+    @objc private func restartLocal() { if mode == .local { switchWorkspace(.local) } }
+    @objc private func resetLocalPassword() {
+        guard mode == .local, let paths = localPaths else { return }
+        try? FileManager.default.removeItem(at: paths.credentialsShown)
+        switchWorkspace(.local, resetPassword: true)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if choosing { return [#selector(switchToCloud), #selector(switchToLocal), #selector(showAbout)].contains(menuItem.action) }
         if menuItem.action == #selector(switchToCloud) {
             menuItem.state = mode == .cloud ? .on : .off
-            return !switching && !terminating && mode != .cloud
+            return !switching && !terminating && !cleaning && mode != .cloud
         }
         if menuItem.action == #selector(switchToLocal) {
             menuItem.state = mode == .local ? .on : .off
-            return supportsLocalWorkspace && !switching && !terminating && mode != .local
+            return supportsLocalWorkspace && !switching && !terminating && !cleaning && mode != .local
         }
-        if [#selector(openModelConfiguration), #selector(openLocalCredentials), #selector(openDataDirectory), #selector(openLog)].contains(menuItem.action) {
-            return mode == .local && !switching && !terminating
+        if [#selector(restartLocal), #selector(resetLocalPassword)].contains(menuItem.action) {
+            return mode == .local && !switching && !terminating && !cleaning
+        }
+        if [#selector(openDataDirectory), #selector(openLog)].contains(menuItem.action) {
+            return supportsLocalWorkspace && !terminating
+        }
+        if menuItem.action == #selector(openLocalInBrowser) {
+            return mode == .local && browserURL != nil && !switching && !terminating
         }
         if menuItem.action == #selector(goBack) { return !switching && !terminating && webView?.canGoBack == true }
         if menuItem.action == #selector(goForward) { return !switching && !terminating && webView?.canGoForward == true }
-        if [#selector(reloadPage), #selector(openInBrowser), #selector(openWorkspaceHome)].contains(menuItem.action) { return !switching && !terminating }
+        if menuItem.action == #selector(reloadPage) { return !switching && !terminating && !cleaning && !forcedCleanupRunning }
+        if [#selector(openInBrowser), #selector(openWorkspaceHome)].contains(menuItem.action) { return !switching && !terminating }
         return true
     }
 
@@ -598,47 +840,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45))
     }
 
-    private func startRuntime() {
-        guard supportsLocalWorkspace, mode == .local, !switching, !terminating else { return }
+    /// Starts the local edition's runtime (scripts/awwo-local.mjs) from the payload, with this account's data folder:
+    /// one JSON event a line on its standard output, its log on its standard error (the shell's logs folder, which holds
+    /// no secret), and its stop in order when its standard input closes. Its own deadlines bound its start (the API's
+    /// five minutes, a first start's initdb): no timer of the window's cuts a slow first start short.
+    private func startRuntime(resetPassword: Bool = false) {
+        guard let paths = localPaths, mode == .local, !switching, !terminating else { return }
         let launchGeneration = generation
         do {
             let files = FileManager.default
-            let logs = stateDirectory.appendingPathComponent("logs", isDirectory: true)
-            try files.createDirectory(at: logs, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: stateDirectory.path)
-            let logURL = logs.appendingPathComponent("runtime.log")
+            try files.createDirectory(at: paths.logs, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: paths.home.path)
+            let logURL = paths.logs.appendingPathComponent("runtime.log")
             if !files.fileExists(atPath: logURL.path) { files.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
             try? logHandle?.close()
             logHandle = try FileHandle(forWritingTo: logURL)
             try logHandle?.seekToEnd()
-            log("Launching bundled local runtime")
-            guard let resources = Bundle.main.resourceURL else { throw LaunchError("应用资源目录缺失。") }
-            let executable = resources.appendingPathComponent("bin/node")
-            let script = resources.appendingPathComponent("runtime.ts")
-            guard files.isExecutableFile(atPath: executable.path), files.fileExists(atPath: script.path) else {
-                throw LaunchError("应用缺少 Node 运行时或 runtime.ts，请重新构建本地版本。")
-            }
+            log("Launching AwwO 本地版 from \(paths.code.path)")
+            let token = try ShellToken.make()
             let process = Process()
-            process.executableURL = executable
-            process.arguments = [script.path, resources.path, stateDirectory.path, String(ProcessInfo.processInfo.processIdentifier)]
-            process.currentDirectoryURL = resources
-            // Finder and shell launches use the same local configuration. Shell
-            // credentials and NODE_OPTIONS cannot silently change this bundle.
+            process.executableURL = paths.node
+            process.arguments = [paths.script.path, "--events", "--stop-on-stdin-close", "--shell", "macos",
+                "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
+                "--resources", paths.code.path, "--build", paths.build.path, "--state", paths.state.path] + (resetPassword ? ["--reset-password"] : [])
+            process.currentDirectoryURL = paths.code
+            // Finder and shell launches start it alike: none of the person's Node.js or AwwO settings reach it (they
+            // could load code or name another PostgreSQL). The system's folders come first on PATH, then Homebrew's,
+            // where ffmpeg and ffprobe usually are (renders); a proxy set in a shell is passed on.
             let inherited = ProcessInfo.processInfo.environment
-            process.environment = [
+            var environment = [
                 "HOME": files.homeDirectoryForCurrentUser.path,
-                "PATH": "\(resources.appendingPathComponent("bin").path):/usr/bin:/bin:/usr/sbin:/sbin",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
                 "TMPDIR": NSTemporaryDirectory(),
                 "LANG": inherited["LANG"] ?? "en_US.UTF-8",
-                "APP_ENV": "development"
+                ShellToken.environmentName: token
             ]
-            let pipe = Pipe()
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"] {
+                if let value = inherited[name] { environment[name] = value }
+            }
+            process.environment = environment
+            let output = Pipe()
+            let input = Pipe()
             let buffer = RuntimeOutputBuffer()
-            outputPipe = pipe
-            process.standardOutput = pipe
+            outputPipe = output
+            runtimeInput = input
+            process.standardOutput = output
             process.standardError = logHandle
-            process.standardInput = FileHandle.nullDevice
-            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            process.standardInput = input
+            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
                 let data = handle.availableData
                 guard !data.isEmpty else { handle.readabilityHandler = nil; return }
                 self?.outputQueue.async { [weak self] in self?.consumeOutput(data, buffer: buffer, generation: launchGeneration) }
@@ -646,16 +895,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             process.terminationHandler = { [weak self] process in
                 DispatchQueue.main.async { self?.runtimeExited(process, status: process.terminationStatus) }
             }
+            shellToken = token
             runtime = process
             try process.run()
-            startupTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
-                guard let self, self.generation == launchGeneration, self.mode == .local, self.localURL == nil else { return }
-                self.runtimeFailed = true
-                self.fail("本地服务启动超时", detail: "服务在 3 分钟内未完成启动。请查看运行日志，退出后重新启动。")
-                if self.runtime?.isRunning == true { self.runtime?.terminate() }
-            }
+            // The child has its own copy of the pipe's read end; this process keeps only the write end.
+            try? input.fileHandleForReading.close()
         } catch {
-            fail("无法启动 AwwO Local", detail: error.localizedDescription)
+            // Not started, so no end of it will come (its terminationHandler): nothing of it is left to wait for.
+            outputPipe?.fileHandleForReading.readabilityHandler = nil
+            outputPipe = nil
+            runtimeInput = nil
+            runtime = nil
+            shellToken = nil
+            fail("无法启动 AwwO 本地版", detail: error.localizedDescription)
         }
     }
 
@@ -673,35 +925,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func receiveRuntimeEvent(_ event: [String: Any], generation: UUID) {
-        guard !terminating, !switching, mode == .local, self.generation == generation else { return }
-        if event["event"] as? String == "error" {
+        guard !terminating, !switching, mode == .local, self.generation == generation, let paths = localPaths else { return }
+        switch event["event"] as? String ?? "" {
+        case "status":
+            // The runtime's steps (scripts/awwo-local.mjs): database, workers, api.
+            let steps = ["database": "正在启动数据库…", "workers": "正在启动执行服务…", "api": "正在启动 API…"]
+            if localURL == nil, !runtimeFailed, let step = event["step"] as? String, let text = steps[step] { statusDetail.stringValue = text }
+        case "error":
+            // The runtime is stopping in order on its own (its error ends it): a signal now would cut that stop short.
             runtimeFailed = true
-            fail("本地服务发生错误", detail: event["message"] as? String ?? "请查看运行日志。")
-            if runtime?.isRunning == true { runtime?.terminate() }
-            return
-        }
-        guard !runtimeFailed, event["event"] as? String == "ready", localURL == nil,
-            let value = event["url"] as? String, let url = URL(string: value),
-            url.scheme == "http", ["127.0.0.1", "localhost"].contains(url.host ?? ""),
-            let port = url.port, (1...65535).contains(port), url.user == nil, url.password == nil,
-            let state = event["stateDir"] as? String,
-            URL(fileURLWithPath: state).standardizedFileURL == stateDirectory.standardizedFileURL else {
-            if event["event"] as? String == "ready" {
+            let message = event["message"] as? String ?? "请查看日志。"
+            runtimeError = message
+            retireLocalPage()
+            fail("AwwO 本地版遇到错误，正在停止", detail: message)
+        case "stopping":
+            // Its stop has begun, which it says as it begins (its web server then answers 503 alone until it ends): from
+            // outside (a signal), at its parent's end, or after its error (said above). The window's own stops ignore it
+            // (switching, terminating).
+            retireLocalPage()
+        case "ready":
+            guard !runtimeFailed, localURL == nil else { return }
+            guard let ready = LocalReady.parse(event, state: paths.state), let token = shellToken, let cookie = ShellToken.cookie(token) else {
                 runtimeFailed = true
-                fail("本地服务返回了无效地址", detail: "仅允许当前应用管理的本机服务。请查看运行日志。")
-                if runtime?.isRunning == true { runtime?.terminate() }
+                runtimeError = "AwwO 本地版报告了意外的地址（\(event["url"] as? String ?? "")），这个窗口只打开本应用启动的本机服务。"
+                fail("AwwO 本地版报告了意外的地址", detail: "仅打开本应用启动的本机服务。请用菜单「AwwO → 打开日志」查看日志。")
+                if let process = runtime, process.isRunning { stopRuntime(process) }
+                return
             }
-            return
+            localURL = ready.window
+            browserURL = ready.browser
+            log("Runtime ready: \(ready.browser.absoluteString) (window \(ready.window.absoluteString))")
+            statusDetail.stringValue = "AwwO 本地版已就绪，正在载入工作台。"
+            let current = { [weak self] () -> Bool in
+                guard let self else { return false }
+                return self.generation == generation && self.mode == .local && !self.switching && !self.terminating && self.localURL == ready.window
+            }
+            // Before its first request: the rule that keeps its cookies at its own port, then the window's cookie (the
+            // runtime answers its address only with it).
+            let port = ready.window.port ?? 0
+            WKContentRuleListStore.default().compileContentRuleList(forIdentifier: LoopbackRule.identifier(port: port),
+                encodedContentRuleList: LoopbackRule.json(port: port)) { [weak self] list, error in
+                DispatchQueue.main.async {
+                    guard let self, current() else { return }
+                    guard let list, error == nil, let webView = self.webView else {
+                        self.runtimeFailed = true
+                        self.runtimeError = "无法为本机窗口设置网络规则：\(error?.localizedDescription ?? "WebKit 没有给出规则")"
+                        self.fail("AwwO 本地版无法打开", detail: self.runtimeError ?? "")
+                        if let process = self.runtime, process.isRunning { self.stopRuntime(process) }
+                        return
+                    }
+                    webView.configuration.userContentController.add(list)
+                    self.localDataStore.httpCookieStore.setCookie(cookie) {
+                        guard current() else { return }
+                        self.loadPage(ready.window)
+                        self.showCredentialsOnce(host: ready.browser.host ?? "", paths: paths)
+                    }
+                }
+            }
+        default:
+            break
         }
-        startupTimer?.invalidate()
-        localURL = url
-        log("Runtime ready: \(url.absoluteString)")
-        statusDetail.stringValue = "本地服务已就绪，正在载入工作台。"
-        loadPage(url)
+    }
+
+    /// The sign-in file opens the first time a data folder is ready (it has a name of its own, the address's host), and
+    /// after a password reset (which removes the mark): a start that failed before it was ready leaves it for the next.
+    private func showCredentialsOnce(host: String, paths: LocalPaths) {
+        let shown = (try? String(contentsOf: paths.credentialsShown, encoding: .utf8)) ?? ""
+        guard shown != host else { return }
+        let credentials = paths.state.appendingPathComponent("admin-credentials.txt")
+        guard FileManager.default.fileExists(atPath: credentials.path) else { return }
+        NSWorkspace.shared.open([credentials], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
+            configuration: NSWorkspace.OpenConfiguration())
+        try? host.write(to: paths.credentialsShown, atomically: true, encoding: .utf8)
+    }
+
+    /// Takes the local workspace's page down once its runtime is stopping (its stopping event, however its stop came) or
+    /// has gone. Once it has ended its port is free for any program on this computer to take, another account's
+    /// included, and the page's requests (its polls, a run's event stream) would carry the window's cookie, the host
+    /// 127.0.0.1's, to whatever listens there next: that launch's token alone, which opens nothing by then (the runtime
+    /// keeps the window's sign-in), so this is one more layer. A stop the window asks for takes the page down first itself
+    /// (switchWorkspace, applicationShouldTerminate); the next start makes a new one (beginWorkspace).
+    private func retireLocalPage() {
+        guard mode == .local, webView != nil else { return }
+        removeWebView()
+        // A failure already said (runtimeFailed: its error, an unexpected address; cleanupNeedsAttention: a stop that
+        // could not end it, whose 重新载入 retries it) stays what the window says.
+        guard !runtimeFailed, !cleanupNeedsAttention else { return }
+        statusView.isHidden = false
+        spinner.startAnimation(nil)
+        statusHeading.stringValue = "AwwO 本地版正在停止"
+        statusDetail.stringValue = "停完后可以用菜单「AwwO → 重新启动」再启动。"
     }
 
     private func runtimeExited(_ process: Process, status: Int32) {
         guard runtime === process else { return }
+        retireLocalPage()
         pendingExitStatus = status
         if forcedCleanupRunning || cleanupNeedsAttention { return }
         if let ownership = stopOwnership {
@@ -714,23 +1032,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func completeRuntimeExit(_ process: Process, status: Int32) {
         guard runtime === process else { return }
-        startupTimer?.invalidate()
         shutdownTimer?.invalidate()
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         outputPipe = nil
+        try? runtimeInput?.fileHandleForWriting.close()
+        runtimeInput = nil
         runtime = nil
         stopOwnership = nil
         cleanupNeedsAttention = false
         pendingExitStatus = nil
+        shellToken = nil
+        localURL = nil
+        browserURL = nil
         log("Runtime exited with status \(status)")
-        if terminating {
-            finishTermination()
-        } else if let next = pendingMode {
-            beginWorkspace(next)
-        } else {
-            localURL = nil
-            fail("本地服务已停止", detail: "运行进程已退出（状态 \(status)）。请查看运行日志，退出后重新启动应用。")
+        // A runtime that was ended (at the stop's deadline, or from outside) or crashed leaves its database running; one
+        // that stopped in order leaves none, and this only asks. Before anything follows, off the main thread (pg_ctl
+        // may take a minute), with what is asked meanwhile waiting for it.
+        cleaning = true
+        let paths = localPaths
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let leftover = paths.map(stopLeftoverDatabase) ?? .notRunning
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.cleaning = false
+                switch leftover {
+                case .stopped: self.log("Stopped the database the runtime left running")
+                case .stillRunning: self.log("The database the runtime left running did not stop (pg_ctl fast, then immediate)")
+                case .notRunning: break
+                }
+                // A database still running is said: the next start waits for it and stops it, but until then it runs.
+                // Said before a quit or a switch to the cloud workspace too; a start of the local one stops it itself,
+                // and says so if it cannot.
+                let still = leftover == .stillRunning
+                    ? "\n\n它留下的数据库没能停止，仍在运行：下次启动 AwwO 本地版时会先停止它。也可以在「活动监视器」中结束 postgres。" : ""
+                if self.terminating {
+                    if leftover == .stillRunning { self.reportDatabaseStillRunning() }
+                    self.finishTermination()
+                } else if let next = self.pendingMode {
+                    if leftover == .stillRunning, next == .cloud { self.reportDatabaseStillRunning() }
+                    self.beginWorkspace(next, resetPassword: self.pendingReset)
+                } else {
+                    let why = self.runtimeError.map { "\($0)\n\n" } ?? ""
+                    self.fail("AwwO 本地版已停止（\(status)）", detail: "\(why)用菜单「AwwO → 重新启动」再启动；「AwwO → 打开日志」里有它的日志。\(still)")
+                }
+            }
         }
+    }
+
+    /// Says, before the window quits or opens the cloud workspace, that the database a runtime left running did not stop
+    /// (a fast, then an immediate stop): it runs on until the next start of AwwO 本地版, which stops it first.
+    private func reportDatabaseStillRunning() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "AwwO 本地版的数据库没能停止"
+        alert.informativeText = "它仍在运行：下次启动 AwwO 本地版时会先停止它。也可以在「活动监视器」中结束 postgres。"
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 
     private func finishTermination() {
@@ -1039,7 +1396,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     @objc private func reloadPage() {
-        guard !switching, !terminating else { return }
+        // Not while the runtime's processes are being ended (forceCleanup): a start now would take its place.
+        guard !switching, !terminating, !cleaning, !choosing, !forcedCleanupRunning else { return }
         if cleanupNeedsAttention, let process = runtime {
             switching = true
             pendingMode = .local
@@ -1048,7 +1406,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             stopRuntime(process)
             return
         }
-        if mode == .local && runtime?.isRunning != true {
+        // A runtime that has exited has its end on its way (runtimeExited, queued), which stops what it left first.
+        if mode == .local, let process = runtime, !process.isRunning { return }
+        if mode == .local && runtime == nil {
             generation = UUID()
             removeWebView()
             beginWorkspace(.local)
@@ -1082,7 +1442,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         loadPage(NavigationPolicy.mainSiteLoginURL)
     }
     @objc private func openWorkspaceHome() {
-        guard !switching, !terminating else { return }
+        guard !switching, !terminating, !choosing else { return }
+        if mode == .local {
+            if let url = localURL { loadPage(url) }
+            return
+        }
         if mainSiteLoginAvailable {
             statusHeading.stringValue = "正在返回 AwwO"
             statusDetail.stringValue = "返回后，点击“使用 ClawHunt 账号继续”重新开始登录。"
@@ -1091,49 +1455,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         loadPage(cloudURL)
     }
     @objc private func openInBrowser() {
-        guard !switching, !terminating, let url = mode == .cloud ? cloudURL : localURL else { return }
-        NSWorkspace.shared.open(isApplicationURL(webView?.url) && webView?.url?.scheme != "blob" ? webView.url! : url)
+        guard !switching, !terminating, !choosing else { return }
+        if mode == .local { openLocalInBrowser(); return }
+        NSWorkspace.shared.open(isApplicationURL(webView?.url) && webView?.url?.scheme != "blob" ? webView.url! : cloudURL)
     }
+    /// The local workspace in the browser, at its data folder's own address (the window's 127.0.0.1 address is the
+    /// window's alone). Safari before macOS 26 cannot open *.localhost names; Chrome, Edge and Firefox can.
+    @objc private func openLocalInBrowser() {
+        guard mode == .local, !switching, !terminating, let browser = browserURL else { return }
+        var page = browser
+        if let current = webView?.url, current.scheme != "blob", isApplicationURL(current),
+            var components = URLComponents(url: current, resolvingAgainstBaseURL: false) {
+            components.host = browser.host
+            components.port = browser.port
+            page = components.url ?? browser
+        }
+        NSWorkspace.shared.open(page)
+    }
+    /// The data folder once the runtime has made it; before, the folder above it. The window never makes the data folder
+    /// itself: the runtime makes it, private, at its first start.
     @objc private func openDataDirectory() {
-        guard mode == .local, !switching, !terminating else { return }
-        NSWorkspace.shared.open(stateDirectory)
+        guard let paths = localPaths, !terminating else { return }
+        if FileManager.default.fileExists(atPath: paths.state.path) { NSWorkspace.shared.open(paths.state); return }
+        try? FileManager.default.createDirectory(at: paths.home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        NSWorkspace.shared.open(paths.home)
     }
     @objc private func openLog() {
-        guard mode == .local, !switching, !terminating else { return }
-        let url = stateDirectory.appendingPathComponent("logs/runtime.log")
-        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.open(url) }
-        else { NSWorkspace.shared.open(stateDirectory) }
-    }
-    @objc private func openModelConfiguration() {
-        guard mode == .local, !switching, !terminating else { return }
-        let url = stateDirectory.appendingPathComponent("models.env")
-        if FileManager.default.fileExists(atPath: url.path) {
-            NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
-                configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "模型配置尚未就绪"
-            alert.informativeText = "本地服务首次启动后会创建 models.env。请稍后重试，或查看运行日志。"
-            alert.beginSheetModal(for: window)
-        }
-    }
-    @objc private func openLocalCredentials() {
-        guard mode == .local, !switching, !terminating else { return }
-        let url = stateDirectory.appendingPathComponent("admin-credentials.txt")
-        if FileManager.default.fileExists(atPath: url.path) {
-            NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
-                configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "本机登录凭据尚未就绪"
-            alert.informativeText = "首次启动完成后，本地服务会生成管理员凭据。请稍后重试。"
-            alert.beginSheetModal(for: window)
-        }
+        guard let paths = localPaths, !terminating else { return }
+        try? FileManager.default.createDirectory(at: paths.logs, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        NSWorkspace.shared.open(paths.logs)
     }
     @objc private func showAbout() {
         var details = mode == .cloud
             ? "正式版\n地址：\(cloudURL.absoluteString)\n使用同一份账号、工作区和历史记录，界面随正式网站更新。"
-            : "当前环境：本机 development（独立数据）\n数据目录：\(stateDirectory.path)\n本机账号与数据不与线上工作区同步。"
+            : "本机工作区：AwwO 本地版（独立数据）\n数据目录：\(localPaths?.state.path ?? "")\n本机账号与数据不与线上工作区同步。"
         if let url = Bundle.main.resourceURL?.appendingPathComponent("metadata.json"),
             let data = try? Data(contentsOf: url),
             let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1159,37 +1514,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         terminating = true
         pendingMode = nil
         generation = UUID()
-        startupTimer?.invalidate()
         removeWebView()
-        guard let process = runtime, process.isRunning || cleanupNeedsAttention || stopOwnership != nil else { return .terminateNow }
+        // The end of a runtime still stopping what it left: the app exits once it has (completeRuntimeExit).
+        if cleaning { return .terminateLater }
+        guard let process = runtime else { return .terminateNow }
         statusHeading.stringValue = "正在退出 AwwO"
-        statusDetail.stringValue = "正在关闭本地服务并保存数据库。"
+        statusDetail.stringValue = "AwwO 本地版正在有序停止：先停 API，再停执行服务和数据库（最多几分钟）。"
         statusView.isHidden = false
         spinner.startAnimation(nil)
-        stopRuntime(process)
+        // One that has exited already (crashed, ended from outside) has its end on its way (runtimeExited, queued), which
+        // stops the database it left running and then lets the app quit.
+        if process.isRunning || cleanupNeedsAttention || stopOwnership != nil { stopRuntime(process) }
         return .terminateLater
     }
+
+    /// How long the runtime's stop in order may take before it is ended: its API is given 55 s at most, its workers 30 s
+    /// and its database up to 120 s (scripts/awwo-local.mjs), as AwwO Local's window on Windows gives it.
+    private let stopDeadline: TimeInterval = 240
 
     private func stopRuntime(_ process: Process) {
         // A Quit during a mode switch keeps the same pending stop and deadline.
         if shutdownTimer?.isValid == true || forcedCleanupRunning { return }
-        do {
-            if stopOwnership == nil { stopOwnership = try RuntimeStopOwnership(pid: process.processIdentifier) }
-        } catch {
-            // Defer until applicationShouldTerminate has returned terminateLater.
-            DispatchQueue.main.async { [weak self] in self?.cleanupFailed(error) }
+        if cleanupNeedsAttention {
+            // One that has exited with nothing of it recorded cannot be found by its pid any more (another process may
+            // have it by now): what is left of its end is the window's own (completeRuntimeExit: the database it left).
+            if !process.isRunning && stopOwnership == nil {
+                completeRuntimeExit(process, status: pendingExitStatus ?? process.terminationStatus)
+                return
+            }
+            do {
+                if stopOwnership == nil { stopOwnership = try RuntimeStopOwnership(pid: process.processIdentifier) }
+                if let ownership = stopOwnership { forceCleanup(process, ownership: ownership) }
+            } catch {
+                // Defer until applicationShouldTerminate has returned terminateLater.
+                DispatchQueue.main.async { [weak self] in self?.cleanupFailed(error) }
+            }
             return
         }
-        if cleanupNeedsAttention, let ownership = stopOwnership { forceCleanup(process, ownership: ownership); return }
-        process.terminate()
-        // Let the runtime stop its child services and flush embedded storage.
-        // Its independent parent-PID watchdog is the fallback for native crashes.
-        shutdownTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
-            guard let self, self.runtime === process else { return }
-            guard let ownership = self.stopOwnership else { self.cleanupFailed(LaunchError("缺少本次退出的进程归属记录。")); return }
-            self.log("Runtime exceeded 20-second shutdown deadline; checking owned descendants")
-            self.forceCleanup(process, ownership: ownership)
+        // Closing its standard input is the runtime's stop in order (--stop-on-stdin-close): the API first, while the
+        // workers and the database it records into still run, then the workers, then the database. No signal: one more
+        // during its stop would end its services at once. Its parent-PID watch is the fallback for a crash of this app.
+        try? runtimeInput?.fileHandleForWriting.close()
+        runtimeInput = nil
+        // What it started, recorded now while it runs, for the deadline's end of it and for what may outlive it; a record
+        // that cannot be made now (ps slow under load) is made again at the deadline, and the stop goes on meanwhile.
+        if stopOwnership == nil, process.isRunning { stopOwnership = try? RuntimeStopOwnership(pid: process.processIdentifier) }
+        let deadline = Timer(timeInterval: stopDeadline, repeats: false) { [weak self] _ in
+            // One that has exited meanwhile has its end on its way (runtimeExited).
+            guard let self, self.runtime === process, process.isRunning || self.stopOwnership != nil else { return }
+            self.log("Runtime exceeded its \(Int(self.stopDeadline))-second stop deadline; ending it")
+            do {
+                if self.stopOwnership == nil { self.stopOwnership = try RuntimeStopOwnership(pid: process.processIdentifier) }
+            } catch {
+                self.cleanupFailed(error)
+                return
+            }
+            if let ownership = self.stopOwnership { self.forceCleanup(process, ownership: ownership) }
         }
+        // In the common modes: while a Quit waits (terminateLater) AppKit runs the main run loop in its modal-panel mode,
+        // where a timer of the default mode alone never fires.
+        RunLoop.main.add(deadline, forMode: .common)
+        shutdownTimer = deadline
     }
 
     private func forceCleanup(_ process: Process, ownership: RuntimeStopOwnership) {
@@ -1201,8 +1586,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             do { try ownership.forceCleanup(); result = .success(()) }
             catch { result = .failure(error) }
             DispatchQueue.main.async {
-                guard let self, self.runtime === process else { return }
+                guard let self else { return }
+                // Before the check below: a cleanup that ends after another runtime took this one's place (none should,
+                // reloadPage waits for it) must not leave every later stop waiting for it.
                 self.forcedCleanupRunning = false
+                guard self.runtime === process else { return }
                 switch result {
                 case .success:
                     self.completeRuntimeExit(process, status: self.pendingExitStatus ?? SIGKILL)
@@ -1300,7 +1688,7 @@ private func testRuntimeShutdown() throws {
         let ownership = try RuntimeStopOwnership(pid: fixture.processIdentifier)
         defer {
             if fixture.isRunning { kill(fixture.processIdentifier, SIGCONT); fixture.terminate() }
-            try? ownership.forceCleanup(termGrace: 0.1, killGrace: 2)
+            try? ownership.forceCleanup(childGrace: 0.1, killGrace: 2)
             fixture.waitUntilExit()
         }
         try wait("detached child and grandchild ready") { try ownership.detachedFixtureReady() }
@@ -1313,7 +1701,7 @@ private func testRuntimeShutdown() throws {
             guard kill(fixture.processIdentifier, SIGSTOP) == 0 else { throw LaunchError("Could not stop fixture supervisor") }
             fixture.terminate() // SIGTERM remains pending while the supervisor is stopped.
             guard try ownership.hasSurvivors(includeRoot: true) else { throw LaunchError("Stopped fixture was mistaken for an exited process") }
-            try ownership.forceCleanup(termGrace: 0.15, killGrace: 2)
+            try ownership.forceCleanup(childGrace: 0.15, killGrace: 2)
             fixture.waitUntilExit()
             guard try !ownership.hasSurvivors(includeRoot: true) else { throw LaunchError("Fault cleanup left an owned process alive") }
         }
@@ -1430,6 +1818,78 @@ private func testNavigationPolicy() throws {
     print("Navigation policy: \(checks) checks passed")
     try testNavigationHTTPFailures()
     try testMainSiteLoginRecovery()
+    try testLocalContract()
+}
+
+/// The local edition's contract with its runtime (scripts/awwo-local.mjs): what a ready event must say, this launch's
+/// token and the window's cookie. Synthetic events only: nothing is started.
+private func testLocalContract() throws {
+    var checks = 0
+    func check(_ value: Bool, _ name: String) throws {
+        guard value else { throw LaunchError("Local contract self-test failed: \(name)") }
+        checks += 1
+    }
+    let state = URL(fileURLWithPath: "/Users/someone/Library/Application Support/store.clawhunt.awwo.local/state", isDirectory: true)
+    func ready(_ url: String, _ window: String?, stateDir: String? = nil, event: String = "ready") -> [String: Any] {
+        var value: [String: Any] = ["event": event, "url": url, "stateDir": stateDir ?? state.path, "services": ["api": true]]
+        if let window { value["window"] = window }
+        return value
+    }
+    let good = LocalReady.parse(ready("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199"), state: state)
+    try check(good?.browser.absoluteString == "http://awwo-0123456789ab.localhost:5199" && good?.window.absoluteString == "http://127.0.0.1:5199", "a ready data folder opens at the window's address")
+    try check(LocalReady.parse(ready("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199"), state: URL(fileURLWithPath: state.path + "/../state")) != nil, "the data folder is compared as a path")
+    let refused: [(String, String?, String)] = [
+        ("http://awwo-0123456789ab.localhost:5199", nil, "a ready event without the window's address"),
+        ("https://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199", "https"),
+        ("http://awwo.example:5199", "http://127.0.0.1:5199", "a name outside .localhost"),
+        ("http://a.b.localhost:5199", "http://127.0.0.1:5199", "two names under .localhost"),
+        ("http://-awwo.localhost:5199", "http://127.0.0.1:5199", "a name starting with a hyphen"),
+        ("http://awwo-0123456789ab.localhost", "http://127.0.0.1:5199", "no port"),
+        ("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5200", "another port for the window"),
+        ("http://awwo-0123456789ab.localhost:5199", "http://localhost:5199", "a window at localhost"),
+        ("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.2:5199", "a window at another loopback address"),
+        ("http://user@awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199", "credentials"),
+        ("http://awwo-0123456789ab.localhost:5199/admin", "http://127.0.0.1:5199", "a path"),
+        ("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199/?x=1", "a query on the window")
+    ]
+    for (url, window, name) in refused {
+        try check(LocalReady.parse(ready(url, window), state: state) == nil, name)
+    }
+    try check(LocalReady.parse(ready("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199", stateDir: "/tmp/other"), state: state) == nil, "another data folder's ready")
+    try check(LocalReady.parse(ready("http://awwo-0123456789ab.localhost:5199", "http://127.0.0.1:5199", event: "status"), state: state) == nil, "another event")
+    let token = try ShellToken.make()
+    let another = try ShellToken.make()
+    try check(ShellToken.isValid(token) && token != another, "a launch's token is 43 characters of base64url, new each time")
+    for bad in ["", String(repeating: "A", count: 42), String(repeating: "A", count: 42) + "=", String(repeating: "A", count: 42) + "+", String(repeating: "A", count: 44)] {
+        try check(!ShellToken.isValid(bad), "an invalid token: \(bad.count) characters")
+    }
+    let cookie = ShellToken.cookie(token)
+    try check(cookie?.name == "awwo_shell" && cookie?.value == token && cookie?.domain == "127.0.0.1" && cookie?.path == "/", "the window's cookie names its token, for 127.0.0.1")
+    try check(cookie?.isHTTPOnly == true && cookie?.isSessionOnly == true, "the window's cookie is unreadable by the page and ends with the session")
+    try check(LocalReady.isLocalhostName("awwo-0123456789ab.localhost") && !LocalReady.isLocalhostName("localhost") && !LocalReady.isLocalhostName("AWWO.localhost"), "names under .localhost as the runtime makes them")
+    // The loopback rule list: JSON WebKit takes, blocking every port of 127.0.0.1 but the window's own.
+    let rules = try JSONSerialization.jsonObject(with: Data(LoopbackRule.json(port: 5199).utf8)) as? [[String: Any]]
+    let filters = (rules ?? []).compactMap { ($0["trigger"] as? [String: Any])?["url-filter"] as? String }
+    let actions = (rules ?? []).compactMap { ($0["action"] as? [String: Any])?["type"] as? String }
+    try check(filters == ["^[a-z]+://127\\.0\\.0\\.1[:/]", "^[a-z]+://.*@127\\.0\\.0\\.1[:/]", "^http://127\\.0\\.0\\.1:5199/"]
+        && actions == ["block", "block", "ignore-previous-rules"], "the loopback rules block 127.0.0.1, with user information too, then let the window's port through")
+    func matches(_ pattern: String, _ url: String) throws -> Bool {
+        let expression = try NSRegularExpression(pattern: pattern)
+        return expression.firstMatch(in: url, range: NSRange(url.startIndex..., in: url)) != nil
+    }
+    // (URL, blocked by a block rule, let through by the last.)
+    let loads: [(String, Bool, Bool)] = [("http://127.0.0.1:3000/x.png", true, false), ("http://127.0.0.1/x", true, false),
+        ("https://x@127.0.0.1:9443/capture", true, false), ("http://x:y@127.0.0.1:5199/", true, false),
+        ("ws://127.0.0.1:5199/", true, false), ("http://127.0.0.1:5199/api/v1/auth/me", true, true),
+        ("http://127.0.0.1:51990/", true, false), ("https://awwo.clawhunt.store/kits/x.js", false, false)]
+    for (url, blocked, allowed) in loads {
+        let plain = try matches(filters[0], url)
+        let withUser = try matches(filters[1], url)
+        let isBlocked = plain || withUser
+        let isAllowed = try matches(filters[2], url)
+        try check(isBlocked == blocked && isAllowed == allowed, "loopback rule on \(url)")
+    }
+    print("Local contract: \(checks) checks passed (synthetic events only)")
 }
 
 private func testMainSiteLoginRecovery() throws {
@@ -1644,7 +2104,24 @@ private func testNavigationLoading() throws {
     empty.load("never")
     try wait(15) { !empty.timeouts.isEmpty }
     try check(empty.timeouts == [false] && empty.commits == 0, "real first document timeout still reported")
-    print("Navigation loading: \(checks) checks passed (including isolated WebKit slow-resource and uncommitted-document fixtures)")
+
+    // The local window's loopback rule list, compiled by WebKit itself (its rules take a narrower syntax than
+    // NSRegularExpression, which the policy self-test reads them with), in a store of its own in a temporary folder.
+    let ruleFolder = FileManager.default.temporaryDirectory.appendingPathComponent("awwo-rule-test-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: ruleFolder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: ruleFolder) }
+    // Typed as an optional: the SDK imports storeWithURL: as a plain initializer (an audited header) or as one returning
+    // an implicitly unwrapped value (an older one), and this reads the same in both.
+    let store: WKContentRuleListStore? = WKContentRuleListStore(url: ruleFolder)
+    guard let ruleStore = store else { throw LaunchError("Navigation loading self-test: no content rule store") }
+    var compiled: Bool?
+    ruleStore.compileContentRuleList(forIdentifier: LoopbackRule.identifier(port: 5199), encodedContentRuleList: LoopbackRule.json(port: 5199)) { list, error in
+        let ok = list != nil && error == nil
+        DispatchQueue.main.async { compiled = ok }
+    }
+    try withExtendedLifetime(ruleStore) { try wait(15) { compiled != nil } }
+    try check(compiled == true, "WebKit compiles the local window's loopback rule list")
+    print("Navigation loading: \(checks) checks passed (including isolated WebKit slow-resource and uncommitted-document fixtures, and the loopback rule list)")
 }
 
 private func testWindowLifecycle() throws {

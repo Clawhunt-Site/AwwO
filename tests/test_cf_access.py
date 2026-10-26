@@ -23,7 +23,7 @@ from superclaw.cf_access import (
 from superclaw.clawhunt import ClawHuntClient, ClawHuntSettings
 from superclaw.clawhunt_auth import ClawHuntAccountClient, ClawHuntAccountSettings
 
-STAGING_BASE = "https://staging.clawhunt.store"
+STAGING_BASE = "https://staging.example.com"
 PRODUCTION_BASE = "https://clawhunt.store"
 ID_HEADER = "CF-Access-Client-Id"
 SECRET_HEADER = "CF-Access-Client-Secret"
@@ -95,25 +95,25 @@ def test_headers_blocked_for_arbitrary_third_party_host(monkeypatch: pytest.Monk
     # Allowlist: the service token is never sent to an arbitrary CLAWHUNT_BASE_URL
     # override / third-party host, even in a non-production environment.
     assert cf_access_headers("https://evil.example/api") == {}
-    assert cf_access_headers("https://staging.clawhunt.store.evil.example/api") == {}
+    assert cf_access_headers("https://staging.example.com.evil.example/api") == {}
     assert cf_access_headers("http://127.0.0.1:8787") == {}
 
 
 def test_headers_blocked_for_cleartext_http(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_creds(monkeypatch)
     # Even the right host over cleartext http must never carry the token.
-    assert cf_access_headers("http://staging.clawhunt.store/api") == {}
+    assert cf_access_headers("http://staging.example.com/api") == {}
 
 
 def test_headers_blocked_for_nondefault_port(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_creds(monkeypatch)
     # Right host+scheme but an alternate port -> some other listener on the box.
-    assert cf_access_headers("https://staging.clawhunt.store:8443/api") == {}
+    assert cf_access_headers("https://staging.example.com:8443/api") == {}
 
 
 def test_headers_allowed_for_explicit_default_port(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_creds(monkeypatch)
-    assert cf_access_headers("https://staging.clawhunt.store:443/api") == {
+    assert cf_access_headers("https://staging.example.com:443/api") == {
         ID_HEADER: "cid-123",
         SECRET_HEADER: "secret-xyz",
     }
@@ -121,7 +121,7 @@ def test_headers_allowed_for_explicit_default_port(monkeypatch: pytest.MonkeyPat
 
 def test_headers_blocked_for_embedded_userinfo(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_creds(monkeypatch)
-    assert cf_access_headers("https://user:pass@staging.clawhunt.store/api") == {}
+    assert cf_access_headers("https://user:pass@staging.example.com/api") == {}
 
 
 def test_headers_blocked_for_homoglyph_production_host(monkeypatch: pytest.MonkeyPatch) -> None:

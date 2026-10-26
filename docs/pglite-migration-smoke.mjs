@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { fuzzystrmatch } from '@electric-sql/pglite/contrib/fuzzystrmatch';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 
-const MIG_DIR = String.raw`E:\Bobo's Coding cache\bo-work\superclaw\server\packages\db\dist\migrations`;
+const MIG_DIR = String.raw`E:\work\bo-work\superclaw\server\packages\db\dist\migrations`;
 const DATA_DIR = './pgdata-smoke';
 
 rmSync(DATA_DIR, { recursive: true, force: true });

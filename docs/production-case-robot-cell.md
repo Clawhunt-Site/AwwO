@@ -190,6 +190,8 @@ back out so the tree stays green until the run:
 - Re-checked against `4701d91d` after a rebase onto the current `main`, where `PRODUCTION_WORKFLOWS`
   now folds in the flagship and epic workflows: `CELL` goes into that same list
   (`[CAR, CELL, CIRCUIT, …, ...PUBLISHED_FLAGSHIPS.map(…), ...PUBLISHED_EPICS.map(…)]`).
+- Still applies at `a1373063` (2026-10-24 afternoon): neither `productionWorkflows.ts` nor
+  `productionCatalog.ts` has moved upstream since the patch was made, so it is still a clean apply.
 - An adversarial review of the `physical-props` skill found three rules that were also wrong in these
   tasks, now corrected here: a bay's levels are a floor level and two beam levels (0.59 m of load on the
   lower two, 0.69 m on the top, 0.10 m spare), a 1.00 m pallet overhangs a 0.70 m frame by 0.15 m each
@@ -198,28 +200,63 @@ back out so the tree stays green until the run:
 
 ## Running it
 
-1. **Apply** the card and the canvas above to the working tree. A patch of exactly the text above, taken
-   from the tree it was tested in, is kept outside the repository at
-   `E:/KiroCrew/awwo-simready-20261024/out/robot-cell-case.patch` (`git apply` it). The two failures
-   above are expected until step 5; nothing is committed yet.
+1. **Apply** the card and the canvas above. A patch of exactly the text above, taken from the tree it
+   was tested in, is kept outside the repository at
+   `E:/KiroCrew/awwo-simready-20261024/out/robot-cell-case.patch` (`git apply` it; re-checked against
+   `a1373063`). It can also be retyped from the two code blocks above, which are the source of truth.
+   The two failures above are expected until step 5; nothing is committed yet.
 2. **Run** the case on production in the operator's workspace, on the openai-agents runtime with
    Claude Opus 5.5 at the published limits (200,000-token context, 32,000 output tokens, thinking on,
    one model call per node), driven from a browser signed in as the owner, as the other 23 records
-   were. The local alternative, against a private stack on this machine, is
-   `AWWO_SHOWCASE_EMAIL=… AWWO_SHOWCASE_PASSWORD=… node scripts/showcase/run-production-cases.mjs --api <url> --out <dir> --cases robot-cell`.
-3. **Check** the delivered page in a real browser the way AwwO's preview runs it: open it, read the
-   checks against the figures by hand (the aisle arithmetic, the bay fit, the gripper payload), move
-   the aisle slider to 2.0 and to 4.0 and confirm the aisle check turns red and green with the right
-   numbers, switch the vehicle, the robot and the gripper, click several objects, toggle the plan view
-   and the dimensions, and confirm the two unknown checks stay amber. Write down only what was
-   observed, defects included.
-4. **Publish** with `node scripts/showcase/publish-run.mjs <raw.json> <notes.json>` (note,
-   verification, edition, source, thinking, limits, all in English).
+   were.
+   - **The local private stack cannot do this run from this machine.** It was built and proved out on
+     2026-10-24 up to the model call itself: private PostgreSQL, the Go API, the openai-agents worker
+     on Node 24 offering `bedrock.claude-opus-5-5`, authenticated, with the canvas created and the
+     graph started. Every node then failed, because Bedrock refuses **streaming** Anthropic calls from
+     this egress: `ValidationException` - *"Access to Anthropic models is not allowed from unsupported
+     countries, regions, or territories"* - for the `global.` and `us.` profiles alike, while a
+     **non-streaming** `Converse` with the same credentials succeeds. AwwO streams every run. The
+     production host (UCloud Tokyo) is unaffected. Details and the five other gates that had to be
+     cleared first are in the `awwo-local-case-run-geoblock` memory; the working kit is in
+     `E:/KiroCrew/awwo-simready-20261024/tools/`.
+   - The documented local alternative,
+     `AWWO_SHOWCASE_EMAIL=… AWWO_SHOWCASE_PASSWORD=… node scripts/showcase/run-production-cases.mjs --api <url> --out <dir> --cases robot-cell --runtime openai-agents --model bedrock.claude-opus-5-5`,
+     is therefore only usable where Anthropic allows streaming (the email and password are values the
+     caller chooses: it registers the account on the private stack).
+3. **Check** the delivered page in a real browser the way AwwO's preview runs it, and write down only
+   what was observed, defects included:
+   - every check's arithmetic against the figures by hand - the aisle (vehicle width + 2 x the stated
+     clearance), the bay fit (2 x 1.21 m in 3.10 m, and the 0.15 m overhang past the 0.70 m frame), the
+     levels (0.59 / 0.59 / 0.69 m with 0.10 m spare) and the gripper payload (carton and crate yes,
+     62 kg pallet no);
+   - the aisle slider at 2.0 and at 4.0: the aisle check turns red and green with the right numbers;
+   - the vehicle, robot and gripper switches, and the rack-row count: the cell re-lays and every check
+     recomputes;
+   - `bayCapacity` and `robotReach` stay **amber**, each naming what to source - a pass there is the
+     defect this case exists to avoid;
+   - clicking several objects shows their measured figures, including a figure note on the floor sign
+     and the desk; the bill of materials lists holder and licence for every placed prop;
+   - the plan view (T) and the dimensions (D).
+4. **Publish** with `node scripts/showcase/publish-run.mjs <raw.json> <notes.json>`. Every field below
+   is required except `model`, and all prose is English:
+   ```json
+   {
+     "note": "what happened in the run, failures included, and how many runs of this canvas text there were",
+     "verification": "what the browser check in step 3 actually observed",
+     "edition": "production, the operator's workspace",
+     "source": { "api": "<api commit that ran>", "worker": "<worker commit that ran>" },
+     "thinking": true,
+     "model": "Claude Opus 5.5",
+     "limits": { "contextWindow": 200000, "maxOutputTokens": 32000, "modelCallsPerNode": 1, "concurrency": 4 }
+   }
+   ```
 5. **Record** the cover: a screen recording of the delivered page played with scripted input - the
    aisle slider moving and a check flipping is the shot that says what this case is - as
    `apps/web/showcase/cell-real.mp4` with its `.jpg` poster.
 6. **Commit** the canvas, the card, the footage and the record together, then run
-   `npm test --prefix apps/web`, `npm run test:saas --prefix apps/web` and the Go suite.
+   `npm run test:saas --prefix apps/web` (it covers every `saas-production-*` suite),
+   `npm test --prefix apps/web` and the Go suite. The known environmental failure here is the Windows
+   symlink `EPERM` test in `saas-team-market-agents`.
 
 ## What a first run will probably need
 

@@ -103,11 +103,23 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
   for (const [reference, url] of Object.entries(files)) expect(url.startsWith(`data:${manifest[reference].type};base64,`), reference).toBe(true);
   await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'missing' }).fetchFile)).rejects.toThrow('production_media_unavailable');
   await expect(loadProductionMedia(record.caseId, serve({ src: second[1].src, as: 'short' }).fetchFile)).rejects.toThrow('production_media_unavailable');
-  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50, undefined, Infinity)).rejects.toThrow('production_media_unavailable');
+  // A load whose 50 ms deadline is for its files is handed its manifest, so the deadline, with any time added for the
+  // bytes, covers the files alone: loading the chunk can take more than 50 ms on a busy run, and the load could then
+  // end before its files were asked for.
+  const handed = () => Promise.resolve(manifest);
+  await expect(loadProductionMedia(record.caseId, serve({ src: first[1].src, as: 'stalled' }).fetchFile, 50, handed, Infinity)).rejects.toThrow('production_media_unavailable');
   // A manifest chunk that never arrives ends at the same deadline, and nothing is fetched for it.
   const idle = serve();
   await expect(loadProductionMedia(record.caseId, idle.fetchFile, 50, () => new Promise(() => {}))).rejects.toThrow('production_media_unavailable');
   expect(idle.seen).toEqual([]);
+  // Nor is anything fetched for a manifest that arrives after the deadline: this one is handed over only once the load
+  // has failed, so it is late on any run, however busy.
+  let arrive: (value: typeof manifest) => void = () => {};
+  const overdue = serve();
+  await expect(loadProductionMedia(record.caseId, overdue.fetchFile, 50, () => new Promise(resolve => { arrive = resolve; }))).rejects.toThrow('production_media_unavailable');
+  arrive(manifest);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(overdue.seen).toEqual([]);
   // The files get the time their bytes take at a slow link's speed on top of the deadline: a file 200 ms late fails a
   // 50 ms deadline alone, and arrives when the case's bytes are given five seconds more.
   const total = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
@@ -115,8 +127,8 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
     await new Promise(resolve => setTimeout(resolve, 200));
     return fetchFile(input, init);
   }) as typeof fetch;
-  await expect(loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, Infinity)).rejects.toThrow('production_media_unavailable');
-  expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, undefined, total / 5)).sort()).toEqual(Object.keys(manifest).sort());
+  await expect(loadProductionMedia(record.caseId, late(serve().fetchFile), 50, handed, Infinity)).rejects.toThrow('production_media_unavailable');
+  expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, handed, total / 5)).sort()).toEqual(Object.keys(manifest).sort());
   expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
 });
 

@@ -12,8 +12,14 @@ use tauri::Manager;
 
 const DEFAULT_CLI_EXECUTABLE: &str = "superclaw";
 const DEFAULT_WEB_DEV_URL: &str = "http://127.0.0.1:5173";
-const DEFAULT_PRODUCT_NAME: &str = "ClawHunt";
-const DEFAULT_RELEASE_CHANNEL: &str = "beta";
+const DEFAULT_PRODUCT_NAME: &str = match option_env!("AWWO_DESKTOP_PRODUCT_NAME") {
+    Some(name) => name,
+    None => "ClawHunt",
+};
+const DEFAULT_RELEASE_CHANNEL: &str = match option_env!("AWWO_DESKTOP_RELEASE_CHANNEL") {
+    Some(channel) => channel,
+    None => "beta",
+};
 const DEFAULT_UPDATE_MODE: &str = "manual";
 const UPDATE_GUIDE_RELATIVE_PATH: &str = "docs/desktop-manual-update.md";
 const SMOKE_EXIT_DELAY_MS: u64 = 200;
@@ -49,6 +55,10 @@ pub struct DesktopShellInfo {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopLaunchSmokePayload {
     pub product_name: String,
+    pub app_environment: Option<String>,
+    pub data_root: Option<String>,
+    pub state_path: Option<String>,
+    pub artifact_dir: Option<String>,
     pub version: String,
     pub release_channel: String,
     pub update_mode: String,
@@ -318,8 +328,10 @@ pub fn desktop_shell_info_payload() -> DesktopShellInfo {
     DesktopShellInfo {
         product_name: DEFAULT_PRODUCT_NAME.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        release_channel: env::var("SUPERCLAW_DESKTOP_RELEASE_CHANNEL")
-            .unwrap_or_else(|_| DEFAULT_RELEASE_CHANNEL.to_string()),
+        release_channel: option_env!("AWWO_DESKTOP_RELEASE_CHANNEL")
+            .map(str::to_string)
+            .unwrap_or_else(|| env::var("SUPERCLAW_DESKTOP_RELEASE_CHANNEL")
+                .unwrap_or_else(|_| DEFAULT_RELEASE_CHANNEL.to_string())),
         update_mode: DEFAULT_UPDATE_MODE.to_string(),
         workspace_root: workspace_root
             .as_ref()
@@ -396,6 +408,10 @@ fn desktop_workbench_smoke_config() -> Option<DesktopWorkbenchSmokeConfig> {
 fn build_desktop_launch_smoke_payload(info: &DesktopShellInfo) -> DesktopLaunchSmokePayload {
     DesktopLaunchSmokePayload {
         product_name: info.product_name.clone(),
+        app_environment: option_env!("AWWO_DESKTOP_ENV").map(str::to_string),
+        data_root: desktop_data_root().map(|p| p.display().to_string()),
+        state_path: env::var("SUPERCLAW_STATE_PATH").ok(),
+        artifact_dir: env::var("SUPERCLAW_ARTIFACT_DIR").ok(),
         version: info.version.clone(),
         release_channel: info.release_channel.clone(),
         update_mode: info.update_mode.clone(),
@@ -1315,6 +1331,13 @@ pub fn build_desktop_stop_command(request: &DesktopStopRequest) -> CommandSpec {
 /// per-user Application Support directory — otherwise a Finder launch inherits
 /// cwd `/` and relative paths like `.superclaw/state.db` hit a read-only volume.
 fn desktop_data_root() -> Option<PathBuf> {
+    if let Some(profile) = option_env!("AWWO_DESKTOP_ENV") {
+        let base = env::var_os("AWWO_DESKTOP_DATA_ROOT").map(PathBuf::from)
+            .or_else(|| env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("AwwO")))?;
+        let root = base.join(profile);
+        fs::create_dir_all(&root).ok()?;
+        return Some(root);
+    }
     if let Some(root) = configured_workspace_root() {
         return Some(root);
     }
@@ -1327,7 +1350,10 @@ fn desktop_data_root() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     let candidate = env::var_os("LOCALAPPDATA")
         .or_else(|| env::var_os("USERPROFILE"))
-        .map(|base| PathBuf::from(base).join("ClawHunt"));
+        .map(|base| match option_env!("AWWO_DESKTOP_ENV") {
+            Some(profile) => PathBuf::from(base).join("AwwO").join(profile),
+            None => PathBuf::from(base).join("ClawHunt"),
+        });
     // The macOS/Linux data root stays "SuperClaw" across the ClawHunt rebrand: it is
     // the packaged app's working dir (resolves .superclaw/state.db, desktop-shell.log,
     // the watchdog migration stamp) and existing installs + session-lookup tooling scan
@@ -1824,6 +1850,29 @@ mod commands {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Profile builds keep separate state and cannot inherit a different APP_ENV
+    // from the launching shell. Existing unprofiled builds retain their behavior.
+    if let Some(profile) = option_env!("AWWO_DESKTOP_ENV") {
+        env::set_var("APP_ENV", profile);
+        let root = desktop_data_root().expect("cannot create profile-specific desktop data directory");
+        for (name, relative) in [
+            ("SUPERCLAW_HOME", "state"),
+            ("SUPERCLAW_STATE_PATH", "state/state.db"),
+            ("SUPERCLAW_ARTIFACT_DIR", "state/artifacts"),
+            ("SUPERCLAW_SHELL_CONFIG_PATH", "state/config.json"),
+            ("SUPERCLAW_CLAWHUNT_AUTH_PATH", "state/clawhunt-auth.json"),
+            ("SUPERCLAW_SECRETS_KEY_PATH", "state/secrets.key"),
+            ("SUPERCLAW_DEVICE_ID_PATH", "state/device-id"),
+            ("SUPERCLAW_RELAY_LOCK_PATH", "state/relay-key.lock"),
+            ("SUPERCLAW_RELAY_AUDIT_PATH", "state/relay-audit.jsonl"),
+            ("SUPERCLAW_CHAT_WORKSPACE_ROOT", "chats"),
+            ("SUPERCLAW_PERSONAL_WORKSPACE_ROOT", "workspaces"),
+            ("SUPERCLAW_COMPANY_WORKSPACE_ROOT", "companies"),
+            ("SUPERCLAW_NODE_HOME", "state/node-runtime"),
+        ] {
+            env::set_var(name, root.join(relative));
+        }
+    }
     if let Some(config) = desktop_workbench_smoke_config() {
         match run_workbench_smoke(config) {
             Ok(success) => std::process::exit(if success { 0 } else { 1 }),

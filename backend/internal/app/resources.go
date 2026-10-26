@@ -191,6 +191,10 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 	} else {
 		_, e = tx.Exec(r.Context(), "UPDATE memberships SET role=$3 WHERE tenant_id=$1 AND user_id=$2", tid, id, role)
 	}
+	// A member who leaves the workspace, or may only read it now, loses their AwwO 本地版 keys for it (relay.go).
+	if e == nil && (role == "" || role == "reader") {
+		_, e = tx.Exec(r.Context(), revokeRelayKeysSQL, id, tid)
+	}
 	if e != nil {
 		a.dbError(w, e)
 		return

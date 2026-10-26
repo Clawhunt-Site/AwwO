@@ -192,3 +192,20 @@ it('names no model before the canvas has read its palette', async () => {
   const node = await added();
   expect([node.runtime, node.model]).toEqual(['openai-agents', 'qwen-fixture']);
 });
+
+// A page a plan adds runs with AwwO's design skills where AwwO runs the models, and without them where every model runs
+// on the reader's own key (personalCredentialsRequired): such a model is given 32K counted in bytes, which they would
+// take some 40% of.
+it.each([[false, ['builtin:design-craft', 'builtin:anti-ai-slop']], [true, undefined]] as const)(
+  'gives a page the plan adds the design skills unless every model runs on personal keys (personal keys: %s)', async (personal, skills) => {
+    const request = vi.fn<typeof requestCanvasPlan>(async () => ({ version: 1, summary: '已添加网页。',
+      operations: [{ type: 'add_node', ref: 'p', templateId: 'frontend', title: '网页' }] }) as CanvasPlan);
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} assistantExecution={host(qwen)} routeAssistant={router}
+      planRequest={request} personalCredentialsRequired={personal} />);
+    await ask();
+    const node = await added();
+    expect([node.templateId, node.contract!.outputs.map(field => field.id), node.skills]).toEqual(['frontend', ['page'], skills]);
+    // The reply says so, since no one chose them and each of the page's runs sends them.
+    await screen.findByText(/新增 1 个节点/);
+    expect(screen.queryByText(/给 「网页」 加上了技能 design-craft、anti-ai-slop，放得下时使用，可在节点的配置里移除/) !== null).toBe(!personal);
+  });

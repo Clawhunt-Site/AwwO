@@ -28,7 +28,7 @@ func TestSettingsAreCheckedBeforeServing(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	proxy, listener, where, err := setup(settings(map[string]string{"AWWO_EGRESS_SECRET": good, "AWWO_EGRESS_LISTEN": "127.0.0.1:0", "AWWO_EGRESS_RUN_MB": "64", "AWWO_EGRESS_DENY": "152.32.145.74"}))
+	proxy, listener, where, err := setup(settings(map[string]string{"AWWO_EGRESS_SECRET": good, "AWWO_EGRESS_LISTEN": "127.0.0.1:0", "AWWO_EGRESS_RUN_MB": "64", "AWWO_EGRESS_DENY": "203.0.113.74"}))
 	if err != nil {
 		t.Fatal(err)
 	}

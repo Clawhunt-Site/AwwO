@@ -160,6 +160,7 @@ type AccountFacts struct {
 	Sessions         int64  `json:"sessions"`
 	IdentityLinks    int    `json:"identityLinks"`
 	Connections      int64  `json:"connections"`
+	RelayKeys        int64  `json:"relayKeys"`        // its AwwO 本地版 connection keys (042), revoked ones too: they go with it
 	DeletionRequests int64  `json:"deletionRequests"` // each keeps its email and name, and loses its account (037)
 	// The account's latest deletion request, if it made one in 设置 → 数据管理.
 	LatestRequestID     string `json:"latestRequestId,omitempty"`

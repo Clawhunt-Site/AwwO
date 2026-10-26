@@ -92,6 +92,11 @@ it('points a free workspace at the default model and the paid plans when its pre
   expect(saasErrorMessage(new SaaSApiError(403, 'checkout_closed', 'x'), 'zh')).toContain('即将开放');
   expect(saasErrorMessage(new SaaSApiError(409, 'already_subscribed', 'x'), 'en')).toContain('Manage subscription');
 });
+it('names a node’s skills among what to bring less of when a run would send its model more than it reads', () => {
+  // A page the canvas assistant plans carries two skills nobody added by hand (canvasPlan.ts HOSTED_PAGE_SKILLS).
+  expect(saasErrorMessage(new SaaSApiError(413, 'context_limit', 'x'), 'zh')).toContain('选中的资料、添加的技能）');
+  expect(saasErrorMessage(new SaaSApiError(413, 'context_limit', 'x'), 'en')).toContain('selected knowledge, attached skills)');
+});
 it('says the free default model is full for the whole service today, and offers only the next UTC day or a plan', () => {
   const zh = saasErrorMessage(new SaaSApiError(500, 'free_capacity_exceeded', 'Model execution failed'), 'zh');
   const en = saasErrorMessage(new SaaSApiError(500, 'free_capacity_exceeded', 'Model execution failed'), 'en');

@@ -5,11 +5,12 @@ import { emptyDocument } from '../canvas/canvasDoc';
 import { joinAttachments, type UploadedCanvasFile } from '../canvas/attachments';
 import { useCanvasI18n } from '../canvas/i18n';
 import { useEnterToSend } from '../canvas/composerKeys';
+import { refuseHeldEnter } from '../canvas/heldEnter';
 import { useSaaSPreferences } from './preferences';
 import { CanvasList } from './CanvasList';
 import { CaseGallery } from './CaseGallery';
 import { uploadFileToCanvas } from './canvasBridge';
-import { HomeAttachButton, HomeFileChips, PLAN_PROMPT_MAX_BYTES, requestBytes, useHomeFiles } from './homeAttachments';
+import { HomeAttachButton, HomeFileChips, keepFocus, PLAN_PROMPT_MAX_BYTES, requestBytes, useHomeFiles } from './homeAttachments';
 import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
@@ -290,8 +291,17 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       <form className={`saas-home-composer${files.dragging ? ' is-dropping' : ''}`} data-onboarding="canvas-create" aria-labelledby={titleId}
         onSubmit={event => { event.preventDefault(); send(); }} {...files.dropProps}>
         {files.notice && <p className="saas-home-files-note" role="status">{files.notice}
-          <button type="button" aria-label={t('关闭提示', 'Dismiss')} onClick={files.clearNotice}><X size={12} aria-hidden="true" /></button></p>}
-        <HomeFileChips state={files} disabled={busy} t={t} locale={locale} />
+          {/* Pressed with the focus on it (a click takes none: keepFocus), the ✕ gives the focus to the request's text field
+            before the note goes with it, so the keyboard's focus does not fall to the page's body; an Enter held down
+            stops there (its repeats would send the request). */}
+          <button type="button" aria-label={t('关闭提示', 'Dismiss')} onMouseDown={keepFocus} onClick={event => {
+            if (event.currentTarget === document.activeElement) {
+              input.current?.focus({ preventScroll: true });
+              refuseHeldEnter(event);
+            }
+            files.clearNotice();
+          }}><X size={12} aria-hidden="true" /></button></p>}
+        <HomeFileChips state={files} disabled={busy} t={t} locale={locale} textField={input} />
         <textarea ref={input} aria-label={text('assistant.input')} aria-describedby={describedBy}
           placeholder={files.files.length ? t('写一句想用这些文件做什么…', 'Say what to do with these files…') : text('assistant.welcomePlaceholder')}
           value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}

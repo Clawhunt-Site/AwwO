@@ -136,7 +136,8 @@ export interface BedrockSdk {
 export class BedrockBridgeError extends Error {
   status: number;
   type: string;
-  /** True when AWS reported the failure; the bridge's own refusals are not provider outages. */
+  /** True for AWS's answer or the way to it (the connection, the credentials); the bridge's own refusals are not
+   *  provider outages. */
   upstream: boolean;
   constructor(status: number, type: string, message: string, upstream = false) {
     super(message);
@@ -372,6 +373,42 @@ export function withClaudeThinking(command: Json, budget: number): Json {
 }
 
 /**
+ * Models that think on every call, cannot be told not to, and send nothing while they think unless they are asked for
+ * a summary of it, by Converse model ID without the inference profile's prefix: Claude Opus 5.5. Without the summary
+ * nothing, not even messageStart, arrives until its thinking ends: up to 192.5 s was seen on 2026-10-21, and on
+ * 2026-10-26 a page node on the Pi worker was cut three times by Pi's 300 s wait for a call's first event (each call
+ * 300,064-300,092 ms, no tokens). With the summary the thinking streams within seconds. The Python worker's bridge asks
+ * the same since 2026-10-21 (bedrock_bridge.py SUMMARIZED_THINKING_MODELS), of single calls only (its runs make one call
+ * with text history, sometimes offering tools): 417 completed by 2026-10-26, none refused by Bedrock as invalid.
+ */
+export const SUMMARIZED_THINKING_MODELS: ReadonlySet<string> = new Set(['anthropic.claude-opus-5-5']);
+const SUMMARIZED_THINKING = { type: 'adaptive', display: 'summarized' } as const;
+// An inference profile's prefix, as bedrock-catalog.ts reads it.
+const PROFILE_PREFIX = /^(?:global|us|eu|apac|jp|au|ca)\./;
+
+/**
+ * Asks a model of SUMMARIZED_THINKING_MODELS to stream a summary of the thinking it does anyway, so that its stream is
+ * not silent while it thinks. The summary arrives as reasoning content, which a worker counts or passes over and never
+ * shows. Only a request of the shape the Python worker's bridge sends it in gets the field: no tool turns in its history
+ * (with thinking asked for, Bedrock may want each earlier thinking block back with its signature, which no caller keeps:
+ * the chunk mapper drops signatures), no sampling settings and no forced tool choice (both refused beside thinking where
+ * thinking can be turned on). Pi's node runs offer no tools, so each of their calls gets it; a tool loop's first call
+ * does, its later ones are sent as before. Any other request or model, and a command that already carries model fields
+ * (an operator's thinking budget, which Opus 5.5 refuses), is returned unchanged.
+ */
+export function withSummarizedThinking(command: Json): Json {
+  const modelId = typeof command.modelId === 'string' ? command.modelId.replace(PROFILE_PREFIX, '') : '';
+  if (!SUMMARIZED_THINKING_MODELS.has(modelId) || command.additionalModelRequestFields !== undefined) return command;
+  const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
+  if (messages.some(m => Array.isArray(m.content) && m.content.some(block => 'toolUse' in block || 'toolResult' in block))) return command;
+  const inference = plain(command.inferenceConfig) ? command.inferenceConfig : {};
+  if (inference.temperature !== undefined || inference.topP !== undefined) return command;
+  const choice = plain(command.toolConfig) && plain(command.toolConfig.toolChoice) ? command.toolConfig.toolChoice : {};
+  if ('any' in choice || 'tool' in choice) return command;
+  return { ...command, additionalModelRequestFields: { thinking: { ...SUMMARIZED_THINKING } } };
+}
+
+/**
  * Claude explicit prompt caching for one Converse command, where the operator turned it on for the profile
  * (AWWO_BEDROCK_PROMPT_CACHE_MODELS). Only a request that re-sends an earlier exchange — a conversation with
  * history, or a tool loop — gets cache checkpoints, because only its prefix is sent again: after the tool
@@ -551,6 +588,16 @@ const SDK_STATUS: Record<string, number> = {
  *  provider gives it, and words the workers' reading of a refusal knows (context-overflow.ts). */
 export const BEDROCK_CONTEXT_LIMIT = { type: 'context_length_exceeded', message: 'Input is too long for requested model' } as const;
 
+/** The type of a failure on the way to AWS that AWS never reported: no AWS exception and no HTTP status, such as a
+ *  connection reset or a stream cut off or unreadable partway. Its body carries no status (errorBody), so a stream lost
+ *  this way after it began is not reported as the provider's outage, which a call refused at once is not billed for
+ *  (plans.go refusedBeforeOutput): AWS may already have done, and billed, the work. */
+export const BEDROCK_CONNECTION_FAILURE = 'connection_error';
+/** The names of errors this process makes itself (the JavaScript and Node errors a socket, a stream or a timer fails
+ *  with). Any other name is one AWS gave: the SDK throws an exception the stream reports but the SDK does not model, or
+ *  an error message, with AWS's own code as its name. */
+const LOCAL_ERROR_NAMES: ReadonlySet<string> = new Set(['', 'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AggregateError', 'AbortError', 'TimeoutError']);
+
 /** Status and type only: SDK messages can carry account IDs and role ARNs, which never leave the worker. A request AWS
  *  refused as larger than its model's window, read from its message here and only here, is told apart by its type
  *  (BEDROCK_CONTEXT_LIMIT): the workers answer it as the size refusal it is, not as a request the bridge got wrong. */
@@ -561,9 +608,12 @@ export function bridgeFailure(error: unknown): BedrockBridgeError {
   if (name === 'ValidationException' && contextOverflow(e.message)) {
     return new BedrockBridgeError(400, BEDROCK_CONTEXT_LIMIT.type, BEDROCK_CONTEXT_LIMIT.message, true);
   }
+  if (Object.hasOwn(SDK_STATUS, name)) return new BedrockBridgeError(SDK_STATUS[name], name, 'The Bedrock request failed', true);
   const httpStatus = Number.isInteger(e.$metadata?.httpStatusCode) ? e.$metadata!.httpStatusCode as number : undefined;
-  const status = SDK_STATUS[name] ?? (httpStatus && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 502);
-  return new BedrockBridgeError(status, Object.hasOwn(SDK_STATUS, name) ? name : 'api_error', 'The Bedrock request failed', true);
+  if (httpStatus && httpStatus >= 400 && httpStatus <= 599) return new BedrockBridgeError(httpStatus, 'api_error', 'The Bedrock request failed', true);
+  // An exception AWS named that the bridge does not know: AWS's own failure, as before.
+  if (!LOCAL_ERROR_NAMES.has(name)) return new BedrockBridgeError(502, 'api_error', 'The Bedrock request failed', true);
+  return new BedrockBridgeError(502, BEDROCK_CONNECTION_FAILURE, 'The Bedrock request failed', true);
 }
 
 const encoder = new TextEncoder();
@@ -571,12 +621,21 @@ const sse = (payload: Json | '[DONE]') => encoder.encode(`data: ${payload === '[
 // `status` lets the workers classify an AWS failure that arrives after the stream began, when the
 // HTTP status is already 200 (the OpenAI SDKs raise such a frame without a status of their own).
 // The bridge's own refusals (an event it cannot relay, a truncated stream) carry none, so they are
-// not reported as a provider outage.
-const errorBody = (error: BedrockBridgeError) => ({ error: { message: error.message, type: error.type, code: error.type, ...(error.upstream ? { status: error.status } : {}) } });
+// not reported as a provider outage; nor does a failure AWS never reported (BEDROCK_CONNECTION_FAILURE).
+// A failure before the stream began is classified by the response's own status, which it keeps.
+const errorBody = (error: BedrockBridgeError) => ({ error: { message: error.message, type: error.type, code: error.type,
+  ...(error.upstream && error.type !== BEDROCK_CONNECTION_FAILURE ? { status: error.status } : {}) } });
 
 function jsonError(error: BedrockBridgeError): Response {
   return new Response(JSON.stringify(errorBody(error)), { status: error.status, headers: { 'content-type': 'application/json' } });
 }
+
+const EVENT_STREAM_HEADERS = { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
+
+/** Whether an SDK error came after AWS answered the call with its HTTP 200: the SDK reads a stream's first event before
+ *  `send` returns, and stamps an error thrown while it does with the response's status (its deserialization middleware;
+ *  an error before AWS answered has no such stamp). */
+const afterAnswer = (error: unknown): boolean => plain(error) && plain(error.$metadata) && error.$metadata.httpStatusCode === 200;
 
 async function bodyText(body: unknown): Promise<string> {
   if (typeof body === 'string') return body;
@@ -699,6 +758,7 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       try { body = JSON.parse(raw); } catch { return reject('The request body is not JSON'); }
       command = toConverseInput(body, model);
       if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
+      command = withSummarizedThinking(command);
       if (promptCache) command = withClaudePromptCache(command);
       singleToolCall = (body as Json).parallel_tool_calls === false;
     } catch (error) { return jsonError(failed(bridgeFailure(error), model, 'request')); }
@@ -754,9 +814,16 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
     } catch (error) {
       release();
       if (abort.signal.aborted) throw aborted();
+      const failure = bridgeFailure(error);
+      // The stream AWS answered with lost before its first event (a connection reset, a first message cut off): the
+      // SDK reads that event before `send` returns, so the loss comes here, stamped with AWS's 200. It is the stream's
+      // failure, after AWS took the call and while its model may already be working (one that thinks first sends
+      // nothing until it writes): answered as a failure after the stream began is, inside a 200, without a status.
+      if (failure.type === BEDROCK_CONNECTION_FAILURE && afterAnswer(error)) {
+        return new Response(sse(errorBody(failed(failure, active, 'stream'))), { status: 200, headers: EVENT_STREAM_HEADERS });
+      }
       // A refusal as too large from the other profile follows the first one's refusal: two requests, so not one made
       // before any work (the workers' rule): it goes out as AWS's validation failure it is.
-      const failure = bridgeFailure(error);
       return jsonError(failed(active !== model && failure.type === BEDROCK_CONTEXT_LIMIT.type
         ? new BedrockBridgeError(400, 'ValidationException', 'The Bedrock request failed', true) : failure, active, 'request'));
     }
@@ -804,6 +871,6 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
         release();
       },
     });
-    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' } });
+    return new Response(body, { status: 200, headers: EVENT_STREAM_HEADERS });
   };
 }

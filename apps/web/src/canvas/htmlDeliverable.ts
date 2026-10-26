@@ -87,8 +87,45 @@ export const PREVIEW_VIEWPORT_SCRIPT = "(()=>{if(innerWidth>0&&innerHeight>0)ret
   + "if(innerWidth>0&&innerHeight>0&&document.readyState==='complete'){dispatchEvent(new Event('resize'));return}"
   + 'if(++tries<300)setTimeout(check,50)};check()})();';
 
-/** Everything AwwO runs ahead of a delivered page: the viewport fix above, then the error reporter (pageErrors.ts). */
-export const PREVIEW_HOST_SCRIPT = PREVIEW_VIEWPORT_SCRIPT + PAGE_ERROR_SCRIPT;
+/**
+ * A delivered page runs in an opaque-origin sandbox, where the browser refuses localStorage, sessionStorage and
+ * document.cookie with a SecurityError the moment a page touches them: a login page that keeps its token, a page that
+ * remembers a setting, died there at its first line, though it works wherever it is deployed. Each of them that the
+ * sandbox refuses gets a stand-in that keeps its values in memory while the page is open, so the page runs as it would.
+ * One the browser does give the page is left alone. On 2026-10-25 the refusal sent four of one account's pages back to
+ * their models as failures to repair (pageRepair.ts), each a paid run, and the pages it asked for again refused alike.
+ *
+ * The Storage stand-in keeps a real Storage's named-property rules (WebIDL), so that no use a page makes of one throws
+ * where the real one would not: every string key read, written, defined or deleted on it is an item (`s.getItem = 'x'`
+ * stores an item named getItem and leaves the method), its methods and length are what a name they shadow reads, a
+ * key shadowed so is not listed, an accessor definition and making it non-extensible are refused, and symbols are kept
+ * off it. Cookies keep their Max-Age (which wins) or Expires, and an expired one is dropped when the cookie is read.
+ */
+export const PREVIEW_STORAGE_SCRIPT = "(()=>{const mem=()=>{const d=new Map();const api={"
+  + 'getItem(k){k=String(k);return d.has(k)?d.get(k):null},setItem(k,v){d.set(String(k),String(v))},'
+  + 'removeItem(k){d.delete(String(k))},clear(){d.clear()},'
+  + 'key(i){const a=Array.from(d.keys());i=Math.trunc(Number(i));return i>=0&&i<a.length?a[i]:null},get length(){return d.size}};'
+  + "const str=p=>typeof p==='string',own=p=>str(p)&&!(p in api);"
+  + 'return new Proxy(api,{get(t,p,r){return own(p)?(d.has(p)?d.get(p):undefined):Reflect.get(t,p,r)},'
+  + 'set(t,p,v){if(str(p)){d.set(p,String(v));return true}return false},'
+  + "defineProperty(t,p,x){if(!str(p)||'get' in x||'set' in x)return false;d.set(p,String(x.value));return true},"
+  + 'deleteProperty(t,p){if(str(p))d.delete(p);return true},has(t,p){return p in t||(own(p)&&d.has(p))},'
+  + 'ownKeys(){return Array.from(d.keys()).filter(own)},'
+  + 'getOwnPropertyDescriptor(t,p){return own(p)&&d.has(p)?{value:d.get(p),writable:true,enumerable:true,configurable:true}:undefined},'
+  + 'preventExtensions(){return false},setPrototypeOf(){return false}})};'
+  + "for(const n of ['localStorage','sessionStorage']){let ok=false;try{const s=window[n];ok=Boolean(s)&&typeof s.getItem==='function';if(ok)void s.length}catch(e){ok=false}"
+  + 'if(!ok)try{const s=mem();Object.defineProperty(window,n,{configurable:true,enumerable:true,get:()=>s})}catch(e){}}'
+  + 'let ok=false;try{void document.cookie;ok=true}catch(e){}'
+  + "if(!ok)try{const c=new Map();Object.defineProperty(document,'cookie',{configurable:true,enumerable:true,"
+  + "get:()=>{const now=Date.now();for(const [k,e] of c)if(e.t<=now)c.delete(k);return Array.from(c,([k,e])=>k?k+'='+e.v:e.v).join('; ')},"
+  + "set:v=>{const a=String(v).split(';'),p=a[0],i=p.indexOf('='),k=i<0?'':p.slice(0,i).trim(),x=i<0?p.trim():p.slice(i+1).trim();"
+  + "let age,at;for(const q of a.slice(1)){const j=q.indexOf('='),n=(j<0?q:q.slice(0,j)).trim().toLowerCase(),w=j<0?'':q.slice(j+1).trim();"
+  + "if(n==='max-age'&&/^-?\\d+$/.test(w))age=Number(w);else if(n==='expires'){const t=Date.parse(w);if(!Number.isNaN(t))at=t}}"
+  + 'const t=age!==undefined?Date.now()+age*1000:at!==undefined?at:Infinity;if(t<=Date.now())c.delete(k);else c.set(k,{v:x,t})}})}catch(e){}})();';
+
+/** Everything AwwO runs ahead of a delivered page: storage the sandbox refuses (above), the viewport fix, then the error
+ *  reporter (pageErrors.ts). */
+export const PREVIEW_HOST_SCRIPT = PREVIEW_STORAGE_SCRIPT + PREVIEW_VIEWPORT_SCRIPT + PAGE_ERROR_SCRIPT;
 
 const PREVIEW_ELEMENTS = new Set(('a abbr address article aside b bdi bdo blockquote br button caption circle cite code col colgroup dd defs del details dfn div dl dt ellipse em fieldset figcaption figure footer form g h1 h2 h3 h4 h5 h6 header hr i img input ins kbd label legend li line main mark meter nav ol optgroup option p path pattern polygon polyline pre progress q rect s samp section select small span strong style sub summary sup svg table tbody td text textarea tfoot th thead time tr tspan u ul use var wbr').split(' '));
 const PREVIEW_ATTRIBUTES = new Set(('class id style title role lang dir alt width height colspan rowspan scope value placeholder type checked disabled selected multiple min max step rows cols size open hidden readonly name for viewbox d fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-dasharray stroke-opacity clip-rule cx cy r rx ry x x1 x2 y y1 y2 points transform xmlns preserveaspectratio').split(' '));

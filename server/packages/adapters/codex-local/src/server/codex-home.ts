@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
@@ -26,6 +27,7 @@ function hasUsableAuthPayload(authPayload: unknown): boolean {
     if (!AUTH_CREDENTIAL_KEYS.test(key)) continue;
     if (key.toLowerCase() === "token_type") continue;
     if (typeof value === "string" && value.trim().length > 0) return true;
+    if (key === "tokens" && hasUsableAuthPayload(value)) return true;
   }
 
   return false;
@@ -172,6 +174,51 @@ export async function ensureSymlink(target: string, source: string): Promise<voi
   await createExpectedSymlink(target, source);
 }
 
+// Windows file symlinks require privileges. Keep only auth on the same inode;
+// config, sessions and skills remain in a distinct managed directory. Codex's
+// file auth store writes in place (verified with CLI 0.143.0).
+export async function prepareWindowsAuthHome(targetHome: string, sourceAuth: string): Promise<void> {
+  const realSource = await fs.realpath(sourceAuth);
+  const current = await fs.lstat(targetHome).catch(() => null);
+  const realTarget = current ? await fs.realpath(targetHome) : path.resolve(targetHome);
+  if (path.parse(realTarget).root.toLowerCase() === path.parse(realSource).root.toLowerCase()) return;
+  // Never move an existing home with user/session data.
+  if (current && (current.isSymbolicLink() || (await fs.readdir(targetHome)).length > 0)) {
+    throw new Error("Windows Codex auth requires a new managed home on the credentials volume; existing home was preserved. Configure an independent API key for this home.");
+  }
+  const identity = createHash("sha256").update(path.resolve(targetHome).toLowerCase()).digest("hex");
+  const physicalHome = path.join(path.dirname(realSource), ".awwo-homes", identity);
+  await fs.mkdir(physicalHome, { recursive: true });
+  await fs.mkdir(path.dirname(targetHome), { recursive: true });
+  if (current) await fs.rmdir(targetHome); // verified empty above; never recursive
+  try {
+    await fs.symlink(physicalHome, targetHome, "junction");
+  } catch (error) {
+    // A simultaneous seed may already have created exactly this junction.
+    if (await fs.realpath(targetHome).catch(() => null) !== await fs.realpath(physicalHome)) throw error;
+  }
+}
+
+export async function ensureWindowsAuthLink(target: string, source: string): Promise<void> {
+  const sourceStat = await fs.stat(source).catch(() => null);
+  const existing = await fs.lstat(target).catch(() => null);
+  if (!sourceStat?.isFile()) {
+    if (existing?.isFile() || existing?.isSymbolicLink()) await fs.unlink(target);
+    return;
+  }
+  if (existing?.isDirectory()) throw new Error("Managed auth.json is a directory; preserved for inspection.");
+  if (existing?.isFile() && existing.dev === sourceStat.dev && existing.ino === sourceStat.ino) return;
+  if (existing) await fs.unlink(target);
+  await ensureParentDir(target);
+  try {
+    await fs.link(source, target);
+  } catch (error) {
+    const raced = await fs.stat(target).catch(() => null);
+    if (raced?.dev === sourceStat.dev && raced?.ino === sourceStat.ino) return;
+    throw error;
+  }
+}
+
 async function ensureCopiedFile(target: string, source: string): Promise<void> {
   const existing = await fs.lstat(target).catch(() => null);
   if (existing) return;
@@ -211,13 +258,17 @@ export async function seedManagedCodexHome(
   const sourceHome = resolveSharedCodexHomeDir(env);
   const seedFromShared = path.resolve(sourceHome) !== path.resolve(targetHome);
 
+  const sourceAuth = path.join(sourceHome, "auth.json");
+  if (process.platform === "win32" && !apiKey && seedFromShared && await pathExists(sourceAuth)) {
+    await prepareWindowsAuthHome(targetHome, sourceAuth);
+  }
   await fs.mkdir(targetHome, { recursive: true });
 
   // If a previous run wrote an apikey-mode auth.json (regular file) and this
   // run has no apiKey, remove it so the chatgpt-mode symlink can be restored.
   // Without this cleanup, ensureSymlink bails on a non-symlink and Codex keeps
   // authenticating with the stale key after it is removed from configuration.
-  if (!apiKey && seedFromShared) {
+  if (!apiKey && seedFromShared && process.platform !== "win32") {
     const authPath = path.join(targetHome, "auth.json");
     const existing = await fs.lstat(authPath).catch(() => null);
     if (existing && !existing.isSymbolicLink()) {
@@ -228,8 +279,12 @@ export async function seedManagedCodexHome(
   if (seedFromShared) {
     for (const name of SYMLINKED_SHARED_FILES) {
       const source = path.join(sourceHome, name);
-      if (!(await pathExists(source))) continue;
-      await ensureSymlink(path.join(targetHome, name), source);
+      if (apiKey) continue;
+      if (process.platform === "win32") {
+        await ensureWindowsAuthLink(path.join(targetHome, name), source);
+      } else if (await pathExists(source)) {
+        await ensureSymlink(path.join(targetHome, name), source);
+      }
     }
 
     for (const name of COPIED_SHARED_FILES) {

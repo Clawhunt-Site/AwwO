@@ -27,6 +27,15 @@ All three environments use the same schema in `apps/gateway/.env.example`:
 
 The gateway does not load this example as a dotenv file. Supply environment variables through the existing launcher or shell. Model and CLI options cannot be supplied by HTTP clients. Existing Codex authentication is reused without reading or copying credentials into the app.
 
+Desktop installations can also persist `SUPERCLAW_CANVAS_PLANNER_PROVIDER` and the optional
+`SUPERCLAW_CANVAS_PLANNER_CLI_PATH` through the existing Runtime Settings configuration.
+The values belong to that installation's profile (`%LOCALAPPDATA%/AwwO/production/state/config.json`
+for the Windows production profile), not the system environment. Explicit nonempty process
+environment values take precedence. Fully exit and restart the desktop after saving so the
+gateway inherits the new values. Unset profiles still use the environment defaults above;
+enabling Codex planning does not change `APP_ENV`, credentials, or the execution backend.
+The HTTP provider still requires its separate runtime URL/model/key configuration.
+
 Each invocation uses an isolated temporary working directory, stdin for the request, `--ephemeral`, `--ignore-user-config`, and the read-only sandbox. Shell, apps, plugins, multi-agent delegation, browser/computer use, images, memories, hooks, workspace dependency tools, goals and web search are disabled. User execution rules are not ignored, and permission bypass flags are never passed. CLI versions that reject the required isolation flags fail instead of retrying with weaker options. Native executables and recognized npm Codex wrappers are resolved without a shell; arbitrary `.cmd`/`.ps1` scripts are not evaluated.
 
 ## Local start

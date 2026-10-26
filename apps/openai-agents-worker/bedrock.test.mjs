@@ -253,7 +253,7 @@ test('a model that calls two tools at once runs only the first, as the worker as
 });
 
 test('provider refusals and truncation become the worker failures the control plane already knows', { timeout: 15_000 }, async () => {
-  const denied = fakeBedrock(textTurn('unused'), { fail: Object.assign(new Error('User: arn:aws:sts::563688183799:assumed-role/x'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }) });
+  const denied = fakeBedrock(textTurn('unused'), { fail: Object.assign(new Error('User: arn:aws:sts::123456789012:assumed-role/x'), { name: 'AccessDeniedException', $metadata: { httpStatusCode: 403 } }) });
   const deniedRun = await bridged('bedrock.glm-5', denied.sdk, request({ model: 'bedrock.glm-5' }));
   assert.equal(classifyError(deniedRun.error).code, 'MODEL_AUTHENTICATION');
   const throttled = fakeBedrock(textTurn('unused'), { fail: Object.assign(new Error('Too many'), { name: 'ThrottlingException', $metadata: { httpStatusCode: 429 } }) });
@@ -268,6 +268,14 @@ test('provider refusals and truncation become the worker failures the control pl
   // A throttle after the stream began keeps its meaning although the HTTP status was already 200.
   const midThrottle = fakeBedrock(async function* () { yield { messageStart: {} }; yield { contentBlockDelta: { delta: { text: 'half' } } }; yield { throttlingException: { message: 'slow' } }; });
   assert.equal(classifyError((await bridged('bedrock.glm-5', midThrottle.sdk, request({ model: 'bedrock.glm-5' }))).error).code, 'MODEL_RATE_LIMIT');
+  // A stream lost on its way to AWS (a connection reset, which AWS never reported) is not AWS's outage: the model's
+  // failure, billed as one, since AWS may already have done the work (plans.go refusedBeforeOutput).
+  const reset = fakeBedrock(async function* () { yield { messageStart: {} }; throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); });
+  assert.equal(classifyError((await bridged('bedrock.glm-5', reset.sdk, request({ model: 'bedrock.glm-5' }))).error).code, 'MODEL_ERROR');
+  // So is one lost after AWS answered but before its first event (the SDK stamps it with AWS's 200): a stream whose only
+  // frame is that error.
+  const answered = fakeBedrock(textTurn('unused'), { fail: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', $metadata: { httpStatusCode: 200 } }) });
+  assert.equal(classifyError((await bridged('bedrock.glm-5', answered.sdk, request({ model: 'bedrock.glm-5' }))).error).code, 'MODEL_ERROR');
   // Content the bridge cannot relay is a deterministic refusal, not a provider outage.
   const citing = fakeBedrock(async function* () { yield { messageStart: {} }; yield { contentBlockDelta: { delta: { citation: { title: 'doc' } } } }; });
   assert.notEqual(classifyError((await bridged('bedrock.glm-5', citing.sdk, request({ model: 'bedrock.glm-5' }))).error).code, 'MODEL_UNAVAILABLE');

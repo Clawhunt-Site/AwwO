@@ -4,7 +4,7 @@
 // scripts/awwo-local-setup.mjs installs and builds what they need. docs/awwo-local-edition.md describes the whole.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, constants, existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, constants, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -89,6 +89,7 @@ export function localState(dir) {
     dir, env: at('local.env'), providers: at('providers.env'), credentials: at('admin-credentials.txt'),
     lock: at('runtime.lock'), logs: at('logs'), postgres: at('postgres'), media: at('media'),
     broker: at('openmaus'), renderTmp: at('render-tmp'), ownerWorkspace: at('owner-workspace.json'),
+    windowSession: at('window-session'),
   });
 }
 
@@ -317,8 +318,27 @@ export function privateFile(line, sid) {
 }
 
 /** What the runtime keeps in the data folder; only these take the folder's list when it is first protected. */
-const OWN_ENTRIES = new Set(['local.env', 'providers.env', 'admin-credentials.txt', 'runtime.lock', 'owner-workspace.json', 'logs', 'postgres', 'media', 'openmaus', 'render-tmp']);
-const SECRET_FILES = ['local.env', 'providers.env', 'admin-credentials.txt'];
+const OWN_ENTRIES = new Set(['local.env', 'providers.env', 'admin-credentials.txt', 'runtime.lock', 'owner-workspace.json', 'logs', 'postgres', 'media', 'openmaus', 'render-tmp', 'window-session']);
+const SECRET_FILES = ['local.env', 'providers.env', 'admin-credentials.txt', 'window-session'];
+/** Files a folder gets from being looked at (Finder's .DS_Store and .localized, Explorer's desktop.ini and Thumbs.db):
+ *  no one's data, in a data folder or anywhere else. */
+export const SYSTEM_FILES = Object.freeze(['.DS_Store', '.localized', 'desktop.ini', 'Thumbs.db']);
+/** What a private data folder holds before its first start has written local.env: the folders and the lock that start
+ *  makes first, and a copy of local.env a write cut short left (writeFileAtomic). */
+export const beforeFirstStart = name => ['logs', 'media', 'openmaus', 'render-tmp', 'runtime.lock'].includes(name)
+  || /^local\.env\.\d+\.[0-9a-f]{8}\.tmp$/.test(name);
+
+/** Why a folder without local.env is not to be taken as a data folder (the name of what it holds that says so), or
+ *  null. One not yet private to this account (a mistaken --state, a folder someone made) must hold nothing but system
+ *  files. One already private may hold what a first start cut short leaves there (beforeFirstStart); one that also has
+ *  a database (postgres/PG_VERSION) is a data folder that lost its local.env, which loadLocalProfile says and asks for
+ *  back, and may hold all of the runtime's own files. Anything else is another's: an older app's folder (the Mac app's
+ *  own local mode kept models.env and an admin-credentials.txt of another password in a folder it made private). */
+export function foreignEntry(entries, { isPrivate, hasDatabase }) {
+  if (entries.includes('local.env')) return null;
+  const allowed = name => SYSTEM_FILES.includes(name) || (isPrivate && (beforeFirstStart(name) || (hasDatabase && OWN_ENTRIES.has(name))));
+  return entries.find(name => !allowed(name)) ?? null;
+}
 
 function currentSid(run, env) {
   const who = run(windowsTool('whoami', env), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
@@ -349,23 +369,26 @@ function readAcl(paths, run, env) {
  * nothing on Windows, where a folder under another drive's root inherits "Authenticated Users: modify": there the
  * folder gets its own access list (inheritance off; full control for this account's SID and SYSTEM), the runtime's own
  * entries in it take that list, and the result is read back by SID (readAcl). Elsewhere it gets mode 700. On every
- * system a folder another account owns, or one with other content and no local.env (a mistaken --state), is refused
- * rather than changed. A failure is an error: secrets are not written into a folder other accounts can read. Done once;
- * later starts only read the lists.
+ * system a folder another account owns, or one without local.env that holds more than a first start makes there
+ * (beforeFirstStart: an older app's folder, a mistaken --state), is refused rather than changed, however private it
+ * already is. A failure is an error: secrets are not written into a folder other accounts can read. Done once; later
+ * starts only read the lists.
  */
 export function protectStateDirectory(dir, { platform = process.platform, run = spawnSync, env = process.env, uid = process.getuid?.() } = {}) {
-  const refuseForeign = () => {
+  const refuseForeign = isPrivate => {
     const entries = readdirSync(dir);
-    if (entries.length && !entries.includes('local.env')) {
-      throw new Error(`${dir} is not empty and has no local.env, so it is not an AwwO 本地版 data folder; choose an empty or new folder`);
+    const other = foreignEntry(entries, { isPrivate, hasDatabase: existsSync(path.join(dir, 'postgres', 'PG_VERSION')) });
+    if (other !== null) {
+      throw new Error(`${dir} has no local.env and holds ${other}, which AwwO 本地版 does not make there, so it is not an AwwO 本地版 data folder; choose an empty or new folder`);
     }
     return entries;
   };
   if (platform !== 'win32') {
     const info = statSync(dir);
     if (uid !== undefined && info.uid !== uid) throw new Error(`${dir} belongs to another account; choose a data folder of your own`);
-    if ((info.mode & 0o777) === 0o700) return 'already private';
-    refuseForeign();
+    const isPrivate = (info.mode & 0o777) === 0o700;
+    refuseForeign(isPrivate);
+    if (isPrivate) return 'already private';
     chmodSync(dir, 0o700);
     return 'mode 700';
   }
@@ -376,9 +399,9 @@ export function protectStateDirectory(dir, { platform = process.platform, run = 
     return { folder, ok: privateFolder(folder, sid) && files.every(file => privateFile(file, sid)) };
   };
   const before = check();
-  if (before.ok) return 'already private';
   if (!trustedOwner(parseAcl(before.folder).owner, sid)) throw new Error(`${dir} belongs to another account; choose a data folder of your own`);
-  const entries = refuseForeign();
+  const entries = refuseForeign(before.ok);
+  if (before.ok) return 'already private';
   const icacls = args => run(windowsTool('icacls', env), args, { encoding: 'utf8', windowsHide: true });
   const set = icacls([dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '/grant:r', '*S-1-5-18:(OI)(CI)F', '/Q']);
   if (set.status !== 0) throw new Error(`Cannot restrict the data folder ${dir} to this account (icacls ${set.status})`);
@@ -522,8 +545,46 @@ export function withModuleGuard(env, { resources, build, data }, guard = MODULE_
 const MODEL_LIMITS = Object.freeze({ contextWindow: '131072', maxTokens: '16384' });
 
 /** The windows that start the runtime and tell the app so (--shell; AWWO_LOCAL_SHELL in edition.go), which then names
- *  their menu instead of npm commands: windows is AwwO Local, the Windows installer's (apps/windows-local). */
-export const LOCAL_SHELLS = Object.freeze(['windows']);
+ *  their menu instead of npm commands: windows is AwwO Local, the Windows installer's (apps/windows-local); macos is
+ *  the Mac app's local workspace (apps/macos), which opens AwwO at a loopback address of its own (SHELL_TOKEN). */
+export const LOCAL_SHELLS = Object.freeze(['windows', 'macos']);
+
+/** What the Mac app's window is given in its environment (never on its command line, which any account can read):
+ *  a token of its own launch, in a cookie of its WebKit store (SHELL_COOKIE). The web server answers that window at
+ *  http://127.0.0.1:<port> (awwo-local-web.mjs): macOS resolves *.localhost names only from macOS 26 on, and the window
+ *  supports macOS 14. 43 characters of base64url, 256 bits. */
+export const SHELL_TOKEN = 'AWWO_LOCAL_SHELL_TOKEN';
+export const SHELL_COOKIE = 'awwo_shell';
+export const shellToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : '';
+
+/** The API's session cookie (auth.go), and the form of its token: "a" and base64url, twice. */
+export const SESSION_COOKIE = 'awwo_session';
+const SESSION_FORM = /^[A-Za-z0-9_-]{16,256}$/;
+
+/**
+ * The Mac app's window's sign-in, which the runtime keeps for it (localState's windowSession) instead of the window's
+ * cookie store: cookies of the host 127.0.0.1 go to every port of it, and a port is anyone's on the computer once its
+ * runtime has ended, so the window holds nothing that outlives the launch it was given (SHELL_COOKIE), and its sign-in
+ * stays in its data folder, which is this account's alone. Read once; written as the API sets it (a value that is not
+ * a session token is none). A write that fails keeps it for this run alone, rather than ending the request.
+ */
+export function windowSessionStore(file) {
+  let value = '';
+  try { value = readFileSync(file, 'utf8').trim(); } catch { /* none kept yet */ }
+  if (!SESSION_FORM.test(value)) value = '';
+  return Object.freeze({
+    get: () => value,
+    set(next) {
+      const token = typeof next === 'string' && SESSION_FORM.test(next) ? next : '';
+      if (token === value) return;
+      value = token;
+      try {
+        if (token) writeFileSync(file, `${token}\n`, { mode: 0o600 });
+        else rmSync(file, { force: true });
+      } catch { /* kept for this run */ }
+    },
+  });
+}
 
 /**
  * Each service's environment. `capabilities` says which optional services run: python (the OpenAI Agents runtime in
@@ -536,9 +597,12 @@ export const LOCAL_SHELLS = Object.freeze(['windows']);
  * owner's own workspaces (a platform administrator owns them) are offered them (media_setup.go mediaEntitled), and an
  * account someone else registers on this computer cannot spend the owner's media keys.
  */
-export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '' }) {
+export function serviceEnvironments({ profile, ports, state, capabilities, system = systemEnvironment(), resetPassword = '', shell = '', cloudOrigin = '' }) {
   const loopback = port => `http://127.0.0.1:${port}`;
-  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false' };
+  // cloudOrigin is a test's hosted AwwO for the AwwO 云端 connections (AWWO_LOCAL_CLOUD_ORIGIN, which the API and the
+  // workers check alike); unset, they run on https://awwo.clawhunt.store.
+  const common = { ...system, APP_ENV: 'development', AWWO_CREDENTIAL_MODE: 'user', AWWO_LLMGATE_ONLY: 'false',
+    ...(cloudOrigin ? { AWWO_LOCAL_CLOUD_ORIGIN: cloudOrigin } : {}) };
   const pi = {
     ...common, AWWO_PI_HOST: '127.0.0.1', AWWO_PI_PORT: String(ports.pi), AWWO_PI_TOKEN: profile.AWWO_PI_TOKEN,
     AWWO_PI_CONTEXT_WINDOW: MODEL_LIMITS.contextWindow, AWWO_PI_MAX_TOKENS: MODEL_LIMITS.maxTokens,
@@ -684,15 +748,72 @@ export function findOnPath(name, { env = process.env, platform = process.platfor
 
 const POSTGRES_TOOLS = ['initdb', 'pg_ctl', 'postgres', 'psql', 'createdb'];
 
-/** PostgreSQL's programs: AWWO_LOCAL_PG_BIN, then the copy setup:local downloads, then PATH. A directory counts only
- *  when it has all five the runtime uses. */
-export function resolvePostgresBin(layout, { env = process.env, platform = process.platform, exists = existsSync } = {}) {
+/** The folders of PostgreSQL's programs, in order: AWWO_LOCAL_PG_BIN, then the copy setup:local unpacks, then PATH's.
+ *  A folder counts only when it has all five the runtime uses. */
+export function postgresBinCandidates(layout, { env = process.env, platform = process.platform, exists = existsSync } = {}) {
   const onPath = findOnPath('pg_ctl', { env, platform, exists });
-  for (const dir of [env.AWWO_LOCAL_PG_BIN, layout.pgBin, onPath && path.dirname(onPath)].filter(Boolean)) {
-    if (POSTGRES_TOOLS.every(name => exists(path.join(dir, platform === 'win32' ? `${name}.exe` : name)))) return dir;
-  }
-  return '';
+  return [...new Set([env.AWWO_LOCAL_PG_BIN, layout.pgBin, onPath && path.dirname(onPath)].filter(Boolean))]
+    .filter(dir => POSTGRES_TOOLS.every(name => exists(path.join(dir, platform === 'win32' ? `${name}.exe` : name))));
 }
+
+/** PostgreSQL's programs: the first of postgresBinCandidates, or '' for none. */
+export function resolvePostgresBin(layout, options = {}) {
+  return postgresBinCandidates(layout, options)[0] || '';
+}
+
+/** The major version of the cluster in a database folder (its PG_VERSION, "18"), or '' where there is none yet. */
+export function clusterVersion(dir) {
+  try { return readFileSync(path.join(dir, 'PG_VERSION'), 'utf8').trim(); } catch { return ''; }
+}
+
+/** The major version of a folder's PostgreSQL, as its postgres -V says it ("postgres (PostgreSQL) 18.4": "18"), or ''. */
+export function postgresMajorVersion(dir, { run = spawnSync, platform = process.platform } = {}) {
+  const result = run(path.join(dir, platform === 'win32' ? 'postgres.exe' : 'postgres'), ['-V'],
+    { encoding: 'utf8', windowsHide: true, timeout: 30_000, env: { ...systemEnvironment(), LC_MESSAGES: 'C' } });
+  return /\(PostgreSQL\)\s+(\d+)/.exec(String(result.stdout || ''))?.[1] || '';
+}
+
+/** The PostgreSQL a runtime may run: a packaged app's (no setup serves its code: localLayout's codeLock) its own alone,
+ *  never one of the person's, whatever their PATH or settings name; a checkout's, postgresBinCandidates. */
+export const runnablePostgres = (layout, options = {}) => layout.codeLock
+  ? postgresBinCandidates(layout, options)
+  : postgresBinCandidates(layout, { ...options, env: {} }).filter(dir => dir === layout.pgBin);
+
+/**
+ * The PostgreSQL to run a data folder's database with: with no database yet, the first candidate; with one, the first
+ * candidate of the major version that made it (PG_VERSION), each asked in turn. A cluster is the files of its major
+ * version alone, which another refuses to open ("database files are incompatible with server"): a checkout whose
+ * database was made by the PostgreSQL on PATH (16, say) keeps running on it after setup:local has unpacked EDB's 18 into
+ * the build on macOS. A packaged app has its own alone (runnablePostgres). Throws when no candidate is of that version,
+ * naming what was found, or when none says its version at all: then its programs do not run (blocked, damaged, or for
+ * another processor), which the database's version has nothing to do with.
+ */
+export function postgresForCluster(layout, database, { candidates = runnablePostgres(layout), version = postgresMajorVersion, platform = process.platform } = {}) {
+  if (!candidates.length) return '';
+  const cluster = clusterVersion(database);
+  if (!cluster) return candidates[0];
+  const found = [];
+  for (const dir of candidates) {
+    const major = version(dir);
+    if (major === cluster) return dir;
+    found.push({ dir, major });
+  }
+  if (found.every(({ major }) => !major)) {
+    const fix = layout.codeLock
+      ? 'run npm run setup:local again, or set AWWO_LOCAL_PG_BIN to PostgreSQL programs that run'
+      : `this app's files are damaged or blocked: install it again${platform === 'darwin' ? ' (System Settings → Privacy & Security names a program macOS blocked)' : ''}`;
+    throw new Error(`PostgreSQL's programs here do not run (postgres -V gave no version in ${found.map(({ dir }) => dir).join('; ')}): ${fix}.`);
+  }
+  const remedy = layout.codeLock
+    ? `put PostgreSQL ${cluster}'s programs on PATH or set AWWO_LOCAL_PG_BIN to them`
+    : `this app carries another (open it with the version of the app that made the database)`;
+  const named = found.map(({ dir, major }) => `${major || 'an unknown version'} in ${dir}`);
+  throw new Error(`The local database (${database}) was made by PostgreSQL ${cluster}, and no PostgreSQL ${cluster} is here (${named.join('; ')}): ${remedy}, or move that data folder aside to start a new database.`);
+}
+
+/** What brings back a piece of the runtime that is missing: a checkout's setup:local builds them, while an installed
+ *  app (no setup serves its code: localLayout's codeLock) came with them and is to be installed again. */
+export const missingPieceFix = layout => layout.codeLock ? 'run npm run setup:local' : 'this app is incomplete: install it again';
 
 /** The browsers the render worker can drive, in order of preference: Chrome, then Edge, which every Windows has. */
 export function browserCandidates(platform = process.platform, env = process.env) {

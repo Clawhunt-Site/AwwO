@@ -3,7 +3,7 @@
 // plans, invites, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 邀请好友, 我的引擎)
 // are drawn as they were, inside the centre (settingsFrame.ts); the others live in settings/.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CreditCard, Database, Gift, Info, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
+import { ArrowLeft, CreditCard, Database, Gift, Info, KeyRound, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
 import type { Identity } from './api';
 import { isLocalEdition } from './edition';
 import { AccountSecurity, accountURL } from './PersonalAccount';
@@ -16,13 +16,16 @@ import type { SettingsSection } from './settingsFrame';
 import { AboutSettings, AppearanceSettings, DataSettings, EngineSettings, GeneralSettings, PersonalizationSettings, PlansUsage, ShortcutSettings, SkillSettings, WorkspaceSettings } from './settings/sections';
 import { SettingsIntro } from './settings/general';
 import { LocalComputerSettings } from './settings/local';
+import { RelaySettings, relayOffered } from './settings/relay';
 import './settings/settings-center.css';
 
 /**
  * The page an address opens in this edition. The local edition sells nothing and takes no invited friends, so the links
  * the app sends to 用量与计费 or 邀请好友 open 本机 there; the hosted site has no 本机 and opens 账号安全 for it.
+ * 本机版连接 is the hosted site's where it offers AwwO 本地版 its models; elsewhere its address opens the engines page.
  */
 export function editionSection(identity: Identity, section: SettingsSection): SettingsSection {
+  if (section === 'relay' && !relayOffered(identity)) return 'engines';
   if (isLocalEdition(identity)) return section === 'plans' || section === 'invites' ? 'local' : section;
   return section === 'local' ? 'security' : section;
 }
@@ -53,6 +56,7 @@ function navigation(identity: Identity): Group[] {
       { id: 'personalization', icon: <Wand2 size={16} />, zh: '个性化', en: 'Personalization' },
       { id: 'skills', icon: <Sparkles size={16} />, zh: '技能', en: 'Skills' },
       { id: 'engines', icon: <Plug size={16} />, zh: identity.personalCredentialsRequired ? '我的执行引擎' : '模型服务', en: identity.personalCredentialsRequired ? 'My engines' : 'Model service' },
+      ...(relayOffered(identity) ? [{ id: 'relay' as const, icon: <KeyRound size={16} />, zh: '本机版连接', en: 'AwwO Local' }] : []),
     ] },
     { zh: '工作区', en: 'Workspace', items: [
       { id: 'workspace', icon: <Users size={16} />, zh: '成员与工作区', en: 'Members and workspaces' },
@@ -114,6 +118,7 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
     case 'personalization': return <PersonalizationSettings />;
     case 'skills': return <SkillSettings identity={identity} />;
     case 'engines': return engines ?? <EngineSettings identity={identity} />;
+    case 'relay': return <RelaySettings identity={identity} />;
     case 'workspace': return <WorkspaceSettings identity={identity} onProfile={onProfile} />;
     case 'data': return <DataSettings identity={identity} />;
     case 'about': return <AboutSettings identity={identity} />;

@@ -2,14 +2,14 @@
 // ffmpeg and ffprobe come from AWWO_RENDER_FFMPEG / AWWO_RENDER_FFPROBE or PATH.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { loadConfig, validateRenderRequest } from './config.mjs';
-import { chromeArgs, renderPage } from './render.mjs';
+import { chromeArgs, renderPage, renderPageSound } from './render.mjs';
 
 const CHROME = process.env.AWWO_RENDER_TEST_CHROME;
 const skip = CHROME ? false : 'set AWWO_RENDER_TEST_CHROME to run real renders';
@@ -149,5 +149,121 @@ test('an abort signal stops the render', { skip }, async () => {
   setTimeout(() => controller.abort(), 1500);
   await assert.rejects(renderPage(request(RAF_PAGE, { seconds: 20, fps: 60, width: 1280, height: 720 }), configWith(), { signal: controller.signal, log: () => {} }),
     (error) => error.status === 422 && error.detail === 'aborted');
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+/** A page whose renderAudio runs `body` (its local `seconds` and `sampleRate` are what it was asked for). */
+const soundPage = (body, before = '') => `<!doctype html><html><body><script>${before}
+window.renderAudio = async ({ seconds, sampleRate }) => { ${body} };
+</script></body></html>`;
+/** A page's sound, written into TMP and read back (the file is removed again); a refused sound leaves no file behind. */
+async function sound(html, seconds = 1, { config = configWith(), ...options } = {}) {
+  const id = `snd_${Math.random().toString(36).slice(2, 10)}`;
+  const file = path.join(TMP, `${id}.wav`);
+  const made = await renderPageSound({ renderId: id, html, seconds, file }, config, { log: () => {}, ...options });
+  const wav = readFileSync(file);
+  rmSync(file, { force: true });
+  assert.equal(wav.length, made.bytes);
+  return { ...made, wav };
+}
+/** The WAV's header fields and its samples as the interleaved 16-bit values. */
+function readWav(wav) {
+  return { rate: wav.readUInt32LE(24), channels: wav.readUInt16LE(22), bits: wav.readUInt16LE(34), bytes: wav.readUInt32LE(40),
+    samples: new Int16Array(wav.buffer.slice(wav.byteOffset + 44, wav.byteOffset + wav.length)) };
+}
+
+test('a page\'s sound is read out exactly as long as asked, whatever the page made or did to the built-ins', { skip, timeout: 120_000 }, async () => {
+  // A 0.25 square wave on the left only, for 10 s, of which 1 s is asked for, from a page that has replaced every built-in
+  // a naive read-out would use.
+  const hostile = `btoa = () => 'A'.repeat(4e6); String.fromCharCode = () => 'x';
+Object.defineProperty(Object.getPrototypeOf(Uint8Array.prototype), 'length', { get() { return 1e9; } });
+Uint8Array.prototype.subarray = function () { return new Uint8Array(1e7); };
+Math.round = () => 7; Number.isFinite = () => false; Reflect.apply = () => 0;`;
+  const big = soundPage(`const left = new Float32Array(sampleRate * 10); for (let i = 0; i < left.length; i += 1) left[i] = i % 2 ? 0.25 : -0.25;
+return { sampleRate, channels: [left, new Float32Array(sampleRate * 10)] };`, hostile);
+  const made = await sound(big, 1);
+  const wav = readWav(made.wav);
+  assert.deepEqual([wav.rate, wav.channels, wav.bits, wav.bytes, made.frames, made.peak], [48000, 2, 16, 48000 * 4, 48000, 0.25]);
+  assert.deepEqual([wav.samples[0], wav.samples[1], wav.samples[2], wav.samples[3]], [-8192, 0, 8192, 0]);
+  assert.equal(wav.samples.length, 96000);
+  // An AudioBuffer from an OfflineAudioContext at another rate is taken at its own rate; mono is put on both sides.
+  const offline = await sound(soundPage(`const ctx = new OfflineAudioContext(1, 22050, 22050); const osc = ctx.createOscillator();
+osc.connect(ctx.destination); osc.start(0); return ctx.startRendering();`), 1);
+  const mono = readWav(offline.wav);
+  assert.deepEqual([mono.rate, mono.bytes, offline.frames], [22050, 22050 * 4, 22050]);
+  assert.ok(mono.samples.some((value, index) => index % 2 === 0 && value !== 0) && mono.samples.every((value, index) => index % 2 === 0 || value === mono.samples[index - 1]));
+  // Up to 50 ms short is rounding: padded with silence to the length asked. Clipped and bad samples are counted by frame.
+  const short = await sound(soundPage(`const left = new Float32Array(Math.round(sampleRate * 0.97)).fill(0.5); left[0] = 2; left[1] = NaN;
+return { sampleRate, channels: [left] };`), 1);
+  const padded = readWav(short.wav);
+  assert.deepEqual([padded.bytes, padded.samples[2 * 46000], padded.samples[2 * 47999], padded.samples[0], padded.samples[2]], [48000 * 4, 16384, 0, 32767, 0]);
+  assert.deepEqual(short.warnings, ['sound_not_finite:1', 'sound_clipped:1']);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a page cannot hand the worker anything but the sound asked for, even through the prototypes a promise or a serialiser meets', { skip, timeout: 120_000 }, async () => {
+  // An object a naive capture would pass back with its counts now looks like a promise resolving to 2 MB, and every
+  // destructured argument would read as 1e9 seconds; the page's own answer is left alone.
+  const before = `Object.defineProperty(Object.prototype, 'then', { configurable: true, get() { return Object.prototype.hasOwnProperty.call(this, 'wanted') ? (resolve) => resolve('X'.repeat(2e6)) : undefined; } });
+Object.defineProperty(Object.prototype, 'wanted', { configurable: true, get() { return 1e9; } });
+Array.prototype[Symbol.iterator] = function* () { yield 1e9; yield 1e9; };`;
+  const made = await sound(soundPage(`const left = new Float32Array(sampleRate).fill(0.125); return { sampleRate, channels: [left, left] };`, before), 1);
+  const wav = readWav(made.wav);
+  assert.deepEqual([wav.rate, wav.bytes, made.frames, made.peak, wav.samples[0]], [48000, 192000, 48000, 0.125, 4096]);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a sound longer than one part is read out whole, every sample in its place across the part boundary', { skip, timeout: 120_000 }, async () => {
+  // 17 s at 48 kHz is 3,264,000 bytes: a 3 MiB part and the rest. Every frame's left sample is a known 16-bit value.
+  const page = soundPage(`const left = new Float32Array(sampleRate * seconds);
+for (let i = 0; i < left.length; i += 1) { const n = ((i * 7) % 65536) - 32768; left[i] = n < 0 ? n / 32768 : n / 32767; }
+return { sampleRate, channels: [left, new Float32Array(sampleRate * seconds)] };`);
+  const made = readWav((await sound(page, 17)).wav);
+  assert.equal(made.bytes, 17 * 48000 * 4);
+  const boundary = (3 * 1024 * 1024) / 4;
+  for (let frame = boundary - 8; frame < boundary + 8; frame += 1) {
+    assert.equal(made.samples[frame * 2], ((frame * 7) % 65536) - 32768, `frame ${frame}`);
+    assert.equal(made.samples[frame * 2 + 1], 0);
+  }
+  let wrong = 0;
+  for (let frame = 0; frame < 17 * 48000; frame += 997) if (made.samples[frame * 2] !== ((frame * 7) % 65536) - 32768) wrong += 1;
+  assert.equal(wrong, 0);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a sound that takes longer to make than a page may take to open still has its own budget', { skip, timeout: 120_000 }, async () => {
+  // Event timestamps keep real time under the virtual clock: this page works for 8 s inside renderAudio.
+  const slow = soundPage(`const start = new Event('t').timeStamp; while (new Event('t').timeStamp - start < 8000) {}
+return { sampleRate, channels: [new Float32Array(sampleRate).fill(0.1)] };`);
+  const made = await sound(slow, 1, { config: configWith({ AWWO_RENDER_TIMEOUT_MS: '6000' }) });
+  assert.equal(made.frames, 48000);
+  assert.ok(Math.abs(made.peak - 0.1) < 1e-6, `peak ${made.peak}`);
+  assert.ok(made.elapsedMs > 8000, `took ${made.elapsedMs} ms`);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a page whose sound outruns its budget, or whose renderAudio cannot be read, is refused with why', { skip, timeout: 120_000 }, async () => {
+  const waits = soundPage('await new Promise((resolve) => setTimeout(resolve, 10)); return { sampleRate, channels: [new Float32Array(sampleRate)] };');
+  await assert.rejects(sound(waits, 1, { soundTimeoutMs: 3000 }),
+    (error) => error.status === 422 && error.detail === 'timeout' && error.message.includes('waits for a timer'));
+  const getter = `<!doctype html><html><body><script>Object.defineProperty(window, 'renderAudio', { get() { throw new Error('broken getter'); } });</script></body></html>`;
+  await assert.rejects(sound(getter, 1), (error) => error.detail === 'sound_failed' && error.message.includes('broken getter'));
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a page that cannot give its sound is refused with the reason, and one that navigates meanwhile fails', { skip, timeout: 120_000 }, async () => {
+  for (const [html, detail, words] of [
+    ['<!doctype html><html><body>no sound</body></html>', 'sound_missing', 'defines no window.renderAudio'],
+    [soundPage("throw new Error('not written yet');"), 'sound_failed', 'not written yet'],
+    [soundPage('return { sampleRate, channels: [[0, 0, 0]] };'), 'sound_failed', 'must be a Float32Array'],
+    [soundPage('return { sampleRate: 96000, channels: [new Float32Array(96000)] };'), 'sound_failed', 'from 8000 to 48000'],
+    [soundPage('return { sampleRate, channels: [new Float32Array(sampleRate / 2)] };'), 'sound_too_short', 'not 1 s'],
+    [soundPage("location.hash = 'moved'; return { sampleRate, channels: [new Float32Array(sampleRate)] };"), 'page_load_failed', 'navigated away'],
+    // A new document while the sound is being made: a reload, and a refresh the page asked for in its head.
+    [soundPage('location.reload(); await new Promise(() => {});'), 'page_load_failed', 'navigated away'],
+    [soundPage('await new Promise(() => {});').replace('<html><body>', '<html><head><meta http-equiv="refresh" content="1"></head><body>'), 'page_load_failed', 'navigated away'],
+  ]) {
+    await assert.rejects(sound(html, 1), (error) => error.status === 422 && error.detail === detail && error.message.includes(words), `${detail}: ${html.slice(0, 120)}`);
+  }
   assert.deepEqual(readdirSync(TMP), []);
 });

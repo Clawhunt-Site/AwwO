@@ -37,7 +37,9 @@ import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from '
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
 import { StageActivity, showsStageLine, type StageActivityState } from './StageActivity';
-import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, nodesLeft, runCost, runRequestKind, type NextStep, type NextSteps } from './nextSteps';
+import { nextSteps as canvasNextSteps, failureRequestKind, isNextStepsQuestion, isOutcomeQuestion, nodesLeft, runCost, runRequestKind, sameWholeRunChoice,
+  wholeRunChoice, type NextStep, type NextSteps, type WholeRunChoice } from './nextSteps';
+import { RerunConfirm } from './RerunConfirm';
 import { reviewVerdict, reworkRequirements } from './reviewVerdict';
 import { isPremiumRefusal, isQuotaRefusal, modelSwitchHelps, refusalReason, upgradeHelps } from './runRefusals';
 import { announceRouteUsageChanged, fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
@@ -57,7 +59,7 @@ import { describePlanChanges } from './planChanges';
 import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
 import { planModelsOf } from './userChosenModels';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
-  readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, type PlanProgress, type PlanningMessage } from './canvasPlanning';
+  readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, planSeedRequest, type PlanProgress, type PlanningMessage } from './canvasPlanning';
 import { invalidateOutputs } from './invalidateOutputs';
 import { prepareNodeConversation } from './nodeConversation';
 import { assembleInputViews } from './assembleNode';
@@ -206,6 +208,11 @@ const PANEL_BOX = '.awwo-canvas-assistant--panel .awwo-assistant-composer textar
 const WELCOME_BOX = '.awwo-canvas-assistant--welcome .awwo-assistant-composer textarea';
 /** The message box of whichever holds the conversation, the side panel or the welcome: one is drawn at a time. */
 const MESSAGE_BOX = '.awwo-canvas-assistant .awwo-assistant-composer textarea';
+/** What the rerun question (RerunConfirm.tsx) asks of this canvas as it stands, the way this host runs it. */
+function rerunQuestionOf(doc: CanvasDocument): WholeRunChoice | null {
+  return wholeRunChoice({ nodes: doc.nodes, edges: doc.edges, cloudRuns: Boolean(currentSaaSCanvas()), scopedRuns: !doc.execution });
+}
+
 /** Whether `target` is in `scope`, or in a layer one of its controls opened elsewhere on the page and names with
  *  aria-controls (a composer's 用户须知 is a portal into the body): the reader is with that part of the page there too.
  *  Such a layer is a child of the body other than the one holding `scope`; anything else (the board) is answered without
@@ -1370,6 +1377,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [reviewRound, setReviewRound] = useState(initialJournals.find(item => item.journal.review)?.journal.review?.round ?? 0);
   const [runSummary, setRunSummary] = useState<Parameters<typeof RunControls>[0]['summary']>(null);
   const [stopped, setStopped] = useState(false);
+  // The question a run of the whole canvas asks before it runs nodes again that have their result (RerunConfirm.tsx);
+  // `changed` once the canvas changed under it and it was asked again.
+  const [rerunChoice, setRerunChoice] = useState<(WholeRunChoice & { changed?: boolean }) | null>(null);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -1676,7 +1686,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
   }, [locale, t, saveLocalDocument, runUnavailableReason]);
 
-  const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy) => {
+  // `asked`, for a start from the rerun question (RerunConfirm.tsx): the question the reader answered, or null for a run
+  // of the whole canvas that had none to ask. It is held to once the run's ownership, and then its nodes' setup, are
+  // through. Undefined for every other run.
+  const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy,
+    asked?: WholeRunChoice | null) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
     writePreviewsNow.current();
@@ -1794,6 +1808,37 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       return true;
     };
     if (refuseUnsupportedGraph(docRef.current)) return;
+    // The canvas stays editable while the run waits for its ownership (a node added touches none of the nodes it
+    // holds). Before anything is set up or cleared, a start from the rerun question must find the canvas as the question
+    // showed it, or, having had nothing to ask, still with nothing to ask: one that changed (a node added, a result
+    // published by hand) is asked again as it now stands, with nothing cleared.
+    if (asked !== undefined) {
+      const now = rerunQuestionOf(docRef.current);
+      if (!sameWholeRunChoice(asked, now)) {
+        if (now) setRerunChoice({ ...now, changed: true }); else setHandoffNote(t('rerun.changedSetup'));
+        return;
+      }
+      // Setting the nodes up can itself clear a result (a node moved to another runtime starts a new conversation:
+      // node_setup.go). A run its own preflight refuses anyway (an input nobody filled in, a cycle, a team's or a media
+      // node's settings) is refused before that, by the same check, with the Agents the setup would bind taken as bound:
+      // nothing else it checks does the setup change.
+      if (currentSaaSCanvas()) {
+        const asSetUp = docRef.current.nodes.map(node => node.kind === 'session' && !node.binding ? { ...node, binding: { companyId: '', agentId: '', agentName: node.title } } : node);
+        const refused = preflightGraphIssue(asSetUp, reconcileEdges(asSetUp, docRef.current.edges).filter(edge => edge.kind !== 'feedback'), scope,
+          { media: mediaCatalogueOf(mediaStateRef.current) });
+        if (refused) { refusedRevision.current = canvasPlanRevision(docRef.current); setHandoffNote(preflightIssueMessage(t, refused, locale) ?? refused.message); return; }
+        // That check judges a media node's settings by the workspace's catalogue, so while it is still loading, a run
+        // whose setup could take a result (an Agent node's: a form keeps what it sent, and is never set up) waits: once
+        // the catalogue arrives, the run could still be refused. Not when it failed to load: the service judges them
+        // then, as it did before.
+        const inRun = (scope ? docRef.current.nodes.filter(node => scope!.includes(node.id)) : docRef.current.nodes)
+          .filter((node): node is SessionNode => node.kind === 'session');
+        if (mediaStateRef.current?.status === 'loading' && inRun.some(node => node.lastOutput != null)
+            && inRun.some(node => mediaKindOf(node.agentKind))) {
+          setHandoffNote(t('rerun.mediaLoading')); return;
+        }
+      }
+    }
     let runDocument = docRef.current;
     try {
       if (currentSaaSCanvas()) {
@@ -1816,6 +1861,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (!mounted.current || readOnlyRef.current) return;
     if (refuseUnsupportedGraph(runDocument)) return;
     const runNodes = runDocument.nodes;
+    // The setup may itself clear a result of a node it sets up anew (moved to another runtime, its conversation starts
+    // again: node_setup.go), which the run replaces anyway. What the run must not do is replace a result the question
+    // did not name (one that came from elsewhere while the setup ran), nor run more than it quoted.
+    if (asked !== undefined) {
+      const now = rerunQuestionOf(runDocument);
+      const runs = new Set(requestedScope ?? runNodes.map(node => node.id));
+      const named = new Set(asked?.finished ?? []);
+      if (now && now.finished.some(id => runs.has(id) && !named.has(id))) { setRerunChoice({ ...now, changed: true }); return; }
+      const quoted = asked ? (requestedScope ? asked.rest : asked.whole) : undefined;
+      if (quoted) {
+        const ids = new Set(runNodes.map(node => node.id));
+        const spends = runCost(runNodes, requestedScope, Boolean(currentSaaSCanvas()));
+        const sameNodes = requestedScope ? quoted.scope.every(id => ids.has(id)) : ids.size === quoted.scope.length && quoted.scope.every(id => ids.has(id));
+        if (!sameNodes || spends.calls !== quoted.calls || (spends.generations ?? 0) !== (quoted.generations ?? 0)) { setHandoffNote(t('rerun.changedSetup')); return; }
+      }
+    }
     const runEdges = reconcileEdges(runNodes, runDocument.edges);
     const reviewPolicy = !manualMessage && !collaboration ? runDocument.execution : undefined;
     const problem = collaboration ? '' : preflightIssueMessage(t, reviewPolicy
@@ -2159,6 +2220,41 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     () => void startRun(downstreamClosure(selectionRef.current)),
     [startRun, downstreamClosure],
   );
+
+  /** What a run of the whole canvas asks first (RerunConfirm.tsx), or null when it has nothing to ask: no node it would
+   *  run again has its result, or it would not start anyway (read only, unavailable, another run going), which startRun
+   *  says itself. */
+  const wholeRunAsk = useCallback((): WholeRunChoice | null => {
+    if (readOnlyRef.current || runUnavailableReason || anyLaneActive()) return null;
+    // A review loop runs its rounds over the whole canvas: it is asked about as a whole (rerunQuestionOf).
+    return rerunQuestionOf(docRef.current);
+  }, [runUnavailableReason, anyLaneActive]);
+  /** Run the whole canvas, from its run button, the 成果 view or the command bar: asked first where that runs nodes again
+   *  that already have their result. Started without asking, it still holds to having had nothing to ask (startRun's
+   *  `asked` null): a result that arrives while it waits to start is asked about. */
+  const runWholeCanvas = useCallback(() => {
+    const ask = wholeRunAsk();
+    if (ask) setRerunChoice(ask); else void startRun(undefined, undefined, undefined, undefined, undefined, null);
+  }, [wholeRunAsk, startRun]);
+  /** The question's answer: only the nodes without a result and what they feed, or every node. It acts only on the
+   *  canvas the question showed: a plan that applied, a wire moved, a result that arrived, a run another tab started
+   *  while it was open would make either start more (or other) work than it quoted, so the question is asked again as
+   *  things now stand, or, with nothing left to ask, the reader is told to press run again. */
+  const answerRerun = useCallback((answer: 'rest' | 'whole') => {
+    const shown = rerunChoice;
+    if (!shown) return;
+    const now = wholeRunAsk();
+    if (!sameWholeRunChoice(shown, now)) {
+      if (now) setRerunChoice({ ...now, changed: true });
+      else { setRerunChoice(null); setHandoffNote(t('rerun.changedAgain')); }
+      return;
+    }
+    setRerunChoice(null);
+    // The nodes the question named and quoted, no more: the scope it was worked out with, checked again once the run is
+    // set up (startRun's `asked`).
+    if (answer === 'rest' && shown.rest) void startRun(shown.rest.scope, undefined, undefined, undefined, undefined, shown);
+    else void startRun(undefined, undefined, undefined, undefined, undefined, shown);
+  }, [rerunChoice, wholeRunAsk, startRun, t]);
 
   // ---- node mutations -----------------------------------------------------------------------
 
@@ -2774,7 +2870,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }) : ({
       addSession: (kind) => addAtViewCenter(kind),
       canEdit,
-      run: runUnavailableReason ? undefined : () => void startRun(),
+      run: runUnavailableReason ? undefined : runWholeCanvas,
       stop: stopRun,
       fitAll,
       // While a node is open the timeline and the minimap step aside, so they are not offered then (as in
@@ -2795,7 +2891,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       canUndo: canEdit && history.undo > 0,
       canRedo: canEdit && history.redo > 0,
     }),
-    [readOnly, addAtViewCenter, canEdit, startRun, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason, focusedId],
+    [readOnly, addAtViewCenter, canEdit, startRun, runWholeCanvas, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason, focusedId],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
@@ -2962,6 +3058,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [modelFocusId, setModelFocusId] = useState<string | null>(null);
   const planningRequest = useRef<{ id: string; controller: AbortController; prompt: string } | null>(null);
   const planningSequence = useRef(0);
+  // Every fix request this page wrote, word for word: the nodes a plan adds never take one as their task (planSeedRequest).
+  const writtenFixRequests = useRef(new Set<string>());
   const refreshPlanningRecovery = useCallback(async (signal?: AbortSignal) => {
     if (!canInitialize || !mounted.current || readOnlyRef.current || currentSaaSCanvas() !== cloudScope) return;
     const sequence = ++recoveryCheckSequence.current;
@@ -3150,8 +3248,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return;
       }
       const before = docRef.current;
-      const planned = jev ? applyJevPlan(before, jev, locale, prompt) : applyCanvasPlan(before, plan, locale, prompt, planMedia, modelChoices, currentSaaSCanvas() !== null,
-        teams);
+      // The nodes it adds take the request as their first constraint, but never the canvas's own fix request in it: one
+      // this page wrote, or the one it would write for a failure it shows now (a request written before a reload).
+      const failedIds = Object.entries(runs).filter(([, run]) => run.state === 'failed').map(([nodeId]) => nodeId);
+      const seed = planSeedRequest(prompt, [...writtenFixRequests.current,
+        ...(failedIds.length ? [fixRequestText(failedIds), ...failedIds.map(nodeId => fixRequestText([nodeId]))] : [])]);
+      // A planned page gets the design skills only where AwwO runs the models: a model on a personal key is given 32K
+      // counted in bytes (connections.go), and the skills would take some 40% of it.
+      const hosted = currentSaaSCanvas() !== null;
+      const planned = jev ? applyJevPlan(before, jev, locale, seed)
+        : applyCanvasPlan(before, plan, locale, seed, planMedia, modelChoices, hosted, hosted && !personalCredentialsRequired, teams);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own):
       // the one its request named, which the planner sized them for (a resume's, chosen before the reader changed it;
       // planComponentModel), against the reader's choice now, which may have changed while it planned; except a node the
@@ -3585,10 +3691,18 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // A step the assistant takes from the conversation, said as the reader's own message so the turn reads as asked.
   const askAssistant = (prompt: string) => { setAssistantOpen(true); void sendPlanningMessage(prompt); };
   // Said as the reader's own message, so it carries what happened, and the request says how to change the canvas.
-  const fixRequest = (ids: ReadonlyArray<string>) => {
+  const fixRequestText = (ids: ReadonlyArray<string>) => {
     const failedNodes = ids.map(titleOf).filter(Boolean);
     return t('assistant.fixRequest', { nodes: failedNodes.map(name => locale === 'zh' ? `「${name}」` : `“${name}”`).join(listSeparator),
       reason: failureReason(t, runs[ids[0]]?.detail, locale) || t('assistant.repairNoReason') });
+  };
+  const fixRequest = (ids: ReadonlyArray<string>) => {
+    const text = fixRequestText(ids);
+    const written = writtenFixRequests.current;
+    written.delete(text); written.add(text);
+    // The newest fifty: one asked about long ago has been planned since.
+    if (written.size > 50) written.delete(written.values().next().value!);
+    return text;
   };
   // A node handed to the assistant from its own view: 'edit' starts the request in the composer (the reader says what
   // to change), 'fix' asks it to make the failed node finish, as the 接下来 card's step does.
@@ -3646,7 +3760,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         onSelect: () => nodes.find(node => node.id === step.nodeId)?.kind === 'edit' ? configureNode(step.nodeId) : openNodeInputs(step.nodeId) };
       case 'assistant-fix': return { id: 'assistant-fix', primary, label: t('assistant.nextAssistantFix'), onSelect: () => askAssistant(fixRequest(step.nodeIds)) };
       case 'assistant-fill': return { id: 'assistant-fill', primary, label: t('assistant.nextAssistantFill'), onSelect: () => askAssistant(fillRequest(step.nodeIds)) };
-      case 'run-all': return { id: 'run-all', primary, label: withCost(t('assistant.nextRunAll'), step), onSelect: () => void startRun() };
+      case 'run-all': return { id: 'run-all', primary, label: withCost(t('assistant.nextRunAll'), step), onSelect: runWholeCanvas };
       // One node, alone: an out-of-scope upstream would contribute what it produced earlier, and a first node has none.
       case 'try-first': return { id: `try-${step.nodeId}`, primary, label: withCost(t('assistant.nextTryFirst', { node: titleOf(step.nodeId) }), step),
         onSelect: () => void startRun([step.nodeId]) };
@@ -3780,6 +3894,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     let content: string;
     let scope: string[] | undefined;
     let start = false;
+    let ask: WholeRunChoice | null = null;
     if (running) content = t('assistant.runBusy');
     else if (runUnavailableReason) content = t('assistant.runUnavailable', { reason: runUnavailableReason });
     else if (suggested?.situation.kind === 'inputs') content = localAnswer();
@@ -3802,15 +3917,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       } else content = t('assistant.runStarting');
       // 「继续运行」 with every node done runs nothing: running it all again is 「重新运行」.
       start = kind === 'all' || scope !== undefined;
+      // A whole run that would run nodes with a result again asks first, as the run button's does (RerunConfirm.tsx);
+      // the reply says so instead of saying it started.
+      ask = start && scope === undefined ? wholeRunAsk() : null;
+      if (ask) content = t(ask.rest ? 'assistant.runConfirmRest' : ask.left ? 'assistant.runConfirmWhole' : 'assistant.runConfirmAll', { count: ask.finished.length });
       // What it spends is counted over what it starts (the whole canvas, or the nodes left and what they feed).
-      if (start) content += runCostText(runCost(nodes, scope, Boolean(cloudScope)));
+      else if (start) content += runCostText(runCost(nodes, scope, Boolean(cloudScope)));
     }
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     setPlanningError('');
     setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
       { id: `${id}-user`, role: 'user' as const, content: prompt }, { id: `${id}-assistant`, role: 'assistant' as const, content }].slice(-60) }));
     setAssistantOpen(true);
-    if (start) void startRun(scope);
+    if (ask) setRerunChoice(ask);
+    // A run of the whole canvas that had nothing to ask holds to that, as the run button's does (runWholeCanvas).
+    else if (start) void startRun(scope, undefined, undefined, undefined, undefined, scope === undefined ? null : undefined);
     countPress('assistant.local_answer');
     return true;
   };
@@ -4300,7 +4421,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}
       view={showingResults ? 'results' : 'canvas'} onViewChange={results ? changeStageView : undefined}
       results={showingResults ? <CanvasResults nodes={nodes} edges={edges} execution={doc.execution} runs={runs} running={running} readOnly={readOnly}
-        runUnavailableReason={runUnavailableReason} onRun={readOnly ? undefined : () => void startRun()}
+        runUnavailableReason={runUnavailableReason} onRun={readOnly ? undefined : runWholeCanvas}
         notice={initializing ? { kind: 'status', text: locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…' }
           : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') } : undefined}
         onOpenNode={id => { focusNode(id); refocus('.awwo-view-switch button'); }}
@@ -4318,7 +4439,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       <RunControls initializeOnRun={canInitialize} runUnavailableReason={runUnavailableReason} onConfigureNode={(id) => { focusNode(id, { configure: true }); setInspectorId(id); }} readOnly={readOnly || initializing || bindingLocked} nodes={nodes} edges={edges} execution={doc.execution} round={reviewRound} running={running} runs={runs} lanes={laneRunning.filter(Boolean).length} summary={runSummary}
         onViewOutput={id => { toggleDeliverables(id, true); focusNode(id); setTimelineOpen(false); }}
         reviewNote={reviewNote} onReviewNext={() => { setAssistantOpen(true); countPress('review.next_steps'); }}
-        stopped={stopped} onStart={() => void startRun()} onStop={stopRun}
+        stopped={stopped} onStart={runWholeCanvas} onStop={stopRun}
         onToggleTimeline={() => { const fromResults = stageViewRef.current === 'results'; changeStageView('canvas'); setTimelineOpen(o => fromResults || !o); }} timelineOpen={timelineOpen && !showingResults}
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
@@ -4527,6 +4648,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         title={studio.nodeId ? t('studio.titleNode', { title: nodes.find(node => node.id === studio.nodeId)?.title || '—' }) : t('studio.titleCanvas', { title: workspaceName || 'AwwO' })}
         onClose={() => setStudio(null)} onOpenNode={id => { setStudio(null); changeStageView('canvas'); focusNode(id); }} /> : null}
     </div>
+    {/* Outside the board, which turns inert under the 成果 view, where its run button asks this too. */}
+    {rerunChoice && <RerunConfirm choice={rerunChoice} changed={rerunChoice.changed} titleOf={titleOf} withCost={withCost}
+      onRest={() => answerRerun('rest')} onWhole={() => answerRerun('whole')} onCancel={() => setRerunChoice(null)} />}
     </AgentWorkspace>
   );
 }

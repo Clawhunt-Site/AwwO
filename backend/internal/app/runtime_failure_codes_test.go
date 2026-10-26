@@ -22,6 +22,7 @@ func TestRuntimeFailureCodeTable(t *testing.T) {
 		"MODEL_RATE_LIMIT":       "provider_rate_limited",
 		"MODEL_UNAVAILABLE":      "provider_unavailable",
 		"MODEL_CONNECTION_ERROR": "provider_unavailable",
+		"MODEL_STALLED":          "provider_unavailable",
 		"DEADLINE_EXCEEDED":      "run_timeout",
 	}
 	for worker, want := range named {
@@ -82,6 +83,7 @@ func TestPostgresRunFailureCodesAreNamedFromWorkerCodes(t *testing.T) {
 		{"MODEL_RATE_LIMIT", "provider_rate_limited"},
 		{"MODEL_UNAVAILABLE", "provider_unavailable"},
 		{"MODEL_CONNECTION_ERROR", "provider_unavailable"},
+		{"MODEL_STALLED", "provider_unavailable"},
 		{"MODEL_CALL_LIMIT", "runtime_failed"},
 		{"MaxTurnsExceededError", "runtime_failed"},
 		{"DEADLINE_EXCEEDED", "run_timeout"},
@@ -112,10 +114,12 @@ func TestPostgresRunFailureCodesAreNamedFromWorkerCodes(t *testing.T) {
 
 // Team member turns parse the worker stream on their own path; a member that fails with
 // a named code records that code on its turn and on the parent run, and a contract
-// refusal there stays generic because members never carry a contract.
+// refusal there stays generic because members never carry a contract. A member's call
+// its worker cut for silence before any output is given back, as a single run's is.
 func TestPostgresTeamMemberFailureCodesMatchSingleRuns(t *testing.T) {
 	for _, test := range []struct{ worker, want string }{
 		{"MODEL_RATE_LIMIT", "provider_rate_limited"},
+		{"MODEL_STALLED", "provider_unavailable"},
 		{"OUTPUT_CONTRACT_INVALID", "runtime_failed"},
 	} {
 		t.Run(test.worker, func(t *testing.T) {
@@ -138,11 +142,15 @@ func TestPostgresTeamMemberFailureCodesMatchSingleRuns(t *testing.T) {
 			}
 			awaitSettledTeam(t, h, rid)
 			var code string
-			if err := h.db.QueryRow(context.Background(), "SELECT error FROM run_turns WHERE run_id=$1 AND status='failed'", rid).Scan(&code); err != nil {
+			var given bool
+			if err := h.db.QueryRow(context.Background(), "SELECT t.error,EXISTS(SELECT 1 FROM refunded_calls rs JOIN model_invocations mi ON mi.tenant_id=rs.tenant_id AND mi.id=rs.invocation_id WHERE rs.tenant_id=t.tenant_id AND mi.turn_id=t.id AND rs.reason='stalled') FROM run_turns t WHERE t.run_id=$1 AND t.status='failed'", rid).Scan(&code, &given); err != nil {
 				t.Fatal(err)
 			}
 			if code != test.want {
 				t.Fatal("member turn error", code, "wanted", test.want)
+			}
+			if given != (test.worker == "MODEL_STALLED") {
+				t.Fatal("member turn's call given back", given)
 			}
 		})
 	}

@@ -43,9 +43,8 @@ COPY scripts/apply-workspace-publish-config.mjs /app/scripts/apply-workspace-pub
 RUN node /app/scripts/apply-workspace-publish-config.mjs /app/server
 
 # apps/web build: needs node_routes.json (vite config-load gate) and nothing else. It used to also
-# need the sibling fleet-canvas / creative-canvas embed SOURCES; the session-canvas rebuild made
-# apps/web self-contained (src/canvas/ owns the whole surface), so those COPYs are gone.
-# (apps/creative-canvas still exists for the myshell orchestrator, which copies it in its own image.)
+# need the sibling creative-canvas embed SOURCES; the session-canvas rebuild made apps/web
+# self-contained (src/canvas/ owns the whole surface), so those COPYs are gone.
 COPY packages/superclaw/src/superclaw/node_routes.json /app/packages/superclaw/src/superclaw/node_routes.json
 COPY apps/web /app/apps/web
 RUN npm ci --prefix apps/web

@@ -951,7 +951,7 @@ def test_synced_policy_max_tool_timeout_tightens_sidecar_timeout(tmp_path: Path)
 
 def test_evidence_summary_upload_omits_raw_outputs_and_workspace_paths(tmp_path: Path):
     evidence = EvidenceBundle(run_id="run_cloud_upload")
-    evidence.add_command("cat /Users/leongong/Documents/superClaw/private.txt", 0, "raw secret output ghp_abcdefghijklmnop")
+    evidence.add_command("cat /Users/dev-user/Documents/superClaw/private.txt", 0, "raw secret output ghp_abcdefghijklmnop")
     evidence.add_worker_result(
         WorkerResult(
             task_id="task_1",
@@ -959,15 +959,15 @@ def test_evidence_summary_upload_omits_raw_outputs_and_workspace_paths(tmp_path:
             backend="codex",
             command="pytest",
             exit_code=0,
-            output="full workspace transcript /Users/leongong/Documents/superClaw",
+            output="full workspace transcript /Users/dev-user/Documents/superClaw",
             duration_seconds=1.0,
-            artifact_path="/Users/leongong/Documents/superClaw/.superclaw/raw.log",
+            artifact_path="/Users/dev-user/Documents/superClaw/.superclaw/raw.log",
         )
     )
     evidence.add_artifact(
         ArtifactRef(
             kind="plugin-invocation",
-            path="/Users/leongong/Documents/superClaw/.superclaw/artifacts/plugin.json",
+            path="/Users/dev-user/Documents/superClaw/.superclaw/artifacts/plugin.json",
             metadata={"plugin_id": "dev.superclaw.hello-world", "tool_name": "hello_world"},
         )
     )
@@ -993,7 +993,7 @@ def test_evidence_summary_upload_omits_raw_outputs_and_workspace_paths(tmp_path:
     assert summary["probes"][0]["plugin_id"] == "dev.superclaw.hello-world"
     assert "raw secret output" not in summary_text
     assert "should not be uploaded" not in summary_text
-    assert "/Users/leongong/Documents/superClaw" not in summary_text
+    assert "/Users/dev-user/Documents/superClaw" not in summary_text
     assert "ghp_abcdefghijklmnop" not in summary_text
     assert "output_digest" in summary_text
 

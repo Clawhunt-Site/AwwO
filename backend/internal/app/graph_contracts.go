@@ -534,6 +534,12 @@ func graphOutputContract(n graphNode) (*outputContract, string) {
 // replace exactly this tag with their pinned copy of three.js r128, so the output policy must not forbid it.
 const previewLibraryTag = `<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>`
 
+// previewModulesImportMap is the import map a delivered page writes to load three.js r186 as ES modules. AwwO's previews
+// (apps/web previewImportMap.ts, THREE_MODULES_IMPORT_MAP) supply that release and its addons for exactly these URLs,
+// and the sandbox page checker supplies only it, so the output policy must not forbid it either; a test keeps the two
+// equal.
+const previewModulesImportMap = `<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"}}</script>`
+
 // Generate format instructions from the same frozen fields used by validation.
 // Saved values are never prompt examples: they may be stale prior deliverables.
 func graphOutputPolicy(n graphNode) string {
@@ -585,7 +591,8 @@ func graphOutputPolicy(n graphNode) string {
 		if f.Type == "html" {
 			hasHTML = true
 			policy += "\nHTML requires a complete HTML document with explicit html, head and body tags, never a path or fragment. Use self-contained inline CSS and inline SVG/data images, with no external libraries or scripts needed for presentation. " +
-				"The exceptions are three.js r128 referenced by the tag " + previewLibraryTag + " and a script whose exact URL the node instructions say AwwO supplies: AwwO's previews replace those tags with their own copies, " +
+				"The exceptions are three.js r128 referenced by the tag " + previewLibraryTag + ", three.js r186 as ES modules through exactly the import map " + previewModulesImportMap +
+				" (importing 'three' and literal 'three/addons/...' paths in one module script), and a script whose exact URL the node instructions say AwwO supplies: AwwO's previews supply their own copies of these, " +
 				"so a page may use them; never paste the source of three.js or any other library into the page. " +
 				"When an input lists files an upstream image, video or 3D node stored (as <node id>/<file name> paths), the page may show them by exactly those relative paths, " +
 				"written in an img, video or source src, a video poster or a CSS url(); AwwO's previews put the stored files in their place. Never invent other file names, " +

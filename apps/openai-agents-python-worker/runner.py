@@ -377,8 +377,11 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
         yield {"type": "cancelled", "observability": observation.snapshot("cancelled")}
         return
     except Exception as e:  # noqa: BLE001 - boundary: map everything to a wire failure
+        # Only a call the Bedrock bridge served can have stalled (errors.stalled): no other provider's answer is taken
+        # for its read timeout.
         event = {"type": "cancelled"} if cancel_event.is_set() else classify_error(
-            RuntimeError(observation.failure) if observation.failure else e, requests=requests)
+            RuntimeError(observation.failure) if observation.failure else e, requests=requests,
+            bedrock=profile.provider == "bedrock")
         yield {**event, "observability": observation.snapshot(event["type"])}
     finally:
         if client is not None:

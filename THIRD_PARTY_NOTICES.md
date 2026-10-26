@@ -28,7 +28,7 @@ imports keep their original README, lockfiles, and license files under
 
 ## Adapted material
 
-These projects were read during the 2026-10-15 open-source intake. No new source tree was vendored for them: the
+These projects were read during the 2026-10-15 open-source intake, and open-design and refero_skill on 2026-10-26. No new source tree was vendored for them: the
 files listed adapt parts of them and name the source in their own attribution, and the license texts are kept
 under `third_party/adapted/`. Built-in skills reach users as text through the API, so the skill library links the
 licenses of their sources beside each adapted skill's source line: `apps/web/src/saas/skillLicences.txt`,
@@ -42,6 +42,8 @@ when a skill's attribution and that file disagree).
 | claude-mem (Copyright 2026 Alex Newman) | thedotmack/claude-mem | fef3402e674bebbf72a23aeb735e91c92cd34afd | Apache-2.0 | `backend/internal/app/skills/critic.md` and `docs/awwo-review-brief-template.md` (its merge rubric, in AwwO's words) | `third_party/adapted/claude-mem/LICENSE` and `NOTICE` |
 | Berd (Copyright 2026 Block, Inc.) | block/berd | e25424da3fdfce7c33014cbcc7e33ecc648bfbdd | Apache-2.0 | `backend/internal/app/skills/critic.md` and `docs/awwo-review-brief-template.md` (its changed-test questions), `docs/laws/` (its numbered project laws), in AwwO's words | `third_party/adapted/berd/LICENSE` |
 | Pi coding agent (Copyright (c) 2025 Mario Zechner) | earendil-works/pi | v0.79.10, as vendored in `third_party/clawwork` | MIT | `backend/internal/app/skills/handoff-summary.md` (the headings of its session summary) | `third_party/clawwork/LICENSE` |
+| open-design (Copyright 2026 Open Design contributors) | nexu-io/open-design | 9724c44142ea0afaee3d207f37901b31c66a44ad | Apache-2.0 | `backend/internal/app/skills/design-craft.md`, `anti-ai-slop.md`, `design-directions.md`, `ui-state-coverage.md`, `motion-discipline.md` and `design-jury.md` (its craft rules, its design charter's craft section, its direction library and its design-review panel, condensed, partly rewritten and fitted to what AwwO's previews supply) | `third_party/adapted/open-design/LICENSE` |
+| refero_skill (Copyright (c) 2026 Refero) | referodesign/refero_skill | 2382e518f90096df607196b9a635da2d1bc142f9 | MIT | `backend/internal/app/skills/design-craft.md` and `anti-ai-slop.md` (the typography, colour and anti-template rules open-design adapted from it, which reach AwwO through open-design) | `third_party/adapted/refero-skill/LICENSE` |
 
 Ideas only, with no text or code copied: Agent-Reach (Panniantong/Agent-Reach, MIT, Copyright (c) 2025 Agent
 Eyes) and Scrapling (D4Vinci/Scrapling, BSD-3-Clause, Copyright (c) 2024 Karim Shoair) for
@@ -59,6 +61,12 @@ gave Claude Opus 5.5 to make videos as code. Each prompt is its creator's own po
 may not cover, so no prompt text is used: the patterns they share (the order of a brief, hooks, two sizes of
 on-screen text, vertical safe areas, banned effects, stills to check) informed `code-video-brief` and
 `vertical-reel`, written in AwwO's own words and checked for shared five-word runs against the whole collection.
+
+Read on 2026-10-26, ideas only: open-design's `webgl-experience` design template (in the repository above) informed
+the robustness checks of `backend/internal/app/skills/procedural-3d-scene.md`, which is written in AwwO's own words,
+copies no text and so carries an empty `attribution`; its three.js facts are those of the release AwwO's previews
+supply. The open-design snapshot vendored in `third_party/open-design` (commit 324e9fd9, listed above) is older than
+the commit the skills adapt and is not changed by them.
 
 Read on 2026-10-24, figures only: the SimReady asset library's public search service (NVIDIA SimReady Central, over
 the `nvidia/simready-assets` dataset at revision `653d91e182011f357cf1644013cc94ddf194d349`) answers a query with

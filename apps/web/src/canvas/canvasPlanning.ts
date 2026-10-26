@@ -37,6 +37,40 @@ export interface PlanningMessage {
 
 /** The turns the planner reads: an executed turn is the workspace's business, not the canvas's. */
 export const planningTurns = (messages: PlanningMessage[]) => messages.filter(message => message.route !== 'execute');
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** The canvas's own fix request (assistant.fixRequest) as the page writes it now, and as it wrote it until 2026-10-25,
+ *  for a request planned across the release. */
+const FIX_REQUEST_TEMPLATES: ReadonlyArray<readonly ['zh' | 'en', string]> = [
+  ['zh', canvasText('zh', 'assistant.fixRequest')], ['en', canvasText('en', 'assistant.fixRequest')],
+  ['zh', '{nodes} 上次运行失败了（{reason}）。请调整画布，让它这次能完成：输出太长，就把工作拆给更多节点或缩小交付范围；超时，就换一个模型或把工作拆给更多节点；模型被拒绝，就换成默认模型。'],
+  ['en', '{nodes} failed in the last run ({reason}). Change the canvas so it can finish this time: if the answer was too long, split the work across more nodes or narrow the delivery; if it ran out of time, switch it to another model or split the work across more nodes; if the model was refused, switch it to the default model.'],
+];
+/** The failed nodes as the page names them in one (CanvasSurface fixRequest): each title in its quotes, in a list. Matched
+ *  only so, so that words the reader wrote before it on the same line stay theirs. */
+const FIX_REQUEST_NODES = { zh: '「[^」\\n]*」(?:、「[^」\\n]*」)*', en: '“[^”\\n]*”(?:, “[^”\\n]*”)*' };
+/** Each as a pattern: the reason is whatever the failure said, over several lines too. */
+const FIX_REQUESTS = FIX_REQUEST_TEMPLATES.map(([locale, template]) => new RegExp(template.split(/(\{nodes\}|\{reason\})/)
+  .map(part => part === '{nodes}' ? FIX_REQUEST_NODES[locale] : part === '{reason}' ? '[\\s\\S]*?' : escapeRegExp(part)).join(''), 'g'));
+
+/**
+ * The reader's request as every node a plan adds takes it, as the first of its task constraints (applyCanvasPlan): the
+ * canvas's own fix requests left out. A fix request asks the assistant to change the canvas so that a failed node can
+ * finish; it is no requirement of the work, and a node that carried it was told to change the canvas. On 2026-10-25 the
+ * five nodes a fix split one page into each began their task with 「…上次运行失败了（…）。请调整画布…」.
+ *
+ * `written` are the fix requests the page wrote, word for word (CanvasSurface: those it wrote, and those it would write
+ * for the failures it shows now): each is taken out exactly, whatever its node titles hold. What is left is matched
+ * against the request's own wording, now's and before 2026-10-25's, in either language, with its node titles in their
+ * quotes; a title holding quotes of its own is left to the exact copy.
+ */
+export function planSeedRequest(prompt: string, written: Iterable<string> = []): string {
+  // Longest first: one node's request is the end of the request for it and others failed the same way, and taking the
+  // shorter one out first would leave the others' names behind.
+  const exact = [...new Set(written)].filter(Boolean).sort((a, b) => b.length - a.length);
+  const rest = exact.reduce((left, text) => left.split(text).join(''), prompt);
+  return FIX_REQUESTS.reduce((left, pattern) => left.replace(pattern, ''), rest).trim();
+}
 export interface PlanningConversation { draft: string; messages: PlanningMessage[] }
 export const PLANNING_STORAGE_KEY = 'awwo.canvas.planning.v1';
 /** Seconds the last successful plan took in this workspace on this device; a measurement, shown as

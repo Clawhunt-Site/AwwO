@@ -314,12 +314,31 @@ try {
 // `@loader_path/../lib/<name>` dependency at process start, so a successful
 // `--version` proves the symlinked load graph resolves. Fail closed so a dedup that
 // broke PG's dynamic loading aborts the build instead of shipping a runtime crash.
-const pgBins = execFileSync("find", [stageServer, "-type", "f", "-path", "*native/bin/postgres"], {
-  encoding: "utf8",
-  maxBuffer: 16 * 1024 * 1024,
-})
-  .split("\n")
-  .filter(Boolean);
+// Cross-platform walk: find `*/native/bin/postgres(.exe)`. The macOS-only `find`
+// shell-out does not exist on Windows.
+function findPostgresBin(root) {
+  const results = [];
+  const target = isWindows ? "postgres.exe" : "postgres";
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.name === target && path.basename(dir) === "bin" && path.basename(path.dirname(dir)) === "native") {
+        results.push(full);
+      }
+    }
+  };
+  walk(root);
+  return results;
+}
+const pgBins = findPostgresBin(stageServer);
 if (pgBins.length === 0) {
   // No embedded-postgres in the stage — the dedup had no PG libs to touch. Make the
   // skip auditable rather than silent.
@@ -346,7 +365,7 @@ if (pgBins.length === 0) {
 // service, so a plain `npm ci --omit=dev` into the stage gives a self-contained tree.
 const gatewayDir = path.join(repoRoot, "apps", "gateway");
 const stageGateway = path.join(stageRoot, "gateway");
-run("npm", ["ci"], gatewayDir); // dev deps (typescript) needed to build
+run("npm", ["ci", "--include=dev"], gatewayDir); // dev deps (typescript) needed to build; --include=dev guards against a host-level `omit=dev` npm config
 run("npm", ["run", "build"], gatewayDir);
 fs.rmSync(stageGateway, { recursive: true, force: true });
 fs.mkdirSync(stageGateway, { recursive: true });

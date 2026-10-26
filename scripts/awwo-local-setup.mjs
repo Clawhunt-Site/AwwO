@@ -3,7 +3,7 @@
 // running, the workspace image and the managed execution's core. Run it again after an update: what is current stays.
 //
 //   npm run setup:local                         everything this computer can run
-//   npm run setup:local -- --staged-videos      also the Academy's videos and the film case's film (about 1.5 GB)
+//   npm run setup:local -- --staged-videos      also the Academy's videos and the film case's film (about 2.3 GB)
 //   npm run setup:local -- --no-docker          without the workspace image and the managed execution's core
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,8 +12,8 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveCommand } from './awwo-saas-lib.mjs';
-import { findOnPath, localLayout, osLock, resolvePostgresBin, stagedShowcaseFiles, workspaceImageTag } from './awwo-local-lib.mjs';
-import { POSTGRES_LIBRARIES } from './awwo-postgres-licences.mjs';
+import { findOnPath, localLayout, osLock, postgresBinCandidates, resolvePostgresBin, stagedShowcaseFiles, workspaceImageTag } from './awwo-local-lib.mjs';
+import { POSTGRES_LIBRARIES, POSTGRES_MACOS_LIBRARIES } from './awwo-postgres-licences.mjs';
 
 const PUBLIC_SITE = 'https://awwo.clawhunt.store';
 /** Node.js for the services, from nodejs.org, checked against SHASUMS256.txt of the release. */
@@ -29,12 +29,23 @@ export const NODE_RELEASE = Object.freeze({
 });
 /** PostgreSQL for Windows: the EDB binaries of the version CI tests against (18.4). EDB publishes no checksum for
  *  them; this one is of the archive fetched from get.enterprisedb.com over HTTPS on 2026-10-21 (337,444,127 bytes,
- *  Last-Modified 2026-08-25). Elsewhere PostgreSQL comes from PATH. */
+ *  Last-Modified 2026-08-25). On Linux PostgreSQL comes from PATH. */
 export const POSTGRES_WINDOWS = Object.freeze({
   version: '18.4-1', name: 'postgresql-18.4-1-windows-x64-binaries.zip',
   sha256: '7effe34c0bf89027b3f171447d351cbc460f4566c8d0f643daec67f140787858',
   url: 'https://get.enterprisedb.com/postgresql/postgresql-18.4-1-windows-x64-binaries.zip',
 });
+/** PostgreSQL for macOS: EDB's binaries of the same version, universal (x86_64 and arm64, macOS 13 or later), whose
+ *  programs find their libraries beside them (@loader_path/../lib), so they run from wherever they are unpacked. The
+ *  archive's SHA-256 is of the one fetched from get.enterprisedb.com over HTTPS on 2026-10-23 (364,745,215 bytes,
+ *  Last-Modified 2026-08-25). It carries no licence file: the Mac app's are in third_party/postgres-macos. */
+export const POSTGRES_MACOS = Object.freeze({
+  version: '18.4-1', name: 'postgresql-18.4-1-osx-binaries.zip',
+  sha256: 'e3af8c3b4a98a790dba60f2733673b35712a81a201b1f9af6e8ebed5d3b64d0c',
+  url: 'https://get.enterprisedb.com/postgresql/postgresql-18.4-1-osx-binaries.zip',
+});
+/** The archive setup unpacks PostgreSQL from on this system, where it does (Windows and macOS). */
+export const postgresArchive = (platform = process.platform) => ({ win32: POSTGRES_WINDOWS, darwin: POSTGRES_MACOS })[platform] || null;
 
 function run(command, args, { cwd, env = process.env, allowFailure = false } = {}) {
   const resolved = resolveCommand(command, args);
@@ -70,8 +81,11 @@ async function download(url, file, sha256) {
   return file;
 }
 
-/** Windows' own tar (bsdtar) reads zip files; Git for Windows puts a GNU tar earlier on PATH that does not. */
-const tarCommand = () => process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+/** Windows' own tar (bsdtar) reads zip files; Git for Windows puts a GNU tar earlier on PATH that does not. macOS's own
+ *  (bsdtar too) keeps the symlinks of EDB's archive, which PostgreSQL's programs load some libraries through; a GNU tar
+ *  that Homebrew put first on PATH would not read the zip. */
+const tarCommand = () => process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+  : process.platform === 'darwin' ? '/usr/bin/tar' : 'tar';
 
 async function ensureNode(layout, report) {
   // The copy here is replaced when the pinned version changes; its stamp names the version it is.
@@ -94,6 +108,15 @@ async function ensureNode(layout, report) {
  *  every copy of PostgreSQL, the Windows installer's too (scripts/awwo-local-package.mjs). */
 export const POSTGRES_LICENCES = Object.freeze(['server_license.txt', 'commandlinetools_3rd_party_licenses.txt']);
 
+/** Where setup notes which archive it unpacked build/pgsql from (macOS): a pinned archive changed is unpacked anew. */
+const POSTGRES_STAMP = '.awwo-local-archive';
+
+/** Whether the build holds EDB's PostgreSQL as setup unpacks it on macOS: from the pinned archive (its stamp), with
+ *  every program the runtime runs (postgresBinCandidates), so a copy that lost one is unpacked again rather than called
+ *  present while the runtime refuses it. */
+export const macPostgresUnpacked = layout => current(path.join(path.dirname(layout.pgBin), POSTGRES_STAMP), POSTGRES_MACOS.sha256)
+  && postgresBinCandidates(layout, { env: {}, platform: 'darwin' }).includes(layout.pgBin);
+
 async function ensurePostgres(layout, report) {
   const present = resolvePostgresBin(layout);
   const unpacked = path.dirname(layout.pgBin);
@@ -103,24 +126,34 @@ async function ensurePostgres(layout, report) {
     run(tarCommand(), ['-xf', archive, '-C', path.dirname(unpacked), ...POSTGRES_LICENCES.map(name => `pgsql/${name}`)]);
     return report('PostgreSQL', 'present; its licences added');
   }
-  if (present) return report('PostgreSQL', 'present');
-  if (process.platform !== 'win32') throw new Error('PostgreSQL 16 or newer is needed: put initdb, pg_ctl, postgres, psql and createdb on PATH, or set AWWO_LOCAL_PG_BIN');
-  const archive = await download(POSTGRES_WINDOWS.url, path.join(layout.build, 'downloads', POSTGRES_WINDOWS.name), POSTGRES_WINDOWS.sha256);
+  // On macOS the Mac app carries EDB's (scripts/awwo-local-package-macos.mjs), so setup unpacks it into the build even
+  // where another PostgreSQL is on PATH (Homebrew's, Postgres.app's); the runtime of a checkout takes it too.
+  const macos = process.platform === 'darwin';
+  if (macos ? macPostgresUnpacked(layout) : present) {
+    return report('PostgreSQL', 'present');
+  }
+  const pinned = postgresArchive();
+  if (!pinned) throw new Error('PostgreSQL 16 or newer is needed: put initdb, pg_ctl, postgres, psql and createdb on PATH, or set AWWO_LOCAL_PG_BIN');
+  const archive = await download(pinned.url, path.join(layout.build, 'downloads', pinned.name), pinned.sha256);
   const unpack = path.join(layout.build, 'pgsql-unpack');
   await rm(unpack, { recursive: true, force: true });
   await mkdir(unpack, { recursive: true });
   // Only the server, its libraries, its data files and their licences: not pgAdmin, the documentation or the headers.
-  run(tarCommand(), ['-xf', archive, '-C', unpack, 'pgsql/bin', 'pgsql/lib', 'pgsql/share', ...POSTGRES_LICENCES.map(name => `pgsql/${name}`)]);
+  // The macOS archive has no licence file.
+  run(tarCommand(), ['-xf', archive, '-C', unpack, 'pgsql/bin', 'pgsql/lib', 'pgsql/share', ...(macos ? [] : POSTGRES_LICENCES.map(name => `pgsql/${name}`))]);
+  if (macos) await writeFile(path.join(unpack, 'pgsql', POSTGRES_STAMP), `${pinned.sha256}\n`);
   await rm(path.join(layout.build, 'pgsql'), { recursive: true, force: true });
   await rename(path.join(unpack, 'pgsql'), path.join(layout.build, 'pgsql'));
   await rm(unpack, { recursive: true, force: true });
-  report('PostgreSQL', `installed ${POSTGRES_WINDOWS.version}`);
+  report('PostgreSQL', `installed ${pinned.version}`);
 }
 
-/** The source releases of the LGPL libraries PostgreSQL's Windows programs load (POSTGRES_LIBRARIES), which the
- *  Windows installer carries beside them: downloaded beside the archive, checked against their SHA-256s. */
+/** The source releases of the LGPL libraries PostgreSQL's programs load (POSTGRES_LIBRARIES on Windows,
+ *  POSTGRES_MACOS_LIBRARIES on macOS), which the installer and the Mac app carry beside them: downloaded beside the
+ *  archive, checked against their SHA-256s. */
 async function ensurePostgresSources(layout, report) {
-  const sources = POSTGRES_LIBRARIES.libraries.filter(library => library.source).map(library => library.source);
+  const list = process.platform === 'darwin' ? POSTGRES_MACOS_LIBRARIES : POSTGRES_LIBRARIES;
+  const sources = list.libraries.filter(library => library.source).map(library => library.source);
   for (const source of sources) await download(source.url, path.join(layout.build, 'downloads', source.name), source.sha256);
   report('PostgreSQL libraries\' sources', sources.map(source => source.name).join(', '));
 }
@@ -310,8 +343,8 @@ async function setupWith(layout, options) {
   };
   await ensureNode(layout, report);
   await ensurePostgres(layout, report);
-  // Only the Windows installer needs them (scripts/awwo-local-package.mjs), so running without them is fine.
-  if (process.platform === 'win32') await optional('PostgreSQL libraries\' sources', () => ensurePostgresSources(layout, report));
+  // Only the packages need them (the Windows installer, the Mac app), so running without them is fine.
+  if (postgresArchive()) await optional('PostgreSQL libraries\' sources', () => ensurePostgresSources(layout, report));
   for (const app of ['web', 'pi-worker', 'openai-agents-worker']) await installPackages(layout, app, report);
   // The managed execution's broker has no packages of its own to run (only its type checker).
   await optional('render-worker packages', () => installPackages(layout, 'render-worker', report));

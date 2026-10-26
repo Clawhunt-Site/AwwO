@@ -4,9 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveBuildAppEnv } from "./app-env.mjs";
+import { stageWindowsBackend } from "./stage-windows-backend.mjs";
 
 // Freeze the ClawHunt Python backend (FastAPI service + orchestrator + Typer
-// CLI) into a self-contained PyInstaller onefile executable.
+// CLI) into a self-contained PyInstaller distribution: onedir on Windows,
+// onefile on macOS. Windows avoids re-extraction for each helper process.
 //
 // macOS: prepare-macos-bundle.mjs then embeds and signs the result inside
 //   ClawHunt.app/Contents/Resources/backend.
@@ -66,7 +68,8 @@ execFileSync(
   },
 );
 
-const frozenExe = path.join(distDir, frozenName);
+const frozenDir = path.join(distDir, 'superclaw-backend');
+const frozenExe = isWindows ? path.join(frozenDir, frozenName) : path.join(distDir, frozenName);
 if (!fs.existsSync(frozenExe) || !fs.statSync(frozenExe).isFile()) {
   throw new Error(`expected frozen backend executable at ${frozenExe}`);
 }
@@ -79,11 +82,7 @@ if (isWindows) {
   const stageDir = path.join(appRoot, "src-tauri", "resources", "backend", "superclaw-backend");
   fs.rmSync(stageDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
-  fs.copyFileSync(frozenExe, path.join(stageDir, frozenName));
-  fs.writeFileSync(
-    path.join(stageDir, "build-profile.json"),
-    `${JSON.stringify({ app_env: appEnv }, null, 2)}\n`,
-  );
+  stageWindowsBackend(frozenDir, stageDir, appEnv);
   console.log(`staged Windows backend resource: ${stageDir} (app_env=${appEnv})`);
 }
 

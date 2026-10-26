@@ -1,13 +1,14 @@
 // The local edition's web server: what the hosted site's nginx does (deploy/saas/nginx.conf), on loopback. It serves
 // the built app (apps/web/dist-saas) and proxies the public API, /api/v1/, to the Go API; /api/internal/ (the workers'
 // callbacks) is never served here.
+import { timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { pipeline } from 'node:stream';
 import { stagedShowcaseMiddleware } from '../apps/web/scripts/staged-showcase.mjs';
-import { LOCAL_HOST, localOrigin } from './awwo-local-lib.mjs';
+import { LOCAL_HOST, SESSION_COOKIE, SHELL_COOKIE, localOrigin, shellToken } from './awwo-local-lib.mjs';
 
 const TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -113,27 +114,93 @@ async function fileAt(root, pathname) {
   }
 }
 
+/** The values a Cookie header gives a cookie name, in order. */
+export function cookieValues(header, name) {
+  return String(header || '').split(';').map(part => part.trim()).filter(part => part.startsWith(`${name}=`)).map(part => part.slice(name.length + 1));
+}
+/** A Cookie header without a cookie name. */
+export const withoutCookie = (header, name) => String(header || '').split(';').map(part => part.trim()).filter(part => part && !part.startsWith(`${name}=`)).join('; ');
+
+/** What a Set-Cookie line does to the API's session cookie: null for another cookie, '' when it ends it (no value, a
+ *  Max-Age of 0 or less, an Expires gone by: Go writes Max-Age=0 for MaxAge -1), else the session's token. */
+export function sessionCookieValue(line) {
+  const [pair, ...attributes] = String(line).split(';');
+  const at = pair.indexOf('=');
+  if (at < 0 || pair.slice(0, at).trim() !== SESSION_COOKIE) return null;
+  const ended = attributes.some(attribute => {
+    const at = attribute.indexOf('=');
+    const name = (at < 0 ? attribute : attribute.slice(0, at)).trim().toLowerCase();
+    const value = at < 0 ? '' : attribute.slice(at + 1).trim();
+    return (name === 'max-age' && !(Number(value) > 0)) || (name === 'expires' && !(Date.parse(value) > Date.now()));
+  });
+  return ended ? '' : pair.slice(at + 1).trim();
+}
+
+/** A sign-in kept in this process alone (the window's, where the runtime gives none of its data folder's). */
+const memorySession = () => {
+  let value = '';
+  return { get: () => value, set: next => { value = typeof next === 'string' ? next : ''; } };
+};
+
 /**
  * The server. It answers the instance's own name (`host`, AWWO_LOCAL_HOSTNAME, and its port) only; awwo.localhost
  * (the name a person types) and the loopback addresses of the same port are sent there (GET and HEAD) or refused, and
  * so is any other name (a DNS-rebinding page may reach the port under one). The API accepts only the instance's
- * origin, so nothing here rewrites an Origin. `stagedFallback`: where a staged video not on this computer plays from
- * instead (the hosted site's public copy), or '' for a 404.
+ * origin. `stagedFallback`: where a staged video not on this computer plays from instead (the hosted site's public
+ * copy), or '' for a 404.
+ *
+ * One exception, for the Mac app's window (`windowToken`, its launch's token, SHELL_TOKEN): macOS resolves *.localhost
+ * names only from macOS 26 on, so the window opens http://127.0.0.1:<port>, and a request to it that carries the
+ * window's cookie (SHELL_COOKIE, set in the window's own WebKit store, which no browser has) is answered as the
+ * instance's own. Its cookie is taken off before the API sees the request, and the window's Origin is given as the
+ * instance's, the API's own check (app.go) applying unchanged; an address the API answers with is given back as the
+ * window's. The window's sign-in is kept here, not by the window (`windowSession`, the runtime's store of it in the data
+ * folder, else this process's): the session cookie the API sets in answer to the window is taken off its answer and
+ * kept, and given to the API with each of the window's requests in the place of any the window sends. The window then
+ * holds a cookie of its launch alone, which is nothing once its runtime has ended and its port is anyone's. A browser
+ * at that address, without the cookie, is sent to the instance's name as before, the site's own files aside (served
+ * there without it: the same public files, some fetched by the app without cookies).
  */
-export function createLocalWebServer({ root, stagedDir, apiPort, port, host = LOCAL_HOST, stagedFallback = '' }) {
+export function createLocalWebServer({ root, stagedDir, apiPort, port, host = LOCAL_HOST, stagedFallback = '', windowToken = '', windowSession = memorySession() }) {
   const own = `${host}:${port}`;
   const aliases = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`, `${LOCAL_HOST}:${port}`]);
   aliases.delete(own);
   const origin = localOrigin(port, host);
   const staged = stagedDir ? stagedShowcaseMiddleware(stagedDir) : null;
   const agent = new http.Agent({ keepAlive: true, maxSockets: 64 });
+  const token = shellToken(windowToken);
+  const windowHost = `127.0.0.1:${port}`;
+  const windowOrigin = `http://${windowHost}`;
+  const tokenBytes = Buffer.from(token);
+  const carriesToken = value => Buffer.byteLength(value) === tokenBytes.length && timingSafeEqual(Buffer.from(value), tokenBytes);
+  /** Whether a request is the Mac app's window's: at its address, with its launch's cookie. */
+  const fromWindow = req => token !== '' && String(req.headers.host || '').toLowerCase() === windowHost
+    && cookieValues(req.headers.cookie, SHELL_COOKIE).some(carriesToken);
 
-  function proxy(req, res) {
+  function proxy(req, res, inWindow = false) {
     const headers = {};
     for (const [key, value] of Object.entries(req.headers)) if (!HOP_BY_HOP.has(key)) headers[key] = value;
+    if (inWindow) {
+      headers.host = own;
+      const session = windowSession.get();
+      const cookies = [withoutCookie(withoutCookie(headers.cookie, SHELL_COOKIE), SESSION_COOKIE), session && `${SESSION_COOKIE}=${session}`].filter(Boolean);
+      if (cookies.length) headers.cookie = cookies.join('; '); else delete headers.cookie;
+      if (headers.origin === windowOrigin) headers.origin = origin;
+    }
     const upstream = http.request({ host: '127.0.0.1', port: apiPort, method: req.method, path: req.url, headers, agent }, answer => {
       const out = { ...SECURITY_HEADERS };
       for (const [key, value] of Object.entries(answer.headers)) if (!HOP_BY_HOP.has(key) && value !== undefined) out[key] = value;
+      if (inWindow && typeof out.location === 'string' && (out.location === origin || out.location.startsWith(`${origin}/`))) out.location = `${windowOrigin}${out.location.slice(origin.length)}`;
+      if (inWindow && out['set-cookie']) {
+        // The session the API sets (or ends) is the window's, kept here; the window gets no session cookie.
+        const kept = [].concat(out['set-cookie']).filter(line => {
+          const session = sessionCookieValue(line);
+          if (session === null) return true;
+          windowSession.set(session);
+          return false;
+        });
+        if (kept.length) out['set-cookie'] = kept; else delete out['set-cookie'];
+      }
       res.writeHead(answer.statusCode || 502, out);
       // A stream the API cut (it stopped, or a run's events ended badly) ends the browser's side too.
       pipeline(answer, res, () => {});
@@ -147,15 +214,26 @@ export function createLocalWebServer({ root, stagedDir, apiPort, port, host = LO
     pipeline(req, upstream, () => {});
   }
 
+  let refusing = false;
   async function handle(req, res) {
+    // Once the runtime's stop has begun (stopServing) the port stays held, answering this alone, until the runtime
+    // ends: a page still open sends its requests (its cookies) here, not to what might take a freed port meanwhile.
+    if (refusing) return send(res, 503, 'AwwO 本地版 is stopping', { Connection: 'close' });
     const host = String(req.headers.host || '').toLowerCase();
-    if (host !== own) {
-      if (aliases.has(host) && (req.method === 'GET' || req.method === 'HEAD')) return send(res, 302, '', { Location: `${origin}${req.url || '/'}` });
+    const inWindow = fromWindow(req);
+    const toInstance = () => send(res, 302, '', { Location: `${origin}${req.url || '/'}` });
+    // At the window's address without its cookie, the site's own files are served all the same (the app's assets, a
+    // production run's media, a staged video): some of the app's fetches of them carry no cookie (credentials: 'omit'),
+    // and they are the public files the instance's name serves to anyone. The app's page and the API are not.
+    const windowFile = !inWindow && token !== '' && host === windowHost && (req.method === 'GET' || req.method === 'HEAD');
+    if (host !== own && !inWindow && !windowFile) {
+      if (aliases.has(host) && (req.method === 'GET' || req.method === 'HEAD')) return toInstance();
       return send(res, aliases.has(host) ? 421 : 403, `AwwO 本地版 answers at ${origin}`);
     }
     const pathname = requestPath(req.url || '/');
     if (pathname === null) return send(res, 400, 'Bad request');
-    if (pathname.startsWith('/api/v1/')) return proxy(req, res);
+    if (windowFile && pathname.startsWith('/api/')) return toInstance();
+    if (pathname.startsWith('/api/v1/')) return proxy(req, res, inWindow);
     if (pathname.startsWith('/api/')) return send(res, 404, 'Not found');
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
     if (sitePath(req.url || '/') === null) return send(res, 400, 'Bad request');
@@ -171,8 +249,12 @@ export function createLocalWebServer({ root, stagedDir, apiPort, port, host = LO
       return send(res, 404, 'Not found');
     }
     const found = pathname === '/' ? null : await fileAt(root, pathname);
+    // A page (saas.html by its name) is the app's page, and needs the window's cookie at its address as below.
+    if (found && windowFile && /\.html?$/i.test(found.file)) return toInstance();
     if (found) return serveFile(req, res, found.file, found.info);
     if (NO_FALLBACK.some(prefix => pathname.startsWith(prefix)) || pathname === '/third-party-licenses.txt') return send(res, 404, 'Not found');
+    // The app's page itself needs the window's cookie at its address.
+    if (windowFile) return toInstance();
     const app = await fileAt(root, '/saas.html');
     if (!app) return send(res, 503, 'AwwO is not built yet: run npm run setup:local');
     return serveFile(req, res, app.file, app.info);
@@ -185,5 +267,11 @@ export function createLocalWebServer({ root, stagedDir, apiPort, port, host = LO
   server.requestTimeout = 0;
   server.headersTimeout = 60_000;
   server.on('close', () => agent.destroy());
+  /** The runtime's stop has begun: every request is answered 503 from now on and none reaches the API, the open
+   *  connections (a run's event stream) end, and the port is held until close(). */
+  server.stopServing = () => {
+    refusing = true;
+    server.closeAllConnections();
+  };
   return server;
 }

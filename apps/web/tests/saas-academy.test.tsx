@@ -62,7 +62,7 @@ it('lists every video once, by section, each staged by its checksum outside the 
     expect(isDay(video.recordedOn), video.id).toBe(true);
   }
   expect(existsSync(resolve(WEB, 'showcase', 'staged'))).toBe(false);
-  expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(4);
+  expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(6);
 });
 
 it('walks through homepage cases in the homepage’s order, one video a case, each with a poster on disk', () => {
@@ -373,17 +373,29 @@ it('marks an updated video on its card and lists its updates beside it, in Engli
 });
 
 it('shows a video’s notes in Chinese in the Chinese interface', async () => {
-  // An English-narrated video with a note, whichever it is as spans are recorded again.
-  const noted = ACADEMY_VIDEOS.find(video => video.voice === 'en' && video.notes?.length);
-  if (!noted) throw new Error('no English-narrated video has a note any more: test the notes on a catalog of the test’s own');
-  const note = noted.notes![0];
-  window.history.replaceState({}, '', `/?academy=${noted.id}`);
-  library('zh');
-  const dialog = await screen.findByRole('dialog', { name: noted.title.zh });
-  const notes = within(dialog).getByRole('region', { name: '录制之后的变化' });
-  expect(within(notes).getByRole('button', { name: `从 ${academyDuration(note.at)} 播放` })).toHaveTextContent(academyDuration(note.at));
-  const item = within(notes).getByText(note.text.zh).closest('li')!;
-  expect(within(item).getByText(`${noteDay(note.since, 'zh')}起`)).toHaveAttribute('datetime', note.since);
+  // An English-narrated video's note, shown in the interface's language, not the narration's: the catalog's own while
+  // one has a note, else a note of the test's own on such a video (since 2026-10-25 none has one: every span such a
+  // note named has been recorded again).
+  const noted = ACADEMY_VIDEOS.find(video => video.voice === 'en' && video.notes?.length)
+    ?? ACADEMY_VIDEOS.find(video => video.voice === 'en')!;
+  const own = noted.notes;
+  if (!own?.length) {
+    noted.notes = [{ at: 30, since: noted.recordedOn, text: {
+      en: 'A note of the test’s own.', zh: '一条测试自己的说明。' } }];
+  }
+  try {
+    const note = noted.notes![0];
+    window.history.replaceState({}, '', `/?academy=${noted.id}`);
+    library('zh');
+    const dialog = await screen.findByRole('dialog', { name: noted.title.zh });
+    const notes = within(dialog).getByRole('region', { name: '录制之后的变化' });
+    expect(within(notes).getByRole('button', { name: `从 ${academyDuration(note.at)} 播放` })).toHaveTextContent(academyDuration(note.at));
+    const item = within(notes).getByText(note.text.zh).closest('li')!;
+    expect(within(item).getByText(`${noteDay(note.since, 'zh')}起`)).toHaveAttribute('datetime', note.since);
+  } finally {
+    if (own === undefined) delete noted.notes;
+    else noted.notes = own;
+  }
 });
 
 it('opens a case through a library that shows up after it, and from a page with a canvas open by a link to its workspace’s home page', async () => {

@@ -67,7 +67,9 @@ export async function sessionFetch(url: string, init: RequestInit = {}): Promise
 export type Tenant = { id: string; name: string; status: string; role: string; maxConcurrentRuns: number; maxRunsPerDay: number; createdAt?: string };
 export type Identity = { user: { id: string; email: string; name: string; platformRole: 'user' | 'admin' }; tenants: Tenant[]; personalCredentialsRequired?: boolean; authentication?: 'clawhunt' | 'local'; clawhuntSiteURL?: string;
   /** The deployment: the hosted site, or the local edition (edition.ts). An API that does not say is the hosted site. */
-  edition?: 'hosted' | 'local' };
+  edition?: 'hosted' | 'local';
+  /** The hosted site offers AwwO 本地版 its models, with keys made in 设置 → 本机版连接 (settings/relay.tsx). */
+  relay?: boolean };
 export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
 /** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
  * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
@@ -123,6 +125,15 @@ function serviceCodes(): Record<string, [string, string]> {
     provider_verification_failed: ['密钥验证失败，请检查 API Key、服务商额度和访问地区。','Key verification failed. Check your API key, provider access and region.'],
     invalid_connection: ['请选择正确的服务商、执行引擎并填写有效密钥。','Select a provider, supported engine and valid API key.'],
     connection_limit: ['最多保存 8 个个人连接。','Up to eight personal connections are allowed.'],
+    // 设置 → 本机版连接 (settings/relay.tsx).
+    relay_key_limit: ['最多同时有 5 个有效的连接密钥，请先撤销一个。', 'An account holds at most five live connection keys. Revoke one first.'],
+    relay_unavailable: ['线上 AwwO 暂未开放本机版连接。', 'The online AwwO does not offer AwwO Local connections right now.'],
+    invalid_relay_key: ['请给密钥起一个不超过 80 个字的名称，并选择一个工作区。', 'Name the key (at most 80 characters) and choose a workspace.'],
+    tenant_not_found: ['找不到这个工作区，或你在其中只能查看。', 'That workspace was not found, or you can only read it.'],
+    // AwwO 本地版's AwwO 云端 connection (cloud_connections.go).
+    cloud_key_rejected: ['线上 AwwO 不接受这个连接密钥，它可能已撤销或过期。请在线上 AwwO 的「设置 → 本机版连接」生成新密钥。', 'The online AwwO did not take this connection key; it may be revoked or expired. Make a new one on the online AwwO under Settings → AwwO Local connection.'],
+    cloud_no_models: ['这个密钥所属的线上工作区不能使用任何云端模型。', 'This key’s online workspace may use no cloud model.'],
+    cloud_unavailable: ['暂时连不上线上 AwwO，请稍后再试。', 'The online AwwO could not be reached. Try again shortly.'],
     email_unavailable: ['邮件找回服务尚未配置，请联系管理员。','Password recovery email is not configured. Contact the administrator.'],
     reset_invalid: ['重设链接已失效，请重新申请。','The reset link is invalid or expired. Request another.'],
     unauthenticated: ['请重新登录。', 'Please sign in again.'], forbidden: ['你没有执行此操作的权限。', 'You do not have permission for this action.'],
@@ -151,10 +162,11 @@ function serviceCodes(): Record<string, [string, string]> {
     tenant_suspended: ['工作区已暂停，请联系管理员或切换工作区。', 'This workspace is suspended. Contact an administrator or switch workspaces.'],
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
     // What a run would send was more than its model reads at once: the request, the node's brief and inputs, what
-    // upstream nodes delivered, files and selected knowledge. A node's own history is trimmed to fit by itself and is
-    // never the cause, so the copy points at what the reader can change.
-    context_limit: ['这次要发给模型的内容超出了它一次能读的量，没有运行。可以换一个上下文更大的模型，或少带一些内容（上游节点的交付、附件、选中的资料）后再试。',
-      'What this would send is more than the model can read at once, so it did not run. Choose a model with a larger context, or bring less into it (what upstream nodes delivered, attachments, selected knowledge), then try again.'],
+    // upstream nodes delivered, files, selected knowledge and attached skills (a page the assistant plans has two). A
+    // node's own history is trimmed to fit by itself and is never the cause, so the copy points at what the reader can
+    // change.
+    context_limit: ['这次要发给模型的内容超出了它一次能读的量，没有运行。可以换一个上下文更大的模型，或少带一些内容（上游节点的交付、附件、选中的资料、添加的技能）后再试。',
+      'What this would send is more than the model can read at once, so it did not run. Choose a model with a larger context, or bring less into it (what upstream nodes delivered, attachments, selected knowledge, attached skills), then try again.'],
     rate_limited: ['请求过于频繁，请稍后重试。', 'Too many requests. Please try again later.'],
     quota_exceeded: quotaExceededMessages,
     free_capacity_exceeded: freeCapacityMessages,

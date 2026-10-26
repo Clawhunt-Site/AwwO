@@ -22,7 +22,14 @@ type Connections = {
   providers: Provider[];
   required: boolean;
   purchaseURL: string;
+  /** AwwO 本地版 only: where an AwwO 云端 connection's key is made, the online AwwO's 设置 → 本机版连接. */
+  cloudKeysURL?: string;
 };
+/** AwwO 云端 (AwwO 本地版 only): a connection whose models the online AwwO runs, with a key made there (cloud_connections.go). */
+const CLOUD_PROVIDER = "awwo";
+const CLOUD_KEY = /^awwo_rk_[A-Za-z0-9_-]{43}$/;
+const cloudKeysURL = (catalog: Connections) =>
+  /^https?:\/\/[^/?#\s@]+\/\?account=relay$/.test(catalog.cloudKeysURL || "") ? catalog.cloudKeysURL! : "";
 const connectionUsable = (connection: Connection, catalog: Connections) =>
   connection.hasKey &&
   connection.models.length > 0 &&
@@ -126,7 +133,9 @@ export function PersonalEngineGate({
   ) ?? false;
   // Every ?account= page is a section of the 设置 centre; an account that brings its own key manages it under 连接器.
   if (isSettingsSection(section)) {
-    const engines = !needed || section !== "engines" ? null
+    // 本机版连接's address opens the engines page where the site does not offer it (SettingsCenter editionSection),
+    // as in the local edition, whose engines are the person's own.
+    const engines = !needed || (section !== "engines" && section !== "relay") ? null
       : error ? <AccountLayout
           title={t("连接执行引擎", "Connect an engine")}
           intro={t("使用你自己的模型凭证。", "Use your own model credentials.")}
@@ -189,6 +198,8 @@ export function ConnectionSettings({
   const { t, locale } = useSaaSPreferences();
   const [providerID, setProviderID] = useState(catalog.providers[0]?.id || "");
   const provider = catalog.providers.find((item) => item.id === providerID);
+  const cloud = providerID === CLOUD_PROVIDER;
+  const keysURL = cloudKeysURL(catalog);
   const [runtime, setRuntime] = useState(provider?.runtimes[0] || "");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
@@ -260,7 +271,7 @@ export function ConnectionSettings({
                 body: JSON.stringify({
                   provider: providerID,
                   runtime,
-                  apiKey: key,
+                  apiKey: cloud ? key.trim() : key,
                   name,
                 }),
               });
@@ -306,13 +317,18 @@ export function ConnectionSettings({
               ))}
             </select>
           </label>
-          <SecretInput key={providerID} label="API Key" name="provider-api-key" data-onboarding="provider-key"
+          <SecretInput key={providerID} label={cloud ? t("连接密钥", "Connection key") : "API Key"} name="provider-api-key" data-onboarding="provider-key"
             autoComplete="new-password" spellCheck={false} required minLength={8} maxLength={4096}
             value={key} disabled={busy} onChange={(e) => setKey(e.target.value)}
             aria-describedby="provider-key-help" />
-          <p id="provider-key-help" className="saas-field-hint">{t(
+          <p id="provider-key-help" className="saas-field-hint">{cloud ? t(
+            "在线上 AwwO 的「设置 → 本机版连接」生成连接密钥，粘贴到这里。它以 awwo_rk_ 开头，不是 AwwO 登录密码。",
+            "Make a connection key on the online AwwO under Settings → AwwO Local connection, and paste it here. It starts with awwo_rk_ and is not your AwwO password.") : t(
             `请填写 ${provider?.name || ''} 的 API Key，不是 AwwO 登录密码。`,
             `Use an API key from ${provider?.name || 'your provider'}, not your AwwO password.`)}</p>
+          {cloud && key.trim() !== "" && !CLOUD_KEY.test(key.trim()) && <p className="saas-field-hint" role="status">{t(
+            "这不是连接密钥：它以 awwo_rk_ 开头，共 51 个字符。",
+            "This is not a connection key: one starts with awwo_rk_ and is 51 characters long.")}</p>}
           <small className="saas-key-storage-note">
             {t(
               "密钥在服务端加密保存，不写入画布或浏览器。验证仅查询模型目录。",
@@ -343,7 +359,8 @@ export function ConnectionSettings({
           )}
           {notice && <p className="saas-connection-success" role="status">{notice}</p>}
           <div className="saas-connection-actions">
-            <button data-onboarding="provider-verify" className={canContinue ? undefined : "saas-primary"} disabled={busy || !provider || !key}>
+            <button data-onboarding="provider-verify" className={canContinue ? undefined : "saas-primary"}
+              disabled={busy || !provider || !key || (cloud && !CLOUD_KEY.test(key.trim()))}>
               {busy && !refreshing ? t("正在验证…", "Verifying…") : t("验证并保存", "Verify and save")}
             </button>
             {canContinue && <a className="saas-primary saas-buy-link" href={home()}>
@@ -351,7 +368,19 @@ export function ConnectionSettings({
             </a>}
           </div>
         </form>
-        <aside className="saas-card saas-gate-card">
+        {cloud ? <aside className="saas-card saas-gate-card" data-provider={CLOUD_PROVIDER}>
+          <span className="saas-eyebrow">{t("AwwO 云端", "AWWO CLOUD")}</span>
+          <h2>{t("使用线上 AwwO 的模型", "Use the online AwwO’s models")}</h2>
+          <p>{t(
+            "在线上 AwwO 生成一个连接密钥，粘贴到这里。每次调用都计入密钥所属的线上工作区，和在线上使用一样：用它的免费次数，或用套餐的点数。",
+            "Make a connection key on the online AwwO and paste it here. Each call counts in the key’s online workspace, as it would online: its free calls, or your plan’s credits.")}</p>
+          {keysURL && <a className="saas-primary saas-buy-link" href={keysURL} target="_blank" rel="noopener noreferrer">
+            {t("前往线上 AwwO 生成密钥", "Make a key on the online AwwO")} ↗
+          </a>}
+          <p className="saas-muted">{t(
+            "调用会经过 AwwO 在东京的服务器转给模型。AwwO 只记录每次调用的用量（模型、用量和点数），不保存对话内容。",
+            "Calls go through AwwO’s server in Tokyo to the model. AwwO records each call’s usage (model, usage and credits) and keeps none of the conversation.")}</p>
+        </aside> : <aside className="saas-card saas-gate-card">
           <span className="saas-eyebrow">LLM GATE</span>
           <h2>{t("使用我们的模型服务", "Use our model service")}</h2>
           <p>
@@ -375,7 +404,7 @@ export function ConnectionSettings({
               "AwwO does not make purchases on your behalf. Models, credit and charges depend on your provider account.",
             )}
           </p>
-        </aside>
+        </aside>}
       </div>
       {removing && <RemoveConnectionDialog connection={removing} onClose={() => setRemoving(null)}
         onDeleted={() => { setNotice(''); onChange({ ...catalog, items: catalog.items.filter(item => item.id !== removing.id) }); }}
@@ -397,7 +426,7 @@ export function ConnectionSettings({
                 )}
                 <p>
                   {engineName(c.runtime)} · {c.models.length}{" "}
-                  {t("个模型", "models")} · API Key {t("已保存", "saved")}
+                  {t("个模型", "models")} · {c.provider === CLOUD_PROVIDER ? t("连接密钥", "Connection key") : "API Key"} {t("已保存", "saved")}
                 </p>
                 <p>
                   {c.provider} / {c.id.slice(-6)}

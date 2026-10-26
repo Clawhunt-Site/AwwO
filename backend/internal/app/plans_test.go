@@ -266,6 +266,41 @@ func TestCreditChargeIsTheUsageOrAnEstimateThatErrsHigh(t *testing.T) {
 	}
 }
 
+// Owner 2026-10-25: a call its worker cut for silence before it returned anything is not charged, however long it ran
+// and whatever reasoning its run was told about; a call that streamed text first, whose usage was reported (in part
+// too), that failed otherwise or that did not fail is not such a call.
+func TestOnlyACallCutForSilenceBeforeAnyOutputIsStalled(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	unknown := missingUsage("unknown", "transport_unknown")
+	for _, u := range []InvocationUsage{unknown, missingUsage("unavailable", "provider_missing"), missingUsage("invalid", "protocol_invalid")} {
+		if !stalledBeforeOutput("failed", &invocationFacts{WorkerCode: "MODEL_STALLED"}, u) {
+			t.Fatal("a call cut for silence before any output, its usage", u.Status)
+		}
+	}
+	if !stalledBeforeOutput("failed", &invocationFacts{WorkerCode: "MODEL_STALLED", Reasoned: true, HiddenTokens: 5000}, unknown) {
+		t.Fatal("reasoning the run was told about made a call cut for silence chargeable")
+	}
+	stalled := &invocationFacts{WorkerCode: "MODEL_STALLED"}
+	for name, c := range map[string]struct {
+		status string
+		f      *invocationFacts
+		u      InvocationUsage
+	}{
+		"streamed text first": {"failed", &invocationFacts{WorkerCode: "MODEL_STALLED", OutputBytes: 1}, unknown},
+		"usage reported":      {"failed", stalled, InvocationUsage{Status: "reported", Source: "provider_raw", InputTokens: n(10), OutputTokens: n(0)}},
+		"usage in part":       {"failed", stalled, InvocationUsage{Status: "partial", Source: "provider_raw", InputTokens: n(10)}},
+		"an outage":           {"failed", &invocationFacts{WorkerCode: "MODEL_UNAVAILABLE"}, unknown},
+		"no worker code":      {"failed", &invocationFacts{}, unknown},
+		"cancelled":           {"cancelled", stalled, unknown},
+		"interrupted":         {"interrupted", stalled, unknown},
+		"completed":           {"completed", stalled, unknown},
+	} {
+		if stalledBeforeOutput(c.status, c.f, c.u) {
+			t.Fatal(name, "was taken as a call cut for silence before any output")
+		}
+	}
+}
+
 func TestStripeURLsMustBeStripes(t *testing.T) {
 	for raw, want := range map[string]bool{
 		"https://checkout.stripe.com/c/pay/cs_test_1":       true,
@@ -1250,6 +1285,87 @@ func TestPostgresPaidPlanGenerationsSpendCreditsInsteadOfTheMediaRouteLimit(t *t
 	execSQL(t, h, "UPDATE user_plans SET credits=100")
 	if got := h.mediaRun(t, c, tid, node, "a cat in a hat", 402); errorCode(got) != "credits_exhausted" {
 		t.Fatal("exhausted credits admitted a generation", got)
+	}
+}
+
+// giveGift records what the operator gifted the account, as the grant script does.
+func giveGift(t *testing.T, h *harness, uid string, credits int) {
+	t.Helper()
+	execSQL(t, h, "UPDATE user_plans SET gift_credits=$2,gift_note='beta goodwill' WHERE user_id=$1", uid, credits)
+}
+
+func TestPostgresGiftedCreditsAreSpentAfterThePaidOnesAndSurviveEverySync(t *testing.T) {
+	h := planHarness(t)
+	c, tid, _ := h.register(t, "plan-gift@example.test")
+	rid := routeHarnessRun(t, h, c, tid, planRoutes)
+	ctx := context.Background()
+	now := time.Now()
+	start, end := now.Add(-30*24*time.Hour), now.Add(-time.Minute)
+	uid := givePlan(t, h, "plan-gift@example.test", "pro", "active", start, end, 2000)
+	giveGift(t, h, uid, 4000)
+	// The period's credits are what it paid for and what it was gifted, and the gift is in what the account may spend.
+	p, e := accountPlan(ctx, h.db, uid)
+	if e != nil || p == nil || p.Credits != 2000 || p.Gift != 4000 || p.granted() != 6000 {
+		t.Fatal("the gift", p, e)
+	}
+	if spent, _ := creditsSpent(ctx, h.db, p); p.remaining(spent) != 6000 {
+		t.Fatal("remaining", p.remaining(0))
+	}
+	// A call costing more than the paid credits alone is admitted and settles against the gift.
+	if e := reserveModel(h, tid, rid, "claude-sonnet-5"); e != nil {
+		t.Fatal(e)
+	}
+	settleNewest(t, h, tid, intp(2600))
+	if credits := planCredits0(t, h, c, tid); credits["granted"] != 6000.0 || credits["gift"] != 4000.0 || credits["remaining"] != 3400.0 {
+		t.Fatal("usage view", credits)
+	}
+	// An answer about the same period never touches the gift: ClawHunt reports payments, and a gift is not one.
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, paidPlan("pro", start.Unix(), end.Unix(), map[string]int64{"pro": 2000})), dbNow(t, h)); e != nil {
+		t.Fatal(e)
+	}
+	var gift int
+	if e := h.db.QueryRow(ctx, "SELECT gift_credits FROM user_plans WHERE user_id=$1", uid).Scan(&gift); e != nil || gift != 4000 {
+		t.Fatal("a sync took the gift away", gift, e)
+	}
+	// The next period, paid: the gift belonged to the old period, so the new one starts with none, and prev_gift
+	// keeps what the old one was given. Nothing is worked out from the old period's spend, which keeps moving.
+	next := paidPlan("pro", end.Unix(), now.Add(30*24*time.Hour).Unix(), map[string]int64{"pro": 2000})
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, next), dbNow(t, h)); e != nil {
+		t.Fatal(e)
+	}
+	p, e = accountPlan(ctx, h.db, uid)
+	if e == nil {
+		e = withCarry(ctx, h.db, p)
+	}
+	if e != nil || p == nil || p.Credits != 2000 || p.Gift != 0 || p.PrevGift != 4000 || p.Carry != 0 {
+		t.Fatal("the gift after a renewal", p, e)
+	}
+	var note string
+	if e := h.db.QueryRow(ctx, "SELECT gift_note FROM user_plans WHERE user_id=$1", uid).Scan(&note); e != nil || note != "" {
+		t.Fatal("the note of a gift that ended", note, e)
+	}
+	// The overspend carried into a period is measured against the previous period's credits and gift together — only
+	// what the old period spent beyond 6,000 comes off this one — and a late settlement of that period, which is why
+	// no leftover is frozen at the roll-over, moves the carry and nothing else.
+	execSQL(t, h, "UPDATE model_invocations SET credit_charge=6500 WHERE billed_user_id=$1 AND billed_period_start=$2", uid, start)
+	if p, _ = accountPlan(ctx, h.db, uid); withCarry(ctx, h.db, p) != nil || p.Carry != 500 || p.Gift != 0 {
+		t.Fatal("carry past the credits and the gift", p.Carry, p.Gift)
+	}
+	if spent, _ := creditsSpent(ctx, h.db, p); p.remaining(spent) != 1500 {
+		t.Fatal("the new period after the old one overspent", p.remaining(0))
+	}
+	// A gift given for this period, then a full refund of it: no paid credits entitles nothing — a gift rides a plan
+	// and never makes one — and the gift stays on the row while that period is the charged one.
+	giveGift(t, h, uid, 500)
+	if e := h.a.applyPlan(ctx, uid, decodePlan(t, paidPlan("pro", end.Unix(), now.Add(30*24*time.Hour).Unix(), nil)), dbNow(t, h)); e != nil {
+		t.Fatal(e)
+	}
+	if p, _ = accountPlan(ctx, h.db, uid); p != nil {
+		t.Fatal("a gift alone entitled a refunded period", p)
+	}
+	var credits int
+	if e := h.db.QueryRow(ctx, "SELECT credits,gift_credits FROM user_plans WHERE user_id=$1", uid).Scan(&credits, &gift); e != nil || credits != 0 || gift != 500 {
+		t.Fatal("the refunded row", credits, gift, e)
 	}
 }
 

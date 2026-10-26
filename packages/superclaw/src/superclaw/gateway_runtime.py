@@ -40,6 +40,7 @@ from pathlib import Path
 from superclaw.node_runtime import (
     NodeServerSupervisor,
     _frozen_node_runtime_dir,
+    _find_free_port,
     resolve_node_executable,
 )
 from superclaw.runtime import desktop_toolchain_env
@@ -101,6 +102,10 @@ def resolve_gateway_port() -> int:
             value = 0
         if 1 <= value <= 65535:
             return value
+    if getattr(sys, "frozen", False):
+        # Each desktop owns a separate marker; its front door discovers this
+        # port from that marker. Avoid collisions between installed profiles.
+        return _find_free_port("127.0.0.1") or DEFAULT_GATEWAY_PORT
     return DEFAULT_GATEWAY_PORT
 
 

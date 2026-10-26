@@ -1,6 +1,6 @@
 # Agent 公司自治 —— 严格对齐 Paperclip 的"会自己干活 + 可见 + 无多余手动门"设计
 
-状态：草案（待 Codex + agy 对抗式评审定形）。蓝本 = 官方 Paperclip（`/Users/leongong/Documents/paperclip-ref` @ d9ea1bf）。
+状态：草案（待 Codex + agy 对抗式评审定形）。蓝本 = 官方 Paperclip（`/Users/dev-user/Documents/paperclip-ref` @ d9ea1bf）。
 
 ## 0. 问题陈述（业主实测 + DB/日志实锤）
 

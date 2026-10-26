@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -147,4 +147,180 @@ test('a two-clip film with a crossfade, a card, dialogue, a looped bed and music
   assert.ok(during - before > 15, `the line's band: ${before} dB before, ${during} dB during`);
   assert.equal(await (await call('GET', '/internal/edits/edit_it_0001/outputs/it.srt')).text(), '1\n00:00:02,500 --> 00:00:03,500\nA line.\n');
   assert.equal((await call('DELETE', '/internal/edits/edit_it_0001')).status, 204);
+});
+
+/** A page whose window.renderAudio makes `body` (the code inside an async function given ctx, an OfflineAudioContext). */
+const soundPage = (body) => `<!doctype html><html><body><script>
+window.renderAudio = async ({ seconds, sampleRate }) => {
+  const ctx = new OfflineAudioContext(2, Math.round(seconds * sampleRate), sampleRate);
+  ${body}
+  return ctx.startRendering();
+};
+</script></body></html>`;
+
+/** A worker on a free port, with a call(method, route, body, type) for its routes. */
+async function editServer(t) {
+  const token = 'edit-test-token-'.padEnd(40, 'x');
+  const app = createRenderServer(loadConfig({ AWWO_RENDER_TOKEN: token, AWWO_RENDER_CHROME: CHROME, AWWO_RENDER_FFMPEG: FFMPEG, AWWO_RENDER_FFPROBE: FFPROBE, AWWO_RENDER_TMP: TMP,
+    AWWO_RENDER_CHROME_SANDBOX: process.env.AWWO_RENDER_CHROME_SANDBOX }));
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  return (method, route, body, type) => fetch(base + route, { method, headers: { authorization: `Bearer ${token}`, ...(type ? { 'content-type': type } : {}) }, body });
+}
+
+const BLACK_CARD = '<!doctype html><html><body style="margin:0;background:#000"></body></html>';
+
+test('a sound a page makes is the film\'s sound, to the sample its code put it at', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  // An 880 Hz tone from 0.5 s to 1.5 s of a 2 s sound, written as code: the film's line band is silent before 0.5 s.
+  const page = soundPage(`const osc = ctx.createOscillator(); osc.frequency.value = 880;
+  const gain = ctx.createGain(); gain.gain.value = 0.5; osc.connect(gain).connect(ctx.destination); osc.start(0.5); osc.stop(1.5);`);
+  const timeline = {
+    schema: 'awwo.timeline/1', name: 'scored', output: { width: 160, height: 90, fps: 24, crf: 26, stillsEverySeconds: 0 },
+    tracks: { video: [{ id: 'v1', card: BLACK_CARD, seconds: 2 }], music: [{ id: 'score', page, seconds: 2, at: 0 }] },
+  };
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId: 'edit_it_0003', timeline, files: [] }), 'application/json')).status, 201);
+  const rendered = await call('POST', '/internal/edits/edit_it_0003/render');
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  assert.deepEqual([reply.report.frames, reply.report.counts.music, reply.report.inputs], [48, 1, []]);
+  assert.equal(reply.report.pageSounds.length, 1);
+  assert.deepEqual([reply.report.pageSounds[0].item, reply.report.pageSounds[0].seconds], ['score', 2]);
+  assert.ok(Math.abs(reply.report.pageSounds[0].peak - 0.5) < 0.01, `peak ${reply.report.pageSounds[0].peak}`);
+  assert.ok(Math.abs(reply.report.loudness.integratedLUFS + 16) < 1.5, `loudness ${reply.report.loudness.integratedLUFS}`);
+  // The page's WAV served its purpose once the mix was made: the job keeps only its outputs.
+  const left = readdirSync(TMP).filter((name) => name.startsWith('awwo-edit-')).flatMap((dir) => readdirSync(path.join(TMP, dir)).filter((name) => name.endsWith('.wav')));
+  assert.deepEqual(left, []);
+  const film = path.join(TMP, 'scored.mp4');
+  const got = Buffer.from(await (await call('GET', '/internal/edits/edit_it_0003/outputs/scored.mp4')).arrayBuffer());
+  execFileSync(FFMPEG, ['-v', 'error', '-y', '-f', 'mp4', '-i', 'pipe:0', '-c', 'copy', film], { input: got });
+  // Within 30 ms of where the code put it, on both sides.
+  const before = lineLevel(film, 0.42, 0.05);
+  const during = lineLevel(film, 0.53, 0.05);
+  const ending = lineLevel(film, 1.42, 0.05);
+  const after = lineLevel(film, 1.53, 0.05);
+  assert.ok(during - before > 30 && ending - after > 30, `the tone's band: ${before} dB before, ${during} dB at its start, ${ending} dB at its end, ${after} dB after`);
+  assert.equal((await call('DELETE', '/internal/edits/edit_it_0003')).status, 204);
+});
+
+/** The RMS level (dB) of a band around `frequency` in a window of the film's sound. */
+function bandLevel(file, frequency, start, seconds) {
+  const run = spawnSync(FFMPEG, ['-hide_banner', '-ss', String(start), '-t', String(seconds), '-i', file, '-vn', '-af',
+    `bandpass=f=${frequency}:width_type=q:w=8,astats=measure_overall=RMS_level:measure_perchannel=none`, '-f', 'null', '-'], { encoding: 'utf8' });
+  const match = /RMS level dB: (-?[\d.]+|-inf)/.exec(run.stderr);
+  return match ? Number.parseFloat(match[1].replace('-inf', '-Infinity')) : Number.NaN;
+}
+
+test('page sounds on two tracks beside a received file each play where the timeline puts them, cut, looped and levelled', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  const line = readFileSync(make('line1500.wav', ['-f', 'lavfi', '-i', 'sine=frequency=1500:sample_rate=48000:duration=0.5']));
+  // Music: a 440 Hz tone at 0.5–0.9 s of a 3 s sound, played from its 0.25 s (in) to 1.25 s (out) at 0.5 s of the film:
+  // in the film from 0.75 s to 1.15 s. Effects: a 2 kHz burst at 0.1–0.2 s of a 0.5 s sound, looped from 1.5 s for 1.5 s:
+  // in the film at 1.6, 2.1 and 2.6 s.
+  const music = soundPage(`const osc = ctx.createOscillator(); osc.frequency.value = 440; const gain = ctx.createGain(); gain.gain.value = 0.4;
+  osc.connect(gain).connect(ctx.destination); osc.start(0.5); osc.stop(0.9);`);
+  const hits = soundPage(`const osc = ctx.createOscillator(); osc.frequency.value = 2000; const gain = ctx.createGain(); gain.gain.value = 0.3;
+  osc.connect(gain).connect(ctx.destination); osc.start(0.1); osc.stop(0.2);`);
+  const timeline = {
+    schema: 'awwo.timeline/1', name: 'tracks', output: { width: 160, height: 90, fps: 24, crf: 26, stillsEverySeconds: 0 },
+    tracks: {
+      video: [{ id: 'v1', card: BLACK_CARD, seconds: 3.5 }],
+      dialogue: [{ id: 'line', source: 'tts_a/audio-1.wav', at: 2.9 }],
+      music: [{ id: 'score', page: music, seconds: 3, in: 0.25, out: 1.25, at: 0.5 }],
+      sfx: [{ id: 'hits', page: hits, seconds: 0.5, at: 1.5, out: 1.5, loop: true }],
+    },
+    mix: { levels: { music: -20, sfx: -20 } },
+  };
+  const files = [{ name: 'tts_a/audio-1.wav', size: line.length, sha256: createHash('sha256').update(line).digest('hex') }];
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId: 'edit_it_0007', timeline, files }), 'application/json')).status, 201);
+  assert.equal((await call('PUT', '/internal/edits/edit_it_0007/files/0', line, 'application/octet-stream')).status, 204);
+  const rendered = await call('POST', '/internal/edits/edit_it_0007/render');
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  assert.deepEqual(reply.report.pageSounds.map((sound) => [sound.item, sound.seconds]), [['score', 3], ['hits', 0.5]]);
+  assert.deepEqual(reply.report.inputs.map((input) => input.name), ['tts_a/audio-1.wav']);
+  assert.ok(!reply.report.warnings.some((warning) => warning.startsWith('level_unmeasured')), reply.report.warnings.join(', '));
+  const film = path.join(TMP, 'tracks.mp4');
+  const got = Buffer.from(await (await call('GET', '/internal/edits/edit_it_0007/outputs/tracks.mp4')).arrayBuffer());
+  execFileSync(FFMPEG, ['-v', 'error', '-y', '-f', 'mp4', '-i', 'pipe:0', '-c', 'copy', film], { input: got });
+  const louder = (frequency, quiet, loud) => {
+    const [a, b] = [bandLevel(film, frequency, quiet, 0.05), bandLevel(film, frequency, loud, 0.05)];
+    assert.ok(b - a > 25, `${frequency} Hz: ${a} dB at ${quiet} s, ${b} dB at ${loud} s`);
+  };
+  louder(440, 0.68, 0.79);
+  louder(440, 1.2, 1.08);
+  louder(2000, 1.5, 1.62);
+  louder(2000, 1.78, 2.12);
+  louder(2000, 2.3, 2.62);
+  louder(1500, 2.8, 2.95);
+  assert.equal((await call('DELETE', '/internal/edits/edit_it_0007')).status, 204);
+});
+
+/** The RMS level (dB) of a window of the film's sound, all bands. */
+function rmsLevel(file, start, seconds) {
+  const run = spawnSync(FFMPEG, ['-hide_banner', '-ss', String(start), '-t', String(seconds), '-i', file, '-vn', '-af',
+    'astats=measure_overall=RMS_level:measure_perchannel=none', '-f', 'null', '-'], { encoding: 'utf8' });
+  const match = /RMS level dB: (-?[\d.]+|-inf)/.exec(run.stderr);
+  return match ? Number.parseFloat(match[1].replace('-inf', '-Infinity')) : Number.NaN;
+}
+
+/** Renders one edit of a black card with the given tracks and mix, and returns the film's local path. */
+async function renderEdit(call, editId, seconds, tracks, mix, files = []) {
+  const timeline = { schema: 'awwo.timeline/1', name: editId, output: { width: 160, height: 90, fps: 24, crf: 26, stillsEverySeconds: 0 },
+    tracks: { video: [{ id: 'v1', card: BLACK_CARD, seconds }], ...tracks }, mix };
+  const manifest = { editId, timeline, files: files.map(({ name, bytes }) => ({ name, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') })) };
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify(manifest), 'application/json')).status, 201);
+  for (const [index, file] of files.entries()) assert.equal((await call('PUT', `/internal/edits/${editId}/files/${index}`, file.bytes, 'application/octet-stream')).status, 204);
+  const rendered = await call('POST', `/internal/edits/${editId}/render`);
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  const film = path.join(TMP, `${editId}.mp4`);
+  const got = Buffer.from(await (await call('GET', `/internal/edits/${editId}/outputs/${editId}.mp4`)).arrayBuffer());
+  execFileSync(FFMPEG, ['-v', 'error', '-y', '-f', 'mp4', '-i', 'pipe:0', '-c', 'copy', film], { input: got });
+  assert.equal((await call('DELETE', `/internal/edits/${editId}`)).status, 204);
+  return film;
+}
+
+test('page sounds are levelled and ducked like files', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  const tone = (frequency, from, to, gain) => soundPage(`const osc = ctx.createOscillator(); osc.frequency.value = ${frequency}; const g = ctx.createGain();
+  g.gain.value = ${gain}; osc.connect(g).connect(ctx.destination); osc.start(${from}); osc.stop(${to});`);
+  // The same 1 kHz tone on two tracks, levelled 12 dB apart: so they are, measured where each plays alone.
+  const levelled = await renderEdit(call, 'edit_it_0008', 3.5, {
+    music: [{ id: 'm', page: tone(1000, 0, 1, 0.3), seconds: 1, at: 0.5 }],
+    sfx: [{ id: 's', page: tone(1000, 0, 1, 0.3), seconds: 1, at: 2 }],
+  }, { levels: { music: -20, sfx: -32 } });
+  const [music, effects] = [rmsLevel(levelled, 0.7, 0.6), rmsLevel(levelled, 2.2, 0.6)];
+  assert.ok(Math.abs(music - effects - 12) < 2, `levelled 12 dB apart: music ${music} dB, effects ${effects} dB`);
+  // A 500 Hz bed made by a page, ducked 12 dB under a received line from 2.5 s to 3 s.
+  const line = { name: 'tts_b/audio-1.wav', bytes: readFileSync(make('line-duck.wav', ['-f', 'lavfi', '-i', 'sine=frequency=1500:sample_rate=48000:duration=0.5'])) };
+  const ducked = await renderEdit(call, 'edit_it_0009', 4, {
+    music: [{ id: 'bed', page: tone(500, 0, 4, 0.3), seconds: 4, at: 0 }],
+    dialogue: [{ id: 'l', source: 'tts_b/audio-1.wav', at: 2.5 }],
+  }, { ducking: { music: -12 } }, [line]);
+  const [open, under] = [bandLevel(ducked, 500, 1.8, 0.3), bandLevel(ducked, 500, 2.65, 0.25)];
+  assert.ok(open - under > 8, `the bed: ${open} dB alone, ${under} dB under the line`);
+});
+
+test('a page that cannot make its sound is refused with its own reason, naming the item', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  for (const [index, page, reason] of [
+    [4, '<!doctype html><html><body>no sound here</body></html>', 'defines no window.renderAudio'],
+    [5, soundPage("throw new Error('the score is not written yet');"), 'the score is not written yet'],
+    [6, soundPage('return { sampleRate: 48000, channels: [new Float32Array(4800)] };'), 'not 2 s'],
+  ]) {
+    const editId = `edit_it_000${index}`;
+    const timeline = {
+      schema: 'awwo.timeline/1', name: 'refused', output: { width: 160, height: 90, fps: 24 },
+      tracks: { video: [{ card: BLACK_CARD, seconds: 1 }], sfx: [{ id: 'hits', page, seconds: 2, at: 0 }] },
+    };
+    assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId, timeline, files: [] }), 'application/json')).status, 201);
+    const rendered = await call('POST', `/internal/edits/${editId}/render`);
+    const reply = await rendered.json();
+    assert.equal(rendered.status, 400, JSON.stringify(reply));
+    assert.deepEqual([reply.error.code, reply.error.field], ['INVALID_EDIT', 'tracks.sfx.page']);
+    assert.ok(reply.error.message.startsWith('The sound of hits could not be made: ') && reply.error.message.includes(reason), reply.error.message);
+    await call('DELETE', `/internal/edits/${editId}`);
+  }
 });

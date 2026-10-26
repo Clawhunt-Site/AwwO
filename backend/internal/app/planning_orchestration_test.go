@@ -126,3 +126,21 @@ func TestPlannerDeliversAPageWithOneFrontendNode(t *testing.T) {
 		t.Fatal("the planner is not told to deliver a page with one frontend node")
 	}
 }
+
+// 2026-10-25: asked twice whether the frontend should depend on the mock-data node, the canvas assistant asked back
+// which input field to use and changed nothing; it wired them only once told to decide itself. And asked to fix a node
+// whose inputs were more than its model could read, it cut that node off from the three pages it existed to combine.
+func TestPlannerWiresWhatTheUserNamesAndKeepsWhatANodeCombines(t *testing.T) {
+	for _, rule := range []string{
+		"connect them yourself",
+		"first add_field an input on the receiving node and then connect",
+		"never a question for the user",
+		"when they repeat a request they made already, act on the reading most likely",
+		"when what it was sent was more than its model can read, split the combining so that several nodes each combine a part",
+		"never cutting it off from the deliveries it exists to combine",
+	} {
+		if !strings.Contains(plannerInstructions, rule) {
+			t.Errorf("the planner is not told: %s", rule)
+		}
+	}
+}

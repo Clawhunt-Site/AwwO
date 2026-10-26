@@ -1,4 +1,4 @@
-/** The AwwO Academy (Academy.tsx): the tutorial videos, each recorded on the live AwwO. Four short how-tos to start with
+/** The AwwO Academy (Academy.tsx): the tutorial videos, each recorded on the live AwwO. Six short how-tos to start with
  * (Chinese narration), then a walk through each flagship case and a build of each other homepage case (English narration);
  * every video has Chinese and English subtitles burned in. The files are too large for a release: each is staged once on
  * the host, outside every release, under /showcase/staged/academy/<first 16 hex digits of its sha256>.mp4, and the dev
@@ -41,21 +41,13 @@ export interface AcademyVideo {
   changes?: ReadonlyArray<AcademyChange>;
 }
 
-/** One update of a published video: the day it was published again, and what changed in it. */
+/** One update of a published video: the day it was published again with something recorded again, and what changed
+ *  in it. A video only rendered again (a title card's number) logs none. */
 export interface AcademyChange {
   on: string;
   text: Readonly<Record<UiLocale, string>>;
 }
 
-/** The Configure step of every build video, recorded before AwwO chose an Agent node's runtime itself (2026-10-15; the
- *  panel's hint now calls it the engine), when an OpenAI Agents run still stopped at ten minutes (25 since 2026-10-19).
- *  Claude Opus 5.5 offers no effort levels (the Bedrock bridge refuses them), so its Configure shows none. `at` is where
- *  the span to record again starts. */
-const runtimeNote = (at: number): AcademyNote => ({ at, since: '2026-10-15', text: {
-  en: 'AwwO now picks the runtime (the engine an agent runs on) by itself, so an agent’s Configure has no runtime menu: choose only the model, Claude Opus 5.5. Since 19 October each agent may take up to 25 minutes, not ten. Or skip developer mode here and ask the canvas assistant to set each agent’s task, acceptance criteria and model.',
-  zh: '现在由 AwwO 自动选择运行时（Agent 所用的执行引擎），Agent 的「配置」里已经没有运行时选项：只需选模型 Claude Opus 5.5。10月19日起，单个 Agent 最长 25 分钟，不再是 10 分钟。这一步也可以不进开发者模式，直接请画布助手为每个 Agent 设定任务、验收标准和模型。' } });
-/** The two cases rebuilt on three.js r186 on 2026-10-15, after their videos had been recorded. */
-const rebuiltNote = (at: number, en: string, zh: string): AcademyNote => ({ at, since: '2026-10-15', text: { en, zh } });
 /** A how-to's assistant reply or empty canvas, recorded with the links that switched between a direct task and a plan
  *  for the canvas, which went on 2026-10-19; a correction in words hands a request over the other way. */
 const switchLinksNote = (at: number): AcademyNote => ({ at, since: '2026-10-19', text: {
@@ -67,8 +59,8 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'Code: one sentence, and it’s written', zh: '写代码：一句话，直接写好' },
     summary: { en: 'What one call is, then one sentence: the canvas assistant writes a working Python sales-report tool itself. Preview the report, say “continue” and check the usage.',
       zh: '先讲清「1 次」是什么，再用一句话让画布助手直接写出能用的 Python 销售报告工具：预览报告，说「继续」接着改，再看用量。' },
-    seconds: 154, src: '/showcase/staged/academy/07803132ff5c7f16.mp4', bytes: 17416804, sha256: '07803132ff5c7f1654e97708692921dbb5fb8d16ae3f08c04c9499c74c784891',
-    poster: '/showcase/academy/start-code-2.jpg', notes: [
+    seconds: 154, src: '/showcase/staged/academy/c7d7975a5f6c8776.mp4', bytes: 17416976, sha256: 'c7d7975a5f6c877615f1dd90e353deefa731e80d4c25bebb0be7c6de43d26c59',
+    poster: '/showcase/academy/start-code-3.jpg', notes: [
       switchLinksNote(56),
       // The recap's 「平台原因失败会退还」: since 2026-10-19 a platform time limit gives back only the call it cut.
       { at: 152, since: '2026-10-19', text: {
@@ -79,20 +71,32 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'Image: an event poster', zh: '生图：做一张活动海报' },
     summary: { en: 'One sentence for a café’s autumn poster: the assistant sets up a copy node and an image node on the canvas, you run the canvas and find the poster in Results.',
       zh: '一句话做咖啡店的秋季海报：助手在画布上搭好文案和图像两个节点，运行整张画布，在成果里看海报。' },
-    seconds: 106, src: '/showcase/staged/academy/87ad377098a1ce0b.mp4', bytes: 12757417, sha256: '87ad377098a1ce0b5471bb4ae7b8c38f3affc974de8ba366f691a2f7313603be',
-    poster: '/showcase/academy/start-image-2.jpg', notes: [switchLinksNote(42)] },
+    seconds: 106, src: '/showcase/staged/academy/0f88aae37a3af01e.mp4', bytes: 12760808, sha256: '0f88aae37a3af01e693f0930f73e87576e96229890731f877be17991a09178a5',
+    poster: '/showcase/academy/start-image-3.jpg', notes: [switchLinksNote(42)] },
   { id: 'start-web', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Web design: a complete website', zh: '网页设计：做一个完整官网' },
     summary: { en: 'Switch to Claude Opus 5.5 and ask for a pottery studio’s one-page site: about three minutes later, preview it full screen and check the usage.',
       zh: '换成 Claude Opus 5.5，一句话做陶艺工作室的单页官网：约三分钟后全屏预览，再看用量。' },
-    seconds: 104, src: '/showcase/staged/academy/8bca3281173a3123.mp4', bytes: 17859188, sha256: '8bca3281173a3123887af7e09a2778ca80c743a4cd25a348e295ba832659bc83',
-    poster: '/showcase/academy/start-web-2.jpg', notes: [switchLinksNote(37)] },
+    seconds: 104, src: '/showcase/staged/academy/8f25594fca78dbe9.mp4', bytes: 17870391, sha256: '8f25594fca78dbe914dc68da8d58dd2706cf6c1d6465d6391a50bf4eaa8cc5f4',
+    poster: '/showcase/academy/start-web-3.jpg', notes: [switchLinksNote(37)] },
   { id: 'start-plan', section: 'start', voice: 'zh', recordedOn: '2026-10-17',
     title: { en: 'Product plan: let a team write it', zh: '产品方案：让团队分工来写' },
     summary: { en: 'Name a team of three, a user researcher, a product manager and a writer, and run the canvas: the whole plan arrives as one document in Results. Setting up a canvas uses no calls.',
       zh: '点名用户研究、产品经理、方案撰写三人团队，运行画布，在成果里拿到一份完整的产品方案文档；搭画布不占次数。' },
-    seconds: 118, src: '/showcase/staged/academy/5d1faa082c4ec4cd.mp4', bytes: 17816781, sha256: '5d1faa082c4ec4cd5120edb1d102a9becb1a8017017ce86030eb2bebd37b890a',
-    poster: '/showcase/academy/start-plan-2.jpg', notes: [switchLinksNote(39)] },
+    seconds: 118, src: '/showcase/staged/academy/7f90986b2ba18317.mp4', bytes: 17812438, sha256: '7f90986b2ba18317dc380d604449593a054f57a4e8f805a1431f1ae43aad382e',
+    poster: '/showcase/academy/start-plan-3.jpg', notes: [switchLinksNote(39)] },
+  { id: 'start-node', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
+    title: { en: 'Inside a node: what it was asked, and how to change it', zh: '看懂节点：它被要求做什么，怎么改' },
+    summary: { en: 'Open a node of a three-node team: its Task names the model, the job, its criteria and constraints. Change with the assistant writes your change into them, and the nodes left run again.',
+      zh: '打开三人小团队里的一个节点：「任务」写着模型、要做的事、验收标准和约束。点「让助手修改」说出要改什么，助手把它写进去，再运行剩下的节点。' },
+    seconds: 123, src: '/showcase/staged/academy/2adbe0533e15a23e.mp4', bytes: 21379481, sha256: '2adbe0533e15a23e2bf492186da3d67f8c3b1f3c537e31ba913a4d36980509a2',
+    poster: '/showcase/academy/start-node-2.jpg' },
+  { id: 'start-settings', section: 'start', voice: 'zh', recordedOn: '2026-10-25',
+    title: { en: 'Settings: everything for your account in one place', zh: '设置中心：账号的设置都在这里' },
+    summary: { en: 'More options, then Settings: one page, grouped on the left. The language and the mode stay in this browser; the default model and task alerts follow your account. Export your data before you ask to delete your account.',
+      zh: '更多选项里的「设置」：一个页面，左边分好了组。语言和使用模式只在这个浏览器，默认模型和任务提醒跟着账号走；申请删除账号前，先导出数据。' },
+    seconds: 149, src: '/showcase/staged/academy/5ff1eda816148f9c.mp4', bytes: 15771102, sha256: '5ff1eda816148f9cf66ac832bbaa801c7b6c49b6d5d396228f290e549b275328',
+    poster: '/showcase/academy/start-settings-2.jpg' },
   { id: 'pallward', section: 'flagship', caseId: 'pallward', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'PALLWARD: a dark-fantasy game built by twenty-six agents', zh: 'PALLWARD：二十六个 Agent 做出的黑暗奇幻动作游戏' },
     summary: { en: 'Open the case, play the game right in How it was made, see what the twenty agents in sandbox computers wrote, and copy the canvas as a draft.',
@@ -153,114 +157,155 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     title: { en: 'Build a cinematic brand page with a team of agents', zh: '用 Agent 团队和媒体节点，做一个电影感品牌页' },
     summary: { en: 'A brand page, its pictures and its clip, by two agents and four media nodes.',
       zh: '一个品牌页连同它的图片和视频，由两个 Agent 和四个媒体节点做出。' },
-    seconds: 413, src: '/showcase/staged/academy/cf30bb4f9ddfdc86.mp4', bytes: 92793695, sha256: 'cf30bb4f9ddfdc864ffcb8bcf89e7b97eca84aa49cbae0967c7e0d73377360b6',
-    poster: null, notes: [runtimeNote(171)] },
+    seconds: 412, src: '/showcase/staged/academy/6f7770790cc26f09.mp4', bytes: 93939073, sha256: '6f7770790cc26f09815bea650df26acbfd1debbbb63b0129c98dd0cfaa401dcd',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'shanhai-vn', section: 'build', caseId: 'shanhai-vn', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a visual-novel chapter with a team of agents', zh: '用 Agent 团队和媒体节点，做一章视觉小说' },
     summary: { en: 'A visual-novel chapter, its pictures and its clip, by three agents and six media nodes.',
       zh: '一章视觉小说连同它的图片和视频，由三个 Agent 和六个媒体节点做出。' },
-    seconds: 415, src: '/showcase/staged/academy/720e5820546d3fa4.mp4', bytes: 92624243, sha256: '720e5820546d3fa4e6afdadcedd315f361c6c0612589f2c6585637fb50125655',
-    poster: null, notes: [runtimeNote(211)] },
+    seconds: 416, src: '/showcase/staged/academy/7723029eb63af64b.mp4', bytes: 95739472, sha256: '7723029eb63af64b97f557ebc6201131feccec3703f6475d511038ec68b3036a',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'aurora-gt', section: 'build', caseId: 'aurora-gt', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a car launch site with a team of agents', zh: '用 Agent 团队和媒体节点，做一个新车发布站' },
     summary: { en: 'A car launch site, its pictures and its clip, by two agents and four media nodes.',
       zh: '一个新车发布站连同它的图片和视频，由两个 Agent 和四个媒体节点做出。' },
-    seconds: 377, src: '/showcase/staged/academy/a3dde657d514deff.mp4', bytes: 66764286, sha256: 'a3dde657d514deff7d2a74f5087def501249aa7d31499847c05c1e4bc9f18b09',
-    poster: null, notes: [runtimeNote(160)] },
+    seconds: 376, src: '/showcase/staged/academy/d3da6fb0530331f4.mp4', bytes: 68359410, sha256: 'd3da6fb0530331f458fe3616df1cf1929931da06d9937b814917f16d66e23724',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'car-plant', section: 'build', caseId: 'car-plant', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a live 3D digital twin with a team of agents', zh: '用一支 Agent 团队，做一个实时 3D 工厂数字孪生' },
     summary: { en: 'A live 3D digital twin of an EV plant, by eight agents.',
       zh: '一个实时 3D 电动车工厂数字孪生，由八个 Agent 做出。' },
-    seconds: 438, src: '/showcase/staged/academy/5f09c16c095bfc5e.mp4', bytes: 70202733, sha256: '5f09c16c095bfc5e9ac328423ceb86ac6b4c96d9807e18095144bee94e7095d9',
-    poster: null, notes: [
-      runtimeNote(202),
-      rebuiltNote(426,
-        'The EV plant digital twin case on the home page is now built by a later version of this team: its page uses a newer three.js (r186) with a glow effect, and a 3D model node makes its cars. A copy of it is that version, not the prompts shown here.',
-        '首页的 EV plant digital twin 案例现在由这支团队的更新版本做成：页面用更新的 three.js（r186），带辉光效果，车辆由一个 3D 模型节点生成。复制得到的是这个新版本，而不是视频里的提示词。'),
-    ] },
+    seconds: 431, src: '/showcase/staged/academy/a00f467432e0175c.mp4', bytes: 81527886, sha256: 'a00f467432e0175cb338565b481629cdd87b8e30265a790ac8165a337a3bf090',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so. The closing line now says the home-page case is a later version of this team.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。结尾也已说明：首页的这个案例是这支团队的后续版本。' } }] },
   { id: 'neon-circuit', section: 'build', caseId: 'neon-circuit', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D racing game with a team of agents', zh: '用一支 Agent 团队，做一款 3D 赛车游戏' },
     summary: { en: 'A 3D racing game, by ten agents.',
       zh: '一款 3D 赛车游戏，由十个 Agent 做出。' },
-    seconds: 445, src: '/showcase/staged/academy/43851ad021198aa5.mp4', bytes: 78446631, sha256: '43851ad021198aa5c24707ec3b7623cecdeb31d30dce836b5692630ac71ef1aa',
-    poster: null, notes: [
-      runtimeNote(176),
-      rebuiltNote(433,
-        'The Neon Circuit racer case on the home page is now built by a later version of this team: its page uses a newer three.js (r186) with a glow effect, and a 3D model node makes its six cars. A copy of it is that version, not the prompts shown here.',
-        '首页的 Neon Circuit racer 案例现在由这支团队的更新版本做成：页面用更新的 three.js（r186），带辉光效果，六辆赛车由一个 3D 模型节点生成。复制得到的是这个新版本，而不是视频里的提示词。'),
-    ] },
+    seconds: 433, src: '/showcase/staged/academy/757481fbfe61937b.mp4', bytes: 90288684, sha256: '757481fbfe61937b2d624038b3d028d2ddc9bad6482b67712b8cd7d97a205d7a',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so. The closing line now says the home-page case is a later version of this team.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。结尾也已说明：首页的这个案例是这支团队的后续版本。' } }] },
   { id: 'crystal-keep', section: 'build', caseId: 'crystal-keep', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D tower-defense game with a team of agents', zh: '用一支 Agent 团队，做一款 3D 塔防游戏' },
     summary: { en: 'A 3D tower-defense game, by ten agents.',
       zh: '一款 3D 塔防游戏，由十个 Agent 做出。' },
-    seconds: 489, src: '/showcase/staged/academy/62732787638751ce.mp4', bytes: 78179292, sha256: '62732787638751cedf55875382b3b9dbf03e08d9bcf1a5517bf5b32ad438e62a',
-    poster: null, notes: [runtimeNote(176)] },
+    seconds: 472, src: '/showcase/staged/academy/0f4f4559253398de.mp4', bytes: 91205373, sha256: '0f4f4559253398de32771066045fc8a74e20c50b1d7e541835827ff3becaa81e',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'mars-mission', section: 'build', caseId: 'mars-mission', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a Mars mission control with a team of agents', zh: '用一支 Agent 团队，做一个火星任务控制中心' },
     summary: { en: 'A Mars mission you plan and fly, by eight agents.',
       zh: '一个可以规划和驾驶的火星任务，由八个 Agent 做出。' },
-    seconds: 452, src: '/showcase/staged/academy/46a0ef1263f02d61.mp4', bytes: 71940566, sha256: '46a0ef1263f02d6128d70c0f3169c186bc0967abe058953468236d3a5ce29c47',
-    poster: null, notes: [runtimeNote(177)] },
+    seconds: 440, src: '/showcase/staged/academy/f826ae94d61f7ddd.mp4', bytes: 85430324, sha256: 'f826ae94d61f7dddf7deebec2c8e9df15011ca8326810b48e0d0a3675e076e2c',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'beat-studio', section: 'build', caseId: 'beat-studio', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a browser music workstation with a team of agents', zh: '用一支 Agent 团队，做一个浏览器音乐工作站' },
     summary: { en: 'A music workstation in the browser, by ten agents.',
       zh: '一个浏览器里的音乐工作站，由十个 Agent 做出。' },
-    seconds: 430, src: '/showcase/staged/academy/739c60d1371aef5e.mp4', bytes: 63716961, sha256: '739c60d1371aef5efdba8b87194a24eb7f4a840909cd8d86c8252eeac2f90498',
-    poster: null, notes: [runtimeNote(208)] },
+    seconds: 419, src: '/showcase/staged/academy/0e97e8459328fc94.mp4', bytes: 77206975, sha256: '0e97e8459328fc94e53a357b575d408a422cb814ea3bc857127fdb3879f2f164',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'knowledge-base', section: 'build', caseId: 'knowledge-base', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a team knowledge-base app with a team of agents', zh: '用一支 Agent 团队，做一个团队知识库应用' },
     summary: { en: 'A team knowledge-base app on simulated data, by seven agents.',
       zh: '一个用模拟数据的团队知识库应用，由七个 Agent 做出。' },
-    seconds: 389, src: '/showcase/staged/academy/6a24a96b156ed316.mp4', bytes: 55014523, sha256: '6a24a96b156ed3163724555e02b9ef1abe261e685dc441382a270cca30a6fad7',
-    poster: null, notes: [runtimeNote(222)] },
+    seconds: 388, src: '/showcase/staged/academy/1c4bd61339917703.mp4', bytes: 64179294, sha256: '1c4bd6133991770365c18a43f2ace8b9642af4a902b8757f8221e8db967fd9a7',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'pixel-platformer', section: 'build', caseId: 'pixel-platformer', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a pixel-art platformer with a team of agents', zh: '用一支 Agent 团队，做一款像素平台跳跃游戏' },
     summary: { en: 'A pixel-art platformer level, by six agents.',
       zh: '一关像素平台跳跃游戏，由六个 Agent 做出。' },
-    seconds: 324, src: '/showcase/staged/academy/7ae71099cbf1d6a7.mp4', bytes: 55348960, sha256: '7ae71099cbf1d6a7e01662f03a8e51dd52ba93b6cdc183efef20bfe00ec0ad96',
-    poster: null, notes: [runtimeNote(180)] },
+    seconds: 325, src: '/showcase/staged/academy/be412981fabf1601.mp4', bytes: 63854992, sha256: 'be412981fabf1601e094ffff38b8a3335709f38ad637c48b95077419c171eee7',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: '3d-configurator', section: 'build', caseId: '3d-configurator', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D product configurator with a team of agents', zh: '用一支 Agent 团队，做一个 3D 产品配置器' },
     summary: { en: 'A 3D e-bike configurator, by five agents.',
       zh: '一个 3D 电动自行车配置器，由五个 Agent 做出。' },
-    seconds: 395, src: '/showcase/staged/academy/544295f5aad88354.mp4', bytes: 57674546, sha256: '544295f5aad88354ed973e56940669ac93faa6fe9d3f1d31da1bd898a16771cd',
-    poster: null, notes: [runtimeNote(195)] },
+    seconds: 397, src: '/showcase/staged/academy/f7ccc97b239b7a48.mp4', bytes: 65168575, sha256: 'f7ccc97b239b7a48694d47376b80c13dbdee337ec108610a62d0dfe555413328',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'papercraft-puzzle', section: 'build', caseId: 'papercraft-puzzle', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a papercraft puzzle with a team of agents', zh: '用一支 Agent 团队，做一款纸艺解谜游戏' },
     summary: { en: 'A papercraft puzzle game, by seven agents.',
       zh: '一款纸艺解谜游戏，由七个 Agent 做出。' },
-    seconds: 390, src: '/showcase/staged/academy/e80f6f1f866dec10.mp4', bytes: 64534196, sha256: 'e80f6f1f866dec105930bc4d0fdf2fac99cf8166e097933f37ac3bdd86077471',
-    poster: null, notes: [runtimeNote(216)] },
+    seconds: 384, src: '/showcase/staged/academy/a34fdc3b399fa98f.mp4', bytes: 72857675, sha256: 'a34fdc3b399fa98f433bb803c56a3d8285078a10313256895989e23b0f09d8fa',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'summer-ad', section: 'build', caseId: 'summer-ad', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Pre-produce a 30-second ad with a team of agents', zh: '用一支 Agent 团队，预制一支 30 秒广告' },
     summary: { en: 'A 30-second ad’s animatic, by six agents.',
       zh: '一支 30 秒广告的动态分镜，由六个 Agent 做出。' },
-    seconds: 383, src: '/showcase/staged/academy/503f8466f43990aa.mp4', bytes: 62580470, sha256: '503f8466f43990aad3f4908d7288d93c3326c505f348a5e0fdeb6a39047f799a',
-    poster: null, notes: [runtimeNote(224)] },
+    seconds: 382, src: '/showcase/staged/academy/7938cb4e94ead2b5.mp4', bytes: 70251417, sha256: '7938cb4e94ead2b5c5ec8329e7a228fbe092139f1a7d1e9561b2adcddc9293f5',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'port-twin', section: 'build', caseId: 'port-twin', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a live 3D port cockpit with a team of agents', zh: '用一支 Agent 团队，做一个实时 3D 港口驾驶舱' },
     summary: { en: 'A live 3D port cockpit, by six agents.',
       zh: '一个实时 3D 港口驾驶舱，由六个 Agent 做出。' },
-    seconds: 432, src: '/showcase/staged/academy/93c995fe7c04414a.mp4', bytes: 70124991, sha256: '93c995fe7c04414ac505860e14ccbd10763f5e7d176608ca10eabbcb786a628b',
-    poster: null, notes: [runtimeNote(218)] },
+    seconds: 427, src: '/showcase/staged/academy/3828dc0dd6d725ab.mp4', bytes: 79949642, sha256: '3828dc0dd6d725ab3df64da51f7659060798f3fd7314bfd50ff07ac929643594',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'glider-adventure', section: 'build', caseId: 'glider-adventure', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a 3D glider adventure with a team of agents', zh: '用一支 Agent 团队，做一款 3D 滑翔冒险游戏' },
     summary: { en: 'A 3D glider adventure, by six agents.',
       zh: '一款 3D 滑翔冒险游戏，由六个 Agent 做出。' },
-    seconds: 342, src: '/showcase/staged/academy/471e41cc805ca0bd.mp4', bytes: 56079290, sha256: '471e41cc805ca0bdd7e22686a279be5cd234b69807fd09268df045764c2dea16',
-    poster: null, notes: [runtimeNote(162)] },
+    seconds: 341, src: '/showcase/staged/academy/0019581977870be6.mp4', bytes: 65364491, sha256: '0019581977870be63c1f4e576911a30e7f2ab4b9f094b787472489bcf92dd0c1',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'party-game', section: 'build', caseId: 'party-game', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a four-player party game with a team of agents', zh: '用一支 Agent 团队，做一款四人派对游戏' },
     summary: { en: 'A four-player party game, by six agents.',
       zh: '一款四人派对游戏，由六个 Agent 做出。' },
-    seconds: 362, src: '/showcase/staged/academy/b615ee461de844b5.mp4', bytes: 52160396, sha256: 'b615ee461de844b5647e8ddb8112ebe347b03c875515b16b033b25addd5c7af2',
-    poster: null, notes: [runtimeNote(193)] },
+    seconds: 361, src: '/showcase/staged/academy/6fba6d0a80b56ce0.mp4', bytes: 61823138, sha256: '6fba6d0a80b56ce01185781f194b549877b84be471b86819d375a7be9a72182d',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
   { id: 'rhythm-runner', section: 'build', caseId: 'rhythm-runner', voice: 'en', recordedOn: '2026-10-14',
     title: { en: 'Build a rhythm runner with a team of agents', zh: '用一支 Agent 团队，做一款节奏跑酷游戏' },
     summary: { en: 'A rhythm runner game, by six agents.',
       zh: '一款节奏跑酷游戏，由六个 Agent 做出。' },
-    seconds: 357, src: '/showcase/staged/academy/e7d17cff35d35826.mp4', bytes: 95035202, sha256: 'e7d17cff35d3582637d688c8006a3ba0e0a84d45abb339a067d90bbad8f6e85a',
-    poster: null, notes: [runtimeNote(190)] },
+    seconds: 358, src: '/showcase/staged/academy/a0960c7f549aa3a2.mp4', bytes: 102558380, sha256: 'a0960c7f549aa3a24a711aaec8a0f372d1ee72fe68c6d12fe54bf545fc1f381f',
+    poster: null,
+    changes: [{ on: '2026-10-25', text: {
+      en: 'Step 3, giving every agent its job, recorded again on the live AwwO: an agent’s Configure now asks only for a model, as AwwO picks the engine that runs it, and the narration says so.',
+      zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
 ];
 
 /** 6:15, 1:02:03. */

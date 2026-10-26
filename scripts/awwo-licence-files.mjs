@@ -57,6 +57,11 @@ export const LICENCE_TEXTS = Object.freeze({
   'LicenseRef-MinGW-w64-runtime': /MinGW-w64 runtime licensing.*statically linked against the MinGW-w64 runtime/i,
   // The notices of the code of others in PostgreSQL's source, as Debian's package of it lists them (debian/copyright).
   'LicenseRef-PostgreSQL-source-notices': /Upstream-Name: PostgreSQL.*Files: src\/backend\/regex\/.*src\/backend\/snowball\/libstemmer/i,
+  // PostgreSQL's own licence, its source's COPYRIGHT (EDB's macOS archive carries no copy of it).
+  'PostgreSQL': /PostgreSQL Database Management System.*Permission to use, copy, modify, and distribute this software and its documentation for any purpose, without fee, and without a written agreement is hereby granted/i,
+  // MIT Kerberos: its NOTICE, MIT's BSD-style licence first, then the notices of every other part of it.
+  'LicenseRef-MIT-krb5': /Copyright \(C\) 1985-\d{4} by the Massachusetts Institute of Technology.*Redistribution and use in source and binary forms, with or without modification, are permitted/i,
+  'LGPL-2.1-or-later': /GNU LESSER GENERAL PUBLIC LICENSE Version 2\.1, February 1999/i,
 });
 
 /** An SPDX licence expression as a tree: { or: [...] }, { and: [...] }, or { id } (a WITH's exception kept beside it);

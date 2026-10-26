@@ -36,6 +36,15 @@ const externalAdapter: ServerAdapterModule = {
 };
 
 describe("server adapter registry", () => {
+  it("detects the same configured ClawWork executable that execution uses", () => {
+    vi.stubEnv("SUPERCLAW_CLAWWORK_EXECUTABLE", "C:/custom/runtime/pi.exe");
+    try {
+      const spec = requireServerAdapter("clawwork_local").getRuntimeCommandSpec?.({});
+      expect(spec?.detectCommand).toBe("C:/custom/runtime/pi.exe");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   beforeEach(() => {
     unregisterServerAdapter("external_test");
     unregisterServerAdapter("hermes_local");

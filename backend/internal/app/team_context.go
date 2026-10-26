@@ -96,8 +96,19 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 }
 
 // prepareTeamInputWith is prepareTeamInput for a system prompt that gains noteUnits UTF-16 code units after it (the
-// note naming the member's model, teams.go): its history leaves them within the worker's transport limit too.
+// note naming the member's model, teams.go): its history leaves them within the worker's transport limit too. The
+// planner's page skills are a default for a page's one call (plannerPageSkillRefs): a turn they would not let fit goes
+// without them.
 func prepareTeamInputWith(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead, noteUnits int) (string, string, []json.RawMessage, teamContextAudit, error) {
+	prompt, system, history, audit, err := prepareTeamTurn(snap, m, input, budget, overhead, noteUnits)
+	if err != nil && err.Error() == "context_limit" && plannerPageSkills(snap.Skills) {
+		snap.Skills = nil
+		return prepareTeamTurn(snap, m, input, budget, overhead, noteUnits)
+	}
+	return prompt, system, history, audit, err
+}
+
+func prepareTeamTurn(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead, noteUnits int) (string, string, []json.RawMessage, teamContextAudit, error) {
 	system := teamSystemPrompt(snap.Instructions, m)
 	if snap.OutputPolicy != "" {
 		system += "\n\n" + snap.OutputPolicy
@@ -130,7 +141,8 @@ func prepareTeamInputWith(snap executionSnapshot, m teamMember, input teamTurnIn
 		return estimateTokens(prompt, rate)+systemTokens+overhead <= budget && len(utf16.Encode([]rune(prompt))) <= 128000
 	}
 	prompt := evidenceUserPrompt(renderTeamPrompt(input, nil), snap.Knowledge, snap.Memory)
-	if !fits(prompt) || len(utf16.Encode([]rune(system))) > 32768 {
+	// The note naming the member's model comes after the system prompt (teams.go), within the same 32,768 units.
+	if !fits(prompt) || len(utf16.Encode([]rune(system)))+noteUnits > 32768 {
 		return "", "", nil, audit, errors.New("context_limit")
 	}
 	start := len(upstream)

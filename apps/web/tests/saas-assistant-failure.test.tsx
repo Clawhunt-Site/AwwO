@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { CANVAS_STORAGE_KEY, emptyDocument, loadDocumentWithStatus, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { planSeedRequest } from '../src/canvas/canvasPlanning';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
+import { canvasText } from '../src/canvas/i18n';
 import { failureRequestKind } from '../src/canvas/nextSteps';
 import { loadRunJournal } from '../src/canvas/runJournal';
 import { resetAllSessions } from '../src/canvas/sessions';
@@ -20,6 +22,9 @@ const sidebar = () => within(document.querySelector('.awwo-planner-sidebar') as 
 const FORMAT = 'Output must be a JSON object keyed by output field IDs';
 let posted: Array<{ scope?: string[] }>;
 let outcome: 'failed' | 'running';
+// The canvas assistant's answer, where a test has it plan; null where it never answers.
+let planned: unknown;
+const frames = (...events: unknown[]) => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
 // What the failed node records: a delivery-format refusal, or its run's code.
 let failedDetail: string;
 const graph = (status: string) => ({ id: 'graph', operationId: loadRunJournal()?.id, status, canvasId: 'canvas', documentVersion: 9,
@@ -31,18 +36,18 @@ const graph = (status: string) => ({ id: 'graph', operationId: loadRunJournal()?
 function bound(node: SessionNode): SessionNode {
   return { ...node, runtime: 'pi', model: 'profile-main', binding: { companyId: tenant.id, agentId: `agent-${node.id}`, agentName: node.title }, issueId: `session-${node.id}` };
 }
-function seed() {
+function seed(frontendTitle = '3D游戏前端实现') {
   const frontend = createAgentTemplate('frontend', { x: 40, y: 40 });
   const review = createAgentTemplate('review', { x: 700, y: 40 });
   const filled = (node: SessionNode) => ({ ...node, contract: { ...node.contract!, inputs: node.contract!.inputs.map(field => ({ ...field, value: field.value || 'given' })) } });
   const doc: CanvasDocument = { ...emptyDocument(), view: { x: 0, y: 0, scale: 1 }, nodes: [
-    bound(filled({ ...frontend, id: 'frontend', title: '3D游戏前端实现' })), bound(filled({ ...review, id: 'review', title: '游戏验收' })),
+    bound(filled({ ...frontend, id: 'frontend', title: frontendTitle })), bound(filled({ ...review, id: 'review', title: '游戏验收' })),
   ], edges: [{ id: 'delivery', fromNode: 'frontend', fromPort: 'out:delivery', toNode: 'review', toPort: 'in:delivery', dataType: 'text' }] };
   canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(doc));
 }
 
 beforeEach(() => {
-  cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); posted = []; outcome = 'failed'; failedDetail = FORMAT;
+  cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); posted = []; outcome = 'failed'; failedDetail = FORMAT; planned = null;
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: vi.fn(async (_name, _options, callback) => callback({ name: 'owned' })) } });
   configureSaaSCanvas({ tenant, canvasId: 'canvas' }); configureSaaSCanvasSave(async () => 9);
@@ -52,18 +57,22 @@ beforeEach(() => {
     if (url.endsWith('/graph-runs') && init.method === 'POST') { posted.push(JSON.parse(String(init.body))); return new Response(JSON.stringify(graph('running')), { status: 202 }); }
     if (url.includes('/graph-runs/graph')) return new Response(JSON.stringify(graph(posted.length > 1 ? 'running' : outcome)));
     if (url.endsWith('/runtime')) return new Response(JSON.stringify({ available: true, plannerAvailable: true, plannerRuntime: 'pi' }));
+    if (planned && url.endsWith('/canvases/canvas/plan') && init.method === 'POST') return new Response(JSON.stringify({ id: 'plan-run' }), { status: 202 });
+    if (planned && url.endsWith('/runs/plan-run/events')) return new Response(frames({ type: 'queued' }, { type: 'running' }, { type: 'completed', text: JSON.stringify(planned) }),
+      { headers: { 'Content-Type': 'text/event-stream' } });
+    if (planned && url.endsWith('/runs/plan-run')) return new Response(JSON.stringify({ id: 'plan-run', status: 'completed', output: JSON.stringify(planned) }));
     return new Response(JSON.stringify({ items: [], models: [] }));
   }));
 });
 afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); configureCanvasStorage('user', 'workspace', 'canvas'); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-async function failedRun() {
-  seed();
+async function failedRun(frontendTitle = '3D游戏前端实现') {
+  seed(frontendTitle);
   render(<CanvasSurface storageMode="cloud" runtimeReadJson={reader} />);
   fireEvent.click(toggle());
   fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: /^运行整张画布/ }));
   await waitFor(() => expect(posted).toHaveLength(1));
-  await waitFor(() => expect(within(sidebar().getByRole('group', { name: '接下来' })).getByText('「3D游戏前端实现」上次运行失败了。')).toBeVisible());
+  await waitFor(() => expect(within(sidebar().getByRole('group', { name: '接下来' })).getByText(`「${frontendTitle}」上次运行失败了。`)).toBeVisible());
 }
 
 async function send(text: string) {
@@ -109,7 +118,8 @@ describe('a message about the last run’s failure', () => {
     fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: '让助手调整画布' }));
     const log = within(sidebar().getByRole('log', { name: '画布对话' }));
     await waitFor(() => expect(log.getByText('「3D游戏前端实现」 上次运行失败了（运行超时：模型迟迟没有给出结果）。请调整画布，让它这次能完成：'
-      + '输出太长，就把工作拆给更多节点或缩小交付范围；超时，就换一个模型或把工作拆给更多节点；模型被拒绝，就换成默认模型。')).toBeVisible());
+      + '输出太长，就把工作拆给更多节点或缩小交付范围；要发给它的内容太多，就把合并拆开，让几个节点各合并其中一部分，或只连它确实用得上的内容，'
+      + '不要断开它本来就要合并的交付；超时，就换一个模型或把工作拆给更多节点；模型被拒绝，就换成默认模型。')).toBeVisible());
   });
 
   it('only explains when asked why', async () => {
@@ -118,6 +128,92 @@ describe('a message about the last run’s failure', () => {
     const log = within(sidebar().getByRole('log', { name: '画布对话' }));
     await waitFor(() => expect(log.getByText(/^「3D游戏前端实现」上次运行失败：交回的结果不符合要求的交付格式.*建议下一步：查看失败原因。$/)).toBeVisible());
     expect(posted).toHaveLength(1);
+  });
+
+  // 2026-10-25: a fix split one page into five nodes, and each began its task with the fix request itself
+  // (「…上次运行失败了（…）。请调整画布…」): a node was told to change the canvas. They carry what the plan gave them.
+  const split = { version: 1, summary: '拆成两个节点', operations: [
+    { type: 'add_node', ref: 'top', templateId: 'general', title: '页面上半部分', acceptanceCriteria: ['写完上半部分'], constraints: ['只写上半部分'] },
+    { type: 'add_node', ref: 'bottom', templateId: 'general', title: '页面下半部分', acceptanceCriteria: ['写完下半部分'], constraints: ['只写下半部分'] },
+  ] };
+  const constraintsOf = async (title: string) => {
+    let constraints: string[] | undefined;
+    await waitFor(() => {
+      const node = (loadDocumentWithStatus().doc.nodes as SessionNode[]).find(item => item.title === title);
+      expect(node).toBeTruthy();
+      constraints = (node!.taskFrame as { constraints: string[] } | undefined)?.constraints;
+    });
+    return constraints;
+  };
+
+  it('gives the nodes a fix adds the constraints the plan wrote, not the fix request', async () => {
+    failedDetail = 'output_limit';
+    planned = split;
+    await failedRun();
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: '让助手调整画布' }));
+    expect(await constraintsOf('页面上半部分')).toEqual(['只写上半部分']);
+    expect(await constraintsOf('页面下半部分')).toEqual(['只写下半部分']);
+  });
+
+  it('does so for a failed node whose title holds quotes of its own', async () => {
+    failedDetail = 'output_limit';
+    planned = split;
+    await failedRun('生成「你好」横幅');
+    fireEvent.click(within(sidebar().getByRole('group', { name: '接下来' })).getByRole('button', { name: '让助手调整画布' }));
+    expect(await constraintsOf('页面上半部分')).toEqual(['只写上半部分']);
+  });
+
+  it('still gives the nodes a typed request adds that request first', async () => {
+    planned = split;
+    await failedRun();
+    await send('把前端拆成上下两个节点');
+    expect(await constraintsOf('页面上半部分')).toEqual(['把前端拆成上下两个节点', '只写上半部分']);
+  });
+});
+
+describe('the request the nodes a plan adds take', () => {
+  const fix = (locale: 'zh' | 'en', nodes: string, reason: string) => canvasText(locale, 'assistant.fixRequest', { nodes, reason });
+
+  it('leaves out the canvas’s own fix request, in either language, whatever its nodes and reason', () => {
+    expect(planSeedRequest(fix('zh', '「手机网页版前端开发」', '这次输出（包括模型的思考）超过了一次运行的上限，没有写完'))).toBe('');
+    expect(planSeedRequest(fix('zh', '「教练页」、「家长页」', '这次要发给模型的内容超出了它一次能读的量，没有运行'))).toBe('');
+    expect(planSeedRequest(fix('en', '“Coach page”', 'the answer was longer than one run (thinking included) can hold'))).toBe('');
+  });
+
+  it('keeps what the reader wrote around it, on its own line or the same one', () => {
+    const own = '把登录页的颜色改成蓝色';
+    expect(planSeedRequest(`${own}\n${fix('zh', '「登录页」', '运行超时：模型迟迟没有给出结果')}`)).toBe(own);
+    // Review: a wildcard for the node names took the reader's words before them on the same line along with it.
+    expect(planSeedRequest(`Keep exactly 6 chapters. ${fix('en', '“Login”', 'Timeout (worker delayed)')}`)).toBe('Keep exactly 6 chapters.');
+    expect(planSeedRequest(`章节必须正好 6 章。${fix('zh', '「登录页」', '运行超时')}再加一个封面节点`)).toBe('章节必须正好 6 章。再加一个封面节点');
+    expect(planSeedRequest(own)).toBe(own);
+    expect(planSeedRequest('「登录页」上次运行失败了，能帮我看看吗')).toBe('「登录页」上次运行失败了，能帮我看看吗');
+  });
+
+  // Review: a node title holding quotes of its own was not matched, so the request went back into the new nodes' task.
+  it('takes out word for word one the page wrote, whatever its node titles hold', () => {
+    for (const written of [fix('en', '“Create “Hello” banner”', 'Timeout'), fix('zh', '「生成「你好」横幅」', '运行超时')]) {
+      expect(planSeedRequest(written)).toBe(written);
+      expect(planSeedRequest(written, [written])).toBe('');
+      expect(planSeedRequest(`再加一个封面节点\n${written}`, ['unrelated', written])).toBe('再加一个封面节点');
+    }
+  });
+
+  // Review: one node's request is the end of the request for it and another failed the same way.
+  it('takes out the longer of two copies first, so no name is left behind', () => {
+    for (const [locale, both, one] of [['zh', '「A」、「B」', '「B」'], ['en', '“A”, “B”', '“B”']] as const) {
+      const together = fix(locale, both, 'the same reason');
+      const alone = fix(locale, one, 'the same reason');
+      expect(together.endsWith(alone)).toBe(true);
+      expect(planSeedRequest(together, [alone, together])).toBe('');
+      expect(planSeedRequest(`own words\n${alone}`, [alone, together])).toBe('own words');
+    }
+  });
+
+  it('leaves out one whose reason runs over several lines, and one written before 2026-10-25', () => {
+    expect(planSeedRequest(fix('en', '“Login”', 'Timeout\nplease retry'))).toBe('');
+    expect(planSeedRequest('「手机网页版前端开发」 上次运行失败了（这次输出（包括模型的思考）超过了一次运行的上限，没有写完）。请调整画布，让它这次能完成：'
+      + '输出太长，就把工作拆给更多节点或缩小交付范围；超时，就换一个模型或把工作拆给更多节点；模型被拒绝，就换成默认模型。')).toBe('');
   });
 });
 

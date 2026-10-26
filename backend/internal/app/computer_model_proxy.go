@@ -493,11 +493,12 @@ func (a *App) logComputerCall(lease *computerLease, call, status int, body []byt
 // computerSizeRefusal says whether the worker answered that the call's provider refused it as larger than its model's
 // window before any work (the label context_length_exceeded: apps/computer-model.ts reads it from the provider's error
 // there, and the Bedrock bridge from AWS's, apps/context-overflow.ts; never relayed): a call the API's estimate let
-// through but the model did not take. Only a refusal of the request with a status 400, 413 or 422, before any stream (a
-// refusal inside a 200 may follow work no one sees), never a rate limit: a provider's only with the detail
-// before-output, the worker's word that its body carries no work (no usage that counts anything, none of an answer); a
-// provider's own code without it (beside work, inside a 200, or an older worker's label) is a call that did work. AWS's
-// refusal comes before its stream begins (a refusal after is stream:error:…) in a body the bridge writes itself.
+// through but the model did not take. Only a refusal of the request with a status 400 or 413, as the workers take (not
+// a 422, whatever an older worker labelled it: owner 2026-10-25), before any stream (a refusal inside a 200 may follow
+// work no one sees), never a rate limit: a provider's only with the detail before-output, the worker's word that its
+// body carries no work (no usage that counts anything, none of an answer); a provider's own code without it (beside
+// work, inside a 200, or an older worker's label) is a call that did work. AWS's refusal comes before its stream begins
+// (a refusal after is stream:error:…) in a body the bridge writes itself.
 func computerSizeRefusal(status int, body []byte) bool {
 	code, reason, detail := computerWorkerError(body)
 	if status != 502 || code != "PROVIDER_ERROR" {
@@ -506,7 +507,7 @@ func computerSizeRefusal(status int, body []byte) bool {
 	switch reason {
 	case "bedrock:400:context_length_exceeded":
 		return true
-	case "provider:400:context_length_exceeded", "provider:413:context_length_exceeded", "provider:422:context_length_exceeded":
+	case "provider:400:context_length_exceeded", "provider:413:context_length_exceeded":
 		return detail == "before-output"
 	}
 	return false

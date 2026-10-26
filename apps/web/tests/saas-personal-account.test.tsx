@@ -502,3 +502,49 @@ it('never shows a deleted connection again when readback fails and the user clos
   expect(screen.queryByText('Removed connection')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Remove connection' })).toBeNull();
 });
+
+// AwwO 本地版's catalog: AwwO 云端 first, with the online keys page (connections.go).
+const cloudCatalog = {
+  ...catalog,
+  providers: [{ id: 'awwo', name: 'AwwO 云端 · AwwO Cloud', runtimes: ['openai-agents', 'pi'] }, ...providers],
+  cloudKeysURL: 'https://awwo.clawhunt.store/?account=relay',
+};
+
+it('offers AwwO Cloud first in the local edition: a connection key made online, what its calls count against, and the keys page', async () => {
+  history.replaceState(null, '', '/?account=engines');
+  const key = 'awwo_rk_' + 'A'.repeat(43);
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(response(cloudCatalog))
+    .mockResolvedValueOnce(response({ id: 'cloud' }, 201))
+    .mockResolvedValueOnce(response({ ...cloudCatalog, items: [{ id: 'cloud', name: 'AwwO 云端 · AwwO Cloud', provider: 'awwo', runtime: 'openai-agents', models: ['bedrock.claude-opus-5-5'], hasKey: true }] }));
+  vi.stubGlobal('fetch', fetch);
+  gate();
+  await screen.findByText('Connect your first engine');
+  const input = screen.getByLabelText('Connection key');
+  expect(screen.getByRole('link', { name: /Make a key on the online AwwO/ })).toHaveAttribute('href', 'https://awwo.clawhunt.store/?account=relay');
+  expect(screen.getByText(/AwwO’s server in Tokyo/)).toBeTruthy();
+  expect(screen.getByText(/counts in the key’s online workspace/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /Open LLM Gate/ })).toBeNull();
+  // A key that is not one is said to be so, and cannot be sent.
+  fireEvent.change(input, { target: { value: 'sk-something-else-entirely' } });
+  expect(screen.getByText(/This is not a connection key/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Verify and save' })).toBeDisabled();
+  fireEvent.change(input, { target: { value: '  ' + key + ' ' } });
+  expect(screen.queryByText(/This is not a connection key/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Verify and save' }));
+  expect(await screen.findByText(/Connection key saved/)).toBeTruthy();
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ provider: 'awwo', runtime: 'openai-agents', name: '', apiKey: key });
+  // Any other provider: its API key, and the LLM Gate card.
+  fireEvent.change(screen.getByLabelText('Model provider'), { target: { value: 'llmgate' } });
+  expect(screen.getByLabelText('API Key')).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Open LLM Gate/ })).toBeTruthy();
+});
+
+it('links to no keys page it was not given in the expected form', () => {
+  for (const url of [undefined, 'javascript:alert(1)', 'https://elsewhere.example/path?account=relay', 'https://u@x.example/?account=relay', 'https://x.example/?account=engines']) {
+    render(<SaaSPreferencesProvider><ConnectionSettings catalog={{ ...cloudCatalog, cloudKeysURL: url }} onChange={vi.fn()} onboarding={false} /></SaaSPreferencesProvider>);
+    expect(screen.queryByRole('link', { name: /Make a key on the online AwwO/ })).toBeNull();
+    expect(screen.getByLabelText('Connection key')).toBeTruthy();
+    cleanup();
+  }
+});

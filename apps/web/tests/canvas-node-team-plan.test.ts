@@ -23,7 +23,7 @@ function agent(id = 'writer', patch: Partial<SessionNode> = {}): SessionNode {
 const doc = (...nodes: CanvasNode[]): CanvasDocument => ({ ...emptyDocument(), nodes });
 const apply = (document: CanvasDocument, value: CanvasPlan, teams = true, locale: 'zh' | 'en' = 'zh') => {
   markPlanOffersTeams(value);
-  return applyCanvasPlan(document, value, locale, '', undefined, undefined, false, teams);
+  return applyCanvasPlan(document, value, locale, '', undefined, undefined, false, false, teams);
 };
 const teamOf = (document: CanvasDocument, id = 'writer') => (document.nodes.find(node => node.id === id) as SessionNode).team;
 const translate = (locale: 'zh' | 'en'): CanvasTranslate => (key, values) => canvasText(locale, key, values);
@@ -153,7 +153,7 @@ describe('applying set_team', () => {
 
   it('lets a later set_model move a team this plan gave a node, as if the model had been set first', () => {
     const choices = { choices: [{ runtime: 'pi', model: 'pi-model', available: true }] };
-    const at = (operations: unknown[]) => applyCanvasPlan(doc(), offered(...operations), 'zh', '', undefined, choices, false, true);
+    const at = (operations: unknown[]) => applyCanvasPlan(doc(), offered(...operations), 'zh', '', undefined, choices, false, false, true);
     const add = { type: 'add_node', ref: 'n', templateId: 'general', title: '团队' };
     for (const operations of [[add, template('draft-review', 'n'), { type: 'set_model', nodeId: 'n', model: 'pi-model' }],
       [add, { type: 'set_model', nodeId: 'n', model: 'pi-model' }, template('draft-review', 'n')]]) {
@@ -165,7 +165,7 @@ describe('applying set_team', () => {
     }
     // A team the plan did not make, or one with a member set up its own way, still runs as it is set up.
     const existing = agent('writer', { runtime: 'openai-agents', model: 'own' }); existing.team = createNodeTeam(existing);
-    const kept = applyCanvasPlan(doc(existing), plan({ type: 'set_model', nodeId: 'writer', model: 'pi-model' }), 'zh', '', undefined, choices, false, true);
+    const kept = applyCanvasPlan(doc(existing), plan({ type: 'set_model', nodeId: 'writer', model: 'pi-model' }), 'zh', '', undefined, choices, false, false, true);
     expect((kept.doc.nodes[0] as SessionNode).model).toBe('own');
     expect(kept.adjustments).toEqual(['没有改动「撰写」的模型：它是团队或工作区 Agent，按自己的设置运行']);
   });
@@ -177,7 +177,7 @@ describe('applying set_team', () => {
     existing.team = { ...team, members: [{ ...team.members[0], name: '撰写者', tools: ['calculator'] }, team.members[1]] };
     const toPi = { type: 'set_model', nodeId: 'writer', model: 'pi-model' };
     for (const operations of [[template(), toPi], [toPi, template()], [template(), toPi, template()], [template(), { type: 'set_model', nodeId: 'writer', model: 'default' }]]) {
-      const applied = applyCanvasPlan(doc(existing), offered(...operations), 'zh', '', undefined, choices, false, true);
+      const applied = applyCanvasPlan(doc(existing), offered(...operations), 'zh', '', undefined, choices, false, false, true);
       const node = applied.doc.nodes[0] as SessionNode;
       expect([node.runtime, node.team?.runtime, node.team?.members[0].tools]).toEqual(['openai-agents', 'openai-agents', ['calculator']]);
       expect(validateNodeTeam(node.team!)).toEqual([]);
@@ -187,7 +187,7 @@ describe('applying set_team', () => {
 
   it('never leaves a team on another runtime than its node, for a model or a node on an engine that runs no team', () => {
     const choices = { choices: [{ runtime: 'later', model: 'box', available: true }] };
-    const at = (...operations: unknown[]) => applyCanvasPlan(doc(agent()), offered(...operations), 'zh', '', undefined, choices, false, true);
+    const at = (...operations: unknown[]) => applyCanvasPlan(doc(agent()), offered(...operations), 'zh', '', undefined, choices, false, false, true);
     const toBox = { type: 'set_model', nodeId: 'writer', model: 'box' };
     const kept = at(template(), toBox);
     expect([(kept.doc.nodes[0] as SessionNode).runtime, teamOf(kept.doc)?.runtime]).toEqual(['pi', 'pi']);
@@ -214,7 +214,7 @@ describe('applying set_team', () => {
 
   it('applies set_team only from a plan whose request offered it, whatever the host runs now', () => {
     const before = doc(agent());
-    const unoffered = applyCanvasPlan(before, plan(template()), 'zh', '', undefined, undefined, false, true);
+    const unoffered = applyCanvasPlan(before, plan(template()), 'zh', '', undefined, undefined, false, false, true);
     expect(unoffered.doc.nodes).toEqual(before.nodes);
     expect(unoffered.adjustments).toEqual(['没有给「撰写」配团队：这份方案所依据的请求没有提供协作团队配置']);
     expect(planOffersTeams(offered(template()))).toBe(true);

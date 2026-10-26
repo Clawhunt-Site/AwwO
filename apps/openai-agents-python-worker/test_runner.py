@@ -96,10 +96,21 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         if self.mode == "too_long_unreadable":
             # The same refusal in a body that is not JSON (its last brace missing).
             return web.Response(status=400, content_type="application/json", text=json.dumps({"error": too_long})[:-1])
+        # The Bedrock bridge's answer to a read timeout (bedrock_bridge._error_body), sent by a provider that is not it.
+        stall = {"message": "Bedrock sent nothing for too long", "type": "ReadTimeoutError", "code": "ReadTimeoutError", "status": 504}
+        if self.mode == "bridge_timeout":
+            return web.json_response({"error": stall}, status=504)
+        if self.mode == "reply":
+            # An answer of the test's own: its status, content type and body.
+            status, content_type, body = self.reply
+            return web.Response(status=status, headers={"Content-Type": content_type}, body=body.encode())
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         if self.compress:
             response.enable_compression()
         await response.prepare(request)
+        if self.mode == "bridge_timeout_frame":
+            await response.write(f"data: {json.dumps({'error': stall})}\n\n".encode())
+            return response
         if self.mode.startswith("too_long_"):
             # The same refusal as a frame inside the stream (with its status, as the Bedrock bridge sends one): first,
             # or after the model began (its reasoning, or usage that counts something), in the same write as it.
@@ -270,6 +281,34 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("131072", json.dumps(events))
                 self.assertEqual(len([e for e in events if e["type"] in ("completed", "failed", "cancelled")]), 1)
 
+    async def test_a_size_refusal_is_read_as_the_other_workers_read_one(self):
+        # Through the real SDK: the provider's own words only (its error's message, code or type; never words the SDK's
+        # message spells out from elsewhere in the body), and work looked for anywhere in a body of at most 64 KiB that
+        # is not typed a stream, as the JavaScript worker and the Pi child read one.
+        too_long = "This model's maximum context length is 131072 tokens. However, you requested 140000 tokens."
+        for status, content_type, body, code in [
+            (413, "application/json", {"type": "error", "error": {"type": "request_too_large", "message": "Request exceeds the maximum size"}}, "MODEL_CONTEXT_LIMIT"),
+            (400, "application/json", {"error": too_long}, "MODEL_CONTEXT_LIMIT"),
+            (400, "application/json", {"error": {"code": "invalid_request", "details": {"prompt": "Explain maximum context length"}}}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", {"message": too_long, "code": "context_length_exceeded"}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", {"error": {"message": too_long, "details": {"usage": {"prompt_tokens": 123}}}}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", {"error": {"message": too_long}, "usage": {"cache": {"tokens": {"read": 123}}}}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", {"error": {"message": too_long}, "usageMetadata": {"promptTokenCount": 7}}, "MODEL_REQUEST_REJECTED"),
+            (400, "Text/Event-Stream", {"error": {"message": too_long, "code": "context_length_exceeded"}}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", {"error": {"message": f"{too_long} {'漢' * 30_000}"}}, "MODEL_REQUEST_REJECTED"),
+            (400, "application/json", '{"error":{"code":"context_length_exceeded"},"usage":{"prompt_tokens":NaN}}', "MODEL_REQUEST_REJECTED"),
+            # A 422 is another refusal whatever its words, as in the other workers (owner 2026-10-25).
+            (422, "application/json", {"error": {"message": too_long, "code": "context_length_exceeded"}}, "MODEL_REQUEST_REJECTED"),
+        ]:
+            with self.subTest(status=status, body=str(body)[:100]):
+                self.mode, self.reply = "reply", (status, content_type, body if isinstance(body, str) else json.dumps(body, ensure_ascii=False))
+                before = len(self.calls)
+                events = await self.collect()
+                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", code), events)
+                self.assertEqual(len(self.calls), before + 1)
+                for words in ("131072", "maximum size", "Explain"):
+                    self.assertNotIn(words, json.dumps(events))
+
     async def test_chat_terminal_failures_cover_same_chunk_empty_and_missing_finish(self):
         for text, finish, done, code in [
             ("Hello", "length", True, "MODEL_OUTPUT_LIMIT"),
@@ -332,6 +371,16 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(set(obs["timing"]), {"setupMs", "providerMs", "providerTtftMs", "workerTotalMs", "workerFirstDeltaMs"})
                 self.assertLessEqual(obs["timing"]["providerMs"], obs["timing"]["workerTotalMs"])
                 self.assertLessEqual(obs["timing"]["providerTtftMs"], obs["timing"]["providerMs"])
+
+    async def test_another_providers_answer_shaped_as_the_bridges_read_timeout_is_no_stall(self):
+        # Only a call the Bedrock bridge served can have stalled (errors.stalled, 2026-10-25), which the API does not
+        # charge: another provider's 504, or an error frame inside its stream, with the bridge's very body is the
+        # service's outage, charged as before.
+        for mode in ("bridge_timeout", "bridge_timeout_frame"):
+            with self.subTest(mode=mode):
+                self.mode = mode
+                events = await self.collect()
+                self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_UNAVAILABLE"), events)
 
     async def test_partial_text_and_observed_usage_survive_timeout_and_cancel(self):
         for cancelled in (False, True):

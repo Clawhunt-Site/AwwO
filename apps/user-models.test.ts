@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import test from "node:test";
-import { bindUserModel } from "./user-models.ts";
+import { bindUserModel, callsCloudRelay, cloudRelayBase } from "./user-models.ts";
 import { createOpenAIAgentsServer } from "./openai-agents-worker/server.mjs";
 import { createPiServer } from "./pi-worker/server.mjs";
 import { loadConfig as loadAgents } from "./openai-agents-worker/config.mjs";
@@ -80,6 +80,74 @@ const capable = () => ({
   baseURL: "https://api.openai.com/v1",
   protocol: "responses",
   structuredOutput: true as const,
+});
+
+const cloud = (change: Record<string, unknown> = {}) => ({
+  ...request(),
+  userModel: {
+    ...profile("awwo_rk_" + "a".repeat(43)),
+    provider: "awwo",
+    model: "bedrock.claude-opus-5-5",
+    baseURL: "https://awwo.clawhunt.store/api/v1/relay/v1",
+    contextWindow: 200000,
+    maxTokens: 32000,
+    proseBytesPerToken: 3.4,
+    ...change,
+  },
+});
+
+test("an AwwO 云端 model binds to the hosted AwwO's relay with the hosted limits and rate, which no other model carries", () => {
+  const config = { userCredentials: true, ready: true, models: [{ apiKey: "operator-key" }] };
+  for (const runtime of ["pi", "openai-agents"]) {
+    const bound = bindUserModel(config, cloud(), runtime).models[0] as Record<string, unknown>;
+    assert.equal(bound.provider, "openai");
+    assert.equal(bound.baseURL, "https://awwo.clawhunt.store/api/v1/relay/v1");
+    assert.equal(bound.contextWindow, 200000);
+    assert.equal(bound.maxTokens, 32000);
+    assert.equal(bound.proseBytesPerToken, 3.4);
+    assert.ok(callsCloudRelay(bound.baseURL as string));
+  }
+  assert.equal(callsCloudRelay("https://api.clawhunt.site/v1"), false);
+  for (const change of [
+    { baseURL: "https://elsewhere.example/api/v1/relay/v1" },
+    { contextWindow: 1000 },
+    { contextWindow: 200000.5 },
+    { maxTokens: 199800 },
+    { maxTokens: 0 },
+    { proseBytesPerToken: 9 },
+    { protocol: "responses" },
+    { structuredOutput: true },
+    { reasoningEfforts: ["high"] },
+  ]) {
+    assert.throws(() => bindUserModel(config, cloud(change), "pi"), Error, JSON.stringify(change));
+  }
+  // The other connections keep their fixed limits and take no rate.
+  assert.throws(() => bindUserModel(config, { ...request(), userModel: { ...profile(), proseBytesPerToken: 2 } }, "pi"));
+  assert.throws(() => bindUserModel(config, { ...request(), userModel: { ...profile(), contextWindow: 200000 } }, "pi"));
+});
+
+test("the relay's base is the local edition's cloud origin, an HTTPS one or one on this computer", () => {
+  assert.equal(cloudRelayBase({}), "https://awwo.clawhunt.store/api/v1/relay/v1");
+  assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "http://127.0.0.1:18187/" }), "http://127.0.0.1:18187/api/v1/relay/v1");
+  assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "https://staging.example" }), "https://staging.example/api/v1/relay/v1");
+  assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "http://[::1]:18187" }), "http://[::1]:18187/api/v1/relay/v1");
+  assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: "https://[2001:db8::1]:8443" }), "https://[2001:db8::1]:8443/api/v1/relay/v1");
+  for (const origin of ["https://relay_test.example", "https://bücher.example"]) assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: origin }), origin + "/api/v1/relay/v1");
+  for (const origin of ["http://elsewhere.example", "https://x.example/path", "https://u:p@x.example", "nonsense", "HTTPS://x.example", "http://[2001:db8::1]",
+    "https://x.example:99999", "https://x.example?", "https://x.example#", "https://"]) {
+    assert.equal(cloudRelayBase({ AWWO_LOCAL_CLOUD_ORIGIN: origin }), null, origin);
+  }
+  const saved = process.env.AWWO_LOCAL_CLOUD_ORIGIN;
+  process.env.AWWO_LOCAL_CLOUD_ORIGIN = "http://127.0.0.1:18187";
+  try {
+    const config = { userCredentials: true, ready: true, models: [{ apiKey: "operator-key" }] };
+    const bound = bindUserModel(config, cloud({ baseURL: "http://127.0.0.1:18187/api/v1/relay/v1" }), "pi").models[0] as Record<string, unknown>;
+    assert.equal(bound.baseURL, "http://127.0.0.1:18187/api/v1/relay/v1");
+    assert.throws(() => bindUserModel(config, cloud(), "pi"), Error, "the default origin is not this test's");
+  } finally {
+    if (saved === undefined) delete process.env.AWWO_LOCAL_CLOUD_ORIGIN;
+    else process.env.AWWO_LOCAL_CLOUD_ORIGIN = saved;
+  }
 });
 
 test("structuredOutput is an optional eleventh field: literally true, only on openai-agents, passed through unchanged", () => {

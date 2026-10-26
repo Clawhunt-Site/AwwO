@@ -31,6 +31,9 @@ export const SOURCES = Object.freeze([
     files: ['third_party/adapted/claude-mem/NOTICE', 'third_party/adapted/claude-mem/LICENSE'] },
   { name: 'Berd (block/berd)', match: /\bBerd\b/, files: ['third_party/adapted/berd/LICENSE'] },
   { name: 'Pi coding agent (earendil-works/pi)', match: /\bPi coding agent\b/, files: ['third_party/clawwork/LICENSE'] },
+  { name: 'open-design (nexu-io/open-design)', match: /\bopen-design\b/, files: ['third_party/adapted/open-design/LICENSE'] },
+  { name: 'refero_skill (referodesign/refero_skill)', match: /\brefero_skill\b/, files: ['third_party/adapted/refero-skill/LICENSE'],
+    note: 'open-design adapted its typography, colour and anti-template rules from this project; AwwO adapts them from open-design.' },
 ]);
 
 const PLAIN_CLAUSES = Object.freeze([/^modified for AwwO$/, /^trimmed for AwwO$/, /^author \S.*$/]);

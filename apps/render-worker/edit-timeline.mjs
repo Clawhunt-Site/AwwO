@@ -19,6 +19,8 @@ export const EDIT_LIMITS = Object.freeze({
   maxStills: 150,
   maxSilences: 200,
   maxCardSecondsTotal: 120,
+  maxSoundPages: 8,
+  maxSoundPageSeconds: 300,
   maxSubtitleBytes: 900 * 1024,
   maxSubtitleLines: 3,
   maxInputSide: 4096,
@@ -138,10 +140,24 @@ function placement(raw, field, anchors) {
   return { at: number(raw.at, `${field}.at`, 0, EDIT_LIMITS.maxSecondsCeiling) };
 }
 
+/**
+ * A sound made by a page instead of a wired file: `page` is a complete HTML document whose window.renderAudio
+ * synthesizes it (edit-run.mjs renders it before the timeline is placed), `seconds` how long that sound is.
+ */
+function soundPage(raw, field) {
+  if (raw.source !== undefined) throw invalid(field, `${field} is a wired file (source) or a page that makes its sound (page), not both`);
+  const html = raw.page;
+  if (typeof html !== 'string' || html.includes('\0') || Buffer.byteLength(html, 'utf8') > EDIT_LIMITS.maxCardHtmlBytes || !pageShape(html)) {
+    throw invalid(`${field}.page`, `${field}.page must be a complete HTML document of at most 256 KiB`);
+  }
+  return { html, seconds: number(raw.seconds, `${field}.seconds`, 0.5, EDIT_LIMITS.maxSoundPageSeconds) };
+}
+
 function audioItem(raw, track, index, names, anchors) {
   const field = `tracks.${track}[${index}]`;
   if (!isObject(raw)) throw invalid(field, `${field} must be an object`);
-  if (typeof raw.source !== 'string' || !names.has(raw.source)) throw invalid(`${field}.source`, `${field}.source must name a wired file`);
+  const page = raw.page === undefined ? null : soundPage(raw, field);
+  if (!page && (typeof raw.source !== 'string' || !names.has(raw.source))) throw invalid(`${field}.source`, `${field}.source must name a wired file`);
   if (raw.id !== undefined && (typeof raw.id !== 'string' || !ITEM_ID.test(raw.id))) throw invalid(`${field}.id`, `${field}.id: letters, digits, . _ -`);
   const start = number(raw.in, `${field}.in`, 0, EDIT_LIMITS.maxSecondsCeiling, 0);
   const end = optionalNumber(raw.out, `${field}.out`, 0, EDIT_LIMITS.maxSecondsCeiling);
@@ -149,12 +165,17 @@ function audioItem(raw, track, index, names, anchors) {
   const loop = raw.loop === undefined ? false : raw.loop;
   if (typeof loop !== 'boolean' || (loop && track === 'dialogue')) throw invalid(`${field}.loop`, `${field}.loop is true or false (music and sfx only)`);
   if (loop && end === undefined) throw invalid(`${field}.out`, `${field}.out is required with loop (how long it plays)`);
+  // A page's sound is exactly `seconds` long, so what it plays is known before it is rendered.
+  if (page && start >= page.seconds) throw invalid(`${field}.in`, `${field}.in is past the end of its page's ${page.seconds} s sound`);
+  if (page && !loop && end !== undefined && end > page.seconds + EDIT_LIMITS.durationSlack) {
+    throw invalid(`${field}.out`, `${field}.out is past the end of its page's ${page.seconds} s sound`);
+  }
   const fx = raw.fx === undefined ? 'dry' : raw.fx;
   if (track === 'dialogue' ? !DIALOGUE_FX.includes(fx) : raw.fx !== undefined) {
     throw invalid(`${field}.fx`, `${field}.fx is one of ${DIALOGUE_FX.join(', ')} (dialogue only)`);
   }
   return {
-    id: raw.id ?? `${track}-${index + 1}`, track, source: raw.source, ...placement(raw, field, anchors),
+    id: raw.id ?? `${track}-${index + 1}`, track, ...(page ? { page, trackIndex: index } : { source: raw.source }), ...placement(raw, field, anchors),
     in: start, out: end, loop, fx,
     gainDb: number(raw.gainDb, `${field}.gainDb`, -60, 24, 0),
     fadeIn: number(raw.fadeIn, `${field}.fadeIn`, 0, 30, 0),
@@ -239,6 +260,9 @@ export function normalizeTimeline(raw, names) {
   }
   const audio = AUDIO_TRACKS.flatMap((track) => array(raw.tracks[track], `tracks.${track}`, EDIT_LIMITS.maxAudioItems)
     .map((item, index) => audioItem(item, track, index, names, ids)));
+  if (audio.filter((entry) => entry.page).length > EDIT_LIMITS.maxSoundPages) {
+    throw invalid('tracks', `at most ${EDIT_LIMITS.maxSoundPages} sounds made by pages`);
+  }
   const clipSounds = video.filter((item) => item.kind === 'clip' && item.clipAudioDb !== null).length;
   if (audio.length + clipSounds > EDIT_LIMITS.maxAudioItems) throw invalid('tracks', `at most ${EDIT_LIMITS.maxAudioItems} sounds in all (clips' own sound included)`);
   const subtitles = array(raw.tracks.subtitles, 'tracks.subtitles', EDIT_LIMITS.maxSubtitles).map((item, index) => subtitle(item, index, ids));

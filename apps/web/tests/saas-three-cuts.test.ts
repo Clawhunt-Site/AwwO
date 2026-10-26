@@ -305,7 +305,7 @@ describe('the code three.js took from Shadertoy, Stack Exchange sites and OpenPr
   it('stop a real hosted build that would take in another file of three.js or an add-on with code from Stack Overflow, or inline what they cut as a base64 URL', async () => {
     // three's own source file of the dithering chunk, small enough for Vite to inline: the load hook leaves it alone
     // (none of the files it cuts), and the check of the output stops it as a file of three's sources. The messages
-    // name a file by its absolute path, which may hold spaces (the owner's checkout is under "Bobo's Coding cache").
+    // name a file by its absolute path, which may hold spaces (the owner's checkout is under "work").
     const chunk = 'three/src/renderers/shaders/ShaderChunk/dithering_pars_fragment.glsl.js';
     await expect(hostedBuild(`import u from '${chunk}?url&inline';\nglobalThis.awwoInlined = u;\n`))
       .rejects.toThrow(/holds .*node_modules\/three\/src\/renderers\/shaders\/ShaderChunk\/dithering_pars_fragment\.glsl\.js\S*: of three\.js the builds take in only/);

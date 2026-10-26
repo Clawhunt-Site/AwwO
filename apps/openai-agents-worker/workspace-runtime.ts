@@ -129,12 +129,13 @@ const definitions = [
   { name: 'workspace_archive', description: 'Publish the actual source project as a ZIP into a file output field. Includes README and tests you wrote. Does not mark unrun tests as passed.', properties: { field: property('string', 'Declared file output field ID') } },
 ] as const;
 export const WORKSPACE_CONTEXT_RESERVE = 8192;
-/** The OpenAI client's wait for a model call's first byte. Bedrock answers a Claude call only once the model has thought
- *  (the response headers come with the first event), and Opus 5.5 can think for longer than the OpenAI SDK's default 10
- *  minutes: PALLWARD's Rigs builder was cut at 600 s (DEADLINE_EXCEEDED, 2026-10-18). This no longer cuts first: a
- *  Bedrock call's silent wait is bounded by the bridge's HTTP/2 session idle limit (BEDROCK_STREAM_IDLE_MS, 15 minutes,
- *  reported as MODEL_UNAVAILABLE), other providers' by fetch's own header timeout, and every call by the run's limit and
- *  its cancel. */
+/** The OpenAI client's wait for a model call's first byte. The bridge answers a Bedrock call once its stream has its first
+ *  event, which a Claude model sends only once it has thought (AWS's own headers come within seconds: a production probe
+ *  of 2026-10-21 had Opus 5.5's at 2.3 s and its first event at 194.9 s), and Opus 5.5 can think for longer than the
+ *  OpenAI SDK's default 10 minutes: PALLWARD's Rigs builder was cut at 600 s (DEADLINE_EXCEEDED, 2026-10-18). This no
+ *  longer cuts first: a Bedrock call's silent wait is bounded by the bridge's HTTP/2 session idle limit
+ *  (BEDROCK_STREAM_IDLE_MS, 15 minutes; once AWS has answered, the bridge's connection_error, so MODEL_ERROR), other
+ *  providers' by fetch's own header timeout, and every call by the run's limit and its cancel. */
 export const WORKSPACE_MODEL_TIMEOUT_MS = 30 * 60_000;
 /** What a run keeps of a workspace it cannot keep: an empty ZIP (the end-of-central-directory record alone). */
 export const EMPTY_WORKSPACE_SNAPSHOT: WireFile = Object.freeze({ path: 'workspace.zip', encoding: 'base64', byteLength: 22,

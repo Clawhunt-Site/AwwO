@@ -42,6 +42,7 @@ type App struct {
 	tasks       sync.WaitGroup
 	closed      bool
 	lease       *pgxpool.Conn
+	leasePID    int32 // the backend pid of lease's connection, which holds the worker lock (relayLeaseHeld)
 	leaseCancel context.CancelFunc
 	leaseLost   atomic.Bool
 	authSlots   chan struct{}
@@ -90,6 +91,12 @@ type App struct {
 	canvasSaves     chan struct{}
 	// canvasSaveWaiters counts the saves waiting for a turn, each holding its decoded body (at most maxCanvasSaveWaiters).
 	canvasSaveWaiters atomic.Int32
+	// relayCatalogCache holds the relay worker's catalog for a moment, and relayLimits bound what relayed calls take of
+	// this site at once (relay_limits.go).
+	relayCatalogCache relayCatalogCache
+	relayLimits       relayLimits
+	// cloudModelCache holds the hosted models' limits of the local edition's AwwO 云端 connections (cloud_connections.go).
+	cloudModelCache cloudModelCache
 }
 type rateEntry struct {
 	start time.Time
@@ -122,7 +129,7 @@ func (a *App) Start(ctx context.Context) error {
 		return e
 	}
 	var locked bool
-	if e = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended(current_database() || ':' || current_schema(),84321002))").Scan(&locked); e != nil || !locked {
+	if e = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended(current_database() || ':' || current_schema(),84321002)),pg_backend_pid()").Scan(&locked, &a.leasePID); e != nil || !locked {
 		conn.Release()
 		if e != nil {
 			return e
@@ -181,7 +188,7 @@ func (a *App) Start(ctx context.Context) error {
 	if e = interruptWebReads(ctx, tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET status='interrupted',usage_status='unknown',usage_source='none',usage_reason='worker_lost',cost_status='unknown',failure_class='restart',completed_at=clock_timestamp(),completed_xid=pg_current_xact_id(),updated_at=now(),credit_charge="+abandonedCreditCharge+" WHERE status='running'"); e != nil {
+	if _, e = tx.Exec(ctx, "UPDATE model_invocations SET "+abandonedInvocation+" WHERE status='running'"); e != nil {
 		return e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -225,6 +232,10 @@ func (a *App) Start(ctx context.Context) error {
 	a.resumeMedia(resume)
 	a.startMediaSweeper(watch)
 	a.startPlanSync(watch)
+	a.startRelaySweeper(watch)
+	if e = a.warmCloudModels(ctx); e != nil {
+		a.log.Warn("the AwwO 云端 connections' models could not be read at start", "error_type", "database")
+	}
 	return a.recoverGraphs(ctx)
 }
 func (a *App) Close() {
@@ -313,6 +324,7 @@ func (a *App) Handler() http.Handler {
 	a.registerWikiCompilerRoutes(m)
 	a.registerOpenMausRoutes(m)
 	a.registerComputerRoutes(m)
+	a.registerRelayRoutes(m)
 	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.
@@ -416,7 +428,8 @@ func requestDeadlineApplies(path string) bool {
 		(strings.Contains(path, "/canvases/") && strings.HasSuffix(path, "/uploads")) {
 		return false
 	}
-	return path != computerModelRoute
+	// A call AwwO 本地版 relays here (relay.go) is a managed call too, with the same bound.
+	return path != computerModelRoute && path != relayCompletionsRoute
 }
 
 func (a *App) security(next http.Handler) http.Handler {

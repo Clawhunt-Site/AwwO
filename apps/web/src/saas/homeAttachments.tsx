@@ -3,10 +3,12 @@
 // The home has no canvas yet, so each file waits in this tab until the request is sent: the canvas is created first,
 // the files are uploaded to it, and their lines go at the end of the request it is handed (attachments.ts), exactly
 // as if they had been attached in the canvas assistant's own box. A file already uploaded is never uploaded again.
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type MouseEvent, type ReactNode,
+  type RefObject } from 'react';
 import { AlertCircle, Box, Check, File as FileIcon, FileArchive, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, Plus, X } from 'lucide-react';
 import { attachmentKind, carriesFiles, eventFiles, formatFileSize, joinAttachments, MAX_COMPOSER_ATTACHMENTS, MAX_UPLOAD_BYTES,
   type AttachmentKind, type UploadedCanvasFile } from '../canvas/attachments';
+import { refuseHeldEnter } from '../canvas/heldEnter';
 import type { UiLocale } from '../locale';
 
 type T = (zh: string, en: string) => string;
@@ -120,8 +122,49 @@ export function HomeAttachButton({ state, disabled, t }: { state: HomeFilesState
   </>;
 }
 
+/** On a file's ✕, and on the ✕ of the note above the files (WorkspaceHome.tsx): a pointer press leaves the focus where it
+ *  was, as Safari does, instead of focusing the ✕ (Chrome does), from where the hand-off below would have put it on another
+ *  file's ✕, for a stray Enter or Space to remove that file too. */
+export const keepFocus = (event: MouseEvent<HTMLElement>) => event.preventDefault();
+
+/**
+ * A file's ✕ takes its chip away, and with the focus on the ✕ the keyboard's focus would fall to the page's body. Pressed
+ * with the focus on it (from the keyboard: a click focuses nothing, see keepFocus), the ✕ hands the focus on in the render
+ * its press draws, once the chip has gone: to the ✕ of the file that took its place, else of the one before it, else to the
+ * request's text field. Nothing scrolls for it, and an Enter held down stops at the ✕ it pressed (refuseHeldEnter: its
+ * repeats would remove the next file, then send the request). (A canvas's attachment boxes do the same,
+ * ComposerAttachments.tsx.)
+ */
+function useFileFocusHandOff(textField: RefObject<HTMLTextAreaElement | null>) {
+  const pressed = useRef<{ chip: Element; next: Element | null; previous: Element | null } | null>(null);
+  // Every press draws a render, in which it is let go: nothing is handed on later.
+  const [, setPresses] = useState(0);
+  useLayoutEffect(() => {
+    const press = pressed.current;
+    if (!press) return;
+    pressed.current = null;
+    if (press.chip.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+    // Tried in order until one takes the focus: a ✕ that went too or is disabled takes none.
+    for (const candidate of [press.next?.querySelector<HTMLElement>('.saas-home-file-remove'),
+      press.previous?.querySelector<HTMLElement>('.saas-home-file-remove'), textField.current]) {
+      candidate?.focus({ preventScroll: true });
+      if (candidate && document.activeElement === candidate) return;
+    }
+  });
+  return useCallback((event: MouseEvent<HTMLElement>) => {
+    const chip = event.currentTarget.closest('li');
+    if (!chip || event.currentTarget !== document.activeElement) return;
+    pressed.current = { chip, next: chip.nextElementSibling, previous: chip.previousElementSibling };
+    refuseHeldEnter(event);
+    setPresses(count => count + 1);
+  }, []);
+}
+
 /** One chip per file: its picture when it is one, its kind otherwise, its size, and where its upload stands. */
-export function HomeFileChips({ state, disabled, t, locale }: { state: HomeFilesState; disabled: boolean; t: T; locale: UiLocale }) {
+export function HomeFileChips({ state, disabled, t, locale, textField }: { state: HomeFilesState; disabled: boolean; t: T; locale: UiLocale;
+  /** The request's text field, where a file's ✕ hands the keyboard's focus once no other file is left. */
+  textField: RefObject<HTMLTextAreaElement | null> }) {
+  const handOff = useFileFocusHandOff(textField);
   if (!state.files.length) return null;
   return <ul className="saas-home-files" aria-label={t('要一起发送的文件', 'Files to send with the request')}>
     {state.files.map(item => {
@@ -140,7 +183,7 @@ export function HomeFileChips({ state, disabled, t, locale }: { state: HomeFiles
           {status}
         </span>
         <button type="button" className="saas-home-file-remove" disabled={disabled} aria-label={t(`移除「${item.file.name}」`, `Remove “${item.file.name}”`)}
-          onClick={() => state.remove(item.key)}><X size={12} aria-hidden="true" /></button>
+          onMouseDown={keepFocus} onClick={event => { handOff(event); state.remove(item.key); }}><X size={12} aria-hidden="true" /></button>
       </li>;
     })}
   </ul>;

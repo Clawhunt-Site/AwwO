@@ -23,7 +23,8 @@ export function readInvites(value: unknown): ClawHuntInvites | null {
   return { member, limit, codes: codes as ClawHuntInvites['codes'] };
 }
 
-async function copyText(value: string): Promise<boolean> {
+/** Copies text to the clipboard, through a hidden selection where the clipboard API refuses; false when neither works. */
+export async function copyText(value: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);

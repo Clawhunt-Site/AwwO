@@ -9,15 +9,8 @@ from urllib.parse import urlparse
 
 
 APP_ENV_NAME = "APP_ENV"
-# Two build identities only — selected once at compile time and baked into the
-# bundle (build-profile.json), never edited at runtime:
-#   * staging     — the development / acceptance build; points the whole app at
-#                   the online TEST server (staging.clawhunt.store).
-#   * production  — the shipping build; points at the production endpoints.
-# A pure-localhost "development" tier no longer exists: a dev who wants to talk
-# to 127.0.0.1 sets CLAWHUNT_BASE_URL (or the relevant SUPERCLAW_*_URL) explicitly
-# instead of occupying a third baked environment.
-APP_ENV_CHOICES = ("staging", "production")
+# Distinct local-development, acceptance and production build identities.
+APP_ENV_CHOICES = ("development", "staging", "production")
 DEFAULT_APP_ENV = "staging"
 
 CLAWHUNT_BASE_URL_ENV = "CLAWHUNT_BASE_URL"
@@ -28,11 +21,12 @@ ANTHROPIC_BASE_URL_ENV = "SUPERCLAW_ANTHROPIC_BASE_URL"
 # --- Per-environment service endpoints (single source of truth) -------------
 # These are PUBLIC endpoints, not secrets. They are the one place a service URL
 # may be written: every other module resolves through the helpers below so the
-# "one schema, two modes" rule holds and an explicit env/config override always
+# "one schema, three modes" rule holds and an explicit env/config override always
 # wins. The dev-rules architecture test (tests/test_environment_url_centralization.py)
 # fails the build if a staging/production host string leaks into any other source file.
 CLAWHUNT_BASE_URLS = {
-    "staging": "https://staging.clawhunt.store",
+    "development": "http://127.0.0.1:8787",
+    "staging": "https://staging.example.com",
     "production": "https://clawhunt.store",
 }
 
@@ -40,6 +34,7 @@ CLAWHUNT_BASE_URLS = {
 # currently share one deployment; the per-environment map keeps them independently
 # overridable so they can diverge later without touching call sites.
 RELAY_BASE_URLS = {
+    "development": "http://127.0.0.1:8791/v1",
     "staging": "https://gate.clawhunt.site/v1",
     "production": "https://gate.clawhunt.site/v1",
 }
@@ -95,7 +90,7 @@ _OFFICIAL_ROOT_PUBLIC_KEY_ENV_NAMES = (
 )
 
 # Localhost fallbacks for LOCAL-from-source development. There is no longer a
-# "development" APP_ENV; these are reached only via an explicit override or, for
+# development identity; these are reached via defaults or explicit overrides for
 # local-only daemons, when running from source (see _running_from_source below).
 DEFAULT_CLAWHUNT_LOCAL_BASE_URL = "http://127.0.0.1:8787"
 DEFAULT_RUNNINGHUB_LOCAL_BASE_URL = "http://127.0.0.1:8790"
@@ -106,17 +101,12 @@ DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 # which environment it is without the end user editing any config.
 BUILD_PROFILE_NAME = "build-profile.json"
 
-# Alias normalization. Every legacy / shorthand non-production spelling folds to
-# ``staging`` (the single non-production tier); ``prod`` folds to ``production``. This
-# applies wherever APP_ENV is actually consulted — an explicit ``APP_ENV`` env var or a
-# pre-existing build profile baked as ``development`` resolves to staging instead of
-# raising. (A stale APP_ENV persisted in ~/.superclaw/config.json is no longer consulted
-# at all: it was removed from the runtime-config schema, so the compile-time baked
-# identity / explicit env var is authoritative and a config-file value can't override it.)
+# Runtime config cannot overwrite APP_ENV. Build identity or an explicit
+# process environment selects the mode; dev/local stay distinct from staging.
 _APP_ENV_ALIASES = {
-    "development": "staging",
-    "dev": "staging",
-    "local": "staging",
+    "development": "development",
+    "dev": "development",
+    "local": "development",
     "test": "staging",
     "stage": "staging",
     "prod": "production",
@@ -276,9 +266,9 @@ def _guard_no_production_contamination(url: str) -> None:
             f"{CLAWHUNT_BASE_URL_ENV} override (e.g. in ~/.superclaw/config.json) that is "
             f"redirecting it to production."
         )
-    if effective == "staging":
+    if effective != "production":
         raise RuntimeError(
-            f"cross-environment contamination: APP_ENV=staging resolved {CLAWHUNT_BASE_URL_ENV} "
+            f"cross-environment contamination: APP_ENV={effective} resolved {CLAWHUNT_BASE_URL_ENV} "
             f"to the production endpoint ({url}). Staging must never talk to production. Remove "
             f"the stale {CLAWHUNT_BASE_URL_ENV} override (e.g. in ~/.superclaw/config.json) so the "
             f"staging default applies, or set the correct staging URL. To intentionally target "
@@ -391,7 +381,7 @@ def local_service_url(name: str, local_default: str) -> str | None:
     configured = _clean_env_url(name)
     if configured:
         return configured
-    if _running_from_source():
+    if _running_from_source() or app_environment() == "development":
         return local_default.rstrip("/")
     return None
 

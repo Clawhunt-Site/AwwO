@@ -171,6 +171,16 @@ test('the call gathers the answer, and names an AWS refusal, a bridge refusal or
   })) });
   assert.deepEqual(throttled, { ok: false, reason: 'stream:error:429:throttlingException', facts: failed('throttlingException', 429, 'stream', true) });
   assert.doesNotMatch(JSON.stringify(throttled), /arn:aws/);
+  // A stream lost on its way to AWS (a connection reset, which AWS never reported) names no AWS status either, though
+  // it failed on AWS's side of the bridge.
+  const reset = await bedrockCall(message, { load: load(fakeSdk(async function* () {
+    yield { messageStart: { role: 'assistant' } };
+    throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+  })) });
+  assert.deepEqual(reset, { ok: false, reason: 'stream:error:connection_error', facts: failed('connection_error', 502, 'stream', true) });
+  // And one lost after AWS answered but before its first event (the SDK stamps it with AWS's 200, bedrock-sdk.test.mjs).
+  const lostOnAnswer = await bedrockCall(message, { load: load(fakeSdk(null, { fail: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET', $metadata: { httpStatusCode: 200 } }) })) });
+  assert.deepEqual(lostOnAnswer, { ok: false, reason: 'stream:error:connection_error', facts: failed('connection_error', 502, 'stream', true) });
   const unloadable = await bedrockCall(message, { load: async () => { throw new TypeError('no SDK'); } });
   assert.deepEqual(unloadable, { ok: false, reason: 'bridge-error:TypeError' });
 });

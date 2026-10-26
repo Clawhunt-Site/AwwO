@@ -7,7 +7,7 @@
 
 ## 1. 需求
 
-在 SuperClaw 的看板表层（embed `.company-board-root`，以及桌面/Web 默认呈现）里，**默认不向用户展示操作者的本机用户名与 home 目录路径**（如 `/Users/leongong/...`、裸用户名 `leongong`）。这是一个「呈现层隐私默认」，目标是*显示*上不出现用户名，而**不改变任何已存储的数据**。
+在 SuperClaw 的看板表层（embed `.company-board-root`，以及桌面/Web 默认呈现）里，**默认不向用户展示操作者的本机用户名与 home 目录路径**（如 `/Users/dev-user/...`、裸用户名 `dev-user`）。这是一个「呈现层隐私默认」，目标是*显示*上不出现用户名，而**不改变任何已存储的数据**。
 
 ## 2. 为什么不能直接把 `censorUsernameInLogs` 默认开启（已撤销的尝试）
 

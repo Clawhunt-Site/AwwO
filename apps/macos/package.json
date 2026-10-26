@@ -1,6 +1,6 @@
 {
   "name": "@awwo/macos",
-  "version": "0.9.1",
+  "version": "0.10.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "node build.ts",
-    "test": "node --test production-config.test.ts",
+    "test": "node --test production-config.test.ts local-payload.test.ts",
     "typecheck": "tsc --noEmit",
     "verify:bundle": "node verify-bundle.ts"
   },

@@ -61,6 +61,30 @@ def test_app_env_is_not_a_runtime_config_entry():
     assert "APP_ENV" not in payload["writable_names"]
 
 
+def test_planner_opt_in_persists_per_profile_and_respects_environment(tmp_path, monkeypatch):
+    from superclaw.runtime_config import hydrate_runtime_environment, persisted_runtime_environment
+
+    provider = "SUPERCLAW_CANVAS_PLANNER_PROVIDER"
+    monkeypatch.delenv(provider, raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SUPERCLAW_SHELL_CONFIG_PATH", str(tmp_path / "production.json"))
+    assert runtime_config_specs()[provider].default is None
+    assert provider not in persisted_runtime_environment()
+    with pytest.raises(ValueError, match="must be one of"):
+        set_runtime_config(provider, "automatic")
+    result = set_runtime_config(provider, "codex")
+    assert result["persisted"] and result["restart_required"]
+    assert provider in hydrate_runtime_environment()
+    assert os.environ[provider] == "codex"
+    assert os.environ["APP_ENV"] == "production"
+
+    monkeypatch.setenv(provider, "disabled")
+    assert provider not in hydrate_runtime_environment()
+    assert os.environ[provider] == "disabled"
+    monkeypatch.setenv("SUPERCLAW_SHELL_CONFIG_PATH", str(tmp_path / "staging.json"))
+    assert provider not in persisted_runtime_environment()
+
+
 def test_executables_are_basic_path_fields():
     for name, spec in runtime_config_specs().items():
         if name.endswith("_EXECUTABLE"):

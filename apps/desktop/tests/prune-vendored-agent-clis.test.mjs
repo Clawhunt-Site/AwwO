@@ -90,6 +90,32 @@ test("prune is an auditable no-op when there is nothing to remove", () => {
   }
 });
 
+test("prune matches package names, not the checkout's ancestor names", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-acp-win32-checkout-"));
+  try {
+    const keep = path.join(root, "node_modules", "picocolors", "index.js");
+    fs.mkdirSync(path.dirname(keep), { recursive: true });
+    fs.writeFileSync(keep, "export default {}");
+    const result = pruneVendoredAgentCliBinaries(root, { log: () => {} });
+    assert.deepEqual(result.removed, []);
+    assert.ok(fs.existsSync(keep), "checkout name must not cause unrelated packages to be removed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prune reports sorted paths relative to the staged root", () => {
+  const root = makeStagedTree();
+  try {
+    const { removed } = pruneVendoredAgentCliBinaries(root, { log: () => {} });
+    assert.ok(removed.length > 0);
+    assert.ok(removed.every((entry) => !path.isAbsolute(entry)));
+    assert.deepEqual(removed, [...removed].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("globs target platform suffixes, never the bare JS package names", () => {
   // Guard the invariant the safety argument rests on: every glob requires a
   // platform token, so a suffix-less main package can never match.

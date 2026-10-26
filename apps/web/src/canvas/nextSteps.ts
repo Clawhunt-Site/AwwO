@@ -167,6 +167,66 @@ function downstreamOf<T extends CanvasNode>(roots: ReadonlyArray<CanvasNode>, am
   return among.filter(node => reached.has(node.id));
 }
 
+/** Whether a run started from `roots` can run on this host. On this device a run that reaches a node only a cloud run
+ * executes fails there, and blocks what it feeds after clearing what that had delivered; so does a run of a node fed by
+ * one that has no result to hand on. A run that reaches a node team is refused here (only a hosted workspace runs
+ * teams: CanvasSurface's startRun). */
+function runsOnHost(roots: ReadonlyArray<CanvasNode>, nodes: ReadonlyArray<CanvasNode>, wired: ReadonlyArray<CanvasEdge>, host: Host, cloudRuns: boolean): boolean {
+  if (cloudRuns) return true;
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  return !downstreamOf(roots, nodes, wired).some(node => host.cannotRun(node) || (node.kind === 'session' && Boolean(node.team))
+    || wired.some(edge => {
+      const from = edge.toNode === node.id ? byId.get(edge.fromNode) : undefined;
+      return Boolean(from && host.cannotRun(from) && !delivered(from) && !isSoftMediaFeed(from, node, edge));
+    }));
+}
+
+/** What to ask before a run of the whole canvas runs nodes again that already have their result: a paying user's 运行
+ * ran every node of a canvas whose nodes had all finished but one, and paid for each (2026-10-25). `finished` is every
+ * node with a result the whole run replaces, in canvas order: it clears what every node it runs had delivered
+ * (prepareRunDocument), on this device an edit or a file a cloud run made too, which it cannot make again: those are
+ * `cleared` as well. `left` is how many nodes have no result, `whole` the whole run: `scope`, every node (what it
+ * runs), and what it spends (over the nodes this host runs). `rest` is the run of the nodes without a result
+ * (`nodeIds`) and everything they feed, as
+ * 「运行剩下的节点」 starts it: `scope`, exactly the nodes it runs (the host runs this list, so the question and the
+ * run are the same), what it spends, and `after`, how many of them have a result (their inputs change). It is left out
+ * when every node has its result, where that run cannot start on this host, or when the host runs only whole canvases
+ * (`scopedRuns` false: a review loop). Null when there is nothing to ask: no node with a result would be run again, or
+ * the run would be refused (an input nobody filled in, a node team on this device), which its own notice names. */
+export interface WholeRunChoice {
+  finished: string[];
+  cleared: string[];
+  left: number;
+  whole: { scope: string[]; calls: number; generations?: number };
+  rest?: { nodeIds: string[]; scope: string[]; after: number; calls: number; generations?: number };
+}
+
+export function wholeRunChoice(input: { nodes: ReadonlyArray<CanvasNode>; edges: ReadonlyArray<CanvasEdge>; cloudRuns?: boolean; scopedRuns?: boolean }): WholeRunChoice | null {
+  const { nodes, edges, cloudRuns = false, scopedRuns = true } = input;
+  const host = hostOf(cloudRuns);
+  const finished = nodes.filter(delivered);
+  if (!finished.length) return null;
+  if (!cloudRuns && nodes.some(node => node.kind === 'session' && node.team)) return null;
+  const working = workingNodes(nodes, host);
+  const wired = reconcileEdges(nodes, edges.filter(edge => edge.kind !== 'feedback'));
+  if (missingInputs(working, wired, '').length) return null;
+  const pending = working.filter(node => !delivered(node));
+  const reached = scopedRuns && pending.length && runsOnHost(pending, nodes, wired, host, cloudRuns) ? downstreamOf(pending, working, wired) : [];
+  return { finished: finished.map(node => node.id), cleared: finished.filter(host.cannotRun).map(node => node.id), left: nodesLeft(nodes),
+    whole: { scope: nodes.map(node => node.id), ...costOf(working, host) },
+    ...(reached.length ? { rest: { nodeIds: pending.map(node => node.id), scope: reached.map(node => node.id), after: reached.length - pending.length, ...costOf(reached, host) } } : {}) };
+}
+
+/** Whether two answers of wholeRunChoice ask the same question, the nodes each choice runs and replaces included: an
+ * answer acts only on the canvas the question showed. The order nodes are listed in does not matter. */
+export function sameWholeRunChoice(a: WholeRunChoice | null, b: WholeRunChoice | null): boolean {
+  const sorted = (ids: ReadonlyArray<string>) => [...ids].sort();
+  const key = (choice: WholeRunChoice | null) => choice && JSON.stringify([sorted(choice.finished), sorted(choice.cleared), choice.left,
+    [sorted(choice.whole.scope), choice.whole.calls, choice.whole.generations ?? 0],
+    choice.rest ? [sorted(choice.rest.nodeIds), sorted(choice.rest.scope), choice.rest.after, choice.rest.calls, choice.rest.generations ?? 0] : null]);
+  return key(a) === key(b);
+}
+
 /** What to do next with this canvas, worked out from the canvas alone, so the assistant can offer it unasked and
  * without spending a call. The most urgent situation wins: a failure, then a review that found the delivery wanting,
  * then everything a run would refuse for want of an input, then what has not run yet, then the results. Nothing is
@@ -185,14 +245,8 @@ export function nextSteps(input: NextStepsInput): NextSteps | null {
   const wired = reconcileEdges(nodes, edges.filter(edge => edge.kind !== 'feedback'));
   const offer = (situation: NextSituation, steps: NextStep[], cap = MAX_STEPS): NextSteps | null =>
     steps.length ? { situation, steps: steps.slice(0, cap) } : null;
-  // On this device a run that reaches a node only a cloud run executes fails there, and blocks what it feeds after
-  // clearing what that had delivered; so does a run of a node fed by one that has no result to hand on. Neither is offered.
-  const byId = new Map(nodes.map(node => [node.id, node]));
-  const runsHere = (roots: ReadonlyArray<CanvasNode>) => cloudRuns || !downstreamOf(roots, nodes, wired).some(node => host.cannotRun(node)
-    || wired.some(edge => {
-      const from = edge.toNode === node.id ? byId.get(edge.fromNode) : undefined;
-      return Boolean(from && host.cannotRun(from) && !delivered(from) && !isSoftMediaFeed(from, node, edge));
-    }));
+  // A run that cannot start on this host (runsOnHost) is not offered.
+  const runsHere = (roots: ReadonlyArray<CanvasNode>) => runsOnHost(roots, nodes, wired, host, cloudRuns);
 
   // A delivery a person published by hand after the run (source 'manual') supersedes that run's failure: running the node
   // again would replace it, so it is not offered as the way on.

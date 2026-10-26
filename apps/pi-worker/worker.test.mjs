@@ -79,7 +79,7 @@ async function close(server) {
   await done;
 }
 
-async function provider(t, { mode = 'success', protocol = 'openai', beforeReply, usage, multilineUsage = false } = {}) {
+async function provider(t, { mode = 'success', protocol = 'openai', beforeReply, usage, multilineUsage = false, reply } = {}) {
   const requests = [];
   let notifyRequest;
   const received = new Promise((resolve) => { notifyRequest = resolve; });
@@ -90,6 +90,13 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
     requests.push({ body, headers: req.headers, url: req.url });
     notifyRequest();
     await beforeReply?.();
+    // An answer of the test's own: its status, headers and body.
+    if (reply) {
+      const { status, headers = { 'content-type': 'application/json' }, body: text } = reply();
+      res.writeHead(status, headers);
+      res.end(text);
+      return;
+    }
     if (mode === 'error') {
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'private-provider-key-and-internal-path' } }));
@@ -169,10 +176,17 @@ async function provider(t, { mode = 'success', protocol = 'openai', beforeReply,
         }
         res.end(`data: ${JSON.stringify({ error: { message: 'The Bedrock stream reported an error', type: 'serviceUnavailableException', code: 'serviceUnavailableException', status: 503 } })}\n\n`);
         return;
-      } else if (mode === 'frame_unavailable' || mode === 'frame_rate_limited' || mode === 'frame_unknown' || mode === 'transient_broken') {
+      } else if (mode === 'frame_unavailable' || mode === 'frame_rate_limited' || mode === 'frame_unknown' || mode === 'transient_broken' || mode === 'frame_connection' || mode === 'frame_connection_only') {
         // A failure after the stream began, as the Bedrock bridge relays one: an error frame carrying the status of the
         // AWS failure (bedrock-bridge.ts errorBody), and one of the bridge's own, which carries none (also after a
-        // refused first request, for a Gate model's retry).
+        // refused first request, for a Gate model's retry); nor does a stream lost on its way to AWS, which AWS never
+        // reported (BEDROCK_CONNECTION_FAILURE), here before the model wrote anything.
+        if (mode === 'frame_connection' || mode === 'frame_connection_only') {
+          // With nothing before it: a stream AWS answered and lost before its first event.
+          if (mode === 'frame_connection') send({ role: 'assistant', content: '' });
+          res.end(`data: ${JSON.stringify({ error: { message: 'The Bedrock request failed', type: 'connection_error', code: 'connection_error' } })}\n\n`);
+          return;
+        }
         send({ role: 'assistant', content: 'Hello ' });
         const aws = mode === 'frame_unavailable' ? ['ServiceUnavailableException', 503] : ['ThrottlingException', 429];
         res.end(`data: ${JSON.stringify({ error: mode === 'frame_unknown' || mode === 'transient_broken'
@@ -615,6 +629,52 @@ test('a provider\'s refusal of the request as larger than its model\'s window ke
   }
 });
 
+test('a size refusal is told by the provider\'s own words, never beside work anywhere in its body, and a refusal typed a stream keeps its usage', { timeout: 120000 }, async (t) => {
+  const TOO_LONG = 'This model\'s maximum context length is 131072 tokens. However, you requested 140000 tokens.';
+  const end = async (answer, overrides = {}, protocol = 'openai') => {
+    const model = await provider(t, { protocol, reply: () => answer });
+    const { handle, events } = await run(t, configuration(model.baseURL, overrides));
+    await handle.done;
+    return { last: events.at(-1), events, requests: model.requests.length };
+  };
+  for (const [answer, code] of [
+    // By its type (Anthropic's 413), and by an error that is only words.
+    [{ status: 413, body: JSON.stringify({ type: 'error', error: { type: 'request_too_large', message: 'Request exceeds the maximum size' } }) }, 'MODEL_CONTEXT_LIMIT'],
+    [{ status: 400, body: JSON.stringify({ error: TOO_LONG }) }, 'MODEL_CONTEXT_LIMIT'],
+    // Words a provider echoes from the request in a detail of its error are not its own (the agent library's message
+    // spells out the whole error).
+    [{ status: 400, body: JSON.stringify({ error: { code: 'invalid_request', details: { prompt: 'Explain maximum context length' } } }) }, 'MODEL_ERROR'],
+    // Work anywhere in its body: usage under a detail of its error, or inside usage deeper than one object.
+    [{ status: 400, body: JSON.stringify({ error: { code: 'context_length_exceeded', message: TOO_LONG, details: { usage: { prompt_tokens: 123, completion_tokens: 4 } } } }) }, 'MODEL_ERROR'],
+    [{ status: 400, body: JSON.stringify({ error: { code: 'context_length_exceeded', message: TOO_LONG }, usage: { cache: { tokens: { read: 123 } } } }) }, 'MODEL_ERROR'],
+    // Past 64 KiB of bytes, if not of characters; and JSON typed a stream.
+    [{ status: 400, body: JSON.stringify({ error: { message: `${TOO_LONG} ${'漢'.repeat(30_000)}` } }) }, 'MODEL_ERROR'],
+    [{ status: 400, headers: { 'content-type': 'text/event-stream' }, body: JSON.stringify({ error: { message: TOO_LONG, code: 'context_length_exceeded' } }) }, 'MODEL_ERROR'],
+    // A 422 is another refusal whatever its words, as in the other workers (owner 2026-10-25).
+    [{ status: 422, body: JSON.stringify({ error: { message: TOO_LONG, code: 'context_length_exceeded' } }) }, 'MODEL_ERROR'],
+  ]) {
+    const { last, events, requests } = await end(answer);
+    assert.deepEqual([last.type, last.code], ['failed', code], answer.body.slice(0, 120));
+    assert.equal(requests, 1);
+    for (const words of ['131072', 'maximum size', 'Explain']) assert.equal(JSON.stringify(events).includes(words), false, words);
+  }
+  // A rate limit typed a stream keeps the usage it reports, which a refusal answered at once is charged by (plans.go
+  // creditCharge): read as a refusal's body, its usage was lost, and it was settled at nothing.
+  const frames = `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 17, completion_tokens: 3, total_tokens: 20 } })}\n\n`;
+  const limited = await end({ status: 429, headers: { 'content-type': 'Text/Event-Stream' }, body: frames });
+  assert.deepEqual([limited.last.type, limited.last.code], ['failed', 'MODEL_RATE_LIMIT']);
+  const { usage } = limited.last.observability;
+  assert.deepEqual([usage.status, usage.inputTokens, usage.outputTokens], ['partial', 17, 3]);
+  // Through the Anthropic protocol, whose SDK spells out the whole body: the size refusal in its error's words, and none
+  // in words beside its error.
+  const anthropic = { AWWO_PI_PROVIDER: 'anthropic' };
+  const prompt = await end({ status: 400, body: JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long: 213462 tokens > 200000 maximum' } }) }, anthropic, 'anthropic');
+  assert.deepEqual([prompt.last.type, prompt.last.code], ['failed', 'MODEL_CONTEXT_LIMIT']);
+  const echoed = await end({ status: 400, body: JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages.0.content: Input should be a valid list' }, request: 'prompt is too long' }) }, anthropic, 'anthropic');
+  assert.deepEqual([echoed.last.type, echoed.last.code], ['failed', 'MODEL_ERROR']);
+  assert.equal(JSON.stringify([prompt.events, echoed.events]).includes('213462'), false);
+});
+
 // The parent's words for each failure a child may name (runner.mjs), never the child's or the provider's.
 const FAILURE_WORDS = {
   MODEL_OUTPUT_LIMIT: 'The model response reached its configured output limit.',
@@ -639,8 +699,9 @@ test('a call that did not finish keeps what ended it: its output cap, a declined
     ['frame_unavailable', 'MODEL_UNAVAILABLE'], ['frame_rate_limited', 'MODEL_RATE_LIMIT'],
     // A stop at the cap is that, whatever failed after it.
     ['length_then_unavailable', 'MODEL_OUTPUT_LIMIT'], ['reasoning_then_unavailable', 'MODEL_UNAVAILABLE'],
-    // A refusal that says none of these, and an error frame with no status of its own, stay the model's failure.
-    ['rejected', 'MODEL_ERROR'], ['frame_unknown', 'MODEL_ERROR'],
+    // A refusal that says none of these, and an error frame with no status of its own, stay the model's failure: so does
+    // a stream lost on its way to AWS before any output, which AWS may have billed (no free quick refusal: plans.go).
+    ['rejected', 'MODEL_ERROR'], ['frame_unknown', 'MODEL_ERROR'], ['frame_connection', 'MODEL_ERROR'], ['frame_connection_only', 'MODEL_ERROR'],
   ]) {
     const { last, events, requests } = await end(mode);
     assert.deepEqual(businessEvent(last), { type: 'failed', code, message: FAILURE_WORDS[code] }, mode);

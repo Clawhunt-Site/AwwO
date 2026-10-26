@@ -21,8 +21,8 @@ from pathlib import Path
 
 import superclaw.environment as environment
 
-# Env-divergent host that may appear ONLY in environment.py. Substring "clawhunt.store"
-# also covers "staging.clawhunt.store".
+# Env-divergent host that may appear ONLY in environment.py. Matching on the bare
+# registrable domain also covers every per-environment subdomain of it.
 _FORBIDDEN_HOST = "clawhunt.store"
 
 _OWNER_FILE = Path(environment.__file__).resolve()
@@ -106,5 +106,5 @@ def test_env_example_does_not_pin_environment_divergent_urls():
 def test_environment_module_actually_owns_the_hosts():
     """Guard against the guard silently passing because the hosts moved/renamed."""
     text = _OWNER_FILE.read_text(encoding="utf-8")
-    assert "staging.clawhunt.store" in text
+    assert "staging.example.com" in text
     assert _FORBIDDEN_HOST in text

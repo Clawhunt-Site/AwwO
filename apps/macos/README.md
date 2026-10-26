@@ -1,10 +1,23 @@
 # AwwO for Mac
 
-Source candidate **0.9.1, build 10** is the Apple Silicon desktop client for the hosted
-AwwO service. It requires macOS 14 or later and an internet connection. The
-Swift/AppKit/WebKit shell uses the hosted account, workspaces and history;
-the website and server deploy separately. No local database, Node runtime,
-worker, model runtime or provider API key is bundled.
+Source candidate **0.10.1, build 12** is the Apple Silicon desktop app for AwwO. It requires
+macOS 14 or later. The Swift/AppKit/WebKit shell opens the hosted service (the hosted
+account, workspaces and history; the website and server deploy separately) and, in a
+build that carries its payload, the local workspace: **AwwO 本地版**, the hosted product's
+own services on this Mac with the person's own model keys (its own Node.js, PostgreSQL,
+API, web app and workers; see [docs/awwo-local-edition.md](../../docs/awwo-local-edition.md),
+"Mac 应用"). Such a build asks at its first launch which workspace to open and remembers
+it; the 工作区 menu switches. A build without the payload is the hosted client alone. No
+provider API key is bundled in either.
+
+From build 11 on, the app starts the local workspace's runtime with the same contract as
+AwwO Local's Windows window (`--shell macos`), keeps its data in
+`~/Library/Application Support/store.clawhunt.awwo.local/state`, and never reads or writes
+`~/Library/Application Support/AwwO Local/`, which an earlier build's local mode used. The
+window opens the local workspace at `http://127.0.0.1:<port>` with a cookie of its launch's
+own, since macOS resolves `*.localhost` names only from macOS 26 on. Its sign-in is kept
+by the runtime in the data folder (`window-session`), not in the window, so nothing that
+signs the window in outlives that launch (the page's own data stays in its store).
 
 Published downloads and their verification status are listed on the
 [latest release](https://github.com/Clawhunt-Site/AwwO/releases/latest).
@@ -46,10 +59,26 @@ APP_ENV=production VITE_APP_ENV=production \
   node apps/macos/build.ts
 ```
 
+To carry the local workspace, assemble its payload first, from a clean checkout of
+the same commit set up with `npm run setup:local` (Go is needed for the API), and
+name it:
+
+```sh
+npm run package:local:macos -- --out "$HOME/awwo-mac" --smoke
+AWWO_MAC_LOCAL_PAYLOAD="$HOME/awwo-mac/payload" APP_ENV=production VITE_APP_ENV=production \
+  AWWO_MAC_CLOUD_URL=https://awwo.clawhunt.store \
+  node apps/macos/build.ts
+```
+
+The build refuses a payload assembled from another commit, or from a checkout with
+changes unless `AWWO_MAC_TEST_BUILD=1` marks a build to test, which release
+packaging refuses.
+
 The production origin must be explicitly approved and supplied as an HTTPS
 origin with no credentials, port, path, query or fragment. The build runs
-navigation-policy, WebKit-loading, process-shutdown and window-lifecycle
-self-checks before packaging. It creates a new output directory under
+navigation-policy (including the local workspace's ready-event, token and cookie
+checks), WebKit-loading, process-shutdown and window-lifecycle self-checks before
+packaging. It creates a new output directory under
 `.local/macos-production/` and writes its paths and SHA256 to `latest.json`.
 It creates an `.app` and a ZIP; a release DMG is packaged separately from the
 verified `.app`. A candidate built before a commit records modified inputs
@@ -69,7 +98,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It creates `.local/releases/macos-0.9.1-build10-<sha7>/` and refuses to overwrite
+It creates `.local/releases/macos-0.10.1-build12-<sha7>/` and refuses to overwrite
 an existing release directory. Earlier build 8 artifacts remain separate.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
@@ -107,7 +136,7 @@ APP_ENV=production VITE_APP_ENV=production \
 ```
 
 Verification checks the version/build, bundle identity, configured origin,
-source and icon hashes, expected resources, absence of local runtimes and
+source and icon hashes, expected resources, the local payload (present and of the same commit, or absent as the metadata says) and
 strict code-signature integrity. Quit the old app and preserve a backup before
 replacing `AwwO Local.app` in the existing Applications directory. Confirm the
 Fold icon, launch, account/workspace continuity, navigation/refresh and

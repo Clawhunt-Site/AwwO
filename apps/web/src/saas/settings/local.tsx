@@ -10,7 +10,7 @@ export type LocalComputer = {
   webReader: boolean; skillRegistry: boolean; revision: string;
   /** The proxy on this computer that 从网址读取 and the skill registry read through (AWWO_WEB_READER_PROXY); '' for none. */
   webReaderProxy: string;
-  /** The window that started it ('windows', AwwO Local's, edition.ts inLocalWindow); '' from a checkout. */
+  /** The window that started it ('windows' or 'macos', edition.ts inLocalWindow); '' from a checkout. */
   shell: string;
 };
 
@@ -78,7 +78,10 @@ export function LocalComputerSettings() {
           <Service on={computer.managedExecution} name={t('直接执行', 'Direct execution')} when={windowed
             ? t('安装版暂不提供：它的工作区镜像只能在代码库中构建（Docker 运行时执行 npm run setup:local）。', 'Not in the installed app yet: its workspace image is built from a checkout only (npm run setup:local while Docker runs).')
             : t('需要运行 Docker Desktop，并在 Docker 运行时执行一次 npm run setup:local 构建工作区镜像，然后重启。', 'Needs Docker Desktop running, and npm run setup:local run once while it runs to build the workspace image; then restart.')} />
-          <Service on={computer.render} name={t('渲染视频与剪辑', 'Video rendering and edits')} when={windowed
+          {/* The Mac app's window gives AwwO a fixed PATH: the system's folders, then Homebrew's (apps/macos/AwwOLocal.swift). */}
+          <Service on={computer.render} name={t('渲染视频与剪辑', 'Video rendering and edits')} when={computer.shell === 'macos'
+            ? t('需要 Chrome 或 Edge，以及 ffmpeg 和 ffprobe（例如用 Homebrew 安装：brew install ffmpeg）；装好后退出 AwwO（菜单「AwwO → 退出 AwwO」）再重新打开。', 'Needs Chrome or Edge, and ffmpeg and ffprobe (with Homebrew, for one: brew install ffmpeg); once they are there, quit AwwO (AwwO → Quit AwwO) and open it again.')
+            : windowed
             ? t('需要 Chrome 或 Edge，以及 PATH 上的 ffmpeg 和 ffprobe；装好后退出 AwwO 本地版（菜单「AwwO → 退出」）再重新打开。', 'Needs Chrome or Edge, and ffmpeg and ffprobe on PATH; once they are there, quit AwwO Local (AwwO → Quit) and open it again.')
             : t('需要 Chrome 或 Edge，以及 PATH 上的 ffmpeg 和 ffprobe，然后重启。', 'Needs Chrome or Edge, and ffmpeg and ffprobe on PATH; then restart.')} />
           <Service on={computer.webReader} name={t('从网址读取', 'Read from a web address')} when={t('这次启动没有开启。', 'This start did not turn it on.')} how={readsThrough} />

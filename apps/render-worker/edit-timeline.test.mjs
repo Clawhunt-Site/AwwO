@@ -122,6 +122,8 @@ test('limits are the documented ones', () => {
   assert.equal(EDIT_LIMITS.maxFiles, 300);
   assert.equal(EDIT_LIMITS.maxCardSeconds, 20);
   assert.equal(EDIT_LIMITS.maxStills, 150);
+  assert.equal(EDIT_LIMITS.maxSoundPages, 8);
+  assert.equal(EDIT_LIMITS.maxSoundPageSeconds, 300);
 });
 
 test('a picture is held for out − in seconds, needs its out, and has no sound of its own', () => {
@@ -172,4 +174,28 @@ test('clips that keep their sound count with the sounds; cards have a total; the
   const capped = placeTimeline(normalizeTimeline(timeline({ video: [{ source: 'vid_a/video-1.mp4' }] }), names), probes, { maxFilmBytes: 1024 * 1024 });
   assert.equal(capped.output.maxKbps, filmRateCap(1024 * 1024, capped.seconds, capped.pieces.length));
   assert.equal(capped.output.maxKbps, 1107);
+});
+
+test('a sound may come from a page that makes it: no wired file, a length, and at most eight of them', () => {
+  const PAGE = '<!doctype html><html><body><script>window.renderAudio = async () => null;</script></body></html>';
+  const ok = { video: [{ id: 'v1', source: 'vid_a/video-1.mp4' }] };
+  const made = normalizeTimeline(timeline({ ...ok, music: [{ page: PAGE, seconds: 4, at: 0.5, out: 3, fadeOut: 1 }] }), names).audio[0];
+  assert.deepEqual([made.page, made.source, made.at, made.in, made.out, made.fadeOut], [{ html: PAGE, seconds: 4 }, undefined, 0.5, 0, 3, 1]);
+  assert.equal(normalizeTimeline(timeline({ ...ok, sfx: [{ page: PAGE, seconds: 2, anchor: 'v1', loop: true, out: 9 }] }), names).audio[0].loop, true,
+    'a looped page sound may play past its own length');
+  for (const [tracks, field] of [
+    [{ ...ok, music: [{ page: PAGE, source: 'mus/audio-1.mp3', seconds: 4, at: 0 }] }, 'tracks.music[0]'],
+    [{ ...ok, music: [{ page: PAGE, at: 0 }] }, 'tracks.music[0].seconds'],
+    [{ ...ok, music: [{ page: PAGE, seconds: EDIT_LIMITS.maxSoundPageSeconds + 1, at: 0 }] }, 'tracks.music[0].seconds'],
+    [{ ...ok, music: [{ page: '<p>no document</p>', seconds: 4, at: 0 }] }, 'tracks.music[0].page'],
+    [{ ...ok, music: [{ page: `<!doctype html><html>${'x'.repeat(EDIT_LIMITS.maxCardHtmlBytes)}</html>`, seconds: 4, at: 0 }] }, 'tracks.music[0].page'],
+    [{ ...ok, music: [{ page: PAGE, seconds: 4, at: 0, in: 4 }] }, 'tracks.music[0].in'],
+    [{ ...ok, music: [{ page: PAGE, seconds: 4, at: 0, out: 5 }] }, 'tracks.music[0].out'],
+    [{ ...ok, music: Array.from({ length: EDIT_LIMITS.maxSoundPages + 1 }, () => ({ page: PAGE, seconds: 1, at: 0 })) }, 'tracks'],
+  ]) assert.equal(errorOf(() => normalizeTimeline(timeline(tracks), names)).field, field, JSON.stringify(tracks).slice(0, 160));
+  // Once made, it is placed like a file: by the probe of the WAV the page's sound became.
+  const t = normalizeTimeline(timeline({ ...ok, music: [{ page: PAGE, seconds: 4, at: 0.5, out: 3 }] }), names);
+  const named = { ...t, audio: t.audio.map((entry) => ({ ...entry, source: '#sound-1' })) };
+  const plan = placeTimeline(named, new Map([...probes, ['#sound-1', { duration: 4, video: null, audio: { sampleRate: 48000, channels: 2 } }]]));
+  assert.deepEqual([plan.audio[0].at, plan.audio[0].length], [0.5, 3]);
 });

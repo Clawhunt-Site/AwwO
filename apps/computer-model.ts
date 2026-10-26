@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { estimateTokens } from './context-estimate.ts';
 import { contextOverflow } from './context-overflow.ts';
-import { bindUserModel } from './user-models.ts';
+import { bindUserModel, callsCloudRelay } from './user-models.ts';
 
 type ObjectValue = Record<string, any>;
 type Message = { role: string; content: string | null; tool_calls?: ObjectValue[]; tool_call_id?: string; reasoning_details?: ObjectValue[] };
@@ -108,8 +108,9 @@ export interface ComputerCallOptions { thinking?: boolean; maxTokens?: number }
 
 /** One provider call. `stream` says the call is sent streaming and its answer is to be gathered (gatherChatStream): a
  *  Chat Completions call through LLM Gate, where Cloudflare cuts a response that sends nothing for about 100 s and a call
- *  that is not streamed sends nothing until its last token, and one to the DeepSeek API, which thinks before it answers.
- *  Every other call is sent whole, as before. */
+ *  that is not streamed sends nothing until its last token, one to the hosted AwwO's relay (an AwwO 云端 connection of
+ *  the local edition), which answers streamed calls only behind the same edge, and one to the DeepSeek API, which
+ *  thinks before it answers. Every other call is sent whole, as before. */
 export function providerComputerRequest(completion: Completion, model: Profile, effort?: string, options: ComputerCallOptions = {}): { url: string; headers: Record<string, string>; body: ObjectValue; stream?: boolean } {
   const base = model.baseURL.replace(/\/+$/, '');
   const common = { model: model.model, stream: false };
@@ -157,7 +158,7 @@ export function providerComputerRequest(completion: Completion, model: Profile, 
   const origin = new URL(base).origin;
   const google = origin === 'https://generativelanguage.googleapis.com';
   const deepseek = model.provider === 'deepseek';
-  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN || deepseek;
+  const stream = model.provider === 'llmgate' || origin === LLM_GATE_ORIGIN || deepseek || callsCloudRelay(base);
   // A DeepSeek call thinks unless it is told not to by its own field: for thinking: false, for the effort none where its
   // profile lists that level, and always when it carries tools, since the API wants a tool loop's earlier reasoning_content
   // sent back, which a managed execution's thread does not keep (gatherChatStream passes reasoning over).
@@ -404,33 +405,53 @@ function streamClosed(error: unknown, quietMs: number, idleMs: number): { reason
     detail: network === undefined ? 'end' : network === 'network' ? 'broken' : network.slice('network:'.length) };
 }
 
-/** Whether a provider's usage counts anything (a token read or written, a cost: any positive number at its top level or
- *  one object down): the provider read the request. */
-function countsWork(usage: unknown): boolean {
-  const positive = (value: unknown) => typeof value === 'number' && value > 0;
-  return object(usage) && Object.values(usage).some(value => positive(value) || (object(value) && Object.values(value).some(positive)));
+/** Whether a provider's usage counts anything (a token read or written, a cost: a positive number, or words that are one,
+ *  anywhere in it, its arrays included): the provider read the request. Usage whose objects or arrays nest past 64
+ *  levels is taken to count. As the workers' provider observers count it (openai-agents-worker/usage.mjs and
+ *  pi-worker/usage.mjs, the Python worker's errors.py). */
+function countsWork(usage: unknown, depth = 0): boolean {
+  if (typeof usage === 'number' || typeof usage === 'string') return Number(usage) > 0;
+  if (!usage || typeof usage !== 'object') return false;
+  return depth > 64 || Object.values(usage).some(value => countsWork(value, depth + 1));
 }
 
-/** Whether a refusal's body carries anything of the work it refused, at its top level or inside any of its fields (its
- *  error, a provider's own envelope): usage that counts anything, or any of an answer (Chat Completions, Responses,
- *  Anthropic, Gemini). */
-function carriesWork(body: ObjectValue): boolean {
-  const answer = (value: unknown) => value != null && value !== '' && !(Array.isArray(value) && value.length === 0) && !(object(value) && Object.keys(value).length === 0);
-  return [body, ...Object.values(body).filter(object)].some(part => countsWork(part.usage) || countsWork(part.usage_metadata)
-    || ['choices', 'output', 'content', 'candidates'].some(key => answer(part[key])));
+/** Whether a refusal's body carries anything of the work it refused, anywhere in it (its error, a provider's own
+ *  envelope, a detail under either): usage that counts anything (usage, usage_metadata or Gemini's usageMetadata), or any
+ *  of an answer (Chat Completions, Responses, Anthropic, Gemini), as the workers' provider observers read it. A body is at
+ *  most 16 KiB here, and one whose objects or arrays nest past 64 levels is taken to carry work. */
+function carriesWork(value: unknown, depth = 0): boolean {
+  const answer = (item: unknown) => item != null && item !== '' && !(Array.isArray(item) && item.length === 0) && !(object(item) && Object.keys(item).length === 0);
+  if (!value || typeof value !== 'object') return false;
+  if (depth > 64) return true;
+  if (Array.isArray(value)) return value.some(item => carriesWork(item, depth + 1));
+  const fields = value as ObjectValue;
+  return ['usage', 'usage_metadata', 'usageMetadata'].some(key => countsWork(fields[key], depth + 1))
+    || ['choices', 'output', 'content', 'candidates'].some(key => answer(fields[key]))
+    || Object.values(fields).some(item => carriesWork(item, depth + 1));
+}
+
+/** The provider's own words in a refusal's body, as the workers read them: its error's message (or the error itself,
+ *  where that is only words), code and type. Never anything else in the body, where a provider may echo words of the
+ *  request. */
+function providerWords(body: ObjectValue): string[] {
+  const error = body.error;
+  const words = typeof error === 'string' ? [error] : object(error) ? [error.message, error.code, error.type] : [];
+  return words.filter((item): item is string => typeof item === 'string');
 }
 
 /** A provider's refusal by its status, and by its own error code or type where its body names one as a label
  *  (`provider:400:context_length_exceeded`, `provider:529:overloaded_error`, `provider:524`). Its message is read only to
  *  tell a refusal of the request as larger than its model's window (context-overflow.ts; never relayed) made before any
- *  work: with a status 400, 413 or 422 (an answer before any stream: one inside a 200 may follow work, and keeps its own
- *  code and type) in a body read whole that carries no work (carriesWork). That one carries the label an
+ *  work: with a status 400 or 413 (an answer before any stream: one inside a 200 may follow work, and keeps its own
+ *  code and type) in a body read whole that carries no work (carriesWork), in the provider's own words (providerWords),
+ *  as the workers read one, if more strictly in two ways: a body is read within 16 KiB here (64 KiB in a worker's
+ *  observer), and one that starts with a byte order mark is not JSON here. That one carries the label an
  *  OpenAI-compatible provider gives it whatever this one calls it, and the detail `before-output`, without which the API
- *  never takes a label for that refusal; a body not read to its own end (`whole`: past 16 KiB, or stalled) or not JSON
- *  is never read as one. */
+ *  never takes a label for that refusal; a body not read to its own end (`whole`: past 16 KiB, or stalled), typed a
+ *  stream or not JSON is never read as one. */
 function refusal(status: number, body: ObjectValue = {}, whole = false): { reason: string; detail?: string } {
   const error = object(body.error) ? body.error : body;
-  if (whole && [400, 413, 422].includes(status) && !carriesWork(body) && (error.code === 'context_length_exceeded' || contextOverflow(error.message))) {
+  if (whole && [400, 413].includes(status) && !carriesWork(body) && providerWords(body).some(words => contextOverflow(words))) {
     return { reason: `provider:${status}:context_length_exceeded`, detail: 'before-output' };
   }
   const kind = [error.code, error.type].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value));
@@ -439,8 +460,10 @@ function refusal(status: number, body: ObjectValue = {}, whole = false): { reaso
 
 /** The refusal of a provider that answered a non-2xx. Its body is read for its kind only, at most 16 KiB for at most
  *  2 s: a provider that sends an error's headers and then stalls must not hold the call (as computerRefusalWait does in
- *  the API). Only a body read to its own end can say it carries no work: one cut off there keeps its kind alone. */
+ *  the API). Only a body read to its own end can say it carries no work: one cut off there keeps its kind alone, and so
+ *  does one typed a stream (in any letters), which may carry work in a frame. */
 async function providerRefusal(upstream: Response): Promise<{ reason: string; detail?: string }> {
+  const stream = Boolean(upstream.headers.get('content-type')?.toLowerCase().includes('text/event-stream'));
   let body: ObjectValue | undefined, cut = false, whole = false;
   const reader = upstream.body?.getReader();
   const stalled = setTimeout(() => { cut = true; void reader?.cancel().catch(() => {}); }, 2000);
@@ -456,7 +479,7 @@ async function providerRefusal(upstream: Response): Promise<{ reason: string; de
     body = jsonObject(Buffer.concat(chunks).toString('utf8'), 'json');
   } catch { await reader?.cancel().catch(() => {}); }
   finally { clearTimeout(stalled); }
-  return refusal(upstream.status, body, whole);
+  return refusal(upstream.status, body, whole && !stream);
 }
 
 export async function handleComputerModel(request: IncomingMessage, response: ServerResponse, options: {

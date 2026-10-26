@@ -116,6 +116,12 @@ _SDK_NAMES = {name.lower(): name for name in SDK_STATUS}
 # OpenAI-compatible provider gives it, and words the worker's reading of a refusal knows (context_overflow.py).
 BEDROCK_CONTEXT_LIMIT_TYPE = "context_length_exceeded"
 BEDROCK_CONTEXT_LIMIT_MESSAGE = "Input is too long for requested model"
+# The type of a failure on the way to AWS that AWS never reported (bridge_failure): no answer of AWS's (botocore's
+# ClientError) and no HTTP status, such as a connection reset or a stream cut off or unreadable partway. Its body carries no status (_error_body), so a
+# stream lost this way after it began is not reported as the provider's outage, which a call refused at once is not
+# billed for (plans.go refusedBeforeOutput): AWS may already have done, and billed, the work. As
+# BEDROCK_CONNECTION_FAILURE in apps/bedrock-bridge.ts.
+BEDROCK_CONNECTION_FAILURE = "connection_error"
 
 
 class BridgeError(Exception):
@@ -124,7 +130,8 @@ class BridgeError(Exception):
         self.status = status
         self.kind = kind
         self.message = message
-        # True when AWS reported the failure; the bridge's own refusals are not provider outages.
+        # True for AWS's answer or the way to it (the connection, the credentials); the bridge's own refusals are not
+        # provider outages.
         self.upstream = upstream
 
 
@@ -633,8 +640,8 @@ def bridge_failure(error: BaseException) -> BridgeError:
         return error
     if any(cls.__name__ == "ReadTimeoutError" for cls in type(error).__mro__):
         # botocore's read timeout (urllib3's inside a stream): Bedrock sent nothing for the stream's idle limit. The
-        # service failed, not the run's deadline (MODEL_UNAVAILABLE, never DEADLINE_EXCEEDED): a canvas node whose call
-        # stalled before anything streamed runs again (graph_retry.go).
+        # service failed, not the run's deadline (MODEL_STALLED, never DEADLINE_EXCEEDED, errors.stalled): a canvas node
+        # whose call stalled before anything streamed runs again (graph_retry.go), and such a call is not charged.
         return BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True)
     if type(error).__name__ in CREDENTIAL_ERRORS:
         # No usable AWS credentials: an authentication failure, like a rejected key.
@@ -658,7 +665,12 @@ def bridge_failure(error: BaseException) -> BridgeError:
         return BridgeError(STREAM_EXCEPTIONS[code], code, "The Bedrock request failed", upstream=True)
     if status is not None and 400 <= status <= 599:
         return BridgeError(status, "api_error", "The Bedrock request failed", upstream=True)
-    return BridgeError(502, "api_error", "The Bedrock request failed", upstream=True)
+    if isinstance(response, dict):
+        # An error AWS answered with that the bridge does not know: botocore's ClientError, among them the EventStreamError
+        # of an exception the stream reports and the service model lacks, which botocore gives an empty code. AWS's own
+        # failure, as before.
+        return BridgeError(502, "api_error", "The Bedrock request failed", upstream=True)
+    return BridgeError(502, BEDROCK_CONNECTION_FAILURE, "The Bedrock request failed", upstream=True)
 
 
 def valid_auth(auth: Any) -> bool:
@@ -724,9 +736,10 @@ def _sse(payload: dict | str) -> bytes:
 def _error_body(error: BridgeError) -> dict:
     # ``status`` lets the worker classify an AWS failure that arrives after the stream began. The
     # bridge's own refusals (an event it cannot relay, a truncated stream) carry none, so they are
-    # not reported as a provider outage.
+    # not reported as a provider outage; nor does a failure AWS never reported (BEDROCK_CONNECTION_FAILURE).
+    # A failure before the stream began is classified by the response's own status, which it keeps.
     body = {"message": error.message, "type": error.kind, "code": error.kind}
-    if error.upstream:
+    if error.upstream and error.kind != BEDROCK_CONNECTION_FAILURE:
         body["status"] = error.status
     return {"error": body}
 

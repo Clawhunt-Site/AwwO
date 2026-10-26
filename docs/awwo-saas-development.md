@@ -63,7 +63,7 @@ AWWO_REVIEWER_API_KEY=YOUR_PRIVATE_KEY
 
 真实模型验收先运行 `node scripts/awwo-saas-real-provider-acceptance.mjs --check`。它只从本项目配置文件读取模型配置，缺配置以 exit 2 标记阻塞。明确执行 `--run --env-file <本项目配置路径>` 后，脚本在独立 schema 启动 Go/Pi，校验真实两轮响应、历史、SSE 和持久化，失败或清理失败均非成功；不会改用 fixture。不要把模型密钥放入命令参数或聊天记录。
 
-需要可重复的本地负向验收时，使用 `node scripts/awwo-saas-browser-fixture.mjs --start`。输出的 0600 credentials 文件含随机管理员与控制 token；`scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json>` 只为该 fixture 设置一次性精确方法/路径故障。Go API 和生产部署不加载此控制器。支持非法规划、上游 503/断连、HTTP 失败/延迟和 SSE 断连，普通请求仍经过实际 Go/Pi。详见 [整改验收记录](awwo-fable-remediation-20260907.md)。
+需要可重复的本地负向验收时，使用 `node scripts/awwo-saas-browser-fixture.mjs --start`。输出的 0600 credentials 文件含随机管理员与控制 token；`scripts/awwo-saas-fixture-control.mjs --credentials <file> --rules <json>` 只为该 fixture 设置一次性精确方法/路径故障。Go API 和生产部署不加载此控制器。支持非法规划、上游 503/断连、HTTP 失败/延迟和 SSE 断连，普通请求仍经过实际 Go/Pi。详见 整改验收记录。
 
 原画布规划助手在点击“生成画布”后提交持久规划 run；合法结果自动应用并显示“已更新画布”，支持撤销，没有额外应用确认按钮。planner 可用 `set_team` 新建或替换节点团队（不选择成员模型，见[节点团队 §2.1](awwo-node-teams.md#21-团队模板与规划助手)）。SaaS 整图运行先保存画布、初始化节点身份，再提交 canonical 文档版本及 scope，由 Go 持久调度；关闭页面后已受理图继续运行，后台记录面板可查询节点与成员结果。原本机模式仍由浏览器 runGraph 调度。
 
@@ -125,7 +125,7 @@ npm run test:saas:smoke
 
 `test:saas:backend` 自动使用本项目专属 PostgreSQL，并执行真实数据库测试、race 和 vet；每次测试创建独立 schema 并清理。`test:saas:stack` 使用临时端口、独立数据库 schema、真实 Go/Pi 进程及本地模型协议 fixture，覆盖持久 SSE、历史、幂等、取消、规划和重启。`test:saas:smoke` 访问正在运行的本地服务，创建名称带 Acceptance 的验收用户和工作区，保留这些样例供查看。
 
-不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器分别记录。[基础验收](awwo-saas-verification.md)和[此前真实模型验收](awwo-real-provider-acceptance-20260908.md)有各自快照与范围，本次团队及后台图结果见[节点团队验收报告](awwo-node-teams-acceptance-20260908.md)。团队相关组件/持久化、图恢复、Go 模式与数据库、Pi 多模型测试需随本次实现执行，不能沿用旧用例数判绿。
+不能把没配置数据库而 skip 的测试算通过；真实 provider、HTTP 链路、浏览器和容器分别记录。基础验收和此前真实模型验收有各自快照与范围，本次团队及后台图结果见节点团队验收报告。团队相关组件/持久化、图恢复、Go 模式与数据库、Pi 多模型测试需随本次实现执行，不能沿用旧用例数判绿。
 
 ### 节点团队真实模型验收
 

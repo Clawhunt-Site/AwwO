@@ -25,13 +25,22 @@ export function deliveryProfiles(locale: UiLocale = 'zh'): DeliveryProfile[] {
   return items.map(([id, label, description, type, help]) => ({ id, label, description,
     field: { id: `delivery_${id}`, label, type, required: true, value: '', help },
     ...(id === 'model3d' ? { companions: [{ id: 'delivery_model3d_preview', label: en ? '3D preview (optional)' : '3D 预览（可选）', type: 'html' as const, required: false, value: '',
-      help: en ? 'Optionally include a complete self-contained HTML canvas/WebGL viewer with inline model data matching the actual delivered model. The viewer is a companion, not a substitute for the 3D file. Do not require external libraries or URLs.'
-        : '可附完整、自包含的 HTML canvas/WebGL 预览，内联的数据必须对应实际交付的模型。预览不能代替真实 3D 文件，不依赖外部库或链接。' }] } : {}),
+      help: en ? 'Optionally include a complete self-contained HTML canvas/WebGL viewer with inline model data matching the actual delivered model. The viewer is a companion, not a substitute for the 3D file. It may use the three.js AwwO supplies (r128 by its script tag, or r186 as ES modules by its import map, as the output rules give them) and needs no other library or URL.'
+        : '可附完整、自包含的 HTML canvas/WebGL 预览，内联的数据必须对应实际交付的模型。预览不能代替真实 3D 文件。可以使用 AwwO 提供的 three.js（按输出规则给出的 script 标签加载 r128，或按其 import map 以 ES 模块加载 r186），不依赖其他库或链接。' }] } : {}),
     ...(id === 'report' ? { companions: [{ id: 'delivery_report_pdf', label: en ? 'PDF file (optional)' : 'PDF 文件（可选）', type: 'file' as const, required: false, value: '',
       help: en ? 'Attach the actual PDF only if the available runtime created it. If PDF export is unavailable, omit this optional field and retain the complete Markdown report; do not invent a PDF path or rename text as PDF.'
         : '只有可用运行时实际生成 PDF 时才附该文件；无法导出时省略此可选字段并保留完整 Markdown 报告，不虚构 PDF 路径或把文本改名为 PDF。' }] } : {}),
   }));
 }
+
+/** Help a profile's field had before: a node that took the profile then keeps the field as it was, and adding the
+ *  profile again must not add it twice (the 3D preview's help forbade every library until 2026-10-26). */
+const EARLIER_HELP: Readonly<Record<string, readonly string[]>> = {
+  delivery_model3d_preview: [
+    'Optionally include a complete self-contained HTML canvas/WebGL viewer with inline model data matching the actual delivered model. The viewer is a companion, not a substitute for the 3D file. Do not require external libraries or URLs.',
+    '可附完整、自包含的 HTML canvas/WebGL 预览，内联的数据必须对应实际交付的模型。预览不能代替真实 3D 文件，不依赖外部库或链接。',
+  ],
+};
 
 /** Add a requirement without replacing an existing contract or creating output bytes. */
 export function appendDeliveryProfile(contract: NodeContract, id: DeliveryProfileId, locale: UiLocale = 'zh'): NodeContract {
@@ -40,7 +49,7 @@ export function appendDeliveryProfile(contract: NodeContract, id: DeliveryProfil
   const outputs = [...contract.outputs];
   for (const next of [profile.field, ...profile.companions ?? []]) {
     if (outputs.some(field => (field.id === next.id || new RegExp(`^${next.id}_[0-9]+$`).test(field.id))
-      && field.type === next.type && field.help === next.help)) continue;
+      && field.type === next.type && (field.help === next.help || EARLIER_HELP[next.id]?.includes(field.help ?? '')))) continue;
     if (outputs.length >= 32 || (next.type === 'file' && outputs.filter(field => field.type === 'file').length >= 8)) {
       throw new Error(locale === 'zh' ? '每个节点最多 32 个交付字段，其中最多 8 个文件；请先整理已有交付。'
         : 'A node supports at most 32 output fields, including 8 files. Consolidate existing deliverables first.');

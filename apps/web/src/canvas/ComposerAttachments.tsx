@@ -2,9 +2,10 @@
 // one chip per file. The draft text stays the single source of truth: an uploaded file becomes a line at its end
 // (attachments.ts), so whatever already keeps, recovers or sends a draft keeps, recovers and sends its files too.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { AlertCircle, Box, File as FileIcon, FileArchive, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, Plus, X } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
+import { refuseHeldEnter } from './heldEnter';
 import {
   attachmentKind, attachmentSeenBy, carriesFiles, eventFiles, formatFileSize, joinAttachments, MAX_COMPOSER_ATTACHMENTS, MAX_UPLOAD_BYTES,
   splitAttachments, type AttachmentKind, type ComposerAttachment,
@@ -183,6 +184,7 @@ export function useComposerAttachments({ value, onChange, nodeId, disabled = fal
     add(files);
   }, [enabled, add]);
   const dropProps = {
+    'data-attachment-box': '',
     onDragEnter: (event: DragEvent<HTMLElement>) => { if (enabled && carriesFiles(event.dataTransfer)) { event.preventDefault(); setDragging(true); } },
     onDragOver: (event: DragEvent<HTMLElement>) => { if (enabled && carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } },
     onDragLeave: (event: DragEvent<HTMLElement>) => {
@@ -229,6 +231,50 @@ export function AttachButton({ state, className }: { state: ComposerAttachmentsS
   </>;
 }
 
+/** A box's controls that can take the focus once neither chip beside a removed one is left (or, from a closed notice, in a
+ *  box that draws no text field), in the box's order. */
+const BOX_CONTROLS = ':is(button, textarea, select, a[href], input:not([type="file"])):not([tabindex="-1"])';
+
+/** On a chip's ✕ and a notice's: a pointer press leaves the focus where it was, as Safari does, instead of focusing the ✕
+ *  (Chrome does), which would have the press hand the focus on: from a chip, to another file's ✕, for a stray Enter or
+ *  Space to remove that file; from a notice, away from where the reader had it (the page's body, the canvas's keys). */
+const keepFocus = (event: MouseEvent<HTMLElement>) => event.preventDefault();
+
+/**
+ * A chip's own ✕ takes its chip away, and with the focus on the ✕ the keyboard's focus would fall to the page's body.
+ * Pressed with the focus in its chip (from the keyboard: a click focuses nothing, see keepFocus), the ✕ hands the focus
+ * on in the render its press draws, once the chip has gone — the box's owner may refuse the change, and then the chip
+ * and the focus both stay. It goes to the chip that took its place, else to the one before it (that chip's ✕, else its
+ * link), else to the box's text field, else to the box's first control that takes it. Nothing scrolls for it: the canvas
+ * root clips, so a scroll would shift the canvas under the reader.
+ */
+function useChipFocusHandOff() {
+  const pressed = useRef<{ chip: Element; next: Element | null; previous: Element | null; box: Element | null } | null>(null);
+  // Every press draws a render, so a press whose change is refused is let go at once and moves nothing later.
+  const [, setPresses] = useState(0);
+  useLayoutEffect(() => {
+    const press = pressed.current;
+    if (!press) return;
+    pressed.current = null;
+    if (press.chip.isConnected || (document.activeElement && document.activeElement !== document.body)) return;
+    // Tried in order until one takes the focus: a control that went too, is disabled or is not drawn takes none.
+    const controls = (chip: Element | null) => [chip?.querySelector<HTMLElement>('.awwo-attachment-remove'), chip?.querySelector<HTMLElement>('a.awwo-attachment-name')];
+    for (const candidate of [...controls(press.next), ...controls(press.previous), press.box?.querySelector<HTMLElement>('textarea'),
+      ...Array.from(press.box?.querySelectorAll<HTMLElement>(BOX_CONTROLS) ?? [])]) {
+      candidate?.focus({ preventScroll: true });
+      if (candidate && document.activeElement === candidate) return;
+    }
+  });
+  return useCallback((event: MouseEvent<HTMLElement>) => {
+    const chip = event.currentTarget.closest('li');
+    if (!chip?.contains(document.activeElement)) return;
+    pressed.current = { chip, next: chip.nextElementSibling, previous: chip.previousElementSibling, box: chip.closest('[data-attachment-box]') };
+    // An Enter held down stops at the ✕ it pressed: its repeats would remove the next file, then send the box's draft.
+    refuseHeldEnter(event);
+    setPresses(count => count + 1);
+  }, []);
+}
+
 /** One chip per attached file, uploads in flight and refusals included. Read-only in a transcript. A file that waits to
  *  be added (deferWhileDisabled) has a 加入 of its own, pressable while `canAdd`. */
 export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss, onAdd, canAdd = false, disabled = false, compact = false }: {
@@ -249,6 +295,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
   // nothing is handed on later.
   const list = useRef<HTMLUListElement>(null);
   const focusAdded = useRef<string | null>(null);
+  const handOff = useChipFocusHandOff();
   useLayoutEffect(() => {
     const id = focusAdded.current;
     if (!id) return;
@@ -269,7 +316,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
           : <span className="awwo-attachment-name" title={item.name}>{item.name}</span>}
         <span className="sr-only">{t(`attach.kind.${item.kind}`)}</span>
         {onRemove ? <button type="button" className="awwo-attachment-remove" disabled={disabled} aria-label={t('attach.remove', { name: item.name })}
-          onClick={() => onRemove(item.id)}><X size={12} aria-hidden="true" /></button> : null}
+          onMouseDown={keepFocus} onClick={event => { handOff(event); onRemove(item.id); }}><X size={12} aria-hidden="true" /></button> : null}
       </li>;
     })}
     {uploads.map(upload => {
@@ -285,7 +332,7 @@ export function AttachmentChips({ attachments, uploads = [], onRemove, onDismiss
           aria-describedby={noteId} title={canAdd ? t('attach.addReadyNote') : undefined}
           onClick={event => { if (event.currentTarget === document.activeElement) focusAdded.current = upload.ready!.id; onAdd(upload.key); }}>{t('attach.addReadyShort')}</button> : null}
         {onDismiss ? <button type="button" className="awwo-attachment-remove" aria-label={t(upload.error ? 'attach.dismiss' : upload.ready ? 'attach.remove' : 'attach.cancel', { name: upload.name })}
-          onClick={() => onDismiss(upload.key)}><X size={12} aria-hidden="true" /></button> : null}
+          onMouseDown={keepFocus} onClick={event => { handOff(event); onDismiss(upload.key); }}><X size={12} aria-hidden="true" /></button> : null}
       </li>;
     })}
   </ul>
@@ -299,6 +346,35 @@ function AttachmentThumb({ src, fallback }: { src: string; fallback: ReactNode }
     : <img className="awwo-attachment-thumb" src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />;
 }
 
+/**
+ * The notice's ✕ (关闭) takes the notice with it, and with the focus on the ✕ the keyboard's focus would fall to the page's
+ * body. Pressed with the focus in the notice (from the keyboard: a click focuses nothing, see keepFocus), it first gives the
+ * focus to the box's text field, then closes the notice, which always goes (unlike a chip, which the box's owner may keep).
+ * A box shut for now (its node works, the assistant waits) keeps its text field, disabled: the focus then falls to the
+ * page, as before, where the canvas's keys work and from where the box's owner can give it back as the box opens again
+ * (TileComposer, CanvasAssistant: only from the page). Only a box that draws no text field (a Markdown field showing its
+ * preview) hands it to its first other control that takes it, the notice and the box's files left out (on a file's ✕, an
+ * upload's cancel among them, a stray Enter would take a file away). Nothing scrolls for it (the canvas root clips), and
+ * an Enter held down stops where the focus went (refuseHeldEnter: its repeats would type newlines there, or send the
+ * box's draft).
+ */
+function closeNotice(event: MouseEvent<HTMLElement>, close: () => void) {
+  const notice = event.currentTarget.closest('.awwo-attachment-notice');
+  const box = notice?.closest('[data-attachment-box]');
+  if (notice && box && notice.contains(document.activeElement)) {
+    const field = box.querySelector<HTMLElement>('textarea');
+    const candidates = field ? [field]
+      : Array.from(box.querySelectorAll<HTMLElement>(BOX_CONTROLS)).filter(control => !notice.contains(control) && !control.closest('.awwo-attachment-chips'));
+    // Tried in order until one takes the focus: a disabled control, or one that is not drawn, takes none.
+    for (const candidate of candidates) {
+      candidate.focus({ preventScroll: true });
+      if (document.activeElement === candidate) break;
+    }
+    refuseHeldEnter(event);
+  }
+  close();
+}
+
 /** The tray under a composer's text: its chips, the reason a file was refused, and the drop hint. */
 export function AttachmentTray({ state, disabled = false }: { state: ComposerAttachmentsState; disabled?: boolean }) {
   const { t } = useCanvasI18n();
@@ -307,7 +383,8 @@ export function AttachmentTray({ state, disabled = false }: { state: ComposerAtt
     <AttachmentChips attachments={state.attachments} uploads={state.uploads} onRemove={state.remove} onDismiss={state.dismiss}
       onAdd={state.addReady} canAdd={state.enabled} disabled={disabled} />
     {state.notice ? <p className="awwo-attachment-notice" id={noticeId} role="status">{state.notice}
-      <button type="button" aria-label={t('attach.closeNotice')} onClick={state.clearNotice}><X size={12} aria-hidden="true" /></button></p> : null}
+      <button type="button" aria-label={t('attach.closeNotice')} onMouseDown={keepFocus}
+        onClick={event => closeNotice(event, state.clearNotice)}><X size={12} aria-hidden="true" /></button></p> : null}
     {state.dragging ? <div className="awwo-attachment-drop" aria-hidden="true">{t('attach.drop')}</div> : null}
   </>;
 }

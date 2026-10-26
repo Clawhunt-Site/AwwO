@@ -33,19 +33,17 @@ def test_app_environment_defaults_to_staging(monkeypatch):
     assert clawhunt_base_url() == CLAWHUNT_BASE_URLS["staging"]
 
 
-def test_only_two_environments_exist():
-    """The whole framework has exactly two environments — there is no localhost
-    'development' tier (a dev points 127.0.0.1 via an explicit override instead)."""
-    assert environment.APP_ENV_CHOICES == ("staging", "production")
+def test_three_environments_exist():
+    """Local development remains distinct from online acceptance and production."""
+    assert environment.APP_ENV_CHOICES == ("development", "staging", "production")
     assert environment.DEFAULT_APP_ENV == "staging"
-    assert set(CLAWHUNT_BASE_URLS) == {"staging", "production"}
-    assert set(RELAY_BASE_URLS) == {"staging", "production"}
+    assert set(CLAWHUNT_BASE_URLS) == {"development", "staging", "production"}
+    assert set(RELAY_BASE_URLS) == {"development", "staging", "production"}
 
 
 def test_legacy_non_production_spellings_fold_to_staging():
-    """An old persisted APP_ENV (development/dev/local/test/stage) or a pre-existing
-    build profile baked as 'development' migrates to staging instead of crashing."""
-    for raw in ("development", "dev", "local", "test", "stage", "STAGING", "  staging "):
+    """Test/stage aliases select acceptance; dev/local select development."""
+    for raw in ("test", "stage", "STAGING", "  staging "):
         assert app_environment(raw) == "staging"
     assert app_environment("prod") == "production"
     assert app_environment("production") == "production"
@@ -292,3 +290,16 @@ def test_invalid_app_environment_fails_closed(monkeypatch):
     monkeypatch.setenv("APP_ENV", "prodction")
     with pytest.raises(ValueError, match="APP_ENV must be one of"):
         app_environment()
+
+
+def test_local_build_keeps_local_identity_and_endpoints(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("CLAWHUNT_BASE_URL", raising=False)
+    monkeypatch.delenv("SUPERCLAW_RELAY_BASE_URL", raising=False)
+    for value in ("development", "local", "dev"):
+        assert app_environment(value) == "development"
+    assert clawhunt_base_url() == "http://127.0.0.1:8787"
+    assert relay_base_url() == "http://127.0.0.1:8791/v1"
+    monkeypatch.setenv("CLAWHUNT_BASE_URL", CLAWHUNT_BASE_URLS["production"])
+    with pytest.raises(RuntimeError, match="cross-environment contamination"):
+        clawhunt_base_url()

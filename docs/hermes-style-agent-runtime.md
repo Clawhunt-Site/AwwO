@@ -41,19 +41,19 @@ framework is general enough to host more.
 SuperClaw working tree:
 
 ```text
-/Users/leongong/Desktop/LeonProjects/gho_workspace/superclaw-codex-app-server-runtime
+/Users/dev-user/Desktop/projects/workspace/superclaw-codex-app-server-runtime
 ```
 
 Local Hermes project (reference only):
 
 ```text
-/Users/leongong/Desktop/LeonProjects/gho_workspace/hermes-agent
+/Users/dev-user/Desktop/projects/workspace/hermes-agent
 ```
 
 This plan file:
 
 ```text
-/Users/leongong/Desktop/LeonProjects/gho_workspace/superclaw-codex-app-server-runtime/docs/hermes-style-agent-runtime.md
+/Users/dev-user/Desktop/projects/workspace/superclaw-codex-app-server-runtime/docs/hermes-style-agent-runtime.md
 ```
 
 ## The Real Problems (root-caused in code)

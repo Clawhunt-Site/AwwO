@@ -202,11 +202,11 @@ function fakeConverse(turn: (input: any) => AsyncIterable<Record<string, unknown
 // The Pi worker's managed-execution Bedrock call (pi-worker/bedrock-call.mjs), made here in-process with a fake SDK
 // rather than in its child; the child itself is tested in pi-worker/bedrock-call.test.mjs.
 async function inProcessCall(sdk: unknown, seen: any[] = []) {
-  const [{ createBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
+  const [{ childBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
   return async (model: any, body: any) => {
     seen.push(model);
     const answer = await bedrockCall({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body) },
-      { load: async () => ({ createBedrockFetch, sdk }) });
+      { load: async () => ({ childBedrockFetch, sdk }) });
     if (!answer.ok) throw Object.assign(new Error('The Bedrock call failed'), { reason: answer.reason });
     return answer.raw;
   };
@@ -339,6 +339,8 @@ test('a Bedrock stream that fails or ends early is a failed call, never a partia
     // The bridge ends a stream that stopped early with its own error frame; an AWS failure after the stream began keeps its status.
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'partial' } } }; }, 'stream:error:api_error', undefined],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { throttlingException: { message: 'slow down' } }; }, 'stream:error:429:throttlingException', undefined],
+    // A stream lost on its way to AWS (a connection reset, which AWS never reported) names no AWS status either.
+    [async function* () { yield { messageStart: { role: 'assistant' } }; throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }); }, 'stream:error:connection_error', undefined],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'cut' } } }; yield { messageStop: { stopReason: 'max_tokens' } }; }, 'answer', 'finish:length'],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'I' } } }; yield { messageStop: { stopReason: 'content_filtered' } }; }, 'answer', 'finish:content_filter'],
     [async function* () { yield { messageStart: { role: 'assistant' } }; yield { contentBlockDelta: { contentBlockIndex: 0, delta: { reasoningContent: { text: 'private reasoning' } } } }; yield { messageStop: { stopReason: 'end_turn' } }; }, 'answer', 'empty'],
@@ -495,6 +497,22 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     // keeps its kind alone: only a body read to its own end can say it carries no work.
     'gate-400-cut-long': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.write(JSON.stringify({ error: { code: 'context_length_exceeded' } })); setTimeout(() => res.end(' '.repeat(20_000)), 50); },
     'gate-400-cut-stalled': (res, req) => { res.writeHead(400, { 'content-type': 'application/json' }); res.write(JSON.stringify({ error: { code: 'context_length_exceeded' } })); req.on('close', () => res.destroy()); },
+    // Read as the workers read one (their provider observers' rule): by the type of its error (Anthropic's 413) and by an
+    // error that is only words; work anywhere in its body (under a detail of its error, deep inside usage, in words that
+    // are a number, under usageMetadata, nested past 64 levels); JSON typed a stream, in any letters; and words only in
+    // its error, never in a body without one.
+    'anthropic-413': res => { res.writeHead(413, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'request_too_large', message: 'secret-provider-key Request exceeds the maximum size' } })); },
+    'gate-400-words': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'secret-provider-key maximum context length is 131072 tokens' })); },
+    'gate-400-detail-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded', details: { usage: { prompt_tokens: 123 } } } })); },
+    'gate-400-deep-usage': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { cache: { tokens: { read: 123 } } } })); },
+    'gate-400-usage-words': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' }, usage: { prompt_tokens: '11' } })); },
+    'gate-400-usage-metadata': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' }, usageMetadata: { promptTokenCount: 7 } })); },
+    'gate-400-nested': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(`{"error":{"code":"context_length_exceeded","details":${'['.repeat(70)}{}${']'.repeat(70)}}}`); },
+    'gate-400-nested-under': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(`{"error":{"code":"context_length_exceeded","details":${'['.repeat(50)}{}${']'.repeat(50)}},"usage":{"prompt_tokens":"0","cached":true}}`); },
+    'gate-400-stream-typed': res => { res.writeHead(400, { 'content-type': 'Text/Event-Stream; charset=utf-8' }); res.end(JSON.stringify({ error: { code: 'context_length_exceeded' } })); },
+    'gate-400-no-error-field': res => { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ message: 'secret-provider-key maximum context length is 131072 tokens', code: 'context_length_exceeded' })); },
+    // A 422 is another refusal whatever its words, as in the workers (owner 2026-10-25): it keeps the provider's code.
+    'gate-422': res => { res.writeHead(422, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'secret-provider-key maximum context length is 131072 tokens', type: 'invalid_request_error', code: 'context_length_exceeded' } })); },
   };
   const s = await serve(t, 'chat_completions', (body, req, res) => scenarios[body.messages.at(-1).content](res, req), {}, 'pi');
   for (const [scenario, reason, detail] of [
@@ -508,6 +526,12 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
     ['gate-400-usage', 'provider:400:context_length_exceeded', undefined], ['gate-400-inner-usage', 'provider:400:context_length_exceeded', undefined],
     ['gate-400-answer', 'provider:400:context_length_exceeded', undefined], ['gate-413-not-json', 'provider:413', undefined],
     ['gate-400-cut-long', 'provider:400:context_length_exceeded', undefined], ['gate-400-cut-stalled', 'provider:400:context_length_exceeded', undefined],
+    ['anthropic-413', 'provider:413:context_length_exceeded', 'before-output'], ['gate-400-words', 'provider:400:context_length_exceeded', 'before-output'],
+    ['gate-400-detail-usage', 'provider:400:context_length_exceeded', undefined], ['gate-400-deep-usage', 'provider:400:context_length_exceeded', undefined],
+    ['gate-400-usage-words', 'provider:400:context_length_exceeded', undefined], ['gate-400-usage-metadata', 'provider:400:context_length_exceeded', undefined],
+    ['gate-400-nested', 'provider:400:context_length_exceeded', undefined], ['gate-400-nested-under', 'provider:400:context_length_exceeded', 'before-output'],
+    ['gate-400-stream-typed', 'provider:400:context_length_exceeded', undefined], ['gate-400-no-error-field', 'provider:400:context_length_exceeded', undefined],
+    ['gate-422', 'provider:422:context_length_exceeded', undefined],
   ] as const) {
     const response = await s.send(input({ completion: { messages: [{ role: 'user', content: scenario }], tools: [tool] } }));
     assert.equal(response.status, 502, scenario);
@@ -518,11 +542,32 @@ test('a provider\'s refusal or a broken answer is named by its status, the netwo
   assert.equal(reset.status, 502);
   assert.match((await reset.json()).error.reason, /^network(:[A-Z0-9_]+)?$/);
   // Each refusal is one log line on the worker, with the call's run and model and nothing the provider or the call said.
-  assert.equal(logged.length, 23);
+  assert.equal(logged.length, 34);
   assert.ok(logged.every(line => line.runtime === 'pi' && line.runId === 'run-1' && line.model === 'fixture-model' && line.status === 502 && line.code === 'PROVIDER_ERROR'));
   assert.deepEqual(logged.slice(0, 5).map(line => line.reason), ['provider:400:context_length_exceeded', 'provider:529:overloaded_error',
     'provider:400:context_length_exceeded', 'provider:400:invalid_request_error', 'provider:524']);
   assert.doesNotMatch(JSON.stringify(logged), /secret-provider-key|tokens|quota|gate-400|not json/);
+});
+
+test('of every status from 400 to 599, only a 400\'s or a 413\'s refusal as too large is one before any work, as in the workers', async t => {
+  const logged = rejections(t);
+  const s = await serve(t, 'chat_completions', (body, _req, res) => {
+    res.writeHead(Number(body.messages.at(-1).content), { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'maximum context length is 131072 tokens', code: 'context_length_exceeded' } }));
+  }, {}, 'pi');
+  const before: number[] = [];
+  for (let status = 400; status <= 599; status += 1) {
+    // Every status reaches the rule, its label says, but two that fetch fails on its own: a 407 (no proxy is asked for),
+    // and a 421, which it sends again on a new connection without its body (this provider could not read it).
+    if (status === 421) continue;
+    const response = await s.send(input({ completion: { messages: [{ role: 'user', content: String(status) }], tools: [tool] } }));
+    const { error } = await response.json();
+    if (status === 407) assert.match(error.reason, /^network(:[A-Z0-9_]+)?$/);
+    else assert.equal(error.reason, `provider:${status}:context_length_exceeded`, String(status));
+    if (error.detail === 'before-output') before.push(status);
+  }
+  assert.deepEqual(before, [400, 413]);
+  assert.equal(logged.length, 199);
 });
 
 // An event stream as LLM Gate sends one: each frame a `data:` line (an object as JSON, a string as written), sent in
@@ -566,11 +611,12 @@ test('a Chat Completions call through LLM Gate is streamed and gathered into one
   assert.doesNotMatch(JSON.stringify(body), /private reasoning|secret-provider-key/);
 });
 
-test('only a Chat Completions call through LLM Gate or to the DeepSeek API streams: a Gate profile named "openai" too, no other provider or protocol', () => {
+test('only a Chat Completions call through LLM Gate, to the hosted AwwO\'s relay or to the DeepSeek API streams: a Gate profile named "openai" too, no other provider or protocol', () => {
   const completion = validateComputerCompletion({ messages: [{ role: 'user', content: 'Build the project' }], tools: [tool] });
   const profile = (baseURL: string, provider: string, protocol = 'chat_completions') => ({ model: 'm', apiKey: 'k', baseURL, provider, protocol, maxTokens: 1024, contextWindow: 32768 });
+  // An AwwO 云端 model is bound as "openai" (user-models.ts): its relay's base says where it goes.
   for (const model of [profile('https://api.clawhunt.site/v1', 'openai'), profile('https://api.clawhunt.site/v1/', 'llmgate'), profile('http://127.0.0.1:9/v1', 'llmgate'),
-    profile('https://api.deepseek.com', 'deepseek')]) {
+    profile('https://api.deepseek.com', 'deepseek'), profile('https://awwo.clawhunt.store/api/v1/relay/v1', 'openai')]) {
     const call = providerComputerRequest(completion, model);
     assert.equal(call.stream, true, model.baseURL);
     assert.equal(call.body.stream, true);

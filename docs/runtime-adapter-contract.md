@@ -6,7 +6,7 @@
 >
 > **效力**：本文是**人读的标准**；真正的强制由代码里的 `AgentRuntimeAdapter` Protocol（`agent_runtime/adapter.py`）+ conformance 测试承载，**不是靠这份文档**（防漂移）。本文与各子契约的关系见 §6。
 >
-> 已并入并取代 [capability-workshop-impl-roadmap.md](capability-workshop-impl-roadmap.md) §8.2 / §12.6 中关于授权与容器的讨论；BUG-7（B 类 `_exec_tool` fail-open）见该文 §13。本文每条结论均经 Codex+Gemini 多轮对抗验收。
+> 已并入并取代 capability-workshop-impl-roadmap.md §8.2 / §12.6 中关于授权与容器的讨论；BUG-7（B 类 `_exec_tool` fail-open）见该文 §13。本文每条结论均经 Codex+Gemini 多轮对抗验收。
 
 ---
 
@@ -82,7 +82,7 @@ SandboxResult(exit_code, stdout, stderr, artifacts, violations, metrics)
 | `high_risk_gate_coverage` | 每类高危分级：`kernel_enforced` / `native_enforced` / `not_enforceable`（not_enforceable → 不暴露或 fail-closed） | ✅ |
 | `tool_projection` | 受治理 plugin/skill MCP 工具怎么投影；不支持则 fail-closed | ✅ |
 | `display_field_matrix` | 字段级（streaming_text/tool_lifecycle/tool_input/tool_output/reasoning/usage/approval）→ canonical DisplayEvent；指向 [display-protocol](agent-runtime-display-protocol.md) | ✅ |
-| `prompt_projection` | 统一信封各层投到该 runtime 的 system/user 通道；指向 [prompt-envelope](prompt-envelope-roadmap.md) | ✅ |
+| `prompt_projection` | 统一信封各层投到该 runtime 的 system/user 通道；指向 prompt-envelope | ✅ |
 | `approval_intercept` | 原生审批通道 有(格式)/无 + 怎么路由统一 Ask | ✅ |
 | `session_lifecycle` | 一次性/长驻；session key 组成(repo/MCP/sandbox/model)；resume/suspend | ✅ |
 | `cancel_timeout_heartbeat` | cancel / deadline / heartbeat（尤其挂起等审批时，防 sandbox 超时回收） | ✅ |

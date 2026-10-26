@@ -4,9 +4,10 @@
 // and libiconv), their source releases, which setup:local downloads and the packager carries beside them, as LGPL-2.1
 // asks of their object code. EDB's commandlinetools_3rd_party_licenses.txt names most of them, but not ICU, and some
 // without their copyright lines. scripts/awwo-local-package.mjs (collectPostgresLicences) carries these and stops on a
-// DLL of the archive this list does not name.
+// DLL of the archive this list does not name. The same for EDB's macOS archive (POSTGRES_MACOS_LIBRARIES, into
+// third_party/postgres-macos), which carries no licence file at all; scripts/awwo-local-package-macos.mjs carries those.
 //
-//   node scripts/awwo-postgres-licences.mjs           fetch what is missing
+//   node scripts/awwo-postgres-licences.mjs           fetch what is missing (--macos: of the macOS list)
 //   node scripts/awwo-postgres-licences.mjs --check   fail when one is missing, or differs from its provenance
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,6 +18,7 @@ import { repoRoot } from './awwo-local-lib.mjs';
 import { fetchBytes, licenceTextMatches, provenanceDifferences, sha256 } from './awwo-licence-files.mjs';
 
 export const OUTPUT = path.join(repoRoot, 'third_party', 'postgres-windows');
+export const OUTPUT_MACOS = path.join(repoRoot, 'third_party', 'postgres-macos');
 
 /** A .c file's leading comment, where libxml2 keeps the notices of the files its Copyright file excepts. */
 const header = text => (/^\s*\/\*[\s\S]*?\*\//.exec(text) || [''])[0].trim();
@@ -80,6 +82,84 @@ export const POSTGRES_LIBRARIES = Object.freeze({
       source: { name: 'libiconv-1.18.tar.gz', url: 'https://ftp.gnu.org/gnu/libiconv/libiconv-1.18.tar.gz', sha256: '3b08f5f4f9b4eb82f151a7040bfd6fe6c6fb922efe4b1659c66ea933276965e8' } },
   ].map(library => Object.freeze(library))),
 });
+
+/** PostgreSQL 18.4's source release, whose SHA-256 postgresql.org publishes beside it. */
+const POSTGRES_SOURCE = Object.freeze({ url: 'https://ftp.postgresql.org/pub/source/v18.4/postgresql-18.4.tar.bz2', sha256: '81a81ec695fb0c7901407defaa1d2f7973617154cf27ba74e3a7ab8e64436094' });
+const byName = (list, name) => list.libraries.find(library => library.name === name);
+/** The files of a library both lists carry at the same version, as the Windows list fetches them. */
+const sameFiles = name => byName(POSTGRES_LIBRARIES, name).files;
+
+/** The libraries of EDB's macOS archive of PostgreSQL 18.4 (18.4-1, POSTGRES_MACOS of awwo-local-setup.mjs) that its
+ *  programs and the server's own modules load (the archive holds more: libintl, libxslt, libuuid, libgssrpc, ecpg's and
+ *  libpq-oauth, which nothing kept loads), each dylib with its SHA-256 there, as their Mach-O versions and the strings
+ *  in them name them (krb5: "krb5-1.22.2-final"; libiconv: _libiconv_version 0x113, 1.19; libedit: current version
+ *  1.76, libtool's 0:76:0 of libedit-20251016-3.1; libxml2: 18.3, its build's (2+15+1).3 of 2.15.3; OpenSSL: "OpenSSL
+ *  3.5.6"; zlib: "deflate 1.3.2"), and the symlinks in lib/ that the programs load some of them through (links: name ->
+ *  file). The archive carries no licence file (EDB's Windows one carries server_license.txt and its list of the
+ *  libraries): PostgreSQL's own licence is its source's COPYRIGHT, and the LGPL's text is libiconv's COPYING.LIB, from
+ *  its release. Every program and library is universal (x86_64 and arm64), needs macOS 13 and is signed by EDB (team
+ *  26QKX55P9K). The sources' SHA-256s are of their releases: libiconv's GNU signature (Bruno Haible's) was checked
+ *  against the GNU keyring on 2026-10-23; libedit's release (thrysoee.dk) is not signed. */
+export const POSTGRES_MACOS_LIBRARIES = Object.freeze({
+  postgres: '18.4',
+  libraries: Object.freeze([
+    { name: 'postgresql', version: '18.4', licence: 'PostgreSQL', dylibs: { 'libpq.5.dylib': 'a37092d3647331788bfcb48bb9f466ca9b4a4c36252617f2acb4592a9c4a03fd' },
+      builtInto: ['PostgreSQL\'s programs (bin/) and the server\'s modules (lib/postgresql/)'],
+      files: { COPYRIGHT: { url: POSTGRES_SOURCE.url, extract: 'archive-member', member: 'postgresql-18.4/COPYRIGHT', sha256: POSTGRES_SOURCE.sha256 } } },
+    { name: 'postgresql-source', version: '18', licence: 'LicenseRef-PostgreSQL-source-notices', dylibs: {}, builtInto: ['PostgreSQL\'s own programs and modules (bin/, lib/)'],
+      files: sameFiles('postgresql-source') },
+    { name: 'icu', version: '77.1', licence: 'Unicode-3.0',
+      dylibs: { 'libicudata.77.1.dylib': 'fed98c5b8ef43cd1bf6f32a5fd19a25361ab1402f971a83838d16d8b95e68e97', 'libicui18n.77.1.dylib': 'f9ab1b21d6f08e661dff253b85695d6e0df1fdd76961afbe32c455725ab7a26a',
+        'libicuuc.77.1.dylib': '8fdc917d219bff5fef05e13c73a238631657461396dfe7ca11129e8099086c8a' },
+      links: { 'libicudata.77.dylib': 'libicudata.77.1.dylib', 'libicui18n.dylib': 'libicui18n.77.1.dylib', 'libicuuc.77.dylib': 'libicuuc.77.1.dylib' },
+      files: sameFiles('icu') },
+    { name: 'libxml2', version: '2.15.3', licence: 'MIT', dylibs: { 'libxml2.16.dylib': '0470e3e903e2803e508ab2e21d298a710ac721f461531159295f1cccef2bd77b' }, files: sameFiles('libxml2') },
+    { name: 'zlib', version: '1.3.2', licence: 'Zlib', dylibs: { 'libz.1.3.2.dylib': 'd0db2571c95dec5176cf647b2b9a09094e09baee0d3fd5255044c2e790a15cf3' },
+      links: { 'libz.1.dylib': 'libz.1.3.2.dylib' }, files: sameFiles('zlib') },
+    { name: 'lz4', version: '1.10.0', licence: 'BSD-2-Clause', dylibs: { 'liblz4.1.10.0.dylib': 'b8ee961efb6478bd0ac89fa4bf808bbb18a3e933bc940d674fbac98fe72b485f' },
+      links: { 'liblz4.1.dylib': 'liblz4.1.10.0.dylib' }, files: sameFiles('lz4') },
+    { name: 'zstd', version: '1.5.7', licence: 'BSD-3-Clause', dylibs: { 'libzstd.1.5.7.dylib': '942e71376906b340db45d0884fdfc8cabfc43a4618cd667e07a7820e7d0b5351' },
+      links: { 'libzstd.1.dylib': 'libzstd.1.5.7.dylib' }, files: sameFiles('zstd') },
+    { name: 'openssl', version: '3.5.6', licence: 'Apache-2.0',
+      dylibs: { 'libcrypto.3.dylib': '89a615ef3ff27bf70fd2b815c87a86a60dc055a32c60c362928ed1f15be59845', 'libssl.3.dylib': '7ff816ff0090808e97cfe015da577d44d21329c37ef7d7ec4c7b5e0e6dd7da08' },
+      files: sameFiles('openssl') },
+    { name: 'krb5', version: '1.22.2', licence: 'LicenseRef-MIT-krb5',
+      dylibs: { 'libgssapi_krb5.2.2.dylib': '26976fee31d48fed869152891a847bbfd1baf99e179cf552287ebac897568708', 'libkrb5.3.3.dylib': '3d96e4588e27443bc540af5d85161fdaa0cb7f94c8ee0b2c7ffe6fe3581cd655',
+        'libk5crypto.3.1.dylib': 'a9e23dc0d83849e3499675137d17fd4dc724ce8ffdb3d23b7d8981dd1a32c2d1', 'libkrb5support.1.1.dylib': 'f4912a07f7535c9d4fe757b5f0e8d84dc6d57bbdbfad00bae6fa0995fae85649',
+        'libcom_err.3.0.dylib': '8ddfb8ab3717e68310dffced0be13a7b0034f046b2cd67822ccc5bff5a2219a2' },
+      files: { NOTICE: 'https://raw.githubusercontent.com/krb5/krb5/krb5-1.22.2-final/NOTICE' } },
+    { name: 'libedit', version: '20251016-3.1', licence: 'BSD-3-Clause', dylibs: { 'libedit.0.dylib': 'f75ff8e482f2330e7bd1996c12bdbd64b384cdff04e0beb2f7849f86e2299953' },
+      files: { COPYING: { url: 'https://thrysoee.dk/editline/libedit-20251016-3.1.tar.gz', extract: 'archive-member', member: 'libedit-20251016-3.1/COPYING', sha256: '21362b00653bbfc1c71f71a7578da66b5b5203559d43134d2dd7719e313ce041' } } },
+    { name: 'libiconv', version: '1.19', licence: 'LGPL-2.1-or-later', dylibs: { 'libiconv.2.dylib': 'b486a446ffb46ce0531cb25addfe9bfa1564ebbeea1490c694330aadefa8e008' },
+      files: { 'COPYING.LIB': { url: 'https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz', extract: 'archive-member', member: 'libiconv-1.19/COPYING.LIB', sha256: '88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6' } },
+      source: { name: 'libiconv-1.19.tar.gz', url: 'https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz', sha256: '88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6' } },
+  ].map(library => Object.freeze(library))),
+});
+
+/** What stops a macOS PostgreSQL's libraries from being carried with their licences (its lib folder's top level, as
+ *  [{ name, kind: 'file'|'symlink', sha256, target }], and the version its postgres says): another PostgreSQL than the
+ *  list was made for; a dylib the list does not name, or of other bytes; one it names that is not there; a symlink it
+ *  does not name, or that leads elsewhere than it says. (The server's own modules, lib/postgresql, are kept by name,
+ *  SERVER_MODULES of the packager: none of contrib's or EDB's is carried.) */
+export function postgresMacosLibraryGaps({ lib, version }, list = POSTGRES_MACOS_LIBRARIES) {
+  const gaps = [];
+  if (version !== list.postgres) gaps.push(`the libraries are listed for PostgreSQL ${list.postgres}, not ${version || 'an unknown version'}`);
+  const listed = new Map(list.libraries.flatMap(library => Object.entries(library.dylibs)));
+  const links = new Map(list.libraries.flatMap(library => Object.entries(library.links || {})));
+  for (const entry of lib) {
+    if (entry.kind === 'symlink') {
+      if (!links.has(entry.name)) gaps.push(`${entry.name} is a link the list does not name (to ${entry.target})`);
+      else if (links.get(entry.name) !== entry.target) gaps.push(`${entry.name} leads to ${entry.target}, not ${links.get(entry.name)}`);
+    } else if (/\.dylib$/.test(entry.name)) {
+      if (!listed.has(entry.name)) gaps.push(`${entry.name} is not in the list`);
+      else if (listed.get(entry.name) !== entry.sha256) gaps.push(`${entry.name} is not the build listed (other bytes)`);
+    }
+  }
+  const present = new Map(lib.map(entry => [entry.name, entry.kind]));
+  for (const dylib of listed.keys()) if (present.get(dylib) !== 'file') gaps.push(`${dylib} is listed but not there`);
+  for (const link of links.keys()) if (present.get(link) !== 'symlink') gaps.push(`${link} is listed as a link but not there as one`);
+  return gaps;
+}
 
 const VC_RUNTIME = /^(vcruntime|msvcp|msvcr|concrt|vccorlib|vcomp|vcamp|mfc)\d+(_\w+)?\.dll$/i;
 
@@ -157,32 +237,42 @@ export function sourceNotices(tree, name) {
     files.map(([file, blocks]) => `== ${file} ==\n\n${blocks.join('\n\n')}\n`).join('\n')}`;
 }
 
-/** NOTICES.txt from a source release's archive: downloaded to a scratch folder, checked against its SHA-256, unpacked
- *  there, read, and removed. */
-function fetchSourceNotices({ url, sha256: expected, name }) {
+/** Windows' own tar (bsdtar), which reads zip, bzip2 and gzip archives; elsewhere the system's. */
+const tarProgram = () => process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+
+/** What `read` makes of a release's archive unpacked as `members`: the archive downloaded to a scratch folder, checked
+ *  against its SHA-256, unpacked there, read, and the folder removed. */
+function fromArchive({ url, sha256: expected }, members, read) {
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'awwo-pg-source-'));
   try {
     const archive = path.join(scratch, path.basename(new URL(url).pathname));
     const fetched = fetchBytes(url, 600);
     if (!fetched || sha256(fetched) !== expected) throw new Error(`${url} was not fetched with SHA-256 ${expected}`);
     writeFileSync(archive, fetched);
-    const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-    const unpacked = spawnSync(tar, ['-xf', archive, '-C', scratch, `${name}/src`], { windowsHide: true, stdio: 'ignore' });
+    const unpacked = spawnSync(tarProgram(), ['-xf', archive, '-C', scratch, ...members], { windowsHide: true, stdio: 'ignore' });
     if (unpacked.status !== 0) throw new Error(`${archive} could not be unpacked (tar ${unpacked.status})`);
-    return Buffer.from(sourceNotices(path.join(scratch, name), name));
+    return read(scratch);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
 }
 
+/** NOTICES.txt from a source release's archive (sourceNotices of its src/). */
+const fetchSourceNotices = spec => fromArchive(spec, [`${spec.name}/src`], scratch => Buffer.from(sourceNotices(path.join(scratch, spec.name), spec.name)));
+/** One file of a release's archive, as it is there (a licence its release carries and no repository serves). */
+const fetchArchiveMember = spec => fromArchive(spec, [spec.member], scratch => readFileSync(path.join(scratch, ...spec.member.split('/'))));
+
 function main(args) {
   const check = args.includes('--check');
-  const provenanceFile = path.join(OUTPUT, 'PROVENANCE.json');
+  // The macOS archive's list (--macos) is kept apart: its folder, and dylibs where the Windows one has DLLs.
+  const macos = args.includes('--macos');
+  const [list, output, kind] = macos ? [POSTGRES_MACOS_LIBRARIES, OUTPUT_MACOS, 'dylibs'] : [POSTGRES_LIBRARIES, OUTPUT, 'dlls'];
+  const provenanceFile = path.join(output, 'PROVENANCE.json');
   const provenance = existsSync(provenanceFile) ? JSON.parse(readFileSync(provenanceFile, 'utf8')) : {};
-  const missing = check ? provenanceDifferences(OUTPUT) : [];
-  for (const library of POSTGRES_LIBRARIES.libraries) {
+  const missing = check ? provenanceDifferences(output) : [];
+  for (const library of list.libraries) {
     const key = `${library.name}-${library.version}`;
-    const folder = path.join(OUTPUT, key);
+    const folder = path.join(output, key);
     const names = Object.keys(library.files);
     if (!names.length) continue;
     const have = existsSync(folder) ? readdirSync(folder) : [];
@@ -198,6 +288,10 @@ function main(args) {
         fetched.push({ name, url: spec.url, bytes: fetchSourceNotices(spec), source: spec.sha256, from: `the notices in the headers of its src/ (sourceNotices), the archive's SHA-256 ${spec.sha256}` });
         continue;
       }
+      if (spec.extract === 'archive-member') {
+        fetched.push({ name, url: spec.url, bytes: fetchArchiveMember(spec), source: spec.sha256, from: `${spec.member} of the archive, its SHA-256 ${spec.sha256}` });
+        continue;
+      }
       const bytes = fetchBytes(spec.url);
       if (!bytes) { missing.push(`${key} (${spec.url} could not be fetched)`); break; }
       fetched.push({ name, url: spec.url, bytes: spec.extract === 'header' ? Buffer.from(`${header(bytes.toString('utf8'))}\n`) : bytes, source: spec.extract ? sha256(bytes) : null, from: spec.extract ? 'the leading comment of the file' : null });
@@ -205,7 +299,7 @@ function main(args) {
     if (fetched.length !== names.length) continue;
     if (!licenceTextMatches(library.licence, fetched.map(file => file.bytes.toString('utf8')))) { missing.push(`${key} (what was fetched is not of ${library.licence})`); continue; }
     mkdirSync(folder, { recursive: true });
-    provenance[key] = { licence: library.licence, dlls: Object.keys(library.dlls), files: {} };
+    provenance[key] = { licence: library.licence, [kind]: Object.keys(library[kind]), files: {} };
     for (const file of fetched) {
       writeFileSync(path.join(folder, file.name), file.bytes);
       provenance[key].files[file.name] = { url: file.url, sha256: sha256(file.bytes), ...(file.from ? { from: file.from, fileSha256: file.source } : {}) };
@@ -213,10 +307,10 @@ function main(args) {
     console.log(`${key}: ${names.join(', ')}`);
   }
   if (!check) {
-    mkdirSync(OUTPUT, { recursive: true });
+    mkdirSync(output, { recursive: true });
     writeFileSync(provenanceFile, `${JSON.stringify(Object.fromEntries(Object.entries(provenance).sort(([a], [b]) => a.localeCompare(b))), null, 2)}\n`);
   }
-  if (missing.length) throw new Error(`No licence here for: ${missing.join(', ')}${check ? ' (node scripts/awwo-postgres-licences.mjs fetches them)' : ''}`);
+  if (missing.length) throw new Error(`No licence here for: ${missing.join(', ')}${check ? ` (node scripts/awwo-postgres-licences.mjs${macos ? ' --macos' : ''} fetches them)` : ''}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

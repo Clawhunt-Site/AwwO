@@ -695,14 +695,30 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			snapshot.Computer.Inputs = withWorkspaceFiles(snapshot.Computer.Inputs, attached.Workspace)
 		}
 	}
-	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
 	framedPrompt := evidenceUserPrompt(b.Prompt, snapshot.Knowledge, snapshot.Memory)
-	instructionsFit := (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
 	// The prompt's own bound counts UTF-16 code units and the model's budget estimated tokens at its prose rate, each as
 	// its worker counts it.
 	promptExcess := utf16Len(framedPrompt) - maxRunPromptUnits
-	modelExcess := snapshot.tokens(framedPrompt) + snapshot.tokens(framedInstructions) + overhead - budget
-	if team == nil && (promptExcess > 0 || modelExcess > 0 || !instructionsFit) {
+	var framedInstructions string
+	var instructionsFit bool
+	var modelExcess int
+	// Whether the run is refused for its size, measured with the skills it holds now.
+	refused := func() bool {
+		framedInstructions = a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
+		instructionsFit = (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
+		modelExcess = snapshot.tokens(framedPrompt) + snapshot.tokens(framedInstructions) + overhead - budget
+		return team == nil && (promptExcess > 0 || modelExcess > 0 || !instructionsFit)
+	}
+	tooLarge := refused()
+	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
+	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
+	if team == nil && plannerPageSkills(snapshot.Skills) && promptExcess <= 0 && (snapshot.Workspace != nil || tooLarge) {
+		snapshot.Skills = nil
+		if tooLarge = refused(); !tooLarge {
+			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nodeID, "sandbox", snapshot.Workspace != nil)
+		}
+	}
+	if tooLarge {
 		// A plan the canvas assistant asked for learns how much of its canvas context would fit (planning.go), with
 		// space for personal settings its size left out, and on the operator's planner model where only its size kept
 		// the plan off it.
@@ -1132,7 +1148,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			// quickRefusal after its model had produced reasoning settled at nothing, which is what this closes
 			// (owner 2026-10-24: 「计费缺口按你的建议改」). For sizeRefusal it is defence in depth rather than a
 			// live gap — no shipped worker reports a context limit once reasoning has begun (pi-task.mjs gates on
-			// !reasoningStarted, and the Python worker's on a 400/413/422 before any stream) — so it guards the
+			// !reasoningStarted, and the Python worker's on a 400/413 before any stream) — so it guards the
 			// combination against a worker that one day could.
 			//
 			// Only above zero, which is the worker's own distinction: its contract is "null for nothing, 0 when it
@@ -1245,6 +1261,11 @@ func runtimeFailureCode(workerCode string, contract bool) string {
 	case "MODEL_RATE_LIMIT":
 		return "provider_rate_limited"
 	case "MODEL_UNAVAILABLE", "MODEL_CONNECTION_ERROR":
+		return "provider_unavailable"
+	case "MODEL_STALLED":
+		// The provider sent nothing for the worker's silence limit (the Python worker's Bedrock read timeout): the
+		// service's failure, which a canvas node runs again after (graph_retry.go). Before any output, its call is not
+		// charged (stalledBeforeOutput).
 		return "provider_unavailable"
 	case "DEADLINE_EXCEEDED":
 		return "run_timeout"
@@ -1439,6 +1460,10 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 		return e
 	}
 	defer tx.Rollback(ctx)
+	// Before the run's row: a call that may be noted as cut for silence locks the workspace row first, as a cancellation does.
+	if e = keyShareBeforeStalledNote(ctx, tx, tid, facts); e != nil {
+		return e
+	}
 	var sid string
 	if status == "completed" {
 		var kind string

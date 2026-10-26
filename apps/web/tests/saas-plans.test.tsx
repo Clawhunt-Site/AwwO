@@ -138,6 +138,15 @@ it('shows what an earlier period overspent and a renewal still being charged', a
   expect(screen.getByText(/续费处理中/)).toBeVisible();
 });
 
+it('counts gifted credits in the period and says they are not part of what was paid', async () => {
+  serve(() => response({ ...pro, credits: { granted: 6000, gift: 4000, spent: 1750, remaining: 4250 } }));
+  page();
+  expect(await screen.findByText('4,250 / 6,000')).toBeVisible();
+  expect(screen.getByText('其中赠送')).toBeVisible();
+  expect(screen.getByText('4,000')).toBeVisible();
+  expect(screen.getByText(/赠送的点数不是支付金额的一部分/)).toBeVisible();
+});
+
 it('turns the plan on after Stripe sends the browser back', async () => {
   window.history.replaceState({}, '', '/?account=plans&billing=success');
   returnPoll.ms = 5;
@@ -225,6 +234,17 @@ it('shows a paid workspace’s credits in the chip and its popover', async () =>
   expect(await screen.findByText('1,850 / 2,000')).toBeVisible();
   expect(screen.getByText('12 / 300')).toBeVisible();
   expect(screen.getByRole('link', { name: '套餐与点数' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+});
+
+it('shows a gift in the workspace’s chip and how it is spent', async () => {
+  const usage = paid(4250);
+  serve(() => response({ ...usage, plan: { ...usage.plan, credits: { granted: 6000, gift: 4000, spent: 1750, remaining: 4250 } } }));
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: 'Pro · 剩 4,250 点' }));
+  expect(await screen.findByText('4,250 / 6,000')).toBeVisible();
+  expect(screen.getByText('其中赠送')).toBeVisible();
+  expect(screen.getByText('4,000')).toBeVisible();
+  expect(screen.getByText(/和付费点数一起用，付费的先扣，同样本期有效/)).toBeVisible();
 });
 
 it('warns when the plan’s credits or today’s calls are used up', async () => {

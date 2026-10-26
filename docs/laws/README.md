@@ -26,7 +26,7 @@ in its review, and the change that adds the missing check updates the evidence l
 
 A law is not a feature spec. It does not say how something is built, only what must stay true while it is
 rebuilt. Designs live in [the architecture](../awwo-saas-architecture.md) and
-[the design standards](../awwo-saas-design-standards.md); a law keeps only the part that must survive any
+the design standards; a law keeps only the part that must survive any
 redesign.
 
 ## How to cite laws
@@ -41,7 +41,7 @@ Affected laws: AWWO-LAW-003, AWWO-LAW-008
 ```
 
 Write `Affected laws: none` when no law is touched, so a missing line is visibly missing rather than
-ambiguous. The [review brief template](../awwo-review-brief-template.md) asks the reviewer to check each
+ambiguous. The review brief template asks the reviewer to check each
 affected law against the diff and against its evidence. A change that weakens a law's evidence (deletes,
 skips or loosens a test the law cites) says so next to that law, in the commit body and in the brief.
 
@@ -66,7 +66,7 @@ evidence; say which database the tests ran against.
 
 ## Why numbered rules, when prose cannot stop drift
 
-The legacy SuperClaw plan in [architecture-invariants-roadmap.md](../architecture-invariants-roadmap.md)
+The legacy SuperClaw plan in architecture-invariants-roadmap.md
 rejected numbered prose invariants, because text does not stop a change from drifting; tests do. The laws
 agree with that. A law is an index entry over the checks that enforce it, and every law without one says so
 out loud. Its job is to make a reviewer ask the right question and to make a missing test visible, not to

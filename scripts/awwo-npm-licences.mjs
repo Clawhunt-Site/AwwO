@@ -1,5 +1,6 @@
 // The licences of the npm packages AwwO Local's payload carries: the workers' packages as the packager installs them
-// (npm ci --omit=dev), for Windows on x64, without LEFT_OUT_PACKAGES. A package that ships neither a licence file nor a
+// (npm ci --omit=dev), for Windows on x64 (or the Mac app's, --machine darwin-arm64), without LEFT_OUT_PACKAGES. A
+// package built for one machine (esbuild's) has its machine recorded, and is no other's to carry. A package that ships neither a licence file nor a
 // README carrying its licence's text gets its repository's licence files, fetched at the commit it was published from
 // (gitHead in the registry), else at its version's tag, else (a registry entry naming neither) at the default branch's
 // commit of the day, recorded as such; they must be of the licence the package names. They go into
@@ -9,6 +10,8 @@
 //
 //   node scripts/awwo-npm-licences.mjs           fetch what is missing (after npm run setup:local installed the workers)
 //   node scripts/awwo-npm-licences.mjs --check   fail when one is missing, or differs from its provenance
+//   ... --machine darwin-arm64 --from <folder>   the same for the Mac app's packages, installed for it in
+//                                                <folder>/<worker>/node_modules (npm ci --os=darwin --cpu=arm64)
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,12 +33,17 @@ export const PERMISSIVE_LICENCES = Object.freeze(['MIT', 'ISC', '0BSD', 'BSD-2-C
 export const LEFT_OUT_PACKAGES = Object.freeze(['@mariozechner/clipboard']);
 export const leftOutPackage = name => LEFT_OUT_PACKAGES.some(left => name === left || name.startsWith(`${left}-`));
 
-/** Whether a package.json's os and cpu fields (npm's own) allow Windows on x64: a package built for another system or
- *  machine is never loaded here (as npm does not install such an optional one; some packages bundle them all). */
-export const forThisMachine = manifest => {
+/** The machines a payload is for: the Windows installer's, and the Mac app's (Apple silicon). */
+export const WINDOWS_X64 = Object.freeze({ os: 'win32', cpu: 'x64' });
+export const MACOS_ARM64 = Object.freeze({ os: 'darwin', cpu: 'arm64' });
+
+/** Whether a package.json's os and cpu fields (npm's own) allow the payload's machine (Windows on x64 unless named): a
+ *  package built for another system or machine is never loaded there (as npm does not install such an optional one;
+ *  some packages bundle them all). */
+export const forThisMachine = (manifest, machine = WINDOWS_X64) => {
   const allows = (list, value) => !Array.isArray(list) || !list.length
     || (list.some(item => !String(item).startsWith('!')) ? list.includes(value) : !list.includes(`!${value}`));
-  return allows(manifest.os, 'win32') && allows(manifest.cpu, 'x64');
+  return allows(manifest.os, machine.os) && allows(manifest.cpu, machine.cpu);
 };
 
 /** Whether an SPDX expression leaves a permissive choice: each licence it needs (all of an AND, one of an OR) is one
@@ -58,8 +66,9 @@ export function shippedNpmLicences(dir, licence) {
 }
 
 /** The packages installed below some node_modules folders, once each by name and version, as the payload carries them
- *  (for Windows on x64, without those it leaves out), each with where it is, its licence and what of it is its licence. */
-export function installedPackages(roots) {
+ *  (for Windows on x64 unless another machine is named, without those it leaves out), each with where it is, its
+ *  licence, what of it is its licence, and the machines its package.json limits it to (os and cpu, where it does). */
+export function installedPackages(roots, machine = WINDOWS_X64) {
   const found = new Map();
   const walk = modules => {
     if (!existsSync(modules)) return;
@@ -70,10 +79,11 @@ export function installedPackages(roots) {
         const manifestFile = path.join(dir, 'package.json');
         if (!existsSync(manifestFile)) continue;
         const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
-        if (!forThisMachine(manifest) || leftOutPackage(manifest.name)) continue;
+        if (!forThisMachine(manifest, machine) || leftOutPackage(manifest.name)) continue;
         const key = `${manifest.name}@${manifest.version}`;
         const licence = licenceOf(manifest);
-        if (!found.has(key)) found.set(key, { name: manifest.name, version: manifest.version, licence, dir, ...shippedNpmLicences(dir, licence) });
+        const limits = Object.fromEntries(['os', 'cpu'].filter(field => Array.isArray(manifest[field]) && manifest[field].length).map(field => [field, manifest[field]]));
+        if (!found.has(key)) found.set(key, { name: manifest.name, version: manifest.version, licence, dir, ...(Object.keys(limits).length ? { machine: limits } : {}), ...shippedNpmLicences(dir, licence) });
         walk(path.join(dir, 'node_modules'));
       }
     }
@@ -139,13 +149,25 @@ function fetchPackageLicences(item) {
   return { files: [], why: mismatched ? `its repository's licence files are not of ${item.licence}` : `no licence file in https://github.com/${repository}` };
 }
 
+/** The machines --machine names. */
+export const MACHINES = Object.freeze({ 'win32-x64': WINDOWS_X64, 'darwin-arm64': MACOS_ARM64 });
+
+/** Whether a fetched folder is for packages this machine's payload carries: one PROVENANCE.json records the machines of
+ *  (a package built for one, as esbuild's are) belongs to those alone, and is not missing from another's. */
+export const carriedOn = (entry, machine) => !entry?.machine || forThisMachine(entry.machine, machine);
+
 function main(args) {
   const check = args.includes('--check');
-  const roots = WORKERS.map(worker => path.join(repoRoot, 'apps', worker, 'node_modules'));
+  // --machine darwin-arm64 --from <folder>: the Mac app's packages, installed elsewhere for it (<folder>/<worker>/node_modules).
+  const value = name => { const at = args.indexOf(name); return at >= 0 ? args[at + 1] : undefined; };
+  const machine = MACHINES[value('--machine') || 'win32-x64'];
+  if (!machine) throw new Error(`--machine takes ${Object.keys(MACHINES).join(' or ')}`);
+  const from = value('--from') ? path.resolve(value('--from')) : path.join(repoRoot, 'apps');
+  const roots = WORKERS.map(worker => path.join(from, worker, 'node_modules'));
   const provenanceFile = path.join(OUTPUT, 'PROVENANCE.json');
   const provenance = existsSync(provenanceFile) ? JSON.parse(readFileSync(provenanceFile, 'utf8')) : {};
   const missing = check ? provenanceDifferences(OUTPUT) : [];
-  const installed = installedPackages(roots);
+  const installed = installedPackages(roots, machine);
   for (const item of installed.filter(entry => !entry.files.length && !entry.readme)) {
     const key = folderOf(item.name, item.version);
     const folder = path.join(OUTPUT, key);
@@ -155,16 +177,17 @@ function main(args) {
     const fetched = fetchPackageLicences(item);
     if (!fetched.files.length) { missing.push(`${key} (${fetched.why})`); continue; }
     mkdirSync(folder, { recursive: true });
-    provenance[key] = { repository: fetched.repository, ref: fetched.ref, from: fetched.how, license: item.licence || null, files: {} };
+    provenance[key] = { repository: fetched.repository, ref: fetched.ref, from: fetched.how, license: item.licence || null, ...(item.machine ? { machine: item.machine } : {}), files: {} };
     for (const file of fetched.files) {
       writeFileSync(path.join(folder, file.name), file.bytes);
       provenance[key].files[file.name] = { url: file.url, sha256: sha256(file.bytes) };
     }
     console.log(`${key}: ${fetched.files.map(file => file.name).join(', ')} (${fetched.how === 'published' ? 'at the published commit' : `at the ${fetched.how} ${fetched.ref}`})`);
   }
-  // A folder here for a package no worker carries any more is one to remove.
+  // A folder here for a package no worker carries any more is one to remove; one of another machine's packages is not
+  // carried here (carriedOn).
   const carried = new Set(installed.map(item => folderOf(item.name, item.version)));
-  if (check) for (const key of Object.keys(provenance)) if (!carried.has(key)) missing.push(`${key} (no worker carries it: remove it)`);
+  if (check) for (const key of Object.keys(provenance)) if (!carried.has(key) && carriedOn(provenance[key], machine)) missing.push(`${key} (no worker carries it: remove it)`);
   if (!check) {
     mkdirSync(OUTPUT, { recursive: true });
     writeFileSync(provenanceFile, `${JSON.stringify(Object.fromEntries(Object.entries(provenance).sort(([a], [b]) => a.localeCompare(b))), null, 2)}\n`);
