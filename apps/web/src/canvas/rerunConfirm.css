@@ -1,0 +1,16 @@
+/* The question a run of the whole canvas asks before it runs nodes again that have their result (RerunConfirm.tsx).
+   Its colours are the workspace's (it sits inside .awwo-workspace, so a chosen look reaches it); its buttons are the
+   workspace's own primary and secondary ones, which every look already styles. */
+.awwo-rerun-dialog { width: min(460px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: auto;
+  border: 1px solid var(--awwo-border, #e4e8e2); border-radius: 14px; background: var(--awwo-surface, #fff); color: var(--awwo-ink, #232c29);
+  box-shadow: 0 24px 80px #0004; }
+.awwo-rerun-dialog::backdrop { background: #101b16a8; }
+.awwo-rerun-body { padding: 20px 22px 18px; }
+.awwo-rerun-dialog h2 { margin: 0 0 8px; color: inherit; font-size: 16px; font-weight: 600; line-height: 1.4; }
+.awwo-rerun-dialog p { margin: 0 0 16px; color: var(--awwo-muted, #68736d); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.awwo-rerun-dialog .awwo-rerun-changed { margin: 0 0 8px; color: inherit; font-weight: 600; }
+.awwo-rerun-dialog .awwo-rerun-cleared { margin-top: -6px; color: inherit; }
+.awwo-rerun-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.awwo-rerun-actions .awwo-rerun-hint { margin: -2px 4px 4px; font-size: 12px; line-height: 1.5; }
+.awwo-rerun-actions button { text-align: center; }
+.awwo-rerun-actions button:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 2px; }
