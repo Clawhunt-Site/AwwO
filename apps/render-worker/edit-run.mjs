@@ -10,12 +10,12 @@ import { readdir, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  BATCH_INPUTS, MP4, batchArgs, combineArgs, concatArgs, concatList, inputProbeArgs, loudnessArgs, muxArgs, normalizeArgs,
+  BATCH_INPUTS, MP4, WAV, batchArgs, combineArgs, concatArgs, concatList, inputProbeArgs, loudnessArgs, muxArgs, normalizeArgs,
   packetCountArgs, parseInputProbe, parseLoudness, parsePacketCount, silenceArgs, sourceMatrix, spanArgs, srt, stillsArgs, transitionArgs,
 } from './edit-ffmpeg.mjs';
 import { EDIT_LIMITS, placeTimeline } from './edit-timeline.mjs';
 import { runProcess } from './ffmpeg.mjs';
-import { renderPage } from './render.mjs';
+import { renderPage, renderPageSound } from './render.mjs';
 
 const TRACK_ORDER = Object.freeze(['dialogue', 'clip', 'music', 'sfx']);
 const CHILD_PRIORITY = 10;
@@ -95,6 +95,51 @@ async function probeFiles(job, config, run) {
     probes.set(file.name, { ...probe, size: file.size });
   }
   return probes;
+}
+
+/**
+ * The name a page's sound takes among the job's files, as messages and warnings then name it ("score
+ * (tracks.music[0])"): no received file can have it (theirs are <node>/<file>, this has no slash), and its place in its
+ * track keeps two items that share an id apart.
+ */
+const soundName = (entry) => `${entry.id} (tracks.${entry.track}[${entry.trackIndex}])`;
+
+// The page's own faults: the renderer's fixed words, or what the page threw (render.mjs parseCapture). A sound that
+// outran its own budget is the page's ("timeout"); a page the worker could not open in time is not ("render_timeout").
+const PAGE_FAULTS = new Set(['sound_missing', 'sound_failed', 'sound_too_short', 'page_load_failed', 'timeout']);
+
+/** A page's sound that could not be made: the timeline's fault, with the page's reason and the item, or the worker's. */
+export function soundFailure(entry, error) {
+  if (error?.status === 503) return new EditError(error.detail || 'browser_unavailable', `The sound of ${entry.id} could not be made`, 503);
+  if (!PAGE_FAULTS.has(error?.detail)) return new EditError('sound_render_failed', `The sound of ${entry.id} could not be made`);
+  return Object.assign(new Error(`The sound of ${entry.id} could not be made: ${error.message}`), { status: 400, code: 'INVALID_EDIT', field: `tracks.${entry.track}.page` });
+}
+
+/**
+ * Every sound a page makes (an audio item with a `page`), each a WAV in the job's directory, as files the job did not
+ * receive: [{name, path, format, size, entry, seconds, peak}]. Rendered one by one before the timeline is placed, so a
+ * page's sound is trimmed, levelled, faded and mixed like a wired file's.
+ */
+async function renderSounds(job, config, state) {
+  const sounds = [];
+  for (const [index, entry] of job.timeline.audio.entries()) {
+    if (!entry.page) continue;
+    // Room for the largest WAV it may make (48 kHz, 16-bit stereo), before the work of making it; it is written as read.
+    await ensureSpace(job.dir, Math.ceil(entry.page.seconds * 48000) * 4 + 44);
+    const file = path.join(job.dir, `sound-${String(index).padStart(3, '0')}.wav`);
+    let reply;
+    try {
+      reply = await renderPageSound({ renderId: `${job.editId.slice(0, 60)}-sound${index}`, html: entry.page.html, seconds: entry.page.seconds, file },
+        config, { signal: state.signal, log: state.log });
+    } catch (error) {
+      if (state.halted()) throw state.stopped();
+      throw soundFailure(entry, error);
+    }
+    // Its page's warnings, each named after the item: sound_clipped:<frames>:music-1, sound_page_errors:<count>:music-1 …
+    state.warnings.push(...reply.warnings.map((warning) => `${warning.startsWith('sound_') ? '' : 'sound_'}${warning}:${entry.id}`));
+    sounds.push({ name: soundName(entry), path: file, format: { ...WAV, ext: 'wav' }, size: reply.bytes, entry: entry.id, seconds: reply.seconds, peak: reply.peak });
+  }
+  return sounds;
 }
 
 /** Each card rendered by the page renderer at the film's size and rate. */
@@ -260,15 +305,29 @@ function counts(plan) {
 }
 
 /** Renders one job whose files are all on disk: {report, outputs: [{name, kind, contentType, path, size, sha256}]}. */
-export async function runEdit(job, config, state) {
+export async function runEdit(received, config, state) {
   const started = Date.now();
   const run = makeRunner(config, state);
-  const probes = await probeFiles(job, config, run);
-  const plan = placeTimeline(job.timeline, probes, { maxSeconds: config.editMaxSeconds, maxFilmBytes: job.limits?.maxFilmBytes ?? null });
+  const placing = { maxSeconds: config.editMaxSeconds, maxFilmBytes: received.limits?.maxFilmBytes ?? null };
+  // The sounds pages make join the received files under names no wired file can have; their items name them.
+  const timeline = { ...received.timeline, audio: received.timeline.audio.map((entry) => (entry.page ? { ...entry, source: soundName(entry) } : entry)) };
+  const probes = await probeFiles(received, config, run);
+  // Placed once with each page sound at its known length before any is made: a timeline the edit refuses makes no sound.
+  const pageSounds = timeline.audio.filter((entry) => entry.page);
+  if (pageSounds.length) {
+    placeTimeline(timeline, new Map([...probes, ...pageSounds.map((entry) => [entry.source, { duration: entry.page.seconds, video: null, audio: { index: 0, sampleRate: 48000, channels: 2 }, size: 0 }])]), placing);
+  }
+  const sounds = await renderSounds(received, config, state);
+  const job = sounds.length === 0 ? received : {
+    ...received, timeline, files: [...received.files, ...sounds], byName: new Map([...received.byName, ...sounds.map((sound) => [sound.name, sound])]),
+  };
+  for (const [name, probe] of await probeFiles({ files: sounds }, config, run)) probes.set(name, probe);
+  const plan = placeTimeline(job.timeline, probes, placing);
   state.warnings.push(...plan.warnings);
   const cards = await renderCards(plan, job, config, state);
   const picture = await encodePicture(plan, job, cards, probes, config, run);
   const mix = await normalizeSound(plan, job, await mixSound(plan, job, probes, config, run, state.warnings), config, run, state.warnings);
+  await Promise.all(sounds.map((sound) => rm(sound.path, { force: true })));
   const film = path.join(job.dir, 'out', `${plan.name}.mp4`);
   await ensureSpace(job.dir, plan.seconds * FILM_BYTES_PER_SECOND);
   await run('mux', config.ffmpeg, muxArgs({ video: picture, audio: mix.file, file: film }));
@@ -284,7 +343,8 @@ export async function runEdit(job, config, state) {
   const report = {
     schema: 'awwo.edit-report/1', name: plan.name, seconds: plan.seconds, frames: plan.frames, fps: plan.output.fps,
     width: probe.width, height: probe.height, bytes: probe.size, loudness: mix.loudness, counts: counts(plan),
-    inputs: job.files.map((file) => ({ name: file.name, duration: probes.get(file.name).still ? null : probes.get(file.name).duration, picture: Boolean(probes.get(file.name).video), sound: Boolean(probes.get(file.name).audio) })),
+    inputs: received.files.map((file) => ({ name: file.name, duration: probes.get(file.name).still ? null : probes.get(file.name).duration, picture: Boolean(probes.get(file.name).video), sound: Boolean(probes.get(file.name).audio) })),
+    ...(sounds.length ? { pageSounds: sounds.map((sound) => ({ item: sound.entry, seconds: sound.seconds, peak: Number(sound.peak.toFixed(4)) })) } : {}),
     warnings: [...new Set(state.warnings)], elapsedMs: Date.now() - started,
   };
   const reportFile = path.join(job.dir, 'out', 'report.json');

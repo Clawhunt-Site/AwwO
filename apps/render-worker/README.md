@@ -102,6 +102,27 @@ film the API stores, the picture's peak rate is capped to fit, counting a one-se
 over it all the same fails `film_too_large`); stills every `stillsEverySeconds`, the `.srt`, and `report.json`.
 Children run at a lower CPU priority than the worker. Outputs: `<name>.mp4`, `<name>.srt`, `still-NNN.jpg`, `report.json`.
 
+**Sounds a page makes.** An item of `dialogue`, `music` or `sfx` may name a page instead of a wired file:
+`{"page": "<!doctype html>…", "seconds": 30, "at": 0, …}` (a complete HTML document of at most 256 KiB, as a card;
+`seconds` 0.5–300, how long its sound is; at most 8 such items, though the API takes a timeline of at most 2 MiB in
+all). Before the timeline is placed, each page is opened in the same fresh, walled browser as a render (CDN allowlist,
+virtual clock; a page that crashes or navigates fails) and, once it has loaded, `window.renderAudio({seconds,
+sampleRate})` is called once and has 120 s; it resolves to an `AudioBuffer` (what `OfflineAudioContext.startRendering()`
+gives) or `{sampleRate, channels: [Float32Array, …]}` (one or two channels, 8000–48000 samples a second). The worker keeps
+exactly `round(seconds × the page's rate)` frames of it as a 16-bit stereo WAV at that rate (padded with silence when up
+to 50 ms short; anything past `seconds` is never read). It is read out through two functions installed before any script
+of the page, which take one number and answer one string (never an object, which would meet the page's prototypes on
+its way), and the worker checks every answer's numbers and every part's exact length itself, so a page cannot change
+how much is read, held or written. From then on the item is a sound like any other: `in`/`out`,
+`loop`, `gainDb`, fades, levels, ducking and loudness apply. A page's sound that cannot be made is refused as the
+timeline's fault, 400 `INVALID_EDIT` naming `tracks.<track>.page`, with the reason (no `renderAudio`, what it threw, a
+sound shorter than `seconds`, a page that did not load, crashed or navigated, or a sound that took longer than its 120 s); a worker that could not
+make it, or could not open the page in a render's time, answers 503 or 422 `EDIT_FAILED` (`sound_render_failed`). Time stands still while it runs, so `renderAudio`
+must not wait for a timer or an animation frame. The report lists them under `pageSounds` (`item`, `seconds`, `peak`),
+its warnings name them by item (`sound_clipped:<frames>:<item>`, `sound_not_finite:<frames>:<item>`,
+`sound_silent:<item>`, `sound_page_errors:<count>:<item>`, …), and so do its messages (`score (tracks.music[0])`). This is
+how a film written as code (cards on the picture's track) gets a score and effects written to the same frame clock.
+
 ## Configuration
 
 | Variable | Default | |
