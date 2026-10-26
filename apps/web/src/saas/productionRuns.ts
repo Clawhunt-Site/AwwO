@@ -13,9 +13,12 @@ export interface ProductionRunNode {
   readonly status: ProductionNodeStatus;
   /** From admission to completion, in seconds. */
   readonly seconds?: number;
-  readonly outputType: 'markdown' | 'html' | 'video';
-  /** The delivered field value: Markdown text or a complete HTML document. */
+  /** `text`: code or data (a module, a sheet, a timeline), shown as it is rather than as Markdown. */
+  readonly outputType: 'markdown' | 'html' | 'video' | 'text';
+  /** The delivered field value: Markdown text, a complete HTML document, or plain text. */
   readonly output?: string;
+  /** A recorded canvas's agent: its other text fields beside the result and the report (a director's sheet), verbatim. */
+  readonly extras?: ReadonlyArray<{ readonly label: string; readonly text: string }>;
   /** Why the node did not complete, exactly as recorded. */
   readonly detail?: string;
   /** Over all of the node's model calls. */

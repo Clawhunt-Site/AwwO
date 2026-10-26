@@ -80,4 +80,27 @@ edit only its own canvas's files.
 - **Copy.** A member's copy is the stored canvas, copied only while its text still hashes to the record; nothing is
   pre-filled, since the film's deliveries are files, so its first run makes every picture, clip and sound again.
 
+### Films written as code
+
+The eight films from the YouMind Opus 5.5 prompts (2026-10-26) are recorded canvases too, with no media node: a film's
+picture and sound are written as code on one canvas. A Director agent writes the brief and a sheet; builder agents, each
+in its own sandbox computer, write the kernel, the scene modules and the sound; an assembly pastes them into one page
+with no model; a tester checks the page in a real browser; an Editor writes the edit's timeline, whose cards are that
+page rendered from given moments (`data-offset`) and whose music is the same page's `window.renderAudio` (a page-made
+sound, `apps/render-worker/README.md`); the edit renders and mixes it. Their Review node reads the tester's and the
+editor's reports beside the edit, off the film's chain, and is not published: a case ends on the film's edit, and what
+was checked before publishing says what the operator looked at.
+
+- **Publish.** The same `publish-recorded-run.mjs`. An assembly is stored with its template, contract and file name, and
+  its record names the page file it made (checked by its bytes, as every file). An agent with a contract shows its result
+  as what it is (a page as its source; code, a sheet or a timeline as plain text, `outputType: 'text'`; Markdown as
+  Markdown), its report beside it and any other text field (a Director's sheet) after them, all verbatim. An agent that
+  worked in a sandbox computer keeps `runtime: 'sandbox'` in the stored canvas, and the record marks it. A wire into a
+  contract's input is labelled as that input is. The excerpt and its poster keep a film narrower than 1280 px at its
+  own width, and put a portrait film whole into the card's 16:9 frame.
+- **Dialog.** The heading counts the kinds the canvas has (agents, media nodes, assemblies, edits); an assembly shows
+  the file it pasted together; a sandbox agent its model calls; the player and stills take the film's own frame.
+- **Copy.** A sandbox agent stays in its sandbox computer and takes the chosen model only when the sandbox offers it, as
+  a flagship's copy does; the copy dialog says the first run writes every module, the page and the timeline again.
+
 Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-copy`, `saas-production-cases` (and `saas-production-film`, which pins a film case's record, stored canvas, files and dialog, and `saas-staged-showcase`, the dev server's staged files), `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.

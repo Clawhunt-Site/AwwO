@@ -271,7 +271,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     const run = PRODUCTION_RUN_SUMMARY[item.id];
     if (!run || sending.current) return;
     setError(null);
-    setCaseCopy({ id: item.id, title: item.title, recorded: { nodes: run.total + (run.media?.total ?? 0), media: run.media?.total ?? 0 } });
+    setCaseCopy({ id: item.id, title: item.title, recorded: { nodes: run.total + (run.media?.total ?? 0), media: run.media?.total ?? 0, sandboxed: run.runtime === 'sandbox' } });
   };
   const example = notice?.kind === 'case' ? STARTER_CASES.find(item => item.id === notice.caseId) : undefined;
   const noticeText = example ? t(`已填入案例「${example.title.zh}」，可以直接生成，也可以先修改。`, `Filled in the “${example.title.en}” example. Generate it as is, or edit it first.`)

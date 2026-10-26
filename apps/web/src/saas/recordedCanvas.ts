@@ -1,5 +1,6 @@
 import { emptyDocument, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { mediaKindOf } from '../canvas/mediaCatalog';
+import { SANDBOX_RUNTIME } from '../canvas/nodeRuntime';
 import type { OfficialCopyModel } from './examples/OfficialCopySetup';
 import type { ProductionRunRecord } from './productionRuns';
 import { recordedCanvasText, type RecordedCanvas } from './recordedCanvasText';
@@ -29,15 +30,18 @@ export function loadRecordedCanvas(id: string): Promise<RecordedCanvas | undefin
  * its texts name them), with nothing pre-filled: a film canvas's deliveries are files (clips, takes, cuts), which a copy
  * does not carry, and its editors' answers name the run's own clips, so the copy makes everything again on its first
  * run. An agent node takes the execution model a member picks (none: a draft); a media node keeps its media model,
- * which generates the pictures, clips and voices.
+ * which generates the pictures, clips and voices. An agent that works in its own sandbox computer (a film written as
+ * code: it writes, runs and publishes files there) stays in it, as a flagship's copy does, and takes the chosen model
+ * when the sandbox offers it, else the sandbox's own default.
  */
 export function createRecordedCopyDocument(canvas: RecordedCanvas, model: OfficialCopyModel | null): CanvasDocument {
   const nodes = canvas.nodes.map((node): CanvasNode => {
     const copy = structuredClone(node) as CanvasNode;
-    if (copy.kind === 'edit') return { ...copy, lastOutput: null };
+    if (copy.kind === 'edit' || copy.kind === 'assemble') return { ...copy, lastOutput: null };
     if (copy.kind !== 'session') return copy;
     const fresh = { ...copy, binding: null, bindAttempt: null, issueId: null, preview: '', lastOutput: null };
     if (mediaKindOf(copy.agentKind) || !model) return fresh;
+    if (copy.runtime === SANDBOX_RUNTIME) return { ...fresh, model: model.sandbox ? model.model : copy.model, effort: '' };
     return { ...fresh, runtime: model.runtime, model: model.model, effort: '' };
   });
   return { ...emptyDocument(), nodes, edges: canvas.edges.map(edge => ({ ...edge })) };

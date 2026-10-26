@@ -1,5 +1,7 @@
-// Turns the raw record of a recorded-canvas case (a film canvas: image, video and audio nodes, editor agents, edit nodes)
-// into its homepage record, the canvas a member copies and the files the case dialog shows. The raw record is the
+// Turns the raw record of a recorded-canvas case (a film canvas: image, video and audio nodes, editor agents, edit nodes;
+// or a film written as code: agents in sandbox computers, an assembly that pastes their modules into one page, a tester,
+// an editor and the edit that renders the page and its sound) into its homepage record, the canvas a member copies and
+// the files the case dialog shows. The raw record is the
 // operator's read of the live canvas (every graph run with its frozen document, the run that made each published output,
 // lineage, runs, model calls, and every file those outputs name, with its SHA-256); see docs/production-cases.md.
 //   node scripts/showcase/publish-recorded-run.mjs <raw-record.json> <notes.json>
@@ -80,7 +82,7 @@ for (const file of raw.files) {
 const { build } = await import(pathToFileURL(path.join(ROOT, 'apps/web/node_modules/rolldown/dist/index.mjs')).href);
 const bundle = path.join(path.dirname(path.resolve(rawFile)), '.publish-helpers.mjs');
 await build({ input: path.join(ROOT, 'scripts/showcase/publish-helpers.ts'), platform: 'node', output: { file: bundle, format: 'esm' }, logLevel: 'warn' });
-const { recordedCanvasText } = await import(`${pathToFileURL(bundle).href}?${Date.now()}`);
+const { recordedCanvasText, parseContractOutput, normalizeContract } = await import(`${pathToFileURL(bundle).href}?${Date.now()}`);
 
 const CASE = raw.caseId, ROOT_NODE = raw.root;
 const keep = new Set(raw.nodes);
@@ -96,18 +98,31 @@ const activeThread = node => (node.threads || []).find(thread => thread.id === (
 function stored(id) {
   const node = frozen(id);
   if (node.kind === 'edit') return { id, kind: 'edit', x: node.x, y: node.y, w: node.w, h: node.h, title: node.title, timeline: node.timeline || '' };
-  if (node.kind !== 'session') throw new Error(`${id}: a ${node.kind} node; a recorded canvas publishes session and edit nodes`);
+  // An assembly pastes its inputs into its template with no model (a film written as code: its modules into one page).
+  // Its template, contract and file name are what it is; the canvas drops one whose contract it cannot read. A contract
+  // is stored as the canvas reads it (normalizeContract keeps its fields' known properties and nothing else).
+  if (node.kind === 'assemble') {
+    const contract = normalizeContract(node.contract);
+    if (!contract) throw new Error(`${id}: an assembly without a readable contract`);
+    return { id, kind: 'assemble', x: node.x, y: node.y, w: node.w, h: node.h, title: node.title, template: node.template || '', contract,
+      ...(node.fileName ? { fileName: node.fileName } : {}) };
+  }
+  if (node.kind !== 'session') throw new Error(`${id}: a ${node.kind} node; a recorded canvas publishes session, assembly and edit nodes`);
   if (node.agentRef || node.team || (node.skills || []).some(skill => !skill.startsWith('builtin:')))
     throw new Error(`${id}: names a workspace agent, team or skill, which a copy cannot carry`);
   const media = MEDIA.has(node.agentKind);
   const thread = activeThread(node);
+  // Any contract it holds (false, 0 and '' too, which the canvas refuses) is stored as the canvas reads it, or refused.
+  const contract = node.contract != null ? normalizeContract(node.contract) : undefined;
+  if (node.contract != null && !contract) throw new Error(`${id}: an agent with a contract the canvas cannot read`);
   return { id, kind: 'session', x: node.x, y: node.y, w: node.w, h: node.h, title: node.title, agentKind: node.agentKind,
-    // An agent's runtime and model are the member's choice in the copy dialog; a media node keeps the model it generates with.
-    runtime: media ? (node.runtime || '') : '', model: media ? node.model : '', effort: '', persona: node.persona || '',
+    // An agent's model is the member's choice in the copy dialog; a media node keeps the model it generates with, and an
+    // agent that works in its own sandbox computer (it writes, runs and publishes files there) keeps that runtime.
+    runtime: media ? (node.runtime || '') : node.runtime === 'sandbox' ? 'sandbox' : '', model: media ? node.model : '', effort: '', persona: node.persona || '',
     binding: null, bindAttempt: null, issueId: null, preview: '',
     ...(media ? { activeThreadId: thread?.id || 'default', threads: [{ id: thread?.id || 'default', title: thread?.title || 'Session 1', issueId: null, preview: '', draft: thread?.draft || '', createdAt: 0 }] } : { threads: [] }),
     ...(node.mediaParams ? { mediaParams: node.mediaParams } : {}),
-    ...(node.contract ? { contract: node.contract } : {}),
+    ...(contract ? { contract } : {}),
     ...(node.templateId ? { templateId: node.templateId, ...(node.templateVersion !== undefined ? { templateVersion: node.templateVersion } : {}) } : {}),
     ...(node.taskFrame !== undefined ? { taskFrame: node.taskFrame } : {}),
     ...(node.skills?.length ? { skills: node.skills } : {}) };
@@ -140,6 +155,9 @@ for (const node of canvasNodes) {
   scan(`${node.id}.title`, node.title); scan(`${node.id}.persona`, node.persona);
   for (const thread of node.threads || []) scan(`${node.id}.draft`, thread.draft);
   if (node.kind === 'edit') scan(`${node.id}.timeline`, node.timeline);
+  if (node.kind === 'assemble') scan(`${node.id}.template`, node.template);
+  // A contract's labels, help and the values its inputs hold (an agent's brief) are words the case shows too.
+  if (node.contract) scan(`${node.id}.contract`, JSON.stringify(node.contract));
 }
 
 // Stages: dependency depth (sheets, keyframes, takes and score; clips; editors; reels; the act).
@@ -180,8 +198,22 @@ const fileOf = (id, item) => {
 const count = value => (typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value);
 // The timeline an edit ran, own or its editor's answer (a fenced JSON block): its still interval, for the dialog's stills.
 const timelineOf = text => { try { const match = /```json\s*(\{[\s\S]*\})\s*```/.exec(text); return JSON.parse(match ? match[1] : text); } catch { return null; } };
+// A node with a contract delivers named fields (its output is their JSON object): read with the canvas's own parser, as
+// the API hands a field to the node wired to it (edits.go reads the wire's out:<field>), refused when it does not parse.
+const contractOf = id => normalizeContract(frozen(id).contract);
+const fieldsOf = id => {
+  const contract = contractOf(id);
+  if (!contract) return null;
+  const parsed = parseContractOutput(contract, outputOf(id), 'en');
+  if (parsed.errors.length) throw new Error(`${id}: ${parsed.errors.join('; ')}`);
+  return { contract, values: parsed.values };
+};
+const fieldOf = (id, port) => { const fields = fieldsOf(id); return fields && /^out:/.test(port || '') ? fields.values[port.slice(4)] ?? '' : outputOf(id); };
+// How a delivered text is shown: a page as its source, code or data (a module, a sheet, a timeline) as preformatted
+// text, and Markdown as Markdown.
+const shownAs = (type, text) => type === 'html' ? 'html' : type === 'text' || /^\s*[[{]/.test(text) && (() => { try { JSON.parse(text); return true; } catch { return false; } })() ? 'text' : 'markdown';
 
-const agents = [], edits = [], media = [];
+const agents = [], assemblies = [], edits = [], media = [];
 for (const id of order(keep)) {
   const node = canvasNodes.find(value => value.id === id), made = raw.producedBy[id], place = rows.get(id);
   const took = seconds(made.startedAt, made.endedAt);
@@ -192,13 +224,22 @@ for (const id of order(keep)) {
     const stored_ = fileOf(id, film);
     for (const extra of facts.files ?? []) fileOf(id, extra);
     const wired = canvasEdges.find(edge => edge.toNode === id && edge.toPort === 'timeline');
-    const ranTimeline = timelineOf(wired ? outputOf(wired.fromNode) : node.timeline);
+    const ranTimeline = timelineOf(wired ? fieldOf(wired.fromNode, wired.fromPort) : node.timeline);
     if (!ranTimeline) throw new Error(`${id}: its timeline is not readable`);
     edits.push({ id, title: node.title, column: place.column, row: place.row, status: 'done', kind: 'edit', outputType: 'video',
       film: { name: film.name, bytes: stored_.size, sha256: stored_.sha256, seconds: facts.seconds, frames: facts.frames, fps: facts.fps, width: facts.width, height: facts.height,
         ...(facts.loudness ? { loudness: facts.loudness } : {}), warnings: facts.warnings ?? [],
         ...(Number.isFinite(ranTimeline.output?.stillsEverySeconds) ? { stillsEverySeconds: ranTimeline.output.stillsEverySeconds } : {}),
         timeline: wired ? { from: wired.fromNode } : { own: node.timeline } } });
+  } else if (node.kind === 'assemble') {
+    // Its one output is the page as a file, stored as an artifact: the one its output names, the bytes the read kept.
+    const named = /^awwo-file:([A-Za-z0-9_-]+)$/.exec(String(fieldsOf(id)?.values.file ?? ''))?.[1];
+    const file = named ? filesById.get(named) : undefined;
+    if (!file || file.nodeId !== id) throw new Error(`${id}: the raw record has no stored file ${named} for the assembled page`);
+    bytesOf(file);
+    assemblies.push({ id, title: node.title, column: place.column, row: place.row, status: 'done', kind: 'assemble',
+      ...(!(node.contract?.inputs ?? []).length ? { fromTemplate: true } : {}), ...(took !== undefined ? { seconds: took } : {}),
+      outputType: 'html', file: { name: file.name, bytes: file.size } });
   } else if (MEDIA.has(node.agentKind)) {
     const value = mediaRecord(id);
     for (const item of value.items) fileOf(id, item);
@@ -210,8 +251,18 @@ for (const id of order(keep)) {
     const usage = items.map(item => item?.usage && item.usageStatus !== 'invalid' ? { input: count(item.usage.inputTokens), output: count(item.usage.outputTokens) } : null);
     const tokens = usage.length && usage.every(Boolean) ? { input: usage.reduce((sum, value) => sum + (value.input ?? 0), 0), output: usage.reduce((sum, value) => sum + (value.output ?? 0), 0) } : undefined;
     scan(`${id}'s answer`, outputOf(id));
+    // An agent with a contract delivered named fields: its result shown as what it is, its report beside it, and any
+    // other text field (a director's sheet) after them, each verbatim. One without delivered a single answer.
+    const fields = fieldsOf(id);
+    const typeOf = field => fields?.contract.outputs.find(output => output.id === field)?.type;
+    const result = fields ? String(fields.values.result ?? '') : outputOf(id);
+    const report = fields && typeof fields.values.report === 'string' && fields.values.report.trim() ? fields.values.report : undefined;
+    const extras = fields ? fields.contract.outputs.filter(output => !['result', 'report'].includes(output.id) && output.type !== 'file'
+      && typeof fields.values[output.id] === 'string' && fields.values[output.id].trim()).map(output => ({ label: output.label || output.id, text: redact(fields.values[output.id]) })) : [];
     agents.push({ id, title: node.title, column: place.column, row: place.row, status: 'done', ...(took !== undefined ? { seconds: took } : {}),
-      outputType: 'markdown', output: redact(outputOf(id)), brief: node.persona, ...(items.length > 1 ? { calls: items.length } : {}), ...(tokens ? { tokens } : {}) });
+      outputType: fields ? shownAs(typeOf('result'), result) : 'markdown', output: redact(result), ...(report ? { report: redact(report) } : {}),
+      ...(extras.length ? { extras } : {}), ...(frozen(id).runtime === 'sandbox' ? { sandbox: true } : {}),
+      brief: node.persona, ...(items.length > 1 ? { calls: items.length } : {}), ...(tokens ? { tokens } : {}) });
   }
 }
 const runtimes = new Set(agents.map(agent => frozen(agent.id).runtime));
@@ -222,8 +273,14 @@ const first = ran[0], last = ran.at(-1);
 const delivered = raw.producedBy[ROOT_NODE];
 const artifact = edits.find(edit => edit.id === ROOT_NODE);
 if (!artifact) throw new Error(`${ROOT_NODE}: the film's edit node is not published`);
-const nodes = [...agents, ...edits];
-const edges = canvasEdges.map(edge => ({ from: edge.fromNode, to: edge.toNode, label: { reference: 'Picture', audio: 'Voice', context: 'Input', clips: 'Clip', sounds: 'Sound', pictures: 'Picture', timeline: 'Timeline' }[edge.toPort] ?? edge.toPort }));
+const nodes = [...agents, ...assemblies, ...edits];
+// A wire into a contract's input is named as that input is (its label), and says when it carries a file or a report.
+const edges = canvasEdges.map(edge => {
+  const input = /^in:/.test(edge.toPort || '') ? contractOf(edge.toNode)?.inputs.find(field => `in:${field.id}` === edge.toPort) : undefined;
+  const label = input?.label || ({ reference: 'Picture', audio: 'Voice', context: 'Input', clips: 'Clip', sounds: 'Sound', pictures: 'Picture', timeline: 'Timeline' }[edge.toPort] ?? edge.toPort);
+  const port = edge.fromPort === 'out:report' ? 'report' : contractOf(edge.fromNode)?.outputs.find(field => `out:${field.id}` === edge.fromPort)?.type === 'file' ? 'file' : undefined;
+  return { from: edge.fromNode, to: edge.toNode, label, ...(port ? { port } : {}) };
+});
 // The receipt's revisions: the agents and edits by the runtimes notes.source.runs names (each once, the last one
 // source.api and source.worker), and every media node by the API release that ran its graph run (notes.releases).
 const named = (notes.source.runs ?? []).flatMap(entry => entry.nodes ?? []);
@@ -247,7 +304,9 @@ mediaSource.sort((a, b) => releases.findIndex(entry => entry.api === a.api) - re
 const record = {
   caseId: CASE, edition: notes.edition, runtime: [...runtimes][0], model: notes.model,
   capturedOn: new Date(delivered.endedAt || madeIn(ROOT_NODE).updatedAt).toISOString().slice(0, 10),
-  seconds: seconds(first.createdAt, last.updatedAt), runs: ran.length, activeSeconds: ran.reduce((sum, graph) => sum + (seconds(graph.createdAt, graph.updatedAt) ?? 0), 0),
+  // A canvas that ran again says how many runs and how long they took; one that ran once has its one span.
+  seconds: seconds(first.createdAt, last.updatedAt),
+  ...(ran.length > 1 ? { runs: ran.length, activeSeconds: ran.reduce((sum, graph) => sum + (seconds(graph.createdAt, graph.updatedAt) ?? 0), 0) } : {}),
   completed: nodes.filter(node => node.status === 'done').length, total: nodes.length,
   limits: { ...Object.fromEntries(LIMIT_KEYS.map(key => [key, notes.limits[key]])), thinking: notes.thinking },
   source: { api: notes.source.api, worker: notes.source.worker, runs: notes.source.runs, media: mediaSource }, canvasSHA256: sha256(canvasText), canvas: 'recorded',
@@ -255,10 +314,20 @@ const record = {
   nodes, edges, media, note: notes.note, verification: notes.verification,
 };
 for (const key of ['note', 'verification', 'edition', 'model']) scan(`notes.${key}`, notes[key]);
-// Nothing private: no identifier and no path of the operator's machine anywhere in the record or the stored canvas.
-for (const [where, text] of [['the record', JSON.stringify(record)], ['the stored canvas', JSON.stringify(canvas)]]) {
-  if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text)) throw new Error(`${where} holds a UUID`);
-  if (/(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\/Users\/|\/home\//.test(text)) throw new Error(`${where} holds a machine path`);
+// Nothing private: no identifier and no path of the operator's machine in any string of the record or the stored
+// canvas, keys included. Each string is read as it is, not JSON-escaped: escaped, a line ending in "T:" reads as a drive
+// (T:\n). A letter after a lone backslash is code's escape, not a drive (a module's /^\d\d:\d\d/), and so is a letter
+// and a colon before an escaped double quote, which no Windows path holds (a module's {l:\"D4 E4\"}); a drive after \\?\
+// or \\.\ is a Windows path all the same. MACHINE_PATH is the pattern tests/saas-production-runs.test.ts pins.
+const MACHINE_PATH = /(?<![A-Za-z0-9\\])[A-Za-z]:[\\/](?!")|\\\\[?.]\\[A-Za-z]:|\/Users\/|\/home\//;
+const stringsOf = value => (typeof value === 'string' ? [value]
+  : value && typeof value === 'object' ? Object.entries(value).flatMap(([key, item]) => [...(Array.isArray(value) ? [] : [key]), ...stringsOf(item)]) : []);
+for (const [where, value] of [['the record', record], ['the stored canvas', canvas]]) {
+  for (const text of stringsOf(value)) {
+    if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text)) throw new Error(`${where} holds a UUID`);
+    const machinePath = MACHINE_PATH.exec(text);
+    if (machinePath) throw new Error(`${where} holds a machine path: …${text.slice(Math.max(0, machinePath.index - 80), machinePath.index + 40)}…`);
+  }
 }
 
 // The files the dialog shows: a poster for every picture and clip, the film's stills and its subtitles here; the film
@@ -327,14 +396,17 @@ try {
   // The homepage card's excerpt: a few seconds of the film without sound, and its first frame.
   if (notes.footage?.stem) {
     const { stem, from, seconds: length } = notes.footage;
+    // The card's frame is 16:9 and crops what does not fit: a portrait film (4:5) is shown whole in it, centred on
+    // black, and a film narrower than 1280 px keeps its own width rather than being blown up.
+    const cover = artifact.film.height > artifact.film.width ? 'scale=-2:720,pad=1280:720:(ow-iw)/2:0:black' : "scale='min(1280,iw)':-2";
     // crf 23, not 26. A film case's cover is the only one that is film — grain, smoke, star fields, long dissolves —
     // where every other case's cover is a screen recording of a mostly still interface, which holds together at a far
     // lower rate. Measured 2026-10-23: at crf 26 THE LONG CHORD's cover came out at 630 kbps, below the median 945 kbps
     // of the 17 recorded covers beside it, so the one cover made of film was among the softest on the page.
     ffmpeg('the excerpt', ['-y', '-v', 'error', '-ss', String(from), '-t', String(length), '-i', path.join(STORED, film.file), '-an', '-map_metadata', '-1',
-      '-vf', 'scale=1280:-2', '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(ROOT, 'apps/web/showcase', `${stem}.mp4`)]);
+      '-vf', cover, '-c:v', 'libx264', '-preset', 'slow', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', path.join(ROOT, 'apps/web/showcase', `${stem}.mp4`)]);
     ffmpeg('the excerpt’s poster', ['-y', '-v', 'error', '-ss', String(from), '-i', path.join(STORED, film.file), '-frames:v', '1', '-map_metadata', '-1',
-      '-vf', 'scale=1280:-2', '-q:v', '3', path.join(ROOT, 'apps/web/showcase', `${stem}.jpg`)]);
+      '-vf', cover, '-q:v', '3', path.join(ROOT, 'apps/web/showcase', `${stem}.jpg`)]);
   }
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
@@ -348,4 +420,4 @@ fs.writeFileSync(path.join(ROOT, 'apps/web/src/saas/production-canvases', `${CAS
 fs.writeFileSync(path.join(runsDir, `${CASE}.media.json`), `${JSON.stringify(Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b))), null, 1)}\n`);
 writeSummary(path.join(runsDir, 'summary.json'), record, true);
 const inRepo = Object.values(manifest).filter(file => !file.staged).reduce((sum, file) => sum + file.bytes, 0);
-console.log(`${CASE}: ${record.completed}/${record.total} agents and edits, ${media.length} media nodes, ${record.runs} runs; lineage proved again over ${lineage.wires} wires (${lineage.across} across runs); ${Object.keys(manifest).length} files (${Math.round(inRepo / 1024)} KB in the repo); staged: ${staged}`);
+console.log(`${CASE}: ${record.completed}/${record.total} agents and edits, ${media.length} media nodes, ${record.runs ?? 1} ${record.runs ? 'runs' : 'run'}; lineage proved again over ${lineage.wires} wires (${lineage.across} across runs); ${Object.keys(manifest).length} files (${Math.round(inRepo / 1024)} KB in the repo); staged: ${staged}`);

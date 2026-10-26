@@ -2,12 +2,12 @@ import { Fragment, lazy, Suspense, useEffect, useId, useMemo, useState } from 'r
 import { ArrowDown, Copy, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import { htmlDocumentSource, htmlPreviewDocument } from '../canvas/htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds } from '../canvas/previewLibraries';
-import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
+import { formatDuration, loadProductionMedia, loadProductionRun, type ProductionRunRecord } from './productionRuns';
 import { showcasePage } from './examples/showcaseDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionCase } from './productionCatalog';
-import { renderRecordMarkdown, StatusChip } from './productionMadeParts';
+import { NodeOutput, NodeWork, StatusChip } from './productionMadeParts';
 import './production-made.css';
 
 // A recorded-canvas case (a film) has its own dialog, which loads with the first such case opened.
@@ -79,26 +79,6 @@ function MediaStrip({ record, files, stage }: { record: ProductionRunRecord; fil
       </li>;
     })}</ul>
   </section>;
-}
-
-function NodeOutput({ node }: { node: ProductionRunNode }) {
-  if (node.status !== 'done') return node.detail ? <p className="production-made-detail">{node.detail}</p> : null;
-  if (node.kind === 'assemble' && node.fromTemplate) return <p className="production-made-file">{node.file
-    ? `${node.file.name}, ${Math.round(node.file.bytes / 1024).toLocaleString()} KB: written from its template, byte for byte, with no model.`
-    : 'Written from its template, byte for byte, with no model.'}</p>;
-  if (node.kind === 'assemble') return <p className="production-made-file">{node.file
-    ? `${node.file.name}, ${Math.round(node.file.bytes / 1024).toLocaleString()} KB: the modules pasted into its template, byte for byte, with no model.`
-    : 'The modules pasted into its template, byte for byte, with no model.'}</p>;
-  const report = node.report ? <div className="production-made-markdown">{renderRecordMarkdown(node.report)}</div> : null;
-  if (node.outputType === 'html') return <>{report}<details className="production-made-source"><summary>{`View the page source (${(node.output || '').length.toLocaleString()} characters)`}</summary><pre><code>{node.output}</code></pre></details></>;
-  return <div className="production-made-markdown">{renderRecordMarkdown(node.output || '')}</div>;
-}
-
-/** Where a node worked: the sandbox computer's files, commands and checks, and how many model calls that took. */
-function NodeWork({ node }: { node: ProductionRunNode }) {
-  if (node.kind === 'assemble') return <p className="production-made-work">{node.fromTemplate ? 'Written with no model' : 'Assembled with no model'}</p>;
-  if (!node.sandbox) return null;
-  return <p className="production-made-work">{`Worked in its own sandbox computer${node.calls ? ` · ${node.calls} model calls` : ''}${node.tokens?.output ? ` · ${node.tokens.output.toLocaleString()} output tokens` : ''}`}</p>;
 }
 
 /** How a case was made: its canvas stage by stage, what every agent actually handed over, and the

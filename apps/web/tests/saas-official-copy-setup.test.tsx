@@ -127,6 +127,25 @@ it('says which models the sandbox computer offers too, and tells a flagship copi
   expect(screen.queryByText(/sandbox computer/)).toBeNull();
 });
 
+it('tells a copier of a film written as code what its first run writes, and where its agents keep working',async()=>{
+  const withSandbox={...catalog,runtimes:[...catalog.runtimes,{id:'sandbox',name:'Sandbox computer',available:true,configured:true,tools:[]}],
+    models:[...catalog.models,{id:'shared-model',name:'Sandbox model',runtime:'sandbox'}]};
+  const film={id:'studio-reel',title:'AwwO Studio · Showreel',recorded:{nodes:10,media:0,sandboxed:true}};
+  const recording={capturedOn:'2026-10-26',completed:10,total:10,model:'Claude Opus 5.5'};
+  server(()=>json(withSandbox));setup({item:film,recording});
+  expect(screen.getByText('Keep all 10 nodes and their wires with the texts and settings the real run on 2026-10-26 used: every agent’s task, the assembly’s template and the edit. Nothing is pre-filled: its first run writes every module, the page and the timeline again, and the edit renders the film and its sound from that page. Optionally choose one execution model for its agents.')).toBeVisible();
+  await choose();
+  expect(screen.getByText('Applies to its agents')).toBeVisible();
+  expect(screen.getByText('Its agents keep working in their sandbox computers, on this model.')).toBeVisible();
+  // A model the sandbox does not offer: they keep working there, on the sandbox's own model.
+  cleanup();server();setup({item:film,recording});await choose();
+  expect(screen.getByText(/does not run in a sandbox computer, so its agents keep working there/)).toBeVisible();
+  // A media film's copy is its editors' and says nothing about sandboxes.
+  cleanup();server(()=>json(withSandbox));setup({item:{id:'the-long-chord',title:'THE LONG CHORD · Episode I',recorded:{nodes:298,media:282}},recording});await choose();
+  expect(screen.getByText('Applies to the editor agents')).toBeVisible();
+  expect(screen.queryByText(/sandbox computer/)).toBeNull();
+});
+
 it('locks duplicate confirmation and cancellation until model validation and creation finish',async()=>{
   let reads=0,release!:(value:Response)=>void,finish!:()=>void;
   server(()=>++reads===1?json(catalog):new Promise(resolve=>{release=resolve;}));

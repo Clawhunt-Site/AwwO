@@ -4,10 +4,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { loadProductionMediaManifest, type ProductionMediaFile, type ProductionRunRecord } from '../src/saas/productionRuns';
-import { agentCount, EDIT_ROLE, MEDIA_ROLE, PRODUCTION_CASES } from '../src/saas/productionCatalog';
+import { agentCount, ASSEMBLY_ROLE, EDIT_ROLE, MEDIA_ROLE, PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { createRecordedCopyDocument, recordedCanvasText, recordedCopyDocument, type RecordedCanvas } from '../src/saas/recordedCanvas';
 import { sanitizeDocument, type CanvasNode } from '../src/canvas/canvasDoc';
+import { normalizeContract } from '../src/canvas/nodeContracts';
 import ProductionShowcase from '../src/saas/ProductionShowcase';
+import { NodeOutput } from '../src/saas/productionMadeParts';
 
 // A film case (a recorded canvas, recordedCanvas.ts): its canvas is the run's own document, stored beside its record.
 const RECORDS = import.meta.glob<ProductionRunRecord>('../src/saas/production-runs/*.ts', { eager: true, import: 'default' });
@@ -26,7 +28,11 @@ const MARKS = /tripo|x-?tasy|runninghub|bytedance|dreamina|jimeng|kuaishou|midjo
 const HARMLESS = /(?<![a-z])(?:(?:buc|cac|chuc|crac|crin|dar|duc|frec|hac|hec|in|knuc|pic|pric|ran|roc|shac|sic|spac|spar|spec|sprin|stic|suc|tac|tic|tin|tric|twin|wea|wrin)klings?|tripods?|geminids?)(?![a-z])/gi;
 const unnamed = (text: string) => text.replace(HARMLESS, ' ');
 // What each film case delivers: a record rooted at another edit would show another film.
-const DELIVERED: Readonly<Record<string, string>> = { 'the-long-chord': 'episode-1.mp4' };
+const DELIVERED: Readonly<Record<string, string>> = {
+  'the-long-chord': 'episode-1.mp4',
+};
+// The film cases with spoken lines, whose last edit delivered subtitles; a film written as code has none.
+const SUBTITLED: ReadonlySet<string> = new Set(['the-long-chord']);
 const isMedia = (node: CanvasNode) => node.kind === 'session' && ['image', 'video', 'audio', 'model3d'].includes(node.agentKind);
 
 let ProductionFilm: typeof import('../src/saas/ProductionFilm').default;
@@ -76,6 +82,12 @@ it('stores the canvas as it ran and nothing private: no binding, conversation, o
       const where = `${id}/${node.id}`;
       expect('lastOutput' in node, where).toBe(false);
       if (node.kind === 'edit') { expect(typeof node.timeline, where).toBe('string'); continue; }
+      // A film written as code: an assembly pastes the modules into one page by its template, with no model.
+      if (node.kind === 'assemble') {
+        expect(node.template.trim(), where).not.toBe('');
+        expect(normalizeContract(node.contract), where).toBeDefined();
+        continue;
+      }
       expect(node.kind, where).toBe('session');
       if (node.kind !== 'session') continue;
       expect([node.binding, node.bindAttempt, node.issueId, node.preview], where).toEqual([null, null, null, '']);
@@ -88,17 +100,24 @@ it('stores the canvas as it ran and nothing private: no binding, conversation, o
         expect(node.threads![0].draft.trim(), where).not.toBe('');
         expect([node.threads![0].issueId, node.threads![0].lastOutput, node.threads![0].outputValues], where).toEqual([null, undefined, undefined]);
       } else {
-        // An agent's runtime and model are the member's choice when copying.
-        expect([node.runtime, node.model, node.effort], where).toEqual(['', '', '']);
+        // An agent's runtime and model are the member's choice when copying, but for one that works in its own sandbox
+        // computer (it writes, runs and publishes files there), which keeps that runtime.
+        expect([['', 'sandbox'].includes(node.runtime), node.model, node.effort], where).toEqual([true, '', '']);
         expect(node.persona.trim(), where).not.toBe('');
       }
     }
-    const text = JSON.stringify(canvas);
-    expect(text, id).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-    expect(text, id).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\/Users\/|\/home\//);
+    // Every string as it is, keys too, not JSON-escaped (escaped, a line ending in "T:" reads as a drive, T:\n); the
+    // drive pattern is the one tests/saas-production-runs.test.ts pins (code's escapes are not drives).
+    const strings = (value: unknown): string[] => (typeof value === 'string' ? [value]
+      : value && typeof value === 'object' ? Object.entries(value).flatMap(([key, item]) => [...(Array.isArray(value) ? [] : [key]), ...strings(item)]) : []);
+    for (const text of strings(canvas)) {
+      expect(text, id).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      expect(text, id).not.toMatch(/(?<![A-Za-z0-9\\])[A-Za-z]:[\\/](?!")|\\\\[?.]\\[A-Za-z]:|\/Users\/|\/home\//);
+    }
     // No provider is named in what the canvas says; the media models' ids stay in their settings, never displayed.
     for (const node of canvas.nodes) {
-      const said = node.kind === 'edit' ? [node.title, node.timeline] : node.kind === 'session' ? [node.title, node.persona, ...(node.threads ?? []).map(thread => thread.draft)] : [];
+      const said = node.kind === 'edit' ? [node.title, node.timeline] : node.kind === 'session' ? [node.title, node.persona, ...(node.threads ?? []).map(thread => thread.draft)]
+        : node.kind === 'assemble' ? [node.title, node.template, JSON.stringify(node.contract)] : [];
       for (const value of said) expect(unnamed(value ?? ''), `${id}/${node.id}`).not.toMatch(MARKS);
     }
   }
@@ -132,11 +151,17 @@ it('wires every node as it ran: each wire joins two of its nodes, there is no cy
     const copy = sanitizeDocument(createRecordedCopyDocument(canvas, null));
     expect(copy.nodes.map(node => node.id).sort(), id).toEqual([...ids].sort());
     expect(copy.edges.length, id).toBe(canvas.edges.length);
-    // A chosen execution model goes to the agents only; a media node keeps the model it generates with.
+    // A chosen execution model goes to the agents only; a media node keeps the model it generates with, and an agent in a
+    // sandbox computer stays there, on the chosen model only when the sandbox offers it.
     const before = new Map(canvas.nodes.map(node => [node.id, node]));
-    for (const node of createRecordedCopyDocument(canvas, { runtime: 'openai-agents', model: 'claude-test', label: 'Test' }).nodes) {
-      const ran = before.get(node.id)!;
-      if (node.kind === 'session' && ran.kind === 'session') expect(node.model, `${id}/${node.id}`).toBe(isMedia(node) ? ran.model : 'claude-test');
+    for (const sandbox of [false, true]) {
+      for (const node of createRecordedCopyDocument(canvas, { runtime: 'openai-agents', model: 'claude-test', label: 'Test', ...(sandbox ? { sandbox: true as const } : {}) }).nodes) {
+        const ran = before.get(node.id)!, where = `${id}/${node.id}`;
+        if (node.kind !== 'session' || ran.kind !== 'session') continue;
+        const kept = ran.runtime === 'sandbox';
+        expect(node.model, where).toBe(isMedia(node) ? ran.model : kept && !sandbox ? ran.model : 'claude-test');
+        if (!isMedia(node)) expect(node.runtime, where).toBe(kept ? 'sandbox' : 'openai-agents');
+      }
     }
   }
 });
@@ -160,13 +185,13 @@ it('publishes the posters, stills and subtitles in the repo and stages the film 
     expect(film.src, id).toBe(`/showcase/staged/${id}/${film.sha256.slice(0, 16)}.mp4`);
     expect(film.original, id).toMatchObject({ src: `/showcase/staged/${id}/${delivery.film!.sha256.slice(0, 16)}.mp4`, bytes: delivery.film!.bytes, sha256: delivery.film!.sha256 });
     expect(existsSync(path.join(WEB, 'showcase', 'staged')), 'staged files are never in the repo').toBe(false);
-    expect(media[`${delivery.id}/${delivery.film!.name.replace(/\.mp4$/, '.vtt')}`]?.type, id).toBe('text/vtt');
+    expect(media[`${delivery.id}/${delivery.film!.name.replace(/\.mp4$/, '.vtt')}`]?.type, id).toBe(SUBTITLED.has(id) ? 'text/vtt' : undefined);
     expect(inRepo.filter(([key]) => key.startsWith(`${delivery.id}/still-`)).length, id).toBeGreaterThan(0);
   }
   // A release carries no large file: a film is staged once on the host instead.
   const walk = (dir: string): string[] => readdirSync(dir).flatMap(name => statSync(path.join(dir, name)).isDirectory() ? walk(path.join(dir, name)) : [path.join(dir, name)]);
   for (const file of walk(path.join(WEB, 'showcase'))) expect(statSync(file).size, file).toBeLessThan(10 * 1024 * 1024);
-});
+}, 60_000);
 
 it('shows a film case: the film from its staged URL with English subtitles, no sandboxed page, every node by stage, and a copy', async () => {
   const { made, fetched } = subtitlesServed();
@@ -177,31 +202,46 @@ it('shows a film case: the film from its staged URL with English subtitles, no s
     const delivery = deliveryOf(record), film = media[`${delivery.id}/${delivery.film!.name}`];
     expect(player).toHaveAttribute('src', film.src);
     expect(player).toHaveAttribute('controls');
-    // The subtitles are fetched as text and given to the player as WebVTT, whatever type the server sends them with.
+    // The subtitles are fetched as text and given to the player as WebVTT, whatever type the server sends them with; a
+    // film without them plays with no track.
     const vtt = media[`${delivery.id}/${delivery.film!.name.replace(/\.mp4$/, '.vtt')}`];
-    await waitFor(() => expect(player.querySelector('track')).toHaveAttribute('src', `blob:subtitles-${made.length}`));
-    expect(fetched).toHaveBeenCalledWith(vtt.src, { credentials: 'omit' });
-    expect([made.at(-1)!.type, made.at(-1)!.size]).toEqual(['text/vtt', vtt.bytes]);
-    expect(player.querySelector('track')).toHaveAttribute('srclang', 'en');
+    if (SUBTITLED.has(id)) {
+      await waitFor(() => expect(player.querySelector('track')).toHaveAttribute('src', `blob:subtitles-${made.length}`));
+      expect(fetched).toHaveBeenCalledWith(vtt.src, { credentials: 'omit' });
+      expect([made.at(-1)!.type, made.at(-1)!.size]).toEqual(['text/vtt', vtt.bytes]);
+      expect(player.querySelector('track')).toHaveAttribute('srclang', 'en');
+    } else expect(player.querySelector('track'), id).toBeNull();
     expect(document.querySelector('iframe')).toBeNull();
     expect(delivery.film!.name, id).toBe(DELIVERED[id]);
     expect(screen.getByRole('link', { name: name => name.startsWith(`Download ${DELIVERED[id]} as delivered`) })).toHaveAttribute('href', film.original!.src);
-    // The heading counts agents, media nodes and edits apart.
-    const agents = record.nodes.filter(node => node.kind !== 'edit').length, edits = record.nodes.filter(node => node.kind === 'edit').length;
-    expect(screen.getByRole('heading', { level: 3, name: new RegExp(`^${agents} agents, ${record.media!.length} media nodes, ${edits} edits, `) })).toBeVisible();
-    // An editor shows its brief and its answer; a clip its words.
+    // The heading counts agents, media nodes, assemblies and edits apart, naming only the kinds the canvas has.
+    const agents = record.nodes.filter(node => node.kind !== 'edit' && node.kind !== 'assemble').length, edits = record.nodes.filter(node => node.kind === 'edit').length;
+    const assemblies = record.nodes.filter(node => node.kind === 'assemble').length, media_ = record.media ?? [];
+    const counts = [`${agents} agents`, ...(media_.length ? [`${media_.length} media nodes`] : []), ...(assemblies ? [`${assemblies} ${assemblies === 1 ? 'assembly' : 'assemblies'}`] : []),
+      `${edits} ${edits === 1 ? 'edit' : 'edits'}`].join(', ');
+    expect(screen.getByRole('heading', { level: 3, name: new RegExp(`^${counts}, `) })).toBeVisible();
+    // An agent shows its brief and its answer; an assembly what it made, with no model; a clip its words.
     const rail = screen.getByRole('list', { name: 'Every node, stage by stage' });
-    const editor = record.nodes.find(node => node.kind !== 'edit')!;
+    const editor = record.nodes.find(node => node.kind !== 'edit' && node.kind !== 'assemble')!;
     fireEvent.click(within(rail).getByRole('button', { name: new RegExp(`^${editor.title}`) }));
     expect(screen.getByText(new RegExp(`^Its brief, as it ran \\(${editor.brief!.length.toLocaleString('en')} characters\\)$`))).toBeInTheDocument();
-    const clip = record.media!.find(value => value.kind === 'video')!;
-    fireEvent.click(within(rail).getByRole('button', { name: clip.title }));
-    expect(screen.getByText(clip.words!)).toBeInTheDocument();
+    if (editor.sandbox) expect(screen.getByText(/^Worked in its own sandbox computer/)).toBeInTheDocument();
+    const assembly = record.nodes.find(node => node.kind === 'assemble');
+    if (assembly) {
+      fireEvent.click(within(rail).getByRole('button', { name: new RegExp(`^${assembly.title}`) }));
+      expect(screen.getByText('Assembly · no model')).toBeInTheDocument();
+      expect(screen.getByText(`${assembly.file!.name}, ${Math.round(assembly.file!.bytes / 1024).toLocaleString()} KB: the modules pasted into its template, byte for byte, with no model.`)).toBeInTheDocument();
+    }
+    const clip = media_.find(value => value.kind === 'video');
+    if (clip) {
+      fireEvent.click(within(rail).getByRole('button', { name: clip.title }));
+      expect(screen.getByText(clip.words!)).toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole('button', { name: 'Copy this canvas' }));
     expect(copy).toHaveBeenCalledWith(item);
     cleanup();
     // Its object URL goes with the dialog.
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:subtitles-${made.length}`);
+    if (SUBTITLED.has(id)) expect(URL.revokeObjectURL).toHaveBeenCalledWith(`blob:subtitles-${made.length}`);
   }
 }, 60_000);
 
@@ -229,6 +269,7 @@ it('says when the film cannot be loaded and tries again: its list of files first
     expect(player).toBeVisible();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(load).toHaveBeenCalledTimes(2);
+    reload.mockRestore();
     cleanup();
   }
 }, 60_000);
@@ -290,14 +331,25 @@ it('copies a recorded canvas only while it is the canvas its record pins, by the
   }
 });
 
+it('shows what an agent delivered as what it is, with the report it gave apart, whatever its result is', () => {
+  const node = { id: 'a', title: 'Agent', column: 0, row: 0, status: 'done' as const, report: 'The report it gave.', extras: [{ label: 'Timing sheet', text: '{"fps":30}' }] };
+  for (const [outputType, output, shown] of [['markdown', '# The brief', 'The brief'], ['text', 'const F = {};', /^View what it delivered/], ['html', '<!DOCTYPE html><title>p</title>', /^View the page source/]] as const) {
+    render(<NodeOutput node={{ ...node, outputType, output }} />);
+    expect(screen.getByText(shown), outputType).toBeInTheDocument();
+    expect(screen.getByText('The report it gave.'), outputType).toBeInTheDocument();
+    expect(screen.getByText('Timing sheet (10 characters)'), outputType).toBeInTheDocument();
+    cleanup();
+  }
+});
+
 it('draws a film case’s card from its record: a media step for each stage of media nodes, an entry for each editor and edit', () => {
   for (const { id, record } of FILMS) {
     const media = record.media ?? [];
     const columns = [...new Set([...record.nodes.map(node => node.column), ...media.flatMap(value => value.column ?? [])])].sort((a, b) => a - b);
     const expected = columns.map(column => [...(media.some(value => value.column === column) ? [MEDIA_ROLE] : []),
-      ...record.nodes.filter(node => node.column === column).sort((a, b) => a.row - b.row).map(node => (node.kind === 'edit' ? EDIT_ROLE : 'agent'))]);
-    expect(caseOf(id).stages.map(stage => stage.map(role => (role === MEDIA_ROLE || role === EDIT_ROLE ? role : 'agent'))), id).toEqual(expected);
-    expect(agentCount(caseOf(id)), id).toBe(record.nodes.filter(node => node.kind !== 'edit').length);
+      ...record.nodes.filter(node => node.column === column).sort((a, b) => a.row - b.row).map(node => (node.kind === 'edit' ? EDIT_ROLE : node.kind === 'assemble' ? ASSEMBLY_ROLE : 'agent'))]);
+    expect(caseOf(id).stages.map(stage => stage.map(role => ([MEDIA_ROLE, EDIT_ROLE, ASSEMBLY_ROLE].includes(role) ? role : 'agent'))), id).toEqual(expected);
+    expect(agentCount(caseOf(id)), id).toBe(record.nodes.filter(node => node.kind !== 'edit' && node.kind !== 'assemble').length);
   }
 });
 
@@ -336,7 +388,9 @@ it('plays the web copy by default, the file as delivered on request, and names t
 
     // Asking for the film as delivered plays that file, from where the viewer had got to, and says so. The label says
     // what the click does, so it carries no pressed state — a pressed state and a changing label contradict each other.
-    player.currentTime = 42;
+    // The moments lie inside every film (a moment past the end is clamped to it).
+    const reached = Math.min(42, film.seconds / 2), later = Math.min(73, film.seconds * 0.75);
+    player.currentTime = reached;
     const toDelivered = screen.getByRole('button', { name: /^As delivered/ });
     expect(toDelivered, id).toHaveAccessibleName(`As delivered · ${Math.round(delivered.bytes / 1e6).toLocaleString('en')} MB`);
     expect(toDelivered, id).not.toHaveAttribute('aria-pressed');
@@ -353,17 +407,17 @@ it('plays the web copy by default, the file as delivered on request, and names t
       expect(onDelivered.getAttribute('src'), id).toBe(delivered.src);
       expect(screen.getByRole('button', { name: /^Web copy/ }), id).toBeInTheDocument();
       frame(onDelivered, film.width, film.height);
-      expect([onDelivered.currentTime, plays], id).toEqual([42, 1]);
+      expect([onDelivered.currentTime, plays], id).toEqual([reached, 1]);
       expect(screen.getByText(`The delivered film · ${minutes} · ${film.width}×${film.height}`), id).toBeInTheDocument();
 
       // A second switch before the first has loaded keeps the moment the viewer saw, not the fresh element's 0.
-      onDelivered.currentTime = 73;
+      onDelivered.currentTime = later;
       fireEvent.click(screen.getByRole('button', { name: /^Web copy/ }));
       fireEvent.click(screen.getByRole('button', { name: /^As delivered/ }));
       const back = await playerIn();
       expect(back.getAttribute('src'), id).toBe(delivered.src);
       frame(back, film.width, film.height);
-      expect(back.currentTime, id).toBe(73);
+      expect(back.currentTime, id).toBe(later);
     } finally {
       Object.defineProperty(HTMLMediaElement.prototype, 'play', play);
       Object.defineProperty(HTMLMediaElement.prototype, 'paused', paused);

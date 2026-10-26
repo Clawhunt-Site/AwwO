@@ -254,6 +254,21 @@ it('changes the canvas digest when any task or wire changes, but not with the fr
   expect(canonicalCanvasText({ ...document, nodes: document.nodes.map((node, index) => index ? node : { ...node, persona: `${(node as { persona?: string }).persona} ` }) })).not.toBe(text);
 });
 
+// A Windows drive path in a string as it is: a drive letter that no letter, digit or backslash comes before (after a lone
+// backslash it is code's escape: a module's /^\d\d:\d\d/), and no double quote comes after, as no Windows path holds one
+// (a module's {l:\"D4 E4\"}); or a drive after \\?\ or \\.\. The film publisher
+// (scripts/showcase/publish-recorded-run.mjs) refuses the same.
+const DRIVE_PATH = /(?<![A-Za-z0-9\\])[A-Za-z]:[\\/](?!")|\\\\[?.]\\[A-Za-z]:/;
+
+it('reads a drive path wherever one is, and not in code’s escapes', () => {
+  for (const drive of ['C:\\Users\\alice\\notes.txt', 'see E:/projects/runs', '(D:\\work)', 'path C:\\\\Users\\\\bob in a string', '\\\\?\\C:\\Users\\alice', '\\\\.\\C:\\device',
+    "C:\\'Alice\\private.txt", 'C:\\`notes`\\a.txt'])
+    expect(drive).toMatch(DRIVE_PATH);
+  for (const code of ['/^\\d\\d:\\d\\d/.test(w.text)', 'from T:\n| Tab', 'const P={cave:{l:\\"D4 E4\\"}}', 'https://x.com/a', 'file.mjs:12:3'])
+    expect(code).not.toMatch(DRIVE_PATH);
+  expect(readFileSync(path.resolve(__dirname, '../../../scripts/showcase/publish-recorded-run.mjs'), 'utf8')).toContain(DRIVE_PATH.source);
+});
+
 it('carries no private identifiers or machine paths into a public record', () => {
   for (const record of RECORDS) {
     const text = JSON.stringify(record);
@@ -270,12 +285,16 @@ it('carries no private identifiers or machine paths into a public record', () =>
     const walk = (value: unknown): void => {
       if (typeof value === 'string') {
         if (/^window\.(Roost|Errand)&&window\.\1\.library\.add\(/.test(value)) walk(added(value)); else strings.push(value);
-      } else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+      } else if (value && typeof value === 'object') {
+        // Keys too: a record's own maps are keyed by its words (a media manifest by node and file).
+        if (!Array.isArray(value)) strings.push(...Object.keys(value));
+        Object.values(value).forEach(walk);
+      }
     };
     walk(record);
     for (const value of strings) {
       expect(value, record.caseId).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-      expect(value, record.caseId).not.toMatch(/(?<![A-Za-z0-9])[A-Za-z]:[\\/]/);
+      expect(value, record.caseId).not.toMatch(DRIVE_PATH);
       // /home/errand and /home/roost are the homes of the computers inside Errand's and Roost's own pages (their
       // kernels'), not a machine's. A network path is two backslashes, a host, a backslash and a share (\\host\share):
       // two backslashes and a letter alone are also code's escaped escapes ('\\u2019' in a module's string).

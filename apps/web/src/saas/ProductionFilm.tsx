@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Copy, Download, Maximize2, Minimize2 } from 'lucide-react';
 import { formatDuration, loadProductionMediaManifest, type ProductionMediaFile, type ProductionRunMedia, type ProductionRunNode, type ProductionRunRecord } from './productionRuns';
 import type { ProductionCase } from './productionCatalog';
-import { renderRecordMarkdown, StatusChip } from './productionMadeParts';
+import { NodeOutput, NodeWork, StatusChip } from './productionMadeParts';
 import './production-made.css';
 
 /** What each kind of media node is called in the dialog (it reads in English in both interface languages). */
@@ -114,6 +114,12 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
     playing?.catch(() => {});
   };
   const agents = record.nodes.filter(node => node.kind !== 'edit' && node.kind !== 'assemble').length, edits = record.nodes.filter(node => node.kind === 'edit').length;
+  // A film written as code (its picture rendered from a page, its sound made by one) has no media nodes but an assembly.
+  const assemblies = record.nodes.filter(node => node.kind === 'assemble').length;
+  const made = [`${agents} ${agents === 1 ? 'agent' : 'agents'}`, ...(media.length ? [`${media.length} media ${media.length === 1 ? 'node' : 'nodes'}`] : []),
+    ...(assemblies ? [`${assemblies} ${assemblies === 1 ? 'assembly' : 'assemblies'}`] : []), `${edits} ${edits === 1 ? 'edit' : 'edits'}`, `${columns.length} stages`];
+  // The player and its stills take the film's own frame (THE LONG CHORD's 1680×720, a 1080×1350 film's 4:5).
+  const frame = film && film.width > 0 && film.height > 0 ? { aspectRatio: `${film.width} / ${film.height}` } : undefined;
   const nodesDone = record.completed + media.filter(value => value.status === 'done').length;
   // The moment a still shows. The render worker takes one every N seconds (the timeline's stillsEverySeconds) with
   // ffmpeg's fps=1/N, which rounds each frame to the nearest step and keeps the last of a step: still n is the frame just
@@ -148,7 +154,7 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   return <section className={`production-made production-film${focused ? ' is-result-focused' : ''}`} lang="en" aria-labelledby={`${id}-title`}>
     <header className="production-made-heading">
       <div><span className="production-eyebrow"><span />HOW IT WAS MADE</span>
-        <h3 id={`${id}-title`}>{`${agents} ${agents === 1 ? 'agent' : 'agents'}, ${media.length} media nodes, ${edits} ${edits === 1 ? 'edit' : 'edits'}, ${columns.length} stages, ${record.runs && record.activeSeconds !== undefined
+        <h3 id={`${id}-title`}>{`${made.join(', ')}, ${record.runs && record.activeSeconds !== undefined
           ? `${formatDuration(record.activeSeconds, 'en')} in ${record.runs} runs` : `${formatDuration(record.seconds, 'en')} end to end`}`}</h3>
         <p className="production-made-receipt"><span className="production-label is-real">Real run</span>
           <span>{record.model}</span><span>{record.capturedOn}</span><span>{`${nodesDone}/${record.total + media.length} nodes done`}</span></p></div>
@@ -205,13 +211,13 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
           : manifest === undefined ? <p className="production-made-empty" role="status">Loading the film…</p>
             : !filmFile || filmFailed ? <p className="production-made-empty" role="alert">The film could not be loaded.<button type="button" onClick={retryFilm}>Try again</button></p>
               : null}
-        {source && <video ref={video} className="production-film-player" hidden={filmFailed} controls preload="metadata" playsInline poster={stills[0]?.src} src={source.src}
+        {source && <video ref={video} className="production-film-player" style={frame} hidden={filmFailed} controls preload="metadata" playsInline poster={stills[0]?.src} src={source.src}
           onLoadedMetadata={onMetadata} onError={() => setFilmFailed(true)} aria-label={`${item.title}: the film an AwwO run delivered`}>
           {subtitles && <track kind="subtitles" srcLang="en" label="English" src={subtitles} default />}
         </video>}
         {stills.length > 0 && source && !filmFailed && <div className="production-film-stills" role="group" aria-label="Stills from the film">
           {stills.map((still, index) => <button type="button" key={still.src} onClick={() => seek(stillAt(index))} aria-label={`Play from ${clock(stillAt(index))}`}>
-            <img src={still.src} alt="" loading="lazy" decoding="async" /></button>)}</div>}
+            <img src={still.src} alt="" loading="lazy" decoding="async" style={frame} /></button>)}</div>}
         {filmFile && film && <p className="production-made-hint">{asDelivered
           ? `It plays as the last edit delivered it, frame for frame (${megabytes(filmFile.original?.bytes ?? filmFile.bytes)}); its sound is the film's own track.`
           : `It plays as the last edit delivered it, re-encoded smaller for the web (${megabytes(filmFile.bytes)}); its sound is the film's own track.`}
@@ -228,8 +234,13 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
         {/* The agents' settings only: how many nodes ran at once changed over the runs, as "What happened" says. */}
         <dt>Execution settings</dt><dd>{`${record.limits.modelCallsPerNode === 1 ? '1 model call' : `up to ${record.limits.modelCallsPerNode} model calls`} per agent${record.limits.thinking ? '' : ' with thinking off'}, at most ${record.limits.maxOutputTokens} output tokens, ${record.limits.contextWindow}-token context`}</dd>
         {/* An edit runs on the render worker, not an agent runtime. */}
-        <dt>Editors and edits</dt><dd>{record.source.runs && record.source.runs.length > 0
-          ? record.source.runs.map(entry => `API ${entry.api.slice(0, 12)} · ${entry.nodes.every(id => record.nodes.find(node => node.id === id)?.kind === 'edit') ? 'renderer' : 'runtime'} ${entry.worker.slice(0, 12)} (${entry.nodes.map(titleOf).join(', ')})`).join('; then ')
+        <dt>Agents and edits</dt><dd>{record.source.runs && record.source.runs.length > 0
+          ? record.source.runs.map(entry => {
+            const kinds = entry.nodes.map(id => record.nodes.find(node => node.id === id)?.kind);
+            // An assembly runs in the API itself, with no model: its entry names the API alone.
+            if (kinds.every(kind => kind === 'assemble')) return `API ${entry.api.slice(0, 12)} · no model (${entry.nodes.map(titleOf).join(', ')})`;
+            return `API ${entry.api.slice(0, 12)} · ${kinds.every(kind => kind === 'edit') ? 'renderer' : 'runtime'} ${entry.worker.slice(0, 12)} (${entry.nodes.map(titleOf).join(', ')})`;
+          }).join('; then ')
           : `API ${record.source.api} · runtime ${record.source.worker}`}</dd>
         {record.source.media && record.source.media.length > 0 && <><dt>Media nodes</dt><dd>{record.source.media.map(entry => `API ${entry.api.slice(0, 12)} (${entry.nodes.length} ${entry.nodes.length === 1 ? 'node' : 'nodes'})`).join('; then ')}</dd></>}
         {record.runs && record.activeSeconds !== undefined && <><dt>Time</dt><dd>{`${record.runs} runs took ${formatDuration(record.activeSeconds, 'en')}, ${formatDuration(record.seconds, 'en')} from the first start to the last finish`}</dd></>}
@@ -239,23 +250,25 @@ export default function ProductionFilm({ item, record, onCopy, loadManifest = lo
   </section>;
 }
 
-/** An editor agent or an edit node: what it was asked, how it worked and what it delivered. */
+/** An agent, an assembly or an edit node: what it was asked, how it worked and what it delivered. */
 function NodeDetail({ node }: { node: ProductionRunNode }) {
   const film = node.film;
   return <>
-    <header><h4>{node.title}</h4><span>{film ? 'Edit · joins clips and sounds, no model' : 'Agent'}</span><StatusChip status={node.status} /></header>
+    <header><h4>{node.title}</h4><span>{film ? 'Edit · joins the pictures and sounds its timeline names, no model' : node.kind === 'assemble' ? 'Assembly · no model' : 'Agent'}</span><StatusChip status={node.status} /></header>
+    {!film && <NodeWork node={node} />}
     {film && <p className="production-made-work">{`${clock(film.seconds)} · ${film.frames.toLocaleString('en')} frames at ${film.fps} fps · ${film.width}×${film.height} · ${megabytes(film.bytes)}${film.loudness ? ` · ${film.loudness.integratedLUFS} LUFS, true peak ${film.loudness.truePeakDb} dB` : ''}`}</p>}
     {film && <p className="production-made-handoff"><ArrowDown size={13} aria-hidden="true" />{'from' in film.timeline
       ? 'Its timeline is the answer of the agent wired into it, as delivered.'
       : 'Its timeline was written on the node by the operator’s script once the films it joins existed (their lengths and subtitles), and is shown below.'}</p>}
     {film && film.warnings.length > 0 && <p className="production-made-work">{`The edit's warnings: ${film.warnings.join(', ')}`}</p>}
-    {node.tokens?.output !== undefined && <p className="production-made-work">{`${node.calls ? `${node.calls} model calls · ` : ''}${node.tokens.output.toLocaleString('en')} output tokens`}</p>}
+    {/* A sandbox agent's calls and tokens are in its work line (NodeWork). */}
+    {!node.sandbox && node.tokens?.output !== undefined && <p className="production-made-work">{`${node.calls ? `${node.calls} model calls · ` : ''}${node.tokens.output.toLocaleString('en')} output tokens`}</p>}
     {node.brief && <details className="production-made-source"><summary>{`Its brief, as it ran (${node.brief.length.toLocaleString('en')} characters)`}</summary><pre><code>{node.brief}</code></pre></details>}
     {film && 'own' in film.timeline && <details className="production-made-source"><summary>Its own timeline</summary><pre><code>{film.timeline.own}</code></pre></details>}
-    <div className="production-made-output"><span>{film ? 'What this edit delivered' : 'What this agent actually delivered'}</span>
+    <div className="production-made-output"><span>{film ? 'What this edit delivered' : node.kind === 'assemble' ? 'What this assembly made' : 'What this agent actually delivered'}</span>
       {node.status !== 'done' ? node.detail ? <p className="production-made-detail">{node.detail}</p> : null
         : film ? <p className="production-made-file">{`${film.name}: ${megabytes(film.bytes)}, SHA-256 ${film.sha256.slice(0, 16)}…`}</p>
-          : <div className="production-made-markdown">{renderRecordMarkdown(node.output || '')}</div>}</div>
+          : <NodeOutput node={node} />}</div>
   </>;
 }
 

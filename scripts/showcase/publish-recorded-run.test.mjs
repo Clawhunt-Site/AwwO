@@ -112,3 +112,33 @@ test('refuses a provider named in what a node was asked, even inside another wor
     assert.doesNotMatch(publish(raw(words), NOTES).stderr, /names a provider/, words);
   }
 });
+
+// A film written as code (2026-10-26): its page is pasted together by an assembly, and its agents' words sit in contracts.
+const FILE_CONTRACT = { version: 1, inputs: [{ id: 'from_kernel', label: 'Kernel', type: 'text', required: true, value: '' }],
+  outputs: [{ id: 'file', label: 'Page', type: 'file', required: true, value: '' }] };
+const one = node => ({ ...RAW, root: node.id, nodes: [node.id], producedBy: { [node.id]: { graph: 'g1' } },
+  graphs: [{ id: 'g1', createdAt: '2026-10-26T00:00:00Z', updatedAt: '2026-10-26T00:01:00Z', document: { nodes: [node], edges: [] },
+    nodes: [{ nodeId: node.id, state: 'done', output: node.lastOutput.text }] }],
+  canvas: { id: 'c', version: 1, document: { nodes: [node], edges: [] } } });
+const assembly = over => ({ id: 'page', kind: 'assemble', title: 'Assembly', x: 0, y: 0, w: 1, h: 1, template: '<!DOCTYPE html><script>{{in:from_kernel}}</script>',
+  contract: FILE_CONTRACT, lastOutput: { text: '{"file":"awwo-file:a1"}' }, ...over });
+
+test('publishes an assembly only with a contract it can read, and scans its template', () => {
+  for (const contract of [undefined, null, { version: 2, inputs: [], outputs: [] }, { version: 1, inputs: 'x', outputs: [] }]) {
+    assert.match(publish(one(assembly({ contract })), NOTES).stderr, /page: an assembly without a readable contract/, JSON.stringify(contract));
+  }
+  assert.match(publish(one(assembly({ template: '<!DOCTYPE html><!-- made with Kling -->{{in:from_kernel}}' })), NOTES).stderr, /page[.]template names a provider: “Kling”/);
+  assert.doesNotMatch(publish(one(assembly({})), NOTES).stderr, /readable contract|names a provider/);
+});
+
+test('scans the words an agent’s contract holds: its inputs’ values and its fields’ labels', () => {
+  const agent = value => ({ id: 'director', kind: 'session', agentKind: 'coding', runtime: 'sandbox', model: '', title: 'Director', persona: 'Write the brief.',
+    x: 0, y: 0, w: 1, h: 1, threads: [], lastOutput: { text: '{"result":"A brief."}' },
+    contract: { version: 1, inputs: [{ id: 'brief', label: 'Task', type: 'markdown', required: true, value }], outputs: [{ id: 'result', label: 'Brief', type: 'markdown', required: true, value: '' }] } });
+  assert.match(publish(one(agent('Cut it like a Seedance trailer.')), NOTES).stderr, /director[.]contract names a provider: “Seedance”/);
+  assert.doesNotMatch(publish(one(agent('A floating island at night, in rain.')), NOTES).stderr, /names a provider/);
+  // A contract the canvas would refuse is refused here, a falsy one too, rather than published as no contract.
+  for (const contract of [false, 0, '', { version: 2, inputs: [], outputs: [] }]) {
+    assert.match(publish(one({ ...agent('A brief.'), contract }), NOTES).stderr, /director: an agent with a contract the canvas cannot read/, JSON.stringify(contract));
+  }
+});

@@ -60,8 +60,9 @@ export function createOfficialCopyDocument(item: OfficialWorkflow, model: Offici
 /** A production case's recorded run, whose deliveries the copy carries (productionCopy.ts). */
 export type OfficialCopyRecording = { capturedOn: string; completed: number; total: number; model: string };
 /** A recorded-canvas case (a film, recordedCanvas.ts): its canvas is stored beside its record, so the dialog knows it by
- * its title and how many nodes, and how many of them generate media, its copy holds. */
-export type RecordedCopyItem = { readonly id: string; readonly title: string; readonly recorded: { readonly nodes: number; readonly media: number } };
+ * its title and how many nodes, and how many of them generate media, its copy holds; `sandboxed` when its agents work in
+ * sandbox computers (a film written as code). */
+export type RecordedCopyItem = { readonly id: string; readonly title: string; readonly recorded: { readonly nodes: number; readonly media: number; readonly sandboxed?: boolean } };
 
 /** The copy dialog is part of the case flow, which reads in English in both interface languages (owner 2026-10-14). */
 type Props = {
@@ -97,7 +98,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
   const chosen = models.find(model => modelKey(model) === selection);
   const recorded = 'recorded' in item ? item.recorded : null;
   const workflow = 'recorded' in item ? null : item;
-  const sandboxed = workflow?.nodes.some(node => node.sandbox) === true;
+  const sandboxed = workflow?.nodes.some(node => node.sandbox) === true || recorded?.sandboxed === true;
   const locked = busy || checking;
   const invalidChoice = selection !== '' && (!chosen || loading || catalogError);
   const close = () => { if (!busy && !checking && !submitting.current) onClose(); };
@@ -124,7 +125,10 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
     onCancel={event => { event.preventDefault(); close(); }}>
     <form onSubmit={event => { event.preventDefault(); void confirm(); }}>
       <header><span>PRODUCTION CASE</span><h2 id={`${id}-title`}>Copy example to my canvases</h2><p>{item.title}</p></header>
-      <p id={`${id}-description`}>{recorded
+      <p id={`${id}-description`}>{recorded && !recorded.media
+        // A film written as code: its picture and sound come from the page its agents write, not from media nodes.
+        ? `Keep all ${recorded.nodes} nodes and their wires with the texts and settings the real run${recording ? ` on ${recording.capturedOn}` : ''} used: every agent’s task, the assembly’s template and the edit. Nothing is pre-filled: its first run writes every module, the page and the timeline again, and the edit renders the film and its sound from that page. Optionally choose one execution model for its agents.`
+        : recorded
         ? `Keep all ${recorded.nodes} nodes and their wires with the texts and settings the real run${recording ? ` on ${recording.capturedOn}` : ''} used: every picture, clip, voice and score cue with its words, the editors’ briefs and the edits. Nothing is pre-filled: the film’s deliveries are files, which a copy does not carry, so its first run makes all ${recorded.media} pictures, clips and sounds again before any editor runs, and that takes a paid plan’s media allowance. New clips speak their lines at other moments and run to other lengths: the sync sheets in the editors’ briefs and the edits’ own timelines were measured on the case run’s clips and films, so measure and edit them again before cutting. Optionally choose one execution model for the editor agents.`
         : workflow && recording
         ? `Keep all ${workflow.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${workflow.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}${workflow.nodes.some(node => node.assemble?.file || node.assemble?.fileOnly) ? '; the assembly makes its file again on the first run, with no model' : ''}${workflow.nodes.some(node => node.handoff) ? '; the turns that hand their project on as a file run again on the first run, and so make the team session again' : ''}. Optionally choose one execution model for every new node.`
@@ -136,7 +140,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
           {models.map(model => <option key={modelKey(model)} value={modelKey(model)}>{model.label}</option>)}
         </select>
       </label>
-      {chosen && <div className="official-copy-selection"><strong>{recorded ? 'Applies to the editor agents' : 'Applies to every new node'}</strong><span>{chosen.label}</span>
+      {chosen && <div className="official-copy-selection"><strong>{recorded ? recorded.media ? 'Applies to the editor agents' : 'Applies to its agents' : 'Applies to every new node'}</strong><span>{chosen.label}</span>
         {sandboxed && <small>{chosen.sandbox
           ? 'Its agents keep working in their sandbox computers, on this model.'
           : 'This model does not run in a sandbox computer, so its agents keep working there on the sandbox’s own model.'}</small>}</div>}
