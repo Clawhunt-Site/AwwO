@@ -71,7 +71,7 @@ test('the catalog is off unless enabled, and contributes each worker only its ow
   const claude = agents.find(profile => profile.id === 'bedrock.claude-opus-5-5')!;
   assert.deepEqual(claude, { id: 'bedrock.claude-opus-5-5', provider: 'bedrock', model: 'global.anthropic.claude-opus-5-5', name: 'Claude Opus 5.5', vendor: 'anthropic',
     region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'],
-    fallbackModel: 'us.anthropic.claude-opus-5-5', proseBytesPerToken: 2.15 });
+    fallbackModel: 'us.anthropic.claude-opus-5-5', proseBytesPerToken: 2.15, reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium' });
   // A model without a fallback profile has none.
   assert.equal('fallbackModel' in agents.find(profile => profile.id === 'bedrock.kimi-k3')!, false);
   // A model nobody measured has no prose rate: its budget stays counted byte for byte.
@@ -117,6 +117,35 @@ test('a measured prose rate is a number from 1 to 4 in steps of 0.05, carried to
   for (const item of readBedrockCatalog()) {
     if (item.proseBytesPerToken !== undefined) assert.ok(item.proseBytesPerToken > 1 && item.proseBytesPerToken <= 4 && item.verified, item.id);
   }
+});
+
+test('thinking efforts are a Claude entry\'s own levels with a default among them, carried to its profile', () => {
+  const claude = (overrides: Record<string, unknown>) => entry({ vendor: 'anthropic', target: 'global.anthropic.claude-x', ...overrides });
+  const [item] = parseBedrockCatalog(catalogOf(claude({ reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium' })));
+  assert.deepEqual(item.reasoningEfforts, ['low', 'medium', 'high']);
+  assert.equal(item.defaultReasoningEffort, 'medium');
+  assert.equal(Object.isFrozen(item.reasoningEfforts), true);
+  const profile = bedrockProfile(item, 'us-east-1', '');
+  assert.deepEqual([profile.reasoningEfforts, profile.defaultReasoningEffort], [['low', 'medium', 'high'], 'medium']);
+  // Levels without a default are levels; an entry without levels has neither on its profile.
+  const [plain] = parseBedrockCatalog(catalogOf(claude({ reasoningEfforts: ['low'] })));
+  assert.deepEqual([plain.reasoningEfforts, plain.defaultReasoningEffort], [['low'], undefined]);
+  assert.equal('defaultReasoningEffort' in bedrockProfile(plain, 'us-east-1', ''), false);
+  const [none] = parseBedrockCatalog(catalogOf(claude({})));
+  assert.equal('reasoningEfforts' in none || 'reasoningEfforts' in bedrockProfile(none, 'us-east-1', ''), false);
+  // Only the levels the bridge sends, each once, at least one, on a Claude model, with any default among them.
+  for (const [label, bad] of [['another vendor', entry({ reasoningEfforts: ['low'] })], ['no level', claude({ reasoningEfforts: [] })],
+    ['a level Bedrock refuses', claude({ reasoningEfforts: ['minimal'] })], ['a level not offered', claude({ reasoningEfforts: ['low', 'xhigh'] })],
+    ['twice', claude({ reasoningEfforts: ['low', 'low'] })], ['not a list', claude({ reasoningEfforts: 'low' })],
+    ['a default not among them', claude({ reasoningEfforts: ['low'], defaultReasoningEffort: 'medium' })],
+    ['a default without levels', claude({ defaultReasoningEffort: 'medium' })], ['an empty default', claude({ reasoningEfforts: ['low'], defaultReasoningEffort: '' })]] as const) {
+    assert.throws(() => parseBedrockCatalog(catalogOf(bad)), /catalog is invalid/, label);
+  }
+  // The built-in catalog offers them for Claude Opus 5.5 alone, at its own default.
+  const offered = readBedrockCatalog().filter(model => model.reasoningEfforts !== undefined);
+  assert.deepEqual(offered.map(model => [model.id, model.reasoningEfforts, model.defaultReasoningEffort]), [['bedrock.claude-opus-5-5', ['low', 'medium', 'high'], 'medium']]);
+  const opus = bedrockCatalogProfiles('pi', { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_MODELS: 'bedrock.claude-opus-5-5' })[0];
+  assert.deepEqual([opus.reasoningEfforts, opus.defaultReasoningEffort], [['low', 'medium', 'high'], 'medium']);
 });
 
 test('an explicit model list selects in catalog order and refuses unknown or tool-less Agents models', () => {

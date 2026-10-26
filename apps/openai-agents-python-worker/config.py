@@ -166,12 +166,14 @@ BEDROCK_PROFILE_FIELDS = {"id", "provider", "model", "region", "apiKeyEnv", "con
 
 
 def _bedrock_profile(entry_id: str, name: str, target: str, region: str, api_key: str, context_window: int, max_tokens: int,
-                     input_kinds: tuple = ("text",), fallback_target: str = "", prose: float = 1.0) -> ModelProfile:
-    # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint;
-    # it never advertises effort (the bridge refuses it).
+                     input_kinds: tuple = ("text",), fallback_target: str = "", prose: float = 1.0,
+                     efforts: tuple = (), default_effort: str = "") -> ModelProfile:
+    # Bedrock is reached only through the Converse bridge, as an OpenAI-compatible endpoint. It advertises the thinking
+    # efforts its catalog entry offers (a Claude model's, which the bridge sends as output_config.effort) and no others.
     return ModelProfile(id=entry_id, provider="bedrock", model=target, base_url=bridge_base_url(region), api_key=api_key,
                         protocol="chat_completions", context_window=context_window, max_tokens=max_tokens, name=name, region=region,
-                        input=input_kinds, fallback_model=fallback_target, prose_bytes_per_token=prose)
+                        input=input_kinds, fallback_model=fallback_target, prose_bytes_per_token=prose,
+                        reasoning_efforts=efforts, default_reasoning_effort=default_effort)
 
 
 def _bedrock_models_json_profile(value: dict, env: dict, ids: set, default: ModelProfile, missing: list) -> ModelProfile:
@@ -369,7 +371,8 @@ def load_config(env: dict | None = None) -> Config:
     except CatalogError as e:
         raise ConfigError(f"Bedrock catalog configuration is invalid: {e}")
     catalog = [replace(_bedrock_profile(entry["id"], entry["name"], entry["target"], region, catalog_key, entry["contextWindow"], entry["maxTokens"],
-                                        tuple(entry["input"]), entry.get("fallbackTarget", ""), prose_rate(entry.get("proseBytesPerToken", ABSENT))),
+                                        tuple(entry["input"]), entry.get("fallbackTarget", ""), prose_rate(entry.get("proseBytesPerToken", ABSENT)),
+                                        tuple(entry.get("reasoningEfforts", ())), entry.get("defaultReasoningEffort", "")),
                        prompt_cache=entry["id"] in cached)
                for entry in selected]
     if any(p.id in {c.id for c in configured} for p in catalog) or len(configured) + len(catalog) > MAX_CATALOG_MODELS:

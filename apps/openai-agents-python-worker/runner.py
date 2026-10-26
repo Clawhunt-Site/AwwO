@@ -277,10 +277,11 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
 
             # A stream that sends nothing for 15 minutes (3 for a call to Claude Opus 4.8 or Opus 5.5 that offers no tools;
             # Opus 5.5 is asked to stream its thinking) fails as the service's outage instead of riding out the run.
+            # The run's effort reaches the bridge as the SDK's reasoning_effort, which it sends as output_config.effort.
             bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
                                               read_timeout=stream_read_timeout(config.timeout_ms / 1000), prompt_cache=profile.prompt_cache,
-                                              fallback_model=profile.fallback_model, report=report)
+                                              reasoning_efforts=profile.reasoning_efforts, fallback_model=profile.fallback_model, report=report)
         # A DeepSeek call follows no redirect: the API has one address, and the profile may reach only that one.
         http_client = DefaultAsyncHttpxClient(event_hooks={
             "request": [observation.on_request, count_request], "response": [observation.on_response],

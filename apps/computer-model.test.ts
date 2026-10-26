@@ -205,7 +205,9 @@ async function inProcessCall(sdk: unknown, seen: any[] = []) {
   const [{ childBedrockFetch }, { bedrockCall }] = await Promise.all([import('./bedrock-bridge.ts'), import('./pi-worker/bedrock-call.mjs')]);
   return async (model: any, body: any) => {
     seen.push(model);
-    const answer = await bedrockCall({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body) },
+    // As the Pi worker's parent sends its child the model's settings (runner.mjs bedrockCall).
+    const answer = await bedrockCall({ region: model.region, model: model.model, auth: { bearerToken: model.apiKey }, url: `${model.baseURL}/chat/completions`, body: JSON.stringify(body),
+      ...(model.reasoningEfforts?.length ? { reasoningEfforts: [...model.reasoningEfforts] } : {}) },
       { load: async () => ({ childBedrockFetch, sdk }) });
     if (!answer.ok) throw Object.assign(new Error('The Bedrock call failed'), { reason: answer.reason });
     return answer.raw;
@@ -271,6 +273,45 @@ test('Pi serves a Bedrock model to managed execution through the Converse bridge
   assert.deepEqual(fake.sent[1].input.messages.at(-1), { role: 'user', content: [{ toolResult: { toolUseId: 'tooluse_Ab12', content: [{ text: 'verified' }] } }] });
   assert.equal(s.calls.length, 0);
   assert.deepEqual(outbound, []);
+});
+
+test('a managed call on Claude Opus 5.5 sends the effort it names, never the model\'s default or none, and refuses a level it does not offer', async t => {
+  const fake = fakeConverse(async function* () {
+    yield { messageStart: { role: 'assistant' } };
+    yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Done.' } } };
+    yield { messageStop: { stopReason: 'end_turn' } };
+    yield { metadata: { usage: { inputTokens: 20, outputTokens: 2 } } };
+  });
+  const bedrockCall = await inProcessCall(fake.sdk);
+  const s = await serve(t, 'anthropic_messages', () => assert.fail('No other provider expected'),
+    { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_API_KEY: 'ABSKbedrockkey000000000000000000', AWWO_BEDROCK_MODELS: 'bedrock.claude-opus-5-5,bedrock.gemma-3-27b' }, 'pi', { bedrockCall });
+  const summary = { thinking: { type: 'adaptive', display: 'summarized' } };
+  for (const [effort, fields] of [['low', { output_config: { effort: 'low' }, ...summary }], ['high', { output_config: { effort: 'high' }, ...summary }],
+    // No effort named is the model's own default (medium), which is never sent; none is no field either.
+    ['', summary], ['none', summary]] as const) {
+    const response = await s.send(input({ model: 'bedrock.claude-opus-5-5', effort }));
+    assert.equal(response.status, 200, effort);
+    assert.equal((await response.json()).completion.choices[0].message.content, 'Done.');
+    assert.deepEqual(fake.sent.at(-1).input.additionalModelRequestFields, fields, effort);
+  }
+  const sent = fake.sent.length;
+  for (const effort of ['xhigh', 'max', 'minimal']) {
+    const refused = await s.send(input({ model: 'bedrock.claude-opus-5-5', effort }));
+    assert.equal(refused.status, 400, effort);
+    assert.equal((await refused.json()).error.code, 'EFFORT_NOT_SUPPORTED');
+  }
+  // A model that offers no level refuses every one, before any call.
+  const plain = await s.send(input({ model: 'bedrock.gemma-3-27b', effort: 'low' }));
+  assert.equal(plain.status, 400);
+  assert.equal((await plain.json()).error.code, 'EFFORT_NOT_SUPPORTED');
+  assert.equal(fake.sent.length, sent);
+  // The request the bridge gets: its reasoning_effort, only where one was named.
+  const named = bedrockComputerRequest({ tools: [tool], messages: [{ role: 'user', content: 'U' }] }, { model: 'm', baseURL: 'http://b', maxTokens: 64 } as any, { effort: 'low' }).body;
+  assert.equal(named.reasoning_effort, 'low');
+  for (const effort of [undefined, '', 'none']) {
+    const body = bedrockComputerRequest({ tools: [tool], messages: [{ role: 'user', content: 'U' }] }, { model: 'm', baseURL: 'http://b', maxTokens: 64 } as any, { effort }).body;
+    assert.equal('reasoning_effort' in body, false, String(effort));
+  }
 });
 
 test('a managed-execution thread that opens with the engine\'s greeting reaches Bedrock at its user turn, the greeting as context', async t => {

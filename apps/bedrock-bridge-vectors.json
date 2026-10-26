@@ -45,6 +45,109 @@
    }
   },
   {
+   "name": "reasoning-effort-offered",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "reasoning_effort": "low"
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    },
+    "additionalModelRequestFields": {
+     "output_config": {
+      "effort": "low"
+     }
+    }
+   },
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ]
+  },
+  {
+   "name": "reasoning-effort-offered-none-named",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "reasoning_effort": null
+   },
+   "expect": {
+    "modelId": "global.anthropic.claude-opus-5-5",
+    "messages": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "text": "Hello"
+       }
+      ]
+     }
+    ],
+    "system": [
+     {
+      "text": "Be brief."
+     }
+    ],
+    "inferenceConfig": {
+     "maxTokens": 512
+    }
+   },
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ]
+  },
+  {
    "name": "merged-roles-tools-and-settings",
    "body": {
     "model": "global.anthropic.claude-opus-5-5",
@@ -958,6 +1061,64 @@
    },
    "status": 400,
    "message": "Reasoning effort is not supported for this Bedrock model"
+  },
+  {
+   "name": "reasoning-effort-not-offered",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "reasoning_effort": "high"
+   },
+   "status": 400,
+   "message": "This Bedrock model does not offer that reasoning effort",
+   "efforts": [
+    "low"
+   ]
+  },
+  {
+   "name": "reasoning-effort-bedrock-refuses",
+   "body": {
+    "model": "global.anthropic.claude-opus-5-5",
+    "stream": true,
+    "stream_options": {
+     "include_usage": true
+    },
+    "store": false,
+    "max_tokens": 512,
+    "messages": [
+     {
+      "role": "system",
+      "content": "Be brief."
+     },
+     {
+      "role": "user",
+      "content": "Hello"
+     }
+    ],
+    "reasoning_effort": "minimal"
+   },
+   "status": 400,
+   "message": "This Bedrock model does not offer that reasoning effort",
+   "efforts": [
+    "low",
+    "medium",
+    "high"
+   ]
   },
   {
    "name": "json-schema",

@@ -46,6 +46,7 @@ flowchart LR
 | `name` / `vendor` | 显示名与厂商；网页按显示名归入品牌组 |
 | `target` | Converse `modelId`：只通过推理配置文件提供的模型用 `global.`/`us.` 配置文件，否则用区域内模型 ID |
 | `fallbackTarget` | 可选，目前只有 Claude：同一模型的另一个推理配置文件（`global.` ↔ `us.`）。目标在输出任何内容之前因容量或额度拒绝调用时，桥用它重发一次（见下文 2026-10-19） |
+| `reasoningEfforts` / `defaultReasoningEffort` | 可选，只给 Claude：节点可以选的思考强度（`low`、`medium`、`high` 中的若干档，桥把选中的一档作为 Claude 的 `output_config.effort` 发出），以及不选时模型自己的强度（只显示，从不发送）。目前只有 Claude Opus 5.5：`low`/`medium`/`high`，默认 `medium`（见下文 2026-10-26） |
 | `contextWindow` / `maxTokens` | AwwO 的保守预算（worker 把 contextWindow 当字节预算），不是厂商上限 |
 | `input` | `text`，可含 `image`（仅展示；桥目前只发文本） |
 | `tools` | 观察到流式工具调用或文档写明 ConverseStream 支持工具；没有工具能力的模型只放 Pi。Pixtral Large 与 Llama 只在非流式 Converse 接受工具（ConverseStream 回答 “This model doesn't support tool use in streaming mode”），所以放 Pi |
@@ -291,3 +292,28 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 - **不在范围内**：Pi 与沙箱这两个 JS worker 的静默截断仍报 `MODEL_UNAVAILABLE` / `MODEL_ERROR`，照旧计费（Pi 10-19 以来 6 次）。
 - **发布顺序**：先发 API（迁移 043 在它启动时执行），再发 Python worker。反过来，旧 API 会把新 worker 的 `MODEL_STALLED` 读成 `runtime_failed`：R-1 不重跑，也照样收费。退还名额的计数靠结算事务在拿到锁之后才取快照，所以要求数据库默认的隔离级别是 READ COMMITTED（PostgreSQL 的默认值，准入逻辑本来就这样假定）。
 - **回滚**：先回滚 Python worker，再回滚 API（反过来，旧 API 会把新 worker 的 `MODEL_STALLED` 读成 `runtime_failed`，R-1 不再重跑）。回滚 API 发布即停止退还：旧 API 不读原因为 `stalled` 的记录（它只把与直接任务退还记录对上的调用当作被切断，停滞的调用不属于直接任务），也不检查迁移 043，留下的这些记录无害，它自己写的 `timeout` 记录新检查照收（回滚演练 `rollback-proof-043.sh`）。可见的影响：当天已退还的停滞调用重新计入每日调用，免费工作区的当天用量最多会多出 32 次、可能因此到上限；已经记为 0 的点数不变。回滚 Python worker 后它重新报 `MODEL_UNAVAILABLE`，新 API 照旧计费。
+
+## 2026-10-26：节点可以为 Claude Opus 5.5 选择思考强度
+
+- **起因**（运营方 10-26 选定：让页面节点和规划器为 Bedrock 上的 Opus 5.5 选择思考强度，档位写在目录里，两个桥都发 `output_config.effort`）：当天 open-design 上线后的验证中，openai-agents 上两次 Opus 5.5 页面节点（群岛与单岛两种简报）都在 64,000 输出 token 上限处结束，没有交付页面，单岛那次约 58,000 token 是思考。Opus 5.5 不能关思考，强度默认 `medium`；而两个桥都拒绝请求里的 `reasoning_effort`，节点无法降低它。
+- **实测**（2026-10-26，直接调用 ConverseStream，经本机代理）：
+  - `low`、`medium`、`high` 在 `global.` 与 `us.` 两个配置文件上都被接受：与思考摘要（`thinking: {type: adaptive, display: summarized}`）并列、单独发送、提供工具、历史里有工具回合，四种都接受。
+  - `xhigh`、`max` 也被接受。没有提供：它们在同一个上限内思考更多。
+  - `minimal`、`none` 返回 400（`unknown variant`，列出它接受的五档）。
+  - 同一个约 250 行的页面任务：`low` 3,473 个输出 token（页面 7,289 字符），`medium` 4,978，`high` 5,804。按 HTML 每 token 约 3.5 字节估，思考分别约 1,400、2,800、3,400 token。
+  - 群岛节点的真实提示词在 `low`：12.8 s 起流式发回思考摘要，最长 12.7 s 没有字节，226 s 开始写页面。本机网络在 309 s 切断了连接，没能看到结尾。同一节点在默认 `medium` 下线上跑到了 64,000 上限。
+- **改动**：
+  - 目录：Opus 5.5 加 `reasoningEfforts: ["low", "medium", "high"]` 与 `defaultReasoningEffort: "medium"`。两个加载器（`bedrock-catalog.ts`、`bedrock_catalog.py`）都校验：只给 `vendor` 为 `anthropic` 的条目，至少一档，只能是桥发送的三档，每档一次，默认值必须在其中。
+  - 桥（`bedrock-bridge.ts` 的 `toConverseInput`、`bedrock_bridge.py` 的 `to_converse_input`）：请求的 `reasoning_effort` 是档案提供的档位时，作为 `additionalModelRequestFields.output_config.effort` 发出。其他档位，或档案不提供强度时，照旧拒绝（400，请求不发出）。
+  - 思考摘要与强度并列：`withSummarizedThinking` / `with_summarized_thinking` 合并字段，只在已经有 `thinking` 设置时让开。Python worker 的 3 分钟首字节上限照旧适用，`call_read_timeout` 只看 `thinking` 字段。
+  - 桥在创建时校验档位（`createBedrockFetch` 的 `reasoningEfforts`、`BedrockConverseTransport` 的 `reasoning_efforts`，只能给 Claude 模型）。两个桥对共享向量 `bedrock-bridge-vectors.json`（新增 4 个）给出相同结果；TS 的测试现在也读这份向量。
+  - Pi worker：health 列出每个模型的档位与默认值。
+    - 运行请求可以带 `effort`。`config.mjs` 的 `validateRequest` 只收这三档；`server.mjs` 用 `effortAllowed` 按模型核对，只认 Bedrock 档案提供的档位，否则返回 400 `EFFORT_NOT_SUPPORTED`，运行不启动。
+    - 子进程的 payload 钩子（`payload-hooks.mjs` 的 `withEffort`）把它作为 `reasoning_effort` 交给桥。
+    - 直接任务（`computer-model.ts`）把调用自己点名的强度发给桥。档案的默认值从不发送，`none` 也不发。
+    - 运营方的思考预算（`AWWO_PI_BEDROCK_THINKING_*`）不会给提供思考强度的模型；点名这样的模型时，worker 拒绝启动（生产只点名 `bedrock.claude-haiku-4-5`）。
+  - Python worker：目录档案带上档位，health 照旧公布。运行的 `effort` 经 Agents SDK 作为 `reasoning_effort` 到达桥。
+  - JS 与沙箱 worker 不变：它们的 Bedrock 档案仍不提供强度。
+- **效果**：在 Opus 5.5 节点上选 `low` 时，思考约减半（上面的小页面 1,400 对 2,800 token），64,000 上限里留给页面的更多。网页的模型选择器在 Opus 5.5 下显示强度（`low` / `medium` / `high`，默认 `medium`）。不选强度时，请求与以前完全相同。
+- **计费**：思考 token 照旧计费，强度越低思考越少，花费也越少。
+- **回滚**：回滚 worker 发布即可。注意已经存了强度的节点：worker 不再公布档位后，API 会以 `effort_unsupported` 拒绝它们的运行；要在节点设置里把强度改回模型默认（网页把这样的已存强度显示为不可用）才能再运行。

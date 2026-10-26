@@ -12,7 +12,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from bedrock_bridge import BEARER, BEDROCK_REGIONS, valid_region
+from bedrock_bridge import BEARER, BEDROCK_REGIONS, valid_reasoning_efforts, valid_region
 from context_estimate import ABSENT, prose_rate
 
 # A model's output limit per call, as apps/bedrock-catalog.ts has it: Claude Opus 5.5 always thinks first and can spend
@@ -34,7 +34,10 @@ ENTRY_FIELDS = ("id", "name", "vendor", "target", "contextWindow", "maxTokens", 
 # fallbackTarget: the same model through its other inference profile (global. <-> us.), which the bridge asks once when
 # the target refuses a call before anything streamed (BedrockConverseTransport's fallback_model).
 # proseBytesPerToken: the model's measured bytes of prose per token (context_estimate.py), from 1 to 4.
-OPTIONAL_FIELDS = ("fallbackTarget", "proseBytesPerToken")
+# reasoningEfforts (a Claude model only): the thinking efforts a node may choose for it, which the bridge sends as
+# output_config.effort (REASONING_EFFORTS in bedrock_bridge.py); defaultReasoningEffort: one of them, the one the model
+# thinks at when none is chosen, shown and never sent.
+OPTIONAL_FIELDS = ("fallbackTarget", "proseBytesPerToken", "reasoningEfforts", "defaultReasoningEffort")
 CATALOG_ID = re.compile(r"bedrock\.[a-z0-9][a-z0-9-]{0,62}")
 TARGET = re.compile(r"(?:(?:global|us|eu|apac|jp|au|ca)\.)?[a-z0-9-]+\.[A-Za-z0-9.:-]{1,120}")
 PROFILE_PREFIX = re.compile(r"(global|us|eu|apac|jp|au|ca)\.")
@@ -87,7 +90,13 @@ def parse_catalog_file(value) -> tuple:
                 or not isinstance(e["input"], list) or not e["input"] or any(kind not in ("text", "image") for kind in e["input"]) or "text" not in e["input"]
                 or not isinstance(e["tools"], bool) or e["runtime"] not in ("pi", "openai-agents")
                 or (e["runtime"] == "openai-agents" and e["tools"] is not True)
-                or not isinstance(e["verified"], str) or (e["verified"] and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", e["verified"]))):
+                or not isinstance(e["verified"], str) or (e["verified"] and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", e["verified"]))
+                # Thinking efforts only for a Claude model (output_config is Claude's), at least one, and a default among them.
+                or ("reasoningEfforts" in e and (e["vendor"] != "anthropic" or not isinstance(e["reasoningEfforts"], list)
+                                                 or not e["reasoningEfforts"] or not valid_reasoning_efforts(e["reasoningEfforts"])))
+                or ("defaultReasoningEffort" in e and (not isinstance(e.get("reasoningEfforts"), list)
+                                                       or not isinstance(e["defaultReasoningEffort"], str)
+                                                       or e["defaultReasoningEffort"] not in e["reasoningEfforts"]))):
             fail()
         try:
             prose_rate(e.get("proseBytesPerToken", ABSENT))

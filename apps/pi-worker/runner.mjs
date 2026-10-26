@@ -183,7 +183,9 @@ export async function startIsolatedRun({ config, request, onEvent, onExit }, { t
       ...(modelConfig.disableThinking === true ? { disableThinking: true } : {}),
       ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.thinkingBudget ? { thinkingBudget: modelConfig.thinkingBudget } : {}),
         ...(modelConfig.promptCache === true ? { promptCache: true } : {}),
-        ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}) } : {}),
+        ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}),
+        // The efforts the model offers, for the child's bridge: the run's effort (request.effort) must be one of them.
+        ...(modelConfig.reasoningEfforts?.length ? { reasoningEfforts: [...modelConfig.reasoningEfforts] } : {}) } : {}),
     },
   }, (error) => { if (error) stop(); });
   return { cancel: stop, done, pid: child.pid, directory };
@@ -236,6 +238,7 @@ export async function bedrockComputerCall(model, body, signal, { auth = resolveB
     void closed.then((how) => settle(() => reject(failure(`child-exit:${how}`))));
     child.send({ region: model.region, model: model.model, auth: credentials, promptCache: model.promptCache === true,
       ...(model.fallbackModel ? { fallbackModel: model.fallbackModel } : {}),
+      ...(model.reasoningEfforts?.length ? { reasoningEfforts: [...model.reasoningEfforts] } : {}),
       url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: JSON.stringify(body) },
     (error) => { if (error) settle(() => { child.kill('SIGKILL'); reject(failure('child-send')); }); });
   });

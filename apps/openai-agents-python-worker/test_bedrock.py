@@ -19,8 +19,8 @@ from botocore.exceptions import ClientError, EventStreamError
 from urllib3.exceptions import ProtocolError
 
 from bedrock_bridge import (
-    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
-    call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, with_claude_prompt_cache, with_summarized_thinking,
+    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, REASONING_EFFORTS, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
+    call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, valid_reasoning_efforts, with_claude_prompt_cache, with_summarized_thinking,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -91,15 +91,17 @@ class VectorParityTests(unittest.TestCase):
     """The Python bridge must match the TypeScript bridge on the shared vectors."""
 
     def test_requests_map_identically(self):
+        # "efforts": the thinking efforts the vector's profile offers (none where it says none).
         for vector in VECTORS["requests"]:
             with self.subTest(vector["name"]):
-                self.assertEqual(to_converse_input(vector["body"], VECTORS["model"]), vector["expect"])
+                self.assertEqual(to_converse_input(vector["body"], VECTORS["model"], tuple(vector.get("efforts", ()))), vector["expect"])
+        self.assertTrue(any(vector.get("efforts") for vector in VECTORS["requests"]))
 
     def test_refusals_match(self):
         for vector in VECTORS["errors"]:
             with self.subTest(vector["name"]):
                 with self.assertRaises(BridgeError) as caught:
-                    to_converse_input(vector["body"], VECTORS["model"])
+                    to_converse_input(vector["body"], VECTORS["model"], tuple(vector.get("efforts", ())))
                 self.assertEqual(caught.exception.status, vector["status"])
                 self.assertEqual(caught.exception.message, vector["message"])
 
@@ -212,6 +214,25 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(entry["fallbackTarget"], entry["target"].replace("global.", "us.", 1), entry["id"])
         self.assertTrue(all(entry["vendor"] == "anthropic" or "fallbackTarget" not in entry for entry in read_catalog()))
 
+    def test_thinking_efforts_are_a_claude_entrys_own_levels_with_a_default_among_them(self):
+        good = {"id": "bedrock.test", "name": "Test", "vendor": "anthropic", "target": "global.anthropic.claude-x", "contextWindow": 32768,
+                "maxTokens": 4096, "input": ["text"], "tools": True, "runtime": "openai-agents", "verified": ""}
+        catalog = lambda entry: {"version": 1, "regions": ["us-east-1"], "models": [entry]}  # noqa: E731
+        entry = parse_catalog(catalog({**good, "reasoningEfforts": ["low", "medium", "high"], "defaultReasoningEffort": "medium"}))[0]
+        self.assertEqual((entry["reasoningEfforts"], entry["defaultReasoningEffort"]), (["low", "medium", "high"], "medium"))
+        self.assertEqual(parse_catalog(catalog({**good, "reasoningEfforts": ["low"]}))[0]["reasoningEfforts"], ["low"])
+        for label, bad in (("another vendor", {**good, "vendor": "test", "reasoningEfforts": ["low"]}), ("no level", {**good, "reasoningEfforts": []}),
+                           ("a level Bedrock refuses", {**good, "reasoningEfforts": ["minimal"]}), ("a level not offered", {**good, "reasoningEfforts": ["low", "xhigh"]}),
+                           ("twice", {**good, "reasoningEfforts": ["low", "low"]}), ("not a list", {**good, "reasoningEfforts": "low"}),
+                           ("a default not among them", {**good, "reasoningEfforts": ["low"], "defaultReasoningEffort": "medium"}),
+                           ("a default without levels", {**good, "defaultReasoningEffort": "medium"}),
+                           ("an empty default", {**good, "reasoningEfforts": ["low"], "defaultReasoningEffort": ""})):
+            with self.subTest(label), self.assertRaises(ValueError):
+                parse_catalog(catalog(bad))
+        # The built-in catalog offers them for Claude Opus 5.5 alone, at its own default, as apps/bedrock-catalog.ts reads it.
+        self.assertEqual([(e["id"], e["reasoningEfforts"], e.get("defaultReasoningEffort")) for e in read_catalog() if "reasoningEfforts" in e],
+                         [("bedrock.claude-opus-5-5", ["low", "medium", "high"], "medium")])
+
 
 class ConfigTests(unittest.TestCase):
     def test_catalog_profiles_and_health(self):
@@ -227,7 +248,11 @@ class ConfigTests(unittest.TestCase):
         entry = next(model for model in health["models"] if model["id"] == "bedrock.claude-opus-5-5")
         self.assertEqual(entry["name"], "Claude Opus 5.5")
         self.assertEqual(entry["provider"], "bedrock")
-        self.assertEqual(entry["reasoningEfforts"], [])
+        # The thinking efforts its catalog entry offers, and the one it thinks at when none is chosen (shown, never sent).
+        self.assertEqual((entry["reasoningEfforts"], entry["defaultReasoningEffort"]), (["low", "medium", "high"], "medium"))
+        self.assertEqual(claude.reasoning_efforts, ("low", "medium", "high"))
+        self.assertTrue(health["supportsEffortSelection"])
+        self.assertEqual([m["id"] for m in health["models"] if m["reasoningEfforts"]], ["bedrock.claude-opus-5-5"])
         self.assertNotIn("amazonaws", json.dumps(health))
         # The JS and Python workers advertise the same Bedrock catalog for the Agents runtime.
         self.assertEqual([m["id"] for m in health["models"][1:]], [e["id"] for e in read_catalog() if e["runtime"] == "openai-agents"])
@@ -438,6 +463,29 @@ class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("20", events[-1]["text"])
         self.assertNotIn("44102", json.dumps(events, ensure_ascii=False))
         self.assertEqual(self.record["input"]["additionalModelRequestFields"], {"thinking": {"type": "adaptive", "display": "summarized"}})
+
+    async def test_an_opus_5_5_run_sends_the_effort_it_names_beside_the_summary(self):
+        # A node's chosen thinking effort (2026-10-26): the Agents SDK sends it as reasoning_effort and the bridge as
+        # Claude's output_config.effort, beside the summary of its thinking; the call keeps its 3-minute first-byte limit.
+        config = catalog_config(AWWO_BEDROCK_API_KEY=BEDROCK_KEY, AWWO_OPENAI_AGENTS_TIMEOUT_MS="1500000")
+        for effort in ("low", "medium", "high"):
+            with self.subTest(effort=effort):
+                request = RunRequest("r1", "t1", "s1", "Say hello", [], model="bedrock.claude-opus-5-5", effort=effort)
+                events = [event async for event in stream_run(request, config, asyncio.Event())]
+                self.assertEqual(events[-1]["type"], "completed", events[-1])
+                self.assertEqual(self.record["input"]["additionalModelRequestFields"],
+                                 {"output_config": {"effort": effort}, "thinking": {"type": "adaptive", "display": "summarized"}})
+                self.assertEqual(self.record["read_timeout"], 180.0)
+        # None named: the request it was before, the model at its own default.
+        events = await self.run_model("bedrock.claude-opus-5-5")
+        self.assertEqual(self.record["input"]["additionalModelRequestFields"], {"thinking": {"type": "adaptive", "display": "summarized"}})
+        # A model that offers no level, or a level its model does not offer, is refused before any call.
+        for model, effort in (("bedrock.kimi-k2-5", "low"), ("bedrock.claude-sonnet-5-5", "high")):
+            with self.subTest(model=model):
+                self.record.clear()
+                events = await self.run_model(model, effort=effort)
+                self.assertEqual((events[-1]["type"], events[-1].get("code")), ("failed", "MODEL_REQUEST_REJECTED"), events[-1])
+                self.assertNotIn("input", self.record)
 
     async def test_tool_call_result_is_the_output(self):
         self.events = [{"messageStart": {"role": "assistant"}},
@@ -1296,3 +1344,67 @@ class SummarizedThinkingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("additionalModelRequestFields", record["input"])
         self.assertEqual(timeouts, [900.0])
+
+
+class ReasoningEffortTests(unittest.IsolatedAsyncioTestCase):
+    """A thinking effort a run names for a Claude model whose catalog entry offers it (2026-10-26), sent as Claude's
+    output_config.effort, as apps/bedrock-bridge.ts sends it."""
+
+    def test_an_offered_level_is_claudes_output_config_beside_the_summary_and_no_other_level_is(self):
+        self.assertEqual(REASONING_EFFORTS, ("low", "medium", "high"))
+        for level in REASONING_EFFORTS:
+            with self.subTest(level=level):
+                command = to_converse_input(chat_body(reasoning_effort=level), CLAUDE, REASONING_EFFORTS)
+                self.assertEqual(command["additionalModelRequestFields"], {"output_config": {"effort": level}})
+                self.assertEqual(with_summarized_thinking(command, CLAUDE)["additionalModelRequestFields"],
+                                 {"output_config": {"effort": level}, "thinking": {"type": "adaptive", "display": "summarized"}})
+        self.assertNotIn("additionalModelRequestFields", to_converse_input(chat_body(reasoning_effort=None), CLAUDE, REASONING_EFFORTS))
+        for level in ("minimal", "none", "xhigh", "max", "LOW", "", 3, ["low"]):
+            with self.subTest(level=level), self.assertRaises(BridgeError) as caught:
+                to_converse_input(chat_body(reasoning_effort=level), CLAUDE, REASONING_EFFORTS)
+            self.assertEqual(caught.exception.message, "This Bedrock model does not offer that reasoning effort")
+        with self.assertRaises(BridgeError) as caught:
+            to_converse_input(chat_body(reasoning_effort="low"), CLAUDE)
+        self.assertEqual(caught.exception.message, "Reasoning effort is not supported for this Bedrock model")
+        # Model fields that already set thinking are kept as they are, the effort with them.
+        thought = {"modelId": CLAUDE, "messages": [], "additionalModelRequestFields": {"output_config": {"effort": "low"}, "thinking": {"type": "enabled"}}}
+        self.assertIs(with_summarized_thinking(thought, CLAUDE), thought)
+        for value, valid in (((), True), (("low", "medium", "high"), True), (["high", "low"], True), (("low", "low"), False), (("minimal",), False),
+                             ("low", False), ((1,), False), (None, False)):
+            with self.subTest(value=value):
+                self.assertEqual(valid_reasoning_efforts(value), valid)
+
+    def test_the_quick_first_byte_limit_holds_with_an_effort_beside_the_summary(self):
+        summary = {"thinking": {"type": "adaptive", "display": "summarized"}}
+        command = {"modelId": CLAUDE, "messages": []}
+        for fields, want in ((summary, 180.0), ({"output_config": {"effort": "low"}, **summary}, 180.0),
+                             ({"output_config": {"effort": "low"}}, 900.0), (None, 900.0), ("odd", 900.0)):
+            with self.subTest(fields=fields):
+                given = {**command, **({"additionalModelRequestFields": fields} if fields is not None else {})}
+                self.assertEqual(call_read_timeout(900.0, given, CLAUDE), want)
+
+    async def test_the_transport_sends_an_offered_effort_and_checks_its_setting(self):
+        record: dict = {}
+        transport = BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True}, reasoning_efforts=REASONING_EFFORTS,
+                                             client_factory=lambda *args: FakeClient(record, text_turn("OK")))
+        async with httpx2.AsyncClient(transport=transport) as client:
+            response = await client.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(reasoning_effort="high"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(record["input"]["additionalModelRequestFields"],
+                         {"output_config": {"effort": "high"}, "thinking": {"type": "adaptive", "display": "summarized"}})
+        # Without efforts the request is refused by the bridge itself, before any call.
+        bare: dict = {}
+        plain = BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True}, client_factory=lambda *args: FakeClient(bare, text_turn("OK")))
+        async with httpx2.AsyncClient(transport=plain) as client:
+            refused = await client.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(reasoning_effort="high"))
+        self.assertEqual(refused.status_code, 400)
+        self.assertNotIn("input", bare)
+        # Only the bridge's levels, each once, and only for a Claude model.
+        for efforts in (("minimal",), ("low", "low"), "low", (1,)):
+            with self.subTest(efforts=efforts), self.assertRaises(ValueError):
+                BedrockConverseTransport(region="us-east-1", model=CLAUDE, auth={"aws": True}, reasoning_efforts=efforts)
+        for model in ("moonshotai.kimi-k2.5", "deepseek.v3.2"):
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, reasoning_efforts=("low",))
+        BedrockConverseTransport(region="us-east-1", model="us.anthropic.claude-opus-5-5", auth={"aws": True}, reasoning_efforts=("low",))
+        BedrockConverseTransport(region="us-east-1", model="moonshotai.kimi-k2.5", auth={"aws": True}, reasoning_efforts=())

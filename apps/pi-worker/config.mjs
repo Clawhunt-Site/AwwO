@@ -1,6 +1,6 @@
 import { loadObservabilityConfig } from './observability.mjs';
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL, applyBedrockPromptCache, assertDeepSeekProfiles, assertOperatorOnlyBedrock, bedrockApiKey, bedrockCatalogProfiles, bedrockProfile, bedrockPromptCacheModels, bedrockRegion, deepseekKeyProblem, parsePlatformProviders, platformHealth, platformProvidersInUse } from '../bedrock-catalog.ts';
-import { validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
+import { BEDROCK_REASONING_EFFORTS, validBedrockRegion, validThinkingBudget } from '../bedrock-bridge.ts';
 import { estimateTokens, proseRate, proseRateSetting } from '../context-estimate.ts';
 const DEFAULTS = Object.freeze({
   llmgate: 'https://api.clawhunt.site/v1',
@@ -105,8 +105,9 @@ function bedrockModelsJsonProfile(value, env, ids, defaultProfile, missing) {
 
 function workerBedrockProfile(profile, thinking = null) {
   // An operator thinking budget reaches only the Claude models it names, and only where the output limit leaves
-  // room beyond it.
-  const budget = thinking !== null && thinking.models.has(profile.id) && profile.vendor === 'anthropic'
+  // room beyond it, never one whose catalog entry offers thinking efforts (Claude Opus 5.5 refuses a budget: its
+  // thinking is set by the effort a run names, reasoningEfforts).
+  const budget = thinking !== null && thinking.models.has(profile.id) && profile.vendor === 'anthropic' && !profile.reasoningEfforts?.length
     && profile.maxTokens > thinking.budget + 1024 ? thinking.budget : 0;
   return Object.freeze({ ...profile, protocol: 'chat_completions', ...(budget ? { thinkingBudget: budget } : {}) });
 }
@@ -240,7 +241,7 @@ export function loadConfig(env = process.env) {
   catch (error) { throw new Error(`Bedrock catalog configuration is invalid: ${error.message}`); }
   for (const id of thinking?.models ?? []) {
     if (!catalog.some(profile => profile.id === id && profile.thinkingBudget)) {
-      throw new Error(`AWWO_PI_BEDROCK_THINKING_MODELS names ${id}, which is not a Claude model this worker serves through Bedrock with room for the budget`);
+      throw new Error(`AWWO_PI_BEDROCK_THINKING_MODELS names ${id}, which is not a Claude model this worker serves through Bedrock that takes a thinking budget, with room for it`);
     }
   }
   if (catalog.some(profile => configured.some(item => item.id === profile.id)) || configured.length + catalog.length > MAX_CATALOG_MODELS) {
@@ -302,6 +303,9 @@ export function publicHealth(config, activeRuns = 0) {
       ...(profile.proseBytesPerToken > 1 ? { proseBytesPerToken: profile.proseBytesPerToken } : {}),
       // What the model takes; the API shows pictures only to a model listing 'image' (vision).
       input: [...(profile.input ?? ['text'])],
+      // The thinking efforts a run may name for the model (a Bedrock Claude model's catalog entry), and the one it thinks
+      // at when a run names none, which is shown and never sent; absent where a model offers none.
+      ...(profile.reasoningEfforts?.length ? { reasoningEfforts: [...profile.reasoningEfforts], defaultReasoningEffort: profile.defaultReasoningEffort ?? '' } : {}),
     })),
     // This worker takes a run's pictures ("images") and shows them to the models whose input lists 'image'.
     imageInput: true,
@@ -325,7 +329,7 @@ export function publicHealth(config, activeRuns = 0) {
 }
 
 export function validateRequest(value) {
-  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'images']);
+  const allowed = new Set(['runId', 'tenantId', 'sessionId', 'prompt', 'messages', 'systemPrompt', 'userModel', 'model', 'runtime', 'images', 'effort']);
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error('Invalid request fields');
   }
@@ -341,6 +345,8 @@ export function validateRequest(value) {
   }
   if (value.model !== undefined && (typeof value.model !== 'string' || !MODEL_SELECTOR.test(value.model))) throw new Error('Invalid model selector');
   if (value.runtime !== undefined && value.runtime !== 'pi') throw new Error('Invalid runtime selector');
+  // A thinking effort: one of the levels the bridge sends (the server checks it against the run's model, effortAllowed).
+  if (value.effort !== undefined && !BEDROCK_REASONING_EFFORTS.includes(value.effort)) throw new Error('Invalid effort selector');
   for (const field of ['runId', 'tenantId', 'sessionId']) {
     if (typeof value[field] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value[field])) {
       throw new Error(`Invalid ${field}`);
@@ -367,6 +373,13 @@ export function resolveModelConfig(config, selector) {
   const profile = selector === undefined ? config.models[0] : config.models.find((model) => model.id === selector);
   if (!profile) throw new Error('Unknown configured model');
   return profile;
+}
+
+// Whether a run may name `effort` for its model: none named always may; a named one only where the model's Bedrock
+// profile offers it, since only a Bedrock run's call carries it (pi-task.mjs). Fail-closed: any other model refuses every
+// one rather than run without it.
+export function effortAllowed(profile, effort) {
+  return effort === undefined || (profile.provider === 'bedrock' && profile.reasoningEfforts?.includes(effort) === true);
 }
 
 // Text admission counts each text's estimated tokens at the profile's measured prose rate (context-estimate.ts: its

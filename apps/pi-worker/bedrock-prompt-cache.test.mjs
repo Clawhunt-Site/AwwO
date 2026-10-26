@@ -47,7 +47,7 @@ test('the runner hands the prompt-cache setting to a Bedrock child, and only to 
   console.error = line => logged.push(String(line));
   try {
     assert.deepEqual(await runOnce('bedrock.claude-haiku-4-5'), { provider: 'bedrock', model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', region: 'us-east-1',
-      apiKey: '', thinkingBudget: null, promptCache: true, fallbackModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' });
+      apiKey: '', thinkingBudget: null, promptCache: true, fallbackModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', reasoningEfforts: null, effort: null });
     assert.equal((await runOnce('bedrock.claude-sonnet-4-6')).promptCache, null);
     // A model without a second profile gets none.
     assert.equal((await runOnce('bedrock.deepseek-r1')).fallbackModel, null);

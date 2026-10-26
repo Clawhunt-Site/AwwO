@@ -63,6 +63,13 @@ THINKS_SILENTLY = frozenset({"anthropic.claude-opus-5-5"})
 # this set is asked as before, and THINKS_SILENTLY keeps it waiting the idle limit.
 SUMMARIZED_THINKING_MODELS = frozenset({"anthropic.claude-opus-5-5"})
 SUMMARIZED_THINKING = {"type": "adaptive", "display": "summarized"}
+# The thinking efforts a catalog entry may offer for a Claude model (BEDROCK_REASONING_EFFORTS in apps/bedrock-bridge.ts):
+# a request's reasoning_effort that its profile offers goes to Bedrock as Claude's output_config.effort. Claude Opus 5.5
+# also takes xhigh and max, which think more within the same output limit; this worker's request check (EFFORT_LEVELS
+# in config.py) takes these three. Bedrock refuses any other value (minimal and none, probed on 2026-10-26).
+REASONING_EFFORTS = ("low", "medium", "high")
+# A Claude model's Converse ID, with or without an inference profile's prefix: the only models output_config is for.
+CLAUDE_MODEL = re.compile(r"(?:(?:global|us|eu|apac|jp|au|ca)\.)?anthropic\.")
 # The same limit, for a call that offers the model no tools, on a model whose calls were never seen silent for long: its
 # answer is text, which Bedrock streams as it is written. Only models measured so are here, by Converse model ID without
 # its inference profile's prefix; the limit is an empirical bound, not a guarantee. Claude Opus 4.8 was never seen to
@@ -259,8 +266,16 @@ def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def to_converse_input(body: Any, model_id: str) -> dict:
-    """Translate a Chat Completions request body into ConverseStream input."""
+def valid_reasoning_efforts(value: Any) -> bool:
+    """True for a list of distinct REASONING_EFFORTS (an empty one offers none)."""
+    return (isinstance(value, (list, tuple)) and all(isinstance(level, str) and level in REASONING_EFFORTS for level in value)
+            and len(set(value)) == len(value))
+
+
+def to_converse_input(body: Any, model_id: str, efforts: tuple = ()) -> dict:
+    """Translate a Chat Completions request body into ConverseStream input. `efforts` are the thinking efforts the profile
+    offers (valid_reasoning_efforts): a reasoning_effort must be one of them and is sent as output_config.effort; with none
+    offered, any is refused."""
     if not isinstance(body, dict):
         _reject("The request body must be a JSON object")
     for key in body:
@@ -272,8 +287,9 @@ def to_converse_input(body: Any, model_id: str) -> dict:
         _reject("Only streaming requests are supported")
     if "n" in body and body["n"] != 1:
         _reject("Only one choice is supported")
-    if body.get("reasoning_effort") is not None:
-        _reject("Reasoning effort is not supported for this Bedrock model")
+    effort = body.get("reasoning_effort")
+    if effort is not None and (not isinstance(effort, str) or effort not in efforts):
+        _reject("This Bedrock model does not offer that reasoning effort" if efforts else "Reasoning effort is not supported for this Bedrock model")
     for key in ("frequency_penalty", "presence_penalty"):
         if body.get(key) not in (None, 0, 0.0):
             _reject(f"{key} is not supported by Bedrock Converse")
@@ -401,6 +417,8 @@ def to_converse_input(body: Any, model_id: str) -> dict:
         _reject("tool_choice requires tools")
     if tool_blocks and "toolConfig" not in result:
         _reject("Tool history requires tool definitions")
+    if effort is not None:
+        result["additionalModelRequestFields"] = {"output_config": {"effort": effort}}
     return result
 
 
@@ -612,22 +630,27 @@ def base_model_id(model_id: str) -> str:
 
 def with_summarized_thinking(command: dict, model_id: str) -> dict:
     """Asks a model of SUMMARIZED_THINKING_MODELS (`model_id`, the command's) to stream a summary of the thinking it does
-    anyway, so that its stream is not silent while it thinks. Any other command is returned unchanged."""
-    if base_model_id(model_id) not in SUMMARIZED_THINKING_MODELS:
+    anyway, so that its stream is not silent while it thinks. The effort a request names (output_config,
+    to_converse_input) stays beside it (both together answered on both profiles, 2026-10-26). Any other command, and one
+    whose model fields already set thinking, is returned unchanged."""
+    fields = command.get("additionalModelRequestFields")
+    if base_model_id(model_id) not in SUMMARIZED_THINKING_MODELS or (fields is not None and (not isinstance(fields, dict) or "thinking" in fields)):
         return command
-    return {**command, "additionalModelRequestFields": {"thinking": dict(SUMMARIZED_THINKING)}}
+    return {**command, "additionalModelRequestFields": {**(fields or {}), "thinking": dict(SUMMARIZED_THINKING)}}
 
 
 def call_read_timeout(read_timeout: float, command: dict, model_id: str) -> float:
     """The read timeout of one call (its ConverseStream command, to `model_id`): the transport's, or the model's
     QUICK_FIRST_BYTE_SECONDS when that comes first and the call offers the model no tools (no toolConfig: none were
     given, or tool_choice was "none"); for a model that thinks silently (THINKS_SILENTLY) only while the command asks for
-    its thinking summarized."""
+    its thinking summarized, at whatever effort (with low effort a long think still streamed its summary from 12.8 s,
+    never silent for longer, 2026-10-26)."""
     model = base_model_id(model_id)
     quick = QUICK_FIRST_BYTE_SECONDS.get(model)
     if quick is None or command.get("toolConfig") is not None:
         return read_timeout
-    if model in THINKS_SILENTLY and command.get("additionalModelRequestFields") != {"thinking": SUMMARIZED_THINKING}:
+    fields = command.get("additionalModelRequestFields")
+    if model in THINKS_SILENTLY and not (isinstance(fields, dict) and fields.get("thinking") == SUMMARIZED_THINKING):
         return read_timeout
     return min(read_timeout, quick)
 
@@ -788,11 +811,13 @@ class BedrockConverseTransport(AsyncBaseTransport):
 
     def __init__(self, *, region: str, model: str, auth: dict, read_timeout: float = 120.0,
                  client_factory: Callable[[str, dict, float], Any] = default_client, prompt_cache: bool = False,
-                 fallback_model: str = "", report: Callable[[dict], None] | None = None):
+                 reasoning_efforts: tuple = (), fallback_model: str = "", report: Callable[[dict], None] | None = None):
         if not valid_auth(auth):
             raise ValueError("Invalid Bedrock credentials")
         if not isinstance(prompt_cache, bool):
             raise ValueError("Invalid Bedrock prompt cache setting")
+        if not valid_reasoning_efforts(reasoning_efforts) or (reasoning_efforts and not CLAUDE_MODEL.match(model)):
+            raise ValueError("Invalid Bedrock reasoning efforts")
         if not isinstance(fallback_model, str) or (fallback_model and (not FACT_LABEL.fullmatch(fallback_model) or fallback_model == model)):
             raise ValueError("Invalid Bedrock fallback model")
         if report is not None and not callable(report):
@@ -805,6 +830,8 @@ class BedrockConverseTransport(AsyncBaseTransport):
         self.client_factory = client_factory
         # Claude only, operator-enabled (AWWO_BEDROCK_PROMPT_CACHE_MODELS): see with_claude_prompt_cache.
         self.prompt_cache = prompt_cache
+        # Claude only: the thinking efforts the profile's catalog entry offers, which a request may name (to_converse_input).
+        self.reasoning_efforts = tuple(reasoning_efforts)
         # The same model through its other inference profile (the catalog's fallbackTarget): asked once, on the same
         # client, when `model` refuses the call for capacity or quota (PROFILE_REFUSALS) before anything streamed.
         # Empty: one profile, exactly as before.
@@ -841,7 +868,7 @@ class BedrockConverseTransport(AsyncBaseTransport):
                 body = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 _reject("The request body is not JSON")
-            command = with_summarized_thinking(to_converse_input(body, self.model), self.model)
+            command = with_summarized_thinking(to_converse_input(body, self.model, self.reasoning_efforts), self.model)
             if self.prompt_cache:
                 command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False

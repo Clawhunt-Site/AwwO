@@ -229,14 +229,35 @@ function toolUseBlock(call: unknown): ConverseBlock {
   return { toolUse: { toolUseId: call.id, name: call.function.name, input } };
 }
 
-/** Translate a Chat Completions request body into ConverseStream input. Throws BedrockBridgeError(400). */
-export function toConverseInput(body: unknown, modelId: string): Json {
+/**
+ * The thinking efforts a catalog entry may offer for a Claude model (bedrock-models.json reasoningEfforts): a request's
+ * reasoning_effort that its profile offers goes to Bedrock as Claude's output_config.effort. Claude Opus 5.5 also takes
+ * xhigh and max, which think more within the same output limit; every worker's own request check takes these three.
+ * Bedrock refuses any other value (minimal and none, probed on 2026-10-26, with a 400 naming the five it takes).
+ */
+export const BEDROCK_REASONING_EFFORTS: readonly string[] = Object.freeze(['low', 'medium', 'high']);
+/** True for a list of distinct BEDROCK_REASONING_EFFORTS (an empty one offers none). */
+export function validReasoningEfforts(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(level => BEDROCK_REASONING_EFFORTS.includes(level)) && new Set(value).size === value.length;
+}
+// A Claude model's Converse ID, with or without an inference profile's prefix: the only models output_config is for.
+const CLAUDE_MODEL = /^(?:(?:global|us|eu|apac|jp|au|ca)\.)?anthropic\./;
+
+/**
+ * Translate a Chat Completions request body into ConverseStream input. Throws BedrockBridgeError(400). `efforts` are the
+ * thinking efforts the profile offers (validReasoningEfforts): a reasoning_effort must be one of them and is sent as
+ * output_config.effort; with none offered, any is refused.
+ */
+export function toConverseInput(body: unknown, modelId: string, efforts: readonly string[] = []): Json {
   if (!plain(body)) return reject('The request body must be a JSON object');
   for (const key of Object.keys(body)) if (!REQUEST_FIELDS.has(key)) reject(`Unsupported request field: ${key}`);
   if (body.model !== modelId) reject('The request model does not match the configured Bedrock model');
   if (body.stream !== true) reject('Only streaming requests are supported');
   if (body.n !== undefined && body.n !== 1) reject('Only one choice is supported');
-  if (body.reasoning_effort !== undefined && body.reasoning_effort !== null) reject('Reasoning effort is not supported for this Bedrock model');
+  const effort = body.reasoning_effort ?? undefined;
+  if (effort !== undefined && (typeof effort !== 'string' || !efforts.includes(effort))) {
+    reject(efforts.length ? 'This Bedrock model does not offer that reasoning effort' : 'Reasoning effort is not supported for this Bedrock model');
+  }
   for (const key of ['frequency_penalty', 'presence_penalty'] as const) {
     if (body[key] !== undefined && body[key] !== null && body[key] !== 0) reject(`${key} is not supported by Bedrock Converse`);
   }
@@ -341,6 +362,7 @@ export function toConverseInput(body: unknown, modelId: string): Json {
     input.toolConfig = toolConfig;
   } else if (choice !== undefined && choice !== null && choice !== 'auto') reject('tool_choice requires tools');
   if (toolBlocks && !input.toolConfig) reject('Tool history requires tool definitions');
+  if (typeof effort === 'string') input.additionalModelRequestFields = { output_config: { effort } };
   return input;
 }
 
@@ -357,7 +379,7 @@ export function validThinkingBudget(value: unknown): value is number {
  * stays as it was (Converse would need every earlier thinking block back with its signature), and so does a
  * request whose output limit leaves no room beyond the budget. Thinking requires the default sampling, so
  * temperature and top_p are dropped. The reasoning itself streams back as reasoning content, which the
- * workers count and never show.
+ * workers count and never show. A model field the request already carries (its effort) stays beside it.
  */
 export function withClaudeThinking(command: Json, budget: number): Json {
   if (!validThinkingBudget(budget) || command.toolConfig !== undefined) return command;
@@ -367,7 +389,8 @@ export function withClaudeThinking(command: Json, budget: number): Json {
   if (typeof inference.maxTokens === 'number' && inference.maxTokens <= budget + 1024) return command;
   delete inference.temperature;
   delete inference.topP;
-  const out: Json = { ...command, additionalModelRequestFields: { thinking: { type: 'enabled', budget_tokens: budget } } };
+  const fields = plain(command.additionalModelRequestFields) ? command.additionalModelRequestFields : {};
+  const out: Json = { ...command, additionalModelRequestFields: { ...fields, thinking: { type: 'enabled', budget_tokens: budget } } };
   if (Object.keys(inference).length) out.inferenceConfig = inference; else delete out.inferenceConfig;
   return out;
 }
@@ -393,19 +416,21 @@ const PROFILE_PREFIX = /^(?:global|us|eu|apac|jp|au|ca)\./;
  * (with thinking asked for, Bedrock may want each earlier thinking block back with its signature, which no caller keeps:
  * the chunk mapper drops signatures), no sampling settings and no forced tool choice (both refused beside thinking where
  * thinking can be turned on). Pi's node runs offer no tools, so each of their calls gets it; a tool loop's first call
- * does, its later ones are sent as before. Any other request or model, and a command that already carries model fields
- * (an operator's thinking budget, which Opus 5.5 refuses), is returned unchanged.
+ * does, its later ones are sent as before. The effort a request names (output_config, toConverseInput) stays beside it
+ * (both together answered on both profiles, 2026-10-26). Any other request or model, and a command whose model fields
+ * already set thinking (an operator's thinking budget, which Opus 5.5 refuses), is returned unchanged.
  */
 export function withSummarizedThinking(command: Json): Json {
   const modelId = typeof command.modelId === 'string' ? command.modelId.replace(PROFILE_PREFIX, '') : '';
-  if (!SUMMARIZED_THINKING_MODELS.has(modelId) || command.additionalModelRequestFields !== undefined) return command;
+  const fields = command.additionalModelRequestFields;
+  if (!SUMMARIZED_THINKING_MODELS.has(modelId) || (fields !== undefined && (!plain(fields) || 'thinking' in fields))) return command;
   const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
   if (messages.some(m => Array.isArray(m.content) && m.content.some(block => 'toolUse' in block || 'toolResult' in block))) return command;
   const inference = plain(command.inferenceConfig) ? command.inferenceConfig : {};
   if (inference.temperature !== undefined || inference.topP !== undefined) return command;
   const choice = plain(command.toolConfig) && plain(command.toolConfig.toolChoice) ? command.toolConfig.toolChoice : {};
   if ('any' in choice || 'tool' in choice) return command;
-  return { ...command, additionalModelRequestFields: { thinking: { ...SUMMARIZED_THINKING } } };
+  return { ...command, additionalModelRequestFields: { ...fields, thinking: { ...SUMMARIZED_THINKING } } };
 }
 
 /**
@@ -699,6 +724,9 @@ export type BedrockFetchOptions = {
   thinkingBudget?: number;
   /** Claude only: operator-enabled explicit prompt caching (withClaudePromptCache). Absent or false means none. */
   promptCache?: boolean;
+  /** Claude only: the thinking efforts the profile's catalog entry offers (validReasoningEfforts). A request naming one is
+   *  sent with it as output_config.effort; one naming another, or any where this is absent or empty, is refused. */
+  reasoningEfforts?: readonly string[];
   /** The same model through its other inference profile (the catalog's fallbackTarget): asked once, on the same client,
    *  when `model` refuses the call for capacity or quota (PROFILE_REFUSALS) before anything streamed. Absent: one
    *  profile, exactly as before. */
@@ -710,30 +738,35 @@ export type BedrockFetchOptions = {
 type StreamHead = IteratorResult<Record<string, unknown>> | { error: unknown };
 
 /** What a worker sends its Bedrock child over IPC for the bridge, besides the credentials. */
-export type BedrockChildSettings = { region: string; model: string; thinkingBudget?: number; promptCache?: boolean; fallbackModel?: string };
+export type BedrockChildSettings = { region: string; model: string; thinkingBudget?: number; promptCache?: boolean; fallbackModel?: string;
+  reasoningEfforts?: readonly string[] };
 
 /**
  * A Bedrock child's bridge, from the settings its parent sent: the operator's thinking budget and prompt cache, the
- * model's other profile, and `report`, which the child passes the call's facts to for its parent's log (a child has no
- * output of its own). One place for every child (the Pi worker's runs and managed calls, the Agents worker's runs).
+ * model's other profile, the thinking efforts the model's profile offers, and `report`, which the child passes the call's
+ * facts to for its parent's log (a child has no output of its own). One place for every child (the Pi worker's runs and
+ * managed calls, the Agents worker's runs).
  */
 export function childBedrockFetch(settings: BedrockChildSettings, auth: BedrockAuth, sdk: BedrockSdk, report: (fact: BedrockCallFact) => void) {
   if (typeof report !== 'function') throw new Error('A Bedrock child reports its calls');
   return createBedrockFetch({ region: settings.region, model: settings.model, auth, sdk, report,
     ...(settings.thinkingBudget ? { thinkingBudget: settings.thinkingBudget } : {}),
     ...(settings.promptCache === true ? { promptCache: true } : {}),
-    ...(typeof settings.fallbackModel === 'string' && settings.fallbackModel ? { fallbackModel: settings.fallbackModel } : {}) });
+    ...(typeof settings.fallbackModel === 'string' && settings.fallbackModel ? { fallbackModel: settings.fallbackModel } : {}),
+    // Checked by createBedrockFetch: a malformed list stops the call rather than dropping the efforts.
+    ...(settings.reasoningEfforts !== undefined ? { reasoningEfforts: settings.reasoningEfforts } : {}) });
 }
 
 /**
  * A `fetch` that serves `POST <bridge base URL>/chat/completions` from Bedrock ConverseStream.
  * Any other URL or method is refused before a network call is made.
  */
-export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget, promptCache = false, fallbackModel, report }: BedrockFetchOptions) {
+export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {}, thinkingBudget, promptCache = false, reasoningEfforts = [], fallbackModel, report }: BedrockFetchOptions) {
   const endpoint = `${bedrockBridgeBaseURL(region)}/chat/completions`;
   if (!validBedrockAuth(auth)) throw new Error('Invalid Bedrock credentials');
   if (thinkingBudget !== undefined && !validThinkingBudget(thinkingBudget)) throw new Error('Invalid Bedrock thinking budget');
   if (typeof promptCache !== 'boolean') throw new Error('Invalid Bedrock prompt cache setting');
+  if (!validReasoningEfforts(reasoningEfforts) || (reasoningEfforts.length && !CLAUDE_MODEL.test(model))) throw new Error('Invalid Bedrock reasoning efforts');
   if (fallbackModel !== undefined && (!factLabel(fallbackModel) || fallbackModel === model)) throw new Error('Invalid Bedrock fallback model');
   if (report !== undefined && typeof report !== 'function') throw new Error('Invalid Bedrock call reporter');
   for (const key of ['credentials', 'token', 'endpoint', 'region', 'authSchemePreference']) {
@@ -756,7 +789,7 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
       if (Buffer.byteLength(raw) > MAX_REQUEST_BYTES) reject('The request is too large');
       let body: unknown;
       try { body = JSON.parse(raw); } catch { return reject('The request body is not JSON'); }
-      command = toConverseInput(body, model);
+      command = toConverseInput(body, model, reasoningEfforts);
       if (thinkingBudget !== undefined) command = withClaudeThinking(command, thinkingBudget);
       command = withSummarizedThinking(command);
       if (promptCache) command = withClaudePromptCache(command);

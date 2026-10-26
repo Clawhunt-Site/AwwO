@@ -256,14 +256,17 @@ export function threadOpening(messages: Message[]): Message[] {
 }
 
 /** A Bedrock profile's call goes to the Converse bridge, which answers streaming Chat Completions only: the call is
- *  sent as one streaming request (no reasoning effort and no chat-template switch, which the bridge refuses) and the
- *  stream is gathered back into one completion by gatherChatStream. */
-export function bedrockComputerRequest(completion: Completion, model: Profile, options: ComputerCallOptions = {}): { url: string; body: ObjectValue } {
+ *  sent as one streaming request (no chat-template switch, which the bridge refuses) and the stream is gathered back
+ *  into one completion by gatherChatStream. `effort`, one the call itself names and its profile offers, goes as
+ *  reasoning_effort, which the bridge sends as Claude's output_config.effort; the effort none is no field, and a
+ *  profile's default is never sent (the model thinks at it anyway). */
+export function bedrockComputerRequest(completion: Completion, model: Profile, options: ComputerCallOptions & { effort?: string } = {}): { url: string; body: ObjectValue } {
   const maxTokens = options.maxTokens ? Math.min(model.maxTokens, options.maxTokens) : model.maxTokens;
   return { url: `${model.baseURL.replace(/\/+$/, '')}/chat/completions`, body: {
     model: model.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens,
     messages: threadOpening(completion.messages).map(({ reasoning_details: _, ...msg }) => msg),
-    ...(completion.tools.length ? { tools: completion.tools } : {}) } };
+    ...(completion.tools.length ? { tools: completion.tools } : {}),
+    ...(options.effort && options.effort !== 'none' ? { reasoning_effort: options.effort } : {}) } };
 }
 
 /** Gathers a streamed Chat Completions answer (`chat.completion.chunk` SSE: the Bedrock bridge's, or LLM Gate's) into
@@ -564,7 +567,7 @@ export async function handleComputerModel(request: IncomingMessage, response: Se
     // An answer gathered from a stream, which readJSON's limit has not held to the size of an answer read whole.
     let gathered = false;
     if (bedrock) {
-      const call = bedrockComputerRequest(completion, model, { maxTokens: body.maxTokens });
+      const call = bedrockComputerRequest(completion, model, { maxTokens: body.maxTokens, effort: requested });
       try { raw = await options.bedrockCall!(model, call.body, controller.signal); }
       catch (error) {
         if (controller.signal.aborted) throw error;

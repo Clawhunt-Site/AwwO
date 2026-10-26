@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   BEDROCK_BRIDGE_API_KEY, BEDROCK_CONNECTION_FAILURE, BEDROCK_CREDENTIAL_REFRESH_MS, BEDROCK_STREAM_IDLE_MS, BedrockBridgeError, bedrockBridgeBaseURL, bedrockFactLine, bedrockOrigin, bridgeFailure, chatUsage,
   childBedrockFetch, createBedrockAuthResolver, createBedrockFetch, createChunkMapper, toConverseInput, validBedrockAuth, validBedrockRegion,
   SUMMARIZED_THINKING_MODELS, validThinkingBudget, withClaudePromptCache, withClaudeThinking, withSummarizedThinking, type BedrockCallFact,
-  type BedrockSdk,
+  type BedrockSdk, BEDROCK_REASONING_EFFORTS, validReasoningEfforts,
 } from './bedrock-bridge.ts';
 
 const MODEL = 'global.anthropic.claude-opus-5-5';
@@ -875,4 +876,87 @@ test('the fetch asks Claude Opus 5.5 for the summary, on its other profile too, 
   assert.equal(script.inputs.length, 3);
   assert.equal(script.inputs[2].additionalModelRequestFields, undefined);
   assert.deepEqual(script.inputs[2], toConverseInput(request({ tools: TIME_TOOL, messages: TOOL_LOOP }), MODEL));
+});
+
+// The levels Claude Opus 5.5's catalog entry offers (bedrock-models.json).
+const EFFORTS = ['low', 'medium', 'high'];
+const EFFORT_LOW = { output_config: { effort: 'low' } };
+
+test('a reasoning effort the profile offers goes to Claude as output_config.effort, and no other level does', () => {
+  assert.deepEqual(BEDROCK_REASONING_EFFORTS, EFFORTS);
+  for (const level of EFFORTS) {
+    assert.deepEqual(toConverseInput(request({ reasoning_effort: level }), MODEL, EFFORTS).additionalModelRequestFields, { output_config: { effort: level } }, level);
+  }
+  // None named (absent or null) is no field, offered levels or not.
+  assert.equal(toConverseInput(request({ reasoning_effort: null }), MODEL, EFFORTS).additionalModelRequestFields, undefined);
+  assert.equal(toConverseInput(request(), MODEL, EFFORTS).additionalModelRequestFields, undefined);
+  // A level the profile does not offer, one Bedrock refuses or takes but no worker offers, or no text, is refused.
+  const refused = (body: unknown, efforts: readonly string[], pattern: RegExp) => assert.throws(() => toConverseInput(body, MODEL, efforts),
+    (error: unknown) => error instanceof BedrockBridgeError && error.status === 400 && pattern.test(error.message));
+  refused(request({ reasoning_effort: 'high' }), ['low'], /does not offer that reasoning effort/);
+  for (const level of ['minimal', 'none', 'xhigh', 'max', 'LOW', '', 3, ['low']]) refused(request({ reasoning_effort: level }), EFFORTS, /does not offer/);
+  refused(request({ reasoning_effort: 'low' }), [], /Reasoning effort is not supported/);
+  // Beside the summary of Opus 5.5's thinking, and kept where the summary is not asked for (a tool loop's later call).
+  assert.deepEqual(withSummarizedThinking(toConverseInput(request({ reasoning_effort: 'low' }), MODEL, EFFORTS)).additionalModelRequestFields, { ...EFFORT_LOW, ...SUMMARY });
+  const loop = toConverseInput(request({ reasoning_effort: 'low', tools: TIME_TOOL, messages: TOOL_LOOP }), MODEL, EFFORTS);
+  assert.equal(withSummarizedThinking(loop), loop);
+  assert.deepEqual(loop.additionalModelRequestFields, EFFORT_LOW);
+  // An operator's thinking budget joins it rather than replacing it, and the summary then stays out.
+  const budgeted = withClaudeThinking(toConverseInput(request({ max_tokens: 8000, reasoning_effort: 'low' }), MODEL, EFFORTS), 2048);
+  assert.deepEqual(budgeted.additionalModelRequestFields, { ...EFFORT_LOW, thinking: { type: 'enabled', budget_tokens: 2048 } });
+  assert.equal(withSummarizedThinking(budgeted), budgeted);
+  for (const [value, valid] of [[[], true], [EFFORTS, true], [['high', 'low'], true], [['low', 'low'], false], [['minimal'], false], [['xhigh'], false], ['low', false], [[1], false], [undefined, false]] as const) {
+    assert.equal(validReasoningEfforts(value), valid, JSON.stringify(value));
+  }
+});
+
+test('requests map and are refused as the shared vectors say, which the Python bridge is held to too', () => {
+  const vectors = JSON.parse(readFileSync(new URL('./bedrock-bridge-vectors.json', import.meta.url), 'utf8'));
+  for (const vector of vectors.requests) assert.deepEqual(toConverseInput(vector.body, vectors.model, vector.efforts ?? []), vector.expect, vector.name);
+  for (const vector of vectors.errors) {
+    assert.throws(() => toConverseInput(vector.body, vectors.model, vector.efforts ?? []),
+      (error: unknown) => error instanceof BedrockBridgeError && error.status === vector.status && error.message === vector.message, vector.name);
+  }
+  assert.ok(vectors.requests.some((vector: { efforts?: string[] }) => vector.efforts?.length), 'a vector offers efforts');
+});
+
+test('the fetch sends the effort a request names where the profile offers it, on its other profile too, and refuses an invalid setting', async () => {
+  const script = scriptedSdk([{ fail: awsError('ThrottlingException', 429) }, { events: ANSWER }, { events: ANSWER }]);
+  const fetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: script.sdk, fallbackModel: FALLBACK, reasoningEfforts: EFFORTS });
+  assert.deepEqual(await answered(await fetch(ENDPOINT, post(request({ reasoning_effort: 'low' })))), ANSWERED);
+  assert.deepEqual(script.inputs.map(input => [input.modelId, input.additionalModelRequestFields]), [[MODEL, { ...EFFORT_LOW, ...SUMMARY }], [FALLBACK, { ...EFFORT_LOW, ...SUMMARY }]]);
+  // A request naming none is the request it was before.
+  await (await fetch(ENDPOINT, post(request()))).text();
+  assert.deepEqual(script.inputs[2].additionalModelRequestFields, SUMMARY);
+  // A level the profile does not offer is the bridge's own refusal, before any call.
+  const offered = scriptedSdk([]);
+  const facts: BedrockCallFact[] = [];
+  const low = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: offered.sdk, reasoningEfforts: ['low'], report: fact => facts.push(fact) });
+  const response = await low(ENDPOINT, post(request({ reasoning_effort: 'high' })));
+  assert.equal(response.status, 400);
+  assert.equal(JSON.parse(await response.text()).error.type, 'invalid_request_error');
+  assert.deepEqual([offered.inputs.length, facts], [0, [{ event: 'failed', model: MODEL, error: 'invalid_request_error', status: 400, stage: 'request', upstream: false }]]);
+  // Only the levels the bridge sends, each once, and only for a Claude model.
+  for (const reasoningEfforts of [['minimal'], ['low', 'low'], 'low', [1]]) {
+    assert.throws(() => createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: offered.sdk, reasoningEfforts: reasoningEfforts as never }), /Invalid Bedrock reasoning efforts/, JSON.stringify(reasoningEfforts));
+  }
+  for (const model of ['deepseek.v3.2', 'global.xai.grok-4.7', 'openai.gpt-oss-120b-1:0']) {
+    assert.throws(() => createBedrockFetch({ region: REGION, model, auth: BEARER, sdk: offered.sdk, reasoningEfforts: ['low'] }), /Invalid Bedrock reasoning efforts/, model);
+    assert.doesNotThrow(() => createBedrockFetch({ region: REGION, model, auth: BEARER, sdk: offered.sdk, reasoningEfforts: [] }), model);
+  }
+  for (const model of ['us.anthropic.claude-opus-5-5', 'anthropic.claude-haiku-4-5-20251001-v1:0']) {
+    assert.doesNotThrow(() => createBedrockFetch({ region: REGION, model, auth: BEARER, sdk: offered.sdk, reasoningEfforts: ['low'] }), model);
+  }
+});
+
+test('a child\'s bridge takes the efforts its parent sent, and stops on a malformed list rather than dropping it', async () => {
+  const child = scriptedSdk([{ events: ANSWER }]);
+  const fetch = childBedrockFetch({ region: REGION, model: MODEL, reasoningEfforts: EFFORTS }, BEARER, child.sdk, () => {});
+  await (await fetch(ENDPOINT, post(request({ reasoning_effort: 'medium' })))).text();
+  assert.deepEqual(child.inputs[0].additionalModelRequestFields, { output_config: { effort: 'medium' }, ...SUMMARY });
+  // Settings without efforts refuse any, as a bridge always did.
+  const bare = scriptedSdk([]);
+  assert.equal((await childBedrockFetch({ region: REGION, model: MODEL }, BEARER, bare.sdk, () => {})(ENDPOINT, post(request({ reasoning_effort: 'low' })))).status, 400);
+  assert.equal(bare.inputs.length, 0);
+  assert.throws(() => childBedrockFetch({ region: REGION, model: MODEL, reasoningEfforts: 'low' as never }, BEARER, bare.sdk, () => {}), /Invalid Bedrock reasoning efforts/);
 });

@@ -5,7 +5,7 @@ import { COMPUTER_COMPLETION_OPTIONS, handleComputerModel } from '../computer-mo
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
+import { effortAllowed, fitsContextBudget, INPUT_LIMITS, loadConfig, publicHealth, resolveModelConfig, validateRequest } from './config.mjs';
 import { bedrockComputerCall, startIsolatedRun } from './runner.mjs';
 
 function json(response, status, body) {
@@ -89,6 +89,9 @@ export function createPiServer(config, { startRun = startIsolatedRun, bedrockCal
     }
     if (body.images?.length && !modelConfig.input?.includes('image')) return json(response, 400, { error: {
       code: 'IMAGES_UNSUPPORTED', message: 'The selected model does not take images.',
+    } });
+    if (!effortAllowed(modelConfig, body.effort)) return json(response, 400, { error: {
+      code: 'EFFORT_NOT_SUPPORTED', message: 'The selected model does not offer this reasoning effort.',
     } });
     if (!fitsContextBudget(body, modelConfig)) return json(response, 413, { error: {
       code: 'CONTEXT_LIMIT', message: 'The prompt and history exceed the configured model context budget. Shorten the conversation or configure a model with a larger supported context window.',
