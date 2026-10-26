@@ -87,14 +87,16 @@ free plan holds until the promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (1.91 GB) are too large for a release. Nothing removes a staged file by itself, and one stays while something
-still plays it: the live catalog, a release a rollback goes to, or an AwwO Local build, whose local web server sends a
-video it lacks to this site (`stagedFallback` in `scripts/awwo-local-web.mjs`), so an old build plays the files its
-own catalog names. On 2026-10-26 the 41 that nothing played any more were removed by hand (1.97 GB: the first cut and
+The files (1.91 GB) are too large for a release. Nothing removes a staged file by itself. What still plays one: the
+live catalog, a release a rollback goes to, or an AwwO Local build, whose local web server sends a video it lacks to
+this site (`stagedFallback` in `scripts/awwo-local-web.mjs`), so a local build plays the files its own catalog names.
+On 2026-10-26 the old ones were removed by hand. First went 41 that nothing named any more (1.97 GB: the first cut and
 THE LONG CHORD's first recording of 2026-10-21, nine motion versions of 2026-10-22 from before their sound was encoded
-again, four draft renders of the two how-tos of 2026-10-25). The 58 that stay (3.65 GB) include what older AwwO Local
-builds still play: the earlier versions of the flagships and of the 17 build videos, and the six how-tos' versions from
-before their title cards were renumbered. Each is staged once on the host,
+again, four draft renders of the two how-tos of 2026-10-25). Then went 23 that only AwwO Local 0.1.0 and 0.1.1 named
+(1.64 GB: the earlier versions of the flagships, THE LONG CHORD and the 17 build videos), so those builds' Academy no
+longer plays them. 35 stay (2.01 GB): the catalog's 29, and the six how-tos' versions from before their title cards were
+renumbered. The AwwO Local builds published before that (Windows 0.1.2, macOS 0.10.0) and a rollback to an earlier
+release still play those six; they go once a local build with this catalog ships. Each is staged once on the host,
 outside every release, under `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
