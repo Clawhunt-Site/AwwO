@@ -6,7 +6,7 @@ description: Use on any page, landing page, deck, poster or prototype a model wr
 description_zh: 模型写的网页、落地页、演示、海报或原型，以及对它们的评审都适用：一眼就被认出是模型默认输出的具体模式（默认靛蓝、双色渐变、表情符号当图标、编造的数字、填充文案、左侧色条卡片），替代做法，以及如何加入一个有意为之的设计选择。
 category: design
 applies: html,design,review
-version: 1
+version: 2
 attribution: Adapted from open-design (Apache-2.0, Copyright 2026 Open Design contributors); its list adapts refero_skill (MIT, Copyright (c) 2026 Refero); modified for AwwO
 ---
 # Strip the AI look
@@ -48,4 +48,4 @@ About 80% proven patterns and 20% decision. Put the 20% into one bold move (a ty
 
 1. Search the source for every P0 pattern above; none remains.
 2. Every number and every line of copy comes from the brief or is a labelled placeholder.
-3. Name the one deliberate choice in a sentence of the hand-over.
+3. Name the one deliberate choice in a sentence of the hand-over (or an HTML comment).

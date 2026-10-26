@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, condensedMark, hostedPagePersona, markPlanContextCondensed, parseCanvasPlan, PLAN_NOTES_SHOWN, sharedRequirements,
-  type CanvasPlanModels } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, condensedMark, HOSTED_PAGE_SKILL_ROOM, HOSTED_PAGE_SKILLS, hostedPagePersona,
+  markPlanContextCondensed, nodePromptUnits, parseCanvasPlan, PLAN_NOTES_SHOWN, sharedRequirements, type CanvasPlanModels } from '../src/canvas/canvasPlan';
+import type { ContractField } from '../src/canvas/nodeContracts';
+import type { TaskFrame } from '../src/canvas/taskFrame';
 import { buildPlanningContext } from '../src/canvas/canvasPlanning';
 import { withAssistantModel } from '../src/canvas/assistantModel';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
@@ -404,18 +406,133 @@ describe('a page on a hosted canvas', () => {
     expect(game.contract!.inputs.map(field => field.id)).toEqual(['api', 'screens', 'design', 'assets']);
     expect(applied.doc.edges).toEqual([expect.objectContaining({ fromNode: game.id, fromPort: 'out:page', toNode: applied.addedNodeIds[1] })]);
     expect(applied.adjustments).toEqual([]);
+    // The page runs with AwwO's design skills, which nothing in the plan names; the reviewer beside it gets none.
+    expect(game.skills).toEqual(['builtin:design-craft', 'builtin:anti-ai-slop']);
+    expect(game.skills).not.toBe(HOSTED_PAGE_SKILLS);
+    expect(session(applied.doc, applied.addedNodeIds[1]).skills).toBeUndefined();
+    // Where the models run on personal keys (pageSkills off, as CanvasSurface passes it there), the page is the same
+    // without them.
+    const own = applyCanvasPlan(doc(), page, 'en', REQUEST, undefined, undefined, true, false);
+    const ownPage = own.doc.nodes.find(node => node.id === own.addedNodeIds[0]) as SessionNode;
+    expect([ownPage.contract!.outputs.map(field => field.id), ownPage.persona, ownPage.skills]).toEqual([['page'], hostedPagePersona('en'), undefined]);
     // A persona the plan writes is the node's brief.
     const briefed = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend', persona: 'A snake game.' }), 'zh', REQUEST, undefined, undefined, true);
     expect((briefed.doc.nodes[0] as SessionNode).persona).toBe('A snake game.');
     expect((briefed.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.label)).toEqual(['网页']);
+    expect((briefed.doc.nodes[0] as SessionNode).skills).toEqual([...HOSTED_PAGE_SKILLS]);
   });
 
   it('keeps the frontend template elsewhere: off a hosted canvas, and on a frontend node already on the canvas', () => {
     const local = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend' }), 'en', REQUEST);
     expect((local.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
+    expect((local.doc.nodes[0] as SessionNode).skills).toBeUndefined();
     const existing = { ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), id: 'old' } as SessionNode;
     const renamed = applyCanvasPlan(doc(existing), plan({ type: 'update_node', nodeId: 'old', title: 'Shop' }), 'en', REQUEST, undefined, undefined, true);
     expect(session(renamed.doc, 'old').contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
+    expect(session(renamed.doc, 'old').skills).toBeUndefined();
+    // A figure page keeps its own kit, whose guide already fills most of its system prompt.
+    const figure = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'fig', templateId: 'figure' }), 'en', REQUEST, undefined, undefined, true);
+    expect((figure.doc.nodes[0] as SessionNode).skills).toBeUndefined();
+  });
+
+  // The API refuses a run whose system prompt passes 32,768 UTF-16 units; the skills take about 11,400 of them, and
+  // design_skills_test.go pins the room left for the node's own text (HOSTED_PAGE_SKILL_ROOM).
+  it('gives the page its design skills only while its brief, requirements and fields, as the API writes them, leave room for them', () => {
+    const page = (request: string, ...more: unknown[]) => {
+      const applied = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend' }, ...more), 'en', request, undefined, undefined, true);
+      return applied.doc.nodes.find(node => node.id === applied.addedNodeIds[0]) as SessionNode;
+    };
+    // A request of 2,000 letters fits; the same length of markup does not, since the API escapes each <, > or & in six units.
+    const letters = page('a'.repeat(2000));
+    expect(nodePromptUnits(letters)).toBeLessThan(HOSTED_PAGE_SKILL_ROOM);
+    expect(letters.skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    const markup = page('<>'.repeat(1000) + '&'.repeat(400));
+    expect(markup.taskFrame).toMatchObject({ constraints: ['<>'.repeat(1000), '&'.repeat(400)] });
+    expect(nodePromptUnits(markup)).toBeGreaterThan(HOSTED_PAGE_SKILL_ROOM);
+    expect(markup.skills).toBeUndefined();
+    // Output fields count: the API writes each one's label, help and placeholder into the output policy.
+    const field = (id: string) => ({ type: 'add_field', nodeId: 'game', side: 'output', field: { id, label: id, type: 'text', required: false, value: '', help: '&'.repeat(1900) } });
+    expect(page(REQUEST, field('one')).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    const fields = page(REQUEST, field('one'), field('two'));
+    expect(fields.contract!.outputs.map(output => output.id)).toEqual(['page', 'one', 'two']);
+    expect(fields.skills).toBeUndefined();
+    // A brief or requirements the same plan writes later count as well: a long brief beside a long request, or markup.
+    const brief = (persona: string) => ({ type: 'update_node', nodeId: 'game', persona });
+    expect(page(REQUEST, brief('p'.repeat(7999))).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    const long = page('a'.repeat(7000), brief('p'.repeat(7999)));
+    expect([long.persona.length, long.taskFrame]).toMatchObject([7999, { constraints: ['a'.repeat(2000), 'a'.repeat(2000), 'a'.repeat(2000), 'a'.repeat(1000)] }]);
+    expect(long.skills).toBeUndefined();
+    expect(page(REQUEST, brief('<'.repeat(2400))).skills).toBeUndefined();
+    const checks = (count: number) => ({ type: 'set_task', nodeId: 'game', acceptanceCriteria: Array.from({ length: count }, () => '&'.repeat(1500)) });
+    expect(page(REQUEST, checks(1)).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    const checked = page(REQUEST, checks(2));
+    expect(checked.taskFrame).toMatchObject({ acceptanceCriteria: ['&'.repeat(1500), '&'.repeat(1500)] });
+    expect(checked.skills).toBeUndefined();
+  });
+
+  // A later plan that changes a page keeps it within the room as well; a node it leaves alone, or one whose skills a member
+  // chose (not exactly the two), is not touched.
+  it('takes the design skills off a page a later plan changes past the room, and says so', () => {
+    const first = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'game', templateId: 'frontend', title: 'Snake' }), 'en', REQUEST, undefined, undefined, true);
+    const id = first.addedNodeIds[0];
+    expect(session(first.doc, id).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    const short = applyCanvasPlan(first.doc, plan({ type: 'update_node', nodeId: id, persona: 'A snake game, smaller.' }), 'en', 'Smaller', undefined, undefined, true);
+    expect(session(short.doc, id).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    expect(short.adjustments).toEqual([]);
+    for (const step of [{ type: 'update_node', nodeId: id, persona: '<'.repeat(2400) },
+      { type: 'set_task', nodeId: id, acceptanceCriteria: ['&'.repeat(1500), '&'.repeat(1500)] },
+      { type: 'add_field', nodeId: id, side: 'output', field: { id: 'notes', label: 'Notes', type: 'text', required: false, value: '', help: '>'.repeat(1990), placeholder: '&'.repeat(1990) } },
+      { type: 'update_field', nodeId: id, side: 'output', fieldId: 'page', changes: { help: '<'.repeat(1990), placeholder: '&'.repeat(1990) } }]) {
+      const later = applyCanvasPlan(first.doc, plan(step), 'en', 'Change it', undefined, undefined, true);
+      // An empty list, not a missing one: the server keeps a saved node's skills for a save that leaves the list out.
+      expect(session(later.doc, id).skills).toEqual([]);
+      expect(later.adjustments).toEqual(['“Snake” no longer carries the design skills (design-craft, anti-ai-slop): with them, its brief, task requirements and output fields would be more than one call can send its model']);
+    }
+    // A page over the room that this plan does not change keeps them (a member's own edit put it there).
+    const edited = { ...session(first.doc, id), persona: '<'.repeat(2400) };
+    const other = applyCanvasPlan(doc(edited), plan({ type: 'add_node', ref: 'check', templateId: 'review' }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(other.doc, id).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    // Skills a member chose are theirs: three of them, or the two in another order with one more.
+    const chosen = { ...edited, skills: ['builtin:anti-ai-slop', 'builtin:design-craft', 'builtin:design-jury'] };
+    const kept = applyCanvasPlan(doc(chosen), plan({ type: 'update_node', nodeId: id, persona: '<'.repeat(2401) }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(kept.doc, id).skills).toEqual(['builtin:anti-ai-slop', 'builtin:design-craft', 'builtin:design-jury']);
+    const reordered = { ...edited, skills: ['builtin:anti-ai-slop', 'builtin:design-craft'] };
+    expect(session(applyCanvasPlan(doc(reordered), plan({ type: 'update_node', nodeId: id, persona: '<'.repeat(2401) }), 'en', REQUEST, undefined, undefined, true).doc, id).skills).toEqual([]);
+    // Steps that change nothing the room counts leave it alone: a new title, a change to a field it does not have, the
+    // brief it already has.
+    for (const step of [{ type: 'update_node', nodeId: id, title: 'Snake 2' },
+      { type: 'update_field', nodeId: id, side: 'output', fieldId: 'missing', changes: { help: 'x' } },
+      { type: 'update_node', nodeId: id, persona: '<'.repeat(2400) }]) {
+      const same = applyCanvasPlan(doc(edited), plan(step), 'en', REQUEST, undefined, undefined, true);
+      expect(session(same.doc, id).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+    }
+    // Nor does a set_task that only drops a blank entry, which the API leaves out anyway.
+    const frame = edited.taskFrame as TaskFrame;
+    const blank = { ...edited, taskFrame: { ...frame, acceptanceCriteria: [...frame.acceptanceCriteria, ' '] } };
+    const cleaned = applyCanvasPlan(doc(blank), plan({ type: 'set_task', nodeId: id, acceptanceCriteria: frame.acceptanceCriteria }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(cleaned.doc, id).skills).toEqual([...HOSTED_PAGE_SKILLS]);
+  });
+
+  it('counts a node’s own text as the API’s encoding/json writes it', () => {
+    const bare = (persona: string, outputs: ContractField[] = []) => ({ ...createAgentTemplate('frontend', { x: 0, y: 0 }, 'en'), persona,
+      contract: { version: 1, inputs: [], outputs } }) as SessionNode;
+    const units = (persona: string) => nodePromptUnits(bare(persona));
+    // Go's json.Marshal of each string, measured in UTF-16 units (2026-10-26).
+    expect(units('a<b>c&d')).toBe(24);
+    expect(units(['line', 'next'].join(String.fromCharCode(10)) + String.fromCharCode(9) + '"q"' + String.fromCharCode(92))).toBe(21);
+    expect(units(String.fromCharCode(0x2028, 0x2029))).toBe(14);
+    expect(units(String.fromCharCode(8, 12, 1))).toBe(12);
+    expect(units('中文<div>')).toBe(19);
+    // With a task frame, the frame's JSON is counted too.
+    const framed = { ...bare('x'), taskFrame: { version: 1, source: 'manual', constraints: ['x'], acceptanceCriteria: [] } } as SessionNode;
+    expect(nodePromptUnits(framed)).toBe(3 + JSON.stringify(framed.taskFrame).length);
+    // Output fields with the example of their shape, as Go's json.Marshal writes the policy's (measured the same day):
+    // 210 units for one html field, 757 for one of each kind.
+    const output = (id: string, type: ContractField['type'], extra: Partial<ContractField> = {}): ContractField =>
+      ({ id, label: id === 'ok' ? 'OK' : id[0].toUpperCase() + id.slice(1), type, required: false, value: '', ...extra });
+    expect(nodePromptUnits(bare('x', [output('page', 'html', { required: true })]))).toBe(3 + 210);
+    expect(nodePromptUnits(bare('x', [output('page', 'html', { required: true }), output('bundle', 'file'), output('count', 'number'),
+      output('ok', 'boolean'), output('summary', 'text', { help: '<b>&</b>', placeholder: 'One line' })]))).toBe(3 + 757);
   });
 
   it('shows the hosted planner a frontend node as that page, and a local planner the template', () => {

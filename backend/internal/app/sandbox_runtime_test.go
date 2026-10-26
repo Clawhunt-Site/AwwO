@@ -123,6 +123,10 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 			!strings.HasSuffix(request.SystemPrompt, "work from what the user tells you about it.") {
 			t.Errorf("sandbox system prompt %q", request.SystemPrompt)
 		}
+		// The planner's page skills are for a page's one call: a sandbox run goes without them (plannerPageSkills).
+		if strings.Contains(request.SystemPrompt, skillsBoundary) {
+			t.Error("a sandbox run was sent the planner's page skills")
+		}
 		sandboxRuns.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
@@ -152,6 +156,9 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 		if e := json.Unmarshal(request["systemPrompt"], &system); e != nil || strings.Count(system, "Model and date: ") != 1 {
 			t.Errorf("plain system prompt %q %v", system, e)
 		}
+		if !strings.Contains(system, skillsBoundary) {
+			t.Error("a plain run lost the planner's page skills, which fit its budget")
+		}
 		plainRuns.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
@@ -170,6 +177,10 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 			t.Fatal(e)
 		}
 		if _, e := h.db.Exec(ctx, "UPDATE agents SET runtime=$2 WHERE id=$1", aid, runtime); e != nil {
+			t.Fatal(e)
+		}
+		// Both nodes carry the skills the canvas assistant gives a page it plans.
+		if _, e := h.db.Exec(ctx, `UPDATE canvases SET document=jsonb_set(document,'{nodes,0,skills}',$2::jsonb) WHERE id=$1`, cid, `["builtin:design-craft","builtin:anti-ai-slop"]`); e != nil {
 			t.Fatal(e)
 		}
 		run := h.request(t, c, "POST", "/tenants/"+tid+"/runs", map[string]any{"sessionId": sid, "prompt": "go", "operationId": operation}, 202)

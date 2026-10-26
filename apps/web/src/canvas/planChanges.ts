@@ -49,6 +49,10 @@ export function describePlanChanges(before: CanvasDocument, after: CanvasDocumen
   const removed = before.nodes.filter(node => !later.has(node.id));
   const lines: string[] = [];
   if (added.length) lines.push(t('planning.changeAdded', { count: added.length, names: names(locale, t, added) }));
+  // Skills the plan put on nodes it adds, which no one chose (canvasPlan.ts HOSTED_PAGE_SKILLS): each run sends them.
+  const skilled = added.filter((node): node is SessionNode => node.kind === 'session' && Boolean(node.skills?.length));
+  if (skilled.length) lines.push(t('planning.changeSkills', { names: names(locale, t, skilled),
+    skills: [...new Set(skilled.flatMap(node => node.skills!.map(ref => ref.replace(/^builtin:/, ''))))].join(locale === 'zh' ? '、' : ', ') }));
   if (removed.length) lines.push(t('planning.changeRemoved', { names: names(locale, t, removed) }));
   const persona: CanvasNode[] = [], acceptance: CanvasNode[] = [], constraints: CanvasNode[] = [], inputs: CanvasNode[] = [], fields: CanvasNode[] = [], prompts: CanvasNode[] = [];
   const modelLines: string[] = [];

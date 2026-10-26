@@ -45,6 +45,25 @@ describe('delivery requirements are independent from persona', () => {
     const model = profiles.find(profile => profile.id === 'model3d')!;
     expect(model.field).toMatchObject({ type: 'file', required: true });
     expect(model.companions).toEqual([expect.objectContaining({ type: 'html', required: false })]);
+    // The viewer may load the three.js AwwO's previews supply, as the API's output policy allows every html field.
+    for (const locale of ['en', 'zh'] as const) {
+      const help = deliveryProfiles(locale).find(profile => profile.id === 'model3d')!.companions![0].help!;
+      expect(help).toMatch(/three\.js/);
+      expect(help).toMatch(/r128.*r186/);
+      expect(help).not.toMatch(/Do not require external libraries|不依赖外部库/);
+    }
+    // A node that took the 3D profile before its preview's help changed keeps that preview, and adding the profile
+    // again adds nothing: the earlier help is the same requirement.
+    const earlier = {
+      en: 'Optionally include a complete self-contained HTML canvas/WebGL viewer with inline model data matching the actual delivered model. The viewer is a companion, not a substitute for the 3D file. Do not require external libraries or URLs.',
+      zh: '可附完整、自包含的 HTML canvas/WebGL 预览，内联的数据必须对应实际交付的模型。预览不能代替真实 3D 文件，不依赖外部库或链接。',
+    };
+    for (const locale of ['en', 'zh'] as const) {
+      const fresh = appendDeliveryProfile(createAgentTemplate('general', { x: 0, y: 0 }).contract!, 'model3d', locale);
+      const old = { ...fresh, outputs: fresh.outputs.map(output => output.id === 'delivery_model3d_preview' ? { ...output, help: earlier[locale] } : output) };
+      expect(appendDeliveryProfile(old, 'model3d', locale)).toBe(old);
+      expect(appendDeliveryProfile(fresh, 'model3d', locale)).toBe(fresh);
+    }
     const report = profiles.find(profile => profile.id === 'report')!;
     expect(report.field).toMatchObject({ type: 'markdown', required: true });
     expect(report.companions).toEqual([expect.objectContaining({ type: 'file', required: false })]);

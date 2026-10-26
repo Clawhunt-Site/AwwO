@@ -223,6 +223,149 @@ func TestPostgresNodeSkillsAreFrozenIntoTheRun(t *testing.T) {
 	}
 }
 
+// The skills the canvas assistant gives a page it plans are a default: a run they would push past its model's budget
+// goes without them, on a node's own run and in a canvas run alike, where any skills a member chose stop it as before;
+// with room for them, they are sent.
+func TestPostgresPlannedPageSkillsGiveWayWhereTheyWouldNotFit(t *testing.T) {
+	planned := []string{"builtin:anti-ai-slop", "builtin:design-craft"}
+	chosen := []string{"builtin:design-craft", "builtin:critic"}
+	added := []string{"builtin:design-craft", "builtin:anti-ai-slop", "builtin:critic"}
+	for _, tc := range []struct {
+		name  string
+		bytes int // the worker's budget for its model, in bytes (no prose rate)
+		fits  bool
+	}{{"tight", 9000, false}, {"roomy", 200000, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan observedPiCall, 8)
+			pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test",
+						"limits": map[string]any{"maxContextTextBytes": tc.bytes, "messageOverheadBytes": 32}})
+					return
+				}
+				if r.Method == "DELETE" {
+					w.WriteHeader(202)
+					return
+				}
+				var body observedPiCall
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				seen <- body
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(200)
+				completePi(w, `{"result":"done"}`)
+			}))
+			defer pi.Close()
+			h := newHarness(t, pi.URL)
+			owner, tid, _ := h.register(t, "planned-skills-"+tc.name+"@example.test")
+			execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+			cid, aid, sid := h.fixture(t, owner, tid)
+			base := "/tenants/" + tid
+			// A node's own run.
+			put := func(skills []string) {
+				node := map[string]any{"id": "node-a", "kind": "session", "title": "Page", "runtime": runtimePI,
+					"binding": map[string]string{"companyId": tid, "agentId": aid}, "issueId": sid, "skills": skills}
+				canvas := h.request(t, owner, "GET", base+"/canvases/"+cid, nil, 200)
+				h.request(t, owner, "PUT", base+"/canvases/"+cid, map[string]any{"name": "skills", "version": canvas["version"],
+					"document": map[string]any{"nodes": []any{node}, "edges": []any{}}}, 200)
+			}
+			put(planned)
+			run := h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the page", "operationId": "planned-" + tc.name}, 202)
+			h.awaitRun(t, owner, tid, run["id"].(string), "completed")
+			if call := <-seen; strings.Contains(call.SystemPrompt, skillsBoundary) != tc.fits {
+				t.Fatalf("a node's own run sent the planned skills: %v, want %v", strings.Contains(call.SystemPrompt, skillsBoundary), tc.fits)
+			}
+			var raw json.RawMessage
+			if err := h.db.QueryRow(context.Background(), "SELECT execution_snapshot FROM runs WHERE tenant_id=$1 AND id=$2", tid, run["id"]).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var snap executionSnapshot
+			if err := json.Unmarshal(raw, &snap); err != nil || (snap.Skills != nil) != tc.fits {
+				t.Fatalf("the run's snapshot kept skills %v, want %v (%v)", snap.Skills != nil, tc.fits, err)
+			}
+			if tc.fits {
+				put(chosen)
+				run = h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the page", "operationId": "chosen-" + tc.name}, 202)
+				h.awaitRun(t, owner, tid, run["id"].(string), "completed")
+				<-seen
+			} else {
+				// A member's own choice: other skills, or one added to the planner's two.
+				for i, skills := range [][]string{chosen, added} {
+					put(skills)
+					refused := h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the page", "operationId": fmt.Sprintf("chosen-%s-%d", tc.name, i)}, 413)
+					if refused["error"].(map[string]any)["code"] != "context_limit" {
+						t.Fatal("a member's own skills were dropped instead of the run refused", skills, refused)
+					}
+				}
+			}
+			// A canvas run.
+			graph := func(agent string, skills []string) string {
+				node := map[string]any{"id": "only", "kind": "session", "title": "Page", "binding": map[string]string{"companyId": tid, "agentId": agent},
+					"contract": map[string]any{"version": 1, "inputs": []any{}, "outputs": []any{map[string]any{"id": "result", "type": "text", "required": true}}},
+					"skills":   skills}
+				gid := h.request(t, owner, "POST", base+"/canvases", map[string]any{"name": "Graph " + strings.Join(skills, " "), "document": map[string]any{"nodes": []any{node}, "edges": []any{}}}, 201)["id"].(string)
+				path := base + "/canvases/" + gid + "/graph-runs"
+				accepted := h.request(t, owner, "POST", path, map[string]string{"operationId": "graph-" + agent + "-" + strings.Join(skills, "-")}, 202)
+				return path + "/" + accepted["id"].(string)
+			}
+			awaitGraph(t, h, owner, graph(aid, planned), "completed")
+			if call := <-seen; strings.Contains(call.SystemPrompt, skillsBoundary) != tc.fits {
+				t.Fatalf("a canvas run sent the planned skills: %v, want %v", strings.Contains(call.SystemPrompt, skillsBoundary), tc.fits)
+			}
+			// On a roomy budget, a brief long enough that the skills would take its system prompt past 32,768 units.
+			agent := aid
+			if tc.fits {
+				agent = h.request(t, owner, "POST", base+"/agents", map[string]string{"name": "Long brief", "adapterType": "pi", "model": "test-model",
+					"instructions": strings.Repeat("Keep the page calm. ", 1150)}, 201)["id"].(string)
+				awaitGraph(t, h, owner, graph(agent, planned), "completed")
+				if call := <-seen; strings.Contains(call.SystemPrompt, skillsBoundary) || !strings.Contains(call.SystemPrompt, "Keep the page calm.") {
+					t.Fatal("a canvas run whose skills would pass 32,768 units sent them")
+				}
+			}
+			failed := awaitGraph(t, h, owner, graph(agent, chosen), "failed")
+			if node := failed["nodes"].([]any)[0].(map[string]any); node["detail"] != "context_limit" {
+				t.Fatalf("a canvas node with a member's skills ended %v", node["detail"])
+			}
+		})
+	}
+}
+
+// A team member's turn of a page with the planner's page skills goes without them where they would not let it fit;
+// skills a member chose refuse the turn as before, and with room the planner's are sent.
+func TestTeamTurnLetsThePlannersPageSkillsGiveWay(t *testing.T) {
+	m := fixtureTeam("sequential").Members[0]
+	planned, err := freezeSkillContext(t.Context(), nil, "", plannerPageSkillRefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chosen, err := freezeSkillContext(t.Context(), nil, "", []string{"builtin:design-craft", "builtin:critic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := teamTurnInput{Task: "Make the page", Purpose: "work"}
+	// No member health, so the byte rule: room for the turn, not for its skills too.
+	budget := len(teamSystemPrompt("Brief", m)) + 4000
+	_, system, _, _, err := prepareTeamInput(executionSnapshot{Instructions: "Brief", Skills: planned}, m, input, budget, 32)
+	if err != nil || strings.Contains(system, skillsBoundary) {
+		t.Fatalf("a turn the planner's skills would not let fit: %v, skills sent %v", err, strings.Contains(system, skillsBoundary))
+	}
+	if _, _, _, _, err = prepareTeamInput(executionSnapshot{Instructions: "Brief", Skills: chosen}, m, input, budget, 32); err == nil || err.Error() != "context_limit" {
+		t.Fatalf("a turn with a member's own skills was not refused: %v", err)
+	}
+	if _, system, _, _, err = prepareTeamInput(executionSnapshot{Instructions: "Brief", Skills: planned}, m, input, 262144, 32); err != nil || !strings.Contains(system, skillsBoundary) {
+		t.Fatalf("a turn with room lost the planner's skills: %v", err)
+	}
+	// The cap counts the note naming the member's model too: a system prompt 100 units under 32,768 with the skills,
+	// before a 400-unit note, goes without them.
+	fixed := utf16Len(skillsSystemPrompt(teamSystemPrompt("", m), planned))
+	long := executionSnapshot{Instructions: strings.Repeat("a", 32768-100-fixed), Skills: planned}
+	if got := utf16Len(skillsSystemPrompt(teamSystemPrompt(long.Instructions, m), planned)); got != 32768-100 {
+		t.Fatalf("the setup's system prompt is %d units", got)
+	}
+	if _, system, _, _, err = prepareTeamInputWith(long, m, input, 262144, 32, 400); err != nil || strings.Contains(system, skillsBoundary) {
+		t.Fatalf("a turn its model's note takes past 32,768 kept the planner's skills: %v", err)
+	}
+}
+
 func TestFrontmatterReadsTheYAMLOtherAgentsWrite(t *testing.T) {
 	meta, body, err := parseSkillMarkdown("---\nname: \"pdf-tools\"\ndescription: >-\n  Read, merge and split\n  PDF files.\n\ntitle: 'It''s PDF'\napplies:\n  - writing\n  - \"data\"\nmetadata:\n  author: someone\n  version: 2\ncategory: data # comment kept as text\n---\nBody\n", false)
 	if err != nil || body != "Body\n" {

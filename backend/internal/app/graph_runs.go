@@ -950,9 +950,25 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
-	framedInstructions := a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap)
+	framed := func() string {
+		return a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap)
+	}
+	framedInstructions := framed()
 	framedPrompt := evidenceUserPrompt(prompt, snap.Knowledge, snap.Memory)
-	if utf16Len(framedPrompt) > maxRunPromptUnits || (snap.Team == nil && (snap.tokens(framedPrompt)+snap.tokens(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)) {
+	promptTooLarge := utf16Len(framedPrompt) > maxRunPromptUnits
+	tooLargeForModel := func() bool {
+		return snap.Team == nil && (snap.tokens(framedPrompt)+snap.tokens(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)
+	}
+	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
+	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
+	if plannerPageSkills(snap.Skills) && !promptTooLarge && (snap.Workspace != nil || tooLargeForModel()) {
+		snap.Skills = nil
+		framedInstructions = framed()
+		if !tooLargeForModel() {
+			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nid, "sandbox", snap.Workspace != nil)
+		}
+	}
+	if promptTooLarge || tooLargeForModel() {
 		return errors.New("context_limit")
 	}
 	var busy bool

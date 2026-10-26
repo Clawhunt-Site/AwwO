@@ -6,7 +6,7 @@ description: Use for any node that delivers a page, prototype, deck, dashboard o
 description_zh: 交付网页、原型、演示、仪表盘或海报（HTML）的节点使用：字号阶梯、拉丁文与中文的行高、字距、层级、配色与强调色上限、对比度、交互状态配色和版面完整性的具体规则，交付前逐项自查。
 category: design
 applies: html,design,motion
-version: 1
+version: 2
 attribution: Typography and colour rules adapted from open-design (Apache-2.0, Copyright 2026 Open Design contributors); those rules adapt refero_skill (MIT, Copyright (c) 2026 Refero); modified for AwwO
 ---
 # Design craft
@@ -80,4 +80,4 @@ Pages that show stored files, the studio and recordings run as written; the defa
 
 1. Chinese headings at line-height 1.3 or more, all capitals tracked 0.06em or more, one dominant element per region, at most 3 sizes above the fold.
 2. Tokens in `:root`; the accent at most twice a screen; contrast met in every state; one primary button per action per viewport; a focus ring on every control.
-3. Nothing overlaps, clips or orphans at 360, 768 and 1440 px wide; say whether that comes from reading the CSS or from a render the inputs show.
+3. Nothing overlaps, clips or orphans at 360, 768 and 1440 px; say, in the hand-over or an HTML comment, whether that comes from reading the CSS or from a render the inputs show.

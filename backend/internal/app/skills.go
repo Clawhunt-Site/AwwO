@@ -647,6 +647,25 @@ func (a *App) freezeNodeSkills(ctx context.Context, q querier, tid string, docum
 	return freezeSkillContext(ctx, q, tid, refs)
 }
 
+// plannerPageSkillRefs are the skills the canvas assistant gives a page it plans (canvasPlan.ts HOSTED_PAGE_SKILLS;
+// TestPlannedPageSkillsFitTheSystemPrompt keeps the two lists the same). They are its default, not a member's choice,
+// so a run they would push past what its model takes goes without them instead of being refused (plannerPageSkills).
+var plannerPageSkillRefs = []string{"builtin:design-craft", "builtin:anti-ai-slop"}
+
+// plannerPageSkills reports whether a run's frozen skills are exactly the planner's page skills, in any order: a member
+// who attaches another skill, or takes one of the two off, has chosen the node's skills.
+func plannerPageSkills(value *skillContext) bool {
+	if value == nil || len(value.Items) != len(plannerPageSkillRefs) {
+		return false
+	}
+	for _, ref := range plannerPageSkillRefs {
+		if !slices.ContainsFunc(value.Items, func(s frozenSkill) bool { return s.Ref == ref }) {
+			return false
+		}
+	}
+	return true
+}
+
 func skillsSystemPrompt(instructions string, value *skillContext) string {
 	if value == nil || len(value.Items) == 0 {
 		return instructions

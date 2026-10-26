@@ -3249,7 +3249,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const failedIds = Object.entries(runs).filter(([, run]) => run.state === 'failed').map(([nodeId]) => nodeId);
       const seed = planSeedRequest(prompt, [...writtenFixRequests.current,
         ...(failedIds.length ? [fixRequestText(failedIds), ...failedIds.map(nodeId => fixRequestText([nodeId]))] : [])]);
-      const planned = jev ? applyJevPlan(before, jev, locale, seed) : applyCanvasPlan(before, plan, locale, seed, planMedia, modelChoices, currentSaaSCanvas() !== null);
+      // A planned page gets the design skills only where AwwO runs the models: a model on a personal key is given 32K
+      // counted in bytes (connections.go), and the skills would take some 40% of it.
+      const hosted = currentSaaSCanvas() !== null;
+      const planned = jev ? applyJevPlan(before, jev, locale, seed)
+        : applyCanvasPlan(before, plan, locale, seed, planMedia, modelChoices, hosted, hosted && !personalCredentialsRequired);
       // The components a plan adds start on the model the reader chose for the canvas assistant (Jev picks its own):
       // the one its request named, which the planner sized them for (a resume's, chosen before the reader changed it;
       // planComponentModel), against the reader's choice now, which may have changed while it planned; except a node the

@@ -40,6 +40,48 @@ export function hostedPagePersona(locale: UiLocale): string {
     ? 'Delivers one page that works as soon as it is opened in a browser: a website, game or tool as one complete HTML file, its CSS and JavaScript inside it. Uses what the nodes wired into it deliver and pastes their code unchanged. Writes no notes, code locations or preview links, and relies on no server, account or tool to install.'
     : '负责交付一页打开就能用的网页、游戏或小工具：一个完整的 HTML 文件，CSS 与 JavaScript 写在页面里，在浏览器里直接打开就能使用。使用上游节点交来的内容，代码原样粘贴、不改写。不写说明文字、代码位置或预览链接，不依赖服务器、账号或需要安装的工具。';
 }
+/** The built-in design skills (backend/internal/app/skills) such a page runs with: rules that make a page read as
+ *  designed, and the patterns that mark one as default model output. A plan never names skills (planning.go refuses
+ *  keys it does not know); a member removes them in the node's 配置 like any others. The API refuses to run a node
+ *  naming a skill it does not have, so these stay skills it ships (design_skills_test.go checks them). */
+export const HOSTED_PAGE_SKILLS: readonly string[] = ['builtin:design-craft', 'builtin:anti-ai-slop'];
+/** The UTF-16 units a node's own text may take in its system prompt (nodePromptUnits) for it to keep those skills: the
+ *  API refuses a run whose system prompt passes 32,768 units (graph_runs.go), and the skills, the rest of the output
+ *  policy and every note a run can add leave about 15,800. design_skills_test.go pins this. */
+export const HOSTED_PAGE_SKILL_ROOM = 14000;
+/** The example of an output's shape the API's output policy writes beside its fields (graphOutputPolicy);
+ *  design_skills_test.go checks these against the policy. */
+const POLICY_EXAMPLE_HTML = '<html><head></head><body>Actual result</body></html>';
+const POLICY_EXAMPLE_FILE = { name: 'deliverable.txt', content: '<actual file text>' };
+const policyExample = (field: ContractField) => field.type === 'number' ? 0 : field.type === 'boolean' ? false
+  : field.type === 'html' ? POLICY_EXAMPLE_HTML : field.type === 'file' ? POLICY_EXAMPLE_FILE : `<actual ${field.id} content>`;
+/** What a node's own text takes of its system prompt: its brief and task requirements (graphSystemPrompt,
+ *  taskFrameSystemPrompt) and its output fields with the example of their shape (graphOutputPolicy), all of which the
+ *  API writes as JSON. Its encoding/json writes what JSON.stringify does, except <, > and & and the two line
+ *  separators, as six-unit escapes. */
+export function nodePromptUnits(node: SessionNode): number {
+  const units = (value: unknown) => {
+    const text = JSON.stringify(value);
+    let count = text.length;
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      if (code === 0x3c || code === 0x3e || code === 0x26 || code === 0x2028 || code === 0x2029) count += 5;
+    }
+    return count;
+  };
+  const outputs = node.contract?.outputs ?? [];
+  const fields = outputs.map(field => ({ help: field.help ?? '', id: field.id, label: field.label, placeholder: field.placeholder ?? '',
+    required: field.required, type: field.type }));
+  return units(node.persona) + (isTaskFrame(node.taskFrame) ? units(node.taskFrame) : 0)
+    + (outputs.length ? units(fields) + units(Object.fromEntries(outputs.map(field => [field.id, policyExample(field)]))) : 0);
+}
+/** Whether a node carries exactly the design skills a planned page is given (in any order). */
+const carriesPageSkills = (node: SessionNode) => node.skills?.length === HOSTED_PAGE_SKILLS.length
+  && HOSTED_PAGE_SKILLS.every(ref => node.skills!.includes(ref));
+/** The parts of a node nodePromptUnits counts, to tell whether a plan changed them (task requirements without the blank
+ *  entries the API drops). */
+const promptText = (node: SessionNode) => JSON.stringify([node.persona, isTaskFrame(node.taskFrame) ? cleanTaskFrame(node.taskFrame) : null,
+  (node.contract?.outputs ?? []).map(field => [field.id, field.label, field.type, field.required, field.help ?? '', field.placeholder ?? ''])]);
 
 export type CanvasPlanFieldChanges = Partial<Pick<ContractField, 'label' | 'type' | 'required' | 'help' | 'placeholder'>>;
 export type CanvasPlanOperation =
@@ -643,9 +685,10 @@ export const DEFAULT_MODEL_REFERENCE = 'default';
 
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
  *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. On a
- *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs). */
+ *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs), and where `pageSkills`
+ *  it runs with the design skills while they fit (HOSTED_PAGE_SKILLS). */
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
-  models?: CanvasPlanModels, hosted = false): AppliedCanvasPlan {
+  models?: CanvasPlanModels, hosted = false, pageSkills = hosted): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   // Every note is kept, so the count the panel gives of those it does not show is true.
   const adjustments: string[] = [];
@@ -753,6 +796,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (hosted && op.templateId === HOSTED_PAGE_TEMPLATE_ID && node.contract) {
           node.contract = { ...node.contract, outputs: hostedPageOutputs(locale) };
           node.persona = hostedPagePersona(locale);
+          if (pageSkills) node.skills = [...HOSTED_PAGE_SKILLS];
         }
         // A new node never takes text copied from one the plan's context showed only in part; what it is added
         // without is said under the name it gets.
@@ -1010,6 +1054,19 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   checkGraph(draft);
   checkExecution(draft);
   const added = new Set(addedNodeIds);
+  // A node with the design skills whose own text, as this plan leaves it, would leave its system prompt too little room
+  // runs without them rather than be refused for its size: a page the plan adds, or one whose brief, task or fields it
+  // changed. A node already saved loses them only by an empty list (the server keeps a node's skills for a save that
+  // leaves the list out).
+  const before = new Map(doc.nodes.flatMap(node => node.kind === 'session' ? [[node.id, promptText(node)] as const] : []));
+  for (const node of draft.nodes) {
+    if (node.kind !== 'session' || !carriesPageSkills(node) || nodePromptUnits(node) <= HOSTED_PAGE_SKILL_ROOM) continue;
+    if (added.has(node.id)) { delete node.skills; continue; }
+    if (before.get(node.id) === promptText(node)) continue;
+    node.skills = [];
+    adjust(`「${titleOf(node)}」不再带设计技能（design-craft、anti-ai-slop）：带上它们，这个节点的说明、任务要求和交付字段会超出一次调用能发给模型的量`,
+      `“${titleOf(node)}” no longer carries the design skills (design-craft, anti-ai-slop): with them, its brief, task requirements and output fields would be more than one call can send its model`);
+  }
   const survivors = draft.nodes.filter(node => added.has(node.id));
   const oldNodes = draft.nodes.filter(node => !added.has(node.id));
   const right = oldNodes.length ? Math.max(...oldNodes.map(node => node.x + node.w)) + 100 : 80;
