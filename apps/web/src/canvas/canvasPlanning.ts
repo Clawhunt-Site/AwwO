@@ -9,6 +9,7 @@ import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_P
   sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
 import { NEW_NODE_LINE } from './planNewNodeModel';
+import { SANDBOX_RUNTIME } from './nodeRuntime';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import { nodeTeamTemplates } from './nodeTeamTemplates';
@@ -328,14 +329,20 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
         ...(persona !== roleOf(template?.persona) ? { persona: short(node.id, 'persona', persona) } : {}),
         ...(frame?.constraints.length ? { constraints: frame.constraints.map(item => refOf.get(item) ?? short(node.id, 'constraints', item)) } : {}),
         ...(frame?.acceptanceCriteria.length ? { acceptanceCriteria: frame.acceptanceCriteria.map(item => short(node.id, 'acceptanceCriteria', item)) } : {}),
-        // The planner sees a node's model only where it can change one; an unset node runs the workspace default.
-        ...(models ? { model: node.model || DEFAULT_MODEL_REFERENCE } : {}),
+        // The planner sees a node's model only where it can change one; an unset node runs the workspace default. Its
+        // effort is shown where one is set (none: the model's default), so a plan lowers it only where it can.
+        ...(models ? { model: node.model || DEFAULT_MODEL_REFERENCE, ...(node.model && node.effort ? { effort: node.effort } : {}) } : {}),
         // A team's members as the planner may write them (set_team): never their models, runtimes or tools. Their texts
         // shorten with the node's (eight members' 512-character roles on many nodes would fill a context on their own),
         // and a team shown in part is one the plan leaves as it is (applyCanvasPlan).
         ...(node.team ? { team: extras.teams ? { mode: node.team.mode, maxRounds: node.team.maxRounds,
           members: node.team.members.map(({ name, role, instructions }) => ({ name: short(node.id, 'team', name), role: short(node.id, 'team', role),
             ...(instructions ? { instructions: short(node.id, 'team', instructions) } : {}) })) } : true } : {}),
+        // A workspace Agent's node runs as its Agent is set up: a plan changes neither its model nor its effort, which
+        // the node shows as copied from the Agent (canvasPlan.ts set_model, workspaceAgents.ts).
+        ...(node.agentRef ? { workspaceAgent: true } : {}),
+        // A node on its own sandbox computer, which a plan's effort does not reach (canvasPlan.ts set_model).
+        ...(node.runtime === SANDBOX_RUNTIME ? { sandbox: true } : {}),
         inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value: short(node.id, `input:${id}`, value) })),
         outputs: node.contract?.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}),

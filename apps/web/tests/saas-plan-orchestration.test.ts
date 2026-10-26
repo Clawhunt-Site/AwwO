@@ -290,6 +290,33 @@ describe('models a plan sets', () => {
     expect(applied.adjustments).toEqual([expect.stringContaining('no “xhigh” reasoning effort')]);
   });
 
+  it('keeps a node on its sandbox computer, setting only the model and effort the sandbox offers (2026-10-26, Codex review)', () => {
+    // The planner now lowers a page node's effort with a set_model of its own model: on a sandbox node that must not
+    // move it to the runtime AwwO would choose, as the sandbox is the node's own choice.
+    const sandboxed: CanvasPlanModels = { choices: [...models.choices,
+      { runtime: 'sandbox', model: 'bedrock.claude-opus-5-5', available: true, name: 'Claude Opus 5.5' },
+      { runtime: 'sandbox', model: 'qwen3.8-27b-p6', available: true, name: 'Qwen 3.8', efforts: ['low'] }] };
+    const before = doc(agent('page', { runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' }), agent('tool', { runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' }),
+      agent('gone', { runtime: 'sandbox', model: 'qwen3.8-27b-p6', effort: 'low' }), agent('plain', { runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' }));
+    const applied = applyCanvasPlan(before, plan(
+      { type: 'set_model', nodeId: 'page', model: 'bedrock.claude-opus-5-5', effort: 'low' },
+      { type: 'set_model', nodeId: 'tool', model: 'Qwen 3.8', effort: 'low' },
+      { type: 'set_model', nodeId: 'gone', model: 'default' },
+      { type: 'set_model', nodeId: 'plain', model: 'bedrock.claude-opus-5-5', effort: 'low' },
+    ), 'en', '', undefined, sandboxed);
+    // The sandbox's Opus 5.5 offers no level: the node stays on the sandbox at the model's default, and the reply says so.
+    expect(session(applied.doc, 'page')).toMatchObject({ runtime: 'sandbox', model: 'bedrock.claude-opus-5-5', effort: '' });
+    expect(session(applied.doc, 'tool')).toMatchObject({ runtime: 'sandbox', model: 'qwen3.8-27b-p6', effort: 'low' });
+    expect(session(applied.doc, 'gone')).toMatchObject({ runtime: 'sandbox', model: '', effort: '' });
+    expect(session(applied.doc, 'plain')).toMatchObject({ runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5', effort: 'low' });
+    expect(applied.adjustments).toEqual([expect.stringContaining('no “low” reasoning effort')]);
+    // A model the sandbox does not offer leaves the node as it was.
+    const left = applyCanvasPlan(doc(agent('page', { runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' })),
+      plan({ type: 'set_model', nodeId: 'page', model: 'bedrock.claude-opus-5-5' }), 'en', '', undefined, models);
+    expect(session(left.doc, 'page')).toMatchObject({ runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' });
+    expect(left.adjustments).toEqual([expect.stringContaining('its sandbox computer, which does not offer “Claude Opus 5.5”')]);
+  });
+
   it('goes back to the workspace default, and refuses a model it cannot run', () => {
     const before = doc(agent('page', { runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5', effort: 'high' }), agent('other'));
     const applied = applyCanvasPlan(before, plan(
@@ -367,6 +394,33 @@ describe('what the planner is shown', () => {
     expect(context).not.toContain('acceptanceCriteria in add_node');
     // The request appears once, in the table, not once per node.
     expect(context.split(REQUEST).length - 1).toBe(1);
+  });
+
+  it('shows a node’s effort where one is set, so a plan lowers it only where it can (2026-10-26)', () => {
+    configureSaaSCanvas({ tenant, canvasId: 'canvas' });
+    const context = buildPlanningContext(doc(
+      agent('page', { taskFrame: frame([REQUEST]), model: 'bedrock.claude-opus-5-5', effort: 'low' }),
+      agent('copy', { taskFrame: frame([REQUEST]), model: 'bedrock.claude-opus-5-5' }),
+      // An effort left on a node that runs the workspace default says nothing about the model it runs.
+      agent('notes', { taskFrame: frame([REQUEST]), effort: 'high' }),
+    ), [], 'en', [], { models: [{ id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high'] }] });
+    expect(context).toContain('"model":"bedrock.claude-opus-5-5","effort":"low"');
+    expect(context.match(/"effort":/g)).toHaveLength(1);
+    expect(context).toContain('"model":"default"');
+    // A node on its sandbox computer says so: a plan's effort does not reach it there.
+    const sandboxed = buildPlanningContext(doc(agent('tool', { runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' }), agent('page')), [], 'en', [],
+      { models: [{ id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high'] }] });
+    expect(sandboxed).toContain('"model":"bedrock.claude-opus-5-5","sandbox":true');
+    expect(sandboxed.match(/"sandbox":true/g)).toHaveLength(1);
+    // So does a workspace Agent's node, whose model and effort are its Agent's (Codex and Claude review, round 2: the
+    // planner kept lowering such a node's effort, which a plan cannot do, instead of splitting its work).
+    const owned = buildPlanningContext(doc(agent('writer', { model: 'bedrock.claude-opus-5-5', agentRef: { source: 'workspace', agentId: 'agent-1' } }), agent('page')),
+      [], 'en', [], { models: [{ id: 'bedrock.claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high'] }] });
+    expect(owned).toContain('"model":"bedrock.claude-opus-5-5","workspaceAgent":true');
+    expect(owned.match(/"workspaceAgent":true/g)).toHaveLength(1);
+    // Where no models are offered, neither the model nor the effort is shown.
+    const bare = buildPlanningContext(doc(agent('page', { model: 'bedrock.claude-opus-5-5', effort: 'low' })), [], 'en');
+    expect(bare).not.toContain('"effort":');
   });
 
   it('tells a local planner how to brief its nodes and fix a failure, without set_model', () => {

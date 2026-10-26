@@ -127,6 +127,27 @@ func TestPlannerDeliversAPageWithOneFrontendNode(t *testing.T) {
 	}
 }
 
+// 2026-10-26: at its default effort Claude Opus 5.5 spent about 58,000 of a page node's 64,000 output tokens thinking and
+// delivered no page. The planner gives a page node it adds the lowest effort the new-node model lists, and a failed node
+// with none of its own that first, with a set_model of the node's own model. It sets the effort of no other node already
+// on the canvas unless the user asks (Claude review: a node set up anew loses what it delivered, and a user's chosen level
+// would be overwritten), and none on a team or sandbox node, whose effort a plan does not reach.
+func TestPlannerGivesPageNodesItAddsTheLowestEffortTheirModelLists(t *testing.T) {
+	for _, rule := range []string{
+		"A set_model may also name a node's own model to set only its effort, one of the levels the context lists for that model",
+		"on a node already on the canvas, only when the user asks for it or to fix the node's failed run as below, since a node set up anew loses what it delivered",
+		"Where the context lists effort levels for the model it names for new nodes",
+		"give each node you add that delivers a whole page, game or tool, and each code-module node you add feeding one, the lowest level that model lists",
+		"leave the effort of every other node as it is",
+		"to fix a failed node whose answer was too long or that ran out of time, first give it the lowest effort its model lists, with a set_model naming its own model",
+		"the node shows no effort, team, workspaceAgent or sandbox of its own (a node shows its effort where one is set)",
+	} {
+		if !strings.Contains(plannerInstructions, rule) {
+			t.Errorf("the planner is not told: %s", rule)
+		}
+	}
+}
+
 // 2026-10-25: asked twice whether the frontend should depend on the mock-data node, the canvas assistant asked back
 // which input field to use and changed nothing; it wired them only once told to decide itself. And asked to fix a node
 // whose inputs were more than its model could read, it cut that node off from the three pages it existed to combine.

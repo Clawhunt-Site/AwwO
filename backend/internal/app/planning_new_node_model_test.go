@@ -43,8 +43,15 @@ func TestPlanGateTakesANewNodesModelOnlyWhereItTakesItAnyway(t *testing.T) {
 	for name, c := range map[string]struct{ extra, newNodeModel string }{
 		"another model":           {`,"model":"bedrock.claude-opus-5-5"`, "deepseek-flash"},
 		"a request naming none":   {`,"model":"deepseek-flash"`, ""},
-		"an effort beside it":     {`,"model":"deepseek-flash","effort":"high"`, "deepseek-flash"},
 		"a model that is no text": {`,"model":7`, "deepseek-flash"},
+		// An effort is the set_model of the model new nodes take (TestPlanGateTakesANewNodesEffortAsItsSetModel), and
+		// only that: not beside another model, not where new nodes take the workspace default, not one that is no level.
+		"an effort beside another model":      {`,"model":"bedrock.claude-sonnet-5-5","effort":"low"`, "bedrock.claude-opus-5-5"},
+		"an effort where new nodes take none": {`,"effort":"low"`, ""},
+		"an effort on the workspace default":  {`,"model":"default","effort":"low"`, "default"},
+		"an effort that is no level":          {`,"effort":"LOW"`, "bedrock.claude-opus-5-5"},
+		"an effort that is no text":           {`,"effort":1`, "bedrock.claude-opus-5-5"},
+		"an empty effort":                     {`,"effort":""`, "bedrock.claude-opus-5-5"},
 	} {
 		if got, ok := acceptPlanFor(plan(c.extra), c.newNodeModel); ok {
 			t.Errorf("%s: accepted as %s", name, got)
@@ -59,6 +66,40 @@ func TestPlanGateTakesANewNodesModelOnlyWhereItTakesItAnyway(t *testing.T) {
 		if got, ok := acceptPlanFor(answer, "deepseek-flash"); ok {
 			t.Errorf("%s: accepted as %s", media, got)
 		}
+	}
+}
+
+// The planner gives a node that delivers a page on a model listing effort levels its lowest one (2026-10-26), with a
+// set_model of that model; an effort given on the node's add_node instead, with the model new nodes take or none, is
+// that set_model, right after the node and before the steps made for its inputs.
+func TestPlanGateTakesANewNodesEffortAsItsSetModel(t *testing.T) {
+	const opus = "bedrock.claude-opus-5-5"
+	for name, extra := range map[string]string{
+		"an effort alone":                  `,"effort":"low"`,
+		"the model new nodes take with it": `,"model":"` + opus + `","effort":"low"`,
+	} {
+		answer := `{"version":1,"summary":"S","operations":[{"type":"add_node","ref":"page","templateId":"frontend","title":"Page","acceptanceCriteria":["Opens"],` +
+			`"inputs":[{"id":"brief","value":"An island"},{"id":"palette","label":"Palette","type":"text","required":false}]` + extra + `}]}`
+		got, ok := acceptPlanFor(answer, opus)
+		if !ok {
+			t.Fatalf("%s: refused", name)
+		}
+		ops := canvasPlanOps(t, got)
+		if len(ops) != 3 || ops[0]["type"] != "add_node" || ops[0]["model"] != nil || ops[0]["effort"] != nil {
+			t.Fatalf("%s: %s", name, got)
+		}
+		if want := (map[string]any{"type": "set_model", "nodeId": "page", "model": opus, "effort": "low"}); fmt.Sprint(ops[1]) != fmt.Sprint(want) {
+			t.Errorf("%s: the set_model is %v", name, ops[1])
+		}
+		if ops[0]["inputValues"].(map[string]any)["brief"] != "An island" || ops[2]["type"] != "add_field" || ops[2]["nodeId"] != "page" {
+			t.Errorf("%s: the node's inputs are %v, then %v", name, ops[0], ops[2])
+		}
+	}
+	// A plan that already says it so is taken as it is.
+	plain := `{"version":1,"summary":"S","operations":[{"type":"add_node","ref":"page","templateId":"frontend","acceptanceCriteria":["Opens"]},` +
+		`{"type":"set_model","nodeId":"page","model":"` + opus + `","effort":"low"}]}`
+	if got, ok := acceptPlanFor(plain, opus); !ok || len(canvasPlanOps(t, got)) != 2 {
+		t.Errorf("a plan with its set_model: %v %s", ok, got)
 	}
 }
 

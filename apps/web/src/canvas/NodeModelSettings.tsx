@@ -41,7 +41,13 @@ export function NodeModelSettings({ node, groups, loading = false, error = '', o
   const selected: ModelPaletteSelection | undefined = node.model ? entries.find(entry => entry.model === node.model) : undefined;
   // The levels shown are the automatic runtime's (nodeRuntime.ts), so choosing one also moves a node set up on another
   // runtime there: a level that runtime has, kept on the old runtime, would be refused when the node is set up.
-  const efforts = selected && (!keepRuntime || selected.runtime === node.runtime) ? selected.efforts ?? [] : [];
+  const kept = Boolean(keepRuntime && selected && selected.runtime !== node.runtime);
+  const efforts = selected && !kept ? selected.efforts ?? [] : [];
+  // A level the node saved that its model does not offer now (a worker that stopped listing it): shown as unavailable so
+  // that the reader can go back to the model's default, without which the node cannot run (its setup refuses a level the
+  // model lacks). Only where the levels are known: not while the models load or after they failed to (the list is empty
+  // then), nor for a team kept on another runtime, whose levels there are not listed here.
+  const stale = node.effort && !loading && !error && !kept && !efforts.includes(node.effort) ? node.effort : '';
   const pick = (model: string) => {
     if (!model) { onChange({ runtime: '', model: '', effort: '' }); return; }
     const entry = entries.find(item => item.model === model && item.available);
@@ -64,11 +70,12 @@ export function NodeModelSettings({ node, groups, loading = false, error = '', o
       {t('inspector.modelsFailed')} {error}
       {onRetry ? <> <button type="button" className="canvas-inspector-link" onClick={onRetry}>{t('inspector.modelsRetry')}</button></> : null}
     </div> : null}
-    {efforts.length ? <>
+    {efforts.length || stale ? <>
       <label className="canvas-inspector-label" htmlFor={effortId}>{t('inspector.effort')}</label>
-      <select id={effortId} className="canvas-inspector-input" aria-label={t('inspector.effort')} value={efforts.includes(node.effort) ? node.effort : ''}
-        disabled={disabled} onChange={event => onChange({ runtime: keepRuntime ? node.runtime : selected?.runtime ?? node.runtime, model: node.model, effort: event.target.value })}>
+      <select id={effortId} className="canvas-inspector-input" aria-label={t('inspector.effort')} value={efforts.includes(node.effort) || stale ? node.effort : ''}
+        disabled={disabled || loading} onChange={event => onChange({ runtime: keepRuntime ? node.runtime : selected?.runtime ?? node.runtime, model: node.model, effort: event.target.value })}>
         <option value="">{selected?.defaultEffort ? t('inspector.effortDefaultIs', { level: effortLabel(t, selected.defaultEffort) }) : t('inspector.effortDefault')}</option>
+        {stale ? <option value={stale} disabled>{t('inspector.effortUnavailableSaved', { level: effortLabel(t, stale) })}</option> : null}
         {efforts.map(level => <option key={level} value={level}>{effortLabel(t, level)}</option>)}
       </select>
       <div className="canvas-inspector-hint">{t('inspector.effortHint')}</div>

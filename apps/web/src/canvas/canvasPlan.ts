@@ -1003,7 +1003,11 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         }
         const follow = () => { if (node.team) node.team = { ...node.team, runtime: newTeamRuntime(node) }; };
         const wanted = op.model.trim();
-        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = ''; node.model = ''; node.effort = ''; follow(); modelSetNodeIds.add(node.id); break; }
+        // A node on its sandbox computer stays there: the sandbox is the node's own choice, which AwwO never makes or
+        // undoes for it (nodeRuntime.ts SANDBOX_RUNTIME), so a plan changes only its model and effort, as the sandbox
+        // offers them (2026-10-26: the planner now sets page nodes' effort with set_model, which moved such a node off).
+        const sandboxed = node.runtime === SANDBOX_RUNTIME;
+        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = sandboxed ? SANDBOX_RUNTIME : ''; node.model = ''; node.effort = ''; follow(); modelSetNodeIds.add(node.id); break; }
         const choices = models?.choices ?? [];
         const folded = wanted.toLowerCase();
         const id = choices.find(choice => choice.model === wanted)?.model
@@ -1027,10 +1031,16 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             `Did not switch “${title}” to “${entry.name || entry.model}”: its team cannot run on that model’s engine`);
           break;
         }
-        const effort = op.effort && entry.efforts?.includes(op.effort) ? op.effort : '';
-        if (op.effort && !effort) adjust(`「${title}」改用了「${entry.name || entry.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
-          `“${title}” now uses “${entry.name || entry.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
-        node.runtime = entry.runtime; node.model = entry.model; node.effort = effort;
+        const placed = sandboxed ? choices.find(choice => choice.runtime === SANDBOX_RUNTIME && choice.model === entry.model && choice.available) : entry;
+        if (!placed) {
+          adjust(`没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${entry.name || entry.model}」`,
+            `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${entry.name || entry.model}”`);
+          break;
+        }
+        const effort = op.effort && placed.efforts?.includes(op.effort) ? op.effort : '';
+        if (op.effort && !effort) adjust(`「${title}」改用了「${placed.name || placed.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
+          `“${title}” now uses “${placed.name || placed.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
+        node.runtime = placed.runtime; node.model = placed.model; node.effort = effort;
         follow();
         modelSetNodeIds.add(node.id);
         break;
