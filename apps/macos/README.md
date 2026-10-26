@@ -1,6 +1,6 @@
 # AwwO for Mac
 
-Source candidate **0.10.0, build 11** is the Apple Silicon desktop app for AwwO. It requires
+Source candidate **0.10.1, build 12** is the Apple Silicon desktop app for AwwO. It requires
 macOS 14 or later. The Swift/AppKit/WebKit shell opens the hosted service (the hosted
 account, workspaces and history; the website and server deploy separately) and, in a
 build that carries its payload, the local workspace: **AwwO 本地版**, the hosted product's
@@ -10,8 +10,8 @@ API, web app and workers; see [docs/awwo-local-edition.md](../../docs/awwo-local
 it; the 工作区 menu switches. A build without the payload is the hosted client alone. No
 provider API key is bundled in either.
 
-Build 11 starts the local workspace's runtime with the same contract as AwwO Local's
-Windows window (`--shell macos`), keeps its data in
+From build 11 on, the app starts the local workspace's runtime with the same contract as
+AwwO Local's Windows window (`--shell macos`), keeps its data in
 `~/Library/Application Support/store.clawhunt.awwo.local/state`, and never reads or writes
 `~/Library/Application Support/AwwO Local/`, which an earlier build's local mode used. The
 window opens the local workspace at `http://127.0.0.1:<port>` with a cookie of its launch's
@@ -98,7 +98,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It creates `.local/releases/macos-0.10.0-build11-<sha7>/` and refuses to overwrite
+It creates `.local/releases/macos-0.10.1-build12-<sha7>/` and refuses to overwrite
 an existing release directory. Earlier build 8 artifacts remain separate.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
