@@ -28,6 +28,8 @@ test('the agent is told about its files, the tools its image has and the web, an
   assert.ok(plain.includes('no network') && !plain.includes('/inputs') && !plain.includes('rea ') && !plain.includes('awwo-check-page') && !plain.includes('PROXY'));
   const full = workspaceSoul({ tools: new Set(['rea', 'check-page']), sandbox: { egress: { socketDir: '/srv/egress', secret: 'x'.repeat(32) } } }, { inputs });
   assert.ok(full.includes('/inputs: app.zip') && full.includes('rea analyze-javascript-application') && full.includes('awwo-check-page'));
+  // What the page check's held clock reports reaches this worker's agents too (workspace-sandbox.test.ts pins the words).
+  assert.ok(full.includes('heldClock.failure') && full.includes('Exit 4 (verdict "unfinished")') && !plain.includes('heldClock'));
   assert.ok(full.includes('HTTPS_PROXY') && !full.includes('no network') && !full.includes('x'.repeat(32)));
   // A recoverable tool failure is an ordinary result (tool-failures.ts): the agent is told what it means.
   for (const soul of [plain, full]) assert.ok(soul.includes('failed: true did nothing') && soul.includes('Only published: true delivered a file.'));

@@ -96,6 +96,31 @@ test('egress and tools configuration is both-or-neither and names only known pro
   assert.ok(online.includes(`three.js ${three}`) && online.includes(`cdn.jsdelivr.net/npm/three@${three}/`), three);
   assert.ok(online.includes("--missing-ok '**/*.glb'") && online.includes('awwo-check-page --help'));
   assert.ok(online.includes('HTTPS_PROXY') && !online.includes('no network') && online.includes('rea analyze-javascript-application') && online.includes('window.awwoSelfTest'));
+  // A page written for the render worker is checked on its held clock too, of which a film's tester read nothing: agents
+  // are told to read the verdict and heldClock, what a failure or a note there means and how to fix it, when to force the
+  // check, and that exit 4 is no pass, in the words, options and defaults the checker has.
+  const checker = await readFile(fileURLToPath(new URL('../../deploy/saas/workspace/tools/awwo-check-page.mjs', import.meta.url)), 'utf8');
+  assert.match(checker, /const EXIT = \{[^}]*\bunfinished: 4\b/);
+  assert.match(checker, /\bverdict: 'unfinished'/);
+  for (const field of ['why', 'failure', 'unfinished', 'note']) assert.match(checker, new RegExp(`heldClock: \\{[^}]*\\b${field}: `), field);
+  assert.match(checker, /const DEFAULTS = \{[^}]*\bbudgetMs: 25_?000\b/);
+  assert.match(checker, /const NUMBERS = \{[^}]*'--budget-ms'/);
+  for (const flag of ['--held-clock', '--no-held-clock']) assert.match(checker, new RegExp(`const SWITCHES = \\{[^}]*'${flag}'`), flag);
+  // The reasons the text names: of a page too busy to answer, and of one that defines a function after the check asked
+  // (which the check says it defines fewer of, or neither).
+  for (const why of ["'the page did not answer whether it defines window.renderAt or window.renderAudio'", "`the page defines ${names.join(' and ')}`",
+    "'the page defines neither window.renderAt nor window.renderAudio'"]) assert.ok(checker.includes(why), why);
+  // A larger budget may let a check the budget cut short finish, but not one its own 15 s bounds stopped: one more run,
+  // within the command's limit, then the agent says so.
+  for (const words of ['window.renderAt or window.renderAudio', 'verdict and heldClock too',
+    'for such a page, pass --held-clock when heldClock.why says the page did not answer, or says it defines fewer of those functions than it does', 'heldClock.failure says', 'heldClock.note that it would use the page before window.__ready turned true',
+    'renderAt draws each frame from t alone', 'neither renderAudio nor window.__ready waits on a timer or an animation frame', 'set __ready from load events and promises',
+    'Exit 4 (verdict "unfinished")', 'heldClock.unfinished says where it stopped', 'not a pass', '--no-held-clock', "where the command's time limit allows (120 s by default)",
+    'run it once more with a larger --budget-ms (25000 by default)', 'if it still does not finish, say that the page has not been shown to render']) assert.ok(online.includes(words), words);
+  assert.ok(!offline.includes('heldClock') && !sandboxAbilities(new Set(['rea']), true).join(' ').includes('heldClock'));
+  // Without the web a command gets 30 s (workspace-protocol.ts, the OpenMaus worker's config.ts).
+  const checkOffline = sandboxAbilities(new Set(['check-page']), false).join(' ');
+  assert.ok(checkOffline.includes('heldClock.failure') && checkOffline.includes("where the command's time limit allows (30 s by default)"));
   // Both name what the image has and how little room an install gets, so a data task uses the installed packages.
   for (const text of [offline, online]) assert.ok(text.startsWith(WORKSPACE_SOFTWARE) && ['pandas', 'matplotlib', 'openpyxl', '128 MiB'].every(word => text.includes(word)));
   assert.ok(online.includes('--system-site-packages') && !offline.includes('pip'));
