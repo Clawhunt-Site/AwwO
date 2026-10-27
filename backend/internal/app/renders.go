@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -407,7 +409,12 @@ func (a *App) executeRender(stop context.Context, tid, id, canvasID, nodeID, htm
 		return
 	}
 	if resp.StatusCode != 200 {
-		a.settleRender(tid, id, "failed", renderWorkerCode(resp.StatusCode, raw), nil)
+		code, reason := renderWorkerFailure(resp.StatusCode, raw)
+		var result any
+		if reason != "" {
+			result = map[string]string{"reason": reason}
+		}
+		a.settleRender(tid, id, "failed", code, result)
 		return
 	}
 	var reply renderReply
@@ -479,30 +486,66 @@ func nonNil(items []string) []string {
 	return items
 }
 
-// renderWorkerCode maps the worker's refusal to a stable code; the worker's own message is never shown.
-func renderWorkerCode(status int, raw []byte) string {
+// renderWorkerFailure maps the worker's refusal to a stable code. A page it refused for waiting on its own clock also
+// keeps the worker's words, which name what waited (the render's result.reason, as a refused edit keeps its words,
+// edit_worker.go); the worker's other messages are never shown.
+func renderWorkerFailure(status int, raw []byte) (code, reason string) {
 	var reply struct {
 		Error struct {
-			Code   string `json:"code"`
-			Detail string `json:"detail"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Detail  string `json:"detail"`
 		} `json:"error"`
 	}
+	// A field of another type is left empty and the others are still read (json.Unmarshal goes on past it).
 	_ = json.Unmarshal(raw, &reply)
 	switch {
 	case status == 429:
-		return "render_busy"
+		return "render_busy", ""
 	case status == 503 || status == 401:
-		return "render_unavailable"
+		return "render_unavailable", ""
 	case status == 422 && reply.Error.Detail == "timeout":
-		return "timeout"
+		return "timeout", ""
 	case status == 422 && reply.Error.Detail == "page_load_failed":
-		return "render_page_failed"
+		return "render_page_failed", ""
 	case status == 422 && reply.Error.Detail == "output_too_large":
-		return "render_output_too_large"
+		return "render_output_too_large", ""
+	case status == 400 && reply.Error.Code == "INVALID_RENDER" && reply.Error.Detail == "page_waits_on_timers":
+		return "render_page_waits_on_timers", renderReason(reply.Error.Message)
 	case status == 400 || status == 413:
-		return "render_rejected"
+		return "render_rejected", ""
 	}
-	return "render_failed"
+	return "render_failed", ""
+}
+
+// renderReason is the worker's message as a render keeps it: one line of plain text of at most 500 characters (as many
+// as an edit keeps of a refusal's words), without control characters (PostgreSQL's jsonb refuses a NUL), invisible
+// format characters or broken UTF-8, its white space one space between words. It stops as soon as it can keep no
+// more, so cleaning a broken worker's long message costs no more memory than the words kept.
+func renderReason(message string) string {
+	var kept strings.Builder
+	count, space := 0, false
+	for _, r := range message {
+		if r == utf8.RuneError || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			if count >= 499 { // no room for a space and a character after it
+				break
+			}
+			space = count > 0
+			continue
+		}
+		if space {
+			kept.WriteByte(' ')
+			count, space = count+1, false
+		}
+		kept.WriteRune(r)
+		if count++; count == 500 {
+			break
+		}
+	}
+	return kept.String()
 }
 
 var renderOutputKinds = map[string]struct{ field, name, ext, contentType string }{

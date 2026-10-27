@@ -7,7 +7,9 @@ export interface RenderJob {
   id: string; canvasId: string; nodeId: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   params: RenderParams; htmlBytes: number; htmlSha256?: string; errorCode: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
   result: { mode?: 'contract' | 'virtual-time'; frames?: number; distinctFrames?: number; seconds?: number; fps?: number; width?: number; height?: number;
-    elapsedMs?: number; warnings?: string[]; pageErrors?: string[]; outputs?: RenderOutput[] };
+    elapsedMs?: number; warnings?: string[]; pageErrors?: string[]; outputs?: RenderOutput[];
+    /** A failed render's: the renderer's own words for a page it refused, plain text (render_page_waits_on_timers). */
+    reason?: string };
 }
 
 export const RENDER_PRESETS = [

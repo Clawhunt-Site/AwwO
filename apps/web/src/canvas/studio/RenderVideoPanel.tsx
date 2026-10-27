@@ -17,7 +17,8 @@ const POLL_MS = 1500;
 /** Status reads that may fail in a row (a restart, a network blip) before the panel says so; it keeps reading. */
 const QUIET_FAILURES = 3;
 const ERROR_CODES = new Set(['render_busy', 'render_quota', 'render_unavailable', 'timeout', 'render_page_failed', 'render_output_too_large',
-  'render_invalid_output', 'render_rejected', 'cancelled', 'interrupted', 'media_storage_full', 'render_failed', 'render_storage_failed', 'render_too_large', 'invalid_render']);
+  'render_invalid_output', 'render_rejected', 'render_page_waits_on_timers', 'cancelled', 'interrupted', 'media_storage_full', 'render_failed',
+  'render_storage_failed', 'render_too_large', 'invalid_render']);
 const WARNING_CODES = new Set(['gif_too_large', 'gif_fps_reduced', 'contact_too_large', 'gif_failed', 'contact_failed', 'ready_timeout', 'fonts_timeout',
   'timer_limit', 'network_blocked', 'page_errors', 'still_too_large', 'probe_frames']);
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -149,6 +150,10 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
   const videoUrl = video ? storedMediaUrl(video.artifactId) : null;
   const jobFrames = job ? job.result.frames ?? Math.round((job.params.seconds ?? 0) * (job.params.fps ?? 0)) : 0;
   const mode = job?.result.mode === 'contract' ? t('studio.renderModeContract') : t('studio.renderModeVirtual');
+  // The renderer's own words for a page it refused (one whose renderAt waited on its own clock), as the server kept them.
+  // They are English whatever the UI's language, so they are marked so inside the line that frames them.
+  const reason = job?.status === 'failed' && typeof job.result.reason === 'string' ? job.result.reason : '';
+  const [reasonBefore, reasonAfter = ''] = t('studio.renderReason').split('{reason}');
 
   return <section className="awwo-studio-render" aria-label={t('studio.renderTitle')}>
     <header><Clapperboard size={15} aria-hidden="true" /><h3>{t('studio.renderTitle')}</h3>
@@ -185,8 +190,12 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
           {!!job.result.warnings?.filter(item => item !== 'static_page').length && <p className="awwo-studio-render-note">{t('studio.renderWarnings', { notes: job.result.warnings.filter(item => item !== 'static_page').map(warning).join(' ') })}</p>}
           {!!job.result.pageErrors?.length && <p className="awwo-studio-render-note">{t('studio.renderPageErrors', { errors: job.result.pageErrors.join('; ') })}</p>}
         </>
-        : <p className="awwo-studio-render-problem">{job.errorCode === 'render_busy' ? t('studio.renderBusyJob')
-          : t('studio.renderFailed', { reason: message(job.status === 'cancelled' ? 'cancelled' : job.errorCode ?? 'render_failed') })}</p>}
+        : <>
+          <p className="awwo-studio-render-problem">{job.errorCode === 'render_busy' ? t('studio.renderBusyJob')
+            : t('studio.renderFailed', { reason: message(job.status === 'cancelled' ? 'cancelled' : job.errorCode ?? 'render_failed') })}</p>
+          {/* One inline run: the result's paragraphs are flex rows, which would set the label beside the words. */}
+          {reason && <p className="awwo-studio-render-note"><span>{reasonBefore}<span lang="en">{reason}</span>{reasonAfter}</span></p>}
+        </>}
     </div>}
   </section>;
 }

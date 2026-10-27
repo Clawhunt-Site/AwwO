@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func renderPayload(kind, contentType string, data []byte) map[string]any {
@@ -95,8 +97,124 @@ func TestRenderParamsValidation(t *testing.T) {
 			t.Fatalf("accepted %+v", p)
 		}
 	}
-	if renderWorkerCode(429, nil) != "render_busy" || renderWorkerCode(422, []byte(`{"error":{"code":"RENDER_FAILED","detail":"timeout"}}`)) != "timeout" || renderWorkerCode(500, nil) != "render_failed" {
-		t.Fatal("worker codes mapped wrongly")
+}
+
+// The render worker's words for a page whose renderAt(t) waited on its own clock (its held-clock refusal).
+const renderHeldReason = "window.renderAt(0) had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock. " +
+	"The renderer moves that clock only when it draws a frame, which it does once renderAt(t) has settled, so renderAt must draw from t alone, without waiting on a timer or an animation frame."
+
+func renderRefusal(code, message, detail string) []byte {
+	return jsonBytes(map[string]any{"error": map[string]any{"code": code, "message": message, "field": "html", "detail": detail}})
+}
+
+// The worker's answers map to stable codes, and only a page it refused for waiting on its own clock keeps its words.
+func TestRenderWorkerFailureCodes(t *testing.T) {
+	for _, c := range []struct {
+		status       int
+		raw          []byte
+		code, reason string
+	}{
+		{400, renderRefusal("INVALID_RENDER", renderHeldReason, "page_waits_on_timers"), "render_page_waits_on_timers", renderHeldReason},
+		// Without words, or with a message that is not text, the refusal keeps its code and says nothing more.
+		{400, []byte(`{"error":{"code":"INVALID_RENDER","field":"html","detail":"page_waits_on_timers"}}`), "render_page_waits_on_timers", ""},
+		{400, []byte(`{"error":{"code":"INVALID_RENDER","message":{"text":"x"},"field":"html","detail":"page_waits_on_timers"}}`), "render_page_waits_on_timers", ""},
+		{400, renderRefusal("INVALID_RENDER", "Content-Type must be application/json.", ""), "render_rejected", ""},
+		{400, renderRefusal("INVALID_RENDER", renderHeldReason, "page_load_failed"), "render_rejected", ""},
+		{400, renderRefusal("RENDER_FAILED", renderHeldReason, "page_waits_on_timers"), "render_rejected", ""},
+		{400, []byte("not json"), "render_rejected", ""},
+		{413, renderRefusal("INVALID_RENDER", renderHeldReason, "page_waits_on_timers"), "render_rejected", ""},
+		{422, renderRefusal("RENDER_FAILED", renderHeldReason, "page_waits_on_timers"), "render_failed", ""},
+		{422, renderRefusal("RENDER_FAILED", "The render took too long.", "timeout"), "timeout", ""},
+		{422, renderRefusal("RENDER_FAILED", "The page did not load.", "page_load_failed"), "render_page_failed", ""},
+		{422, renderRefusal("RENDER_FAILED", "The video is too large.", "output_too_large"), "render_output_too_large", ""},
+		{422, renderRefusal("RENDER_FAILED", "ffmpeg failed.", "ffmpeg_failed"), "render_failed", ""},
+		{429, nil, "render_busy", ""},
+		{401, nil, "render_unavailable", ""},
+		{503, renderRefusal("RENDER_UNAVAILABLE", renderHeldReason, "page_waits_on_timers"), "render_unavailable", ""},
+		{500, nil, "render_failed", ""},
+	} {
+		if code, reason := renderWorkerFailure(c.status, c.raw); code != c.code || reason != c.reason {
+			t.Errorf("%d %s: got %q %q, want %q %q", c.status, c.raw, code, reason, c.code, c.reason)
+		}
+	}
+}
+
+// The worker's words are kept as one line of plain text of at most 500 characters: no control character (a NUL would
+// make PostgreSQL refuse the whole record), no invisible formatting, no broken UTF-8.
+func TestRenderReasonIsBoundedPlainText(t *testing.T) {
+	// A zero-width space, a right-to-left override, the next-line control and the line separator, made from their code
+	// points so that this file holds none of them.
+	zeroWidth, override, nextLine, lineSeparator := string(rune(0x200b)), string(rune(0x202e)), string(rune(0x85)), string(rune(0x2028))
+	raw := "  window.renderAt(0)\x00had\tnot\r\nsettled" + zeroWidth + override + " after\x7f" + nextLine + lineSeparator + "5 s\xff.  "
+	if got := renderReason(raw); got != "window.renderAt(0) had not settled after 5 s." {
+		t.Fatalf("%q", got)
+	}
+	if got := renderReason(strings.Repeat("时", 600)); got != strings.Repeat("时", 500) {
+		t.Fatal("a long reason must keep its first 500 characters", utf8.RuneCountInString(got), len(got))
+	}
+	if got := renderReason(strings.Repeat("held ", 120)); got != strings.TrimSpace(strings.Repeat("held ", 100)) {
+		t.Fatalf("a reason cut at a space must not end with one: %q", got)
+	}
+	// At the cut: a space with a character after it fits in the 499th and 500th places, but not from the 500th on.
+	if got := renderReason(strings.Repeat("a", 498) + " b c"); got != strings.Repeat("a", 498)+" b" {
+		t.Fatalf("a space and a character must fit in the last two places: %d runes, ending %q", utf8.RuneCountInString(got), got[max(0, len(got)-8):])
+	}
+	if got := renderReason(strings.Repeat("a", 499) + " b"); got != strings.Repeat("a", 499) {
+		t.Fatalf("a space in the last place must be left out: %d runes, ending %q", utf8.RuneCountInString(got), got[max(0, len(got)-8):])
+	}
+	if renderReason(renderHeldReason) != renderHeldReason || renderReason("\x00"+zeroWidth+" \n") != "" {
+		t.Fatal("the worker's own reason must be kept as it is, and one of no words not at all")
+	}
+	// A broken worker's long message costs no more than the words kept: it is read once, never split or copied whole
+	// (a cleaner that split the whole message into words took 208 MiB for these 16 MiB of "a ", this one 1 KiB).
+	long := strings.Repeat("a ", 8<<20)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	got := renderReason(long)
+	runtime.ReadMemStats(&after)
+	if got != strings.TrimSpace(strings.Repeat("a ", 250)) || after.TotalAlloc-before.TotalAlloc > 1<<20 {
+		t.Fatal("a long message must be read into its first 500 characters alone", utf8.RuneCountInString(got), after.TotalAlloc-before.TotalAlloc)
+	}
+}
+
+// A page the worker refused for waiting on its own clock fails with its own code and the worker's words, in the
+// render's record and its listing; words PostgreSQL would refuse are cleaned rather than leaving the render running,
+// and the worker's other refusals keep render_rejected and say nothing more. Each counts against the day's renders, as
+// the page's fault.
+func TestPostgresRenderKeepsTheReasonOfAPageHeldOnItsOwnClock(t *testing.T) {
+	renderer := newFakeRenderer(t)
+	h, tid, cid, owner := renderHarness(t, renderer)
+	h.a.cfg.RendersPerDay = 10
+	base := "/tenants/" + tid + "/canvases/" + cid + "/renders"
+	refuse := func(message, detail string) {
+		renderer.reply = func(w http.ResponseWriter, _ map[string]any) {
+			writeJSON(w, 400, map[string]any{"error": map[string]any{"code": "INVALID_RENDER", "message": message, "field": "html", "detail": detail}})
+		}
+	}
+	render := func(op string) map[string]any {
+		job := h.request(t, owner, "POST", base, map[string]any{"operationId": op, "nodeId": "node-a", "html": renderPage, "width": 320, "height": 180, "fps": 12, "seconds": 2}, 202)
+		return awaitRender(t, h, owner, base+"/"+job["id"].(string), "failed")
+	}
+	refuse(renderHeldReason, "page_waits_on_timers")
+	failed := render("render-held")
+	if failed["errorCode"] != "render_page_waits_on_timers" || failed["result"].(map[string]any)["reason"] != renderHeldReason {
+		t.Fatal("a page held on its own clock must fail saying why", failed)
+	}
+	listed := h.request(t, owner, "GET", base+"?nodeId=node-a", nil, 200)["items"].([]any)[0].(map[string]any)
+	if listed["id"] != failed["id"] || listed["result"].(map[string]any)["reason"] != renderHeldReason {
+		t.Fatal("the listing must carry the reason too", listed)
+	}
+	refuse("window.renderAt(0)\x00 had not settled\x1b after 5 s.", "page_waits_on_timers")
+	if failed = render("render-held-nul"); failed["errorCode"] != "render_page_waits_on_timers" || failed["result"].(map[string]any)["reason"] != "window.renderAt(0) had not settled after 5 s." {
+		t.Fatal("a reason PostgreSQL would refuse must be cleaned, and the render must still end", failed)
+	}
+	refuse("Content-Type must be application/json.", "")
+	if failed = render("render-refused"); failed["errorCode"] != "render_rejected" || len(failed["result"].(map[string]any)) != 0 {
+		t.Fatal("the worker's other refusals keep their code and say nothing more", failed)
+	}
+	if used := h.request(t, owner, "GET", "/tenants/"+tid+"/capabilities", nil, 200)["render"].(map[string]any)["usedToday"]; used != float64(3) {
+		t.Fatal("a refused page's render must count against the day's renders", used)
 	}
 }
 

@@ -255,7 +255,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | POST /knowledge/sources/web | url, title?, operationId | 读取一个公开网页并存为原始资料（201；同一正文已有资料时 200）；`web_reader_unavailable` 503、`web_reader_busy` 503（同时读取已满，不计次）、`web_read_quota` 429、`web_read_in_progress` 409（同一 operationId 仍在读取）、`web_<原因>` 见下 |
 | GET /canvases/{id}/renders | nodeId? | `{items}`：最近 30 次渲染 |
 | POST /canvases/{id}/renders | operationId, nodeId, html, width, height, fps, seconds, loop?, gif?, contact? | 202 受理；同一 operationId 只属于一个画布，幂等回放同一渲染；每个工作区同时只能有一个（`render_busy`）、每日次数（`render_quota`）、页面 ≤ 6 MiB（`render_too_large`） |
-| GET /canvases/{id}/renders/{renderId} | 无 | status（queued/running/completed/failed/cancelled）、errorCode、result（mode、frames、distinctFrames、warnings、outputs） |
+| GET /canvases/{id}/renders/{renderId} | 无 | status（queued/running/completed/failed/cancelled）、errorCode、result（mode、frames、distinctFrames、warnings、outputs）；渲染器因页面的 renderAt 在等它自己的时钟而拒绝时，errorCode 为 `render_page_waits_on_timers`，result.reason 是渲染器的原话（单行纯文本，至多 500 字） |
 | POST /canvases/{id}/renders/{renderId}/cancel | 空对象 | 幂等取消 |
 
 **技能** 写在节点的 `document.nodes[].skills`（最多 4 个引用，合计 ≤ 20 KiB）。受理运行时，服务器把每个技能的全文、版本和内容 hash 冻结进执行快照，放在节点指令之后、带边界说明的系统提示里（正文中的 `</skill` 被转义）；之后修改技能只影响新的运行。没有技能的节点请求逐字节不变。

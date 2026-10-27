@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createSessionNode, sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { LocaleProvider } from '../src/canvas/i18n';
 import { inspectorSavedNode } from '../src/canvas/inspectorSave';
 import { NodeSkillsEditor } from '../src/canvas/NodeSkillsEditor';
 import { RenderVideoPanel, useRenderCapability } from '../src/canvas/studio/RenderVideoPanel';
@@ -162,6 +163,62 @@ describe('rendering a page as a video', () => {
     render(<RenderVideoPanel nodeId="node-a" pageName="hero.html" capability={capability} documentOf={() => page} onClose={() => {}} />);
     expect(await screen.findByText('渲染未完成：页面在渲染器里没有加载成功。')).toBeVisible();
     expect(screen.queryByText(/已渲染 99 帧/)).toBeNull();
+  });
+
+  // The render worker's words for a page whose renderAt waited on a timer of its own (its held-clock refusal).
+  const held = 'window.renderAt(0) had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock. '
+    + 'The renderer moves that clock only when it draws a frame, which it does once renderAt(t) has settled, so renderAt must draw from t alone, without waiting on a timer or an animation frame.';
+
+  it('says why the renderer refused a page that waited on its own timers, in the renderer’s words', async () => {
+    scope();
+    const page = '<!doctype html><html><body>held page</body></html>';
+    const hash = createHash('sha256').update(page).digest('hex');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('/renders?nodeId=') ? json({ items: [
+      job({ status: 'failed', errorCode: 'render_page_waits_on_timers', htmlSha256: hash, result: { reason: held } }),
+    ] }) : json({}, 500)));
+    render(<RenderVideoPanel nodeId="node-a" pageName="hero.html" capability={capability} documentOf={() => page} onClose={() => {}} />);
+    expect(await screen.findByText('渲染未完成：页面的 window.renderAt(t) 在等它自己的计时器或动画帧，而它们要等这一帧画完才会运行：请只根据 t 画出每一帧。')).toBeVisible();
+    // The renderer's English words are marked as English inside the Chinese line.
+    const words = screen.getByText(held);
+    expect(words).toBeVisible();
+    expect(words).toHaveAttribute('lang', 'en');
+    // One inline run in the paragraph (a flex row, studio.css), or the label would stand in a column beside the words.
+    expect(words.closest('p')!.childNodes).toHaveLength(1);
+    expect(words.parentElement).toHaveTextContent(`渲染器的原话：${held}`);
+  });
+
+  it('follows a render to the renderer’s refusal and gives its reason in English', async () => {
+    scope();
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (String(url).includes('/renders?nodeId=')) return json({ items: [] });
+      if (String(url).endsWith('/capabilities')) return json({ render: { ...capability, usedToday: 4 }, skills: { enabled: true }, memory: { enabled: true }, webReader: { enabled: false } });
+      if (init.method === 'POST') return json(job({ status: 'running' }), 202);
+      return json(job({ status: 'failed', errorCode: 'render_page_waits_on_timers', result: { reason: held } }));
+    }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<LocaleProvider locale="en"><RenderVideoPanel nodeId="node-a" pageName="hero.html" capability={capability} documentOf={() => '<html><body>x</body></html>'} onClose={() => {}} /></LocaleProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Render' }));
+    await screen.findByText('Rendering 180 frames…');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+    expect(await screen.findByText('The render did not finish: The page’s window.renderAt(t) waited on its own timers or animation frames, which run only once the frame is drawn: draw each frame from t alone.')).toBeVisible();
+    const words = screen.getByText(held);
+    expect(words).toBeVisible();
+    expect(words).toHaveAttribute('lang', 'en');
+    // One inline run in the paragraph (a flex row, studio.css), or the label would stand in a column beside the words.
+    expect(words.closest('p')!.childNodes).toHaveLength(1);
+    expect(words.parentElement).toHaveTextContent(`The renderer said: ${held}`);
+  });
+
+  it('gives no renderer’s words for a refusal the server kept none for', async () => {
+    scope();
+    const page = '<!doctype html><html><body>refused page</body></html>';
+    const hash = createHash('sha256').update(page).digest('hex');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('/renders?nodeId=') ? json({ items: [
+      job({ status: 'failed', errorCode: 'render_rejected', htmlSha256: hash, result: { reason: 7 } }),
+    ] }) : json({}, 500)));
+    render(<RenderVideoPanel nodeId="node-a" pageName="hero.html" capability={capability} documentOf={() => page} onClose={() => {}} />);
+    expect(await screen.findByText('渲染未完成：渲染器拒绝了这个页面。')).toBeVisible();
+    expect(screen.queryByText(/渲染器的原话/)).toBeNull();
   });
 
   it('looks for the page’s earlier render again once the page has been built', async () => {
