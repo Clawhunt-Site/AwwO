@@ -138,6 +138,20 @@ test('422 carries the failure detail; 503 when the worker itself cannot render',
   }
 });
 
+test('400 on the page\'s field, in the renderer\'s words, when the page waits on its own clock; any other error keeps its 422', async (t) => {
+  const message = 'window.renderAt(0) had not settled after 5 s, with nothing left for the page to wait for but its own clock, on which 1 setTimeout timer is waiting. …';
+  const failures = [new RenderError('page_waits_on_timers', message, 400), Object.assign(new Error('not the renderer\'s'), { status: 400 })];
+  const { app, post } = await start(READY, { render: async () => { throw failures.shift(); } });
+  t.after(() => app.close());
+  const held = await post(renderBody());
+  assert.equal(held.status, 400);
+  assert.deepEqual(await held.json(), { error: { code: 'INVALID_RENDER', message, field: 'html', detail: 'page_waits_on_timers' } });
+  const other = await post(renderBody());
+  assert.equal(other.status, 422);
+  const { error } = await other.json();
+  assert.deepEqual([error.code, error.detail, error.field], ['RENDER_FAILED', 'render_failed', undefined]);
+});
+
 test('one render at a time: 429 while busy', async (t) => {
   const started = deferred();
   const release = deferred();

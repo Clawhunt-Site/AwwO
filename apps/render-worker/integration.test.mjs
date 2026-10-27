@@ -123,6 +123,134 @@ test('a page that never finishes a frame is stopped at the timeout', { skip }, a
   assert.deepEqual(readdirSync(TMP), []);
 });
 
+// The page's clock moves only when a frame is drawn (virtual-time.mjs), and a frame is drawn only once renderAt(t) has
+// settled, so a renderAt that waits on the page's own timers would wait for ever: it is refused once that is all it
+// waits on (held-clock.mjs). window.__ready is waited for up to 10 s, as before, then the frames are drawn.
+const BOOT_ON_A_TIMER = `<!doctype html><html><body style="margin:0"><canvas id="c" width="160" height="90"></canvas><script>
+window.__ready = false;
+const boot = new Promise((resolve) => setTimeout(resolve, 0)).then(() => { window.__ready = true; });
+window.renderAt = (t) => boot.then(() => { const ctx = document.getElementById('c').getContext('2d'); ctx.fillStyle = '#204060'; ctx.fillRect(t * 100, 0, 60, 90); });
+</script></body></html>`;
+
+test('a page whose renderAt waits on a boot that waits on setTimeout is refused on its first frame, naming the timer, not left to the timeout', { skip, timeout: 120_000 }, async () => {
+  const started = Date.now();
+  await assert.rejects(renderPage(request(BOOT_ON_A_TIMER), configWith(), { log: () => {} }), (error) => {
+    assert.deepEqual([error.status, error.code, error.field, error.detail], [400, 'INVALID_RENDER', 'html', 'page_waits_on_timers']);
+    assert.ok(error.message.startsWith('window.renderAt(0) had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock.'), error.message);
+    assert.ok(error.message.includes('The renderer moves that clock only when it draws a frame'), error.message);
+    return true;
+  });
+  // Its __ready, set by the same boot, is waited for its 10 s first; then its first frame for 5 s.
+  const took = Date.now() - started;
+  assert.ok(took >= 15_000 && took < 40_000, `refused after ${took} ms (the render's own limit is 120 s)`);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a renderAt that waits on an animation frame or a timer is refused on its frame, naming what waits', { skip, timeout: 120_000 }, async () => {
+  const page = (body) => `<!doctype html><html><body><script>window.renderAt = (t) => ${body};</script></body></html>`;
+  for (const [body, words] of [
+    ['new Promise((resolve) => requestAnimationFrame(resolve))', 'window.renderAt(0) had not settled after 5 s, in which the page did no work the renderer could see while 1 requestAnimationFrame callback was waiting on its clock.'],
+    // Frame 2 (t = 1/6) waits on two timers; the frames before it draw.
+    ['t < 0.1 ? undefined : new Promise((resolve) => { setTimeout(resolve, 5); setTimeout(() => {}, 50); })', 'window.renderAt(0.167) had not settled after 5 s, in which the page did no work the renderer could see while 2 setTimeout timers were waiting on its clock.'],
+  ]) {
+    await assert.rejects(renderPage(request(page(body)), configWith(), { log: () => {} }),
+      (error) => error.status === 400 && error.detail === 'page_waits_on_timers' && error.message.startsWith(words) && error.message.includes('so renderAt must draw from t alone'), body);
+  }
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a page that is ready at once renders as before, whatever timers and frames of its own wait on its clock', { skip }, async () => {
+  const ready = `<!doctype html><html><body style="margin:0"><canvas id="c" width="160" height="90"></canvas><script>
+window.__ready = false;
+Promise.resolve().then(() => { window.__ready = true; });
+setInterval(() => {}, 100); setTimeout(() => {}, 5000); requestAnimationFrame(function loop() { requestAnimationFrame(loop); });
+const ctx = document.getElementById('c').getContext('2d');
+window.renderAt = (t) => { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 160, 90); ctx.fillStyle = '#f80'; ctx.fillRect(t * 130, 30, 30, 30); };
+</script></body></html>`;
+  const result = await renderPage(request(ready), configWith(), { log: () => {} });
+  checkOutputs(result);
+  assert.deepEqual([result.mode, result.frames, result.distinctFrames, result.warnings], ['contract', 12, 12, []]);
+});
+
+test('a page that sets __ready from a timer still renders after its 10 s, with the warning, as its frames move the clock', { skip, timeout: 120_000 }, async () => {
+  const late = `<!doctype html><html><body style="margin:0;background:#000"><div id="d" style="width:40px;height:40px;background:#08f"></div><script>
+window.__ready = false; setTimeout(() => { window.__ready = true; }, 0);
+requestAnimationFrame(function loop(ts) { document.getElementById('d').style.marginLeft = (ts / 10) + 'px'; requestAnimationFrame(loop); });
+</script></body></html>`;
+  const started = Date.now();
+  const result = await renderPage(request(late, { seconds: 0.5 }), configWith(), { log: () => {} });
+  checkOutputs(result);
+  assert.deepEqual([result.mode, result.warnings], ['virtual-time', ['ready_timeout']]);
+  assert.ok(Date.now() - started >= 10_000, `took ${Date.now() - started} ms`);
+});
+
+test('a renderAt at work for longer than that, or waiting on a worker that keeps its own time, with timers of its own waiting, is waited for', { skip, timeout: 120_000 }, async () => {
+  // Frame 0 waits 6.5 s of real time (event time stamps keep it): busy on the main thread in short tasks, or on a
+  // worker sleeping on its own setTimeout (a worker keeps real time). Meanwhile an interval and a frame loop wait on the
+  // page's clock, so its renderer looks idle in the second case: only the worker says the page is not done.
+  const pages = {
+    script: `const start = new Event('t').timeStamp; const channel = new MessageChannel();
+const busy = new Promise((resolve) => { channel.port1.onmessage = () => { const end = new Event('t').timeStamp + 8; let n = 0;
+  while (new Event('t').timeStamp < end) n += Math.sqrt(n + 1); if (new Event('t').timeStamp - start < 6500) channel.port2.postMessage(0); else resolve(); }; channel.port2.postMessage(0); });`,
+    worker: `const source = 'onmessage = () => setTimeout(() => postMessage(1), 6500);';
+const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+const busy = new Promise((resolve) => { worker.onmessage = resolve; worker.postMessage(0); });`,
+  };
+  for (const [name, setup] of Object.entries(pages)) {
+    const html = `<!doctype html><html><body style="margin:0;background:#fff"><script>
+setInterval(() => {}, 100); requestAnimationFrame(function loop() { requestAnimationFrame(loop); });
+${setup}
+window.renderAt = (t) => busy.then(() => { document.body.style.background = t > 0 ? '#0a0' : '#00a'; });
+</script></body></html>`;
+    const started = Date.now();
+    const result = await renderPage(request(html, { seconds: 0.5 }), configWith(), { log: () => {} });
+    checkOutputs(result);
+    assert.equal(result.frames, 6, name);
+    assert.ok(Date.now() - started > 6500, `${name}: took ${Date.now() - started} ms`);
+  }
+});
+
+test('a renderAt waiting on something that keeps real time, with timers of its own waiting, is waited for', { skip, timeout: 120_000 }, async () => {
+  // Frame 0 waits 6.5 s on a wait that takes no CPU and that no request, worker, sound or media shows: an
+  // AbortSignal.timeout, a delayed scheduler.postTask, or an animation of an element that is not drawn, of one never
+  // added to the document, or of none, or an endless one played back to its start. The page counts them itself
+  // (virtual-time.mjs, __awwoClockWaiting(3) and (4)); an interval and a frame loop wait on its clock meanwhile.
+  const pages = {
+    timeout: 'const busy = new Promise((resolve) => AbortSignal.timeout(6500).addEventListener(\'abort\', resolve));',
+    postTask: 'const busy = scheduler.postTask(() => {}, { delay: 6500 });',
+    animation: `const box = document.createElement('div'); box.style.display = 'none'; document.body.append(box);
+const busy = box.animate([{ opacity: 0 }, { opacity: 1 }], 6500).finished;`,
+    detached: 'const busy = document.createElement(\'div\').animate([{ opacity: 0 }, { opacity: 1 }], 6500).finished;',
+    targetless: 'const motion = new Animation(new KeyframeEffect(null, [], 6500)); motion.play(); const busy = motion.finished;',
+    // An endless one played back to its start from 6.5 s in.
+    backwards: `const intro = document.createElement('div').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+intro.currentTime = 6500; intro.reverse(); const busy = intro.finished;`,
+  };
+  for (const [name, setup] of Object.entries(pages)) {
+    const html = `<!doctype html><html><body style="margin:0;background:#fff"><script>
+setInterval(() => {}, 100); requestAnimationFrame(function loop() { requestAnimationFrame(loop); });
+${setup}
+window.renderAt = (t) => busy.then(() => { document.body.style.background = t > 0 ? '#0a0' : '#00a'; });
+</script></body></html>`;
+    const started = Date.now();
+    const result = await renderPage(request(html, { seconds: 0.5 }), configWith(), { log: () => {} });
+    checkOutputs(result);
+    assert.deepEqual([result.frames, result.pageErrors], [6, []], name);
+    assert.ok(Date.now() - started > 6500, `${name}: took ${Date.now() - started} ms`);
+  }
+});
+
+test('a renderAt that leaves its drawing to a microtask draws each frame at that frame\'s time, as before', { skip }, async () => {
+  // The clock moves to t in the same task as renderAt(t) returns, before the page's microtasks run, as a framework that
+  // batches its drawing into one (Vue, Svelte, Lit) needs: each frame its own colour, none red with the frame before's time.
+  const deferred = `<!doctype html><html><body style="margin:0;background:#fff"><script>
+window.renderAt = (t) => { queueMicrotask(() => { document.body.style.background = Math.abs(performance.now() - t * 1000) < 0.001 ? 'hsl(' + Math.round(t * 300) + ', 80%, 50%)' : '#a00'; }); };
+</script></body></html>`;
+  const result = await renderPage(request(deferred), configWith(), { log: () => {} });
+  checkOutputs(result);
+  assert.deepEqual([result.mode, result.frames, result.distinctFrames, result.pageErrors], ['contract', 12, 12, []]);
+});
+
 // The router never sees a redirect's next hop, so the launch flags alone must keep every non-CDN host and IP
 // unreachable. Checked here without the router, against a local server that must see no request.
 test('without the request router, the launch flags alone refuse local hosts and IPs', { skip }, async () => {
@@ -248,6 +376,53 @@ test('a page whose sound outruns its budget, or whose renderAudio cannot be read
     (error) => error.status === 422 && error.detail === 'timeout' && error.message.includes('waits for a timer'));
   const getter = `<!doctype html><html><body><script>Object.defineProperty(window, 'renderAudio', { get() { throw new Error('broken getter'); } });</script></body></html>`;
   await assert.rejects(sound(getter, 1), (error) => error.detail === 'sound_failed' && error.message.includes('broken getter'));
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a page whose renderAudio waits on its own clock is refused at once, well within its budget, naming what waits', { skip, timeout: 120_000 }, async () => {
+  const started = Date.now();
+  await assert.rejects(sound(soundPage('await new Promise((resolve) => setTimeout(resolve, 10)); return { sampleRate, channels: [new Float32Array(sampleRate)] };'), 1),
+    (error) => error.status === 400 && error.detail === 'page_waits_on_timers' && error.message.startsWith('window.renderAudio had not settled after 5 s, in which the page '
+      + 'did no work the renderer could see while 1 setTimeout timer was waiting on its clock.') && error.message.includes('it draws none while a sound is made'), 'a timer');
+  assert.ok(Date.now() - started < 20_000, `refused after ${Date.now() - started} ms (the sound's own budget is 120 s)`);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a sound page that sets __ready from an animation frame is still made after its 10 s, with the warning', { skip, timeout: 120_000 }, async () => {
+  const made = await sound(soundPage('return { sampleRate, channels: [new Float32Array(sampleRate).fill(0.1)] };', 'window.__ready = false; requestAnimationFrame(() => { window.__ready = true; });'), 1);
+  assert.deepEqual([made.frames, made.warnings], [48000, ['ready_timeout']]);
+  assert.ok(made.elapsedMs >= 10_000, `took ${made.elapsedMs} ms`);
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+test('a sound made for longer than that while timers wait on the page\'s clock is waited for: offline, in real time, or played from a file', { skip, timeout: 180_000 }, async () => {
+  const pending = 'setInterval(() => {}, 16); requestAnimationFrame(function loop() { requestAnimationFrame(loop); });';
+  const sounds = {
+    // OfflineAudioContext renders on the browser's audio thread, so the main thread is free all along: 2 s pieces are
+    // rendered one after another until 7 s of real time (event time stamps keep it) have passed.
+    offline: `const start = new Event('t').timeStamp;
+while (new Event('t').timeStamp - start < 7000) {
+  const ctx = new OfflineAudioContext(2, sampleRate * 2, sampleRate);
+  for (let i = 0; i < 200; i += 1) { const osc = ctx.createOscillator(); osc.frequency.value = 100 + i * 3; const filter = ctx.createBiquadFilter();
+    filter.frequency.value = 400 + i; const gain = ctx.createGain(); gain.gain.value = 0.001; osc.connect(filter).connect(gain).connect(ctx.destination); osc.start(); }
+  await ctx.startRendering();
+}`,
+    // A real-time AudioContext plays a tone for 7 s: its audio thread keeps real time and takes almost no CPU.
+    realtime: `const ctx = new AudioContext(); const osc = ctx.createOscillator(); osc.connect(ctx.destination);
+await new Promise((resolve) => { osc.onended = resolve; osc.start(); osc.stop(ctx.currentTime + 7); }); await ctx.close();`,
+    // An audio element plays 7 s of silence to its end.
+    media: `const rate = 8000; const n = rate * 7; const wav = new DataView(new ArrayBuffer(44 + n * 2));
+[...'RIFF'].forEach((c, i) => wav.setUint8(i, c.charCodeAt(0))); wav.setUint32(4, 36 + n * 2, true); [...'WAVEfmt '].forEach((c, i) => wav.setUint8(8 + i, c.charCodeAt(0)));
+wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 1, true); wav.setUint32(24, rate, true); wav.setUint32(28, rate * 2, true);
+wav.setUint16(32, 2, true); wav.setUint16(34, 16, true); [...'data'].forEach((c, i) => wav.setUint8(36 + i, c.charCodeAt(0))); wav.setUint32(40, n * 2, true);
+const audio = new Audio(URL.createObjectURL(new Blob([wav.buffer], { type: 'audio/wav' })));
+await new Promise((resolve, reject) => { audio.onended = resolve; audio.play().catch(reject); });`,
+  };
+  for (const [name, body] of Object.entries(sounds)) {
+    const made = await sound(soundPage(`${body}\nreturn { sampleRate, channels: [new Float32Array(sampleRate).fill(0.2)] };`, pending), 1);
+    assert.equal(made.frames, 48000, name);
+    assert.ok(made.elapsedMs > 7000, `${name}: took ${made.elapsedMs} ms`);
+  }
   assert.deepEqual(readdirSync(TMP), []);
 });
 

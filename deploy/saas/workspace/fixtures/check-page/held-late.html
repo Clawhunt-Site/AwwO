@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a page that defines renderAt from a timer</title>
+<style>html, body { margin: 0; background: #f4f1ea; color: #1d2a24; font: 16px/1.5 system-ui, sans-serif; } p { margin: 40px; }</style>
+</head>
+<body>
+<p id="state">Setting up…</p>
+<script>
+// With real timers renderAt exists by the time anyone looks; on AwwO's renderer the timer has not run when the renderer
+// looks for it, so the page would be rendered as if it had none.
+setTimeout(() => {
+  window.renderAt = t => { document.getElementById('state').textContent = `Frame at ${t.toFixed(2)} s`; };
+  document.getElementById('state').textContent = 'Ready to render';
+}, 0);
+</script>
+</body>
+</html>

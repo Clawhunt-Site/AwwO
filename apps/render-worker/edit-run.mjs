@@ -105,8 +105,9 @@ async function probeFiles(job, config, run) {
 const soundName = (entry) => `${entry.id} (tracks.${entry.track}[${entry.trackIndex}])`;
 
 // The page's own faults: the renderer's fixed words, or what the page threw (render.mjs parseCapture). A sound that
-// outran its own budget is the page's ("timeout"); a page the worker could not open in time is not ("render_timeout").
-const PAGE_FAULTS = new Set(['sound_missing', 'sound_failed', 'sound_too_short', 'page_load_failed', 'timeout']);
+// outran its own budget is the page's ("timeout"), and so is one that waited on its own clock (page_waits_on_timers); a
+// page the worker could not open in time is not ("render_timeout").
+const PAGE_FAULTS = new Set(['sound_missing', 'sound_failed', 'sound_too_short', 'page_load_failed', 'timeout', 'page_waits_on_timers']);
 
 /** A page's sound that could not be made: the timeline's fault, with the page's reason and the item, or the worker's. */
 export function soundFailure(entry, error) {
@@ -142,6 +143,17 @@ async function renderSounds(job, config, state) {
   return sounds;
 }
 
+/**
+ * A card that could not be rendered: the timeline's fault on the card's field, with the page's reason, when the
+ * renderer names the page's fault (400: it waits on its own clock); else 422 card_failed, or 503.
+ */
+export function cardFailure(item, error) {
+  if (error?.status === 400) {
+    return Object.assign(new Error(`Card ${item.id} could not be rendered: ${error.message}`), { status: 400, code: 'INVALID_EDIT', field: `tracks.video[${item.index}].card` });
+  }
+  return new EditError(error?.status === 503 ? 'browser_unavailable' : 'card_failed', `Card ${item.id} could not be rendered`, error?.status === 503 ? 503 : 422);
+}
+
 /** Each card rendered by the page renderer at the film's size and rate. */
 async function renderCards(plan, job, config, state) {
   const files = new Map();
@@ -156,7 +168,7 @@ async function renderCards(plan, job, config, state) {
       reply = await renderPage(request, config, { signal: state.signal, log: state.log });
     } catch (error) {
       if (state.halted()) throw state.stopped();
-      throw new EditError(error?.status === 503 ? 'browser_unavailable' : 'card_failed', `Card ${item.id} could not be rendered`, error?.status === 503 ? 503 : 422);
+      throw cardFailure(item, error);
     }
     const file = path.join(job.dir, `card-${String(index).padStart(3, '0')}.mp4`);
     await writeFile(file, Buffer.from(reply.outputs[0].data, 'base64'));

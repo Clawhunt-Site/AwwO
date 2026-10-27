@@ -19,7 +19,8 @@ import { EditRequestError, createJob, jobOutput, publicOutputs, receiveFile, rem
 import { EditError } from './edit-run.mjs';
 import { EDIT_LIMITS, validateEditManifest } from './edit-timeline.mjs';
 import { findExecutable } from './ffmpeg.mjs';
-import { renderPage } from './render.mjs';
+import { describeHost } from './held-clock.mjs';
+import { RenderError, renderPage } from './render.mjs';
 
 const EDIT_PATH = /^\/internal\/edits(?:\/([A-Za-z0-9_-]{8,80})(?:\/(files|outputs)\/([A-Za-z0-9_.-]{1,200})|\/(render))?)?$/;
 
@@ -114,6 +115,10 @@ export function createRenderServer(config, { render = renderPage, exists = findE
       if (!response.destroyed) json(response, 200, reply);
     } catch (error) {
       if (response.destroyed) return;
+      // The page's own fault that the renderer can name (it waits on its own clock): on its field, in the renderer's words.
+      if (error instanceof RenderError && error.status === 400) {
+        return fail(response, 400, 'INVALID_RENDER', error.message, { field: error.field ?? 'html', detail: error.detail });
+      }
       const status = error?.status === 503 ? 503 : 422;
       const code = status === 503 ? 'RENDER_UNAVAILABLE' : 'RENDER_FAILED';
       fail(response, status, code, typeof error?.message === 'string' ? error.message : 'The render failed.', { detail: error?.detail ?? 'render_failed' });
@@ -323,6 +328,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const app = createRenderServer(config);
   // Nothing runs yet: what a stopped worker left in its temporary root (a crash, an OOM kill) is removed first.
   await sweepStale(config, (message) => process.stderr.write(`${message}\n`));
+  // Whether this host lets a page that waits on its own clock be refused (held-clock.mjs), so that it never silently does not.
+  process.stderr.write(`${describeHost()}\n`);
   app.server.listen(config.port, config.host, () => {
     console.log(JSON.stringify({ host: config.host, port: config.port, ...publicHealth(config, false) }));
   });

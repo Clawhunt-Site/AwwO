@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a page made ready by an animation that runs in real time</title>
+<style>html, body { margin: 0; background: #11161d; } canvas { display: block; } #intro { display: none; }</style>
+</head>
+<body>
+<canvas id="film" width="320" height="180"></canvas>
+<div id="intro"></div>
+<script>
+// Its readiness comes from a 7 s animation of an element that is not drawn, which runs in real time on AwwO's renderer
+// as well, while an interval waits on the held clock: the renderer waits for it within its 10 s and draws the first
+// frame once it is ready, so the check must wait for it too rather than take the page for one waiting on its clock.
+window.__ready = false;
+setInterval(() => {}, 250);
+const ctx = document.getElementById('film').getContext('2d');
+const draw = t => {
+  ctx.fillStyle = '#11161d'; ctx.fillRect(0, 0, 320, 180);
+  ctx.fillStyle = '#e8b04a'; ctx.fillRect(20 + (t % 2) * 120, 60, 60, 60);
+};
+draw(0);
+document.getElementById('intro').animate([{ opacity: 0 }, { opacity: 1 }], 7000).finished.then(() => { window.__ready = true; });
+window.renderAt = t => {
+  if (!window.__ready) throw new Error('drawn before it was ready');
+  draw(t);
+};
+window.awwoSelfTest = async () => ({ tests: [{ name: 'the page knows whether it is ready', ok: typeof window.__ready === 'boolean' }] });
+</script>
+</body>
+</html>

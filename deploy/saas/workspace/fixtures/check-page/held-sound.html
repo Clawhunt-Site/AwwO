@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a sound that waits on what only a frame or a timer starts</title>
+<style>html, body { margin: 0; background: #10141c; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="film" width="320" height="180"></canvas>
+<script>
+// Its boot ends on a timer or on the first frame drawn. With real timers both work. On AwwO's renderer a frame's page
+// draws (its first renderAt starts the boot), but a sound's page is a fresh one in which no frame is drawn and the
+// timer never runs: renderAudio waits for ever.
+let boot;
+const booted = new Promise(resolve => { boot = resolve; });
+setTimeout(() => boot(), 0);
+const ctx = document.getElementById('film').getContext('2d');
+const draw = t => {
+  ctx.fillStyle = '#10141c'; ctx.fillRect(0, 0, 320, 180);
+  ctx.fillStyle = '#2f7df6'; ctx.fillRect(20 + (t % 2) * 120, 60, 60, 60);
+};
+draw(0);
+window.renderAt = t => { boot(); draw(t); };
+window.renderAudio = async ({ seconds, sampleRate }) => {
+  await booted;
+  const audio = new OfflineAudioContext(2, Math.round(seconds * sampleRate), sampleRate);
+  const tone = audio.createOscillator();
+  tone.connect(audio.destination);
+  tone.start(0);
+  return audio.startRendering();
+};
+</script>
+</body>
+</html>

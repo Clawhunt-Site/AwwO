@@ -324,3 +324,61 @@ test('a page that cannot make its sound is refused with its own reason, naming t
     await call('DELETE', `/internal/edits/${editId}`);
   }
 });
+
+// A film written as code: its cards are the page from given moments (data-offset) and its music the same page's
+// renderAudio. A kernel that waits on a timer before it boots never boots on the renderer's held clock, so neither its
+// frames nor its sound, which wait on the boot, ever come.
+const filmPage = (boot) => `<!doctype html><html data-offset="0"><body style="margin:0;background:#000"><canvas id="c" width="160" height="90"></canvas><script>
+window.__ready = false;
+const offset = Number(document.documentElement.dataset.offset || 0);
+const booted = ${boot}.then(() => { window.__ready = true; });
+setInterval(() => {}, 100);
+window.renderAt = (t) => booted.then(() => { const ctx = document.getElementById('c').getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 160, 90);
+  ctx.fillStyle = '#2f7df6'; ctx.fillRect(((offset + t) * 60) % 160, 30, 30, 30); });
+window.renderAudio = ({ seconds, sampleRate }) => booted.then(() => {
+  const ctx = new OfflineAudioContext(2, Math.round(seconds * sampleRate), sampleRate);
+  const osc = ctx.createOscillator(); osc.frequency.value = 660; const gain = ctx.createGain(); gain.gain.value = 0.3;
+  osc.connect(gain).connect(ctx.destination); osc.start(0); return ctx.startRendering();
+});
+</script></body></html>`;
+
+test('an edit whose card or page sound waits on its own clock is refused at once as the timeline\'s fault, on that page\'s field', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  const hung = filmPage('new Promise((resolve) => setTimeout(resolve, 0))');
+  for (const [editId, tracks, field, words] of [
+    ['edit_it_0010', { video: [{ id: 'p1', card: hung, seconds: 1 }] }, 'tracks.video[0].card', 'Card p1 could not be rendered: window.renderAt(0) had not settled after 5 s'],
+    ['edit_it_0011', { video: [{ id: 'p1', card: BLACK_CARD, seconds: 1 }], music: [{ id: 'score', page: hung, seconds: 1, at: 0 }] }, 'tracks.music.page',
+      'The sound of score could not be made: window.renderAudio had not settled after 5 s'],
+  ]) {
+    const timeline = { schema: 'awwo.timeline/1', name: 'held', output: { width: 160, height: 90, fps: 24, crf: 26, stillsEverySeconds: 0 }, tracks };
+    assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId, timeline, files: [] }), 'application/json')).status, 201);
+    const started = Date.now();
+    const rendered = await call('POST', `/internal/edits/${editId}/render`);
+    const reply = await rendered.json();
+    assert.equal(rendered.status, 400, JSON.stringify(reply));
+    assert.deepEqual([reply.error.code, reply.error.field], ['INVALID_EDIT', field]);
+    assert.ok(reply.error.message.startsWith(words) && reply.error.message.includes(' while 1 setTimeout timer and 1 setInterval timer were waiting on its clock.') && reply.error.message.length <= 500, reply.error.message);
+    // Its __ready, set by the same boot, is waited for its 10 s first; then the frame or the sound for 5 s.
+    assert.ok(Date.now() - started < 45_000, `refused after ${Date.now() - started} ms`);
+    await call('DELETE', `/internal/edits/${editId}`);
+  }
+});
+
+test('the same film whose kernel boots without a timer makes its cards and its sound, an interval of its own waiting all along', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  const booting = filmPage('Promise.resolve()');
+  const film = await renderEdit(call, 'edit_it_0012', 1, { music: [{ id: 'score', page: booting, seconds: 1, at: 0 }] });
+  const probe = JSON.parse(execFileSync(FFPROBE, ['-v', 'error', '-count_packets', '-show_entries', 'stream=codec_type,nb_read_packets', '-of', 'json', film], { encoding: 'utf8' }));
+  assert.deepEqual(probe.streams.map((stream) => stream.codec_type), ['video', 'audio']);
+  assert.ok(bandLevel(film, 660, 0.3, 0.4) > -40, 'the page\'s tone is in the film');
+  // Its two cards, each the page from its own moment.
+  const cards = booting.replace('data-offset="0"', 'data-offset="0.5"');
+  const timeline = { schema: 'awwo.timeline/1', name: 'edit_it_0013', output: { width: 160, height: 90, fps: 24, crf: 26, stillsEverySeconds: 0 },
+    tracks: { video: [{ id: 'p1', card: booting, seconds: 0.5 }, { id: 'p2', card: cards, seconds: 0.5 }] } };
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId: 'edit_it_0013', timeline, files: [] }), 'application/json')).status, 201);
+  const rendered = await call('POST', '/internal/edits/edit_it_0013/render');
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  assert.deepEqual([reply.report.frames, reply.report.counts.cards], [24, 2]);
+  assert.equal((await call('DELETE', '/internal/edits/edit_it_0013')).status, 204);
+});

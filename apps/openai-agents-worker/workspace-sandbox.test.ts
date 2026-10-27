@@ -144,7 +144,7 @@ test('the page check answers exactly the three.js files the preview supplies, at
   assert.equal(JSON.parse(await read('../../deploy/saas/workspace/tools/package.json')).dependencies.three, list.version);
   const dockerfile = await read('../../deploy/saas/workspace/Dockerfile');
   assert.match(dockerfile, /npm ci [^\n]*\n[^\n]*\n\s*&& node \/opt\/awwo\/tools\/keep-preview-files\.mjs/);
-  assert.match(dockerfile, /COPY tools\/awwo-check-page\.mjs tools\/libraries\.mjs tools\/missing-ok\.mjs \/opt\/awwo\/tools\//);
+  assert.match(dockerfile, /COPY tools\/awwo-check-page\.mjs tools\/libraries\.mjs tools\/missing-ok\.mjs tools\/held-clock\.mjs tools\/virtual-time\.mjs \/opt\/awwo\/tools\//);
   // The check names a file from a URL as the preview's pinnedModuleFile does (apps/web/tests/canvas-preview-modules.test.ts):
   // the four addresses on the default port, the path as written, a .min.js naming the same file.
   const libraries = new Map([['three', { name: 'three', version: list.version, files: new Set(Object.keys(list.files)), root: '/x' }]]);
@@ -507,6 +507,41 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
         pass: { exitCode: 0, check: report => {
           assert.deepEqual([report.selfTest.passed, report.selfTest.failed, report.selfTest.plantedTotal, report.selfTest.plantedRejected], [4, 0, 2, 2]);
           assert.equal(report.blank, false); assert.equal(report.errorCount, 0);
+          assert.deepEqual([report.heldClock.ran, report.heldClock.why], [false, 'the page defines neither window.renderAt nor window.renderAudio']);
+        } },
+        // A page written for AwwO's renderer is loaded again on the clock the renderer gives it, its timers and frames held
+        // until a frame is drawn: once for its first frame, once for its sound, each in a fresh page as the renderer opens
+        // them. One whose kernel boots on a timer passes on real timers and fails there, as the renderer refuses it (its
+        // __ready, which the renderer waits 10 s for and renders past, is only noted); one ready at once, whose frame and
+        // sound share an OfflineAudioContext that a page may render once, passes both; one whose sound waits on a boot
+        // that only its first frame or a timer starts fails in its own sound page; one that defines renderAt from a timer
+        // fails; one made ready by a 7 s animation, with an interval waiting meanwhile, is waited for and passes.
+        'held-timer': { exitCode: 1, check: report => {
+          assert.deepEqual([report.selfTest.passed, report.errorCount, report.blank], [1, 0, false]);
+          assert.deepEqual([report.heldClock.ran, report.heldClock.why, report.heldClock.unfinished], [true, 'the page defines window.renderAt', null]);
+          assert.deepEqual(report.heldClock.steps.map((step: any) => [step.page, step.step, step.ok]), [['frame', 'window.__ready', false], ['frame', 'window.renderAt(0)', false]]);
+          // Its __ready is waited for as the renderer waits for it, all 10 s, though the page is held from the first 5.
+          assert.ok(report.heldClock.steps[0].ms >= 9500, `ready waited ${report.heldClock.steps[0].ms} ms`);
+          assert.deepEqual(report.heldClock.steps[0].waiting, { setTimeout: 1, setInterval: 0, requestAnimationFrame: 0 });
+          assert.deepEqual(report.heldClock.steps[1].waiting, { setTimeout: 1, setInterval: 0, requestAnimationFrame: 0 });
+          assert.match(report.heldClock.failure, /^window\.renderAt\(0\) had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock\. The renderer moves that clock only when it draws a frame/);
+          assert.match(report.heldClock.note, /^window\.__ready was still not true after 5 s, .* renders the page before it is ready/);
+          assert.ok(report.reasons.includes(`held clock: ${report.heldClock.failure}`), JSON.stringify(report.reasons));
+        } },
+        'held-ready': { exitCode: 0, check: report => {
+          assert.deepEqual(report.heldClock.steps.map((step: any) => [step.page, step.step, step.ok]),
+            [['frame', 'window.__ready', true], ['frame', 'window.renderAt(0)', true], ['sound', 'window.__ready', true], ['sound', 'window.renderAudio', true]]);
+          assert.deepEqual([report.heldClock.why, report.heldClock.failure, report.heldClock.unfinished, report.heldClock.note], ['the page defines window.renderAt and window.renderAudio', null, null, null]);
+        } },
+        'held-sound': { exitCode: 1, check: report => {
+          assert.deepEqual(report.heldClock.steps.map((step: any) => [step.page, step.step, step.ok]), [['frame', 'window.renderAt(0)', true], ['sound', 'window.renderAudio', false]]);
+          assert.match(report.heldClock.failure, /^window\.renderAudio had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock\./);
+        } },
+        'held-late': { exitCode: 1, check: report => assert.match(report.heldClock.failure, /^window\.renderAt is not defined on the held clock when the renderer looks for it \(once the page has loaded and is ready\), though it was in the first load/) },
+        'held-animation': { exitCode: 0, check: report => {
+          assert.deepEqual(report.heldClock.steps.map((step: any) => [step.page, step.step, step.ok]), [['frame', 'window.__ready', true], ['frame', 'window.renderAt(0)', true]]);
+          assert.ok(report.heldClock.steps[0].ms >= 5500, `ready after ${report.heldClock.steps[0].ms} ms`);
+          assert.deepEqual([report.heldClock.failure, report.heldClock.unfinished, report.heldClock.note], [null, null, null]);
         } },
         'failing-test': { exitCode: 1, check: report => {
           assert.deepEqual([report.selfTest.passed, report.selfTest.failed], [3, 1]);
@@ -588,6 +623,20 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
       // models/boot was fetched as data (excused, listed) and then loaded as a script: one of its two 404s still counts.
       assert.equal(code.report.errorCount, 2, JSON.stringify(code.report.errors));
       assert.deepEqual(code.report.missingAllowed.map((entry: any) => new URL(entry.url).pathname).sort(), ['/models/boot', '/models/hero.glb']);
+      // --no-held-clock skips the second load, --held-clock makes it for any page, and neither takes a value.
+      const skipped = await check('held-off', 'held-timer', '--no-held-clock');
+      assert.equal(skipped.run.exitCode, 0, skipped.run.stdout);
+      assert.deepEqual([skipped.report.heldClock.ran, skipped.report.heldClock.why], [false, '--no-held-clock']);
+      const forced = await check('held-on', 'pass', '--held-clock');
+      assert.equal(forced.run.exitCode, 0, forced.run.stdout);
+      assert.deepEqual([forced.report.heldClock.ran, forced.report.heldClock.steps], [true, []]);
+      assert.equal((await sandbox.exec('awwo-check-page /inputs/check-page/pass.html --out checks/held-value --held-clock=on')).exitCode, 2);
+      // A check on the held clock that the budget cuts short fails nothing and is no pass either: exit 4, not finished.
+      const short = await check('held-short', 'held-timer', '--budget-ms 12000');
+      assert.equal(short.run.exitCode, 4, short.run.stdout);
+      assert.deepEqual([short.report.verdict, short.report.exitCode, short.report.reasons, short.report.heldClock.failure], ['unfinished', 4, [], null]);
+      assert.match(short.report.heldClock.unfinished, /what --budget-ms had left|not within/);
+      assert.match(short.run.stdout, /UNFINISHED[\s\S]*held clock: NOT FINISHED/);
       const spoof = await check('missing-spoof', 'missing-spoof', "--missing-ok 'models/*.glb'");
       assert.equal(spoof.run.exitCode, 1, spoof.run.stdout);
       assert.equal(spoof.report.errorCount, 1, JSON.stringify(spoof.report.errors));

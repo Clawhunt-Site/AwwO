@@ -1,6 +1,8 @@
 // One render: a fresh headless Chromium freezes the page at every frame time and ffmpeg encodes the frames.
 // The browser may reach only the CDN allowlist (network.mjs), runs on the virtual clock (virtual-time.mjs) and
-// is closed, with the render's own temporary directory removed, however the render ends.
+// is closed, with the render's own temporary directory removed, however the render ends. A page whose renderAt or
+// renderAudio waits on its own clock, which moves only when a frame is drawn, is refused as soon as that is all it
+// waits on (held-clock.mjs).
 import { createHash } from 'node:crypto';
 import { mkdtemp, open, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { frameTimes } from './config.mjs';
 import { childEnv, contactArgs, encodeArgs, gifArgs, gifRate, parseProbe, probeArgs, runProcess, writeChunk } from './ffmpeg.mjs';
+import { heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
 import { allowedRequest, hostResolverRules, NETWORK_GUARD_SCRIPT } from './network.mjs';
 import { MAX_TIMER_FIRINGS, VIRTUAL_TIME_SCRIPT } from './virtual-time.mjs';
 
@@ -29,19 +32,42 @@ export function chromeArgs() {
   return [...CHROME_ARGS, `--host-resolver-rules=${hostResolverRules()}`, '--no-proxy-server', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'];
 }
 
-/** A render that did not produce a video: 422 RENDER_FAILED with a detail, or 503 when the worker itself cannot. */
+/**
+ * A render that did not produce a video: 422 RENDER_FAILED with a detail, 503 when the worker itself cannot, or 400
+ * INVALID_RENDER on the page's field (`html`) when the page is at fault in a way the worker can name (its renderAt or
+ * renderAudio waits on its own clock: page_waits_on_timers).
+ */
 export class RenderError extends Error {
   constructor(detail, message, status = 422) {
     super(message);
     this.status = status;
-    this.code = status === 503 ? 'RENDER_UNAVAILABLE' : 'RENDER_FAILED';
+    this.code = status === 503 ? 'RENDER_UNAVAILABLE' : status === 400 ? 'INVALID_RENDER' : 'RENDER_FAILED';
     this.detail = detail;
+    if (status === 400) this.field = 'html';
+  }
+}
+
+/**
+ * `work`'s value, unless the page is held on its own clock first (held-clock.mjs) while it is waited on for `wait`
+ * ({ kind: 'renderAt', t } or { kind: 'renderAudio' }): then a 400 page_waits_on_timers that names what waits on it.
+ * `work` is left to settle on its own (the browser is closed after).
+ */
+async function unlessHeld(work, state, wait) {
+  const watch = watchHeldClock(state.watched);
+  try {
+    const outcome = await Promise.race([work.then((value) => ({ value }), (error) => ({ error })), watch.held.then((waiting) => ({ waiting }))]);
+    if (outcome.waiting) throw new RenderError('page_waits_on_timers', heldClockMessage(wait, outcome.waiting), 400);
+    if ('error' in outcome) throw outcome.error;
+    return outcome.value;
+  } finally {
+    watch.stop();
   }
 }
 
 // Runs in the page for every frame (serialized by Playwright, so it must stay self-contained): renderAt(t) for a
 // contract page, the virtual clock to t in this frame and every same-origin child frame, each Web/CSS animation
-// paused at t measured from the frame it first appeared in; then two real animation frames, so it is painted.
+// paused at t measured from the frame it first appeared in. All of it but renderAt is synchronous, so the held-clock
+// watch, which waits on this call for a contract page, waits on renderAt alone; the paint is paintFrame's.
 async function stepFrame({ t, contract }) {
   const ms = t * 1000;
   const errors = [];
@@ -67,9 +93,13 @@ async function stepFrame({ t, contract }) {
     }
   };
   visit(window);
+  return { errors, fired };
+}
+
+// Then two real animation frames, so the frame is painted (in the page, self-contained like stepFrame).
+async function paintFrame() {
   const raf = window.__awwoRealRaf;
   if (typeof raf === 'function') await new Promise((resolve) => raf(() => raf(resolve)));
-  return { errors, fired };
 }
 
 /** Resolves true when promise settles within ms, false otherwise (the promise is left to settle on its own). */
@@ -91,8 +121,10 @@ async function waitForReady(page, halted) {
   return false;
 }
 
-// Opens the page in a fresh browser: blocked requests are counted, page errors kept (count + first three). `extra` are
-// init scripts installed after the network guard and the virtual clock, before any script of the page.
+// Opens the page in a fresh browser: blocked requests are counted, page errors kept (count + first three), and what the
+// held-clock watch reads of it kept for unlessHeld (state.watched; null when it could not be opened, and the page is
+// then never held). `extra` are init scripts installed after the network guard and the virtual clock, before any script
+// of the page.
 async function openPage(request, config, state, extra = []) {
   state.browser = await chromium.launch({
     executablePath: config.chrome, headless: true, chromiumSandbox: config.chromeSandbox, args: chromeArgs(), env: childEnv(),
@@ -121,6 +153,7 @@ async function openPage(request, config, state, extra = []) {
   context.on('page', (other) => { if (other !== page) other.close().catch(() => {}); });
   page.on('pageerror', (error) => state.notePageError(error.message));
   page.on('crash', () => { state.crashed = true; });
+  state.watched = await openWatch(context, page);
   try {
     await page.setContent(request.html, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
   } catch {
@@ -145,9 +178,12 @@ async function encodeFrames(page, contract, request, config, state, mp4Path) {
   for (const [index, t] of frameTimes(request.frames, request.fps).entries()) {
     if (state.halted()) throw state.stopped();
     if (state.navigated) throw new RenderError('page_load_failed', 'The page navigated away');
-    const step = await page.evaluate(stepFrame, { t, contract });
+    // A contract page's step waits on its renderAt(t), and so may be held there; the paint after it is never watched.
+    const stepping = page.evaluate(stepFrame, { t, contract });
+    const step = contract ? await unlessHeld(stepping, state, { kind: 'renderAt', t }) : await stepping;
     for (const message of step.errors) state.notePageError(message);
     if (step.fired >= MAX_TIMER_FIRINGS) state.timerLimit = true;
+    await page.evaluate(paintFrame);
     const png = await page.screenshot({ type: 'png' });
     hashes.add(createHash('sha256').update(png).digest('hex'));
     if (wanted.has(index)) state.stills.set(index, png);
@@ -438,7 +474,8 @@ export function partBytes(text, start, total) {
  * soundTimeoutMs (120 s). Rejects with a RenderError: sound_missing (no renderAudio), sound_failed (it threw, gave
  * something else, or what it kept could not be read), sound_too_short, timeout (the sound took longer than its budget),
  * page_load_failed (it did not load, crashed or navigated, also while its sound was read), render_timeout (opening it
- * took longer than a render may), aborted, render_failed; 503 when the browser is missing.
+ * took longer than a render may), aborted, render_failed; 400 page_waits_on_timers (its renderAudio waited on its own
+ * clock); 503 when the browser is missing.
  */
 export async function renderPageSound(request, config, { signal, log = defaultLog, soundTimeoutMs = SOUND_TIMEOUT_MS } = {}) {
   const started = Date.now();
@@ -451,7 +488,7 @@ export async function renderPageSound(request, config, { signal, log = defaultLo
   if (signal?.aborted) controller.abort(); else signal?.addEventListener('abort', forward, { once: true });
   const pageErrors = [];
   const state = {
-    signal: controller.signal, browser: null, encoder: null, blocked: 0, crashed: false, navigated: false, timerLimit: false,
+    signal: controller.signal, browser: null, encoder: null, watched: null, blocked: 0, crashed: false, navigated: false, timerLimit: false,
     pageErrorCount: 0, warnings: [], stills: new Map(),
     halted: () => controller.signal.aborted,
     stopped: () => {
@@ -501,7 +538,7 @@ export async function renderPageSound(request, config, { signal, log = defaultLo
       if (reply.exceptionDetails) throw new RenderError('render_failed', 'The sound capture failed in the page');
       return reply.result?.value;
     };
-    const answer = await ask(`window.__awwoCaptureSound(${Number(request.seconds)})`);
+    const answer = await unlessHeld(ask(`window.__awwoCaptureSound(${Number(request.seconds)})`), state, { kind: 'renderAudio' });
     left();
     const made = parseCapture(answer, request.seconds);
     const bytes = made.wanted * 4;
@@ -556,7 +593,8 @@ export async function renderPageSound(request, config, { signal, log = defaultLo
 /**
  * Renders a validated request (config.mjs validateRenderRequest) into the reply the API stores. Rejects with a
  * RenderError: detail timeout (config.timeoutMs for the whole render), aborted (signal), page_load_failed,
- * output_too_large, ffmpeg_failed or render_failed; status 503 when the browser, ffmpeg or temporary space is missing.
+ * output_too_large, ffmpeg_failed or render_failed; status 400 page_waits_on_timers (its renderAt waited on its own
+ * clock); status 503 when the browser, ffmpeg or temporary space is missing.
  */
 export async function renderPage(request, config, { signal, log = defaultLog } = {}) {
   const started = Date.now();
@@ -567,7 +605,7 @@ export async function renderPage(request, config, { signal, log = defaultLog } =
   if (signal?.aborted) controller.abort(); else signal?.addEventListener('abort', forward, { once: true });
   const pageErrors = [];
   const state = {
-    signal: controller.signal, browser: null, encoder: null, blocked: 0, crashed: false, navigated: false, timerLimit: false,
+    signal: controller.signal, browser: null, encoder: null, watched: null, blocked: 0, crashed: false, navigated: false, timerLimit: false,
     pageErrorCount: 0, warnings: [], stills: new Map(),
     halted: () => controller.signal.aborted,
     stopped: () => (timedOut ? new RenderError('timeout', 'The render took too long') : new RenderError('aborted', 'The render was stopped')),

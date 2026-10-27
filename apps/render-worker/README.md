@@ -12,7 +12,8 @@ Every frame must be a pure function of the time `t` in seconds. Frame `i` is sho
 frames 0 … N-1 and repeats seamlessly.
 
 - **`window.renderAt(t)`** (contract mode, recommended): called once per frame before the screenshot. It may return
-  a promise; the frame waits for it. An exception is recorded as a page error and the render goes on.
+  a promise; the frame waits for it, so it must not wait on the page's own timers or animation frames (see below). An
+  exception is recorded as a page error and the render goes on.
 - **CSS keyframes, transitions and Web Animations** are allowed: before every frame each animation is paused and
   placed at `t`, measured from the frame it first appeared in (animations present at load start at 0).
 - **No `renderAt`** (virtual-time mode): the page runs on a virtual clock injected before any page script.
@@ -21,7 +22,42 @@ frames 0 … N-1 and repeats seamlessly.
   exactly its `t` however long the screenshot takes. Timers fire at their own due times; at most 10,000 timer
   firings per frame (warning `timer_limit`). Web workers and cross-origin frames keep real time.
 - **`window.__ready`**: a page that defines it is waited for (up to 10 s) until it is `true`, after `load` and
-  `document.fonts.ready` (warnings `ready_timeout`, `fonts_timeout`).
+  `document.fonts.ready` (warnings `ready_timeout`, `fonts_timeout`). Its timers and animation frames do not run in
+  that wait, so a page that sets `__ready` from one waits all 10 s and is rendered before it is ready.
+- **A `renderAt` or `renderAudio` that waits on the page's own clock is refused within seconds.** The page's timers
+  and animation frames run only when the renderer draws a frame, and a frame is drawn only once `renderAt(t)` has
+  settled (none is drawn while a sound is made, below), so a `renderAt` or `renderAudio` that waits on them would wait
+  for ever. While the renderer waits on one (not on `__ready`, nor on the paint after a frame), it reads the page every
+  250 ms (`held-clock.mjs`):
+  - the `setTimeout`, `setInterval` and `requestAnimationFrame` callbacks waiting on its clock and on its same-origin
+    frames' (`__awwoClockWaiting`, which the page cannot replace);
+  - the waits the page has that keep real time, which it counts itself: `AbortSignal.timeout` signals not yet aborted
+    and `scheduler.postTask` tasks with a delay the browser took and has not yet run; and, asked only once all the rest
+    is quiet, since it costs a style recalculation and a look at each, the animations running towards an end (forwards
+    to their end, or backwards to their start), the document's own (CSS ones too) and those the page started from
+    script (on an element of the document or not, each kept as long as the page can reach it); a frame whose waits it
+    cannot read (of another origin, past the first 32 or four deep, or without the clock) counts as one such wait. The
+    wrappers this takes call the browser's own functions, which read and refuse what the page gives as before;
+  - the CPU time of each of the browser's processes but its own (DevTools `SystemInfo.getProcessInfo`, which the browser
+    reads itself: the renderer's own figure reads 0 under Chromium's sandbox on Linux);
+  - its other work: requests in flight, dedicated workers (they keep real time), Web Audio running (a sound played,
+    recorded or rendered), media playing and frames of another origin.
+
+  Callbacks waiting on the clock, and for 5 s none of the rest: no wait on real time and none of that work, nothing of
+  it begun or ended, no process gone, the processes under a quarter of a CPU while the CPUs the worker may run on (its
+  cpuset or affinity) had at least half a CPU idle and its control group was not held back for a CPU quota (cgroup v1
+  or v2, found through `/proc/self/mountinfo`; the CPUs and groups are read at every reading, and a change in them
+  starts the 5 s again), so that a page with work to do could have run: refused, 400
+  `INVALID_RENDER` on `html`, `detail` `page_waits_on_timers`, with a message naming what waited and saying the clock
+  moves only when a frame is drawn. A page at work is waited for as before, however long, and so is one on a host too
+  busy to tell, one whose control group's throttling cannot be read (a cgroup layout `/proc` does not show), one with
+  nothing waiting on its clock, and one the watch could not be opened on in 5 s; the render's own limits stay as they
+  are. So a page that keeps a dedicated worker, a running `AudioContext`, a playing media element, a frame of another
+  origin or of no readable clock, or a long `AbortSignal.timeout` (a fetch's safety net of minutes, say) for as long as
+  it waits is never refused: its hang ends at the render's limit, as before. The other way round, a `renderAt` or
+  `renderAudio` that waits more than 5 s on something none of these shows (a speech utterance, an `Atomics.waitAsync`)
+  while callbacks of its own wait on the clock would be refused. The worker says at start, in a `held clock:` line of
+  its log, whether its host lets it refuse such a page.
 - The page may load scripts, styles and fonts only from the CDN origins in `cdn-allowlist.json` (the same list as
   the web preview's `LIVE_CDNS`); everything else is blocked. It must not navigate away (that fails the render).
 
@@ -67,7 +103,7 @@ Failures:
 
 | Status | Code | When |
 |---|---|---|
-| 400 | `INVALID_RENDER` (+ `field`) | Invalid request or JSON, wrong Content-Type |
+| 400 | `INVALID_RENDER` (+ `field`) | Invalid request or JSON, wrong Content-Type; or a page whose `renderAt` waits on its own clock (`field` `html`, `detail` `page_waits_on_timers`, see the render contract) |
 | 401 | `UNAUTHORIZED` | Missing or wrong token |
 | 413 | `TOO_LARGE` | Body over 8 MiB |
 | 429 | `RENDER_BUSY` | A render is already running (one at a time, never queued) |
@@ -92,7 +128,9 @@ media directory. A job holds the worker like a render does, so a render waits wh
 | `DELETE /internal/edits/{id}` | stops and removes the job (204); a job left without a request for `AWWO_EDIT_IDLE_MS` is removed too |
 
 How it renders (`edit-run.mjs`, argument lists in `edit-ffmpeg.mjs`): cards through the page renderer at the film's
-size; every picture piece (an item's own frames, and each transition as its own piece through `xfade`) encoded once
+size (a card whose `renderAt` waits on its own clock is refused as the timeline's fault, 400 `INVALID_EDIT` on
+`tracks.video[<i>].card` with the renderer's reason; a card that fails otherwise is 422 `card_failed`); every picture
+piece (an item's own frames, and each transition as its own piece through `xfade`) encoded once
 from its source at the film's settings (a clip's picture stream as the probe measured it; a picture, PNG, JPEG, WebP or
 a GIF's first frame, decoded once and held) and checked for its frame count, then joined by stream copy; sounds trimmed,
 levelled (per file, with `mix.levels`), faded, delayed to the sample and mixed per track in batches of 48; music and
@@ -116,9 +154,11 @@ its way), and the worker checks every answer's numbers and every part's exact le
 how much is read, held or written. From then on the item is a sound like any other: `in`/`out`,
 `loop`, `gainDb`, fades, levels, ducking and loudness apply. A page's sound that cannot be made is refused as the
 timeline's fault, 400 `INVALID_EDIT` naming `tracks.<track>.page`, with the reason (no `renderAudio`, what it threw, a
-sound shorter than `seconds`, a page that did not load, crashed or navigated, or a sound that took longer than its 120 s); a worker that could not
+sound shorter than `seconds`, a page that did not load, crashed or navigated, a `renderAudio` that waited on its own
+clock, or a sound that took longer than its 120 s); a worker that could not
 make it, or could not open the page in a render's time, answers 503 or 422 `EDIT_FAILED` (`sound_render_failed`). Time stands still while it runs, so `renderAudio`
-must not wait for a timer or an animation frame. The report lists them under `pageSounds` (`item`, `seconds`, `peak`),
+must not wait for a timer or an animation frame: one that does, with nothing else to wait for, is refused after 5 s
+rather than at its 120 s (see the render contract). The report lists them under `pageSounds` (`item`, `seconds`, `peak`),
 its warnings name them by item (`sound_clipped:<frames>:<item>`, `sound_not_finite:<frames>:<item>`,
 `sound_silent:<item>`, `sound_page_errors:<count>:<item>`, …), and so do its messages (`score (tracks.music[0])`). This is
 how a film written as code (cards on the picture's track) gets a score and effects written to the same frame clock.
@@ -184,6 +224,15 @@ AWWO_RENDER_FFMPEG=C:/tools/ffmpeg/bin/ffmpeg.exe AWWO_RENDER_FFPROBE=C:/tools/f
 ```
 
 The integration tests render real pages (CSS keyframes, a `renderAt` canvas, a `requestAnimationFrame` page twice
-for identical bytes, blocked requests, a hung page stopped at the timeout, an abort) and check that the launch
-flags alone refuse local hosts and IPs. `network.test.mjs` keeps `cdn-allowlist.json` equal to the web preview's
-`LIVE_CDNS`; change both together.
+for identical bytes, blocked requests, a hung page stopped at the timeout, a `renderAt` that leaves its drawing to a
+microtask, a `renderAt` and a `renderAudio` that wait on their own clock, refused in seconds, and pages that are ready
+at once, set `__ready` from a timer, or wait longer with timers of their own pending, made as before: a busy main
+thread, a worker on its own timer, an `AbortSignal.timeout`, a delayed `scheduler.postTask`, animations of an element
+that is not drawn, of one not in the document and of none, an `OfflineAudioContext`, real-time audio, an audio element;
+an abort) and check that the launch
+flags alone refuse local hosts and IPs. With `AWWO_RENDER_CHROME_SANDBOX=1` (the default) on Linux they run as
+production does, Chromium's own sandbox on. `network.test.mjs` keeps `cdn-allowlist.json` equal to the web preview's
+`LIVE_CDNS`; change both together. `awwo-check-page`, the sandbox's page check (`deploy/saas/workspace`), loads a page
+that defines `renderAt` or `renderAudio` again on this clock and fails one this worker would refuse; it carries copies
+of `virtual-time.mjs` and `held-clock.mjs`, which `held-clock.test.mjs` keeps equal to these, so change both together
+(and rebuild the workspace image).

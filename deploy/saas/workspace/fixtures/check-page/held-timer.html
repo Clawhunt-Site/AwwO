@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a film page whose kernel boots on a timer</title>
+<style>html, body { margin: 0; background: #0f1218; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="film" width="320" height="180"></canvas>
+<script>
+// With real timers this page works: the boot's setTimeout fires, it is ready and every frame draws. On AwwO's renderer
+// its clock is held until a frame is drawn, so the boot never ends: window.__ready stays false and renderAt(t) never settles.
+window.__ready = false;
+const ctx = document.getElementById('film').getContext('2d');
+const draw = t => {
+  ctx.fillStyle = '#0f1218'; ctx.fillRect(0, 0, 320, 180);
+  ctx.fillStyle = '#2f7df6'; ctx.fillRect(20 + (t % 2) * 120, 60, 60, 60);
+  ctx.fillStyle = '#f3efe6'; ctx.font = '16px sans-serif'; ctx.fillText(`t = ${t.toFixed(2)}`, 20, 30);
+};
+const boot = new Promise(resolve => setTimeout(resolve, 0)).then(() => { draw(0); window.__ready = true; });
+window.renderAt = t => boot.then(() => draw(t));
+window.awwoSelfTest = async () => {
+  await boot;
+  return { tests: [{ name: 'the first frame draws', ok: (await window.renderAt(0), true) }] };
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: a film page that is ready at once</title>
+<style>html, body { margin: 0; background: #0f1218; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="film" width="320" height="180"></canvas>
+<script>
+// Ready from a promise, drawing from t alone, its sound from an OfflineAudioContext: it never waits on its own clock,
+// although an interval and a frame loop of its own are pending on it all along. Its first frame starts rendering the
+// score it draws as a waveform, and renderAudio renders the same score: a page may render it once, as AwwO's renderer
+// does with a page of its own for each frame and each sound. Its sound is made in the renderer's 640x360 window.
+window.__ready = false;
+const ctx = document.getElementById('film').getContext('2d');
+const score = new OfflineAudioContext(2, 48000, 48000);
+const tone = score.createOscillator();
+tone.frequency.value = 440;
+tone.connect(score.destination);
+tone.start(0);
+let waveform = null;
+const draw = t => {
+  ctx.fillStyle = '#0f1218'; ctx.fillRect(0, 0, 320, 180);
+  ctx.fillStyle = '#2f7df6'; ctx.fillRect(20 + (t % 2) * 120, 60, 60, 60);
+  ctx.fillStyle = '#f3efe6'; ctx.font = '16px sans-serif'; ctx.fillText(`t = ${t.toFixed(2)}`, 20, 30);
+};
+const boot = Promise.resolve().then(() => { draw(0); window.__ready = true; });
+setInterval(() => {}, 1000);
+requestAnimationFrame(function idle() { requestAnimationFrame(idle); });
+window.renderAt = t => boot.then(() => {
+  waveform ??= score.startRendering();
+  draw(t);
+});
+window.renderAudio = async () => {
+  await boot;
+  if (innerWidth !== 640 || innerHeight !== 360) throw new Error(`made in a ${innerWidth}x${innerHeight} window, not the renderer's 640x360`);
+  return score.startRendering();
+};
+</script>
+</body>
+</html>

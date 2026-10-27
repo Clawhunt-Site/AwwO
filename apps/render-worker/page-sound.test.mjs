@@ -1,12 +1,13 @@
 // The worker's own checks of what a page's sound capture answers (render.mjs parseCapture, partBytes), how its WAV is
-// written (writeAll), and how a sound that could not be made reaches the edit (edit-run.mjs soundFailure): no browser.
+// written (writeAll), and how a sound or a card that could not be made reaches the edit (edit-run.mjs soundFailure,
+// cardFailure): no browser.
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { soundFailure } from './edit-run.mjs';
+import { cardFailure, EditError, soundFailure } from './edit-run.mjs';
 import { parseCapture, partBytes, RenderError, wavFile, writeAll } from './render.mjs';
 
 const refused = (fn, detail, words) => assert.throws(fn, (error) => error instanceof RenderError && error.detail === detail && error.message.includes(words), `${detail}: ${words}`);
@@ -51,11 +52,35 @@ test('a sound that could not be made is the timeline\'s fault with its reason, o
   const page = soundFailure(entry, new RenderError('sound_failed', 'window.renderAudio failed: nope'));
   assert.deepEqual([page.status, page.code, page.field, page.message], [400, 'INVALID_EDIT', 'tracks.music.page', 'The sound of score could not be made: window.renderAudio failed: nope']);
   for (const detail of ['sound_missing', 'sound_too_short', 'page_load_failed', 'timeout']) assert.equal(soundFailure(entry, new RenderError(detail, 'x')).status, 400, detail);
+  // A page that waited on its own clock, before it was ready or in renderAudio: the timeline's fault, with the reason.
+  const held = soundFailure(entry, new RenderError('page_waits_on_timers', 'window.renderAudio had not settled after 5 s, …', 400));
+  assert.deepEqual([held.status, held.code, held.field, held.message], [400, 'INVALID_EDIT', 'tracks.music.page', 'The sound of score could not be made: window.renderAudio had not settled after 5 s, …']);
   const worker = soundFailure(entry, new RenderError('render_timeout', 'The page took too long to open'));
   assert.deepEqual([worker.status, worker.code, worker.detail], [422, 'EDIT_FAILED', 'sound_render_failed']);
   assert.equal(soundFailure(entry, new RenderError('render_failed', 'The render failed')).detail, 'sound_render_failed');
   const gone = soundFailure(entry, new RenderError('browser_unavailable', 'x', 503));
   assert.deepEqual([gone.status, gone.code], [503, 'EDIT_UNAVAILABLE']);
+});
+
+test('a card that waited on its own clock is the timeline\'s fault on the card\'s field; any other card failure is as before', () => {
+  const item = { id: 'p2', index: 3 };
+  const held = cardFailure(item, new RenderError('page_waits_on_timers', 'window.__ready was still not true after 5 s, …', 400));
+  assert.ok(!(held instanceof EditError));
+  assert.deepEqual([held.status, held.code, held.field, held.message], [400, 'INVALID_EDIT', 'tracks.video[3].card', 'Card p2 could not be rendered: window.__ready was still not true after 5 s, …']);
+  for (const [error, status, detail] of [[new RenderError('timeout', 'The render took too long'), 422, 'card_failed'],
+    [new RenderError('page_load_failed', 'The page crashed the browser'), 422, 'card_failed'], [new Error('surprise'), 422, 'card_failed'],
+    [new RenderError('browser_unavailable', 'x', 503), 503, 'browser_unavailable']]) {
+    const failure = cardFailure(item, error);
+    assert.ok(failure instanceof EditError, detail);
+    assert.deepEqual([failure.status, failure.detail, failure.message], [status, detail, 'Card p2 could not be rendered']);
+  }
+});
+
+test('a render error says whose it is by its status: 400 is the page\'s, on its html', () => {
+  const held = new RenderError('page_waits_on_timers', 'why', 400);
+  assert.deepEqual([held.status, held.code, held.field, held.detail], [400, 'INVALID_RENDER', 'html', 'page_waits_on_timers']);
+  assert.deepEqual([new RenderError('timeout', 'x').code, new RenderError('tmp_unavailable', 'x', 503).code], ['RENDER_FAILED', 'RENDER_UNAVAILABLE']);
+  assert.equal(new RenderError('timeout', 'x').field, undefined);
 });
 
 test('a write the disk stores only part of is written again until whole, and one it stores none of fails', async () => {

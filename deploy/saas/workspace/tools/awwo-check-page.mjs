@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // awwo-check-page: serves an HTML page and its directory to the image's Chromium from a private https origin, blocks every
-// other request, and reports the page's errors, its own self-test (window.awwoSelfTest) and whether it rendered anything.
-// Protocol and report: deploy/saas/workspace/README.md.
+// other request, and reports the page's errors, its own self-test (window.awwoSelfTest) and whether it rendered anything;
+// then, for a page written for AwwO's renderer, loads it again on the renderer's held clock and reports whether the renderer
+// would be left waiting on it. Protocol and report: deploy/saas/workspace/README.md.
 import { rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,8 +10,10 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { HELD_CLOCK_MS, heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
 import { libraryFile, loadLibraries } from './libraries.mjs';
 import { excusable, globMatcher, MAX_PATTERNS, parseMissingOk } from './missing-ok.mjs';
+import { VIRTUAL_TIME_SCRIPT } from './virtual-time.mjs';
 
 const CHROMIUM = '/usr/lib/chromium/chromium-headless-shell';
 const ORIGIN = 'https://awwo-check.invalid';
@@ -21,7 +24,7 @@ const ORIGIN = 'https://awwo-check.invalid';
 // 0.186.1 came only from cdn.jsdelivr.net (2026-10-18).
 const LIBRARIES = loadLibraries(path.dirname(fileURLToPath(import.meta.url)));
 const TYPES = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.wasm': 'application/wasm', '.css': 'text/css' };
-const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 };
+const EXIT = { pass: 0, fail: 1, usage: 2, error: 3, unfinished: 4 };
 const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTestJson: 1_000_000, screenshotBytes: 400_000, allowedMissing: 2000, allowedUrl: 4096 };
 // A sandbox command gets 30 s (120 s when the workspace has the web) and is stopped when it overruns. So each step has its
 // own bound and also fits the --budget-ms counted from process start, less FINISH_MS kept back for closing and writing the report.
@@ -31,9 +34,15 @@ const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTe
 // a page that did not load gets only that long for its screenshot, as before.
 const STEP_MS = { launch: 15_000, load: 10_000, probe: 10_000, screenshot: 20_000 };
 const FINISH_MS = 3000, SCREENSHOT_RESERVE_MS = 5000;
-const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800, missingOk: [] };
+// On the held clock, as the renderer waits: window.__ready up to 10 s, then the first frame and the sound, each until it
+// settles or the page is held (HELD_CLOCK_MS, held-clock.mjs) and at most HELD_STEP_MS, always within the budget.
+const READY_MS = 10_000, HELD_STEP_MS = 15_000;
+// The window the render worker makes a page's sound in (render.mjs SOUND_VIEWPORT); a frame's is --viewport.
+const SOUND_VIEWPORT = { width: 640, height: 360 };
+const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800, missingOk: [], heldClock: 'auto' };
 const NUMBERS = { '--wait-ms': ['waitMs', 0, 60_000], '--timeout-ms': ['timeoutMs', 100, 600_000], '--budget-ms': ['budgetMs', 5000, 900_000] };
-const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH] [--missing-ok GLOB]...';
+const SWITCHES = { '--held-clock': 'on', '--no-held-clock': 'off' };
+const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH] [--missing-ok GLOB]... [--held-clock | --no-held-clock]';
 const HELP = `${USAGE}
 Serves the page and the files of its directory from a private https origin to headless Chromium (any other request is blocked
 and listed, except the three.js 0.186.1 files AwwO's preview supplies, answered from the image's copy at the jsDelivr and
@@ -43,9 +52,17 @@ boolean, detail? }] }, planted listing deliberately wrong variants of the code t
 errors, unhandled rejections (cancelled ones too) and console.error fail the page; while the self-test runs, console errors and
 errors the page cancels are only listed. A missing local file (a 404) is an error unless the page fetched it as data, a picture,
 sound, video or a font and its path, relative to the page, matches a --missing-ok pattern (* and ? within a directory, ** across
-them: **/*.glb is any .glb; at most ${MAX_PATTERNS}); those are only listed. A missing script or stylesheet always counts. The check ends within --budget-ms
-(25000). Writes <out>/report.json and <out>/screenshot.png (out: ./check-out).
-Exit 0: pass. 1: the page failed (an error, a test, a planted variant, a blank render). 2: usage. 3: the check could not run.`;
+them: **/*.glb is any .glb; at most ${MAX_PATTERNS}); those are only listed. A missing script or stylesheet always counts.
+A page that defines window.renderAt or window.renderAudio (--held-clock: any page; --no-held-clock: none) is then loaded
+again on the clock AwwO's renderer gives it, where timers and animation frames run only when a frame is drawn, once for
+its first frame and once for its sound, as the renderer opens it: window.__ready is waited for (noted when the renderer would
+render the page before it is ready), then window.renderAt(0), or window.renderAudio({ seconds: 1, sampleRate: 48000 }). The
+page fails when one of those throws, when the renderer would not find it, or when it waits ${HELD_CLOCK_MS / 1000} s on nothing the renderer can see
+but its own clock, which the renderer refuses; a wait the budget cuts short is reported as not finished. The check ends
+within --budget-ms (25000). Writes <out>/report.json and <out>/screenshot.png (out: ./check-out).
+Exit 0: pass. 1: the page failed (an error, a test, a planted variant, a blank render, a failure on the held clock).
+2: usage. 3: the check could not run. 4: nothing failed, but the check on the held clock did not finish, so the page
+was not shown to render (heldClock.unfinished says where it stopped; a larger --budget-ms may let it finish).`;
 // The container is the sandbox: Chromium's own needs user namespaces or setuid, which the container drops (Playwright
 // adds --no-sandbox). WebGL runs on SwiftShader. No name resolution or proxy: a second wall behind the request router.
 const ARGS = ['--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio',
@@ -73,7 +90,10 @@ function parseArgs(argv) {
     const [flag, inline] = argv[index].startsWith('--') ? argv[index].split(/=(.*)/s, 2) : [argv[index]];
     const value = () => inline ?? argv[++index];
     if (flag === '--help' || flag === '-h') return { help: true };
-    if (flag === '--out') options.out = value() || '';
+    if (SWITCHES[flag]) {
+      if (inline !== undefined) throw new UsageError(`${flag} takes no value`);
+      options.heldClock = SWITCHES[flag];
+    } else if (flag === '--out') options.out = value() || '';
     else if (NUMBERS[flag]) {
       const [key, min, max] = NUMBERS[flag], raw = value() ?? '';
       if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) throw new UsageError(`${flag} takes an integer from ${min} to ${max}`);
@@ -175,15 +195,11 @@ async function measure(browser, png) {
   } finally { await context.close().catch(() => {}); }
 }
 
-async function checkPage(browser, file, out, options, report) {
-  const root = await realpath(path.dirname(file));
-  // allowedMissing: for each URL, how many excused 404s still have Chromium's console entry to come (one each).
-  const missingOk = options.missingOk.map(globMatcher), allowedMissing = new Map();
-  const context = await browser.newContext({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false });
-  const block = (url, type, reason) => {
-    if (report.blockedRequests.length < MAX.blocked) report.blockedRequests.push({ url: clip(url, 500), type, ...(reason ? { reason } : {}) }); else report.blockedDropped += 1;
-  };
-  const served = (url, status) => { if (report.libraryRequests.length < MAX.blocked) report.libraryRequests.push({ url: clip(url, 500), status }); else report.libraryRequestsDropped += 1; };
+// Serves the page's directory from ORIGIN and the library files AwwO's preview supplies, and blocks everything else.
+// `listing` takes what the report lists (blocked and library requests, excused missing files); without it, as on the held
+// clock's second load of the same page, nothing is listed.
+async function routePage(context, root, listing) {
+  const { block, served, missing } = listing ?? { block: () => {}, served: () => {}, missing: () => {} };
   // A request for a library file the preview supplies, at its version, answered from the image (CORS open: a page's
   // module imports are cross-origin); a .min.js names the same file, as in the preview. Any other file of that version
   // is blocked like every other request, with the reason, because the preview's page could not load it either.
@@ -216,21 +232,36 @@ async function checkPage(browser, file, out, options, report) {
     try { target = await realpath(path.join(root, decodeURIComponent(url.pathname))); } catch { /* missing or malformed: 404 */ }
     const inside = target === root || target.startsWith(root + path.sep);
     return (inside ? route.fulfill({ path: target }) : Promise.reject()).catch(() => {
-      // Data, a picture, sound, video or a font the caller said may be missing (--missing-ok, e.g. the models a sandbox
-      // does not have) is listed, not counted; missing code (a script, a stylesheet, a worker) always counts. The URLs
-      // excused are bounded, in number and length: past that, a missing file counts.
+      missing(url, request.resourceType());
+      return route.fulfill({ status: 404, body: '' });
+    }).catch(() => {});
+  });
+  await context.routeWebSocket(/.*/, socket => { block(socket.url(), 'websocket'); socket.close().catch(() => {}); });
+}
+
+async function checkPage(browser, file, out, options, report) {
+  const root = await realpath(path.dirname(file));
+  // allowedMissing: for each URL, how many excused 404s still have Chromium's console entry to come (one each).
+  const missingOk = options.missingOk.map(globMatcher), allowedMissing = new Map();
+  const context = await browser.newContext({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false });
+  await routePage(context, root, {
+    block: (url, type, reason) => {
+      if (report.blockedRequests.length < MAX.blocked) report.blockedRequests.push({ url: clip(url, 500), type, ...(reason ? { reason } : {}) }); else report.blockedDropped += 1;
+    },
+    served: (url, status) => { if (report.libraryRequests.length < MAX.blocked) report.libraryRequests.push({ url: clip(url, 500), status }); else report.libraryRequestsDropped += 1; },
+    // Data, a picture, sound, video or a font the caller said may be missing (--missing-ok, e.g. the models a sandbox
+    // does not have) is listed, not counted; missing code (a script, a stylesheet, a worker) always counts. The URLs
+    // excused are bounded, in number and length: past that, a missing file counts.
+    missing: (url, type) => {
       let relative = '';
       try { relative = decodeURIComponent(url.pathname).replace(/^\/+/, ''); } catch { /* malformed: counted */ }
-      const type = request.resourceType();
       if (relative && excusable(type, relative) && url.href.length <= MAX.allowedUrl && (allowedMissing.has(url.href) || allowedMissing.size < MAX.allowedMissing)
         && missingOk.some(matches => matches(relative))) {
         allowedMissing.set(url.href, (allowedMissing.get(url.href) ?? 0) + 1);
         if (report.missingAllowed.length < MAX.blocked) report.missingAllowed.push({ url: clip(url.href, 500), type }); else report.missingAllowedDropped += 1;
       }
-      return route.fulfill({ status: 404, body: '' });
-    }).catch(() => {});
+    },
   });
-  await context.routeWebSocket(/.*/, socket => { block(socket.url(), 'websocket'); socket.close().catch(() => {}); });
   let phase = 'load';
   const note = (kind, message, handled = kind === 'console') => {
     // A self-test may exercise error paths that log or that it handles; its own verdict covers them, so it lists them only.
@@ -272,10 +303,18 @@ async function checkPage(browser, file, out, options, report) {
   const shot = await within(page.screenshot({ timeout: bound }), bound + 500);
   if (!shot.ok) report.screenshotError = timedOut(shot) ? `the screenshot timed out (${cut(bound, allowed)})` : firstLine(shot.error);
   report.timings.screenshotMs = Date.now() - started;
+  // Whether the page is written for AwwO's renderer, which the held clock's pass checks it for: asked before the self-test
+  // (which may hang) and, when the page was too busy to answer then, once more after it.
+  const declares = async () => {
+    const answer = await within(page.evaluate(() => [typeof window.renderAt, typeof window.renderAudio]), left(2000));
+    if (answer.ok && Array.isArray(answer.value)) report.heldClock.declares = { renderAt: answer.value[0] === 'function', renderAudio: answer.value[1] === 'function' };
+  };
   if (report.load.ok) {
+    await declares();
     [phase, started] = ['selftest', Date.now()];
     report.selfTest = await runSelfTest(page, options.timeoutMs);
     report.timings.selfTestMs = Date.now() - started;
+    if (!report.heldClock.declares) await declares();
   }
   // Closing the page first keeps its renderer and the measuring one from running at once (the container has 128 PIDs).
   await within(context.close(), left(2000, 0));
@@ -287,6 +326,130 @@ async function checkPage(browser, file, out, options, report) {
   await writeFile(report.screenshot, written ? Buffer.from(written, 'base64') : shot.value);
 }
 
+// Whether the held clock's pass runs, and why (report.heldClock.why).
+function heldClockWanted(options, report) {
+  const { declares } = report.heldClock;
+  if (options.heldClock === 'off') return [false, '--no-held-clock'];
+  if (!report.load.ok) return [false, 'the page did not load'];
+  if (options.heldClock === 'on') return [true, '--held-clock'];
+  if (!declares) return [false, 'the page did not answer whether it defines window.renderAt or window.renderAudio'];
+  const names = ['renderAt', 'renderAudio'].filter(name => declares[name]).map(name => `window.${name}`);
+  return names.length ? [true, `the page defines ${names.join(' and ')}`] : [false, 'the page defines neither window.renderAt nor window.renderAudio'];
+}
+
+// The page loaded once more for one of the renderer's two uses of it (`use`: 'frame' or 'sound'), in a fresh context on
+// the clock AwwO's renderer gives it (virtual-time.mjs: its timers and animation frames run only when a frame is drawn),
+// as the render worker opens a fresh page for a render and another for each sound, and waited on as the renderer waits,
+// with its watch (held-clock.mjs): window.__ready, until it is true and up to READY_MS (a page held there is noted, not
+// failed: the renderer renders it then, before it is ready), then window.renderAt(0), the first frame, or
+// window.renderAudio({ seconds: 1, sampleRate: 48000 }). Answers what the page defines once it is ready, or null when it
+// got no further.
+async function heldVisit(browser, root, options, report, use) {
+  const held = report.heldClock, name = use === 'frame' ? 'renderAt' : 'renderAudio', call = use === 'frame' ? 'window.renderAt(0)' : 'window.renderAudio';
+  const viewport = use === 'sound' ? SOUND_VIEWPORT : { width: options.width, height: options.height };
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false });
+  try {
+    await routePage(context, root, null);
+    await context.addInitScript(VIRTUAL_TIME_SCRIPT);
+    const opening = left(5000), page = await context.newPage(), watched = await openWatch(context, page, { timeoutMs: opening });
+    // A watch that could not be opened, or that DevTools will not tell of Web Audio or media, never holds a page: the
+    // check could only sit out its bounds and then say nothing true of a page held on its clock.
+    if (!watched || !watched.activity.known) {
+      const why = watched ? 'DevTools would not report the page\'s Web Audio or media'
+        : `DevTools did not open its sessions within ${opening} ms${opening < 5000 ? ' (what --budget-ms had left)' : ''}`;
+      held.unfinished = `the held clock could not be watched: ${why}`;
+      return null;
+    }
+    const bound = left(STEP_MS.load);
+    const loaded = await within(page.goto(report.url, { waitUntil: 'load', timeout: bound }), bound + 500);
+    if (!loaded.ok) {
+      held.unfinished = `the page did not load on the held clock: ${loaded.timedOut || loaded.error?.name === 'TimeoutError' ? `not within ${bound} ms` : firstLine(loaded.error)}`;
+      return null;
+    }
+    await within(page.evaluate(() => document.fonts.ready.then(() => true)), left(STEP_MS.probe));
+    // One of the renderer's waits, as a step of the report, and what `work` settled to: or that the page was held on its
+    // clock (`held`, the renderer's reason), or that it ran out of `ms` (or what the budget had left).
+    const wait = async (step, work, ms, kind) => {
+      const watch = watchHeldClock(watched), from = Date.now(), allowed = left(ms);
+      try {
+        const outcome = await within(Promise.race([work.then(value => ({ value })), watch.held.then(waiting => ({ waiting }))]), allowed);
+        const entry = { page: use, step, ms: Date.now() - from };
+        held.steps.push(entry);
+        if (outcome.ok && outcome.value.waiting) return [Object.assign(entry, { ok: false, waiting: outcome.value.waiting, held: heldClockMessage(kind, outcome.value.waiting) })];
+        if (outcome.ok) return [Object.assign(entry, { ok: true }), outcome.value.value];
+        if (outcome.timedOut) return [Object.assign(entry, { ok: false, unfinished: `${step} had not settled after ${allowed} ms${allowed < ms ? ' (what --budget-ms had left)' : ''}` })];
+        return [Object.assign(entry, { ok: false, unfinished: `${step} could not be waited for: ${firstLine(outcome.error)}` })];
+      } finally { watch.stop(); }
+    };
+    const asks = await within(page.evaluate(() => '__ready' in window), left(STEP_MS.probe));
+    if (!asks.ok) return void (held.unfinished = 'the page did not answer on the held clock');
+    if (asks.value) {
+      // As the renderer waits: until it is true, for up to READY_MS, whatever the watch finds meanwhile (a page may turn
+      // ready by work no watch can see); what it finds only words the note on a page that never did.
+      const watch = watchHeldClock(watched), from = Date.now(), allowed = left(READY_MS);
+      let waiting = null, ready = false, failed = null;
+      watch.held.then(value => { waiting = value; });
+      try {
+        for (const until = from + allowed; !ready && Date.now() < until;) {
+          const answer = await within(page.evaluate(() => window.__ready === true), Math.max(1, until - Date.now()));
+          if (answer.ok && answer.value === true) ready = true;
+          else if (answer.ok || answer.timedOut) await delay(100);
+          else { failed = answer.error; break; }
+        }
+      } finally { watch.stop(); }
+      const step = { page: use, step: 'window.__ready', ms: Date.now() - from, ok: ready, ...(!ready && waiting ? { waiting } : {}) };
+      held.steps.push(step);
+      if (failed) return void (held.unfinished = step.unfinished = `window.__ready could not be waited for: ${firstLine(failed)}`);
+      if (!ready && allowed < READY_MS) return void (held.unfinished = step.unfinished = `window.__ready had not settled after ${allowed} ms (what --budget-ms had left)`);
+      if (!ready) held.note ??= waiting ? heldClockMessage({ kind: 'ready' }, waiting) : `window.__ready was not true within ${READY_MS / 1000} s, where the renderer warns (ready_timeout) and renders on`;
+    }
+    const shape = await within(page.evaluate(() => [typeof window.renderAt, typeof window.renderAudio]), left(STEP_MS.probe));
+    if (!shape.ok || !Array.isArray(shape.value)) return void (held.unfinished = 'the page did not answer on the held clock once it was ready');
+    const defines = { renderAt: shape.value[0] === 'function', renderAudio: shape.value[1] === 'function' };
+    if (!defines[name]) {
+      // Defined in the first load, whose timers run, but not here when the renderer looks for it.
+      if (held.declares?.[name]) {
+        held.failure = `window.${name} is not defined on the held clock when the renderer looks for it (once the page has loaded and is ready), `
+          + `though it was in the first load, whose timers run: the page defines it only after a timer or some other wait, so the renderer would ${use === 'frame' ? 'render the page without it' : 'refuse its sound'}.`;
+      }
+      return defines;
+    }
+    const [step, threw] = await wait(call, page.evaluate(async use => {
+      try { await (use === 'frame' ? window.renderAt(0) : window.renderAudio({ seconds: 1, sampleRate: 48000 })); return null; } catch (error) { return String(error?.message ?? error).slice(0, 300); }
+    }, use), HELD_STEP_MS, use === 'frame' ? { kind: 'renderAt', t: 0 } : { kind: 'renderAudio' });
+    // The renderer counts a throw of renderAt as a page error on every frame it happens on, and refuses a sound whose
+    // renderAudio throws.
+    if (step.ok && typeof threw === 'string') Object.assign(step, { ok: false, failure: `${call} threw on the held clock: ${threw}` });
+    if (step.held) held.failure = step.failure = step.held;
+    else if (step.failure) held.failure = step.failure;
+    else if (step.unfinished) held.unfinished = step.unfinished;
+    return defines;
+  } finally {
+    await within(context.close(), left(2000, 0));
+  }
+}
+
+// After the first load's page and measuring page are closed, one renderer at a time (the container has 128 PIDs): the
+// first frame's page, where the page defines window.renderAt (or with --held-clock), then the sound's, where it defines
+// window.renderAudio. The page fails when its renderAt(0) or renderAudio waits on nothing but its own clock, which the
+// renderer refuses; when either throws there; or when the renderer would not find it. A wait cut short by HELD_STEP_MS
+// or the budget is reported as not finished, and fails nothing.
+async function checkHeldClock(browser, file, options, report) {
+  const held = report.heldClock, started = Date.now();
+  held.ran = true;
+  try {
+    const root = await realpath(path.dirname(file));
+    let sound = Boolean(held.declares?.renderAudio);
+    if (held.mode === 'on' || held.declares?.renderAt) {
+      const defines = await heldVisit(browser, root, options, report, 'frame');
+      if (held.mode === 'on' && defines?.renderAudio) sound = true;
+    }
+    if (sound && !held.failure && !held.unfinished) await heldVisit(browser, root, options, report, 'sound');
+  } finally {
+    held.ms = Date.now() - started;
+  }
+}
+
 function verdict(report) {
   const test = report.selfTest;
   return [!report.load.ok && `the page did not load: ${report.load.error}`,
@@ -295,7 +458,8 @@ function verdict(report) {
     test.failed && `self-test: ${test.failed} of ${test.passed + test.failed} tests failed`,
     test.plantedRejected < test.plantedTotal && `self-test: ${test.plantedTotal - test.plantedRejected} of ${test.plantedTotal} planted variants were not rejected`,
     report.blank && 'blank render: the screenshot is a single flat colour',
-    report.blank === null && !report.measureError && `no screenshot: ${report.screenshotError}`].filter(Boolean);
+    report.blank === null && !report.measureError && `no screenshot: ${report.screenshotError}`,
+    report.heldClock.failure && `held clock: ${report.heldClock.failure}`].filter(Boolean);
 }
 
 function summary(report) {
@@ -308,6 +472,13 @@ function summary(report) {
     ...unexpected.slice(0, 5).map(item => `    not as expected: ${item.name}${item.detail ? ` (${clip(item.detail, 200)})` : ''}`));
   else if (test.present === false) lines.push('  self-test: none (window.awwoSelfTest is not defined)');
   if (report.pixels) lines.push(`  render: ${report.blank ? 'BLANK' : 'not blank'} (${report.pixels.distinctColours} colours, luma sd ${report.pixels.lumaStdDev})`);
+  const held = report.heldClock, settled = [...new Set(held.steps.filter(step => step.ok).map(step => step.step))];
+  if (held.ran && held.unfinished) lines.push(`  held clock: NOT FINISHED, ${held.unfinished}`);
+  else if (held.ran && !held.failure) {
+    const list = settled.length > 1 ? `${settled.slice(0, -1).join(', ')} and ${settled.at(-1)}` : settled[0];
+    lines.push(`  held clock: ${list ? `${list} settled` : 'nothing for the renderer to wait on'} as AwwO's renderer runs the page`);
+  } else if (!held.ran && (held.mode === 'on' || (held.mode === 'auto' && report.load.ok && !held.declares))) lines.push(`  held clock: not checked (${held.why})`);
+  if (held.note) lines.push(`  held clock note: ${held.note}`);
   if (report.libraryRequests.length) lines.push(`  libraries: ${report.libraryRequests.length + report.libraryRequestsDropped} request(s) answered from the image's copy (${Object.entries(report.libraries).map(([name, version]) => `${name} ${version}`).join(', ')})`);
   const unsupplied = report.blockedRequests.filter(request => request.reason);
   if (unsupplied.length) lines.push(`  not supplied by AwwO's preview, so blocked: ${unsupplied.length} library file(s), first ${unsupplied[0].url}`);
@@ -332,6 +503,7 @@ async function main(argv) {
     missingOk: options.missingOk, missingAllowed: [], missingAllowedDropped: 0,
     load: { ok: false },
     selfTest: { present: null, ok: false, passed: 0, failed: 0, plantedTotal: 0, plantedRejected: 0, items: null }, blank: null, pixels: null,
+    heldClock: { mode: options.heldClock, declares: null, ran: false, why: null, steps: [], failure: null, unfinished: null, note: null },
     screenshot: null, viewport: { width: options.width, height: options.height }, timings: {}, chromium: null };
   const finish = () => {
     clearTimeout(watchdog); // set just below, before anything can finish
@@ -362,9 +534,18 @@ async function main(argv) {
     report.timings.launchMs = Date.now() - started;
     report.chromium = { version: browser.version(), executable: CHROMIUM };
     await checkPage(browser, file, out, options, report);
+    // After the first load's page and measuring page are closed: one renderer at a time (the container has 128 PIDs).
+    const [heldRuns, why] = heldClockWanted(options, report);
+    report.heldClock.why = why;
+    if (heldRuns) {
+      await checkHeldClock(browser, file, options, report);
+      report.timings.heldClockMs = report.heldClock.ms;
+    }
     report.reasons = verdict(report);
     if (!report.reasons.length && report.measureError) throw new Error(report.measureError);
-    Object.assign(report, report.reasons.length ? { verdict: 'fail', exitCode: EXIT.fail } : { verdict: 'pass', exitCode: EXIT.pass });
+    // A check on the held clock that did not finish is not a pass: the page was not shown to render.
+    Object.assign(report, report.reasons.length ? { verdict: 'fail', exitCode: EXIT.fail }
+      : report.heldClock.unfinished ? { verdict: 'unfinished', exitCode: EXIT.unfinished } : { verdict: 'pass', exitCode: EXIT.pass });
   } catch (error) {
     report.reasons = [`the check could not run: ${firstLine(error)}`];
   } finally {
