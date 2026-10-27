@@ -597,7 +597,8 @@ def _stream_exception(event: Any) -> BridgeError | None:
 
 def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
     """One JSON log line for a call's content-free fact (a fallback to the model's other profile, a failure by AWS error
-    type), or None for anything else, as bedrockFactLine in apps/bedrock-bridge.ts: closed labels and a status only."""
+    type; and this worker's own, a change in SummaryWatch), or None for anything else, as bedrockFactLine in
+    apps/bedrock-bridge.ts: closed labels and a status only."""
     if not isinstance(fact, dict):
         return None
 
@@ -614,6 +615,11 @@ def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
             and isinstance(fact.get("upstream"), bool)):
         return json.dumps({"service": service, **run, "event": "bedrock_call_failed", "model": fact["model"], "error": fact["error"],
                            "status": status, "stage": fact["stage"], "upstream": fact["upstream"]})
+    # SummaryWatch: Bedrock stopped (silent) or began again (streams) streaming a model's thinking summary at an effort.
+    if (fact.get("event") == "summary_watch" and label(fact.get("model")) and label(fact.get("effort"))
+            and fact.get("state") in ("silent", "streams")):
+        return json.dumps({"service": service, **run, "event": "bedrock_summary_watch", "model": fact["model"], "effort": fact["effort"],
+                           "state": fact["state"]})
     return None
 
 
@@ -639,20 +645,159 @@ def with_summarized_thinking(command: dict, model_id: str) -> dict:
     return {**command, "additionalModelRequestFields": {**(fields or {}), "thinking": dict(SUMMARIZED_THINKING)}}
 
 
-def call_read_timeout(read_timeout: float, command: dict, model_id: str) -> float:
+def asks_for_summary(command: dict, model_id: str) -> bool:
+    """Whether a ConverseStream command to `model_id` asks a model that thinks silently (THINKS_SILENTLY) for its
+    thinking summarized (with_summarized_thinking)."""
+    fields = command.get("additionalModelRequestFields")
+    return base_model_id(model_id) in THINKS_SILENTLY and isinstance(fields, dict) and fields.get("thinking") == SUMMARIZED_THINKING
+
+
+def command_effort(command: dict) -> str:
+    """The thinking effort a ConverseStream command names (output_config, to_converse_input), or "" for the model's own."""
+    fields = command.get("additionalModelRequestFields")
+    config = fields.get("output_config") if isinstance(fields, dict) else None
+    effort = config.get("effort") if isinstance(config, dict) else None
+    return effort if isinstance(effort, str) else ""
+
+
+class SummaryWatch:
+    """Whether Bedrock streams a silent model's thinking summary right now, by model (without its inference profile's
+    prefix) and the effort its calls name, as this worker last saw it. A call that asked for the summary and got some in
+    time marks it streaming; one that asked, was answered (its stream began) and then got neither summary nor answer
+    before its read timeout marks it silent (_SummaryCall). While it is silent, such a call at that model and effort waits
+    the stream's idle limit, not its model's QUICK_FIRST_BYTE_SECONDS (call_read_timeout), and the first summary in time
+    that any call at that model and effort gets ends that. A call that offers tools waits the idle limit anyway, but its
+    stall begins a spell too. A stream lost after its headers looks the same and begins one; a summary that stops partway
+    through a call does not.
+
+    2026-10-26 (at the owner's 「Bedrock 不发思考摘要时，Opus 5.5 的调用恢复 15 分钟空闲上限」): from about 16:00Z Bedrock
+    sent Claude Opus 5.5's calls nothing while they thought, at the default effort and at low (high was not probed),
+    though they asked for the summary; the same calls had streamed it from 9-13 s that afternoon, and it streamed again by
+    01:15Z the next day. Every call that thought longer than 3 minutes was cut with nothing (two of four in the 16:00Z
+    hour, all three tries of a page node at 17:36Z). A call whose stream never began (Bedrock never answered, the lost
+    deliveries of 10-19) says nothing about the summary and leaves the watch as it is. Since the move to UCloud a silent
+    stream longer than about 6 minutes has not been delivered (THINKS_SILENTLY), so the idle limit saves the calls that
+    think 3 to about 6 minutes; a longer one now fails at 15 minutes, not 3.
+
+    One for the worker's process (SUMMARY_WATCH: its transports are made per run); it starts streaming, as before it."""
+
+    def __init__(self) -> None:
+        self._silent: set[tuple[str, str]] = set()
+        self._lock = threading.Lock()
+
+    def streams(self, model_id: str, effort: str) -> bool:
+        with self._lock:
+            return (base_model_id(model_id), effort) not in self._silent
+
+    def saw_summary(self, model_id: str, effort: str) -> bool:
+        """Marks it streaming; True when that ends a silent spell."""
+        with self._lock:
+            key = (base_model_id(model_id), effort)
+            if key not in self._silent:
+                return False
+            self._silent.discard(key)
+            return True
+
+    def missed_summary(self, model_id: str, effort: str) -> bool:
+        """Marks it silent; True when that begins a silent spell."""
+        with self._lock:
+            key = (base_model_id(model_id), effort)
+            if key in self._silent:
+                return False
+            self._silent.add(key)
+            return True
+
+
+SUMMARY_WATCH = SummaryWatch()
+
+
+def call_read_timeout(read_timeout: float, command: dict, model_id: str, watch: SummaryWatch | None = None) -> float:
     """The read timeout of one call (its ConverseStream command, to `model_id`): the transport's, or the model's
     QUICK_FIRST_BYTE_SECONDS when that comes first and the call offers the model no tools (no toolConfig: none were
     given, or tool_choice was "none"); for a model that thinks silently (THINKS_SILENTLY) only while the command asks for
     its thinking summarized, at whatever effort (with low effort a long think still streamed its summary from 12.8 s,
-    never silent for longer, 2026-10-26)."""
+    never silent for longer, 2026-10-26), and while `watch` has not seen Bedrock stop streaming it (SummaryWatch)."""
     model = base_model_id(model_id)
     quick = QUICK_FIRST_BYTE_SECONDS.get(model)
     if quick is None or command.get("toolConfig") is not None:
         return read_timeout
-    fields = command.get("additionalModelRequestFields")
-    if model in THINKS_SILENTLY and not (isinstance(fields, dict) and fields.get("thinking") == SUMMARIZED_THINKING):
+    if model in THINKS_SILENTLY and not asks_for_summary(command, model_id):
+        return read_timeout
+    if model in THINKS_SILENTLY and watch is not None and not watch.streams(model_id, command_effort(command)):
         return read_timeout
     return min(read_timeout, quick)
+
+
+def _delta_kind(event: Any) -> str:
+    """What a ConverseStream event carries: "summary" (text of the thinking summary, a reasoningContent delta with text),
+    "answer" (answer text, or a tool call's start or input: the thinking is over), or "" (anything else, a signature among
+    them)."""
+    start = event.get("contentBlockStart") if isinstance(event, dict) else None
+    if isinstance(start, dict) and isinstance(start.get("start"), dict) and isinstance(start["start"].get("toolUse"), dict):
+        return "answer"
+    block = event.get("contentBlockDelta") if isinstance(event, dict) else None
+    delta = block.get("delta") if isinstance(block, dict) else None
+    if not isinstance(delta, dict):
+        return ""
+    reasoning = delta.get("reasoningContent")
+    if isinstance(reasoning, dict) and isinstance(reasoning.get("text"), str) and reasoning["text"] != "":
+        return "summary"
+    if (isinstance(delta.get("text"), str) and delta["text"] != "") or isinstance(delta.get("toolUse"), dict):
+        return "answer"
+    return ""
+
+
+class _SummaryCall:
+    """One call's part in its transport's SummaryWatch: a call that asked for the summary tells the watch what it got.
+
+    Only a summary that comes in time ends a spell: a piece after a silence longer than the model's quick limit (a summary
+    held back to the end of the thinking) would make the quick limit cut the next call again. And only a call that got
+    neither summary nor answer before its read timeout begins one: a stall after the answer began says nothing about the
+    summary (Claude review, 2026-10-27)."""
+
+    def __init__(self, watch: SummaryWatch, model_id: str, effort: str, tell: Callable[[dict], None],
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.watch = watch
+        self.model = base_model_id(model_id)
+        self.effort = effort
+        self.tell = tell
+        self.clock = clock
+        self.quick = QUICK_FIRST_BYTE_SECONDS.get(self.model)
+        self.last = clock()
+        self.late = False
+        self.seen = False
+        self.answered = False
+
+    def _told(self, state: str) -> None:
+        self.tell({"event": "summary_watch", "model": self.model, "effort": self.effort or "default", "state": state})
+
+    def restart(self) -> None:
+        """The call is sent again, to the model's other profile, before anything of the first attempt was relayed: its
+        summary is in time from then (Codex review, 2026-10-27). Called from the transport's thread."""
+        self.last = self.clock()
+
+    def event(self, event: Any) -> None:
+        now = self.clock()
+        if self.quick is not None and now - self.last > self.quick:
+            self.late = True
+        self.last = now
+        kind = _delta_kind(event)
+        if kind == "answer":
+            self.answered = True
+        if kind != "summary":
+            return
+        # Every piece of summary counts, not only a call's first: a concurrent call may begin a spell while this one's
+        # summary streams, and this one's next piece ends it (Codex review, 2026-10-27).
+        self.seen = True
+        if not self.late and self.watch.saw_summary(self.model, self.effort):
+            self._told("streams")
+
+    def failure(self, error: BridgeError) -> None:
+        # Only a read timeout after the stream began, before any summary or answer: Bedrock answered and then sent no
+        # summary while the model thought.
+        if (not self.seen and not self.answered and error.kind == "ReadTimeoutError"
+                and self.watch.missed_summary(self.model, self.effort)):
+            self._told("silent")
 
 
 def bridge_failure(error: BaseException) -> BridgeError:
@@ -769,18 +914,22 @@ def _error_body(error: BridgeError) -> dict:
 
 class _ConverseStream(AsyncByteStream):
     def __init__(self, queue: asyncio.Queue, mapper: ChunkMapper, cancel: Callable[[], None],
-                 failed: Callable[[BridgeError], BridgeError] = lambda error: error):
+                 failed: Callable[[BridgeError], BridgeError] = lambda error: error, summary: _SummaryCall | None = None):
         self.queue = queue
         self.mapper = mapper
         self.cancel = cancel
         # Told each failure the stream relays (BedrockConverseTransport._failed), and hands it back.
         self.failed = failed
+        # A call that asked for its thinking summarized: told each event and the failure that ends the stream.
+        self.summary = summary
 
     async def __aiter__(self):
         try:
             while True:
                 kind, value = await self.queue.get()
                 if kind == "event":
+                    if self.summary is not None:
+                        self.summary.event(value)
                     try:
                         for payload in self.mapper.map(value):
                             yield _sse(payload)
@@ -797,7 +946,11 @@ class _ConverseStream(AsyncByteStream):
                     return
                 else:
                     # A failure after the stream began is an SSE error frame, which the OpenAI SDK raises.
-                    yield _sse(_error_body(self.failed(bridge_failure(value))))
+                    failure = bridge_failure(value)
+                    relayed = self.failed(failure)
+                    if self.summary is not None:
+                        self.summary.failure(failure)
+                    yield _sse(_error_body(relayed))
                     return
         finally:
             self.cancel()
@@ -811,7 +964,8 @@ class BedrockConverseTransport(AsyncBaseTransport):
 
     def __init__(self, *, region: str, model: str, auth: dict, read_timeout: float = 120.0,
                  client_factory: Callable[[str, dict, float], Any] = default_client, prompt_cache: bool = False,
-                 reasoning_efforts: tuple = (), fallback_model: str = "", report: Callable[[dict], None] | None = None):
+                 reasoning_efforts: tuple = (), fallback_model: str = "", report: Callable[[dict], None] | None = None,
+                 summary_watch: SummaryWatch | None = None):
         if not valid_auth(auth):
             raise ValueError("Invalid Bedrock credentials")
         if not isinstance(prompt_cache, bool):
@@ -822,6 +976,8 @@ class BedrockConverseTransport(AsyncBaseTransport):
             raise ValueError("Invalid Bedrock fallback model")
         if report is not None and not callable(report):
             raise ValueError("Invalid Bedrock call reporter")
+        if summary_watch is not None and not isinstance(summary_watch, SummaryWatch):
+            raise ValueError("Invalid Bedrock summary watch")
         self.endpoint = bridge_base_url(region) + "/chat/completions"
         self.region = region
         self.model = model
@@ -838,6 +994,9 @@ class BedrockConverseTransport(AsyncBaseTransport):
         self.fallback_model = fallback_model
         # Told each content-free fact of a call (bedrock_fact_line); a reporter that raises never fails the call.
         self.report = report
+        # Whether Bedrock streams a silent model's thinking summary right now: the worker's own (SUMMARY_WATCH) unless one
+        # is given (tests).
+        self.summary_watch = summary_watch if summary_watch is not None else SUMMARY_WATCH
 
     @staticmethod
     def _json_error(error: BridgeError) -> Response:
@@ -872,7 +1031,9 @@ class BedrockConverseTransport(AsyncBaseTransport):
             if self.prompt_cache:
                 command = with_claude_prompt_cache(command)
             single_tool_call = body.get("parallel_tool_calls") is False
-            read_timeout = call_read_timeout(self.read_timeout, command, self.model)
+            read_timeout = call_read_timeout(self.read_timeout, command, self.model, self.summary_watch)
+            summary = (_SummaryCall(self.summary_watch, self.model, command_effort(command), self._tell)
+                       if asks_for_summary(command, self.model) else None)
         except BridgeError as error:
             return self._json_error(self._failed(error, self.model, "request"))
 
@@ -934,6 +1095,8 @@ class BedrockConverseTransport(AsyncBaseTransport):
                         raise
                     self._tell({"event": "fallback", "from": self.model, "to": self.fallback_model, "after": refusal.kind})
                     holder["active"] = self.fallback_model
+                    if summary is not None:
+                        summary.restart()
                     events, head = open_stream(client, self.fallback_model, False)
                 if stop.is_set():
                     cancel()
@@ -969,4 +1132,4 @@ class BedrockConverseTransport(AsyncBaseTransport):
         # The chunks name the model the caller asked for, whichever of its profiles answers.
         return Response(200, headers={"content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache"},
                         stream=_ConverseStream(queue, ChunkMapper(self.model, single_tool_call=single_tool_call), cancel,
-                                               failed=lambda error: self._failed(error, active, "stream")))
+                                               failed=lambda error: self._failed(error, active, "stream"), summary=summary))

@@ -19,8 +19,9 @@ from botocore.exceptions import ClientError, EventStreamError
 from urllib3.exceptions import ProtocolError
 
 from bedrock_bridge import (
-    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, REASONING_EFFORTS, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, bedrock_fact_line, bridge_base_url, bridge_failure,
-    call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, valid_reasoning_efforts, with_claude_prompt_cache, with_summarized_thinking,
+    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, REASONING_EFFORTS, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, SummaryWatch, bedrock_fact_line,
+    bridge_base_url, bridge_failure, call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, valid_reasoning_efforts,
+    with_claude_prompt_cache, with_summarized_thinking,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -366,6 +367,8 @@ def text_turn(text, prefix=()):
 class BridgedRunTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         set_trace_processors([])
+        # The worker's own summary watch, fresh: its read timeouts are asserted below (SummaryWatch).
+        self.enterContext(mock.patch("bedrock_bridge.SUMMARY_WATCH", SummaryWatch()))
         self.record = {}
         self.events = text_turn("你好，来自 Bedrock。")
         self.fail = None
@@ -675,6 +678,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
 OPUS = "global.anthropic.claude-opus-5-5"
 OPUS_US = "us.anthropic.claude-opus-5-5"
+# The fact a call to Opus 5.5 at its own effort tells when it begins a spell of Bedrock streaming no thinking summary.
+OPUS_SUMMARY_SILENT = {"event": "summary_watch", "model": "anthropic.claude-opus-5-5", "effort": "default", "state": "silent"}
 
 
 def aws_error(code, status):
@@ -704,6 +709,10 @@ class ScriptedClient:
 class ProfileFallbackTests(unittest.IsolatedAsyncioTestCase):
     """The model's other inference profile (fallback_model), asked once when its profile refuses the call before
     anything streamed: as createBedrockFetch's fallbackModel in apps/bedrock-bridge.ts."""
+
+    def setUp(self):
+        # The worker's own summary watch, fresh: read timeouts are asserted below (SummaryWatch).
+        self.enterContext(mock.patch("bedrock_bridge.SUMMARY_WATCH", SummaryWatch()))
 
     async def call(self, steps, **options):
         client = ScriptedClient(steps)
@@ -1037,6 +1046,8 @@ class RealEventStreamTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.enterContext(mock.patch.dict(os.environ, STUB_AWS))
+        # The worker's own summary watch, fresh (SummaryWatch).
+        self.enterContext(mock.patch("bedrock_bridge.SUMMARY_WATCH", SummaryWatch()))
 
     async def call(self, body, length=None):
         facts = []
@@ -1143,7 +1154,8 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 url, taken = stalling_endpoint(self, headers)
                 facts = []
                 transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=1.0,
-                                                     client_factory=local_client(url), fallback_model=fallback, report=facts.append)
+                                                     client_factory=local_client(url), fallback_model=fallback, report=facts.append,
+                                                     summary_watch=SummaryWatch())
                 body = {"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]}
                 started = time.monotonic()
                 async with httpx2.AsyncClient(transport=transport) as http:
@@ -1152,7 +1164,10 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 error = (response.json() if stage == "request" else
                          json.loads([line for line in response.text.split("\n") if line.startswith("data: ")][-1][6:]))["error"]
                 self.assertEqual((response.status_code, error["type"], error["status"]), (504 if stage == "request" else 200, "ReadTimeoutError", 504))
-                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
+                # Answered and then silent, a call that asked for the summary marks it missing (SummaryWatch); one never
+                # answered says nothing about it.
+                self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}]
+                                 + ([OPUS_SUMMARY_SILENT] if stage == "stream" else []))
                 self.assertEqual(len(taken), 1, "a stall is not a profile's refusal: the other profile is never asked")
 
     async def test_a_stalled_call_that_offers_no_tools_fails_at_its_models_quick_limit_and_any_other_waits_the_idle_limit(self):
@@ -1171,7 +1186,7 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                     url, _ = stalling_endpoint(self, headers)
                     seen, facts = [], []
                     transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, read_timeout=3.0,
-                                                         client_factory=local_client(url, seen), report=facts.append)
+                                                         client_factory=local_client(url, seen), report=facts.append, summary_watch=SummaryWatch())
                     body = {"model": model, "stream": True, "messages": [{"role": "user", "content": "hi"}], **extra}
                     started = time.monotonic()
                     with mock.patch.dict("bedrock_bridge.QUICK_FIRST_BYTE_SECONDS", {"anthropic.claude-opus-4-8": 1, "anthropic.claude-opus-5-5": 1}):
@@ -1184,7 +1199,8 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                     error = (response.json() if stage == "request" else
                              json.loads([line for line in response.text.split("\n") if line.startswith("data: ")][-1][6:]))["error"]
                     self.assertEqual((error["type"], error["status"]), ("ReadTimeoutError", 504))
-                    self.assertEqual(facts, [{"event": "failed", "model": model, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
+                    self.assertEqual(facts, [{"event": "failed", "model": model, "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}]
+                                     + ([OPUS_SUMMARY_SILENT] if stage == "stream" and model == OPUS else []))
 
     async def test_a_run_whose_call_stalls_ends_as_a_stall_long_before_its_deadline(self):
         set_trace_processors([])
@@ -1204,7 +1220,7 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 request = RunRequest("r1", "t1", "s1", "Say hello", [], model=model)
                 url, _ = stalling_endpoint(self, headers)
                 seen = []
-                runner.BedrockConverseTransport = lambda **kwargs: original(**kwargs, client_factory=local_client(url, seen))
+                runner.BedrockConverseTransport = lambda **kwargs: original(**kwargs, client_factory=local_client(url, seen), summary_watch=SummaryWatch())
                 started = time.monotonic()
                 with limit(), mock.patch("sys.stderr") as stderr:
                     events = [event async for event in stream_run(request, config, asyncio.Event())]
@@ -1213,14 +1229,272 @@ class StalledStreamTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((events[-1]["type"], events[-1]["code"]), ("failed", "MODEL_STALLED"), events[-1])
                 self.assertFalse([event for event in events if event["type"] == "text_delta"], "nothing was returned")
                 written = "".join(call.args[0] for call in stderr.write.call_args_list)
+                watched = ([{"service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_summary_watch",
+                             "model": "anthropic.claude-opus-5-5", "effort": "default", "state": "silent"}]
+                           if stage == "stream" and target == OPUS else [])
                 self.assertEqual([json.loads(line) for line in written.splitlines() if line.startswith('{"service"')], [{
                     "service": "awwo-openai-agents-python-worker", "runId": "r1", "event": "bedrock_call_failed", "model": target,
-                    "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}])
+                    "error": "ReadTimeoutError", "status": 504, "stage": stage, "upstream": True}] + watched)
 
 
-if __name__ == "__main__":
-    unittest.main()
+SUMMARY_DELTA = {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": "Weighing the layout"}}}}
 
+
+def summary_turn(text="OK"):
+    """A turn that streams its thinking summarized before its answer."""
+    return text_turn(text, prefix=[SUMMARY_DELTA, {"contentBlockStop": {"contentBlockIndex": 0}}])
+
+
+class SummaryWatchTests(unittest.IsolatedAsyncioTestCase):
+    """2026-10-26: Bedrock stopped streaming Claude Opus 5.5's thinking summary, at every effort, though its calls asked for
+    it, and every call that thought longer than its 3-minute quick limit was cut with nothing. While a call that asked for
+    the summary has been answered and then got none before its read timeout, the next such call waits the stream's idle
+    limit instead (the owner's 「Bedrock 不发思考摘要时，Opus 5.5 的调用恢复 15 分钟空闲上限」), until a call gets a summary."""
+
+    def test_the_watch_is_by_model_and_effort(self):
+        watch = SummaryWatch()
+        self.assertTrue(watch.streams(OPUS, ""))
+        self.assertTrue(watch.missed_summary(OPUS, ""), "begins a silent spell")
+        self.assertFalse(watch.missed_summary(OPUS_US, ""), "the same model through its other profile: already silent")
+        self.assertFalse(watch.streams("anthropic.claude-opus-5-5", ""))
+        self.assertTrue(watch.streams(OPUS, "low"), "each effort has its own")
+        self.assertTrue(watch.saw_summary(OPUS_US, ""), "a summary ends the spell")
+        self.assertFalse(watch.saw_summary(OPUS, ""), "and only once")
+        self.assertTrue(watch.streams(OPUS, ""))
+
+    def test_a_silent_spell_gives_a_summarized_call_the_idle_limit(self):
+        summarized = {"additionalModelRequestFields": {"thinking": dict(SUMMARIZED_THINKING)}}
+        low = {"additionalModelRequestFields": {"thinking": dict(SUMMARIZED_THINKING), "output_config": {"effort": "low"}}}
+        tools = {"toolConfig": {"tools": [{"toolSpec": {"name": "t", "inputSchema": {"json": {"type": "object"}}}}]}}
+        watch = SummaryWatch()
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **summarized}, OPUS, watch), 180.0)
+        watch.missed_summary(OPUS, "")
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **summarized}, OPUS, watch), 900.0)
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **summarized}, OPUS_US, watch), 900.0)
+        self.assertEqual(call_read_timeout(120.0, {"messages": [], **summarized}, OPUS, watch), 120.0, "a run's shorter deadline still comes first")
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **low}, OPUS, watch), 180.0, "low effort has its own spell")
+        self.assertEqual(call_read_timeout(900.0, {**tools, **summarized}, OPUS, watch), 900.0)
+        self.assertEqual(call_read_timeout(900.0, {"messages": [], **summarized}, OPUS), 180.0, "no watch: as before")
+        # Claude Opus 4.8 never thinks silently and is asked for no summary: its quick limit stays whatever the watch says.
+        watch.missed_summary("global.anthropic.claude-opus-4-8", "")
+        self.assertEqual(call_read_timeout(900.0, {"messages": []}, "global.anthropic.claude-opus-4-8", watch), 180.0)
+
+    async def test_a_call_answered_without_a_summary_begins_a_spell_and_a_summary_ends_it(self):
+        from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeout
+        from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
+
+        def silent():  # answered, then nothing until the read timeout (urllib3's, inside the stream)
+            return FakeClient({}, text_turn("x"), fail_after=0, fail_code=Urllib3ReadTimeout(None, None, "Read timed out."))
+
+        def unanswered():  # never answered (botocore's, while it waits for the response): says nothing about the summary
+            return FakeClient({}, [], fail=BotocoreReadTimeout(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com"))
+
+        def thinking_then_silent():  # its summary began, then a long gap: the summary streams
+            return FakeClient({}, summary_turn("x"), fail_after=2, fail_code=Urllib3ReadTimeout(None, None, "Read timed out."))
+
+        for fallback in ("", OPUS_US):
+            with self.subTest(fallback=fallback):
+                watch, timeouts, facts = SummaryWatch(), [], []
+                clients = [unanswered(), silent(), silent(), FakeClient({}, summary_turn()), FakeClient({}, text_turn("OK")),
+                           thinking_then_silent(), FakeClient({}, text_turn("OK"))]
+
+                def factory(region, auth, read_timeout):
+                    timeouts.append(read_timeout)
+                    return clients.pop(0)
+                transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=900.0, client_factory=factory,
+                                                     fallback_model=fallback, report=facts.append, summary_watch=watch)
+                outcomes = []
+                async with httpx2.AsyncClient(transport=transport) as http:
+                    for _ in range(7):
+                        response = await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(model=OPUS))
+                        frames = [line[6:] for line in response.text.split("\n") if line.startswith("data: ")]
+                        error = response.json()["error"]["type"] if response.status_code != 200 else (
+                            json.loads(frames[-1]).get("error", {}).get("type") if frames and frames[-1] != "[DONE]" else None)
+                        outcomes.append((response.status_code, error))
+                self.assertEqual(outcomes, [(504, "ReadTimeoutError"), (200, "ReadTimeoutError"), (200, "ReadTimeoutError"), (200, None),
+                                            (200, None), (200, "ReadTimeoutError"), (200, None)])
+                # The never-answered call and the first silent one wait the quick limit; the silent one begins the spell, so
+                # the next silent one and the one whose summary ends it wait the idle limit; then the quick limit again, and a
+                # call whose summary began before its gap does not begin another spell.
+                self.assertEqual(timeouts, [180.0, 180.0, 900.0, 900.0, 180.0, 180.0, 180.0])
+                watched = [fact for fact in facts if fact["event"] == "summary_watch"]
+                self.assertEqual(watched, [OPUS_SUMMARY_SILENT, {**OPUS_SUMMARY_SILENT, "state": "streams"}])
+                self.assertEqual([fact["stage"] for fact in facts if fact["event"] == "failed"], ["request", "stream", "stream", "stream"])
+                self.assertTrue(watch.streams(OPUS, ""))
+
+    async def test_each_effort_keeps_its_own_spell_and_tools_learn_but_keep_the_idle_limit(self):
+        from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
+        watch, timeouts, facts = SummaryWatch(), [], []
+        silent = lambda: FakeClient({}, text_turn("x"), fail_after=0, fail_code=Urllib3ReadTimeout(None, None, "Read timed out."))  # noqa: E731
+        clients = [silent(), FakeClient({}, text_turn("OK")), silent(), FakeClient({}, summary_turn())]
+
+        def factory(region, auth, read_timeout):
+            timeouts.append(read_timeout)
+            return clients.pop(0)
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=900.0, client_factory=factory,
+                                             reasoning_efforts=("low", "medium", "high"), report=facts.append, summary_watch=watch)
+        async with httpx2.AsyncClient(transport=transport) as http:
+            for body in (chat_body(model=OPUS, reasoning_effort="low"), chat_body(model=OPUS), chat_body(model=OPUS, tools=TIME_TOOL),
+                         chat_body(model=OPUS, reasoning_effort="low")):
+                await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=body)
+        # A low call without a summary begins low's spell only; a call at the model's own effort keeps its quick limit; one
+        # that offers tools waits the idle limit as always, and without a summary begins the default effort's spell too;
+        # a low call's summary ends low's.
+        self.assertEqual(timeouts, [180.0, 180.0, 900.0, 900.0])
+        self.assertEqual([fact for fact in facts if fact["event"] == "summary_watch"], [
+            {**OPUS_SUMMARY_SILENT, "effort": "low"}, OPUS_SUMMARY_SILENT, {**OPUS_SUMMARY_SILENT, "effort": "low", "state": "streams"}])
+        self.assertFalse(watch.streams(OPUS, ""))
+        self.assertTrue(watch.streams(OPUS, "low"))
+
+    async def test_only_a_model_asked_for_the_summary_is_watched(self):
+        from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
+        for model in ("global.anthropic.claude-opus-4-8", "moonshotai.kimi-k2.5"):
+            with self.subTest(model=model):
+                watch, facts = SummaryWatch(), []
+                transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, read_timeout=900.0, report=facts.append,
+                                                     client_factory=lambda *args: FakeClient({}, text_turn("x"), fail_after=0,
+                                                                                             fail_code=Urllib3ReadTimeout(None, None, "Read timed out.")),
+                                                     summary_watch=watch)
+                async with httpx2.AsyncClient(transport=transport) as http:
+                    await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(model=model))
+                self.assertEqual([fact["event"] for fact in facts], ["failed"])
+                self.assertTrue(watch.streams(model, ""))
+        with mock.patch("bedrock_bridge.SUMMARIZED_THINKING_MODELS", frozenset()):
+            watch, facts = SummaryWatch(), []
+            transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=900.0, report=facts.append,
+                                                 client_factory=lambda *args: FakeClient({}, text_turn("x"), fail_after=0,
+                                                                                         fail_code=Urllib3ReadTimeout(None, None, "Read timed out.")),
+                                                 summary_watch=watch)
+            async with httpx2.AsyncClient(transport=transport) as http:
+                await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(model=OPUS))
+            self.assertEqual([fact["event"] for fact in facts], ["failed"], "not asked for the summary: nothing to learn")
+            self.assertTrue(watch.streams(OPUS, ""))
+
+    def test_every_piece_of_summary_counts_and_only_a_read_timeout_without_one_begins_a_spell(self):
+        # Codex review, 2026-10-27: a call whose summary is streaming ends a spell a concurrent call began, with its next
+        # piece of summary, not only with its first.
+        from bedrock_bridge import _SummaryCall
+        stalled = BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True)
+        watch, told = SummaryWatch(), []
+        a, b = _SummaryCall(watch, OPUS, "", told.append), _SummaryCall(watch, OPUS_US, "", told.append)
+        a.event(SUMMARY_DELTA)
+        b.failure(stalled)
+        self.assertFalse(watch.streams(OPUS, ""))
+        a.event({"messageStart": {"role": "assistant"}})
+        self.assertFalse(watch.streams(OPUS, ""), "an event without summary text says nothing")
+        a.event(SUMMARY_DELTA)
+        self.assertTrue(watch.streams(OPUS, ""))
+        self.assertEqual([fact["state"] for fact in told], ["silent", "streams"])
+        # Any other failure, and a read timeout after a summary, begin no spell.
+        for failure in (BridgeError(500, "InternalServerException", "The Bedrock stream reported an error", upstream=True),
+                        BridgeError(502, "connection_error", "The connection to Bedrock failed", upstream=True)):
+            _SummaryCall(watch, OPUS, "", told.append).failure(failure)
+        late = _SummaryCall(watch, OPUS, "", told.append)
+        late.event(SUMMARY_DELTA)
+        late.failure(stalled)
+        empty = _SummaryCall(watch, OPUS, "", told.append)
+        empty.event({"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "c2ln"}}}})
+        self.assertFalse(empty.seen, "a signature is no summary text")
+        self.assertTrue(watch.streams(OPUS, ""))
+        self.assertEqual(len(told), 2)
+
+    def test_only_a_summary_in_time_ends_a_spell_and_only_a_call_with_neither_summary_nor_answer_begins_one(self):
+        # Claude review, 2026-10-27: a summary held back to the end of the thinking (here 240 s, past Opus 5.5's quick 180)
+        # must not end a spell, or the quick limit would cut the next call again; a stall after the answer began, and a
+        # call that only ever sent a signature and completed, say nothing about the summary being streamed.
+        from bedrock_bridge import _SummaryCall
+        stalled = BridgeError(504, "ReadTimeoutError", "Bedrock sent nothing for too long", upstream=True)
+        signature = {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "c2ln"}}}}
+        answer = {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "<!doctype html>"}}}
+        times = iter([0.0, 240.0, 240.5, 1000.0, 1004.0])
+        watch, told = SummaryWatch(), []
+        watch.missed_summary(OPUS, "")
+        late = _SummaryCall(watch, OPUS, "", told.append, clock=lambda: next(times))
+        late.event(SUMMARY_DELTA)
+        late.event(SUMMARY_DELTA)
+        self.assertTrue(late.late)
+        self.assertFalse(watch.streams(OPUS, ""), "a summary 240 s into the call ends no spell, nor do its later pieces")
+        in_time = _SummaryCall(watch, OPUS, "", told.append, clock=lambda: next(times))
+        in_time.event(SUMMARY_DELTA)
+        self.assertTrue(watch.streams(OPUS, ""), "a summary 4 s into the call ends it")
+        answered = _SummaryCall(watch, OPUS, "", told.append)
+        answered.event(answer)
+        answered.failure(stalled)
+        self.assertTrue(watch.streams(OPUS, ""), "a stall once the answer began begins no spell")
+        tool = _SummaryCall(watch, OPUS, "", told.append)
+        tool.event({"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"toolUse": {"input": "{}"}}}})
+        tool.failure(stalled)
+        self.assertTrue(watch.streams(OPUS, ""), "nor once a tool call's input began")
+        started = _SummaryCall(watch, OPUS, "", told.append)
+        started.event({"contentBlockStart": {"contentBlockIndex": 1, "start": {"toolUse": {"toolUseId": "tooluse_1", "name": "current_time"}}}})
+        started.failure(stalled)
+        self.assertTrue(watch.streams(OPUS, ""), "nor once a tool call began, before its input (Codex review, round 2)")
+        silent = _SummaryCall(watch, OPUS, "", told.append)
+        silent.event({"messageStart": {"role": "assistant"}})
+        silent.event(signature)
+        silent.failure(stalled)
+        self.assertFalse(watch.streams(OPUS, ""), "only a signature, then nothing: no summary")
+        _SummaryCall(watch, OPUS, "", told.append).event(signature)
+        self.assertFalse(watch.streams(OPUS, ""), "a call that sent only a signature leaves the spell on")
+        # Sent again to the other profile after the first refused it 179 s in: its summary 5 s later is in time.
+        times = iter([0.0, 179.0, 184.0])
+        again = _SummaryCall(watch, OPUS, "", told.append, clock=lambda: next(times))
+        again.restart()
+        again.event(SUMMARY_DELTA)
+        self.assertFalse(again.late)
+        self.assertTrue(watch.streams(OPUS, ""), "the other profile's summary in time ends the spell (Codex review, round 2)")
+        self.assertEqual([fact["state"] for fact in told], ["streams", "silent", "streams"])
+
+    async def test_a_call_the_other_profile_answers_without_a_summary_begins_a_spell(self):
+        from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
+
+        class FallingBack:
+            """Refuses the first profile for capacity, then answers on the other with `stream`."""
+            def __init__(self, stream):
+                self.calls, self.stream = 0, stream
+
+            def converse_stream(self, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "busy"}, "ResponseMetadata": {"HTTPStatusCode": 429}},
+                                      "ConverseStream")
+                return {"stream": self.stream}
+        watch, timeouts, facts = SummaryWatch(), [], []
+        clients = [FallingBack(FakeStream(text_turn("x"), 0, Urllib3ReadTimeout(None, None, "Read timed out."))), FallingBack(FakeStream(summary_turn()))]
+
+        def factory(region, auth, read_timeout):
+            timeouts.append(read_timeout)
+            return clients.pop(0)
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=900.0, client_factory=factory,
+                                             fallback_model=OPUS_US, report=facts.append, summary_watch=watch)
+        from bedrock_bridge import _SummaryCall
+        with mock.patch.object(_SummaryCall, "restart", autospec=True, side_effect=_SummaryCall.restart) as restarted:
+            async with httpx2.AsyncClient(transport=transport) as http:
+                for _ in range(2):
+                    await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(model=OPUS))
+        self.assertEqual(restarted.call_count, 2, "each call's clock restarts when it is sent to the other profile")
+        self.assertEqual(timeouts, [180.0, 900.0])
+        fallback = {"event": "fallback", "from": OPUS, "to": OPUS_US, "after": "ThrottlingException"}
+        self.assertEqual(facts, [fallback, {"event": "failed", "model": OPUS_US, "error": "ReadTimeoutError", "status": 504, "stage": "stream", "upstream": True},
+                                 OPUS_SUMMARY_SILENT, fallback, {**OPUS_SUMMARY_SILENT, "state": "streams"}])
+        self.assertTrue(watch.streams(OPUS, ""))
+
+    def test_the_watch_is_the_workers_own_unless_one_is_given(self):
+        import bedrock_bridge
+        self.assertIs(BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}).summary_watch, bedrock_bridge.SUMMARY_WATCH)
+        with self.assertRaisesRegex(ValueError, "summary watch"):
+            BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, summary_watch=object())
+
+    def test_its_facts_are_closed_labels(self):
+        line = bedrock_fact_line("s", "run_1", {"event": "summary_watch", "model": "anthropic.claude-opus-5-5", "effort": "low", "state": "silent"})
+        self.assertEqual(json.loads(line), {"service": "s", "runId": "run_1", "event": "bedrock_summary_watch", "model": "anthropic.claude-opus-5-5",
+                                            "effort": "low", "state": "silent"})
+        for fact in ({"event": "summary_watch", "model": "anthropic.claude-opus-5-5", "effort": "low", "state": "unknown"},
+                     {"event": "summary_watch", "model": "anthropic claude", "effort": "low", "state": "silent"},
+                     {"event": "summary_watch", "model": "anthropic.claude-opus-5-5", "effort": "", "state": "streams"},
+                     {"event": "summary_watch", "model": "anthropic.claude-opus-5-5", "state": "streams"}):
+            with self.subTest(fact=fact):
+                self.assertIsNone(bedrock_fact_line("s", "run_1", fact))
 
 
 CACHE_POINT = {"cachePoint": {"type": "default"}}
@@ -1408,3 +1682,7 @@ class ReasoningEffortTests(unittest.IsolatedAsyncioTestCase):
                 BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, reasoning_efforts=("low",))
         BedrockConverseTransport(region="us-east-1", model="us.anthropic.claude-opus-5-5", auth={"aws": True}, reasoning_efforts=("low",))
         BedrockConverseTransport(region="us-east-1", model="moonshotai.kimi-k2.5", auth={"aws": True}, reasoning_efforts=())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -276,7 +276,8 @@ async def stream_run(request: RunRequest, config: Config, cancel_event: asyncio.
                     print(line, file=sys.stderr, flush=True)
 
             # A stream that sends nothing for 15 minutes (3 for a call to Claude Opus 4.8 or Opus 5.5 that offers no tools;
-            # Opus 5.5 is asked to stream its thinking) fails as the service's outage instead of riding out the run.
+            # Opus 5.5 is asked to stream its thinking, and waits the 15 again while Bedrock streams it none: the bridge's
+            # SummaryWatch, shared by this worker's runs) fails as the service's outage instead of riding out the run.
             # The run's effort reaches the bridge as the SDK's reasoning_effort, which it sends as output_config.effort.
             bridge = BedrockConverseTransport(region=profile.region, model=profile.model,
                                               auth={"bearer_token": profile.api_key} if profile.api_key else {"aws": True},
