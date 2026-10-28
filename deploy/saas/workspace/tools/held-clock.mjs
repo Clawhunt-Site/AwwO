@@ -10,7 +10,10 @@
 // no change in that work since the reading before, the browser's processes but its own under a quarter of a CPU between
 // them while the CPUs it may run on had at least half a CPU idle and its control group was not held back for a CPU quota
 // (so a page with work to do could have run), and then, asked last, no animation running towards an end, in every
-// reading for HELD_CLOCK_MS, is held: refused at once, naming what waits, rather than left to a timeout.
+// reading for HELD_CLOCK_MS, is held: refused at once, naming what waits, rather than left to a timeout. A reading
+// quiet but for its group held back by this process's own CPU time alone (ownThrottling: its garbage collector, whose
+// threads can spend a 1-CPU quota's period in a few tens of milliseconds) tells nothing of the time it spans: it
+// neither counts towards HELD_CLOCK_MS nor starts the count again.
 // A page at work is never held, however long it takes, nor is a page on a host too busy to tell or whose quota cannot be
 // read, one whose clock has nothing waiting on it, or one the watch could not be opened on.
 // awwo-check-page (deploy/saas/workspace/tools) carries a copy of this file and of virtual-time.mjs, kept equal by a test.
@@ -25,6 +28,10 @@ export const HELD_SAMPLE_MS = 250;
 const IDLE_CPU = 0.25;
 /** ...when the CPUs it may run on were idle for at least this many CPUs' worth of that time: else it may only be waiting to run. */
 const SPARE_CPU = 0.5;
+/** A control group held back for its quota took less than this share of a CPU besides this process: the holding back was its own... */
+const OTHERS_CPU = 0.1;
+/** ...when that is also less than this share of what its quota lets it take in a period, so the rest could not have spent it. */
+const OTHERS_QUOTA = 0.25;
 /** How long one reading may take: a page whose main thread does not answer that soon is at work. */
 const READING_MS = 1000;
 /** How long opening a watch may take: past that, or when it fails, the page is waited on unwatched (never held). */
@@ -166,20 +173,34 @@ export function throttleFiles({ platform = process.platform, read = (file) => re
 }
 
 /**
+ * What those files say of their control groups so far, one entry a file in their order: the microseconds the kernel held
+ * the group back for a CPU quota (v2 throttled_usec, v1 throttled_time) and the CPU time the group and those below it
+ * took (v2 usage_usec, in microseconds; NaN in cgroup v1, whose cpu.stat has none); null for files that cannot be known
+ * (throttleFiles' null) or a file that cannot be read.
+ */
+export function quotaGroups(files, read = (file) => readFileSync(file, 'utf8')) {
+  if (files === null) return null;
+  const groups = [];
+  for (const file of files) {
+    let stat;
+    try { stat = read(file); } catch { return null; }
+    const v2 = /^throttled_usec (\d+)$/m.exec(stat);
+    const v1 = v2 ? null : /^throttled_time (\d+)$/m.exec(stat);
+    const usage = /^usage_usec (\d+)$/m.exec(stat);
+    groups.push({ throttled: v2 ? Number(v2[1]) : v1 ? Number(v1[1]) / 1000 : 0, usage: usage ? Number(usage[1]) : Number.NaN });
+  }
+  return groups;
+}
+
+/** quotaGroups' throttling summed: NaN when it is null, which no reading equals, so the page is never quiet. */
+const throttledSum = (groups) => (groups ? groups.reduce((micros, group) => micros + group.throttled, 0) : Number.NaN);
+
+/**
  * The microseconds those files say the kernel held this process back so far (v2 throttled_usec, v1 throttled_time);
  * NaN for files that cannot be known (throttleFiles' null) or read, which no reading equals, so the page is never quiet.
  */
 export function throttledMicros(files, read = (file) => readFileSync(file, 'utf8')) {
-  if (files === null) return Number.NaN;
-  let micros = 0;
-  for (const file of files) {
-    let stat;
-    try { stat = read(file); } catch { return Number.NaN; }
-    const v2 = /^throttled_usec (\d+)$/m.exec(stat);
-    const v1 = v2 ? null : /^throttled_time (\d+)$/m.exec(stat);
-    micros += v2 ? Number(v2[1]) : v1 ? Number(v1[1]) / 1000 : 0;
-  }
-  return micros;
+  return throttledSum(quotaGroups(files, read));
 }
 
 /** The CPU numbers a process may run on, from its /proc/<pid>/status (Cpus_allowed_list, which a cpuset narrows too), or null: any. */
@@ -206,6 +227,59 @@ export function statIdle(stat, allowed) {
   return idle;
 }
 
+/** This process's CPU time so far, in microseconds, all its threads. */
+const cpuTime = () => {
+  const { user, system } = process.cpuUsage();
+  return user + system;
+};
+
+/**
+ * quotaGroups of those files read twice (`groups`): the throttling of the first reading and the CPU time of the second,
+ * since one reading of a cpu.stat takes its CPU time before its throttling, so a throttling counted then may come of
+ * CPU time it does not show; the second shows all the CPU time taken before the first's throttling. With this
+ * process's CPU time (`cpu`) read just before them and just after (`ownBefore`, `ownAfter`), so that ownThrottling
+ * takes away only what it surely took between two readings of them.
+ */
+export function quotaReading(files, { read = (file) => readFileSync(file, 'utf8'), cpu = cpuTime } = {}) {
+  const ownBefore = cpu();
+  const held = quotaGroups(files, read);
+  const used = quotaGroups(files, read);
+  const ownAfter = cpu();
+  const groups = held && used ? held.map(({ throttled }, index) => ({ throttled, usage: used[index].usage, ...quotaLimit(files[index], read) })) : null;
+  return { groups, ownBefore, ownAfter };
+}
+
+/**
+ * The CPU quota of the control group whose cpu.stat is `file`, from the files beside it (cgroup v2 cpu.max, v1
+ * cpu.cfs_quota_us and cpu.cfs_period_us): the microseconds the group may take in a period (`quota`, Infinity for no
+ * quota, as where none of those files is there: a cgroup v2 hierarchy's root) and the period's (`period`), each NaN
+ * when it cannot be read.
+ */
+export function quotaLimit(file, read = (path) => readFileSync(path, 'utf8')) {
+  // A file's text: null when it is not there, '' when it cannot be read.
+  const text = (name) => {
+    try { return read(path.posix.join(path.posix.dirname(file), name)); } catch (error) { return error?.code === 'ENOENT' ? null : ''; }
+  };
+  const max = text('cpu.max');
+  const v2 = /^(max|\d+) (\d+)\s*$/.exec(max ?? '');
+  if (v2) return { quota: v2[1] === 'max' ? Infinity : Number(v2[1]), period: Number(v2[2]) };
+  const [quotaText, periodText] = [text('cpu.cfs_quota_us'), text('cpu.cfs_period_us')];
+  if (max === null && quotaText === null && periodText === null) return { quota: Infinity, period: Number.NaN };
+  const quota = /^(-1|\d+)\s*$/.exec(quotaText ?? '');
+  const period = /^(\d+)\s*$/.exec(periodText ?? '');
+  return { quota: !quota ? Number.NaN : quota[1] === '-1' ? Infinity : Number(quota[1]), period: period ? Number(period[1]) : Number.NaN };
+}
+
+/**
+ * Whether quota throttling of this process's own doing can be told apart (ownThrottling) in the groups a hostIdle
+ * reading found: never in cgroup v1, whose cpu.stat counts no CPU time, nor in a group whose quota cannot be read or
+ * whose period is longer than the watch's readings are apart.
+ */
+export function toldApart(groups) {
+  return Boolean(groups) && groups.every(({ usage, quota, period }) => Number.isFinite(usage)
+    && (quota === Infinity || (Number.isFinite(quota) && period <= HELD_SAMPLE_MS * 1000)));
+}
+
 // The quota files, and the /proc/self/cgroup and /proc/self/mountinfo they were found from.
 let quotaFiles = [];
 let quotaFrom = null;
@@ -213,8 +287,10 @@ let quotaFrom = null;
  * The idle CPU time so far (milliseconds, summed over the CPUs this process may run on: on Linux from /proc/stat,
  * elsewhere from os.cpus(), all of them), when it was read, where (`place`: the CPUs it may run on and its control
  * groups as the kernel lists them, read again each time, so that a move between two readings shows; '' elsewhere),
- * and the quota throttling (throttledMicros of the files found for those groups, found again when they or the mounts
- * change; NaN when they cannot be known or read).
+ * the quota throttling (throttledMicros of the files found for those groups, found again when they or the mounts
+ * change; NaN when they cannot be known or read), what each of those files says (`groups`) and the CPU time this
+ * process had taken just before they were read and just after (`ownBefore`, `ownAfter`), as quotaReading reads them,
+ * which ownThrottling compares.
  */
 export function hostIdle() {
   let idle = null;
@@ -240,7 +316,35 @@ export function hostIdle() {
     idle = 0;
     for (const cpu of os.cpus()) idle += cpu.times.idle;
   }
-  return { idle, at: performance.now(), place, throttled: throttledMicros(quotaFiles) };
+  const { groups, ownBefore, ownAfter } = quotaReading(quotaFiles);
+  return { idle, at: performance.now(), place, throttled: throttledSum(groups), groups, ownBefore, ownAfter };
+}
+
+/**
+ * Whether the quota throttling between two hostIdle readings, `before` and `now`, came of this process's own CPU time (a
+ * burst of it: its garbage collector's threads can spend a 1-CPU quota's period in a few tens of milliseconds). The
+ * kernel counts a throttling only when it lets the group run again, at the next period of its quota, which may be after
+ * the next reading, so it may have begun after `earlier`, the reading before `before`: each control group held back took
+ * less than OTHERS_CPU of a CPU besides this process's CPU time, and less than OTHERS_QUOTA of what its quota lets it
+ * take in a period, from `earlier` to `before` and from `before` to `now`, so little that the rest of the group, a page's
+ * processes among them, was not what spent its quota. That holds while each span is at least as long as the quota's
+ * period (the watch reads every HELD_SAMPLE_MS and more; both users' periods are 100 ms), so a group whose period is
+ * longer, or whose quota cannot be read, is not told apart; and a reading that takes longer than HELD_SAMPLE_MS gives
+ * the rest of the group no more, since the quota is spent period by period. Of this process's CPU time only what it
+ * surely took between two readings of a group's files is taken away (from just after the first to just before the
+ * second), never a burst that came while they were read. False when that cannot be told: a group whose CPU time cannot
+ * be read (cgroup v1) or went backwards (a group made anew where it was, which shows no other way), or readings missing
+ * or that do not compare.
+ */
+export function ownThrottling(earlier, before, now) {
+  if (![earlier, before, now].every((reading) => reading?.groups && reading.groups.length === now.groups?.length)) return false;
+  const spans = [[earlier, before], [before, now]];
+  return now.groups.every(({ throttled, quota, period }, index) => throttled === before.groups[index].throttled
+    || (throttled > before.groups[index].throttled && spans.every(([from, to]) => {
+      const usage = to.groups[index].usage - from.groups[index].usage;
+      const allowed = Math.min(OTHERS_CPU * Math.min(to.at - from.at, HELD_SAMPLE_MS) * 1000, OTHERS_QUOTA * quota);
+      return period <= (to.at - from.at) * 1000 && usage >= 0 && usage - (to.ownBefore - from.ownAfter) < allowed;
+    })));
 }
 
 /** A line for the worker's log at start: whether a page that waits on its own clock can be refused on this host. */
@@ -249,7 +353,8 @@ export function describeHost() {
   const never = 'held clock: no page is refused for waiting on its own clock on this host, since';
   if (Number.isNaN(reading.throttled)) return `${never} the CPU quota throttling of its control group cannot be read`;
   if (!(reading.idle > 0)) return `${never} its idle CPU time cannot be read`;
-  return `held clock: a page that waits on its own clock is refused after ${HELD_CLOCK_MS / 1000} s (quota throttling read from ${quotaFiles.length} cpu.stat file${quotaFiles.length === 1 ? '' : 's'})`;
+  return `held clock: a page that waits on its own clock is refused after ${HELD_CLOCK_MS / 1000} s (quota throttling read from ${quotaFiles.length} cpu.stat file${quotaFiles.length === 1 ? '' : 's'}`
+    + `${!quotaFiles.length ? '' : `, throttling of its own doing ${toldApart(reading.groups) ? '' : 'not '}told apart`})`;
 }
 
 /**
@@ -350,8 +455,8 @@ export async function openWatch(context, page, { timeoutMs = OPEN_MS } = {}) {
  * Reads the page `watched` (openWatch's answer) every sampleMs until stop(). `held` resolves with what waits on its clock
  * ({ setTimeout, setInterval, requestAnimationFrame }) once the page has been held for stallMs (see above), and never
  * otherwise: not once stopped, nor when a reading fails or the watch was not opened (a failure of the watch never
- * refuses a page). `host` reads the idle CPU time, where it was counted and the quota throttling (hostIdle), `clock`
- * the seconds the readings are timed by.
+ * refuses a page). `host` reads the idle CPU time, where it was counted, the quota throttling and what tells whose doing
+ * it was (hostIdle), `clock` the seconds the readings are timed by.
  */
 export function watchHeldClock(watched, {
   stallMs = HELD_CLOCK_MS, sampleMs = HELD_SAMPLE_MS, readingMs = READING_MS, host = hostIdle, clock = () => performance.now() / 1000,
@@ -362,8 +467,12 @@ export function watchHeldClock(watched, {
   // Unreferenced: a watch keeps no process alive, and stop() ends its pause at once.
   const pause = (ms) => delay(ms, undefined, { signal: stopping.signal, ref: false });
   const held = (async () => {
-    let since = null;
+    // The seconds the quiet readings since the last reading that was not quiet spanned, but those held back by this
+    // process's own CPU time.
+    let stalled = 0;
     let last = null;
+    // The host reading taken at the reading before, answered or not.
+    let previous = null;
     let pending = null;
     for (;;) {
       await pause(sampleMs);
@@ -375,19 +484,25 @@ export function watchHeldClock(watched, {
       const idle = host();
       const waiting = answer?.waiting;
       const used = answer && last ? cpuBetween(last.cpu, answer.cpu) : null;
+      // Held back for a CPU quota since the reading before, and whether by this process's own CPU time alone.
+      const heldBack = used !== null && idle.throttled !== last.idle.throttled;
+      const ownOnly = heldBack && ownThrottling(last.before, last.idle, idle);
       let quiet = Boolean(used !== null && waiting.setTimeout + waiting.setInterval + waiting.requestAnimationFrame > 0
         && waiting.realTime === 0 && !activity.atWork() && events === last.events && used < IDLE_CPU * (answer.at - last.at)
         && idle.idle - last.idle.idle >= SPARE_CPU * (idle.at - last.idle.at) && idle.place === last.idle.place
-        && idle.throttled === last.idle.throttled);
+        && (!heldBack || ownOnly));
       // Quiet so far: then the animations too, which only now are worth resolving styles and reading each for, and the
       // work beside it once more, which may have begun meanwhile.
       if (quiet) {
         quiet = (await Promise.race([readAnimations(watched), pause(readingMs)])) === 0 && !activity.atWork() && activity.events === events;
       }
-      if (!quiet) since = null;
-      else if (since === null) since = last.at;
-      last = answer ? { ...answer, events, idle } : null;
-      if (since !== null && answer.at - since >= stallMs / 1000) {
+      // A reading held back by this process alone is quiet, but the page may not have had its time to run in: it neither
+      // counts towards the stall nor ends it.
+      if (!quiet) stalled = 0;
+      else if (!heldBack) stalled += answer.at - last.at;
+      last = answer ? { ...answer, events, idle, before: previous } : null;
+      previous = idle;
+      if (quiet && stalled >= stallMs / 1000) {
         return { setTimeout: waiting.setTimeout, setInterval: waiting.setInterval, requestAnimationFrame: waiting.requestAnimationFrame };
       }
     }

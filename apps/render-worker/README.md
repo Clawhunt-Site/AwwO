@@ -47,17 +47,26 @@ frames 0 … N-1 and repeats seamlessly.
   it begun or ended, no process gone, the processes under a quarter of a CPU while the CPUs the worker may run on (its
   cpuset or affinity) had at least half a CPU idle and its control group was not held back for a CPU quota (cgroup v1
   or v2, found through `/proc/self/mountinfo`; the CPUs and groups are read at every reading, and a change in them
-  starts the 5 s again), so that a page with work to do could have run: refused, 400
-  `INVALID_RENDER` on `html`, `detail` `page_waits_on_timers`, with a message naming what waited and saying the clock
-  moves only when a frame is drawn. A page at work is waited for as before, however long, and so is one on a host too
-  busy to tell, one whose control group's throttling cannot be read (a cgroup layout `/proc` does not show), one with
-  nothing waiting on its clock, and one the watch could not be opened on in 5 s; the render's own limits stay as they
-  are. So a page that keeps a dedicated worker, a running `AudioContext`, a playing media element, a frame of another
-  origin or of no readable clock, or a long `AbortSignal.timeout` (a fetch's safety net of minutes, say) for as long as
-  it waits is never refused: its hang ends at the render's limit, as before. The other way round, a `renderAt` or
-  `renderAudio` that waits more than 5 s on something none of these shows (a speech utterance, an `Atomics.waitAsync`)
-  while callbacks of its own wait on the clock would be refused. The worker says at start, in a `held clock:` line of
-  its log, whether its host lets it refuse such a page.
+  starts the 5 s again), so that a page with work to do could have run: refused, 400 `INVALID_RENDER` on `html`,
+  `detail` `page_waits_on_timers`, with a message naming what waited and saying the clock moves only when a frame is
+  drawn. A reading in which the group was held back by the worker's own CPU time alone (the rest of it, the page's
+  processes among them, took less than a tenth of a CPU besides the worker (less than 25 ms however long a reading
+  took, and less than a quarter of what the quota lets the group take in a period) in that reading and in the one
+  before, since the kernel counts a holding back only when it lets the group run again, at the quota's next period,
+  which must be no longer than the time between two readings; cgroup v2's `usage_usec` and `cpu.max` tell it, and in
+  cgroup v1 any holding back counts) neither counts towards the 5 s nor starts them again: a garbage collection of the
+  worker's, whose threads can spend a 1-CPU quota's period in a few tens of milliseconds, no longer erases the quiet
+  time before it, and a page is still refused only after 5 s of readings quiet in every respect, holding back included.
+  A page at work is waited for as before, however long, and so is one on a host too busy to tell, one whose control
+  group's throttling cannot be read (a cgroup layout `/proc` does not show), one with nothing waiting on its clock, and
+  one the watch could not be opened on in 5 s; the render's own limits stay as they are. So a page that keeps a
+  dedicated worker, a running `AudioContext`, a playing media element, a frame of another origin or of no readable
+  clock, or a long `AbortSignal.timeout` (a fetch's safety net of minutes, say) for as long as it waits is never
+  refused: its hang ends at the render's limit, as before. The other way round, a `renderAt` or `renderAudio` that
+  waits more than 5 s on something none of these shows (a speech utterance, an `Atomics.waitAsync`) while callbacks of
+  its own wait on the clock would be refused. The worker says at start, in a `held clock:` line of its log, whether its
+  host lets it refuse such a page, and whether it tells throttling of its own doing apart there ("throttling of its own
+  doing told apart").
 - The page may load scripts, styles and fonts only from the CDN origins in `cdn-allowlist.json` (the same list as
   the web preview's `LIVE_CDNS`); everything else is blocked. It must not navigate away (that fails the render).
 

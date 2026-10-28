@@ -8,8 +8,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {
-  allowedCpus, ANIMATION_PROBE, childCpu, CLOCK_PROBE, cpuBetween, describeHost, HELD_CLOCK_MS, heldClockMessage, hostIdle, openWatch, parseWaiting, statIdle,
-  throttledMicros, throttleFiles, trackActivity, waitingWords, watchHeldClock,
+  allowedCpus, ANIMATION_PROBE, childCpu, CLOCK_PROBE, cpuBetween, describeHost, HELD_CLOCK_MS, heldClockMessage, hostIdle, openWatch, ownThrottling, parseWaiting,
+  quotaGroups, quotaLimit, quotaReading, statIdle, throttledMicros, throttleFiles, toldApart, trackActivity, waitingWords, watchHeldClock,
 } from './held-clock.mjs';
 import { VIRTUAL_TIME_SCRIPT } from './virtual-time.mjs';
 
@@ -189,11 +189,194 @@ test('a page on a host without half a CPU to spare, or held back for its CPU quo
   assert.equal(await heldWithin(fakePage(), 300, { ...fast(), host: fakeHost(0, 4 * 3_600_000) }), 'not held');
   // A host whose CPUs cannot be read counts as having none to spare.
   assert.equal(await heldWithin(fakePage(), 300, { ...fast(), host: () => ({ idle: 0, at: performance.now(), throttled: 0 }) }), 'not held');
-  // The control group held back for its quota between two readings: the count starts again after it.
+  // The control group held back for its quota between two readings, by more than this process's CPU time (a host that
+  // does not tell its groups' CPU time apart, as here): the count starts again after it.
   const fake = fakePage();
   assert.ok(await heldWithin(fake, 2000, { ...fast(), host: fakeHost(4, 0, (reading) => (reading >= 4 ? 900 : 0)) }));
   assert.equal(fake.readings, 8);
   assert.equal(await heldWithin(fakePage(), 300, { ...fast(), host: fakeHost(4, 0, (reading) => reading * 10) }), 'not held');
+});
+
+/**
+ * A host as hostIdle reads one in cgroup v2, each reading 250 ms after the one before, with half its CPUs idle: from
+ * reading to reading, this process takes `own(reading)` microseconds of CPU time, the rest of its control group
+ * `others(reading)` and the group's quota holds it back `throttled(reading)`; `groups` is how many groups the files show
+ * (the process's own, then those above it, which `outer(reading)` microseconds of other CPU time each add to).
+ * `usage(reading, group)` may replace a group's CPU time (NaN: cgroup v1). `late(reading)` is CPU time this process
+ * takes while the files are read, after the groups' CPU time and before its own: the next reading's files count it.
+ */
+function quotaHost({ own = () => 3000, others = () => 2000, throttled = () => 0, groups = 1, outer = () => 0, usage = null, late = () => 0 } = {}) {
+  let at = 3_600_000;
+  let idle = 0;
+  let reading = 0;
+  let ownSoFar = 0;
+  let pending = 0;
+  const held = Array(groups).fill(0);
+  const used = Array(groups).fill(0);
+  return () => {
+    reading += 1;
+    at += 250;
+    idle += 2 * 250;
+    ownSoFar += pending + own(reading);
+    const read = held.map((_, group) => {
+      held[group] += throttled(reading, group);
+      used[group] += pending + own(reading) + others(reading) + (group > 0 ? outer(reading) : 0);
+      return { throttled: held[group], usage: usage ? usage(reading, group) : used[group], quota: 100_000, period: 100_000 };
+    });
+    pending = late(reading);
+    return {
+      idle, at, place: '0-3\n0::/render', throttled: held.reduce((sum, micros) => sum + micros, 0), groups: read, ownBefore: ownSoFar, ownAfter: ownSoFar + pending,
+    };
+  };
+}
+
+test('a reading held back for the quota by this process\'s own CPU time alone neither counts towards the stall nor starts it again', async () => {
+  // A burst of this process's (its garbage collector on five threads: 100 ms of CPU time in a 250 ms reading) spends
+  // the quota, while the rest of the group takes 2 ms: reading 4 tells nothing, so the stall is readings 2, 3, 5 and 6.
+  const burst = { own: (reading) => (reading === 4 ? 100_000 : 3000), throttled: (reading) => (reading === 4 ? 81_000 : 0) };
+  const fake = fakePage();
+  assert.deepEqual(await heldWithin(fake, 2000, { ...fast(), host: quotaHost(burst) }), { setTimeout: 1, setInterval: 0, requestAnimationFrame: 0 });
+  assert.equal(fake.readings, 6);
+  // The kernel counts the throttling when it lets the group run again, which may be after the next reading: then the
+  // reading after the burst is the one held back, with little CPU time of anyone's in it, and it tells nothing either.
+  const late = fakePage();
+  assert.ok(await heldWithin(late, 2000, { ...fast(), host: quotaHost({ ...burst, throttled: (reading) => (reading === 5 ? 81_000 : 0) }) }));
+  assert.equal(late.readings, 6);
+  // Such a reading is quiet only if all the rest is: the page's processes at work in it, an animation running to its end
+  // (still asked of it) or a request that came and went start the count again.
+  const busy = fakePage({}, (reading, state) => { state.cpu = reading === 4 ? 2 : 0; });
+  assert.ok(await heldWithin(busy, 2000, { ...fast(), host: quotaHost(burst) }));
+  assert.equal(busy.readings, 8);
+  const animated = fakePage({}, (reading, state) => { state.animations = reading === 4 ? '1' : '0'; });
+  assert.ok(await heldWithin(animated, 2000, { ...fast(), host: quotaHost(burst) }));
+  assert.equal(animated.readings, 8);
+  const working = { events: 0, atWork: () => false };
+  const requested = fakePage({}, (reading) => { if (reading === 4) working.events += 1; });
+  assert.ok(await heldWithin(requested, 2000, { ...fast(), host: quotaHost(burst) }, working));
+  assert.equal(requested.readings, 8);
+  // Held back at two readings in a row, or at two apart, after quiet time: each tells nothing, and none ends the stall.
+  for (const held of [[4, 5], [3, 5]]) {
+    const twice = { own: (reading) => (held.includes(reading) ? 100_000 : 3000), throttled: (reading) => (held.includes(reading) ? 40_000 : 0) };
+    const fake = fakePage();
+    assert.ok(await heldWithin(fake, 2000, { ...fast(), host: quotaHost(twice) }));
+    assert.equal(fake.readings, 7, `held back at readings ${held}`);
+  }
+  // Held back at every reading, however little the rest of the group takes: never held, since no reading counts.
+  const always = fakePage();
+  assert.equal(await heldWithin(always, 600, { ...fast(), host: quotaHost({ own: () => 100_000, throttled: () => 50_000 }) }), 'not held');
+  assert.ok(always.readings > 10, `${always.readings} readings`);
+});
+
+test('throttling the rest of the control group had a share in, or that cannot be told apart, starts the count again', async () => {
+  const throttled = (reading) => (reading === 4 ? 81_000 : 0);
+  // The rest of the group took 25 ms in that reading, a tenth of a CPU: the page may have been held back from work.
+  for (const others of [25_000, 200_000]) {
+    const fake = fakePage();
+    assert.ok(await heldWithin(fake, 2000, { ...fast(), host: quotaHost({ throttled, others: (reading) => (reading === 4 ? others : 2000) }) }));
+    assert.equal(fake.readings, 8, `others ${others}`);
+  }
+  // The rest of the group at work in the reading before (80 ms): the throttling counted a reading late may be its, so the
+  // count starts again, as it does when the count comes in time.
+  const late = fakePage();
+  assert.ok(await heldWithin(late, 2000, { ...fast(), host: quotaHost({ others: (reading) => (reading === 4 ? 80_000 : 2000), throttled: (reading) => (reading === 5 ? 81_000 : 0) }) }));
+  assert.equal(late.readings, 9);
+  // A burst of this process's that comes while the files are read (80 ms, after the group's CPU time and before its own)
+  // is not taken away from the group's, which does not hold it yet: the 80 ms the rest of the group took still count.
+  const between = fakePage();
+  const gc = { own: (reading) => (reading === 4 ? 20_000 : 3000), others: (reading) => (reading === 4 ? 80_000 : 2000), late: (reading) => (reading === 4 ? 80_000 : 0) };
+  assert.ok(await heldWithin(between, 2000, { ...fast(), host: quotaHost({ ...gc, throttled }) }));
+  assert.equal(between.readings, 8);
+  // A group above the process's own held back too, whose other members took their share of it.
+  const above = fakePage();
+  assert.ok(await heldWithin(above, 2000, { ...fast(), host: quotaHost({ throttled, groups: 2, outer: (reading) => (reading === 4 ? 60_000 : 0) }) }));
+  assert.equal(above.readings, 8);
+  // But one above it that was not held back is not asked what the rest of it took.
+  const unheld = fakePage();
+  const ownOnly = quotaHost({ throttled: (reading, group) => (group === 0 ? throttled(reading) : 0), groups: 2, outer: () => 60_000 });
+  assert.ok(await heldWithin(unheld, 2000, { ...fast(), host: ownOnly }));
+  assert.equal(unheld.readings, 6);
+  // cgroup v1, whose cpu.stat counts no CPU time: any throttling starts the count again.
+  const v1 = fakePage();
+  assert.ok(await heldWithin(v1, 2000, { ...fast(), host: quotaHost({ throttled, usage: () => Number.NaN }) }));
+  assert.equal(v1.readings, 8);
+});
+
+test('ownThrottling: each group held back took less than a tenth of a CPU besides this process\'s CPU time, then and in the reading before', () => {
+  // `own`: this process's CPU time just before the files were read and just after, or one number for both.
+  // A group: [throttled, usage] with a quota of 2 CPUs (200 ms a period of 100 ms), or [throttled, usage, period, quota].
+  const reading = (at, own, ...groups) => {
+    const [ownBefore, ownAfter] = Array.isArray(own) ? own : [own, own];
+    return { at, ownBefore, ownAfter, groups: groups.map(([throttled, usage, period = 100_000, quota = 200_000]) => ({ throttled, usage, quota, period })) };
+  };
+  // Readings 250 ms apart: this process took 3 ms and the rest of its group 2 ms, then this process 100 ms and the rest
+  // 2 ms (24.999 ms: still less than a tenth of a CPU), while the group was held back for 81 ms.
+  const earlier = reading(750, 47_000, [0, 395_000], [10, 8_995_000]);
+  const before = reading(1000, 50_000, [0, 400_000], [10, 9_000_000]);
+  const now = (own, ...groups) => reading(1250, own, ...groups);
+  const held = [[81_000, 502_000], [10, 9_102_000]];
+  assert.equal(ownThrottling(earlier, before, now(150_000, ...held)), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 524_999], [10, 9_124_999])), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 525_000], [10, 9_125_000])), false);
+  // The kernel counts a throttling when it lets the group run again, which may be a reading late: the rest of the group
+  // at work in the reading before (25 ms of its 250) may have been what spent the quota.
+  assert.equal(ownThrottling(reading(750, 47_000, [0, 372_000], [10, 8_972_000]), before, now(150_000, ...held)), false);
+  assert.equal(ownThrottling(reading(750, 47_000, [0, 372_001], [10, 8_972_001]), before, now(150_000, ...held)), true);
+  // A group above it held back too counts by its own CPU time; one not held back is not asked.
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000], [500, 9_102_000])), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000], [500, 9_200_000])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000], [10, 20_000_000])), true);
+  // The quota's period: the reading before covers a throttling's cause only while the period is no longer than a
+  // reading (250 ms), so a group held back with a longer one, or one whose period cannot be read, is not told apart.
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000, 250_000], [10, 9_102_000])), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000, 250_001], [10, 9_102_000])), false);
+  // It is the readings' own spacing that counts: two readings 80 ms apart are closer than a 100 ms period.
+  assert.equal(ownThrottling(earlier, before, reading(1080, 150_000, ...held)), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000, Number.NaN], [10, 9_102_000])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000], [10, 9_102_000, Number.NaN])), true);
+  // A small quota (10 ms a period: a tenth of a CPU) gives the rest of the group less: under a quarter of it, 2.5 ms, so
+  // 20 ms of another's, which spent two of its periods, is not this process's; 2 ms is. No quota at all leaves 25 ms.
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000, 100_000, 10_000], [10, 9_102_000])), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_500, 100_000, 10_000], [10, 9_102_500])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 520_000, 100_000, 10_000], [10, 9_120_000])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 524_999, 100_000, Infinity], [10, 9_124_999])), true);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000, 100_000, Number.NaN], [10, 9_102_000])), false);
+  // A reading that took longer (1 s) gives the rest of the group no more than one of 250 ms does: less than 25 ms.
+  const slow = (others) => ownThrottling(earlier, before, reading(2000, 150_000, [81_000, 500_000 + others], [10, 9_100_000 + others]));
+  assert.equal(slow(24_999), true);
+  assert.equal(slow(25_000), false);
+  assert.equal(slow(90_000), false);
+  // What cannot be told: CPU time unread (cgroup v1) or gone backwards (a group made anew where it was), throttling
+  // unread or gone backwards, this process's CPU time unread or gone backwards, a reading missing, groups that do not
+  // compare, and readings not apart in time.
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, Number.NaN], [10, 9_102_000])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 102_000], [10, 9_102_000])), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [Number.NaN, 502_000], [10, 9_102_000])), false);
+  assert.equal(ownThrottling(earlier, reading(1000, 50_000, [90_000, 400_000], [10, 9_000_000]), now(150_000, ...held)), false);
+  assert.equal(ownThrottling(earlier, before, now(Number.NaN, ...held)), false);
+  assert.equal(ownThrottling(earlier, before, now(40_000, ...held)), false);
+  assert.equal(ownThrottling(null, before, now(150_000, ...held)), false);
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 502_000])), false);
+  assert.equal(ownThrottling({ ...earlier, groups: null }, before, now(150_000, ...held)), false);
+  assert.equal(ownThrottling(earlier, { ...before, groups: null }, now(150_000, ...held)), false);
+  assert.equal(ownThrottling(earlier, before, { ...now(150_000), groups: null }), false);
+  assert.equal(ownThrottling(earlier, before, reading(1000, 150_000, [81_000, 499_000], [10, 9_099_000])), false);
+  assert.equal(ownThrottling(reading(1000, 49_000, [0, 399_500], [10, 8_999_500]), before, now(150_000, ...held)), false);
+  // The group's CPU time is read a moment before this process's, so the rest of it can come out a little below nothing.
+  assert.equal(ownThrottling(earlier, before, now(150_000, [81_000, 499_000], [10, 9_099_000])), true);
+  // Only this process's CPU time between two readings of the files is taken away: a burst while `now` read them (80 ms
+  // after its groups' CPU time, which does not hold it yet) leaves the 80 ms the rest of the group took in the span.
+  assert.equal(ownThrottling(earlier, before, now([70_000, 150_000], [81_000, 502_000], [10, 9_102_000])), false);
+  assert.equal(ownThrottling(earlier, before, now([150_000, 150_000], [81_000, 502_000], [10, 9_102_000])), true);
+  // One while `before` read them cannot be put on either side of its groups' reading, so it is taken from neither span
+  // and the throttling is not told apart: the count starts again, as it did before this rule.
+  assert.equal(ownThrottling(earlier, reading(1000, [50_000, 130_000], [0, 400_000], [10, 9_000_000]), now(150_000, ...held)), false);
+  // Read as hostIdle reads them (quotaReading): another process's 100 ms between the CPU time and the throttling of one
+  // reading of a cpu.stat, which spent the quota, is in the second reading's CPU time, so it is not this process's.
+  const stat = (usage, throttled) => `usage_usec ${usage}\nthrottled_usec ${throttled}\n`;
+  const taken = (at, cpu, ...stats) => ({ at, ...quotaReading(['/g/cpu.stat'], { read: (file) => (file === '/g/cpu.max' ? '100000 100000\n' : stats.shift()), cpu: () => cpu }) });
+  const start = () => [taken(0, 0, stat(0, 0), stat(0, 0)), taken(250, 3000, stat(5000, 0), stat(5000, 0))];
+  assert.equal(ownThrottling(...start(), taken(600, 6000, stat(10_000, 81_000), stat(115_000, 81_000))), false);
+  assert.equal(ownThrottling(...start(), taken(600, 6000, stat(10_000, 81_000), stat(10_000, 81_000))), true);
 });
 
 test('the stall must last unbroken: a moment of work, or a reading that cannot be taken, starts the count again', async () => {
@@ -233,7 +416,18 @@ test('the default watch holds a page after 5 s of it, and reads this host\'s idl
   const [first, second] = [hostIdle(), hostIdle()];
   // Throttling is a number of microseconds, or NaN where it cannot be read (and no page is then refused).
   assert.ok(first.idle > 0 && second.idle >= first.idle && second.at >= first.at && typeof first.throttled === 'number' && typeof first.place === 'string', JSON.stringify([first, second]));
-  assert.match(describeHost(), /^held clock: /);
+  // This process's CPU time so far, in microseconds, just before and just after the quota files were read, and what each
+  // of them says (none off Linux).
+  const own = [first.ownBefore, first.ownAfter, second.ownBefore, second.ownAfter];
+  assert.ok(Number.isFinite(own[0]) && own[0] > 0 && own.every((micros, index) => index === 0 || micros >= own[index - 1]), JSON.stringify(own));
+  // In microseconds, user and system time both: between what process.cpuUsage says just before and just after.
+  const around = [process.cpuUsage()];
+  const taken = hostIdle();
+  around.push(process.cpuUsage());
+  const [low, high] = around.map(({ user, system }) => user + system);
+  assert.ok(low <= taken.ownBefore && taken.ownBefore <= taken.ownAfter && taken.ownAfter <= high, JSON.stringify([low, taken.ownBefore, taken.ownAfter, high]));
+  assert.ok(first.groups === null || (Array.isArray(first.groups) && first.groups.every((group) => typeof group.throttled === 'number' && typeof group.usage === 'number')), JSON.stringify(first.groups));
+  assert.match(describeHost(), /^held clock: (no page is refused for waiting on its own clock on this host, since .+|a page that waits on its own clock is refused after 5 s \(quota throttling read from \d+ cpu\.stat files?(, throttling of its own doing (not )?told apart)?\))$/);
 });
 
 test('the probe\'s answer is read only as four counts', () => {
@@ -365,6 +559,11 @@ test('CPU quota throttling is read from the process\'s control group and those a
     ['/srv/cg cpu/batch/job/cpu.stat', 'throttled_time 7000000\n'],
     ['/srv/cg cpu/batch/cpu.stat', 'throttled_time 1000\n'],
     ['/srv/cg cpu/cpu.stat', 'throttled_time 0\n'],
+    // The quotas beside them (the root has none of its own).
+    ['/sys/fs/cgroup/system.slice/awwo-saas-render.service/cpu.max', '200000 100000\n'],
+    ['/sys/fs/cgroup/system.slice/cpu.max', 'max 100000\n'],
+    ['/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us', '-1\n'],
+    ['/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us', '100000\n'],
   ]);
   let proc = '';
   let mounts = '';
@@ -372,7 +571,7 @@ test('CPU quota throttling is read from the process\'s control group and those a
     if (file === '/proc/self/cgroup') return proc;
     if (file === '/proc/self/mountinfo') return mounts;
     if (files.has(file)) return files.get(file);
-    throw new Error('ENOENT');
+    throw Object.assign(new Error(`ENOENT: no such file or directory, open '${file}'`), { code: 'ENOENT' });
   };
   const exists = (file) => files.has(file);
   const unrelated = '22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n24 22 0:22 / /proc rw,nosuid shared:13 - proc proc rw\n';
@@ -392,6 +591,67 @@ test('CPU quota throttling is read from the process\'s control group and those a
   const v1 = throttleFiles({ platform: 'linux', read, exists });
   assert.deepEqual(v1, ['/sys/fs/cgroup/cpu,cpuacct/cpu.stat']);
   assert.equal(throttledMicros(v1, read), 4000);
+  // Each group's own reading, as ownThrottling compares them: its throttling and the CPU time it and the groups below it
+  // took, which only cgroup v2's cpu.stat counts; a group with no quota of its own (the root) is never held back.
+  assert.deepEqual(quotaGroups(v2, read), [{ throttled: 1500, usage: 900 }, { throttled: 20, usage: 9000 }, { throttled: 0, usage: 90_000 }]);
+  assert.deepEqual(quotaGroups(v1, read), [{ throttled: 4000, usage: Number.NaN }]);
+  assert.equal(quotaGroups(['/sys/fs/cgroup/cpu.stat', '/gone/cpu.stat'], read), null, 'a file it cannot read');
+  assert.equal(quotaGroups(null, read), null);
+  assert.deepEqual(quotaGroups([], read), []);
+  // The files are read twice, between two readings of this process's CPU time: the throttling is the first reading's
+  // and the CPU time the second's. One reading of a cpu.stat takes its CPU time before its throttling, so a burst of
+  // another process's between the two (80 ms, then the throttling it caused) shows in the second reading's CPU time;
+  // the second reading's throttling (5 ms more here) may again be ahead of its CPU time, and waits for the next reading.
+  const order = [];
+  let micros = 0;
+  const reads = new Map();
+  const later = (file) => {
+    if (!file.endsWith('/cpu.stat')) {
+      order.push('quota');
+      return read(file);
+    }
+    const times = (reads.get(file) ?? 0) + 1;
+    reads.set(file, times);
+    order.push('stat');
+    const stat = read(file);
+    return times === 1 ? stat.replace(/^throttled_usec (\d+)$/m, (_, held) => `throttled_usec ${Number(held) + 81_000}`)
+      : stat.replace(/^usage_usec (\d+)$/m, (_, used) => `usage_usec ${Number(used) + 80_000}`).replace(/^throttled_usec (\d+)$/m, (_, held) => `throttled_usec ${Number(held) + 86_000}`);
+  };
+  const bracketed = quotaReading(v2, { read: later, cpu: () => { order.push('cpu'); micros += 1000; return micros; } });
+  // The quotas after the bracket: the service's and the slice's cpu.max, and the root's three tries that find none.
+  assert.deepEqual(order, ['cpu', 'stat', 'stat', 'stat', 'stat', 'stat', 'stat', 'cpu', 'quota', 'quota', 'quota', 'quota', 'quota']);
+  const limits = [{ quota: 200_000, period: 100_000 }, { quota: Infinity, period: 100_000 }, { quota: Infinity, period: Number.NaN }];
+  assert.deepEqual(bracketed, {
+    groups: [{ throttled: 82_500, usage: 80_900, ...limits[0] }, { throttled: 81_020, usage: 89_000, ...limits[1] }, { throttled: 0, usage: 170_000, ...limits[2] }],
+    ownBefore: 1000, ownAfter: 2000,
+  });
+  assert.deepEqual(quotaReading(v2, { read, cpu: () => 7 }), { groups: quotaGroups(v2, read).map((group, index) => ({ ...group, ...limits[index] })), ownBefore: 7, ownAfter: 7 });
+  // A quota: cgroup v2's cpu.max (max: none), v1's cpu.cfs_quota_us (-1: none) and cpu.cfs_period_us; NaN for what
+  // cannot be read as one.
+  assert.deepEqual(v2.map((file) => quotaLimit(file, read)), limits);
+  assert.deepEqual(quotaLimit('/sys/fs/cgroup/cpu,cpuacct/cpu.stat', read), { quota: Infinity, period: 100_000 });
+  const beside = (name, text) => (file) => (file === `/g/${name}` ? text : read(file));
+  for (const text of ['max\n', '100000\n', 'max 1e5\n', '-1 100000\n', '']) assert.deepEqual(quotaLimit('/g/cpu.stat', beside('cpu.max', text)), { quota: Number.NaN, period: Number.NaN }, JSON.stringify(text));
+  assert.deepEqual(quotaLimit('/g/cpu.stat', beside('cpu.max', '50000 250000\n')), { quota: 50_000, period: 250_000 });
+  assert.deepEqual(quotaLimit('/g/cpu.stat', beside('cpu.cfs_quota_us', '20000\n')), { quota: 20_000, period: Number.NaN });
+  // None of the files there (a cgroup v2 hierarchy's root): no quota. One there that cannot be read: nothing known.
+  assert.deepEqual(quotaLimit('/g/cpu.stat', read), { quota: Infinity, period: Number.NaN });
+  const unreadable = (file) => { if (file === '/g/cpu.max') throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return read(file); };
+  assert.deepEqual(quotaLimit('/g/cpu.stat', unreadable), { quota: Number.NaN, period: Number.NaN });
+  // The start line's "told apart" (toldApart): CPU time read, and every group either without a quota or with one whose
+  // period is no longer than the watch's readings are apart (250 ms).
+  assert.equal(toldApart(quotaReading(v2, { read }).groups), true);
+  assert.equal(toldApart(quotaReading(v1, { read }).groups), false, 'cgroup v1 counts no CPU time');
+  const group = (quota, period, usage = 1000) => [{ usage, quota, period }];
+  assert.equal(toldApart(group(100_000, 250_000)), true);
+  assert.equal(toldApart(group(100_000, 250_001)), false);
+  assert.equal(toldApart(group(100_000, 1_000_000)), false);
+  assert.equal(toldApart(group(Number.NaN, 100_000)), false, 'a quota that cannot be read');
+  assert.equal(toldApart(group(Infinity, Number.NaN)), true, 'no quota: never held back');
+  assert.equal(toldApart(group(100_000, 100_000, Number.NaN)), false);
+  assert.equal(toldApart(null), false);
+  assert.equal(quotaReading(['/sys/fs/cgroup/cpu.stat', '/gone/cpu.stat'], { read }).groups, null);
+  assert.equal(quotaReading(null, { read }).groups, null);
   assert.deepEqual(throttleFiles({ platform: 'linux', read, exists: () => true }), ['/sys/fs/cgroup/cpu,cpuacct/cpu.stat'], 'the paths it looks for, not only those found');
   // A mount point of another name, written with an escaped space: one that shows all of the hierarchy, and one that
   // shows it from /batch down, where the group /batch/job is the mount's job directory.
