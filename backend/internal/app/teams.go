@@ -44,9 +44,12 @@ type executionSnapshot struct {
 	// Skills are the node's attached method guidance, frozen with their exact text (skills.go).
 	Skills *skillContext `json:"skills,omitempty"`
 	// Memory is the workspace notes relevant to this node's task, quoted as untrusted data (memory.go).
-	Memory   *memoryContext `json:"memory,omitempty"`
-	Computer *computerPlan  `json:"computer,omitempty"`
-	Media    *mediaPlan     `json:"media,omitempty"`
+	Memory *memoryContext `json:"memory,omitempty"`
+	// Market is the market Agent's version this run runs (market_use.go); its instructions and skills are in
+	// Instructions and Skills, and this snapshot never leaves the server.
+	Market   *marketRunSnapshot `json:"market,omitempty"`
+	Computer *computerPlan      `json:"computer,omitempty"`
+	Media    *mediaPlan         `json:"media,omitempty"`
 	// Vision is the pictures this run's model is shown with its message (vision.go).
 	Vision *visionPlan `json:"vision,omitempty"`
 	// VisionFrom is the model this run's node chose, when the run moved to one that sees its pictures (vision.go).

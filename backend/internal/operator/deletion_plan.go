@@ -306,7 +306,8 @@ func (p *deletionPlan) countRows(ctx context.Context, tx pgx.Tx, d Deletion) err
 		(SELECT count(*) FROM audit_events WHERE tenant_id = ANY($2)),
 		(SELECT count(*) FROM tenant_invites WHERE tenant_id = ANY($2)),
 		(SELECT count(*) FROM knowledge_source_origins WHERE tenant_id = ANY($2)),
-		(SELECT count(*) FROM audit_events WHERE actor_id=$1)`, d.UserID, d.Deletes).Scan(&r.AuditEventsDetached, &invites, &r.KnowledgeOriginsDeleted, &r.AuditEventsUnnamed)
+		(SELECT count(*) FROM audit_events WHERE actor_id=$1),
+		(SELECT count(*) FROM market_agents WHERE author_user_id=$1)`, d.UserID, d.Deletes).Scan(&r.AuditEventsDetached, &invites, &r.KnowledgeOriginsDeleted, &r.AuditEventsUnnamed, &r.MarketAgentsUnnamed)
 	if err != nil {
 		return ErrDatabase
 	}

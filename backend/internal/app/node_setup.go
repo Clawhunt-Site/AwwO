@@ -28,6 +28,8 @@ type setupConfiguration struct {
 	Persona   string                   `json:"persona"`
 	Team      *nodeTeam                `json:"team,omitempty"`
 	AgentRef  *workspaceAgentReference `json:"agentRef,omitempty"`
+	// Market is the market Agent's version the conversation runs (market_use.go); Persona is then empty.
+	Market *marketSetup `json:"market,omitempty"`
 }
 
 type setupError struct{ code, message string }
@@ -129,14 +131,22 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resolved, selectedAgent, err := resolveWorkspaceAgent(r.Context(), tx, tid, original)
+		var market *marketSetup
+		var locked *marketModel
+		if err == nil {
+			resolved, market, locked, err = a.resolveMarketNode(r.Context(), tx, tid, cid, currentUser(r), resolved)
+		}
 		if err != nil {
 			var input setupError
+			var marketInput marketError
 			if errors.As(err, &input) {
 				status := 400
 				if input.code == "not_found" {
 					status = 404
 				}
 				fail(w, status, input.code, input.message)
+			} else if errors.As(err, &marketInput) {
+				a.marketFailure(w, err)
 			} else {
 				a.dbError(w, err)
 			}
@@ -167,8 +177,18 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid_node_setup", err.(setupError).message)
 				return
 			}
-		} else if _, err = a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err != nil {
+		} else if snap, err := a.runtimeSnapshot(r.Context(), entitlement, catalog, selection.Runtime, selection.Model, selection.Effort, selection.Persona, team); err == nil {
+			// A market Agent runs as a text Agent only (market_use.go): not on a runtime this deployment runs in a sandbox.
+			if market != nil && a.marketSandboxed(snap) {
+				a.marketFailure(w, marketSandboxRefused())
+				return
+			}
+		} else {
 			var input setupError
+			if locked != nil && errors.As(err, &input) && input.code != "personal_engine_required" {
+				fail(w, 409, "market_agent_model_unavailable", "This Agent runs only on "+locked.ID+", which this workspace cannot use")
+				return
+			}
 			if errors.As(err, &input) {
 				if input.code == "personal_engine_required" || (a.cfg.UserCredentials && input.code == "model_unavailable") {
 					fail(w, 409, input.code, input.message)
@@ -180,7 +200,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			a.runtimeAdmissionError(w, err)
 			return
 		}
-		updated, err := a.initializeNode(r.Context(), tx, tid, cid, resolved, catalog, selectedAgent)
+		updated, err := a.initializeNode(r.Context(), tx, tid, cid, resolved, catalog, selectedAgent, market)
 		if err != nil {
 			var input setupError
 			if errors.As(err, &input) {
@@ -308,10 +328,14 @@ func setupConfig(raw json.RawMessage, catalog runtimeCatalog, media bool) (setup
 	return setupConfiguration{Name: name, AgentKind: n.AgentKind, Runtime: n.Runtime, Model: n.Model, Effort: n.Effort, Persona: n.Persona, Team: team}, nil
 }
 
-func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog, selected *setupBinding) (json.RawMessage, error) {
+func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, raw json.RawMessage, catalog runtimeCatalog, selected *setupBinding, market *marketSetup) (json.RawMessage, error) {
 	config, err := setupConfig(raw, catalog, a.cfg.mediaConfigured())
 	if err != nil {
 		return nil, err
+	}
+	if market != nil {
+		// The node's own persona stays in its document, unused; the Agent's instructions stay in the market tables.
+		config.Persona, config.Market = "", market
 	}
 	var node map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &node)
@@ -330,8 +354,10 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		}
 	}
 	oldConfig, oldEngine := setupConfiguration{Runtime: "pi"}, agentEngineWorker
+	var oldMarket *string
+	var oldMarketVersion *int
 	if old != nil {
-		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime,effort,engine FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime, &oldConfig.Effort, &oldEngine); noRows(err) {
+		if err = tx.QueryRow(ctx, "SELECT name,model,instructions,runtime,effort,engine,market_agent_id,market_version FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, old.AgentID).Scan(&oldConfig.Name, &oldConfig.Model, &oldConfig.Persona, &oldConfig.Runtime, &oldConfig.Effort, &oldEngine, &oldMarket, &oldMarketVersion); noRows(err) {
 			return nil, missingSetupReference()
 		} else if err != nil {
 			return nil, err
@@ -362,7 +388,7 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		return nil, invalidSetup("Active thread and node conversation must agree before initialization")
 	}
 	configRaw, _ := json.Marshal(config)
-	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona || oldEngine != config.engine())
+	changed := old != nil && (oldConfig.Runtime != config.Runtime || oldConfig.Name != config.Name || oldConfig.Model != config.Model || oldConfig.Effort != config.Effort || oldConfig.Persona != config.Persona || oldEngine != config.engine() || !sameMarketAgent(oldMarket, oldMarketVersion, config.Market))
 	if selected != nil && old != nil && selected.AgentID != old.AgentID {
 		changed = true
 	}
@@ -378,7 +404,11 @@ func (a *App) initializeNode(ctx context.Context, tx pgx.Tx, tid, cid string, ra
 		binding = selected
 	} else if old == nil || changed {
 		binding = &setupBinding{CompanyID: tid, AgentID: randomID(), AgentName: config.Name}
-		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort,engine) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort, config.engine()); err != nil {
+		var marketID, marketVersion any
+		if config.Market != nil {
+			marketID, marketVersion = config.Market.AgentID, config.Market.Version
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO agents(id,tenant_id,name,model,instructions,runtime,effort,engine,market_agent_id,market_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", binding.AgentID, tid, config.Name, config.Model, config.Persona, config.Runtime, config.Effort, config.engine(), marketID, marketVersion); err != nil {
 			return nil, err
 		}
 	}
@@ -547,9 +577,20 @@ func configureSetupThread(thread map[string]json.RawMessage, binding *setupBindi
 	putJSON(thread, "persona", config.Persona)
 	putJSON(thread, "effort", config.Effort)
 	// Leave old custom threads byte-stable unless they previously had a reference.
-	if config.AgentRef != nil || len(thread["agentRef"]) != 0 {
+	switch {
+	case config.Market != nil:
+		putJSON(thread, "agentRef", marketAgentReference{Source: "market", AgentID: config.Market.AgentID, Version: config.Market.Version})
+	case config.AgentRef != nil || len(thread["agentRef"]) != 0:
 		putJSON(thread, "agentRef", config.AgentRef)
 	}
+}
+
+// sameMarketAgent reports whether an Agent row runs the market version a setup names (both none counts as the same).
+func sameMarketAgent(agentID *string, version *int, market *marketSetup) bool {
+	if market == nil {
+		return agentID == nil
+	}
+	return agentID != nil && version != nil && *agentID == market.AgentID && *version == market.Version
 }
 
 func clearSetupOutputValues(node map[string]json.RawMessage) {

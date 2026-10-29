@@ -283,12 +283,16 @@ func withCarry(ctx context.Context, q querier, p *activePlan) error {
 // creditsSpentSQL is what the account spent in the period starting $2: a running call its reserve, a settled
 // one its charge. A generation costs its points once its provider accepted the task, and while its run is still
 // active (the provider may yet accept it); one whose run ended before the provider accepted it costs nothing.
-// Only a pending generation looks at its run, and a canvas whose run is active cannot be deleted.
+// Only a pending generation looks at its run, and a canvas whose run is active cannot be deleted. A market Agent's
+// price (market_use.go) costs what it was charged, and while its run is active what it holds; a run that ended
+// without settling it (a cancellation, a restart) holds nothing, and the settlement job releases it.
 const creditsSpentSQL = `SELECT
 	COALESCE((SELECT sum(CASE WHEN status='running' THEN credit_reserve ELSE COALESCE(credit_charge,credit_reserve) END) FROM model_invocations
 		WHERE billed_user_id=$1 AND billed_period_start=$2 AND credit_reserve IS NOT NULL),0)::bigint
 	+COALESCE((SELECT sum(g.credit_points) FROM media_generations g WHERE g.billed_user_id=$1 AND g.billed_period_start=$2 AND g.credit_points IS NOT NULL
-		AND (g.provider_accepted OR (g.provider_accepted IS NULL AND EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=g.tenant_id AND r.id=g.run_id AND r.status IN ('queued','running'))))),0)::bigint`
+		AND (g.provider_accepted OR (g.provider_accepted IS NULL AND EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=g.tenant_id AND r.id=g.run_id AND r.status IN ('queued','running'))))),0)::bigint
+	+COALESCE((SELECT sum(c.price_credits) FROM market_agent_calls c WHERE c.billed_user_id=$1 AND c.billed_period_start=$2 AND c.price_credits>0
+		AND (c.status='charged' OR (c.status='reserved' AND EXISTS(SELECT 1 FROM runs r WHERE r.tenant_id=c.tenant_id AND r.id=c.run_id AND r.status IN ('queued','running'))))),0)::bigint`
 
 func creditsSpent(ctx context.Context, q querier, p *activePlan) (int64, error) {
 	var spent int64

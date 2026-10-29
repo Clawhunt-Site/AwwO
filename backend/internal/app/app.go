@@ -60,6 +60,8 @@ type App struct {
 	routeLimiter assistantRouteLimiter
 	// registry holds the skill registry's caches and limits (skill_registry_client.go).
 	registry *skillRegistry
+	// marketStats holds the market's ranking figures for a minute (market_browse.go).
+	marketStats marketStatsCache
 	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
 	signupClock func() time.Time
 	// promptClock is the clock of the date a model call's system prompt names (model_identity.go); nil is time.Now.
@@ -233,6 +235,12 @@ func (a *App) Start(ctx context.Context) error {
 	a.startMediaSweeper(watch)
 	a.startPlanSync(watch)
 	a.startRelaySweeper(watch)
+	a.startMarketSettlement(watch)
+	if a.cfg.MarketEnabled {
+		if e = a.seedOfficialMarketAgents(ctx); e != nil {
+			a.log.Warn("the market's official Agents were not listed", "error_type", errorType(e))
+		}
+	}
 	if e = a.warmCloudModels(ctx); e != nil {
 		a.log.Warn("the AwwO 云端 connections' models could not be read at start", "error_type", "database")
 	}
@@ -325,6 +333,7 @@ func (a *App) Handler() http.Handler {
 	a.registerOpenMausRoutes(m)
 	a.registerComputerRoutes(m)
 	a.registerRelayRoutes(m)
+	a.registerMarketRoutes(m)
 	if a.cfg.UserCredentials && !a.cfg.TypeSafeSponsoredPlanning {
 		// Hosted ingress must route both TypeSafe endpoints through this guard in
 		// personal mode. Its separate service still uses operator credentials.

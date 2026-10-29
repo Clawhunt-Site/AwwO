@@ -372,6 +372,11 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "version_conflict", "Canvas changed; reload before saving")
 		return
 	}
+	// A page older than the Agent market drops every node whose market Agent it does not know (market_use.go).
+	if !canvasFeatures(r)[marketCanvasFeature] && marketNodesDropped(savedDocument, b.Document) {
+		fail(w, 409, "canvas_reload_required", "This canvas uses market Agents: reload the page before saving")
+		return
+	}
 	b.Document = preserveCanvasSkills(savedDocument, preserveCanvasTaskFrames(savedDocument, b.Document))
 	if err := validateCanvasTaskFrames(b.Document); err != nil {
 		fail(w, 400, "invalid_task_frame", err.Error())
@@ -434,7 +439,8 @@ func (a *App) listAgents(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "agents")
 }
 func (a *App) getAgent(w http.ResponseWriter, r *http.Request) {
-	v, e := oneJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker'", r.PathValue("tenantId"), r.PathValue("id"))
+	// A node's Agent that runs a market version is the node's own (market_use.go): it is not one of the workspace's Agents.
+	v, e := oneJSON(r.Context(), a.db, "SELECT "+agentJSON+" FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' AND market_agent_id IS NULL", r.PathValue("tenantId"), r.PathValue("id"))
 	a.replyOne(w, v, e, 200)
 }
 func (a *App) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -468,7 +474,7 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.AdapterType != "" {
 			var previous string
-			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
+			if err := tx.QueryRow(r.Context(), "SELECT runtime FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' AND market_agent_id IS NULL FOR UPDATE", r.PathValue("tenantId"), id).Scan(&previous); err != nil {
 				return nil, err
 			}
 			if previous != b.AdapterType {
@@ -481,7 +487,7 @@ func (a *App) updateAgent(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime),effort=COALESCE($9,effort) WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType, b.Effort)
+		return oneJSON(r.Context(), tx, "UPDATE agents SET name=$3,role=$4,title=$5,model=$6,instructions=$7,runtime=COALESCE(NULLIF($8,''),runtime),effort=COALESCE($9,effort) WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' AND market_agent_id IS NULL RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Name, b.Role, b.Title, b.Model, b.Instructions, b.AdapterType, b.Effort)
 	})
 }
 func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +502,7 @@ func (a *App) agentInstructions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mutateObject(w, r, "agent.instructions.updated", r.PathValue("id"), 200, func(tx pgx.Tx, id string) (json.RawMessage, error) {
-		return oneJSON(r.Context(), tx, "UPDATE agents SET instructions=$3 WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Content)
+		return oneJSON(r.Context(), tx, "UPDATE agents SET instructions=$3 WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' AND market_agent_id IS NULL RETURNING "+agentJSON, r.PathValue("tenantId"), id, b.Content)
 	})
 }
 func (a *App) deleteAgent(w http.ResponseWriter, r *http.Request) {

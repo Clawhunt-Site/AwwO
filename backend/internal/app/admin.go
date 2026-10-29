@@ -90,6 +90,11 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 				a.dbError(w, e)
 				return
 			}
+			// A market Agent's fee goes back with the suspension, which its caller did not choose (market_use.go).
+			if e = settleMarketCall(r.Context(), tx, id, rid, false); e != nil {
+				a.dbError(w, e)
+				return
+			}
 		}
 	}
 	if e = audit(r.Context(), tx, currentUser(r).ID, id, "tenant.updated", id); e != nil {

@@ -100,6 +100,8 @@ type Config struct {
 	editionSettings
 	// The cloud relay AwwO 本地版 makes its model calls through (relay.go); off unless configured.
 	relaySettings
+	// The Agent market and authors' payouts (market_config.go); off unless configured.
+	marketSettings
 	// BillingCheckoutEnabled opens the paid plans' checkout (billing.go). Off, the plans can be read but not
 	// bought; subscriptions already taken still count.
 	BillingCheckoutEnabled bool
@@ -245,6 +247,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.relayFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.marketSettingsFromEnv(); err != nil {
+		return c, err
+	}
 	return c, c.Validate()
 }
 func env(k, d string) string {
@@ -270,6 +275,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validateCapabilities(); err != nil {
+		return err
+	}
+	if err := c.validateMarket(); err != nil {
 		return err
 	}
 	if err := c.validateClawHunt(); err != nil {

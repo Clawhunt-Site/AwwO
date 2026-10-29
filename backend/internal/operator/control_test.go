@@ -326,7 +326,7 @@ func TestPostgresOperatorStatusIncludesDetachedAndComputerWorkWithoutMutation(t 
 		t.Fatal(err)
 	}
 	want := operator.Counts{ActiveRuns: 3, QueuedRuns: 1, RunningRuns: 2, ActiveComputerRuns: 1, ActiveGraphRuns: 1, WaitingGraphNodes: 1, RunningGraphNodes: 1, ActiveTeamTurns: 1, ActiveInvocations: 1, OpenMausDispatchesSending: 1}
-	if before.Counts != want || before.ContractVersion != 1 || before.Source != "awwo-control" || before.Nonce != "status-proof-nonce-001" || before.SchemaVersion != 44 || len(before.SchemaDigest) != 64 || len(before.DatabaseIdentity) != 64 || time.Since(before.SnapshotAt) > 5*time.Second {
+	if before.Counts != want || before.ContractVersion != 1 || before.Source != "awwo-control" || before.Nonce != "status-proof-nonce-001" || before.SchemaVersion != 45 || len(before.SchemaDigest) != 64 || len(before.DatabaseIdentity) != 64 || time.Since(before.SnapshotAt) > 5*time.Second {
 		t.Fatal(before)
 	}
 	if _, err = h.store.Grant(h.ctx, grantFor("person"), actor, true); err != nil {

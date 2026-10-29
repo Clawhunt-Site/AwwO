@@ -370,6 +370,9 @@ func (a *App) getRun(w http.ResponseWriter, r *http.Request) {
 	if e == nil {
 		v, e = projectDeliveryRecord(r.Context(), a.db, tid, rid, v, "output")
 	}
+	if e == nil {
+		v, e = projectMarketCall(r.Context(), a.db, tid, rid, v)
+	}
 	a.replyOne(w, v, e, 200)
 }
 
@@ -410,7 +413,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	actorRole, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
 	var concurrent, daily int
@@ -497,7 +501,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var model, instructions, kind, runtime, effort, agentID, engine string
-	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id,a.engine FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge','computer') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID, &engine)
+	var marketAgentID *string
+	var marketVersion *int
+	e = tx.QueryRow(r.Context(), `SELECT a.model,a.instructions,s.kind,a.runtime,a.effort,a.id,a.engine,a.market_agent_id,a.market_version FROM node_sessions s JOIN agents a ON a.tenant_id=s.tenant_id AND a.id=s.agent_id JOIN canvases c ON c.tenant_id=s.tenant_id AND c.id=s.canvas_id WHERE s.tenant_id=$1 AND s.id=$2 AND (s.kind IN ('planner','knowledge','computer') OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n WHERE n->>'id'=s.node_id AND (COALESCE(n->'binding'->>'agentId','')='' OR n->'binding'->>'agentId'=s.agent_id) AND (COALESCE(n->'binding'->>'companyId','')='' OR n->'binding'->>'companyId'=s.tenant_id))) FOR UPDATE OF s`, tid, b.SessionID).Scan(&model, &instructions, &kind, &runtime, &effort, &agentID, &engine, &marketAgentID, &marketVersion)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Session, agent or canvas node not found")
 		return
@@ -550,6 +556,25 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if !savedRuntimeMatches(document, nodeID, runtime) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
+	}
+	// A node running a market Agent sends the version's instructions and skills, read now (market_use.go).
+	var market *marketRun
+	if kind == "node" {
+		if market, e = a.admitMarketRun(r.Context(), tx, tid, b.SessionID, nodeID, currentUser(r).ID, document, marketAgentID, marketVersion); e != nil {
+			a.marketAdmissionError(w, e)
+			return
+		}
+	}
+	if market != nil {
+		instructions = marketInstructions(market.Version.Instructions)
+		if e = marketPaidRole(market, actorRole); e != nil {
+			a.marketAdmissionError(w, e)
+			return
+		}
+		if market.Price > 0 && plan == nil {
+			fail(w, 402, "market_agent_plan_required", "This Agent is paid: it runs in a workspace whose owner has a paid plan")
+			return
+		}
 	}
 	catalog := runtimeCatalog{}
 	if (kind == "planner" || kind == "knowledge") && a.cfg.UserCredentials {
@@ -609,6 +634,17 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.runtimeAdmissionError(w, e)
 		return
 	}
+	if market != nil && a.marketSandboxed(snapshot) {
+		a.marketAdmissionError(w, marketSandboxRefused())
+		return
+	}
+	// The node's page sends what its inputs hold with the prompt, as a canvas run does (createGraphRun).
+	if team != nil || a.marketSandboxed(snapshot) {
+		if fed, title := marketFed(document, nodeID); fed {
+			a.marketAdmissionError(w, marketFeedRefused(title))
+			return
+		}
+	}
 	if e = validateWorkspaceAgentSession(r.Context(), tx, tid, b.SessionID, nodeID, document, snapshot); e != nil {
 		a.workspaceAgentAdmissionError(w, e)
 		return
@@ -618,7 +654,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_task_frame", e.Error())
 		return
 	}
-	if snapshot.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, document, nodeID); e != nil {
+	if market != nil {
+		snapshot.Skills, snapshot.Market = marketSkillContext(market.Version.Skills), market.snapshot()
+	} else if snapshot.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, document, nodeID); e != nil {
 		a.skillFailure(w, e)
 		return
 	}
@@ -712,7 +750,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	tooLarge := refused()
 	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
 	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
-	if team == nil && plannerPageSkills(snapshot.Skills) && promptExcess <= 0 && (snapshot.Workspace != nil || tooLarge) {
+	if team == nil && snapshot.Market == nil && plannerPageSkills(snapshot.Skills) && promptExcess <= 0 && (snapshot.Workspace != nil || tooLarge) {
 		snapshot.Skills = nil
 		if tooLarge = refused(); !tooLarge {
 			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nodeID, "sandbox", snapshot.Workspace != nil)
@@ -778,6 +816,20 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	if e = saveRunSnapshot(r.Context(), tx, tid, id, currentUser(r).ID, snapshot); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	if market != nil {
+		// The price is held on the owner's plan, read again under its row lock (planRunSlot took it).
+		locked, err := ownerPlan(r.Context(), tx, tid, true)
+		if err == nil {
+			err = relockMarketRun(r.Context(), tx, market, currentUser(r).ID)
+		}
+		if err == nil {
+			err = a.reserveMarketCall(r.Context(), tx, tid, id, currentUser(r).ID, market, locked)
+		}
+		if err != nil {
+			a.marketAdmissionError(w, err)
+			return
+		}
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO messages(id,tenant_id,session_id,run_id,role,content) VALUES($1,$2,$3,$4,'user',$5)", randomID(), tid, b.SessionID, id, b.Prompt); e != nil {
 		a.dbError(w, e)
@@ -1131,7 +1183,8 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 				continue
 			}
 			if !a.appendDelta(ctx, tid, id, delta) {
-				finish("failed", output.String(), "event_persistence_failed")
+				status, code := deltaWriteFailure(ctx)
+				finish(status, output.String(), code)
 				return
 			}
 		case "reasoning":
@@ -1332,6 +1385,16 @@ func sizeRefusal(facts *invocationFacts) bool {
 		facts.Usage.Status != "reported" && facts.Usage.Status != "partial" && facts.sinceSent(time.Now()) < quickRefusal()
 }
 
+// deltaWriteFailure is how a run ends whose text could not be saved: as its own deadline or stop when that is why the
+// write failed (runContextOutcome), so that a run out of time after its Agent wrote is the run_timeout a market fee is
+// charged for; only a write the database itself failed is the platform's (event_persistence_failed).
+func deltaWriteFailure(ctx context.Context) (status, code string) {
+	if status, code, ended := runContextOutcome(ctx); ended {
+		return status, code
+	}
+	return "failed", "event_persistence_failed"
+}
+
 // runContextOutcome reports how a run ended when its own context is what stopped it. Once the
 // context is done, every subsequent database write fails too, so any step that writes must consult
 // this before blaming the runtime: recording a user's cancellation as a runtime fault shows them a
@@ -1438,7 +1501,12 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 				return err
 			}
 		}
-		return settleExecutionRecords(ctx, tx, tid, id, status)
+		if err := settleExecutionRecords(ctx, tx, tid, id, status); err != nil {
+			return err
+		}
+		// After the run's calls are settled, so the market call records what they cost. A run this end moves to cancelled
+		// was stopped by the API, not by its caller (market_use.go settleMarketCall).
+		return settleMarketCall(ctx, tx, tid, id, runChanged && status == "cancelled")
 	}
 	commit := func(tx pgx.Tx) error {
 		if err := tx.Commit(ctx); err != nil {
@@ -1617,6 +1685,12 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if tag.RowsAffected() > 0 {
 		if _, e = tx.Exec(r.Context(), "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, `{"type":"cancelled"}`); e != nil {
+			a.dbError(w, e)
+			return
+		}
+		// A market Agent's fee settles with the cancellation, by what the run holds now (market_use.go): the credits it
+		// held are spent or free again at once, and the run's execution ending later finds nothing left to settle.
+		if e = settleMarketCall(r.Context(), tx, tid, id, false); e != nil {
 			a.dbError(w, e)
 			return
 		}

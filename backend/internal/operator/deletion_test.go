@@ -126,6 +126,8 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"graph_operation_cancellations actor_id users a", "graph_runs actor_id users a",
 			"knowledge_documents tenant_id tenants a", "knowledge_events tenant_id tenants a",
 			"knowledge_operations tenant_id tenants a", "knowledge_proposals tenant_id tenants a",
+			// The author's market Agents keep no author: they list and run no more (removeAccount unnames them first).
+			"market_agents author_user_id users n",
 			"media_generations tenant_id tenants c", "memberships tenant_id tenants a", "memberships user_id users a",
 			"memory_items tenant_id tenants c", "model_invocations tenant_id tenants c", "node_sessions tenant_id tenants a",
 			"openmaus_dispatches tenant_id tenants a", "password_resets user_id users c", "plan_watches user_id users c",
@@ -148,18 +150,21 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"knowledge_revisions tenant_id,document_id knowledge_documents a",
 			"knowledge_revisions tenant_id,document_id,parent_revision_id knowledge_revisions a",
 			"knowledge_source_origins tenant_id,document_id knowledge_documents a",
+			// A market Agent is never deleted, nor a call: they are the market's ledger.
+			"market_agent_calls agent_id market_agents a", "market_agent_ratings call_id market_agent_calls a",
 			"node_sessions tenant_id,agent_id agents a",
 		}},
 		"triggers": {`SELECT tgrelid::regclass::text, tgname, tgtype FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace=to_regnamespace(current_schema())) ORDER BY 1,2`, []string{
 			"knowledge_revisions knowledge_revision_immutable 19", "knowledge_source_origins knowledge_source_origin_immutable 27",
 		}},
 		"rules": {`SELECT tablename, rulename FROM pg_rules WHERE schemaname=current_schema()`, []string{}},
-		// Workspace rows without a key to their workspace would outlive a deleted one.
+		// Workspace rows without a key to their workspace would outlive a deleted one. The market's calls do on purpose:
+		// an author's earnings and an Agent's ranking outlive the caller's workspace (migration 045).
 		"workspace tables without a key": {`SELECT c.table_name FROM information_schema.columns c
 			WHERE c.table_schema=current_schema() AND c.column_name='tenant_id' AND c.table_name NOT LIKE 'awwo\_schema\_%'
 			AND NOT EXISTS (SELECT 1 FROM pg_constraint k JOIN pg_attribute a ON a.attrelid=k.conrelid AND a.attnum=ANY(k.conkey)
 				WHERE k.contype='f' AND k.conrelid=(quote_ident(c.table_schema)||'.'||quote_ident(c.table_name))::regclass AND a.attname='tenant_id')
-			ORDER BY 1`, []string{}},
+			ORDER BY 1`, []string{"market_agent_calls"}},
 		// Columns named like a person's id without a foreign key: kept as plain text when the account goes (the user
 		// ids among them are listed in backend/README.md), or not a person at all (run_turns.member_id is a team member).
 		"plain-text user ids": {`SELECT c.table_name, c.column_name FROM information_schema.columns c
@@ -170,6 +175,9 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			ORDER BY 1,2`, []string{
 			"account_deletion_requests decided_by", "computer_sessions actor_id", "knowledge_events actor_id",
 			"knowledge_proposals actor_id", "knowledge_revisions actor_id", "knowledge_source_origins actor_id",
+			// The Agent market's ledger: its calls (caller, author, payer), ratings, payouts, period facts and reviewers.
+			"market_agent_calls actor_id", "market_agent_calls author_user_id", "market_agent_calls billed_user_id",
+			"market_agent_ratings user_id", "market_agent_versions reviewed_by", "market_payouts author_user_id", "market_period_facts user_id",
 			"media_generations billed_user_id", "memory_items created_by", "memory_items updated_by",
 			"model_invocations billed_user_id", "openmaus_dispatches actor_id", "render_jobs actor_id", "run_turns member_id",
 			"tenant_skill_revisions created_by", "tenant_skills created_by", "tenant_skills updated_by", "web_reads actor_id",
@@ -253,6 +261,11 @@ func seedAccount(t *testing.T, h *harness) {
 		`INSERT INTO relay_keys(id,user_id,tenant_id,key_hash,prefix,name,expires_at) VALUES
 			('rk-person','person','w-team',repeat('a',64),'awwo_rk_aaaa','Laptop',now()+interval '90 days'),
 			('rk-member','member','w-own',repeat('b',64),'awwo_rk_bbbb','Desktop',now()+interval '90 days')`,
+		// The person published an Agent in the market, and ran other's there: the call stays in the market's ledger.
+		"INSERT INTO market_agents(id,author_user_id,author_display,status,listed_version) VALUES('ma-person','person','Person P.','listed',1),('ma-other','other','Other O.','listed',1)",
+		`INSERT INTO market_agent_versions(agent_id,version,state,name,tagline,description,category,instructions,content_hash,author_display) VALUES
+			('ma-person',1,'approved','Writer','Writes','','writing','Write','h1','Person P.'),('ma-other',1,'approved','Other writer','Writes','','writing','Write','h2','Other O.')`,
+		"INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,tenant_id,run_id,actor_id,price_credits,fee_bps,status,settlement) VALUES('mc-1','ma-other',1,'other','w-team','r-team-person','person',0,2500,'charged','none')",
 	} {
 		h.exec(t, sql)
 	}
@@ -316,7 +329,7 @@ func TestPostgresDeletionPreviewsAndRefusalsChangeNothing(t *testing.T) {
 		t.Fatal("preview", p.Workspaces, p.Account)
 	}
 	want := operator.DeletionRows{WorkspacesTransferred: 1, WorkspacesDeleted: 1, CanvasesDeleted: 1, KnowledgeOriginsDeleted: 1, AuditEventsDetached: 2,
-		RunsUnnamed: 2, GraphRunsReassigned: 2, GraphCancellationsReassigned: 1, InvitationsDeleted: 4, AuditEventsUnnamed: 4, MembershipsDeleted: 3, UsersDeleted: 1}
+		RunsUnnamed: 2, GraphRunsReassigned: 2, GraphCancellationsReassigned: 1, InvitationsDeleted: 4, AuditEventsUnnamed: 4, MarketAgentsUnnamed: 1, MembershipsDeleted: 3, UsersDeleted: 1}
 	if p.Rows != want {
 		t.Fatalf("planned rows\n got %+v\nwant %+v", p.Rows, want)
 	}
@@ -486,6 +499,13 @@ func TestPostgresDeletionKeepsSharedWorkAndReplays(t *testing.T) {
 		"SELECT count(*) FROM memberships WHERE tenant_id='w-team'":                                            2,
 		"SELECT count(*) FROM auth_sessions WHERE user_id='member'":                                            1,
 		"SELECT count(*) FROM relay_keys WHERE user_id='member' AND tenant_id='w-own'":                         1,
+		// The person's market Agent keeps no author and no author's name, in none of its versions; other's keeps both, and
+		// the person's call of it stays in the ledger.
+		"SELECT count(*) FROM market_agents WHERE id='ma-person' AND author_user_id IS NULL AND author_display=''":        1,
+		"SELECT count(*) FROM market_agent_versions WHERE agent_id='ma-person' AND author_display=''":                     1,
+		"SELECT count(*) FROM market_agents WHERE id='ma-other' AND author_user_id='other' AND author_display='Other O.'": 1,
+		"SELECT count(*) FROM market_agent_versions WHERE agent_id='ma-other' AND author_display='Other O.'":              1,
+		"SELECT count(*) FROM market_agent_calls WHERE id='mc-1' AND actor_id='person'":                                   1,
 	} {
 		if got := h.count(t, sql); got != want {
 			t.Errorf("%s = %d, want %d", sql, got, want)

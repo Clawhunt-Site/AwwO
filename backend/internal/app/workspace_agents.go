@@ -19,6 +19,10 @@ func parseWorkspaceAgentReference(raw json.RawMessage) (*workspaceAgentReference
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
+	// A market Agent's reference is read by parseMarketAgentReference (market_use.go).
+	if market, err := parseMarketAgentReference(raw); err != nil || market != nil {
+		return nil, err
+	}
 	var fields map[string]json.RawMessage
 	var ref workspaceAgentReference
 	if json.Unmarshal(raw, &fields) != nil || len(fields) != 2 || len(fields["source"]) == 0 || len(fields["agentId"]) == 0 || json.Unmarshal(raw, &ref) != nil || ref.Source != "workspace" || ref.AgentID == "" || ref.AgentID != strings.TrimSpace(ref.AgentID) || len(ref.AgentID) > 200 {
@@ -42,7 +46,7 @@ func resolveWorkspaceAgent(ctx context.Context, tx pgx.Tx, tid string, raw json.
 		return nil, nil, invalidSetup("An existing workspace Agent cannot be replaced by an inline team")
 	}
 	var name, runtime, model, effort, instructions string
-	err = tx.QueryRow(ctx, "SELECT name,runtime,model,effort,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' FOR SHARE", tid, ref.AgentID).Scan(&name, &runtime, &model, &effort, &instructions)
+	err = tx.QueryRow(ctx, "SELECT name,runtime,model,effort,instructions FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal AND engine='worker' AND market_agent_id IS NULL FOR SHARE", tid, ref.AgentID).Scan(&name, &runtime, &model, &effort, &instructions)
 	if noRows(err) {
 		return nil, nil, missingSetupReference()
 	}

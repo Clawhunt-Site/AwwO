@@ -115,7 +115,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	actorRole, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
 	var cancelled bool
@@ -230,9 +231,14 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	// back decided nothing, and a metric emitted inside the transaction would claim
 	// an envelope that no run will ever use.
 	contractOutcomes := []string{}
+	// The owner's plan, read once a paid market Agent's node needs it.
+	var paidPlan *activePlan
 	// Each helper below looks one node up in a document; given the whole canvas, admission read it whole once per helper
 	// per node under the workspace's row lock (a 400-node canvas: thousands of full parses). Each gets its node alone.
 	nodeDocs := savedNodeDocuments(raw)
+	// A market Agent's text is a third party's: it feeds no node that works with tools (a sandbox, a team), even through
+	// nodes in between, as its instructions could be read there as the task's (market_use.go).
+	fromMarket := marketDescendants(d)
 	for i, n := range d.Nodes {
 		if !needed[n.ID] {
 			continue
@@ -283,7 +289,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			var model, instructions, runtime, effort, engine string
-			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime,effort,engine FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime, &effort, &engine)
+			var marketAgentID *string
+			var marketVersion *int
+			e = tx.QueryRow(r.Context(), "SELECT model,instructions,runtime,effort,engine,market_agent_id,market_version FROM agents WHERE tenant_id=$1 AND id=$2 AND NOT internal", tid, n.Binding.AgentID).Scan(&model, &instructions, &runtime, &effort, &engine, &marketAgentID, &marketVersion)
 			if noRows(e) {
 				fail(w, 404, "not_found", "Node agent not found in workspace")
 				return
@@ -315,10 +323,40 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				fail(w, 400, "invalid_team", e.Error())
 				return
 			}
+			var market *marketRun
 			if !media {
 				if !savedRuntimeMatches(own, n.ID, runtime) {
 					fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 					return
+				}
+				// A node running a market Agent sends the version's instructions and skills (market_use.go); its price is
+				// held when its turn comes (admitGraphChild), and a paid one is refused now without the owner's plan.
+				if market, e = a.admitMarketRun(r.Context(), tx, tid, n.IssueID, n.ID, currentUser(r).ID, own, marketAgentID, marketVersion); e != nil {
+					a.marketAdmissionError(w, e)
+					return
+				}
+				if market != nil {
+					if b.Collaboration != nil {
+						a.marketAdmissionError(w, marketNotUsable("A market Agent does not take part in a collaboration"))
+						return
+					}
+					if e = marketPaidRole(market, actorRole); e != nil {
+						a.marketAdmissionError(w, e)
+						return
+					}
+					if market.Price > 0 {
+						if paidPlan == nil {
+							if paidPlan, e = ownerPlan(r.Context(), tx, tid, false); e != nil {
+								a.dbError(w, e)
+								return
+							}
+						}
+						if paidPlan == nil {
+							fail(w, 402, "market_agent_plan_required", "This Agent is paid: it runs in a workspace whose owner has a paid plan")
+							return
+						}
+					}
+					instructions = marketInstructions(market.Version.Instructions)
 				}
 				snap, e = a.runtimeSnapshot(r.Context(), entitlement, catalog, runtime, model, effort, instructions, team)
 				if e != nil {
@@ -328,6 +366,14 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				snap.Knowledge = knowledge
 				if e = a.requireWorkspaceSnapshot(snap); e != nil {
 					a.runtimeAdmissionError(w, e)
+					return
+				}
+				if market != nil && a.marketSandboxed(snap) {
+					a.marketAdmissionError(w, marketSandboxRefused())
+					return
+				}
+				if fromMarket[n.ID] && (team != nil || a.marketSandboxed(snap)) {
+					a.marketAdmissionError(w, marketFeedRefused(n.Title))
 					return
 				}
 				if e = validateWorkspaceAgentSession(r.Context(), tx, tid, n.IssueID, n.ID, own, snap); e != nil {
@@ -346,7 +392,9 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					fail(w, 400, "invalid_task_frame", e.Error())
 					return
 				}
-				if snap.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, own, n.ID); e != nil {
+				if market != nil {
+					snap.Skills, snap.Market = marketSkillContext(market.Version.Skills), market.snapshot()
+				} else if snap.Skills, e = a.freezeNodeSkills(r.Context(), tx, tid, own, n.ID); e != nil {
 					a.skillFailure(w, e)
 					return
 				}
@@ -742,6 +790,10 @@ func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, de
 		SELECT run_id FROM settled`, tid, gid, nid, state, output, detail).Scan(&runID)
 	if err == nil {
 		a.observeGraphNodeState(state)
+		if runID != nil && state == "failed" {
+			// A market Agent's call whose run completed records the failed delivery (market_use.go).
+			a.marketDeliveryFailed(ctx, tid, *runID, detail)
+		}
 		if runID != nil {
 			// The duration is read on the database's clock, which stamped created_at: this process's clock can be a second
 			// or more off it, which would move every duration by the difference (a shorter one below 0).
@@ -961,7 +1013,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
 	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
-	if plannerPageSkills(snap.Skills) && !promptTooLarge && (snap.Workspace != nil || tooLargeForModel()) {
+	if snap.Market == nil && plannerPageSkills(snap.Skills) && !promptTooLarge && (snap.Workspace != nil || tooLargeForModel()) {
 		snap.Skills = nil
 		framedInstructions = framed()
 		if !tooLargeForModel() {
@@ -978,6 +1030,33 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if busy {
 		return errGraphCapacity
 	}
+	// A market Agent's node runs only while the Agent still may (not suspended since the graph was admitted), at the
+	// price frozen with the graph, and a paid one only while the graph's actor may still pay for it.
+	var market *marketRun
+	var marketPlan *activePlan
+	if snap.Market != nil {
+		if !a.cfg.MarketEnabled {
+			return errors.New("market_unavailable")
+		}
+		if a.marketSandboxed(snap) {
+			return errors.New("market_agent_not_usable")
+		}
+		// The owner's plan row before the Agent's, the order every admission keeps (loadMarketUse).
+		if marketPlan, e = ownerPlan(ctx, tx, tid, true); e != nil {
+			return e
+		}
+		m, v, err := loadMarketUse(ctx, tx, snap.Market.AgentID, snap.Market.Version, actor, false, true)
+		if err != nil {
+			return marketAdmissionCode(err)
+		}
+		if v.ContentHash != snap.Market.ContentHash {
+			return errors.New("node_setup_required")
+		}
+		market = &marketRun{Agent: m, Version: v, Insider: snap.Market.Insider, Price: snap.Market.Price}
+		if err = marketPaidRole(market, role); err != nil {
+			return err
+		}
+	}
 	rid := randomID()
 	op := graphChildOperationID(gid, nid, attempts)
 	if turn != nil {
@@ -989,6 +1068,12 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	}
 	if e = saveRunSnapshot(ctx, tx, tid, rid, actor, snap); e != nil {
 		return e
+	}
+	if market != nil {
+		// Held on the owner's plan, read under its row lock above.
+		if err := a.reserveMarketCall(ctx, tx, tid, rid, actor, market, marketPlan); err != nil {
+			return marketAdmissionCode(err)
+		}
 	}
 	if _, e = tx.Exec(ctx, "INSERT INTO messages(id,tenant_id,session_id,run_id,role,content) VALUES($1,$2,$3,$4,'user',$5)", randomID(), tid, sid, rid, prompt); e != nil {
 		return e
@@ -1066,6 +1151,11 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, rid := range ids {
 			if _, e = tx.Exec(r.Context(), "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, rid, `{"type":"cancelled"}`); e != nil {
+				a.dbError(w, e)
+				return
+			}
+			// The caller stopped it: a market Agent's fee settles now, by what its run holds (market_use.go).
+			if e = settleMarketCall(r.Context(), tx, tid, rid, false); e != nil {
 				a.dbError(w, e)
 				return
 			}
@@ -1206,6 +1296,11 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, id := range ids {
 			if _, e = tx.Exec(r.Context(), "INSERT INTO run_events(tenant_id,run_id,data) VALUES($1,$2,$3)", tid, id, `{"type":"cancelled"}`); e != nil {
+				a.dbError(w, e)
+				return
+			}
+			// The caller stopped it: a market Agent's fee settles now, by what its run holds (market_use.go).
+			if e = settleMarketCall(r.Context(), tx, tid, id, false); e != nil {
 				a.dbError(w, e)
 				return
 			}

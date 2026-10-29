@@ -87,6 +87,8 @@ type frozenSkill struct {
 
 type skillContext struct {
 	Items []frozenSkill `json:"items"`
+	// Market: a market Agent's author attached these skills, not the workspace (marketSkillsBoundary).
+	Market bool `json:"market,omitempty"`
 }
 
 type skillError struct {
@@ -673,7 +675,11 @@ func skillsSystemPrompt(instructions string, value *skillContext) string {
 	var b strings.Builder
 	b.WriteString(instructions)
 	b.WriteString("\n\n")
-	b.WriteString(skillsBoundary)
+	if value.Market {
+		b.WriteString(marketSkillsBoundary)
+	} else {
+		b.WriteString(skillsBoundary)
+	}
 	for _, s := range value.Items {
 		fmt.Fprintf(&b, "\n\n<skill name=%q title=%q version=\"%d\" source=%q>\n%s\n</skill>", s.Name, s.Title, s.Version, s.Source,
 			skillCloseTag.ReplaceAllString(strings.TrimRight(s.Body, "\n"), `<\/$1`))

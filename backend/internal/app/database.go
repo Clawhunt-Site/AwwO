@@ -162,6 +162,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 44, "migrations/044_gift_credits.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 45, "migrations/045_agent_market.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

@@ -173,7 +173,8 @@ func showablePicture(item *uploadAttachment) bool {
 // in words.
 // It must run before freezeVisionImages.
 func (a *App) switchToSeeingModel(ctx context.Context, tx pgx.Tx, tid string, routes []byte, s *executionSnapshot, attached *uploadAttachments) error {
-	if attached == nil || s.Team != nil || s.Workspace != nil || s.Computer != nil || s.Media != nil ||
+	// A market Agent whose author locked its model runs that model, pictures or not (market_use.go).
+	if attached == nil || s.Team != nil || s.Workspace != nil || s.Computer != nil || s.Media != nil || (s.Market != nil && s.Market.Locked) ||
 		!s.Health.ImageInput || s.Health.modelSeesImages(s.Model) || !slices.ContainsFunc(attached.Items, func(item uploadAttachment) bool {
 		return showablePicture(&item)
 	}) {

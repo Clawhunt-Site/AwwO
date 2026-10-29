@@ -35,6 +35,8 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		// Edit nodes (edits.go) render on the same worker.
 		"edit": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": editsPerDay, "usedToday": edits,
 			"limits": map[string]any{"maxSeconds": 1200, "maxFiles": maxEditFiles, "maxTimelineBytes": maxEditTimelineBytes}},
+		// The Agent market (market.go).
+		"market": a.marketCapability(),
 	})
 }
 

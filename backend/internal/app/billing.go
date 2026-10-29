@@ -66,21 +66,29 @@ func (a *App) syncPlan(ctx context.Context, userID, subject, grant string) error
 // syncPlanBySubject asks the issuer for an account's subscription without a session: AwwO's own client, for an
 // account whose renewal is due or that is being watched after a checkout.
 func (a *App) syncPlanBySubject(ctx context.Context, userID, subject string) error {
+	_, err := a.syncPlanBySubjectStatus(ctx, userID, subject)
+	return err
+}
+
+// syncPlanBySubjectStatus is syncPlanBySubject that also says how the issuer answered: its status, 0 for no answer at
+// all (market_settle.go tells ClawHunt being down from a failing answer about one account).
+func (a *App) syncPlanBySubjectStatus(ctx context.Context, userID, subject string) (int, error) {
 	var out struct {
 		Sub  string        `json:"sub"`
 		Plan *clawHuntPlan `json:"plan"`
 	}
 	asked, err := a.databaseNow(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := a.clawHuntRequest(ctx, "plan", map[string]any{"subject": subject, "rebuild": a.planKnown(ctx, userID)}, &out); err != nil {
-		return err
+	status, err := a.clawHuntRequestStatus(ctx, "plan", map[string]any{"subject": subject, "rebuild": a.planKnown(ctx, userID)}, &out)
+	if err != nil {
+		return status, err
 	}
 	if subtle.ConstantTimeCompare([]byte(out.Sub), []byte(subject)) != 1 {
-		return errPlanInvalid
+		return status, errPlanInvalid
 	}
-	return a.applyPlan(ctx, userID, out.Plan, asked)
+	return status, a.applyPlan(ctx, userID, out.Plan, asked)
 }
 
 // databaseNow is the database's clock, which stamps synced_at: a request's start is compared with it, never with

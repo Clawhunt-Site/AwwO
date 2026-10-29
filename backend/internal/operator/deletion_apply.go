@@ -216,6 +216,8 @@ func unnameWork(ctx context.Context, tx pgx.Tx, uid string, rows *DeletionRows) 
 
 // removeAccount deletes what still names the account, keeps its audit rows without it, and deletes the account. Its
 // sessions, identity links, keys, settings, plan mirror and the rest cascade; its deletion requests keep their record.
+// Its market Agents lose the author's name first, every version's with it, while the account still says whose they are
+// (their author goes with the account: ON DELETE SET NULL).
 func removeAccount(ctx context.Context, tx pgx.Tx, uid string, rows *DeletionRows) error {
 	steps := []struct {
 		n   *int64
@@ -224,11 +226,15 @@ func removeAccount(ctx context.Context, tx pgx.Tx, uid string, rows *DeletionRow
 		{&rows.InvitationsDeleted, "DELETE FROM tenant_invites WHERE created_by=$1 OR accepted_by=$1"},
 		{&rows.AuditEventsUnnamed, "UPDATE audit_events SET actor_id=NULL WHERE actor_id=$1"},
 		{&rows.MembershipsDeleted, "DELETE FROM memberships WHERE user_id=$1"},
+		{&rows.MarketAgentsUnnamed, "UPDATE market_agents SET author_display='',updated_at=clock_timestamp() WHERE author_user_id=$1"},
 	}
 	for _, s := range steps {
 		if err := execRows(ctx, tx, s.n, s.sql, uid); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(ctx, "UPDATE market_agent_versions v SET author_display='' FROM market_agents m WHERE m.id=v.agent_id AND m.author_user_id=$1", uid); err != nil {
+		return ErrDatabase
 	}
 	tag, err := tx.Exec(ctx, "DELETE FROM users WHERE id=$1", uid)
 	if err != nil {

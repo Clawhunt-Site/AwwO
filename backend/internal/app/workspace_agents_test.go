@@ -13,7 +13,8 @@ import (
 )
 
 func TestWorkspaceAgentReferenceValidation(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"source":"market","agentId":"a"}`, `{"source":"workspace","agentId":""}`, `{"source":"workspace","agentId":" a"}`, `{"source":"workspace","agentId":"a","tenantId":"other"}`, `{"source":"workspace","agentId":3}`} {
+	// A market reference is not this parser's (parseMarketAgentReference reads it): an unknown source is refused.
+	for _, raw := range []string{`{}`, `{"source":"registry","agentId":"a"}`, `{"source":"workspace","agentId":""}`, `{"source":"workspace","agentId":" a"}`, `{"source":"workspace","agentId":"a","tenantId":"other"}`, `{"source":"workspace","agentId":3}`} {
 		if _, err := parseWorkspaceAgentReference(json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted invalid reference %s", raw)
 		}
@@ -150,7 +151,7 @@ func TestPostgresWorkspaceAgentReferenceAuthorization(t *testing.T) {
 	}{
 		{"foreign", map[string]any{"source": "workspace", "agentId": foreign}, nil, 404},
 		{"missing", map[string]any{"source": "workspace", "agentId": "missing"}, nil, 404},
-		{"unknown", map[string]any{"source": "market", "agentId": aid}, nil, 400},
+		{"unknown", map[string]any{"source": "registry", "agentId": aid}, nil, 400},
 		{"inline-team", map[string]any{"source": "workspace", "agentId": aid}, fixtureTeam("sequential"), 400},
 	} {
 		n["agentRef"], n["team"] = test.ref, test.team

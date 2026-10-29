@@ -29,7 +29,10 @@ import (
 //   - What the account alone holds goes with its users row: sessions, the ClawHunt identity link, keys, settings, the
 //     plan mirror. A later ClawHunt sign-in therefore creates a new account, with a new id and a new workspace.
 //   - Where the schema keeps the id as plain text (knowledge, renders, web reads, skills, memory notes, the billing
-//     ledger), it stays: it names no account any more, and a new account never gets it, as ids are random.
+//     ledger, the Agent market's calls, ratings, payouts and period facts), it stays: it names no account any more, and
+//     a new account never gets it, as ids are random.
+//   - The person's Agents in the market lose the author's name (the market's and every version's); their author goes
+//     with the account, so they list and run no more. Their versions stay: the runs that used them name them.
 //
 // It refuses while the account's plan is live at ClawHunt (user_plans only mirrors what ClawHunt bills), while a
 // checkout or billing portal it opened may still complete, while the person or a workspace to hand over or delete has
@@ -204,6 +207,7 @@ type DeletionRows struct {
 	GraphCancellationsReassigned int64 `json:"graphCancellationsReassigned"`
 	InvitationsDeleted           int64 `json:"invitationsDeleted"`
 	AuditEventsUnnamed           int64 `json:"auditEventsUnnamed"`
+	MarketAgentsUnnamed          int64 `json:"marketAgentsUnnamed"` // the person's market Agents, their versions with them
 	MembershipsDeleted           int64 `json:"membershipsDeleted"`
 	UsersDeleted                 int64 `json:"usersDeleted"`
 }
@@ -273,13 +277,17 @@ func (s *Store) DeleteAccount(ctx context.Context, d Deletion, actor Actor, appl
 	}
 	// Locks in the API's own order. The API locks a workspace before it writes rows naming the person, so the workspaces
 	// go first. A withdrawal updates its request and then writes an audit row naming the account (preferences.go), so the
-	// account's requests go next. The account goes last: once its row is locked, no new row can reference it through a
-	// foreign key (each such write waits on that lock).
+	// account's requests go next, and so do the person's market Agents, which an author's change locks before its audit
+	// row names the account (market_author.go). The account goes last: once its row is locked, no new row can reference
+	// it through a foreign key (each such write waits on that lock).
 	if apply {
 		if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id = ANY($1) ORDER BY id FOR UPDATE", d.named()); err != nil {
 			return DeletionReceipt{}, ErrDatabase
 		}
 		if _, err = tx.Exec(ctx, "SELECT 1 FROM account_deletion_requests WHERE user_id=$1 OR id=$2 ORDER BY id FOR UPDATE", d.UserID, d.RequestID); err != nil {
+			return DeletionReceipt{}, ErrDatabase
+		}
+		if _, err = tx.Exec(ctx, "SELECT 1 FROM market_agents WHERE author_user_id=$1 ORDER BY id FOR UPDATE", d.UserID); err != nil {
 			return DeletionReceipt{}, ErrDatabase
 		}
 	}
