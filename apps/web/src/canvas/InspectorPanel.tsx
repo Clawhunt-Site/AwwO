@@ -43,7 +43,11 @@ import type { EditWiredFiles } from './editNode';
 import type { ModelPaletteGroup } from './modelPalette';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import { automaticChoices } from './userChosenModels';
+import { MarketAgentBox } from './MarketAgentBox';
+import { useMarketModelLocked } from './MarketAgentChip';
+import { marketPublishable, marketUsable, withMarketAgent, withoutMarketAgent, type InspectorMarket } from './marketAgents';
 import {
+  isMarketReference,
   type AgentKind,
   type CanvasNode,
   type FormField,
@@ -94,6 +98,9 @@ export interface InspectorPanelProps {
   onCreateCompany?: () => void;
   /** Protect host Escape/navigation/removal while a real binding result is not yet saved. */
   onCloseLockChange?: (locked: boolean) => void;
+  /** The Agent market where the workspace has it: choosing the node's market Agent and publishing its persona as one.
+   *  Absent → no market controls (a node that has a market Agent still shows it and can take it off). */
+  market?: InspectorMarket;
   onClose: () => void;
   /** Host override for the dock's placement (defaults to a full-height right dock). */
   style?: CSSProperties;
@@ -198,6 +205,7 @@ export function InspectorPanel({
   onBound,
   onCreateCompany,
   onCloseLockChange,
+  market,
   onClose,
   style,
 }: InspectorPanelProps) {
@@ -273,6 +281,12 @@ export function InspectorPanel({
     bindingRef.current = false;
   }, [node.id]);
   const sessionDraft = draft.kind === 'session' ? draft : null;
+  // A workspace Agent brings its whole configuration; a market Agent brings its instructions and skills, and its model
+  // only where its author locked it (MarketAgentBox.tsx).
+  const workspaceRef = sessionDraft?.agentRef?.source === 'workspace' ? sessionDraft.agentRef : undefined;
+  const marketRef = sessionDraft && isMarketReference(sessionDraft.agentRef) ? sessionDraft.agentRef : undefined;
+  const marketLocked = useMarketModelLocked(marketRef);
+  const fixedModel = Boolean(workspaceRef) || (Boolean(marketRef) && marketLocked);
   const sandboxEntries = (sandboxGroups ?? []).flatMap(group => group.models);
   const sandboxReady = sandboxEntries.some(entry => entry.available);
   const sandboxNode = sessionDraft?.runtime === SANDBOX_RUNTIME;
@@ -478,13 +492,20 @@ export function InspectorPanel({
 
         {sessionDraft ? (
           <>
-            {sessionDraft.agentRef && <div className="canvas-inspector-hint" role="status">
+            {workspaceRef && <div className="canvas-inspector-hint" role="status">
               <strong>{locale === 'en' ? 'Workspace Agent' : '工作区 Agent'}：{sessionDraft.binding?.agentName || sessionDraft.title}</strong>
               <p>{locale === 'en' ? 'Uses this Agent’s saved configuration. Changes to this node do not modify the shared Agent.' : '使用该 Agent 已保存的配置。修改此节点不会更改共享 Agent。'}</p>
               <button type="button" className="canvas-inspector-link" disabled={busy} onClick={() => {
                 if (!mutationLocked()) editDraft({ ...sessionDraft, agentRef: undefined });
               }}>{locale === 'en' ? 'Use an independent custom Agent' : '解除引用，使用独立自定义 Agent'}</button>
             </div>}
+            {marketRef && <MarketAgentBox agentRef={marketRef} disabled={busy} catalogue={market?.catalogue ?? null}
+              onApply={choice => editDraft(withMarketAgent(sessionDraft, choice))}
+              onPick={market ? () => { if (!mutationLocked()) market.pick(sessionDraft, editDraft); } : undefined}
+              onDetach={() => editDraft(withoutMarketAgent(sessionDraft))} />}
+            {market && !sessionDraft.agentRef && marketUsable(sessionDraft) ? <button type="button" className="canvas-inspector-link" disabled={busy}
+              onClick={() => { if (!mutationLocked()) market.pick(sessionDraft, editDraft); }}>
+              {locale === 'en' ? 'Choose an Agent from the Agent market' : '从 Agent 市场选一个 Agent'}</button> : null}
             <div className="canvas-inspector-label">{t('inspector.agentType')}</div>
             <div className="canvas-inspector-seg" role="radiogroup" aria-label={t('inspector.agentType')}>
               {(onInitialize ? HOSTED_AGENT_KINDS : AGENT_KINDS).map((kind) => {
@@ -506,16 +527,20 @@ export function InspectorPanel({
 
             {mediaDraft ? <MediaNodeSettings node={sessionDraft} state={media} disabled={busy} onChange={editDraft} onRetry={onRetryMedia} /> : <>
 
-            {!(modelGroups) || sessionDraft.agentRef ? <div className="canvas-inspector-label">{t(modelGroups ? 'inspector.model' : 'inspector.runtime')}</div> : null}
-            {sessionDraft.agentRef ? <dl className="canvas-inspector-hint">
+            {!(modelGroups) || fixedModel ? <div className="canvas-inspector-label">{t(modelGroups ? 'inspector.model' : 'inspector.runtime')}</div> : null}
+            {marketRef && marketLocked ? <div className="canvas-inspector-hint">{locale === 'en' ? 'The Agent’s author locked its model: a node using it runs only this model.' : '这个 Agent 的作者锁定了模型：用它的节点只能用这个模型。'}</div> : null}
+            {fixedModel ? <dl className="canvas-inspector-hint">
               {modelGroups ? null : <><dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd></>}
               <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
               <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
             </dl> : modelGroups ? <div className="canvas-inspector-runtime">
                 {sandboxReady || sandboxNode ? <label className="awwo-sandbox-switch">
-                  <input type="checkbox" checked={sandboxNode} disabled={busy || Boolean(sessionDraft.team) || (!sandboxNode && !sandboxReady)}
+                  {/* A market Agent runs as a text Agent only (market_use.go), so a node with one does not move into a sandbox. */}
+                  <input type="checkbox" checked={sandboxNode} disabled={busy || Boolean(sessionDraft.team) || (!sandboxNode && (!sandboxReady || Boolean(marketRef)))}
                     onChange={event => editDraft(withSandbox(sessionDraft, event.target.checked, sandboxEntries))} />
-                  <span><strong>{t('inspector.sandbox')}</strong><small>{t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.sandboxHint')}</small></span>
+                  <span><strong>{t('inspector.sandbox')}</strong><small>{marketRef && !sandboxNode
+                    ? (locale === 'en' ? 'A market Agent runs as a text Agent, without a sandbox computer. Take the Agent off to use one.' : '市场 Agent 只作为文字 Agent 运行，不带沙箱电脑。要用沙箱电脑，先取下这个 Agent。')
+                    : t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.sandboxHint')}</small></span>
                 </label> : null}
                 <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode}
                   disabled={busy}
@@ -566,6 +591,13 @@ export function InspectorPanel({
             )}
             {onInitialize && !sessionDraft.agentRef && !modelGroups && <div className="canvas-inspector-hint">{t('inspector.serviceDefaults')}</div>}
 
+            {/* A market Agent's instructions and skills stay on the server: the node's own are kept, unused, until it is
+                taken off. */}
+            {marketRef ? <div className="canvas-inspector-hint" role="note">
+              <div className="canvas-inspector-label">{t('inspector.persona')}</div>
+              {locale === 'en' ? 'The market Agent provides the instructions and skills. This node’s own persona and skills are kept and apply again once you choose No Agent.'
+                : '指令和技能由这个市场 Agent 提供。节点自己的人设和技能都保留着，选「不用 Agent」后恢复。'}
+            </div> : <>
             {!sessionDraft.agentRef && <PersonaPicker persona={sessionDraft.persona} disabled={busy}
               onChange={persona => editDraft({ ...sessionDraft, persona })} />}
             <label className="canvas-inspector-label" htmlFor="cv-cfg-persona">
@@ -583,12 +615,20 @@ export function InspectorPanel({
               disabled={busy || Boolean(sessionDraft.agentRef)}
               onChange={(e) => editDraft({ ...sessionDraft, persona: e.target.value })}
             />
+            </>}
 
             <TaskFrameEditor value={sessionDraft.taskFrame} disabled={busy}
               onChange={taskFrame => editDraft({ ...sessionDraft, taskFrame })} />
 
-            <NodeSkillsEditor value={sessionDraft.skills} disabled={busy}
-              onChange={skills => editDraft({ ...sessionDraft, skills })} />
+            {!marketRef && <NodeSkillsEditor value={sessionDraft.skills} disabled={busy}
+              onChange={skills => editDraft({ ...sessionDraft, skills })} />}
+
+            {market && !marketRef && marketPublishable(sessionDraft) && sessionDraft.persona.trim() ? <div className="canvas-inspector-hint">
+              <button type="button" className="canvas-inspector-link" disabled={busy} onClick={() => { if (!mutationLocked()) market.publish(sessionDraft); }}>
+                {locale === 'en' ? 'Publish to the Agent market' : '发布到 Agent 市场'}</button>
+              <p>{locale === 'en' ? 'Publish this node’s persona, skills and model as a market Agent; others can use it once the platform approves it. This node stays as it is.'
+                : '把这个节点的人设、技能和模型发布成市场 Agent，平台审核通过后别人也能用。这个节点保持不变。'}</p>
+            </div> : null}
 
             {!sessionDraft.agentRef && <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
               runtimes={teamRuntimes} runtimeTools={teamTools}

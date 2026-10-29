@@ -7,6 +7,7 @@ import type { SessionNode } from './canvasDoc';
 import type { DeliveryState } from './canvasResultModel';
 import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { useCanvasI18n } from './i18n';
+import { useMarketPage } from './marketPages';
 import { ModelPreview } from './ModelPreview';
 import { canvasFileBytes, canvasResolver } from './studio/canvasAssets';
 import { LivePage } from './studio/LivePage';
@@ -51,6 +52,7 @@ export function CardPreview({ node, canvasEntries, running, liveText, onOpenStud
   const entry = entries.find(item => item.id === chosen) ?? entries.find(item => item.primary) ?? entries[0];
   const stored = useStoredFile(entry);
   const resolver = useMemo(() => canvasEntries ? canvasResolver(canvasEntries, entry?.id) : undefined, [canvasEntries, entry?.id]);
+  const market = useMarketPage(node.id);
   const images = entries.filter(item => item.kind === 'image' && item.source.type === 'media');
   // What the file is once a stored one has been read.
   const storedName = stored?.file?.name || entry?.name || '';
@@ -68,7 +70,7 @@ export function CardPreview({ node, canvasEntries, running, liveText, onOpenStud
     body = <div className="awwo-card-preview-empty is-warning"><AlertTriangle size={20} aria-hidden="true" />
       <p>{t('studio.missingFile', { name: entry.source.type === 'missing' ? entry.source.claimed : entry.name })}</p></div>;
   } else if (kind === 'page') {
-    body = text !== null ? <LivePage passive html={text} title={entry.name} path={entry.name} resolve={resolver} />
+    body = text !== null ? <LivePage passive html={text} title={entry.name} path={entry.name} resolve={resolver} market={market} />
       : <div className="awwo-card-preview-empty"><Loader2 size={18} aria-hidden="true" className="awwo-studio-spin" /></div>;
   } else if (kind === 'image' && images.length > 1) {
     body = <div className={`awwo-card-preview-grid is-${Math.min(images.length, 4)}`}>{images.slice(0, 4).map(image =>

@@ -5,11 +5,19 @@ import type { RouteName } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
 import { AdminRunSummary } from './AdminRunSummary';
 import { DeletionDecisionDialog, deletionStatusLabel, type DeletionOutcome } from './DeletionDecision';
+import { MarketReviewAdmin } from './market/MarketReviewAdmin';
+import { useMarketSettings } from './market/useMarket';
 import './admin.css';
+
+/** The tabs: the paged record lists, and 市场审核 where this server has the Agent market (市场转账 while it is closed:
+ *  what was earned still transfers). */
+type AdminTab = AdminKind | 'market';
 
 export function AdminPanel({ identity, controls }: { identity: Identity; controls?: ReactNode }) {
   const { t, locale } = useSaaSPreferences();
-  const [tab, setTab] = useState<AdminKind>('tenants');
+  const [tab, setTab] = useState<AdminTab>('tenants');
+  // The market is the service's: any workspace's capabilities say whether this server has it.
+  const market = useMarketSettings(identity.user.platformRole === 'admin' ? identity.tenants.find(item => item.status === 'active')?.id : null);
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [rows, setRows] = useState<AdminRow[] | null>(null);
@@ -23,7 +31,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   const isAdmin = identity.user.platformRole === 'admin';
   const cursor = cursors[cursors.length - 1];
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || tab === 'market') return;
     const controller = new AbortController();
     setRows(null); setNextCursor(null); setError('');
     adminPage(tab, cursor, controller.signal).then(page => {
@@ -34,6 +42,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   useEffect(() => () => { exporting.current?.abort(); }, []);
   const refresh = () => { setCursors([null]); setRevision(value => value + 1); };
   const exportAll = async () => {
+    if (tab === 'market') return;
     const controller = new AbortController();
     exporting.current = controller; setExportCount(0); setError('');
     try {
@@ -52,12 +61,14 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
     finally { setPending(false); }
   };
   if (!isAdmin) return <main className="saas-notice"><h1>{t('无平台管理权限', 'Platform access denied')}</h1><p>{t('请联系平台管理员。', 'Contact a platform administrator.')}</p><a href="/">{t('返回工作区', 'Back to workspace')}</a></main>;
-  const labels: Record<AdminKind, string> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log'), interests: t('付费意向', 'Upgrade interest'), deletions: t('删除申请', 'Deletion requests') };
+  const labels: Partial<Record<AdminTab, string>> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log'), interests: t('付费意向', 'Upgrade interest'), deletions: t('删除申请', 'Deletion requests'),
+    ...(market ? { market: t('市场审核', 'Market review') } : market === null ? { market: t('市场转账', 'Market transfers') } : {}) };
   const date = (value: string) => value ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '—';
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">{t('返回工作区', 'Back to workspace')}</a>{controls}</header>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('仅平台管理员可见', 'Visible to platform administrators')}</span><h1>{t('平台管理', 'Platform administration')}</h1><p>{t('管理工作区状态与执行额度，查询用户、运行及审计记录。', 'Manage workspace status and run limits; inspect users, runs and audit records.')}</p></section>
     <AdminRunSummary key={identity.user.id} identity={identity} />
-    <nav className="saas-tabs saas-admin-tabs" aria-label={t('管理分类', 'Administration sections')}>{Object.entries(labels).map(([key, label]) => <button key={key} disabled={pending || exportCount !== null} aria-pressed={tab === key} onClick={() => { setCursors([null]); setTab(key as AdminKind); }}>{label}</button>)}<button disabled={pending} onClick={refresh}>{t('刷新数据', 'Refresh')}</button></nav>
+    <nav className="saas-tabs saas-admin-tabs" aria-label={t('管理分类', 'Administration sections')}>{Object.entries(labels).map(([key, label]) => <button key={key} disabled={pending || exportCount !== null} aria-pressed={tab === key} onClick={() => { setCursors([null]); setTab(key as AdminTab); }}>{label}</button>)}<button disabled={pending} onClick={refresh}>{t('刷新数据', 'Refresh')}</button></nav>
+    {tab === 'market' ? <MarketReviewAdmin key={revision} open={Boolean(market)} /> : <>
     <div className="saas-admin-tools"><p>{t('每页 50 条；导出会读取当前分类的全部分页，范围以首次查询时间限定。记录内容以各页读取时为准。', '50 records per page. Export reads all pages in this section, bounded by the first query time. Record values reflect when each page is read.')}</p>
       {exportCount === null ? <button onClick={exportAll}>{t('导出全部 JSON', 'Export all JSON')}</button> : <><span role="status">{t(`已读取 ${exportCount} 条`, `Read ${exportCount} records`)}</span><button onClick={() => exporting.current?.abort()}>{t('取消导出', 'Cancel export')}</button></>}
     </div>
@@ -66,6 +77,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
     {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
     {!rows ? <p role="status">{error ? t('数据加载失败，可刷新重试。', 'Loading failed. Refresh to retry.') : t('正在加载…', 'Loading…')}</p> : <div className="saas-table-wrap"><table><thead><tr>{tab === 'tenants' ? <><th>{t('工作区', 'Workspace')}</th><th>{t('状态', 'Status')}</th><th>{t('并发 / 每日次数', 'Concurrent / daily runs')}</th><th>{t('可用模型', 'Available models')}</th><th>{t('路由次数（每天）', 'Route limits (daily)')}</th><th>{t('操作', 'Actions')}</th></> : tab === 'deletions' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('原因', 'Reason')}</th><th>{t('状态', 'Status')}</th><th>{t('提出时间', 'Requested')}</th><th>{t('处理', 'Decision')}</th></> : tab === 'interests' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('工作区', 'Workspace')}</th><th>{t('提出时已用完', 'Used up when asked')}</th><th>{t('提出次数', 'Times asked')}</th><th>{t('首次', 'First')}</th><th>{t('最近', 'Latest')}</th></> : tab === 'users' ? <><th>{t('用户', 'User')}</th><th>{t('邮箱', 'Email')}</th><th>{t('平台角色', 'Platform role')}</th></> : tab === 'runs' ? <><th>{t('运行', 'Run')}</th><th>{t('租户', 'Tenant')}</th><th>{t('状态', 'Status')}</th><th>{t('创建时间', 'Created')}</th></> : <><th>{t('操作', 'Action')}</th><th>{t('操作者', 'Actor')}</th><th>{t('租户', 'Tenant')}</th><th>{t('时间', 'Time')}</th></>}</tr></thead><tbody>{rows.map(row => <tr key={row.id}>{tab === 'tenants' ? <><td>{row.name}</td><td>{row.status === 'active' ? t('正常', 'Active') : t('已暂停', 'Suspended')}</td><td>{row.maxConcurrentRuns} / {row.maxRunsPerDay}</td><td>{allowedModelsLabel(row.allowedModels, t)}</td><td>{routeLimitsLabel(row.routeLimits, t)}</td><td className="saas-admin-actions"><button disabled={pending} onClick={() => setEditing(row)}>{t('编辑配额', 'Edit limits')}</button><button disabled={pending} onClick={() => changeStatus(row)}>{row.status === 'active' ? t('暂停工作区', 'Suspend workspace') : t('恢复工作区', 'Resume workspace')}</button></td></> : tab === 'deletions' ? <><td>{row.userId ? row.name || '—' : (row.name || '') + t('（账号已删除）', ' (account deleted)')}</td><td>{row.email}</td><td>{row.reason || '—'}</td><td>{deletionStatusLabel(row.status, t)}</td><td>{date(row.createdAt)}</td><td>{row.status === 'pending' ? <><button disabled={pending || Boolean(row.userId)} title={row.userId ? t('先人工删除这个账号，才能标记已处理', 'Delete this account by hand first, then mark the request handled') : undefined} onClick={() => setDeciding({ row, outcome: 'handled' })}>{t('标记已处理', 'Mark handled')}</button><button disabled={pending || !row.userId} title={row.userId ? undefined : t('账号已删除，只能标记已处理', 'The account is deleted: mark the request handled')} onClick={() => setDeciding({ row, outcome: 'declined' })}>{t('拒绝…', 'Decline…')}</button></> : row.decidedAt ? `${date(row.decidedAt)}${row.decisionNote ? ' · ' + row.decisionNote : ''}` : '—'}</td></> : tab === 'interests' ? <><td>{row.userName}</td><td>{row.email}</td><td>{row.tenantName}</td><td>{routesLabel(row.routes, t)}</td><td>{row.clicks}</td><td>{date(row.createdAt)}</td><td>{date(row.lastAt)}</td></> : tab === 'users' ? <><td>{row.name}</td><td>{row.email}</td><td>{row.platformRole}</td></> : tab === 'runs' ? <><td>{row.id}</td><td>{row.tenantId}</td><td>{row.status}</td><td>{date(row.createdAt)}</td></> : <><td>{row.action}</td><td>{row.actorId || '—'}</td><td>{row.tenantId || '—'}</td><td>{date(row.createdAt)}</td></>}</tr>)}</tbody></table>{rows.length === 0 && <p>{t('暂无记录。', 'No records.')}</p>}</div>}
     <div className="saas-admin-tools"><button disabled={pending || !rows || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>{t('上一页', 'Previous')}</button><span>{t(`第 ${cursors.length} 页`, `Page ${cursors.length}`)}</span><button disabled={pending || !rows || !nextCursor} onClick={() => setCursors(value => [...value, nextCursor])}>{t('下一页', 'Next')}</button></div>
+    </>}
     {editing && <QuotaEditor row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
     {deciding && <DeletionDecisionDialog row={deciding.row} outcome={deciding.outcome} onClose={() => setDeciding(null)} onDecided={() => { setDeciding(null); refresh(); }} onStale={refresh} />}
   </main>;

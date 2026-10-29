@@ -10,7 +10,7 @@
 // happened to show it. The once-only record lives in the canvas's own browser storage: another tab of the same canvas
 // sees it, a reload keeps it. A request the service refuses before anything runs (today's calls used up, every run
 // slot busy) was no repair: the record says when the same delivery may go back (deferPageRepair).
-import type { CanvasNode, NodeOutput, SessionNode } from './canvasDoc';
+import { isMarketReference, type CanvasNode, type NodeOutput, type SessionNode } from './canvasDoc';
 import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
 import { parseContractOutput } from './nodeContracts';
 import type { PageErrorReport } from './pageErrors';
@@ -34,13 +34,14 @@ const normalized = (page: string) => htmlDocumentSource(page).replace(/^\uFEFF/,
 
 /**
  * The node that published `page` in an HTML field of its current, complete run result. A page that came from a case
- * recording, a hand-published value, a failed run or a past conversation is nobody's to repair.
+ * recording, a hand-published value, a failed run or a past conversation is nobody's to repair, and neither is one a
+ * market Agent made: each of its runs may cost its price, which only its caller decides to pay again.
  */
 export function pageRepairTarget(nodes: ReadonlyArray<CanvasNode>, page: string): PageRepairTarget | null {
   const wanted = normalized(page);
   if (!wanted || wanted.length > MAX_REPAIR_PAGE_CHARS) return null;
   for (const node of nodes) {
-    if (node.kind !== 'session' || !node.contract?.outputs.some(field => field.type === 'html')) continue;
+    if (node.kind !== 'session' || !node.contract?.outputs.some(field => field.type === 'html') || isMarketReference(node.agentRef)) continue;
     const output = node.lastOutput;
     if (!output || output.source !== 'run' || output.partial) continue;
     const parsed = parseContractOutput(node.contract, output.text);

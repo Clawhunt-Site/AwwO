@@ -2,7 +2,7 @@ import type { CanvasEdge, CanvasNode, SessionNode } from './canvasDoc';
 import { mediaDeliveryText, mediaMissingText, mediaSourceKind, parseMediaOutput, type MediaOutputKind } from './mediaOutput';
 import { parseContractOutput, type ContractField } from './nodeContracts';
 import { canFeed, isMediaSourceNode, isSoftMediaFeed, portsFor } from './ports';
-import { buildNodeMessage, validateNodeOutput, type UpstreamInput } from './runGraph';
+import { buildNodeMessage, isMarketSource, validateNodeOutput, type UpstreamInput } from './runGraph';
 
 export interface NodeConversationContext {
   messagePrefix: string;
@@ -69,7 +69,7 @@ export function prepareNodeConversation(
     const text = source.kind === 'session' && source.contract
       ? parseContractOutput(source.contract, source.lastOutput.text).values[edge.fromPort.slice('out:'.length)] ?? ''
       : isMediaSourceNode(source) ? mediaDeliveryText(source, source.lastOutput.text) : source.lastOutput.text;
-    upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: text });
+    upstream.push({ fromTitle: source.title, toPort: edge.toPort, output: text, market: isMarketSource(source) });
     if (source.lastOutput.source === 'case') recorded[edge.toPort.slice('in:'.length)] = true;
   }
   const inputs = node.contract.inputs.map((field) => {

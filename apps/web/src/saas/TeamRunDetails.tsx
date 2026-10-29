@@ -7,6 +7,9 @@ import { runFailureText } from './canvasErrors';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
 import { RunEvidence } from './RunEvidence';
 import { readRunExecutionMetadata, workspaceToolLabel, type WorkspaceActivity } from './workspaceActivity';
+import { marketRunInfo, type MarketRunInfo } from './marketApi';
+import { MarketRunFee } from './market/MarketRunFee';
+import { currentSaaSCanvas } from './canvasBridge';
 import './team-run-details.css';
 
 export interface TeamRunDetailsProps {
@@ -55,6 +58,8 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
   const [manuallyOpened, setManuallyOpened] = useState(false);
   const [observedTurns, setObservedTurns] = useState(false);
   const [record, setRecord] = useState<TeamRunRecord | null>(null);
+  // A run made with a market Agent carries its fee and rating (marketApi.ts MarketRunInfo).
+  const [market, setMarket] = useState<MarketRunInfo | null>(null);
   const [turns, setTurns] = useState<TeamTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -79,6 +84,7 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
         }
         receivedRun = true;
         setRecord({ ...next, ...execution }); setRunReadFailed(false);
+        setMarket(marketRunInfo((next as { market?: unknown }).market));
         if (execution.executionKind === 'workspace' || execution.executionKind === 'text') {
           setTurns([]); setObservedTurns(true); setError(null);
           if (isActive(next.status)) timer = setTimeout(() => void poll(), 2000);
@@ -115,6 +121,9 @@ function TeamRunDetailsView({ tenantId, runId, defaultOpen = false, runStatus }:
       <strong>{project ? t('项目执行', 'Project execution') : turns.length || record?.executionKind === 'team' ? t('团队协作过程', 'Team collaboration') : t('运行过程', 'Run process')}</strong>
       {record && <span>{runReadFailed ? t('上次确认：', 'Last confirmed: ') : ''}{status(record.status)}{turns.length ? ` · ${turns.length} ${t('次成员调用', 'member calls')}` : ''}{error !== null ? t(' · 读取已暂停', ' · Reading paused') : ''}</span>}
     </button>
+    {/* Beside the run's outcome even while its details are folded away: what the Agent cost, and the rating. */}
+    {record && market && <MarketRunFee tenantId={tenantId} runId={runId} market={market} completed={record.status === 'completed'}
+      canRate={currentSaaSCanvas()?.tenant.role !== 'reader'} />}
     {expanded && <div className="saas-team-run-content">
       {loading && !record && error === null && <p role="status">{t('正在读取运行记录…', 'Loading run records…')}</p>}
       {error !== null && <p className="saas-team-error" role="alert">{saasErrorMessage(error, locale)} <button type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>{t('重试读取记录', 'Retry reading records')}</button></p>}

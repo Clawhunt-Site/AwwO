@@ -7,6 +7,7 @@ import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
+import { useMarketPage } from './marketPages';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
 import { deliveryPresentation } from './fileDeliveryPresentation';
@@ -123,6 +124,7 @@ function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: ()
 export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId, canvasEntries }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
   const resolveAsset = useMemo(() => canvasEntries?.length ? canvasResolver(canvasEntries) : undefined, [canvasEntries]);
+  const market = useMarketPage(node.id);
   const editor = useRef<HTMLDetailsElement>(null);
   // A collapsed <details> keeps its own state; each edit request opens it again.
   useEffect(() => { if (editorOpen && editor.current) editor.current.open = true; }, [editorOpen, editorRequest]);
@@ -299,10 +301,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
               ? <ArtifactPreview key={`${node.id}:${threadKey}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
-                  resolveAsset={field.type === 'html' ? resolveAsset : undefined}
+                  resolveAsset={field.type === 'html' ? resolveAsset : undefined} market={market}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
-                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`}
+                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`} market={market}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : fileState(field, String(value), output.source === 'manual') === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />

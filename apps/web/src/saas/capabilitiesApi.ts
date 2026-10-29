@@ -11,6 +11,9 @@ export interface WorkspaceCapabilities {
   render: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFps: number; maxWidth: number; maxHeight: number; maxFrames: number; maxHtmlBytes: number } };
   /** Edit nodes (edits.go), rendered on the same worker. Absent from a server older than them. */
   edit?: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFiles: number; maxTimelineBytes: number } };
+  /** The Agent market (docs/awwo-agent-market.md): the platform's fee in basis points, the highest price an author may set
+   *  (credits per call), and the days a period's earnings wait before they are settled. Absent from a server older than it. */
+  market?: { enabled: boolean; payouts: boolean; feeBps: number; maxPrice: number; holdDays: number };
 }
 
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);

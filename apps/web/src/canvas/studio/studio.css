@@ -127,6 +127,14 @@ span.awwo-studio-disclose { cursor: default; }
 .awwo-live-page-note { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 24px); margin: 0;
   padding: 6px 12px; border-radius: 999px; font-size: 12px; line-height: 1.4; pointer-events: none;
   background: var(--studio-text, #0b2230); color: var(--studio-bg, #fff); box-shadow: 0 6px 18px -8px rgb(0 0 0 / 40%); }
+/* A market Agent's page shown still (LivePage.tsx): what the still view is, and the button that runs the page. */
+.awwo-live-page-run { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 12px; font-size: 12px; line-height: 1.4;
+  background: var(--studio-text, #0b2230); color: var(--studio-bg, #fff); box-shadow: 0 6px 18px -8px rgb(0 0 0 / 40%);
+  & p { margin: 0; }
+  & button { flex: none; padding: 5px 12px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--studio-bg, #fff); color: var(--studio-text, #0b2230); }
+  & button:focus-visible { outline: 2px solid var(--studio-accent, #2b7fff); outline-offset: 2px; } }
 
 /* ── Documents, code, tables, media ───────────────────────────────────────────────────────── */
 .awwo-studio-doc { flex: 1; min-height: 0; overflow: auto; padding: 28px clamp(18px, 6%, 64px) 48px; font-size: 14.5px; line-height: 1.7;

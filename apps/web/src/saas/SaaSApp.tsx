@@ -26,6 +26,7 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiMode
 import { BootSurface } from './BootSurface';
 import { navigateTo } from './navigation';
 import { StaleBuildNotice } from './StaleBuildNotice';
+import { noteLoadFailure } from './staleBuild';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
@@ -749,11 +750,17 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             }
             const alreadyFailed = failed.current;
             failed.current = true; pending.current ||= document;
+            // The API wants a newer page to save this canvas (it holds nodes this build may not keep, api.ts
+            // CANVAS_FEATURES_HEADER): the draft stays on this device, and the page asks whether a newer build is live, which
+            // brings up the same "AwwO was updated" notice a part that failed to load does.
+            const reloadRequired = !serverConfirmed && error instanceof SaaSApiError && error.code === 'canvas_reload_required';
+            if (reloadRequired) void noteLoadFailure();
             if (!disposed) {
               setSaveState('未同步');
               // A newer local save failure means pending may exist only in memory.
               // Do not replace its export warning with a claim that all edits are on disk.
               if (!alreadyFailed) setError(serverConfirmed || isCanvasStorageQuotaError(error) ? localDraftFailure(error)
+                : reloadRequired ? saasErrorMessage(error, locale)
                 : error instanceof SaaSApiError && error.status === 409 ? '画布已在另一页面更新。未同步草稿已独立保存在本机，重新加载后可恢复或导出，不会覆盖云端版本。'
                 : error instanceof SaaSApiError && error.status === 413 ? t('画布超过 8 MB 的单次保存上限，未同步的修改保留在本机。删掉不再需要的节点输出或拆分画布后，重新加载再保存。', 'This canvas is over the 8 MB save limit. Unsynced changes stay on this device. Remove node outputs you no longer need or split the canvas, then reload and save again.')
                 : `保存失败：${message(error)}。未同步草稿保留在本机，重新加载后可恢复或导出。`);

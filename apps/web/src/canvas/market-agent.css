@@ -1,0 +1,21 @@
+/* A node's market Agent: the composer's pill (MarketAgentChip.tsx), read like the model picker beside it, and the box in
+   the node's settings (MarketAgentBox.tsx). */
+.awwo-market-chip {
+  display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 26px;
+  border: 1px solid var(--saas-border, var(--awwo-border, #dde3e2)); border-radius: 999px;
+  background: var(--saas-card, var(--awwo-surface, #fff)); color: var(--saas-muted, var(--awwo-muted, #4b5d65));
+  font: 600 11px/1 var(--saas-font, inherit);
+  &.is-attached { border-color: color-mix(in srgb, var(--saas-accent, #187b70) 45%, var(--saas-border, #dde3e2)); color: var(--saas-text, var(--awwo-ink, #0b2230)); }
+  &.is-disabled { opacity: .55; }
+  & button { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 100%; padding: 0 9px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  & button:disabled { cursor: default; }
+  & button:focus-visible { outline: 2px solid var(--saas-focus, #1c6f76); outline-offset: 1px; border-radius: 999px; }
+  & .awwo-market-chip-detach { padding: 0 7px 0 2px; }
+}
+.awwo-market-chip-label { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-market-box { display: grid; gap: 6px; }
+.awwo-market-box dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.awwo-market-box dt { color: var(--saas-muted, #75818c); }
+.awwo-market-box dd { margin: 0; overflow-wrap: anywhere; }
+.awwo-market-box-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.awwo-market-box-update { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

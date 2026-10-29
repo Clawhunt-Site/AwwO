@@ -14,6 +14,7 @@ import {
 import type { CanvasEdge, CanvasNode, ReviewGraphPolicy } from '../canvasDoc';
 import { useCanvasI18n, type CanvasTextKey } from '../i18n';
 import { DeliverableMarkdown } from '../DeliverableMarkdown';
+import { marketPageNodes } from '../marketPages';
 import { ModelPreview } from '../ModelPreview';
 import { PdfPreview } from '../PdfPreview';
 import { highlight, languageOf, type Token } from './codeHighlight';
@@ -93,6 +94,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const [selectedId, setSelectedId] = useState<string | null>(firstId);
   const selectedSource = flat.find(entry => entry.id === selectedId) ?? flat.find(entry => entry.id === firstId) ?? null;
   const selected = selectedSource ? shown(selectedSource, loaded[selectedSource.id]) : null;
+  const marketNodes = useMemo(() => marketPageNodes(nodes, edges), [nodes, edges]);
   const [mode, setMode] = useState<'preview' | 'code'>('preview');
   const [device, setDevice] = useState<LiveDevice>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
@@ -445,7 +447,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       line={jump?.entryId === selected.id ? jump.line : undefined} query={lowered} t={t} />;
   else if (selected.kind === 'page') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <LivePage key={selected.id} html={selectedText} title={selected.name} path={selected.source.type === 'member' ? selected.source.path : selected.name}
-      resolve={selectedResolver} device={device} reloadKey={reloadKey} onDocument={document => { pageDocument.current = { entryId: selected.id, html: document }; setPageBuilds(count => count + 1); }}
+      resolve={selectedResolver} device={device} reloadKey={reloadKey} market={marketNodes.has(selected.nodeId)} onDocument={document => { pageDocument.current = { entryId: selected.id, html: document }; setPageBuilds(count => count + 1); }}
       onLink={href => setNotice({ text: t('studio.linkBlocked'), href })} />;
   else if (selected.kind === 'markdown') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <div className="awwo-studio-doc awwo-markdown-preview"><DeliverableMarkdown>{selectedText}</DeliverableMarkdown></div>;

@@ -8,7 +8,8 @@
 //   1. the iframe sandbox has no allow-same-origin: the page runs in an opaque origin and cannot reach AwwO's cookies
 //      (SameSite=Lax, never sent cross-site), storage, DOM or API with the session; no top navigation, no popups;
 //   2. a Content-Security-Policy injected before anything else in <head>: scripts, styles and fonts only inline or
-//      from well-known public CDNs, network requests only to those CDNs, forms never submit anywhere;
+//      from well-known public CDNs, network requests only to those CDNs, forms never submit anywhere, pictures and
+//      media by any https URL (by none outside those CDNs on a page holding a market Agent's words);
 //   3. a link guard: following a link would navigate the preview itself away, so the click is stopped and handed to
 //      the host (which may offer to open it in a new tab).
 //
@@ -31,13 +32,13 @@ export const LIVE_CDNS = [
 ] as const;
 
 const CDN_LIST = LIVE_CDNS.join(' ');
-export const LIVE_PAGE_CSP = [
+const livePagePolicy = (pictures: string) => [
   "default-src 'none'",
   `script-src 'unsafe-inline' 'unsafe-eval' blob: data: ${CDN_LIST}`,
   `style-src 'unsafe-inline' data: ${CDN_LIST}`,
   `font-src data: blob: ${CDN_LIST}`,
-  'img-src data: blob: https:',
-  'media-src data: blob: https:',
+  `img-src data: blob: ${pictures}`,
+  `media-src data: blob: ${pictures}`,
   `connect-src data: blob: ${CDN_LIST}`,
   'worker-src blob: data:',
   'child-src blob: data:',
@@ -47,6 +48,11 @@ export const LIVE_PAGE_CSP = [
   "form-action 'none'",
   "manifest-src 'none'",
 ].join('; ');
+/** A page's pictures and media from any https address. */
+export const LIVE_PAGE_CSP = livePagePolicy('https:');
+/** A page holding a market Agent's words (marketPages.ts): pictures and media only from the page itself or the CDNs
+ *  above, so that showing it contacts no address the Agent's author chose. */
+export const MARKET_PAGE_CSP = livePagePolicy(CDN_LIST);
 
 /** Sandbox flags of a live page: scripts, forms handled by its own script, dialogs, pointer lock and downloads. */
 export const LIVE_PAGE_SANDBOX = 'allow-scripts allow-forms allow-modals allow-pointer-lock allow-downloads';
@@ -187,6 +193,8 @@ export interface LiveDocumentOptions {
   resolve?: AssetResolver;
   /** Bytes the inlined assets may add, in total. */
   inlineBudget?: number;
+  /** The page holds a market Agent's words: it runs under MARKET_PAGE_CSP. */
+  market?: boolean;
 }
 
 /**
@@ -272,7 +280,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT + (fonts ? PREVIEW_FONT_LOAD_SCRIPT : '') + (Object.keys(assets).length ? assetScript(assets) : '');
   const csp = parsed.createElement('meta');
   csp.setAttribute('http-equiv', 'Content-Security-Policy');
-  csp.setAttribute('content', LIVE_PAGE_CSP);
+  csp.setAttribute('content', options.market ? MARKET_PAGE_CSP : LIVE_PAGE_CSP);
   const referrer = parsed.createElement('meta');
   referrer.setAttribute('name', 'referrer');
   referrer.setAttribute('content', 'no-referrer');

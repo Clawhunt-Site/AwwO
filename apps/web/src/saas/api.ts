@@ -34,6 +34,12 @@ const ENDED_MESSAGE = 'Your session expired. Sign in again.';
  *  (canvas/userChosenModels.ts). Without it they leave such models out, so a page of an earlier release, which would,
  *  is never shown one (backend tenant_models.go listedFor). */
 export const MODEL_MARKS_HEADER = 'X-Awwo-Model-Marks';
+/** Tells a canvas save which kinds of node this page understands. A page of an earlier release drops a node whose
+ *  agentRef it does not know (a market Agent's) when it saves, so the API refuses a save without `market` that would drop
+ *  or change a stored market node (409 canvas_reload_required; docs/awwo-agent-market.md). Every canvas PUT carries it. */
+export const CANVAS_FEATURES_HEADER = 'X-Awwo-Canvas-Features';
+export const CANVAS_FEATURES = 'market';
+const CANVAS_DOCUMENT_PATH = /^\/tenants\/[^/?]+\/canvases\/[^/?]+$/;
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   if (sessionEnded && !path.startsWith('/auth/')) throw new SaaSApiError(401, 'unauthorized', ENDED_MESSAGE);
   const sentUnder = sessionGeneration;
@@ -41,6 +47,7 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   headers.set('Accept', 'application/json');
   headers.set(MODEL_MARKS_HEADER, 'userChosen');
   if (init.body) headers.set('Content-Type', 'application/json');
+  if ((init.method || 'GET').toUpperCase() === 'PUT' && CANVAS_DOCUMENT_PATH.test(path)) headers.set(CANVAS_FEATURES_HEADER, CANVAS_FEATURES);
   const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
@@ -264,6 +271,34 @@ function serviceCodes(): Record<string, [string, string]> {
     web_blocked_by_site_protection: ['网站的防护页拦下了读取（例如人机验证）。AwwO 不会绕过网站的防护，请手动复制正文导入。', 'The site’s protection page stopped the read (for example a human check). AwwO does not get around site protection; copy the text and import it by hand.'],
     web_decode_failed: ['无法识别页面的文字编码。', 'The page’s text encoding could not be read.'],
     web_empty_content: ['页面里没有读到正文。', 'No readable text was found on the page.'],
+    // The Agent market (docs/awwo-agent-market.md). A paid Agent's fee comes off the workspace owner's plan credits, as a
+    // model's does, so credits_exhausted (above) covers a fee the credits cannot pay.
+    market_unavailable: ['Agent 市场没有开放，市场里的 Agent 现在用不了。', 'The Agent market is not open, so its Agents cannot be used right now.'],
+    market_agent_not_found: ['找不到这个市场 Agent，它可能已被作者删除。请换一个 Agent。', 'This market Agent was not found; its author may have removed it. Choose another Agent.'],
+    market_agent_unavailable: ['这个市场 Agent 现在用不了：它被停用了、已经下架，或这个版本不能再选用。请换一个 Agent，或在节点上选「不用 Agent」。', 'This market Agent cannot be used now: it was suspended or unlisted, or this version can no longer be chosen. Choose another Agent, or choose “No Agent” on the node.'],
+    market_agent_not_usable: ['市场 Agent 只能用在文字节点上；团队节点、沙箱电脑节点和图片、视频、3D、音频节点不能用。', 'Market Agents work only on text nodes; team nodes, sandbox computer nodes and image, video, 3D and audio nodes cannot use them.'],
+    market_text_to_sandbox: ['市场 Agent 写的内容不能交给沙箱电脑节点或团队节点（它们能运行命令、联网）。请断开这条连线，或把下游换成文字节点。', 'A market Agent’s text cannot go to a sandbox computer node or a team node, which can run commands and reach the network. Remove the connection, or make the next node a text node.'],
+    market_agent_model_unavailable: ['这个 Agent 的作者锁定了模型，而你的工作区用不了这个模型，所以没有运行。请换一个 Agent，或在节点上选「不用 Agent」。', 'This Agent’s author locked its model, and your workspace cannot use that model, so it did not run. Choose another Agent, or choose “No Agent” on the node.'],
+    market_agent_version_changed: ['这个 Agent 现在上架的是另一个版本，价格可能不同。请在节点上重新选一次这个 Agent。', 'This Agent lists another version now, which may cost differently. Choose the Agent again on the node.'],
+    market_agent_role_required: ['这是付费 Agent：它的价格从工作区所有者的点数里付给作者，只有工作区的所有者和管理员能运行它。', 'This is a paid Agent: its price is paid to its author out of the workspace owner’s credits, so only the workspace’s owner or an administrator can run it.'],
+    market_agent_plan_required: ['这是付费 Agent：工作区所有者有 Pro / Max 付费套餐才能使用，每次运行完成从套餐点数里扣它的价格（账号菜单 → 套餐与点数）。免费 Agent 不需要套餐。', 'This is a paid Agent: it needs the workspace owner to have the Pro or Max plan, and each completed call takes its price from the plan’s credits (account menu → Plans and credits). Free Agents need no plan.'],
+    market_name_reserved: ['名称和署名不能用 AwwO、ClawHunt、阿呜的名字，署名也不能自称官方。', 'A name or author name may not use the name of AwwO, ClawHunt or 阿呜, and an author name may not claim to be official.'],
+    canvas_reload_required: ['AwwO 已经更新，这个页面的版本不能再保存这张画布。没同步的修改都保留在这台设备上：重新加载页面后可以恢复或导出。', 'AwwO was updated, and this page’s version can no longer save this canvas. Your unsynced changes are kept on this device: reload the page to recover or export them.'],
+    market_draft_invalid: ['Agent 的内容不符合要求，请按标出的地方修改后再保存。', 'Some of the Agent’s fields do not meet the requirements. Fix the marked ones and save again.'],
+    market_skill_unavailable: ['有一个技能带不进市场 Agent：它已归档，或你已不是它所在工作区的成员。请移除它后再保存。', 'A skill cannot go into the market Agent: it was archived, or you are no longer a member of its workspace. Remove it and save again.'],
+    market_skill_license: ['从 skills.sh 导入的技能，只有许可证明确宽松时才能带进市场 Agent。请移除这个技能后再保存。', 'A skill imported from skills.sh can go into a market Agent only under a clearly permissive license. Remove that skill and save again.'],
+    market_hidden_text: ['内容里有看不见或会伪装的字符（例如零宽字符、软连字符、文字方向控制符、私用区字符或多余的变体选择符），市场不接受。请删掉它们后再保存。', 'The text holds invisible or disguising characters (such as zero-width characters, soft hyphens, text-direction controls, private-use characters or extra variation selectors), which the market does not accept. Remove them and save again.'],
+    market_price_invalid: ['价格要是 0 到上限之间的整数点数（0 表示免费）。', 'The price must be a whole number of credits from 0 to the limit (0 is free).'],
+    invalid_market_response: ['Agent 市场返回的数据不完整，请重试。', 'The Agent market returned incomplete data. Try again.'],
+    market_agent_limit: ['一个账号能发布的 Agent 已经到上限，请先整理不再需要的 Agent。', 'This account has published as many Agents as it may. Tidy up Agents you no longer need first.'],
+    market_review_pending: ['这个 Agent 有一个版本正在审核：先撤回它，再改草稿或提交新的版本。', 'A version of this Agent is in review: withdraw it first, then change the draft or submit a new version.'],
+    market_agent_suspended: ['平台已停用这个 Agent，现在不能改动或使用它。', 'The platform suspended this Agent, so it cannot be changed or used now.'],
+    market_no_draft: ['这个 Agent 现在没有草稿可以提交，请先编辑保存一份草稿。', 'This Agent has no draft to submit now. Edit and save a draft first.'],
+    market_not_pending: ['这个版本已经不在审核中了，列表已刷新。', 'This version is no longer in review. The list is refreshed.'],
+    market_review_changed: ['作者在你阅读之后改动了这个版本，没有做出决定。列表已刷新：请重新阅读后再决定。', 'Its author changed this version after you read it, so no decision was made. The list is refreshed: read it again before deciding.'],
+    market_not_listed: ['这个 Agent 现在没有上架。', 'This Agent is not listed right now.'],
+    market_not_listable: ['这个 Agent 还没有通过审核的版本，不能上架。', 'This Agent has no approved version yet, so it cannot be listed.'],
+    market_rating_unavailable: ['只有市场 Agent 交出了内容（这次调用已计费）的运行才能评价。', 'Only a run in which the market Agent delivered its text (a charged call) can be rated.'],
     invite_used: ['此邀请已被其他账号领取。', 'This invitation was claimed by another account.'],
     invite_expired: ['邀请已过期，请索取新邀请。', 'This invitation has expired. Request a new one.'],
     invite_revoked: ['邀请已撤销，请索取新邀请。', 'This invitation was revoked. Request a new one.'],

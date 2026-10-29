@@ -11,6 +11,9 @@ import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
 import { unsupportedSaaSGraph } from '../saas/graphCapabilities';
 import { readCapabilities } from '../saas/capabilitiesApi';
+import { marketSettingsOf, type MarketSettings } from '../saas/marketApi';
+import { useCanvasMarket } from './canvasMarket';
+import { keepMarketMark, MarketPagesContext, marketPageNodes, unmarkedMarketNodes } from './marketPages';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
@@ -313,6 +316,8 @@ function sameAsSource(a: CanvasNode | undefined, b: CanvasNode | undefined): boo
 function nodeSubstance(node: CanvasNode): string {
   const { x: _x, y: _y, w: _w, h: _h, ...rest } = node as CanvasNode & { deliverablesOpen?: boolean };
   delete (rest as { deliverablesOpen?: boolean }).deliverablesOpen;
+  // Marking a node as fed by a market Agent (marketPages.ts) changes nothing it runs.
+  delete (rest as { marketFed?: true }).marketFed;
   // People write their next message while the node works; the run already holds the one it was sent.
   if (node.kind === 'session') (rest as { threads?: unknown }).threads = getNodeThreads(node).map(({ draft: _draft, ...thread }) => thread);
   return JSON.stringify(rest);
@@ -537,12 +542,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Whether this server renders edit nodes (capabilities.go): null until read, or when it does not say. Only a server
   // that says no hides the edit node; otherwise a run that cannot make the film says why on the node.
   const [editEnabled, setEditEnabled] = useState<boolean | null>(null);
+  // The Agent market (canvasMarket.tsx), where this workspace's capabilities say it is on; null hides every control of it.
+  const [marketSettings, setMarketSettings] = useState<MarketSettings | null>(null);
   useEffect(() => {
-    setEditEnabled(null);
+    setEditEnabled(null); setMarketSettings(null);
     if (!canInitialize || readOnly || !cloudScope) return;
     const controller = new AbortController();
     void readCapabilities(cloudScope.tenant.id, controller.signal).then(value => {
-      if (!controller.signal.aborted && typeof value.edit?.enabled === 'boolean') setEditEnabled(value.edit.enabled);
+      if (controller.signal.aborted) return;
+      if (typeof value.edit?.enabled === 'boolean') setEditEnabled(value.edit.enabled);
+      setMarketSettings(marketSettingsOf(value));
     }, () => undefined);
     return () => controller.abort();
   }, [canInitialize, cloudScope, readOnly]);
@@ -577,6 +586,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // port vanished (an image agent switched to LLM) must not linger in the document, in the run
   // engine's dependency graph, or on screen.
   const edges = useMemo(() => reconcileEdges(nodes, doc.edges), [nodes, doc.edges]);
+  // The nodes whose pages hold a market Agent's words, for every view below that shows a page (marketPages.ts).
+  const marketPages = useMemo(() => marketPageNodes(nodes, edges), [nodes, edges]);
   // Read by callbacks that must keep their identity (the tiles are memoised on them) and by what the displays read.
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
@@ -679,6 +690,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [syncHistory],
   );
+  // A node a market Agent's text reaches is marked once (marketFed), so that what it delivered keeps the stricter
+  // preview after it is wired otherwise; the mark is no edit, and makes nothing stale.
+  useEffect(() => {
+    if (readOnly) return;
+    const unmarked = new Set(unmarkedMarketNodes(nodes, marketPages));
+    if (!unmarked.size) return;
+    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => unmarked.has(node.id) && !node.marketFed ? { ...node, marketFed: true as const } : node) }),
+      { silent: true, serverIdentity: true });
+  }, [nodes, marketPages, readOnly, patchDoc]);
 
   // What a plan needs to add media nodes: the model each kind starts on (the add menu's first one) and each model's
   // longest prompt. Without a catalogue the planner is offered no media nodes at all.
@@ -728,8 +748,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || laneGuard.current.active()) return;
     lastCommit.current = null;
     const live = docRef.current;
-    const restored = invalidateOutputs(live, { ...target, view: live.view, nodes: target.nodes.map(node => {
-      const current = live.nodes.find(n => n.id === node.id);
+    const restored = invalidateOutputs(live, { ...target, view: live.view, nodes: target.nodes.map(restoredNode => {
+      const current = live.nodes.find(n => n.id === restoredNode.id);
+      // A node marked as fed by a market Agent stays marked (marketPages.ts).
+      const node = keepMarketMark(restoredNode, current);
       if (node.kind !== 'session' || current?.kind !== 'session') return node;
       const kept = preserveThreadRuntime(node, current);
       // A step from before the node had skills names none; say so with an empty list, which the server keeps,
@@ -2912,6 +2934,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
     setSelection([node.id]); focusNode(node.id);
   }, [canEditStructure, patchDoc, focusNode, locale]);
+  // A node with an Agent of the Agent market (canvasMarket.tsx), added where the workspace and team-market Agents are.
+  const addAgentMarketNode = useCallback((create: (pos: { x: number; y: number }) => SessionNode) => {
+    if (!canEditStructure(false, [])) return false;
+    const v = viewRef.current;
+    const s = sizeRef.current;
+    const node = create({ x: (-v.x + s.w / 2) / (v.scale || 1) - 170, y: (-v.y + s.h / 2) / (v.scale || 1) - 130 });
+    patchDoc(previous => ({ ...previous, nodes: [...previous.nodes, node] }), { label: `add:${node.id}` });
+    setSelection([node.id]); focusNode(node.id);
+    return true;
+  }, [canEditStructure, patchDoc, focusNode]);
   const createTemplate = useCallback(() => {
     if (!canEditStructure(false, [])) return;
     const currentNodes = docRef.current.nodes;
@@ -4345,6 +4377,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const media = mediaKindOf(node.agentKind);
     return media ? mediaModelChoices[media] : chatModelChoices;
   };
+  const nodeOfId = useCallback((id: string) => docRef.current.nodes.find(node => node.id === id), []);
+  const market = useCanvasMarket({ settings: canInitialize ? marketSettings : null, tenantId: cloudScope?.tenant.id ?? null, readOnly,
+    catalogue: currentModelCatalogue, nodeOf: nodeOfId, saveNode: saveInspector, addNode: addAgentMarketNode });
   // What a tile's inputs read now (prepareNodeConversation, assembleInputViews) comes from the node, the wires into it
   // and the nodes they come from, and nothing else, so it is kept from render to render while those are as they were.
   // Prepared afresh, every tile got a new object on every render, which defeated the tiles' memo (the whole canvas
@@ -4384,6 +4419,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       editFiles={node.kind === 'edit' ? editWiredFiles(node, nodes, edges) : undefined}
       modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
       onRetryModels={() => setPaletteRefresh(value => value + 1)}
+      market={canInitialize ? market.inspector : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}
       onCreateCompany={!readOnly && onCreateCompany ? () => {
         if (inspectorCloseLocked.current) return;
@@ -4399,6 +4435,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   return (
+    <MarketPagesContext.Provider value={marketPages}>
     <AgentWorkspace simple={simple} readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={exclusiveNow}
       modelShelf={modelShelf}
       modelCatalogue={currentModelCatalogue}
@@ -4418,7 +4455,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       onToggleAssistant={readOnly && !assistantExecution ? undefined : () => { if (panelShown) closeAssistant(); else setAssistantOpen(true); }}
       onRailsChange={onRailsChange} modelRailCollapsed={modelRailCollapsed} onExpandModelRail={() => setShelfCollapsed(false)}
       onOpenSettings={onOpenSettings ? () => { if (!inspectorCloseLocked.current) onOpenSettings(); } : undefined}
-      headerTitle={headerTitle} headerActions={headerActions} canvasTools={canvasTools}
+      headerTitle={headerTitle} headerActions={headerActions} canvasTools={market.tool ? <>{canvasTools}{market.tool}</> : canvasTools}
       view={showingResults ? 'results' : 'canvas'} onViewChange={results ? changeStageView : undefined}
       results={showingResults ? <CanvasResults nodes={nodes} edges={edges} execution={doc.execution} runs={runs} running={running} readOnly={readOnly}
         runUnavailableReason={runUnavailableReason} onRun={readOnly ? undefined : runWholeCanvas}
@@ -4540,6 +4577,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             deliveryBeside={focusedId === node.id ? drawerBeside(focusNarrow, renderNodeById.get(node.id)?.w ?? node.w) : !narrowFocusWidth(size.w)}
             modelNames={modelNames}
             onChangeModel={readOnly || busyNow.has(node.id) || exclusiveNow || initializing ? undefined : changeNodeModel}
+            onOpenMarket={market.openForNode} onDetachMarket={market.detachNode}
             onResizeCard={resizeCard}
             onToggleCardPreview={toggleCardPreview}
             onOpenStudio={openStudio}
@@ -4651,7 +4689,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     {/* Outside the board, which turns inert under the 成果 view, where its run button asks this too. */}
     {rerunChoice && <RerunConfirm choice={rerunChoice} changed={rerunChoice.changed} titleOf={titleOf} withCost={withCost}
       onRest={() => answerRerun('rest')} onWhole={() => answerRerun('whole')} onCancel={() => setRerunChoice(null)} />}
+    {market.dialogs}
     </AgentWorkspace>
+    </MarketPagesContext.Provider>
   );
 }
 

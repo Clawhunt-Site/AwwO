@@ -1,5 +1,6 @@
 import { ArtifactPreview, StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import { nodeContract } from '../canvas/canvasDoc';
+import { marketPageNodes } from '../canvas/marketPages';
 import { normalizeContract, parseContractOutput } from '../canvas/nodeContracts';
 import { readableOutput, type ReadableOutput } from '../canvas/readableTranscript';
 import type { GraphNodeResult, GraphRunSnapshot } from './graphRuns';
@@ -37,6 +38,10 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
   // Missing or ambiguous historical identity cannot supply a trustworthy field contract.
   const historicalNodes = Array.isArray(graph.document?.nodes) ? graph.document.nodes.filter(item => item.id === node.nodeId) : [];
   const snapshot = historicalNodes.length === 1 ? historicalNodes[0] : undefined;
+  // Whether a market Agent's words reached this node in the canvas the run ran (marketPages.ts): its pages then show
+  // still until their reader runs them. A run read without its canvas cannot say, so it is held to the same.
+  const market = !Array.isArray(graph.document?.nodes)
+    || marketPageNodes(graph.document.nodes, Array.isArray(graph.document.edges) ? graph.document.edges : []).has(node.nodeId);
   const historicalContract = snapshot ? nodeContract(snapshot) : undefined;
   const output = readableOutput({ id: 0, role: 'agent', text: node.output,
     presentation: { outputState: final ? 'final' : 'failed', outputContract: historicalContract } });
@@ -52,8 +57,8 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
         {fields.map(({ field, value, pendingFile }) => <section className="saas-graph-output-field" key={field.id} aria-label={field.label || field.id}>
           <h3>{field.label || field.id}</h3>
           {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' || field.type === 'markdown'
-            ? <ArtifactPreview source={value} type={field.type} title={field.label || field.id} renderMarkdown={renderMarkdown} />
-            : field.type === 'file' ? <StoredArtifactPreview reference={value} title={field.label || field.id}
+            ? <ArtifactPreview source={value} type={field.type} title={field.label || field.id} renderMarkdown={renderMarkdown} market={market} />
+            : field.type === 'file' ? <StoredArtifactPreview reference={value} title={field.label || field.id} market={market}
                 identity={`${graph.id}:${node.nodeId}:${field.id}`} renderMarkdown={renderMarkdown} />
               : <div className="saas-graph-output-value">{value}</div>}
         </section>)}

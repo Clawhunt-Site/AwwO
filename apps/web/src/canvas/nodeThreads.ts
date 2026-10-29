@@ -1,4 +1,4 @@
-import type { AgentBinding, NodeThread, SessionNode } from './canvasDoc';
+import { agentReferenceKey, type AgentBinding, type NodeThread, type SessionNode } from './canvasDoc';
 
 export const DEFAULT_THREAD_ID = 'default';
 let sequence = 0;
@@ -48,7 +48,8 @@ export function activeNodeThread(node: SessionNode): NodeThread {
 }
 
 /** Values baked into a hired Agent at bind time. Changing them locally on an already-bound
- * thread would make the canvas describe a runtime/persona the native Agent does not have. */
+ * thread would make the canvas describe a runtime/persona the native Agent does not have.
+ * The selected Agent counts whole: another market version is other instructions. */
 export function boundAgentConfigurationChanged(current: SessionNode, next: SessionNode): boolean {
   return Boolean(current.binding) && (
     current.agentKind !== next.agentKind ||
@@ -56,7 +57,7 @@ export function boundAgentConfigurationChanged(current: SessionNode, next: Sessi
     current.model !== next.model ||
     current.effort !== next.effort ||
     current.persona !== next.persona ||
-    current.agentRef?.agentId !== next.agentRef?.agentId
+    agentReferenceKey(current.agentRef) !== agentReferenceKey(next.agentRef)
   );
 }
 

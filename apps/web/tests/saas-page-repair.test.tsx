@@ -266,6 +266,10 @@ describe('finding the node behind a page', () => {
     const huge = `<!doctype html><html><body>${'x'.repeat(MAX_REPAIR_PAGE_CHARS)}</body></html>`;
     expect(pageRepairTarget([figure({}, huge)], huge)).toBeNull();
   });
+
+  it('is nobody for a market Agent’s page: each of its runs may cost its price, which only its caller decides to pay', () => {
+    expect(pageRepairTarget([{ ...figure(), agentRef: { source: 'market', agentId: 'agent-1', version: 2 } }], PAGE)).toBeNull();
+  });
 });
 
 describe('once per delivery', () => {

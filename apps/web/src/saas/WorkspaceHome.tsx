@@ -19,6 +19,7 @@ import { type OfficialWorkflow } from './examples/officialWorkflows';
 import { OfficialCopySetup, type OfficialCopyModel, type RecordedCopyItem } from './examples/OfficialCopySetup';
 import type { ProductionCase } from './productionCatalog';
 import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
+import { MarketHomeStrip } from './market/MarketHomeStrip';
 
 /** Recent canvases shown before the operator expands the full list: two rows of four at desktop width, four rows of two
  * on a tablet (owner 2026-10-13 17:20 +08: 首页默认多显示几张画布; it was one row of four). */
@@ -343,6 +344,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
     <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
+    {/* The Agent market, for members who can put its Agents on canvases (a reader's home has no strip). */}
+    <MarketHomeStrip tenant={tenant} onOpen={onOpen} />
     <ProductionCases compact onReuse={copyCase} onCopyRecorded={copyRecordedCase} />
     {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} busy={busy}
       recording={PRODUCTION_RUN_SUMMARY[caseCopy.id]}

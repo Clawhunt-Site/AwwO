@@ -1,0 +1,77 @@
+/* The Agent market (AgentMarket.tsx and the views beside it). The dialog builds on the skill library's frame
+   (canvas-library.css); the home strip, the author console and the run fee use the hosted shell's tokens. */
+.awwo-market .awwo-market-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.awwo-market .awwo-market-chips button { min-height: 28px; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+.awwo-market .awwo-market-chips button[aria-pressed='true'] { border-color: var(--library-accent); color: var(--library-accent); background: color-mix(in srgb, var(--library-accent) 10%, var(--library-surface)); }
+.awwo-market .awwo-market-sort { display: flex; flex-direction: row; align-items: center; gap: 6px; color: var(--library-muted); font-size: 12px; white-space: nowrap; }
+.awwo-market .awwo-market-sort select { width: auto; }
+.awwo-market-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.awwo-market-card {
+  display: grid; gap: 4px; width: 100%; height: 100%; padding: 12px 14px; text-align: left; cursor: pointer;
+  border: 1px solid var(--library-border, var(--saas-border, #dfe5e8)); border-radius: 12px;
+  background: var(--library-surface, var(--saas-card, #fff)); color: var(--library-ink, var(--saas-text, #25323c)); font: inherit;
+}
+.awwo-library button.awwo-market-card { display: grid; justify-content: stretch; align-content: start; }
+.awwo-market-card:hover { border-color: color-mix(in srgb, var(--library-accent, var(--saas-accent, #187b70)) 45%, var(--library-border, var(--saas-border, #dfe5e8))); }
+.awwo-market-card.is-selected { border-color: var(--library-accent, var(--saas-accent, #187b70)); box-shadow: 0 0 0 1px var(--library-accent, var(--saas-accent, #187b70)); }
+.awwo-market-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.awwo-market-card-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.awwo-market-price { flex-shrink: 0; color: var(--library-muted, var(--saas-muted, #75818c)); font-size: 12px; }
+.awwo-market-price.is-paid { color: var(--library-accent, var(--saas-accent, #187b70)); font-weight: 600; }
+.awwo-market-card-tagline { color: var(--library-ink, var(--saas-text, #25323c)); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.awwo-market-card-author { color: var(--library-muted, var(--saas-muted, #75818c)); font-size: 11px; }
+.awwo-market-card-stats { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--library-muted, var(--saas-muted, #75818c)); font-size: 11px; }
+.awwo-market-votes { display: inline-flex; align-items: center; gap: 3px; }
+.awwo-market-votes svg:nth-of-type(2) { margin-left: 6px; }
+.awwo-library button.awwo-market-more { align-self: center; }
+.awwo-market-detail h4 { margin: 0 0 6px; font-size: 13px; }
+.awwo-market-actions { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 10px; background: var(--library-surface); }
+.awwo-market-note { color: var(--library-ink); font-size: 12px; }
+.awwo-market-note.is-warning, .awwo-market-warning { color: var(--saas-danger, #c14040); font-size: 12px; }
+.awwo-market-plan { display: grid; gap: 8px; padding: 10px 12px; border: 1px dashed color-mix(in srgb, #c08a1e 55%, var(--library-border)); border-radius: 10px; font-size: 12px; }
+.awwo-library a.awwo-market-plan-link { justify-self: start; display: inline-flex; padding: 6px 12px; border-radius: 8px; text-decoration: none; }
+.awwo-market-section { display: grid; gap: 4px; }
+.awwo-market-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0; }
+.awwo-market-stats > div { padding: 8px 10px; border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); }
+.awwo-market-stats dt { color: var(--library-muted); font-size: 11px; }
+.awwo-market-stats dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
+.awwo-market-skills { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.awwo-market-skills li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); }
+.awwo-market-example { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.awwo-market-instructions summary { cursor: pointer; color: var(--library-muted); font-size: 12px; }
+.awwo-market-instructions[open] summary { margin-bottom: 6px; }
+
+/* The workspace home's strip of top-ranked Agents. */
+.saas-market-strip .awwo-market-cards { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.saas-market-strip .saas-market-status { color: var(--saas-muted); font-size: var(--saas-text-sm, 13px); }
+
+/* The publish form and the author's console. */
+.awwo-market-publish .awwo-library-editor { flex: 1; border-left: 0; }
+.awwo-market-field-error { color: var(--saas-danger, #c14040); font-size: 11px; }
+.awwo-market-publish .awwo-market-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.awwo-market-publish .awwo-market-example-edit { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--library-border); border-radius: 8px; }
+.awwo-market-publish .awwo-market-skill-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.awwo-market-publish .awwo-market-skill-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border: 1px solid var(--library-border); border-radius: 8px; background: var(--library-surface); font-size: 12px; }
+.saas-market-mine { display: grid; gap: 12px; }
+.saas-market-mine-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.saas-market-mine-list > li { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--saas-border); border-radius: 12px; background: var(--saas-card); }
+.saas-market-mine-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+.saas-market-mine-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--saas-muted); font-size: var(--saas-text-sm, 13px); }
+.saas-market-badge { display: inline-flex; padding: 1px 8px; border-radius: 999px; background: var(--saas-soft, #eef2f1); color: var(--saas-muted); font-size: 12px; }
+.saas-market-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.saas-market-earnings dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 0; }
+.saas-market-earnings dl > div { padding: 10px 12px; border: 1px solid var(--saas-border); border-radius: 10px; }
+.saas-market-earnings dt { color: var(--saas-muted); font-size: 12px; }
+.saas-market-earnings dd { margin: 4px 0 0; font-size: 18px; font-weight: 600; }
+
+/* The platform's review (AdminPanel 市场审核). */
+.saas-market-review { display: grid; gap: 14px; }
+.saas-market-review-item { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--saas-border); border-radius: 12px; background: var(--saas-card); }
+.saas-market-review-item pre { max-height: 320px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--saas-border); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.saas-market-review-item textarea { width: 100%; min-height: 64px; }
+
+/* A run made with a market Agent: its fee and the run's rating, beside the run's outcome. */
+.awwo-market-run { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0; color: var(--saas-muted, #75818c); font-size: 12px; }
+.awwo-market-run button { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border: 1px solid var(--saas-border, #dfe5e8); border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.awwo-market-run button[aria-pressed='true'] { border-color: var(--saas-accent, #187b70); color: var(--saas-accent, #187b70); }
+.awwo-market-run button:disabled { opacity: .55; cursor: default; }

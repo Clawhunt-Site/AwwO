@@ -49,12 +49,31 @@ interface CanvasNodeBase {
   w: number;
   h: number;
   title: string;
+  /** The node has run a market Agent or taken one's output in (marketPages.ts): its deliveries, past ones too, keep the
+   *  stricter preview even once it is wired otherwise. Never taken back by the canvas itself. */
+  marketFed?: true;
 }
 
 export interface WorkspaceAgentReference {
   source: 'workspace';
   agentId: string;
 }
+
+/** An Agent from the Agent market, at the version the node is locked to (a newer listing waits for an update). Its
+ *  instructions and skills never come into the document: the server freezes them into each run (docs/awwo-agent-market.md). */
+export interface MarketAgentReference {
+  source: 'market';
+  agentId: string;
+  /** Absent: the version listed when the node is prepared, which the server then writes here. */
+  version?: number;
+}
+
+export type AgentReference = WorkspaceAgentReference | MarketAgentReference;
+
+export const isMarketReference = (ref: AgentReference | null | undefined): ref is MarketAgentReference => ref?.source === 'market';
+/** One string per reference, so two are compared whole (a market Agent's version counts). '' for none. */
+export const agentReferenceKey = (ref: AgentReference | null | undefined): string =>
+  !ref ? '' : ref.source === 'market' ? `market:${ref.agentId}:${ref.version ?? ''}` : `workspace:${ref.agentId}`;
 
 export interface SessionNode extends CanvasNodeBase {
   kind: 'session';
@@ -67,8 +86,9 @@ export interface SessionNode extends CanvasNodeBase {
   persona: string;
   /** Optional collaboration plan; the primary binding remains the legacy conversation owner. */
   team?: NodeTeam;
-  /** Select an existing Agent in the current workspace. The server resolves its configuration. */
-  agentRef?: WorkspaceAgentReference;
+  /** Select an existing Agent in the current workspace, or a market Agent at one version. The server resolves its
+   *  configuration; a market Agent's node keeps its own persona and skills here, unused while the Agent is attached. */
+  agentRef?: AgentReference;
   binding: AgentBinding | null;
   /** A bind attempt whose outcome was UNKNOWN (request sent, response lost). Persisted so the
    *  tile keeps warning across reloads — a blind retry could hire a duplicate agent.
@@ -118,7 +138,7 @@ export interface NodeThread {
   effort?: string;
   persona?: string;
   /** null explicitly marks a custom/legacy thread, rather than inheriting a later selection. */
-  agentRef?: WorkspaceAgentReference | null;
+  agentRef?: AgentReference | null;
 }
 
 /**
@@ -392,12 +412,20 @@ function sanitizeOutput(raw: unknown): NodeOutput | null {
   };
 }
 
-function sanitizeAgentReference(raw: unknown): WorkspaceAgentReference | undefined {
+/** Exactly one of the shapes the server accepts, or undefined: a workspace Agent ({source, agentId}) or a market Agent
+ *  at a positive version or, without one (absent or null), at the version listed when the node is prepared
+ *  (market_use.go parseMarketAgentReference). Anything more, less or else is no reference. */
+function sanitizeAgentReference(raw: unknown): AgentReference | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const value = raw as Record<string, unknown>;
-  if (Object.keys(value).length !== 2 || value.source !== 'workspace' || typeof value.agentId !== 'string'
-    || !value.agentId.trim() || value.agentId !== value.agentId.trim() || value.agentId.length > 200) return undefined;
-  return { source: 'workspace', agentId: value.agentId };
+  const agentId = value.agentId;
+  if (typeof agentId !== 'string' || !agentId.trim() || agentId !== agentId.trim() || agentId.length > 200) return undefined;
+  const fields = Object.keys(value);
+  if (value.source === 'workspace' && fields.length === 2) return { source: 'workspace', agentId };
+  if (value.source !== 'market' || fields.some(key => key !== 'source' && key !== 'agentId' && key !== 'version')) return undefined;
+  if (value.version === undefined || value.version === null) return { source: 'market', agentId };
+  if (typeof value.version === 'number' && Number.isSafeInteger(value.version) && value.version >= 1) return { source: 'market', agentId, version: value.version };
+  return undefined;
 }
 
 function sanitizeThreads(raw: unknown): NodeThread[] | undefined {
@@ -456,6 +484,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       h: num(r.h, FORM_NODE_SIZE.h),
       title: str(r.title, '需求表单'),
       fields,
+      ...(r.marketFed === true ? { marketFed: true as const } : {}),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -475,6 +504,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       template: str(r.template),
       contract,
       ...(typeof r.fileName === 'string' && r.fileName.trim() ? { fileName: r.fileName } : {}),
+      ...(r.marketFed === true ? { marketFed: true as const } : {}),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -490,6 +520,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       h: num(r.h, EDIT_NODE_SIZE.h),
       title: str(r.title, '剪辑'),
       timeline: str(r.timeline),
+      ...(r.marketFed === true ? { marketFed: true as const } : {}),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -549,6 +580,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
           ? { templateVersion: r.templateVersion } : {}),
       } : {}),
       ...(typeof r.deliverablesOpen === 'boolean' ? { deliverablesOpen: r.deliverablesOpen } : {}),
+      ...(r.marketFed === true ? { marketFed: true as const } : {}),
       ...(threads ? { threads } : {}),
       ...(typeof r.activeThreadId === 'string' && threads?.some(thread => thread.id === r.activeThreadId)
         ? { activeThreadId: r.activeThreadId } : {}),

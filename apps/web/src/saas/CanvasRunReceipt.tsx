@@ -4,11 +4,13 @@
 // completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again, and the
 // canvas the run it names froze at admission from that run's own read, which the list does not carry.
 import { useEffect, useState } from 'react';
-import { caseRunLabel, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
+import { caseRunLabel, isMarketReference, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { nodeModelName, type ModelNameSources } from '../canvas/modelNames';
 import { api } from './api';
 import { graphPath, latestGraphRuns, publishGraphRuns, readGraphRun, subscribeGraphRuns, validGraphRunList, type GraphRunSummary } from './graphRuns';
 import { useSaaSPreferences } from './preferences';
+import { currentSaaSCanvas } from './canvasBridge';
+import { MarketRunFee, useRunMarket } from './market/MarketRunFee';
 
 type T = ReturnType<typeof useSaaSPreferences>['t'];
 const statusLabel = (t: T, status: GraphRunSummary['status']) => ({ queued: t('排队中', 'Queued'), running: t('运行中', 'Running'),
@@ -52,6 +54,12 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   // The canvas the run froze names the models its steps ran on and tells whether it ran the whole canvas (a copied
   // case's recording names no run, so none is read for it).
   const frozen = useFrozenCanvas(tenantId, canvasId, run && output?.source !== 'case' ? run.id : '');
+  // The step's own run, read for a market Agent's fee and rating where the step uses one (a run without one shows
+  // nothing more).
+  const step = final && run ? run.nodes.find(node => node.nodeId === final.id) : undefined;
+  const marketStep = final?.kind === 'session' && isMarketReference(final.agentRef) && output?.source !== 'case';
+  const stepRunId = useStepRunId(tenantId, canvasId, marketStep && run ? run.id : '', final?.id ?? '');
+  const market = useRunMarket(tenantId, stepRunId);
   let body;
   // A copied case's recording ran in the case, not here: no run of this workspace is claimed for it.
   if (output?.source === 'case') body = <p className="awwo-results-receipt-note">{t(`这份交付是复制来的案例实录（${caseRunLabel(output)}），没有在这个工作区运行；运行整张图会换成你自己的结果。`,
@@ -88,6 +96,8 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
           counts.cached ? t(`${counts.cached} 步沿用上次结果`, `${counts.cached} reused`) : '',
           counts.failed ? t(`${counts.failed} 步未完成`, `${counts.failed} not completed`) : ''].filter(Boolean).join(' · ')}</dd></div>
         {models.size > 0 && <div><dt>{t('模型', 'Models')}</dt><dd>{[...models].map(([model, count]) => t(`${model}（${count} 步）`, `${model} (${count})`)).join('，')}</dd></div>}
+        {market && stepRunId && <div><dt>{t('市场 Agent', 'Market Agent')}</dt><dd><MarketRunFee tenantId={tenantId} runId={stepRunId} market={market}
+          completed={step?.state === 'done'} canRate={currentSaaSCanvas()?.tenant.role !== 'reader'} /></dd></div>}
         <div><dt>{t('运行编号', 'Run')}</dt><dd>{run.id.slice(0, 10)}</dd></div>
       </dl>
       {output && output.at > 0 && Date.parse(run.updatedAt ?? run.createdAt) + 60_000 < output.at && <p className="awwo-results-receipt-note">
@@ -109,6 +119,22 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
 }
 
 const graphFinished = (run: GraphRunSummary) => run.status !== 'queued' && run.status !== 'running';
+
+/** The run a graph run's step made (the run list does not carry it), read only where it is asked for: a step whose node
+ *  uses a market Agent, whose fee and rating are the run's. */
+function useStepRunId(tenantId: string, canvasId: string, graphRunId: string, nodeId: string): string | undefined {
+  const key = JSON.stringify([tenantId, canvasId, graphRunId, nodeId]);
+  const [read, setRead] = useState<{ key: string; runId?: string } | null>(null);
+  useEffect(() => {
+    if (!graphRunId || !nodeId) return;
+    const controller = new AbortController();
+    readGraphRun(tenantId, canvasId, graphRunId, controller.signal).then(run => {
+      if (!controller.signal.aborted) setRead({ key, runId: run.nodes.find(node => node.nodeId === nodeId)?.runId });
+    }, () => undefined);
+    return () => controller.abort();
+  }, [tenantId, canvasId, graphRunId, nodeId, key]);
+  return read?.key === key ? read.runId : undefined;
+}
 
 // The canvases runs froze at admission, as their own reads gave them, by tenant, canvas and run. A run's frozen canvas
 // never changes, so a page reads it once; the few kept are the latest read (a film's is a megabyte).

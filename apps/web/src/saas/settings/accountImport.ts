@@ -95,9 +95,9 @@ function detachedNode(raw: unknown): unknown {
   if (node.kind !== 'session') return node;
   // Its agent and its conversations are the old workspace's (node_setup.go refuses a reference it does not own; the
   // transcripts are not in the export): the node is set up afresh on its first run, as a new one is. Only the open
-  // conversation's unsent draft comes along.
+  // conversation's unsent draft comes along. A market Agent belongs to no workspace, so the node keeps using it.
   const threads = draftThread(node);
-  delete node.agentRef;
+  if (!object(node.agentRef) || node.agentRef.source !== 'market') delete node.agentRef;
   delete node.activeThreadId;
   Object.assign(node, { binding: null, bindAttempt: null, issueId: null, threads, preview: '' });
   if (threads.length) node.activeThreadId = (threads[0] as { id: string }).id;

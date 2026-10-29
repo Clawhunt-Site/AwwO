@@ -37,7 +37,9 @@ import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { nodeModelName, unlistedModelLabel, type ModelNameSources } from './modelNames';
-import { AGENT_KIND_META, type CanvasNode, type SessionNode } from './canvasDoc';
+import { AGENT_KIND_META, isMarketReference, type CanvasNode, type SessionNode } from './canvasDoc';
+import { MarketAgentChip, useMarketModelLocked } from './MarketAgentChip';
+import { marketUsable } from './marketAgents';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
@@ -285,6 +287,11 @@ function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass
   return { glyph: meta.glyph, kindClass: node.agentKind, label };
 }
 
+/** The composer's row beside the message box: the node's model picker and its market Agent chip, whichever it has. */
+function composerAccessory(picker: ReactNode, chip: ReactNode): ReactNode {
+  return picker || chip ? <>{picker}{chip}</> : undefined;
+}
+
 export interface SessionTileProps {
   /** SaaS host prepares draft nodes before accepting their first turn. */
   initializeOnSend?: boolean;
@@ -363,6 +370,10 @@ export interface SessionTileProps {
   modelChoices?: ReadonlyArray<NodeModelChoice>;
   /** Switch the node to the model with this choice key; the host applies its configuration rules. */
   onChangeModel?: (nodeId: string, key: string) => void;
+  /** The Agent market, where the workspace has it: choose the node's market Agent (the composer's chip opens it), and
+   *  take it off again. Absent → no chip. */
+  onOpenMarket?: (nodeId: string) => void;
+  onDetachMarket?: (nodeId: string) => void;
   /** Resize the card on the board (a view preference, allowed while the canvas runs and for readers). */
   onResizeCard?: (nodeId: string, w: number, h: number) => void;
   /** Enlarge the card to preview its deliverable, or shrink it back. */
@@ -428,6 +439,8 @@ export const SessionTile = memo(function SessionTile({
   onRunNode,
   modelChoices,
   onChangeModel,
+  onOpenMarket,
+  onDetachMarket,
   onResizeCard,
   onToggleCardPreview,
   onOpenStudio,
@@ -442,6 +455,9 @@ export const SessionTile = memo(function SessionTile({
 }: SessionTileProps) {
   const { locale, t } = useCanvasI18n();
   const simple = useSimpleCanvas();
+  const marketRef = sourceNode.kind === 'session' && isMarketReference(sourceNode.agentRef) ? sourceNode.agentRef : undefined;
+  // A locked market Agent runs its own model whatever the node names, so the node's picker only shows it.
+  const marketLocked = useMarketModelLocked(onOpenMarket ? marketRef : undefined);
   const viewOnlyRef = useRef(viewOnly);
   viewOnlyRef.current = viewOnly;
   // History selection is an in-memory projection, never a document or draft write.
@@ -1369,9 +1385,14 @@ export const SessionTile = memo(function SessionTile({
                     attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
-                    accessory={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
+                    accessory={composerAccessory(node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
                       ? <NodeModelPicker choices={modelChoices} value={currentChoiceKey(node, modelChoices)} currentLabel={unlistedModelLabel(node, locale)}
-                        disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined} onChange={key => onChangeModel(nodeId, key)} /> : undefined}
+                        disabled={busy || readOnly || (Boolean(marketRef) && marketLocked)}
+                        disabledReason={busy ? t('tile.taskRunning') : marketLocked ? (locale === 'zh' ? '这个 Agent 的作者锁定了模型' : 'The Agent’s author locked its model') : undefined}
+                        onChange={key => onChangeModel(nodeId, key)} /> : null,
+                      node.kind === 'session' && onOpenMarket && onDetachMarket && !viewOnly && marketUsable(node)
+                        ? <MarketAgentChip agentRef={marketRef} disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined}
+                          onOpen={() => onOpenMarket(nodeId)} onDetach={() => onDetachMarket(nodeId)} /> : null)}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>

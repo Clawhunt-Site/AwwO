@@ -3,7 +3,7 @@
 // plans, invites, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 邀请好友, 我的引擎)
 // are drawn as they were, inside the centre (settingsFrame.ts); the others live in settings/.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CreditCard, Database, Gift, Info, KeyRound, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, UserRound, Users, Wand2 } from 'lucide-react';
+import { ArrowLeft, CreditCard, Database, Gift, Info, KeyRound, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, Store, UserRound, Users, Wand2 } from 'lucide-react';
 import type { Identity } from './api';
 import { isLocalEdition } from './edition';
 import { AccountSecurity, accountURL } from './PersonalAccount';
@@ -17,6 +17,8 @@ import { AboutSettings, AppearanceSettings, DataSettings, EngineSettings, Genera
 import { SettingsIntro } from './settings/general';
 import { LocalComputerSettings } from './settings/local';
 import { RelaySettings, relayOffered } from './settings/relay';
+import { MyAgentsSettings } from './market/MyAgents';
+import { useMarketSettings } from './market/useMarket';
 import './settings/settings-center.css';
 
 /**
@@ -38,7 +40,8 @@ const home = () => {
 
 type Item = { id: SettingsSection; icon: ReactNode; zh: string; en: string };
 type Group = { zh: string; en: string; items: Item[] };
-function navigation(identity: Identity): Group[] {
+/** `market`: 我的 Agent is listed where the server offers the Agent market, and while it is the page open. */
+function navigation(identity: Identity, market = false): Group[] {
   const clawhunt = identity.authentication === 'clawhunt';
   return [
     { zh: '账户', en: 'Account', items: [
@@ -55,6 +58,7 @@ function navigation(identity: Identity): Group[] {
     { zh: '功能', en: 'Features', items: [
       { id: 'personalization', icon: <Wand2 size={16} />, zh: '个性化', en: 'Personalization' },
       { id: 'skills', icon: <Sparkles size={16} />, zh: '技能', en: 'Skills' },
+      ...(market ? [{ id: 'agents' as const, icon: <Store size={16} />, zh: '我的 Agent', en: 'My Agents' }] : []),
       { id: 'engines', icon: <Plug size={16} />, zh: identity.personalCredentialsRequired ? '我的执行引擎' : '模型服务', en: identity.personalCredentialsRequired ? 'My engines' : 'Model service' },
       ...(relayOffered(identity) ? [{ id: 'relay' as const, icon: <KeyRound size={16} />, zh: '本机版连接', en: 'AwwO Local' }] : []),
     ] },
@@ -73,6 +77,8 @@ function navigation(identity: Identity): Group[] {
 function SettingsNav({ identity, section }: { identity: Identity; section: SettingsSection }) {
   const { t } = useSaaSPreferences();
   const [error, setError] = useState('');
+  // The market is the service's: any of the account's workspaces says whether this server offers it.
+  const market = useMarketSettings(identity.tenants.find(tenant => tenant.status === 'active')?.id);
   const nav = useRef<HTMLElement>(null);
   // On a phone the list is one scrolling row: bring the open page's entry into it.
   useEffect(() => {
@@ -81,7 +87,7 @@ function SettingsNav({ identity, section }: { identity: Identity; section: Setti
   }, [section]);
   return <nav ref={nav} className="saas-settings-nav" aria-label={t('设置', 'Settings')}>
     <a className="saas-settings-back" href={home()}><ArrowLeft size={15} aria-hidden="true" />{t('返回工作区', 'Back to workspace')}</a>
-    {navigation(identity).map(group => <div key={group.en} className="saas-settings-group">
+    {navigation(identity, Boolean(market) || section === 'agents').map(group => <div key={group.en} className="saas-settings-group">
       <span className="saas-settings-group-label">{t(group.zh, group.en)}</span>
       <div className="saas-settings-group-items">{group.items.map(item =>
         <a key={item.id} href={accountURL(item.id)} aria-current={item.id === section ? 'page' : undefined}>
@@ -117,6 +123,7 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
     case 'shortcuts': return <ShortcutSettings />;
     case 'personalization': return <PersonalizationSettings />;
     case 'skills': return <SkillSettings identity={identity} />;
+    case 'agents': return <MyAgentsSettings identity={identity} />;
     case 'engines': return engines ?? <EngineSettings identity={identity} />;
     case 'relay': return <RelaySettings identity={identity} />;
     case 'workspace': return <WorkspaceSettings identity={identity} onProfile={onProfile} />;

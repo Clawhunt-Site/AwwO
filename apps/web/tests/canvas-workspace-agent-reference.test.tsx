@@ -34,9 +34,10 @@ it('does not attach a newer reference to an old custom conversation', () => {
   const custom = { ...referenced(), agentRef: undefined };
   const newer = { ...createNodeThread(custom), agentRef: { source: 'workspace' as const, agentId: 'agent-b' } };
   expect(selectNodeThread(newer, 'default').agentRef).toBeUndefined();
-  const malformed = { ...referenced(), agentRef: { source: 'market', agentId: 'unsafe' } };
+  // A market reference without a version is a valid one (docs/awwo-agent-market.md); one at version 0 is not.
+  const malformed = { ...referenced(), agentRef: { source: 'market', agentId: 'unsafe', version: 0 } };
   expect(sanitizeDocument({ ...emptyDocument(), nodes: [malformed] }).nodes).toHaveLength(0);
-  const malformedHistory = { ...referenced(), threads: [{ id: 'old', agentRef: { source: 'market', agentId: 'unsafe' } }] };
+  const malformedHistory = { ...referenced(), threads: [{ id: 'old', agentRef: { source: 'market', agentId: 'unsafe', version: 0 } }] };
   expect(sanitizeDocument({ ...emptyDocument(), nodes: [malformedHistory] }).nodes).toHaveLength(0);
 });
 
