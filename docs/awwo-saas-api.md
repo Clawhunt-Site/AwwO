@@ -270,7 +270,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 ## Agent 市场
 
-设计与规则见 [awwo-agent-market.md](awwo-agent-market.md)。市场默认关闭（`AWWO_MARKET=on` 开启）；关闭时以下市场路径返回 404 `market_unavailable`（`GET /market/earnings` 与 `GET /admin/market/payouts` 除外：已经发生的调用照常结算、确定和转账，作者和管理员照常读得到），节点里的市场引用在初始化与运行受理时被拒绝。市场路径不带工作区前缀，需要登录；用到工作区时以调用方的工作区判断。
+设计与规则见 [awwo-agent-market.md](awwo-agent-market.md)。市场默认关闭（`AWWO_MARKET=on` 开启）；关闭时以下市场路径返回 404 `market_unavailable`（`GET /market/earnings`、`GET /admin/market/payouts` 与批准账单除外：已经发生的调用照常结算、确定和出账单，作者和管理员照常读得到，管理员照常可批准），节点里的市场引用在初始化与运行受理时被拒绝。市场路径不带工作区前缀，需要登录；用到工作区时以调用方的工作区判断。
 
 | 方法与路径（省略 /api/v1） | 请求 / 查询 | 说明 |
 | --- | --- | --- |
@@ -281,18 +281,19 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | PUT /market/agents/{id}/draft | 同新建 | 改最新草稿；最新版本已审过时新建下一个版本的草稿；待审时 409 `market_review_pending`；被停用时 409 `market_agent_suspended` |
 | POST /market/agents/{id}/submit、/withdraw、/unlist、/list | `{}` | 提交审核（409 `market_no_draft`）、撤回待审（409 `market_not_pending`）、下架（409 `market_not_listed`）、重新上架（409 `market_not_listable`） |
 | GET /market/mine | 无 | 我的 Agent：summary 加 `status,listedVersion,latest` |
-| GET /market/earnings | 无 | 作者收益，单位为点（1 点 = 1 美分）：`pending`（已扣、调用方计费期未结束的份额，上限值）、`available`（已确定、未转出）、`transferring`、`paid`、`payouts[]`，以及 `feeBps,holdDays,payoutsEnabled,clawHuntLinked`；市场关闭时照常可读 |
+| GET /market/earnings | 无 | 作者收益，单位为点（1 点 = 1 美分）：`pending`（已扣、调用方计费期未结束的份额，上限值）、`available`（已确定、还没进月度账单）、`inReview`（在待审核的账单上）、`transferring`（已批准、还没转到）、`paid`、`payouts[]`（月度账单：`id,month,calls,credits,amountCents,status,createdAt,sentAt`），以及 `feeBps,holdDays,payoutsEnabled,clawHuntLinked`；市场关闭时照常可读 |
 | GET /admin/market/reviews | 无 | 平台管理员：待审版本的全部字段、`reviewHash` 与作者 `{id,email,name,display,listedDisplay}`（display 是这个版本的署名，listedDisplay 是现在显示的） |
 | POST /admin/market/reviews/{id}/{version} | decision（approve / reject）, note?, reviewHash | 决定针对读到的版本：reviewHash 必填（400 `invalid_input`），与版本现在的内容不符 409 `market_review_changed`；批准后该版本上架并换上它的署名，原上架版本 superseded（已锁定它的节点继续使用）；作者下架的或已停用的 Agent 保持原状态；非待审 409 `market_not_pending` |
 | POST /admin/market/agents/{id}/status | status（suspended / listed） | 停用（所有使用立即停止：正在进行的调用取消、费用退回，回答里 `runsStopped` 是取消的个数）与恢复：回到停用前的状态（作者下架的仍下架，没有已批准版本时回到草稿）；没停用的 Agent 状态不变 |
-| GET /admin/market/payouts | status? | 转账记录；市场关闭时照常可读 |
+| GET /admin/market/payouts | status? | 月度账单：待审核的全部在前，其余的最近 200 张，每张带按 Agent 分列的调用（`agents[]`）和上次转账没成功的原因（`lastError`，被拒时带 ClawHunt 的代码），以及 `payoutsEnabled`；市场关闭时照常可读 |
+| POST /admin/market/payouts/{id}/approve | `{amountCents}` | 批准一张待审核、金额就是确认的这个的账单，并立即转入作者的 ClawHunt 钱包，回答账单现在的样子；金额不一样时 409 `market_statement_changed`，转账关闭时 409 `market_payouts_off`，不是待审核时 409 `market_statement_not_in_review`；市场关闭时照常可用 |
 | PUT /tenants/{tenantId}/runs/{id}/market-rating | score（1 / -1 / 0） | member 以上；只评已计费的调用（Agent 交出了文字，免费 Agent 也一样；否则 409 `market_rating_unavailable`），0 撤销；完成的运行被评 👎 在排行里算失败 |
 
 **在节点上使用**：节点的 `agentRef` 为 `{source:"market",agentId,version?}`；初始化时省略的版本填为当前上架版本，节点种类为 llm，模型锁定时取 Agent 的模型（工作区用不了 409 `market_agent_model_unavailable`）。团队节点、媒体节点、coding 节点、沙箱电脑节点（运行时 sandbox，或在沙箱里跑的运行）400 `market_agent_not_usable`；下架后的新选用、停用或作者已删除的 Agent 409 `market_agent_unavailable`；新选用的节点写的不是现在上架的版本 409 `market_agent_version_changed`（重新选用，看清价格）。节点的工作区 Agent 记 `market_agent_id`、`market_version`，自身指令为空，不出现在 `/agents` 中；会话的 setup_snapshot 记 `market{agentId,version,contentHash}`。运行受理时读取该版本的指令与技能冻结进执行快照（节点自己的人设与技能不生效，任务要求、记忆、知识照常）；指令放在 `<market-agent-instructions>` 里、前面说明这是第三方作者写的，技能以作者版的说明引入。市场节点的文字流进下游文字节点时作为第三方的数据引入；从市场节点沿连线能到达的节点，画布运行与节点自己的运行都不能在沙箱里或作为团队运行（400 `market_text_to_sandbox`）。画布、Agent 行、对话线程和任何响应都不含作者的指令。节点所选与初始化时不一致、或版本内容已变（作者自己的草稿），409 `node_setup_required`。
 
 **计费**：付费 Agent 只给工作区的所有者和管理员用（成员 403 `market_agent_role_required`；画布运行按画布运行的发起人查），要求工作区所有者有付费套餐（402 `market_agent_plan_required`），受理时在套餐行锁下预扣价格（点数不够 402 `credits_exhausted`），与模型调用共用同一余额（`creditsSpentSQL`）。运行完成为 charged；Agent 已写出文字后被调用方取消，或以节点自己的输出约定拒收（`output_contract_invalid`）、截断（`output_limit`）、中途拒答（`model_refused`）、超时（`run_timeout`）失败时也是 charged（这些结束不计排行）；其余结束（写出文字前就结束的、只写出推理过程的、工作区被停用或 API 自己停下时的取消、中断、平台故障）为 released。画布节点运行完成但没通过节点自己的交付检查时照扣，交付文件存不下时退回。取消（运行的、画布运行的、工作区或 Agent 被停用的）在取消的同一事务里结算费用。作者本人发起的调用、以及作者是所有者的工作区里的调用（insider）不收费、不产生收益、不计排行；作者只是成员的工作区照常付费。运行的 JSON（`GET /tenants/{t}/runs/{id}`）对用了市场 Agent 的运行另返回 `market{agentId,version,price,status,insider,rating}`。
 
-**作者收益**：每次 charged 调用的份额是价格 ×（1 − `AWWO_MARKET_FEE_BPS`/10000），在调用方计费期结束并过 `AWWO_MARKET_HOLD_DAYS` 后，先向 ClawHunt 再读一次调用方的套餐（读不到时等待，保留期后 30 天仍读不到按已有记录），再按该期已付点数（减去上期结转）覆盖本期花费的比例确定（不超过 1，赠送点数部分不产生收益，退款后为 0）。`AWWO_MARKET_PAYOUTS=on` 时（需要 ClawHunt 客户端，不需要市场开着），确定的收益按作者汇总、取整到分，经 ClawHunt 的 `POST /api/awwo/sso/earnings`（转账 id 为幂等号）转入作者的 ClawHunt 钱包；没绑定 ClawHunt 的作者收益累积到绑定后。
+**作者收益**：每次 charged 调用的份额是价格 ×（1 − `AWWO_MARKET_FEE_BPS`/10000），在调用方计费期结束并过 `AWWO_MARKET_HOLD_DAYS` 后，先向 ClawHunt 再读一次调用方的套餐（读不到时等待，保留期后 30 天仍读不到按已有记录），再按该期已付点数（减去上期结转）覆盖本期花费的比例确定（不超过 1，赠送点数部分不产生收益，退款后为 0）。不自动转账：每个日历月（UTC）结束后，每位作者当月确定、还没进账单的收益（加上一张账单留下的不足一分的部分）汇总成一张月度账单（`review`），取整到分，不足一分的不出账单；没绑定 ClawHunt 的作者没有账单，收益累积到绑定后。平台管理员批准后（`AWWO_MARKET_PAYOUTS=on` 时才能批准，需要 ClawHunt 客户端，不需要市场开着），账单经 ClawHunt 的 `POST /api/awwo/sso/earnings`（账单 id 由作者和月份算出，为幂等号）转入作者的 ClawHunt 钱包；没批准的账单从不转账。
 
 **画布保存**：网页每次保存画布带 `X-Awwo-Canvas-Features: market`。没带这个请求头、又会删掉或改动已存市场节点的保存返回 409 `canvas_reload_required`（市场之前的旧页面会丢掉它不认识的节点）。
 

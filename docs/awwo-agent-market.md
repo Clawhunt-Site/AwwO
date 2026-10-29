@@ -1,6 +1,6 @@
 # Agent 市场
 
-> 状态：开发中（2026-10-29 起）。本文是这次改动的设计依据，API 小节是前后端共同遵守的契约。
+> 状态：市场 2026-10-29 上线；月度账单（下文「月度账单与转账」）随后开发，转账开关关闭。本文是设计依据，API 小节是前后端共同遵守的契约。
 
 ## 目标
 
@@ -11,7 +11,7 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 1. **市场**：发布、平台审核、上架、按真实运行结果排行，在画布节点上选用并调用。
 2. **按次收费**：作者给每次调用定价（点数，可以是 0），运行完成才扣；在 Agent 写出内容前就结束的、平台和服务商的故障都不扣。调用方拿到了 Agent 写的内容、运行却没算完成的情况照扣：Agent 已经写出内容后，调用方取消、节点自己的输出约定（调用方的配置）拒收、输出被截断、中途拒答或运行超时（业主 2026-10-29 选择照扣；这些结束不计入排行）。
 3. **作者账本**：平台抽成（默认 25%），作者的份额只来自调用方买来的点数。
-4. **转账（AwwO 一侧）**：收益过保留期后转进作者的 ClawHunt 钱包。这次上线时转账开关关闭，收益照常记账、显示为「待转入」：ClawHunt 现有的提现只能提解题收入（必须选具体的已验收问题），钱包入账与让 AwwO 收益可提现是 ClawHunt 的另一次发布（业主 2026-10-29 选择「先上市场，提现单独再上」）。
+4. **月度账单与转账（AwwO 一侧）**：不自动转账（业主 2026-10-29：「不要自动转账，按照次数累计解决，一个月一次统计完整的调用次数」）。每个日历月（UTC）结束后，把每位作者当月确定的收益汇总成一张账单（调用次数、点数、收益，按 Agent 分列），平台管理员核对、批准后才转进作者的 ClawHunt 钱包。钱包入账与让 AwwO 收益可提现是 ClawHunt 的另一次发布（业主 2026-10-29 选择「先上市场，提现单独再上」）；顺序是 AwwO 先上线月度账单，ClawHunt 再打开入账，AwwO 再打开转账，然后业主批准第一张账单。
 
 以后再做（不在这次范围）：画布助手与规划自动推荐、选用市场 Agent；直接执行（画布助手的任务）使用 Agent；本机版中转 API 按 Agent 调用；团队成员使用市场 Agent；外部托管的 Agent（A2A / ClawHunt 接单 Agent）。
 
@@ -31,7 +31,7 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 | `agents` 新增列 | market_agent_id、market_version：节点背后的工作区 Agent 指向哪个市场版本；它自己的 instructions 为空 |
 | `market_agent_calls` | 一次调用：agent、version、作者、调用方工作区、run、发起人、计费账号与计费期（起止）、price_credits、fee_bps、insider、status（reserved / charged / released）、outcome、outcome_code、platform_fault、duration、model_credits、earned_microcredits、settlement（open / final / void / none）、payout_id |
 | `market_agent_ratings` | 每次调用一个 👍/👎（call_id 唯一） |
-| `market_payouts` | 一次转账：作者、ClawHunt subject、amount_cents、微点进位（carry_in / carry_out）、status（pending / sent / held / failed）、尝试次数 |
+| `market_payouts` | 一张月度账单：作者、ClawHunt subject、月份（period_month，UTC 日历月的第一天）、调用次数（calls）、点数（credits）、微点（microcredits）、amount_cents、微点进位（carry_in / carry_out）、status（review / pending / sent / held / failed）、批准人与时间、尝试次数。id 由作者和月份算出，就是 ClawHunt 的幂等号；一位作者一个月一张 |
 
 ## 发布与审核
 
@@ -84,19 +84,28 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 - 计费期的数字（已付点数、上期结转）在 `user_plans` 还有这一期时由后台任务另存一份（`market_period_facts`），`user_plans` 只保留当前期和上一期。两处都没有的计费期一直不确定，记日志等运营处理，也不挡后面的计费期。
 - **花费按见过的最多算**：工作区被删除时，它的模型调用和生成记录跟着删掉，这一期的总花费会变少，买来的点数「覆盖」的比例就会被抬高。所以后台任务每轮记下这一期**已结算**花费的最大值（`market_period_facts.spent`，不含运行中调用的预扣），确定收益时用「现在的花费」和「记下的最大值」里大的那个。两轮之间（10 分钟内）发生又被删掉的花费看不到。
 - 付款人删除账号后，AwwO 不再有他的 ClawHunt 身份，确定前就无法再读他的套餐：之后的退款要靠 ClawHunt 一侧（见下）。
-- 收益以微点（百万分之一点）记账，1 点 = 1 美分。转账按作者汇总后取整到分，不足一分的部分记在转账行上带到下一次。
-- **转入 ClawHunt 钱包**：后台任务每 10 分钟一次，把已确定、未转出的收益按作者汇总，调用 ClawHunt 的 `POST /api/awwo/sso/earnings`（AwwO 自己的客户端凭证，转账行 id 作为幂等号），ClawHunt 给作者钱包记一笔 `awwo_agent_earnings` 交易，之后用 ClawHunt 已有的提现取出。没绑定 ClawHunt 的作者，收益一直累积，绑定后自动转入。ClawHunt 账号不可用（删除、封禁、撤销 AwwO 资格）时转账暂缓（held）。
-- 转账开关 `AWWO_MARKET_PAYOUTS`，ClawHunt 一侧（入账接口与提现支持）上线并验证后再打开；之前收益照常记账，显示为「待转入」。第一笔收益最早在第一位付费调用方的计费期结束、再过保留期后才确定。
+- 收益以微点（百万分之一点）记账，1 点 = 1 美分。账单按作者汇总后取整到分，不足一分的部分记在账单上带到下一张。
+
+### 月度账单与转账
+
+- **月度账单**：每个日历月（UTC）结束后（后台任务每 10 分钟一次，月初第一轮起），把每位作者在这个月里确定、还没进账单的收益，加上一张账单留下的不足一分的部分，汇总成一张账单，记下调用次数（包括调用方用赠送点数付的、没有收益的调用）和这些调用收的点数。当月确定的进当月的账单，之后确定的进下个月的。不足一分的不出账单，收益留到之后的月份；没绑定 ClawHunt 的作者没有账单，收益一直累积，绑定后按月补出账单（每个月一张，见下）。上个月的账单还在待审核时，下个月的照常生成。转账开关关着也照常生成：账单是这个月的统计，只有批准才转账。
+- **一个月一张，按月补齐**：后台任务停了一段时间（比如整个月没跑）再跑时，每位作者从最早一笔没进账单的收益所在的月份起，按月份顺序一张张补出账单，每张只收那个月月底前确定的收益，所以每个月的收益仍在它自己的账单上。账单从不倒序生成：已经有了某个月的账单后，更早确定、却到这时才出现的收益进下一张。
+- **月底的边界**：月份按数据库的时钟（UTC）算，和收益的确定时间（finalized_at）同一个钟。确定收益的事务从打时间戳前到提交一直持有一把共享锁，生成账单时独占这把锁，所以月底前确定、还在提交中的收益一定进这个月的账单，之后确定的进下个月的，两个 API 进程同时跑也一样。
+- **一个月只转一次**：账单的 id 由作者和月份算出（`a` 加 32 个 base64url 字符，AwwO id 的格式），就是 ClawHunt 的幂等号，同一位作者同一个月不会出两张，也不会在 ClawHunt 入账两次。
+- **审核与转账**：账单生成后是「待审核」（review），什么都不转。平台管理员在「平台管理 → 市场审核 → 月度账单」核对（按 Agent 分列的调用次数、点数、收益，带进来的不足一分的部分），点「批准并转入」再确认金额后（批准请求带上确认的金额，和账单不一样时不批准，409 `market_statement_changed`；网页读到的账单数据不完整时不给批准），AwwO 立即调用 ClawHunt 的 `POST /api/awwo/sso/earnings`（AwwO 自己的客户端凭证，账单 id 作为幂等号，备注 `AwwO Agent market earnings, <月份>`），ClawHunt 给作者钱包记一笔 `awwo_agent_earnings` 交易，之后用 ClawHunt 已有的提现取出。只有 ClawHunt 明确回答记了这个幂等号才算转出；其他回答（联系不上、回答读不懂、被拒）都由后台任务用同一个幂等号重试，间隔逐次加长，最长一小时，重试 20 次后记错误日志等运营处理。被拒时记下 ClawHunt 给的代码（`lastError` 如 `answer_400:amount_above_cap`：单笔超上限，要请 ClawHunt 调高；`answer_400:reference_conflict`：这个幂等号已经按别的金额入过账，要人工核对），只记代码，不记 ClawHunt 回答的正文。ClawHunt 账号不可用（删除、封禁、撤销 AwwO 资格，409）时暂缓（held），每天重试。后台任务只发已经批准的账单（要求有批准时间，不只看状态）；数据库也不接受没有月份或没经批准就在转账中、已转出的账单行（`market_payouts_approved_statement_check`），所以回滚到 046 之前的 API 时，即使转账开着，它也生成不了自己的自动转账。数据库里还有 046 之前、仍在转账中的自动转账（pending / held，生产上一笔都没有）时，046 拒绝执行，要运营先处理掉。
+- **转账开关** `AWWO_MARKET_PAYOUTS`：关着时账单照常生成，不能批准（409 `market_payouts_off`）。打开的顺序是 ClawHunt 先打开入账（它的 `AWWO_EARNINGS_ENABLED`），AwwO 再打开转账，然后业主批准第一张账单。ClawHunt 一侧单笔默认上限 $10,000（`AWWO_EARNINGS_MAX_CENTS`，超过的 ClawHunt 拒收、不缩减，AwwO 每小时重试）、24 小时合计默认上限 $20,000（超过时 503，推迟到额度恢复）：大额账单批准前先请 ClawHunt 调高上限，网页对超过 $10,000 的账单会提醒。
+- 第一笔收益最早在第一位付费调用方的计费期结束、再过保留期后才确定，进那个月的账单，次月 1 日（UTC）出账单。
+- **发布时注意**：月底那把锁只有这个版本以后的 API 会拿；046 之前的 API 确定收益时不拿。所以不要让新旧两个 API 在月初（UTC 每月 1 日 0 点前后）同时跑：托管的 API 切换是先停旧的再起新的，正常发布不会重叠，月初前后也尽量不发布。046 的检查对已有的行只防改动不复查：046 之前已经转出或失败的转账（生产上没有）还能读，但不能再改。
 
 ## 配置
 
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
-| `AWWO_MARKET` | off | 打开整个市场（关闭时市场接口 404，节点里的市场引用在受理时被拒绝）。关掉只停新的使用：已经发生的调用照常结算、确定和转账，作者的收益（`GET /market/earnings`）与管理员的转账记录（`GET /admin/market/payouts`）照常可读，网页的「我的 Agent」只在有收益时显示收益，平台管理显示「市场转账」 |
+| `AWWO_MARKET` | off | 打开整个市场（关闭时市场接口 404，节点里的市场引用在受理时被拒绝）。关掉只停新的使用：已经发生的调用照常结算、确定和出账单，作者的收益（`GET /market/earnings`）与管理员的月度账单（`GET /admin/market/payouts`）照常可读、可批准，网页的「我的 Agent」只在有收益时显示收益，平台管理显示「市场账单」 |
 | `AWWO_MARKET_FEE_BPS` | 2500 | 平台抽成，基点 |
 | `AWWO_MARKET_MAX_PRICE` | 500 | 单次调用的最高定价（点） |
 | `AWWO_MARKET_HOLD_DAYS` | 14 | 计费期结束后的保留期 |
-| `AWWO_MARKET_PAYOUTS` | off | 把确定的收益转入 ClawHunt 钱包（需要 ClawHunt 客户端配置，不需要市场开着） |
+| `AWWO_MARKET_PAYOUTS` | off | 允许平台管理员批准月度账单，批准即转入作者的 ClawHunt 钱包（需要 ClawHunt 客户端配置，不需要市场开着）。关着时账单照常生成、不能批准；没有批准的账单从不转账 |
 
 ## API
 
@@ -124,7 +133,7 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 | POST /market/agents/{id}/submit | 草稿 → 待审 |
 | POST /market/agents/{id}/withdraw | 待审 → 草稿 |
 | POST /market/agents/{id}/unlist、/list | 下架、重新上架 |
-| GET /market/earnings | `{feeBps, holdDays, payoutsEnabled, clawHuntLinked, pending, available, paid, payouts:[{id,amountCents,status,createdAt,sentAt}]}`，金额单位为点（= 美分） |
+| GET /market/earnings | `{feeBps, holdDays, payoutsEnabled, clawHuntLinked, pending, available, inReview, transferring, paid, payouts:[{id,month,calls,credits,amountCents,status,createdAt,sentAt}]}`，金额单位为点（= 美分）：pending 计费期未结束（上限值），available 已确定、还没进账单（含上一张账单留下的不足一分的部分），inReview 在待审核的账单上，transferring 已批准、还没转到，paid 已转入；payouts 是月度账单，month 是 YYYY-MM（UTC） |
 
 草稿请求：`{name, tagline, description, category, kind, instructions, instructionsPublic, skills:[{tenantId, ref}], model:{runtime,id,effort,locked}, price, examples:[{prompt,result}], authorName}`。限制：`kind` 只能是 llm（或省略），名称 ≤ 60 字符，简介 ≤ 120，介绍 ≤ 4000，指令 ≤ 32000 字节，技能 ≤ 4 个且合计 ≤ 20 KiB，示例 ≤ 3 个（prompt ≤ 2000，result ≤ 4000），价格 0 至 `AWWO_MARKET_MAX_PRICE`，署名 ≤ 40（省略时用账号名，账号名过不了检查时要求填写），推荐模型的运行时不能是 sandbox；隐藏字符与保留名称见上。
 
@@ -135,7 +144,8 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 | GET /admin/market/reviews | 待审版本，全部字段与 `reviewHash`；`author:{id,email,name,display,listedDisplay}`，display 是这个版本的署名，listedDisplay 是现在显示的 |
 | POST /admin/market/reviews/{agentId}/{version} | `{decision:"approve"\|"reject", note, reviewHash}`；reviewHash 必填，和版本现在的内容不符时 409 `market_review_changed`；批准时把版本的署名换上去，作者下架或已停用的保持原状态 |
 | POST /admin/market/agents/{id}/status | `{status:"suspended"\|"listed"}` 停用与恢复，回答 `{agentId,status,runsStopped}`；停用时取消它正在进行的调用并退回费用；恢复回到停用前的状态（作者下架的仍下架，没有已批准版本的回到草稿），对没停用的 Agent 不改变状态 |
-| GET /admin/market/payouts | 转账记录 |
+| GET /admin/market/payouts | 月度账单：待审核的全部在前（上限 5000），其余的最近 200 张（`status?` 过滤：review / pending / sent / held / failed）：`{items:[{id, author:{id,email,name}, month, calls, credits, microcredits, carryInMicrocredits, amountCents, status, attempts, lastError, clawHuntTransaction, createdAt, approvedAt, approvedBy, sentAt, nextAttemptAt, agents:[{id,name,calls,credits,earnedMicrocredits}]}], payoutsEnabled}`；市场关闭时照常可读 |
+| POST /admin/market/payouts/{id}/approve | `{amountCents}`：批准一张待审核、金额就是确认的这个的账单，并立即转账，回答账单现在的样子（sent；held；或 pending 加 lastError，之后由后台任务用同一个幂等号重试）；没带金额 400，金额不一样时 409 `market_statement_changed`，转账关闭时 409 `market_payouts_off`，不是待审核时 409 `market_statement_not_in_review`；市场关闭时照常可用 |
 
 ### 工作区内
 
@@ -144,13 +154,14 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 - `PUT /tenants/{t}/runs/{id}/market-rating` `{score: 1 | -1 | 0}`，member 以上；只有已计费的调用（Agent 交出了文字，免费 Agent 也一样，`status` 为 charged）才能评，否则 409 `market_rating_unavailable`；0 撤销评价。
 - 画布 `PUT` 请求头 `X-Awwo-Canvas-Features: market`（新网页总是带）。
 
-错误码：`market_unavailable`（市场关闭）、`market_agent_not_found`、`market_agent_unavailable`（停用、下架后的新选用、版本不可用）、`market_agent_version_changed`（409，节点写的不是现在上架的版本，重新选用）、`market_agent_not_usable`（团队、媒体、沙箱节点，或 coding 节点）、`market_text_to_sandbox`（市场 Agent 的文字会流到沙箱或团队节点）、`market_rating_unavailable`（409，没计费的调用不能评）、`market_agent_model_unavailable`（锁定的模型调用方用不了）、`market_agent_role_required`（403，付费 Agent 只给所有者和管理员）、`market_agent_plan_required`（402）、`credits_exhausted`（402）、`canvas_reload_required`（409）、`market_review_changed`（409）、`market_draft_invalid`、`market_name_reserved`、`market_skill_unavailable`、`market_skill_license`、`market_hidden_text`、`market_price_invalid`。画布节点被拒时，节点的 detail 是同一个错误码。
+错误码：`market_unavailable`（市场关闭）、`market_agent_not_found`、`market_agent_unavailable`（停用、下架后的新选用、版本不可用）、`market_agent_version_changed`（409，节点写的不是现在上架的版本，重新选用）、`market_agent_not_usable`（团队、媒体、沙箱节点，或 coding 节点）、`market_text_to_sandbox`（市场 Agent 的文字会流到沙箱或团队节点）、`market_rating_unavailable`（409，没计费的调用不能评）、`market_agent_model_unavailable`（锁定的模型调用方用不了）、`market_agent_role_required`（403，付费 Agent 只给所有者和管理员）、`market_agent_plan_required`（402）、`credits_exhausted`（402）、`canvas_reload_required`（409）、`market_review_changed`（409）、`market_payouts_off`（409，转账关闭时不能批准账单）、`market_statement_not_in_review`（409，账单已经批准过或不在待审核）、`market_statement_changed`（409，账单金额和批准时确认的不一样）、`market_draft_invalid`、`market_name_reserved`、`market_skill_unavailable`、`market_skill_license`、`market_hidden_text`、`market_price_invalid`。画布节点被拒时，节点的 detail 是同一个错误码。
 
 ## ClawHunt 一侧
 
-`POST /api/awwo/sso/earnings`，AwwO 客户端凭证（与 `/plan` 相同），请求 `{subject, amount_cents, reference, note}`：
+`POST /api/awwo/sso/earnings`，AwwO 客户端凭证（与 `/plan` 相同），请求 `{subject, amount_cents, reference, note}`（2026-10-29 已上线，ClawHunt-Store/clawproduct-hunt#1114）：
 
-- 按 `reference` 幂等：同一个 reference 第二次请求返回第一次的结果（`duplicate: true`）。
+- 按 `reference` 幂等：同一个 reference 第二次请求返回第一次的结果（`duplicate: true`）；同一个 reference 配另一个账号或金额时 400 `reference_conflict`，不记账。AwwO 发的 reference 是月度账单的 id（`a` 加 32 个 base64url 字符）。
+- 单笔超过 `AWWO_EARNINGS_MAX_CENTS`（默认 $10,000）400 `amount_above_cap`；24 小时合计超过 `AWWO_EARNINGS_DAILY_MAX_CENTS`（默认 $20,000）或入账关闭（`AWWO_EARNINGS_ENABLED`）时 503。
 - 账号已删除、封禁或撤销了 AwwO 资格：409 `payee_ineligible`，不记账。
 - 成功：作者钱包加 `amount_cents`，写一笔 `awwo_agent_earnings` 交易，返回 `{credited:true, reference, transaction_id, duplicate}`。
 - 这笔钱要能提现：ClawHunt 现在只允许提解题收入（`utils/withdrawals.py` 按 `source_problem_ids` 选），需要让提现流程与钱包页面也能选 AwwO 收益。这是 ClawHunt 的单独发布，走它的 staging 验证、评审与业主批准。
