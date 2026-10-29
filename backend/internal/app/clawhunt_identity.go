@@ -177,12 +177,31 @@ func (a *App) clawHuntRequestStatus(ctx context.Context, endpoint string, body a
 		return resp.StatusCode, errClawHuntUnreachable
 	}
 	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, errors.New("identity rejected")
+		var refusal struct {
+			Detail string `json:"detail"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&refusal)
+		return resp.StatusCode, clawHuntRefusal{code: refusalCode(refusal.Detail)}
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(result); err != nil {
 		return resp.StatusCode, errors.New("invalid identity response")
 	}
 	return resp.StatusCode, nil
+}
+
+// clawHuntRefusal is an answer of ClawHunt's other than 200 that is no outage, with the code its body names
+// (FastAPI's {"detail": "reference_conflict"}), when it names one as a code.
+type clawHuntRefusal struct{ code string }
+
+func (clawHuntRefusal) Error() string { return "identity rejected" }
+
+// refusalCode is a refusal's detail when it reads as a code ([a-z0-9_], at most 60), else empty: never the upstream
+// body's text itself.
+func refusalCode(detail string) string {
+	if detail == "" || len(detail) > 60 || strings.Trim(detail, "abcdefghijklmnopqrstuvwxyz0123456789_") != "" {
+		return ""
+	}
+	return detail
 }
 func (a *App) validClawHuntIdentity(id clawHuntIdentity) bool {
 	return id.Issuer == a.cfg.ClawHuntURL && id.Audience == a.cfg.ClawHuntClientID && len(id.Subject) > 0 && len(id.Subject) <= 200 && validEmail(id.Email) && len(id.Name) > 0 && len(id.Name) <= 200

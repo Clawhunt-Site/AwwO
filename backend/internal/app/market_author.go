@@ -356,13 +356,21 @@ func (a *App) myMarketAgents(w http.ResponseWriter, r *http.Request) {
 
 // marketEarnings answers what the account has earned as an author, in credits (1 credit = 1 cent): pending is the
 // author's share of calls that were charged but whose callers' billing periods have not closed (an upper bound: the
-// share of it that callers paid with gifted credits is taken off when the period closes); available is final and not
-// yet transferred; transferring is on its way to the ClawHunt wallet; paid has arrived there.
+// share of it that callers paid with gifted credits is taken off when the period closes); available is final and on
+// no monthly statement yet; inReview is on a statement the platform has not approved yet; transferring is approved
+// and on its way to the ClawHunt wallet; paid has arrived there.
 func (a *App) marketEarnings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u := currentUser(r)
-	var pendingMicro, availableMicro, transferring, paid int64
-	err := a.db.QueryRow(ctx, `SELECT
+	// One snapshot for every figure, so an earning a statement takes meanwhile is counted once.
+	tx, err := a.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	var pendingMicro, availableMicro, inReview, transferring, paid int64
+	err = tx.QueryRow(ctx, `SELECT
 		COALESCE(sum(price_credits::bigint*(10000-fee_bps)*100) FILTER (WHERE status='charged' AND settlement='open'),0),
 		COALESCE(sum(earned_microcredits) FILTER (WHERE settlement='final' AND payout_id IS NULL),0)
 		FROM market_agent_calls WHERE author_user_id=$1`, u.ID).Scan(&pendingMicro, &availableMicro)
@@ -370,19 +378,21 @@ func (a *App) marketEarnings(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	// The remainder below a cent not yet transferred is the latest payout's: a payout in flight carries the one before
-	// it in, and leaves its own.
+	// The remainder below a cent not yet on a statement is the latest statement's: each carries the one before it in,
+	// and leaves its own.
 	var carry int64
-	if err = a.db.QueryRow(ctx, `SELECT
+	if err = tx.QueryRow(ctx, `SELECT
+		COALESCE(sum(amount_cents) FILTER (WHERE status='review'),0),
 		COALESCE(sum(amount_cents) FILTER (WHERE status IN ('pending','held')),0),
 		COALESCE(sum(amount_cents) FILTER (WHERE status='sent'),0),
-		COALESCE((SELECT carry_out_microcredits FROM market_payouts WHERE author_user_id=$1 AND status IN ('pending','held','sent') ORDER BY created_at DESC, id DESC LIMIT 1),0)
-		FROM market_payouts WHERE author_user_id=$1`, u.ID).Scan(&transferring, &paid, &carry); err != nil {
+		COALESCE((SELECT carry_out_microcredits FROM market_payouts WHERE author_user_id=$1 ORDER BY period_month DESC NULLS LAST, created_at DESC, id DESC LIMIT 1),0)
+		FROM market_payouts WHERE author_user_id=$1`, u.ID).Scan(&inReview, &transferring, &paid, &carry); err != nil {
 		a.dbError(w, err)
 		return
 	}
-	payouts, err := rowsJSON(ctx, a.db, `SELECT jsonb_build_object('id',id,'amountCents',amount_cents,'status',status,'createdAt',created_at,'sentAt',sent_at)
-		FROM market_payouts WHERE author_user_id=$1 ORDER BY created_at DESC, id DESC LIMIT 50`, u.ID)
+	payouts, err := rowsJSON(ctx, tx, `SELECT jsonb_build_object('id',id,'month',to_char(period_month,'YYYY-MM'),'calls',calls,'credits',credits,
+		'amountCents',amount_cents,'status',status,'createdAt',created_at,'sentAt',sent_at)
+		FROM market_payouts WHERE author_user_id=$1 ORDER BY period_month DESC NULLS LAST, created_at DESC, id DESC LIMIT 50`, u.ID)
 	if err != nil {
 		a.dbError(w, err)
 		return
@@ -392,12 +402,12 @@ func (a *App) marketEarnings(w http.ResponseWriter, r *http.Request) {
 	}
 	var linked bool
 	if a.clawHuntEnabled() {
-		if err = a.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM external_identities WHERE user_id=$1 AND issuer=$2)", u.ID, a.cfg.ClawHuntURL).Scan(&linked); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM external_identities WHERE user_id=$1 AND issuer=$2)", u.ID, a.cfg.ClawHuntURL).Scan(&linked); err != nil {
 			a.dbError(w, err)
 			return
 		}
 	}
 	writeJSON(w, 200, map[string]any{"feeBps": a.cfg.MarketFeeBps, "holdDays": a.cfg.MarketHoldDays, "payoutsEnabled": a.cfg.MarketPayouts,
 		"clawHuntLinked": linked, "pending": pendingMicro / 1_000_000, "available": (availableMicro + carry) / 1_000_000,
-		"transferring": transferring, "paid": paid, "payouts": payouts, "asOf": time.Now().UTC()})
+		"inReview": inReview, "transferring": transferring, "paid": paid, "payouts": payouts, "asOf": time.Now().UTC()})
 }

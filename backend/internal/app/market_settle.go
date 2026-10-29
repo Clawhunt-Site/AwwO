@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"math/big"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Settling the market (docs/awwo-agent-market.md). Every marketSettleEvery the API, whether the market is open or
@@ -18,7 +22,11 @@ import (
 //     MarketHoldDays have passed (finalizeMarketEarnings), after asking ClawHunt for the caller's plan once more: the
 //     author's share of the price, scaled by the part of the period's spending its paid credits covered, so a gift the
 //     caller spent earns the author nothing and a period refunded earns nothing at all;
-//  3. with payouts on, transfers what is final into each author's ClawHunt wallet (payMarketEarnings).
+//  3. once a calendar month (UTC) has ended, gathers each author's earnings made final during it into one statement,
+//     its calls counted, for a platform administrator to approve (makeMarketStatements). Nothing is transferred by
+//     itself (owner 2026-10-29: 「不要自动转账，按照次数累计解决，一个月一次统计完整的调用次数」);
+//  4. with transfers on, sends the statements an administrator approved into the authors' ClawHunt wallets
+//     (payMarketEarnings).
 
 const (
 	marketSettleEvery = 10 * time.Minute
@@ -55,6 +63,15 @@ func (a *App) settleMarket(ctx context.Context) {
 	}
 	if err := a.finalizeMarketEarnings(ctx); err != nil && ctx.Err() == nil {
 		a.log.Warn("market settlement: finalizing earnings failed", "error_type", errorType(err))
+	}
+	// On the database's clock, which stamps the earnings' finalized_at.
+	var now time.Time
+	err := a.db.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now)
+	if err == nil {
+		err = a.makeMarketStatements(ctx, now)
+	}
+	if err != nil && ctx.Err() == nil {
+		a.log.Warn("market settlement: making monthly statements failed", "error_type", errorType(err))
 	}
 	if a.cfg.MarketPayouts {
 		a.payMarketEarnings(ctx)
@@ -348,6 +365,10 @@ func (a *App) finalizeMarketPeriod(ctx context.Context, userID string, start tim
 		return err
 	}
 	defer tx.Rollback(context.Background())
+	// Shared with every other finalizing, until this commits: a month's statement waits for it (marketMonthCloseLock).
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared("+marketMonthCloseLock+")"); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('awwo-market-period:' || $1, 84321021))", userID); err != nil {
 		return err
 	}
@@ -392,13 +413,173 @@ func (a *App) finalizeMarketPeriod(ctx context.Context, userID string, start tim
 	return tx.Commit(ctx)
 }
 
-// payMarketEarnings opens a payout for each author whose final earnings reach a cent, then sends every payout that
-// is due. A payout is sent with its own id as the reference, so ClawHunt credits it once however often it is sent.
-func (a *App) payMarketEarnings(ctx context.Context) {
-	if err := a.openMarketPayouts(ctx); err != nil && ctx.Err() == nil {
-		a.log.Warn("market payouts: opening payouts failed", "error_type", errorType(err))
+// marketStatementMonth is the calendar month (UTC) whose statements are made at now, the one before now's, and when
+// it ended.
+func marketStatementMonth(now time.Time) (month, end time.Time) {
+	now = now.UTC()
+	end = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return end.AddDate(0, -1, 0), end
+}
+
+// marketMonthOf is the first instant of the calendar month (UTC) t is in.
+func marketMonthOf(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// marketStatementID is the id of an author's statement for a month, which is the reference ClawHunt credits once: made
+// from the two, so an author's month always names one transfer, however often it is sent or made. It has randomID's
+// form, the one ClawHunt accepts.
+func marketStatementID(authorID string, month time.Time) string {
+	sum := sha256.Sum256([]byte("awwo-market-statement\x00" + authorID + "\x00" + month.UTC().Format("2006-01")))
+	return "a" + base64.RawURLEncoding.EncodeToString(sum[:24])
+}
+
+// marketMonthCloseLock is the advisory lock that making a statement and making earnings final share, one per schema as
+// the worker lease is (app.go). Finalizing holds it shared from before it stamps finalized_at until it commits, and a
+// statement is made holding it alone, so every earning stamped before a month ended is in the database when its
+// statement is made, and every earning stamped after belongs to a later month: an earning made final in a month is
+// never left out of that month's statement by a transaction still committing, here or in another API process.
+const marketMonthCloseLock = "hashtextextended('awwo-market-month-close:' || current_schema(), 84321023)"
+
+// marketMonthCloseWait bounds a statement's wait for the lock: one finalizing that never commits (a frozen process
+// whose connection stays up) holds up every other finalizing queued behind the wait, so the statement gives up and the
+// next round tries again.
+const marketMonthCloseWait = "30s"
+
+// makeMarketStatements makes each author's statements up to the calendar month (UTC) before now's, now being the
+// database's clock, which stamps finalized_at. An author with earnings made final before that month's end that no
+// statement holds, a ClawHunt account, and earnings with their carried remainder of a cent or more, is brought up to date
+// month by month (makeAuthorStatements), so a month the job did not run in still gets its own statement. One without a
+// ClawHunt account gets none until they link one. The longest waiting go first, marketPayoutBatch a round. Statements
+// are made whether transfers are on or not: they are the months' tally, and only an administrator's approval sends one.
+func (a *App) makeMarketStatements(ctx context.Context, now time.Time) error {
+	if !a.clawHuntEnabled() {
+		return nil
 	}
-	rows, err := a.db.Query(ctx, `SELECT id,subject,amount_cents,attempts FROM market_payouts WHERE status IN ('pending','held') AND next_attempt_at<=clock_timestamp()
+	last, end := marketStatementMonth(now)
+	rows, err := a.db.Query(ctx, `SELECT c.author_user_id,e.subject,min(c.finalized_at) FROM market_agent_calls c
+		JOIN external_identities e ON e.user_id=c.author_user_id AND e.issuer=$1
+		WHERE c.settlement='final' AND c.payout_id IS NULL AND c.finalized_at < $2
+		AND NOT EXISTS(SELECT 1 FROM market_payouts p WHERE p.author_user_id=c.author_user_id AND p.period_month>=$3::date)
+		GROUP BY c.author_user_id,e.subject
+		HAVING sum(COALESCE(c.earned_microcredits,0))+COALESCE((SELECT p.carry_out_microcredits FROM market_payouts p WHERE p.author_user_id=c.author_user_id
+			ORDER BY p.period_month DESC NULLS LAST,p.created_at DESC,p.id DESC LIMIT 1),0) >= $4
+		ORDER BY min(c.finalized_at),c.author_user_id LIMIT $5`, a.cfg.ClawHuntURL, end, last.Format("2006-01-02"), microcreditsPerCredit, marketPayoutBatch)
+	if err != nil {
+		return err
+	}
+	type author struct {
+		user, subject string
+		oldest        time.Time
+	}
+	authors := []author{}
+	for rows.Next() {
+		var x author
+		if err = rows.Scan(&x.user, &x.subject, &x.oldest); err != nil {
+			rows.Close()
+			return err
+		}
+		authors = append(authors, x)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	// One author's failure holds up no other: the round goes on, and answers the first. A month-close lock it could not
+	// get in time ends the round, as every other author would wait for it as long.
+	var failed error
+	for _, x := range authors {
+		if err = a.makeAuthorStatements(ctx, x.user, x.subject, x.oldest, last); err != nil {
+			var pgErr *pgconn.PgError
+			if ctx.Err() != nil || (errors.As(err, &pgErr) && pgErr.Code == "55P03") {
+				return err
+			}
+			if failed == nil {
+				failed = err
+			}
+		}
+	}
+	return failed
+}
+
+// makeAuthorStatements makes an author's statements in order, one for each month from that of their oldest earning on
+// no statement (or the month after their latest statement, where that is later) up to last, each with the earnings made
+// final before its month ended. A month below a cent gets none, and its earnings go on the next month's.
+func (a *App) makeAuthorStatements(ctx context.Context, userID, subject string, oldest, last time.Time) error {
+	var latest *time.Time
+	if err := a.db.QueryRow(ctx, "SELECT max(period_month)::timestamp FROM market_payouts WHERE author_user_id=$1", userID).Scan(&latest); err != nil {
+		return err
+	}
+	month := marketMonthOf(oldest)
+	if latest != nil && !month.After(marketMonthOf(*latest)) {
+		month = marketMonthOf(*latest).AddDate(0, 1, 0)
+	}
+	for ; !month.After(last); month = month.AddDate(0, 1, 0) {
+		if err := a.makeMarketStatement(ctx, userID, subject, month); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// makeMarketStatement makes the author's statement for month, unless they have one for it or a later month (a
+// statement is never made out of order: each carries in the remainder its predecessor left).
+func (a *App) makeMarketStatement(ctx context.Context, userID, subject string, month time.Time) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '"+marketMonthCloseWait+"'"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock("+marketMonthCloseLock+")"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('awwo-market-payout:' || $1, 84321022))", userID); err != nil {
+		return err
+	}
+	day := month.Format("2006-01-02")
+	var made bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM market_payouts WHERE author_user_id=$1 AND period_month>=$2::date)", userID, day).Scan(&made); err != nil || made {
+		return err
+	}
+	// The calls are taken into the statement and counted in one statement, so a call made final meanwhile is either in
+	// both or in neither. Below a cent the rollback gives them back.
+	id := marketStatementID(userID, month)
+	var earned, credits int64
+	var calls int
+	if err = tx.QueryRow(ctx, `WITH taken AS (UPDATE market_agent_calls SET payout_id=$2 WHERE author_user_id=$1 AND settlement='final' AND payout_id IS NULL AND finalized_at < $3
+		RETURNING COALESCE(earned_microcredits,0) AS earned,price_credits) SELECT COALESCE(sum(earned),0)::bigint,count(*)::int,COALESCE(sum(price_credits),0)::bigint FROM taken`,
+		userID, id, month.AddDate(0, 1, 0)).Scan(&earned, &calls, &credits); err != nil {
+		return err
+	}
+	var carry int64
+	if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT carry_out_microcredits FROM market_payouts WHERE author_user_id=$1
+		ORDER BY period_month DESC NULLS LAST,created_at DESC,id DESC LIMIT 1),0)`, userID).Scan(&carry); err != nil {
+		return err
+	}
+	total := earned + carry
+	cents := total / microcreditsPerCredit
+	if cents < 1 {
+		return nil
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO market_payouts(id,author_user_id,subject,microcredits,carry_in_microcredits,carry_out_microcredits,amount_cents,status,period_month,calls,credits)
+		VALUES($1,$2,$3,$4,$5,$6,$7,'review',$8::date,$9,$10)`, id, userID, subject, total, carry, total-cents*microcreditsPerCredit, cents, day, calls, credits); err != nil {
+		return err
+	}
+	if err = audit(ctx, tx, "", "", "market.statement.made", id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// payMarketEarnings sends every statement an administrator approved that is due: approving makes it pending, and a
+// send that did not go through waits before it is asked again. Nothing an administrator did not approve is sent.
+func (a *App) payMarketEarnings(ctx context.Context) {
+	rows, err := a.db.Query(ctx, `SELECT id,subject,COALESCE(to_char(period_month,'YYYY-MM'),''),amount_cents,attempts FROM market_payouts
+		WHERE status IN ('pending','held') AND approved_at IS NOT NULL AND next_attempt_at<=clock_timestamp()
 		ORDER BY next_attempt_at,id LIMIT $1`, marketPayoutBatch)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -407,14 +588,14 @@ func (a *App) payMarketEarnings(ctx context.Context) {
 		return
 	}
 	type due struct {
-		id, subject string
-		cents       int64
-		attempts    int
+		id, subject, month string
+		cents              int64
+		attempts           int
 	}
 	list := []due{}
 	for rows.Next() {
 		var d due
-		if err = rows.Scan(&d.id, &d.subject, &d.cents, &d.attempts); err != nil {
+		if err = rows.Scan(&d.id, &d.subject, &d.month, &d.cents, &d.attempts); err != nil {
 			rows.Close()
 			return
 		}
@@ -425,100 +606,32 @@ func (a *App) payMarketEarnings(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		a.sendMarketPayout(ctx, d.id, d.subject, d.cents, d.attempts)
+		a.sendMarketPayout(ctx, d.id, d.subject, d.month, d.cents, d.attempts)
 	}
 }
 
-// openMarketPayouts gathers each author's final, unpaid earnings into a payout: those of an author with a ClawHunt
-// account and no payout in flight, once they come to at least a cent with the previous payout's remainder. Authors below
-// a cent are left out of the batch, so they hold up none who reach one; the longest waiting go first.
-func (a *App) openMarketPayouts(ctx context.Context) error {
-	rows, err := a.db.Query(ctx, `SELECT c.author_user_id,e.subject FROM market_agent_calls c
-		JOIN external_identities e ON e.user_id=c.author_user_id AND e.issuer=$1
-		WHERE c.settlement='final' AND c.payout_id IS NULL AND c.earned_microcredits>0
-		AND NOT EXISTS(SELECT 1 FROM market_payouts p WHERE p.author_user_id=c.author_user_id AND p.status IN ('pending','held','failed'))
-		GROUP BY c.author_user_id,e.subject
-		HAVING sum(c.earned_microcredits)+COALESCE((SELECT p.carry_out_microcredits FROM market_payouts p WHERE p.author_user_id=c.author_user_id AND p.status='sent'
-			ORDER BY p.sent_at DESC, p.id DESC LIMIT 1),0) >= $3
-		ORDER BY min(c.finalized_at),c.author_user_id LIMIT $2`, a.cfg.ClawHuntURL, marketPayoutBatch, microcreditsPerCredit)
-	if err != nil {
-		return err
+// marketPayoutNote is the line the author's ClawHunt wallet shows for a statement of month ("2006-01").
+func marketPayoutNote(month string) string {
+	if month == "" {
+		return "AwwO Agent market earnings"
 	}
-	type author struct{ user, subject string }
-	authors := []author{}
-	for rows.Next() {
-		var x author
-		if err = rows.Scan(&x.user, &x.subject); err != nil {
-			rows.Close()
-			return err
-		}
-		authors = append(authors, x)
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for _, x := range authors {
-		if err = a.openMarketPayout(ctx, x.user, x.subject); err != nil {
-			return err
-		}
-	}
-	return nil
+	return "AwwO Agent market earnings, " + month
 }
 
-func (a *App) openMarketPayout(ctx context.Context, userID, subject string) error {
-	tx, err := a.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(context.Background())
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('awwo-market-payout:' || $1, 84321022))", userID); err != nil {
-		return err
-	}
-	var open bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM market_payouts WHERE author_user_id=$1 AND status IN ('pending','held','failed'))", userID).Scan(&open); err != nil || open {
-		return err
-	}
-	// The calls are taken into the payout and summed in one statement, so a call made final meanwhile is either in both
-	// or in neither. Below a cent the rollback gives them back.
-	id := randomID()
-	var earned, carry int64
-	if err = tx.QueryRow(ctx, `WITH taken AS (UPDATE market_agent_calls SET payout_id=$2 WHERE author_user_id=$1 AND settlement='final' AND payout_id IS NULL
-		RETURNING earned_microcredits) SELECT COALESCE(sum(earned_microcredits),0)::bigint FROM taken`, userID, id).Scan(&earned); err != nil {
-		return err
-	}
-	if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT carry_out_microcredits FROM market_payouts WHERE author_user_id=$1 AND status='sent' ORDER BY sent_at DESC, id DESC LIMIT 1),0)`, userID).Scan(&carry); err != nil {
-		return err
-	}
-	total := earned + carry
-	cents := total / microcreditsPerCredit
-	if cents < 1 {
-		return nil
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO market_payouts(id,author_user_id,subject,microcredits,carry_in_microcredits,carry_out_microcredits,amount_cents)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, id, userID, subject, total, carry, total-cents*microcreditsPerCredit, cents); err != nil {
-		return err
-	}
-	if err = audit(ctx, tx, "", "", "market.payout.opened", id); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-// sendMarketPayout asks ClawHunt to credit one payout to the author's wallet, with the payout's id as the reference
-// ClawHunt credits once. Only an answer that says it credited this reference sends the payout. The author's ClawHunt
-// account unable to receive it (deleted, suspended, AwwO withdrawn, 409): held, asked again daily. Anything else, no
-// answer, an answer cut short or unreadable, another refusal, may follow a credit that was made, so the payout stays
-// pending and the same reference is asked again, waiting longer each time up to an hour; after many attempts it is
-// logged for the operator.
-func (a *App) sendMarketPayout(ctx context.Context, id, subject string, cents int64, attempts int) {
+// sendMarketPayout asks ClawHunt to credit one approved statement to the author's wallet, with the statement's id as
+// the reference ClawHunt credits once. Only an answer that says it credited this reference sends it. The author's
+// ClawHunt account unable to receive it (deleted, suspended, AwwO withdrawn, 409): held, asked again daily. Anything
+// else, no answer, an answer cut short or unreadable, another refusal, may follow a credit that was made, so the
+// statement stays pending and the same reference is asked again, waiting longer each time up to an hour; after many
+// attempts it is logged for the operator.
+func (a *App) sendMarketPayout(ctx context.Context, id, subject, month string, cents int64, attempts int) {
 	var out struct {
 		Credited      bool   `json:"credited"`
 		Reference     string `json:"reference"`
 		TransactionID string `json:"transaction_id"`
 	}
 	status, err := a.clawHuntRequestStatus(ctx, "earnings", map[string]any{"subject": subject, "amount_cents": cents, "reference": id,
-		"note": "AwwO Agent market earnings"}, &out)
+		"note": marketPayoutNote(month)}, &out)
 	if err == nil && (!out.Credited || out.Reference != id) {
 		err, status = errors.New("unexpected earnings answer"), 0
 	}
@@ -532,7 +645,13 @@ func (a *App) sendMarketPayout(ctx context.Context, id, subject string, cents in
 	default:
 		reason := "unreachable"
 		if status != 0 && !errors.Is(err, errClawHuntUnreachable) {
+			// With the code ClawHunt gave, so an administrator reads why (amount_above_cap: its cap must be raised;
+			// reference_conflict: the reference was credited for another amount, which an operator must look into).
 			reason = "answer_" + strconv.Itoa(status)
+			var refusal clawHuntRefusal
+			if errors.As(err, &refusal) && refusal.code != "" {
+				reason += ":" + refusal.code
+			}
 		}
 		wait := min(time.Hour, time.Minute<<min(attempts, 6))
 		update, args = "UPDATE market_payouts SET attempts=attempts+1,last_error=$3,next_attempt_at=clock_timestamp()+$2::interval WHERE id=$1 AND status IN ('pending','held')", []any{id, strconv.Itoa(int(wait.Seconds())) + " seconds", reason}

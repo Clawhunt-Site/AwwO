@@ -175,9 +175,11 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			ORDER BY 1,2`, []string{
 			"account_deletion_requests decided_by", "computer_sessions actor_id", "knowledge_events actor_id",
 			"knowledge_proposals actor_id", "knowledge_revisions actor_id", "knowledge_source_origins actor_id",
-			// The Agent market's ledger: its calls (caller, author, payer), ratings, payouts, period facts and reviewers.
+			// The Agent market's ledger: its calls (caller, author, payer), ratings, statements (author, approver), period facts
+			// and reviewers.
 			"market_agent_calls actor_id", "market_agent_calls author_user_id", "market_agent_calls billed_user_id",
-			"market_agent_ratings user_id", "market_agent_versions reviewed_by", "market_payouts author_user_id", "market_period_facts user_id",
+			"market_agent_ratings user_id", "market_agent_versions reviewed_by", "market_payouts approved_by", "market_payouts author_user_id",
+			"market_period_facts user_id",
 			"media_generations billed_user_id", "memory_items created_by", "memory_items updated_by",
 			"model_invocations billed_user_id", "openmaus_dispatches actor_id", "render_jobs actor_id", "run_turns member_id",
 			"tenant_skill_revisions created_by", "tenant_skills created_by", "tenant_skills updated_by", "web_reads actor_id",

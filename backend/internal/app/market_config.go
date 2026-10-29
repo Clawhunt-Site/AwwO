@@ -8,8 +8,9 @@ import (
 )
 
 // marketSettings configures the Agent market (market.go, docs/awwo-agent-market.md). It is off unless AWWO_MARKET=on;
-// transfers of authors' earnings into their ClawHunt wallets are off unless AWWO_MARKET_PAYOUTS=on. What was used is
-// settled whether the market is on or not (market_settle.go).
+// transfers of the monthly statements an administrator approved into the authors' ClawHunt wallets are off unless
+// AWWO_MARKET_PAYOUTS=on. What was used is settled, and its statements made, whether the market is on or not
+// (market_settle.go).
 type marketSettings struct {
 	MarketEnabled bool
 	// MarketFeeBps is the platform's share of an Agent's price, in basis points, frozen into each call when it is
@@ -21,7 +22,8 @@ type marketSettings struct {
 	// MarketHoldDays is how long after the caller's billing period ends an earning waits before it is final
 	// (AWWO_MARKET_HOLD_DAYS, 1-90, unset 14): a refund or a dispute within the period still takes it back.
 	MarketHoldDays int
-	// MarketPayouts transfers final earnings to the authors' ClawHunt wallets (market_settle.go).
+	// MarketPayouts lets an administrator approve a monthly statement, which sends it to the author's ClawHunt wallet
+	// (market_admin.go, market_settle.go). Nothing is transferred without an approval.
 	MarketPayouts bool
 }
 
@@ -58,7 +60,7 @@ func (c *Config) marketSettingsFromEnv() error {
 	return nil
 }
 
-// validateMarket: payouts need the ClawHunt client, and not the market open (closing it stops new use, never the
+// validateMarket: transfers need the ClawHunt client, and not the market open (closing it stops new use, never the
 // settling and paying of what was earned).
 func (c Config) validateMarket() error {
 	if c.MarketPayouts && (c.ClawHuntURL == "" || c.ClawHuntClientID == "" || c.ClawHuntClientSecret == "") {

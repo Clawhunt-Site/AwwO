@@ -1,10 +1,13 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -277,18 +280,38 @@ func stopMarketAgentRuns(ctx context.Context, tx pgx.Tx, agentID, status string)
 	return stopped, nil
 }
 
+// marketReviewListCap is the most statements waiting for review that the list answers at once, which is more than
+// a month's authors are for a long while.
+const marketReviewListCap = 5000
+
+// marketStatementJSON is a statement (a market_payouts row p) as an administrator reviews it: whose, the month, its
+// calls and what they were charged, earned and carried in, what it sends, who approved it, how its transfer went, and
+// its calls by Agent. It reads users u (the author) and users ap (who approved it).
+const marketStatementJSON = `jsonb_build_object('id',p.id,'author',jsonb_build_object('id',p.author_user_id,'email',COALESCE(u.email,''),'name',COALESCE(u.name,'')),
+	'month',to_char(p.period_month,'YYYY-MM'),'calls',p.calls,'credits',p.credits,'microcredits',p.microcredits,'carryInMicrocredits',p.carry_in_microcredits,
+	'amountCents',p.amount_cents,'status',p.status,'attempts',p.attempts,'lastError',p.last_error,'clawHuntTransaction',p.clawhunt_transaction,
+	'createdAt',p.created_at,'approvedAt',p.approved_at,'approvedBy',COALESCE(NULLIF(ap.email,''),p.approved_by,''),'sentAt',p.sent_at,'nextAttemptAt',p.next_attempt_at,
+	'agents',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',x.agent_id,'name',COALESCE(v.name,''),'calls',x.calls,'credits',x.credits,'earnedMicrocredits',x.earned)
+		ORDER BY x.calls DESC,x.agent_id) FROM (SELECT c.agent_id,count(*) AS calls,COALESCE(sum(c.price_credits),0) AS credits,
+		COALESCE(sum(c.earned_microcredits),0) AS earned,max(c.version) AS version FROM market_agent_calls c WHERE c.payout_id=p.id GROUP BY c.agent_id) x
+		LEFT JOIN market_agent_versions v ON v.agent_id=x.agent_id AND v.version=x.version),'[]'::jsonb))`
+
+// marketPayoutList lists the monthly statements: every one waiting for review (up to marketReviewListCap), then the
+// latest 200 of the others, and says whether transfers are on: approving one sends it, so with transfers off none can
+// be approved.
 func (a *App) marketPayoutList(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	switch status {
-	case "", "pending", "sent", "held", "failed":
+	case "", "review", "pending", "sent", "held", "failed":
 	default:
 		fail(w, 400, "invalid_input", "Unknown payout status")
 		return
 	}
-	items, err := rowsJSON(r.Context(), a.db, `SELECT jsonb_build_object('id',p.id,'author',jsonb_build_object('id',p.author_user_id,'email',COALESCE(u.email,''),'name',COALESCE(u.name,'')),
-		'amountCents',p.amount_cents,'status',p.status,'attempts',p.attempts,'lastError',p.last_error,'clawHuntTransaction',p.clawhunt_transaction,
-		'createdAt',p.created_at,'sentAt',p.sent_at,'nextAttemptAt',p.next_attempt_at)
-		FROM market_payouts p LEFT JOIN users u ON u.id=p.author_user_id WHERE ($1='' OR p.status=$1) ORDER BY p.created_at DESC, p.id DESC LIMIT 200`, status)
+	items, err := rowsJSON(r.Context(), a.db, `SELECT `+marketStatementJSON+`
+		FROM market_payouts p LEFT JOIN users u ON u.id=p.author_user_id LEFT JOIN users ap ON ap.id=p.approved_by
+		WHERE ($1='' OR p.status=$1) AND (p.status='review' OR p.id IN (SELECT q.id FROM market_payouts q WHERE ($1='' OR q.status=$1) AND q.status<>'review'
+			ORDER BY q.period_month DESC NULLS LAST, q.created_at DESC, q.id DESC LIMIT 200))
+		ORDER BY (p.status='review') DESC, p.period_month DESC NULLS LAST, p.created_at DESC, p.id DESC LIMIT $2`, status, marketReviewListCap+200)
 	if err != nil {
 		a.dbError(w, err)
 		return
@@ -296,5 +319,79 @@ func (a *App) marketPayoutList(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []json.RawMessage{}
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	writeJSON(w, 200, map[string]any{"items": items, "payoutsEnabled": a.cfg.MarketPayouts})
+}
+
+// approveMarketStatement is an administrator's approval of a statement waiting for review, which sends it to the
+// author's ClawHunt wallet at once; a send that does not go through is asked again by the settlement job with the same
+// reference. The approval names the amount the administrator read (amountCents), and a statement of another amount is
+// not approved, so what is sent is what was confirmed. Transfers must be on (AWWO_MARKET_PAYOUTS), so that an approval
+// never waits unseen behind a switch that is off. The answer is the statement as it stands after the attempt.
+func (a *App) approveMarketStatement(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		AmountCents *int64 `json:"amountCents"`
+	}
+	if !a.decode(w, r, &b) {
+		return
+	}
+	if b.AmountCents == nil || *b.AmountCents < 1 {
+		fail(w, 400, "invalid_input", "amountCents is the amount of the statement as it was read")
+		return
+	}
+	if !a.cfg.MarketPayouts {
+		fail(w, 409, "market_payouts_off", "Transfers to ClawHunt wallets are off: a statement can be approved once they are on")
+		return
+	}
+	ctx := r.Context()
+	id, u := r.PathValue("id"), currentUser(r)
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	// The settlement job leaves it alone for a while (next_attempt_at), so the send below is the only one.
+	var subject, month string
+	var cents int64
+	var attempts int
+	err = tx.QueryRow(ctx, `UPDATE market_payouts SET status='pending',approved_by=$2,approved_at=clock_timestamp(),next_attempt_at=clock_timestamp()+interval '5 minutes'
+		WHERE id=$1 AND status='review' AND amount_cents=$3 RETURNING subject,COALESCE(to_char(period_month,'YYYY-MM'),''),amount_cents,attempts`, id, u.ID, *b.AmountCents).Scan(&subject, &month, &cents, &attempts)
+	if noRows(err) {
+		var status string
+		var stored int64
+		switch err = tx.QueryRow(ctx, "SELECT status,amount_cents FROM market_payouts WHERE id=$1", id).Scan(&status, &stored); {
+		case noRows(err):
+			fail(w, 404, "not_found", "Statement not found")
+		case err != nil:
+			a.dbError(w, err)
+		case status != "review":
+			fail(w, 409, "market_statement_not_in_review", "This statement is not waiting for review any more: read the list again")
+		default:
+			fail(w, 409, "market_statement_changed", "This statement is not the amount that was approved: read it again")
+		}
+		return
+	}
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	if err = audit(ctx, tx, u.ID, "", "market.statement.approved", id); err != nil {
+		a.dbError(w, err)
+		return
+	}
+	if err = tx.Commit(ctx); err != nil {
+		a.dbError(w, err)
+		return
+	}
+	// Sent on a context of its own: a reviewer who leaves the page does not cut the transfer short.
+	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	a.sendMarketPayout(sendCtx, id, subject, month, cents, attempts)
+	cancel()
+	item, err := rowsJSON(ctx, a.db, `SELECT `+marketStatementJSON+`
+		FROM market_payouts p LEFT JOIN users u ON u.id=p.author_user_id LEFT JOIN users ap ON ap.id=p.approved_by WHERE p.id=$1`, id)
+	if err != nil || len(item) != 1 {
+		a.dbError(w, cmp.Or(err, errors.New("the approved statement was not read back")))
+		return
+	}
+	writeJSON(w, 200, item[0])
 }

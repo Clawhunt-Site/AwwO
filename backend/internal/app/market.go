@@ -214,9 +214,10 @@ func (a *App) registerMarketRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/admin/market/reviews/{id}/{version}", a.marketAdminRoute(a.decideMarketReview))
 	m.HandleFunc("POST /api/v1/admin/market/agents/{id}/status", a.marketAdminRoute(a.setMarketAgentStatus))
 	// Closing the market stops new use, never the settling and paying of what was earned (market_config.go): an
-	// author still reads their earnings, and an admin the transfers, while it is closed.
+	// author still reads their earnings, and an admin the monthly statements and approves them, while it is closed.
 	m.HandleFunc("GET /api/v1/market/earnings", a.auth(a.marketEarnings))
 	m.HandleFunc("GET /api/v1/admin/market/payouts", a.admin(a.marketPayoutList))
+	m.HandleFunc("POST /api/v1/admin/market/payouts/{id}/approve", a.admin(a.approveMarketStatement))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/runs/{id}/market-rating", a.tenant(a.rateMarketRun, 2))
 }
 

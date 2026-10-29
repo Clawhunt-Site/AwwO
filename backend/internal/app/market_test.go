@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestMarketDraftValidationKeepsEveryLimit(t *testing.T) {
@@ -1158,15 +1162,64 @@ func TestPostgresMarketEarningsKeepTheSpendingOfADeletedWorkspace(t *testing.T) 
 	}
 }
 
-func TestPostgresMarketSettlementPaysWhatPaidCreditsCovered(t *testing.T) {
+// marketMonthAfter is the first instant of the calendar month (UTC) after the one t is in.
+func marketMonthAfter(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+}
+
+// approveMarketStatementAs approves a statement of cents as the administrator through the handler itself: a site with
+// ClawHunt keeps no password sessions, so this test's administrator cannot sign in to the route while ClawHunt is
+// configured (the route's own checks run with ClawHunt off).
+func approveMarketStatementAs(t *testing.T, h *harness, adminID, id string, cents int64) (int, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"amountCents": cents})
+	r := httptest.NewRequest("POST", "/api/v1/admin/market/payouts/"+id+"/approve", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.SetPathValue("id", id)
+	r = r.WithContext(context.WithValue(r.Context(), userKey{}, User{ID: adminID, PlatformRole: "admin"}))
+	rec := httptest.NewRecorder()
+	h.a.approveMarketStatement(rec, r)
+	out := map[string]any{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
+func TestMarketStatementMonthAndID(t *testing.T) {
+	month, end := marketStatementMonth(time.Date(2026, 1, 15, 3, 0, 0, 0, time.FixedZone("+08", 8*3600)))
+	if !month.Equal(time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)) || !end.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatal("January's statements are December's", month, end)
+	}
+	// The month is UTC's: half past midnight on the 1st in +08 is still the 31st, so the month before is the one before
+	// October.
+	if month, _ = marketStatementMonth(time.Date(2026, 11, 1, 0, 30, 0, 0, time.FixedZone("+08", 8*3600))); !month.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatal("UTC's month", month)
+	}
+	if month, _ = marketStatementMonth(time.Date(2026, 11, 1, 0, 0, 1, 0, time.UTC)); !month.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatal("a second into November, October's", month)
+	}
+	id := marketStatementID("author-1", month)
+	if !regexp.MustCompile(`^a[A-Za-z0-9_-]{32}$`).MatchString(id) || id != marketStatementID("author-1", month.Add(5*time.Hour)) ||
+		id == marketStatementID("author-2", month) || id == marketStatementID("author-1", month.AddDate(0, 1, 0)) {
+		t.Fatal("one reference per author and month, in the form ClawHunt accepts", id)
+	}
+}
+
+func TestPostgresMarketStatementPaysWhatPaidCreditsCoveredOnceApproved(t *testing.T) {
 	var mu sync.Mutex
 	credited := map[string]int64{}
+	subjects := map[string]string{}
+	notes := map[string]string{}
+	creditsMade := 0
 	ineligible := false
+	// As ClawHunt's own (awwo_earnings.py): a reference credits once, the same one again answers the first credit, and
+	// it again for another account or amount is refused.
 	clawhunt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var b struct {
 			Subject     string `json:"subject"`
 			AmountCents int64  `json:"amount_cents"`
 			Reference   string `json:"reference"`
+			Note        string `json:"note"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&b)
 		if r.URL.Path != "/api/awwo/sso/earnings" {
@@ -1175,22 +1228,40 @@ func TestPostgresMarketSettlementPaysWhatPaidCreditsCovered(t *testing.T) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		if amount, seen := credited[b.Reference]; seen {
+			if amount != b.AmountCents || subjects[b.Reference] != b.Subject {
+				writeJSON(w, 400, map[string]any{"detail": "reference_conflict"})
+				return
+			}
+			writeJSON(w, 200, map[string]any{"credited": true, "reference": b.Reference, "transaction_id": "t-" + b.Reference, "duplicate": true})
+			return
+		}
 		if ineligible {
 			w.WriteHeader(409)
 			return
 		}
-		_, duplicate := credited[b.Reference]
-		credited[b.Reference] = b.AmountCents
-		writeJSON(w, 200, map[string]any{"credited": true, "reference": b.Reference, "transaction_id": "t-" + b.Reference, "duplicate": duplicate})
+		creditsMade++
+		credited[b.Reference], subjects[b.Reference], notes[b.Reference] = b.AmountCents, b.Subject, b.Note
+		writeJSON(w, 200, map[string]any{"credited": true, "reference": b.Reference, "transaction_id": "t-" + b.Reference, "duplicate": false})
 	}))
 	defer clawhunt.Close()
+	sent := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return creditsMade
+	}
 	h, _ := marketTestHarness(t)
+	ctx := context.Background()
 	authorCookie, _, author := h.register(t, "author5@example.test")
 	_, _, payer := h.register(t, "payer5@example.test")
+	adminCookie, _, admin := h.register(t, "admin5@example.test")
+	makeAdmin(t, h, admin)
 	// Accounts first: with ClawHunt configured, AwwO registers none of its own.
 	h.a.cfg.ClawHuntURL, h.a.cfg.ClawHuntClientID, h.a.cfg.ClawHuntClientSecret, h.a.cfg.MarketPayouts = clawhunt.URL, "awwo", strings.Repeat("s", 32), true
 	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'4242',$2)", clawhunt.URL, author)
 	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-settle',$1,'listed',1)", author)
+	execSQL(t, h, `INSERT INTO market_agent_versions(agent_id,version,state,name,tagline,description,category,instructions,content_hash)
+		VALUES('m-settle',1,'approved','Settle writer','Writes','','writing','Write.','h')`)
 	// The payer's previous period: 1,000 paid, 2,000 spent (half of it on a gift): 30 credits charged in three calls.
 	start := time.Now().Add(-60 * 24 * time.Hour).Truncate(time.Second)
 	end := start.Add(30 * 24 * time.Hour)
@@ -1203,63 +1274,569 @@ func TestPostgresMarketSettlementPaysWhatPaidCreditsCovered(t *testing.T) {
 	// The rest of the period's 2,000 credits went on model calls.
 	execSQL(t, h, `INSERT INTO media_generations(run_id,tenant_id,model,credit_points,provider_accepted,billed_user_id,billed_period_start)
 		SELECT 'r-g',t.id,'rh.x',1970,true,$1,$2 FROM tenants t LIMIT 1`, payer, start)
-	h.a.settleMarket(context.Background())
-	// A send that a loaded machine slowed past the client's timeout is tried again, as the next round would.
-	for range 3 {
-		mu.Lock()
-		sent := len(credited)
-		mu.Unlock()
-		if sent > 0 {
-			break
-		}
-		execSQL(t, h, "UPDATE market_payouts SET next_attempt_at=clock_timestamp() WHERE status='pending'")
-		h.a.payMarketEarnings(context.Background())
-	}
+	h.a.settleMarket(ctx)
 	var earned int64
 	var settlement string
-	if err := h.db.QueryRow(context.Background(), "SELECT sum(earned_microcredits),min(settlement) FROM market_agent_calls WHERE agent_id='m-settle'").Scan(&earned, &settlement); err != nil ||
+	if err := h.db.QueryRow(ctx, "SELECT sum(earned_microcredits),min(settlement) FROM market_agent_calls WHERE agent_id='m-settle'").Scan(&earned, &settlement); err != nil ||
 		earned != 3*3_750_000 || settlement != "final" {
 		t.Fatal("half the share where half the period was a gift", earned, settlement, err)
 	}
-	// 11.25 credits: 11 cents sent, a quarter of a credit carried.
-	mu.Lock()
-	if len(credited) != 1 {
-		mu.Unlock()
-		t.Fatal("one payout", credited)
+	// They were made final this month, which has not ended: no statement yet, and nothing sent though transfers are on.
+	var statements int
+	if err := h.db.QueryRow(ctx, "SELECT count(*) FROM market_payouts").Scan(&statements); err != nil || statements != 0 || sent() != 0 {
+		t.Fatal("no statement before the month ends", statements, sent(), err)
 	}
-	for _, cents := range credited {
-		if cents != 11 {
-			t.Fatal("the payout's whole cents", cents)
+	// Once the month has ended, its statement waits for review: 11.25 credits make 11 cents, a quarter carried. Made
+	// again, it is the same one, and the settlement job sends nothing no one approved.
+	next := marketMonthAfter(time.Now())
+	month := next.AddDate(0, -1, 0)
+	for range 2 {
+		if err := h.a.makeMarketStatements(ctx, next); err != nil {
+			t.Fatal(err)
 		}
 	}
-	mu.Unlock()
-	var status string
-	var carry int64
-	if err := h.db.QueryRow(context.Background(), "SELECT status,carry_out_microcredits FROM market_payouts WHERE author_user_id=$1", author).Scan(&status, &carry); err != nil || status != "sent" || carry != 250_000 {
-		t.Fatal("the payout is sent and keeps the remainder", status, carry, err)
+	h.a.payMarketEarnings(ctx)
+	var id, status string
+	var calls int
+	var credits, cents, carry int64
+	if err := h.db.QueryRow(ctx, "SELECT id,status,calls,credits,amount_cents,carry_out_microcredits FROM market_payouts WHERE author_user_id=$1", author).Scan(&id, &status, &calls, &credits, &cents, &carry); err != nil ||
+		id != marketStatementID(author, month) || status != "review" || calls != 3 || credits != 30 || cents != 11 || carry != 250_000 {
+		t.Fatal("one statement for the month, waiting for review", id, status, calls, credits, cents, carry, err)
 	}
-	// The author's view (read with ClawHunt off: this test's account signed in with a password, which a site with
-	// ClawHunt does not keep).
+	if sent() != 0 {
+		t.Fatal("a statement no one approved was sent")
+	}
+	// The author sees it waiting for review (read with ClawHunt off: this test's accounts signed in with a password,
+	// which a site with ClawHunt does not keep).
 	h.a.cfg.ClawHuntURL = ""
 	e := h.request(t, authorCookie, "GET", "/market/earnings", nil, 200)
-	h.a.cfg.ClawHuntURL = clawhunt.URL
-	if e["paid"] != 11.0 || e["available"] != 0.0 || e["transferring"] != 0.0 {
-		t.Fatal("earnings", e)
+	if e["inReview"] != 11.0 || e["available"] != 0.0 || e["transferring"] != 0.0 || e["paid"] != 0.0 {
+		t.Fatal("earnings in review", e)
 	}
-	// A call settled later carries the remainder into the next payout; an ineligible account holds it.
-	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,run_id,billed_user_id,billed_period_start,billed_period_end,price_credits,fee_bps,status,outcome,settlement,earned_microcredits)
-		VALUES('c9','m-settle',1,$1,'r9',$2,$3,$4,1,2500,'charged','completed','final',750000)`, author, payer, start, end)
+	if p := e["payouts"].([]any)[0].(map[string]any); p["month"] != month.Format("2006-01") || p["calls"] != 3.0 || p["credits"] != 30.0 || p["status"] != "review" {
+		t.Fatal("the author's statement", p)
+	}
+	// Only an administrator approves one, of the amount they read, and only with transfers on.
+	h.request(t, authorCookie, "POST", "/admin/market/payouts/"+id+"/approve", map[string]any{"amountCents": 11}, 403)
+	h.request(t, adminCookie, "POST", "/admin/market/payouts/"+id+"/approve", map[string]any{}, 400)
+	h.a.cfg.MarketPayouts = false
+	if off := h.request(t, adminCookie, "POST", "/admin/market/payouts/"+id+"/approve", map[string]any{"amountCents": 11}, 409); errorCode(off) != "market_payouts_off" {
+		t.Fatal("approving with transfers off", off)
+	}
+	list := h.request(t, adminCookie, "GET", "/admin/market/payouts?status=review", nil, 200)
+	items := list["items"].([]any)
+	if list["payoutsEnabled"] != false || len(items) != 1 {
+		t.Fatal("the statements to review", list)
+	}
+	item := items[0].(map[string]any)
+	agents := item["agents"].([]any)
+	if item["month"] != month.Format("2006-01") || item["calls"] != 3.0 || item["credits"] != 30.0 || item["amountCents"] != 11.0 || item["status"] != "review" || len(agents) != 1 {
+		t.Fatal("the statement as reviewed", item)
+	}
+	if byAgent := agents[0].(map[string]any); byAgent["id"] != "m-settle" || byAgent["name"] != "Settle writer" || byAgent["calls"] != 3.0 || byAgent["credits"] != 30.0 || byAgent["earnedMicrocredits"] != 11_250_000.0 {
+		t.Fatal("its calls by Agent", byAgent)
+	}
+	h.a.cfg.MarketPayouts, h.a.cfg.ClawHuntURL = true, clawhunt.URL
+	// An approval of another amount than the statement's approves nothing.
+	if code, other := approveMarketStatementAs(t, h, admin, id, 1100); code != 409 || errorCode(other) != "market_statement_changed" || sent() != 0 {
+		t.Fatal("an approval of another amount", code, other, sent())
+	}
+	// Approving sends it at once, the month on the wallet's line.
+	code, approved := approveMarketStatementAs(t, h, admin, id, 11)
+	mu.Lock()
+	got, note := credited[id], notes[id]
+	mu.Unlock()
+	if code != 200 || approved["status"] != "sent" || approved["approvedBy"] != "admin5@example.test" || approved["clawHuntTransaction"] != "t-"+id ||
+		got != 11 || note != "AwwO Agent market earnings, "+month.Format("2006-01") {
+		t.Fatal("approved and sent", code, approved, got, note)
+	}
+	if code, again := approveMarketStatementAs(t, h, admin, id, 11); code != 409 || errorCode(again) != "market_statement_not_in_review" || sent() != 1 {
+		t.Fatal("a statement is approved once", code, again, sent())
+	}
+	h.a.cfg.ClawHuntURL = ""
+	e = h.request(t, authorCookie, "GET", "/market/earnings", nil, 200)
+	h.a.cfg.ClawHuntURL = clawhunt.URL
+	if e["paid"] != 11.0 || e["inReview"] != 0.0 || e["available"] != 0.0 {
+		t.Fatal("earnings paid", e)
+	}
+	// The next month's statement carries the quarter in; an account that cannot receive it holds it.
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,run_id,billed_user_id,billed_period_start,billed_period_end,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('c9','m-settle',1,$1,'r9',$2,$3,$4,1,2500,'charged','completed','final',750000,$5)`, author, payer, start, end, next.Add(24*time.Hour))
+	if err := h.a.makeMarketStatements(ctx, marketMonthAfter(next)); err != nil {
+		t.Fatal(err)
+	}
 	mu.Lock()
 	ineligible = true
 	mu.Unlock()
-	h.a.settleMarket(context.Background())
-	if err := h.db.QueryRow(context.Background(), "SELECT status FROM market_payouts WHERE author_user_id=$1 AND status<>'sent'", author).Scan(&status); err != nil || status != "held" {
-		t.Fatal("an ineligible payee's payout is held", status, err)
+	if code, held := approveMarketStatementAs(t, h, admin, marketStatementID(author, next), 1); code != 200 || held["status"] != "held" || held["amountCents"] != 1.0 ||
+		held["carryInMicrocredits"] != 250_000.0 || held["calls"] != 1.0 || held["lastError"] != "payee_ineligible" {
+		t.Fatal("the carried quarter makes a cent with the new call, held for an account that cannot receive it", code, held)
 	}
+	// Approved and held, it is on its way: counted once, as transferring.
+	h.a.cfg.ClawHuntURL = ""
+	e = h.request(t, authorCookie, "GET", "/market/earnings", nil, 200)
+	h.a.cfg.ClawHuntURL = clawhunt.URL
+	if e["transferring"] != 1.0 || e["inReview"] != 0.0 || e["available"] != 0.0 || e["paid"] != 11.0 {
+		t.Fatal("an approved statement on its way counts once", e)
+	}
+}
+
+func TestPostgresMarketStatementsGatherTheirMonthOnly(t *testing.T) {
+	var mu sync.Mutex
+	asked := 0
+	clawhunt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked++
+		mu.Unlock()
+		w.WriteHeader(500)
+	}))
+	defer clawhunt.Close()
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	_, _, rich := h.register(t, "author-rich@example.test")
+	_, _, poor := h.register(t, "author-poor@example.test")
+	_, _, unlinked := h.register(t, "author-unlinked@example.test")
+	h.a.cfg.ClawHuntURL, h.a.cfg.ClawHuntClientID, h.a.cfg.ClawHuntClientSecret = clawhunt.URL, "awwo", strings.Repeat("s", 32)
+	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'1',$2),($1,'2',$3)", clawhunt.URL, rich, poor)
+	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-rich',$1,'listed',1),('m-poor',$2,'listed',1),('m-unlinked',$3,'listed',1)", rich, poor, unlinked)
+	next := marketMonthAfter(time.Now())
+	month, after := next.AddDate(0, -1, 0), marketMonthAfter(next)
+	call := func(id, agent, author string, earned int64, finalized time.Time) {
+		execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+			VALUES($1,$2,1,$3,0,2500,'charged','completed','final',$4,$5)`, id, agent, author, earned, finalized)
+	}
+	// The month: two calls of rich's (a caller paid one with a gift: it earns nothing, and is counted), and one made
+	// final after the month ended; less than a cent of poor's; a cent and more of an author with no ClawHunt account.
+	call("r1", "m-rich", rich, 1_500_000, month.Add(time.Hour))
+	call("r2", "m-rich", rich, 0, month.Add(2*time.Hour))
+	call("r3", "m-rich", rich, 2_000_000, next.Add(time.Hour))
+	call("p1", "m-poor", poor, 400_000, month.Add(time.Hour))
+	call("u1", "m-unlinked", unlinked, 5_000_000, month.Add(time.Hour))
+	// Statements are made with transfers off: they are the month's tally.
+	if err := h.a.makeMarketStatements(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	type statement struct {
+		calls                           int
+		micro, carryIn, carryOut, cents int64
+		status                          string
+	}
+	read := func(author string, m time.Time) (statement, error) {
+		var s statement
+		err := h.db.QueryRow(ctx, "SELECT calls,microcredits,carry_in_microcredits,carry_out_microcredits,amount_cents,status FROM market_payouts WHERE id=$1 AND author_user_id=$2 AND period_month=$3::date",
+			marketStatementID(author, m), author, m.Format("2006-01-02")).Scan(&s.calls, &s.micro, &s.carryIn, &s.carryOut, &s.cents, &s.status)
+		return s, err
+	}
+	if s, err := read(rich, month); err != nil || s != (statement{2, 1_500_000, 0, 500_000, 1, "review"}) {
+		t.Fatal("rich's month: two calls, a cent, half a credit carried", s, err)
+	}
+	var waiting int
+	if err := h.db.QueryRow(ctx, "SELECT count(*) FROM market_agent_calls WHERE id IN ('r3','p1','u1') AND payout_id IS NULL").Scan(&waiting); err != nil || waiting != 3 {
+		t.Fatal("a call of the next month, less than a cent and no ClawHunt account wait", waiting, err)
+	}
+	// Asked for one all the same, a statement below a cent is not made, and its calls are given back.
+	if err := h.a.makeMarketStatement(ctx, poor, "2", month); err != nil {
+		t.Fatal(err)
+	}
+	var others int
+	if err := h.db.QueryRow(ctx, "SELECT count(*) FROM market_payouts WHERE author_user_id IN ($1,$2)", poor, unlinked).Scan(&others); err != nil || others != 0 {
+		t.Fatal("no statement below a cent or without a ClawHunt account", others, err)
+	}
+	if err := h.db.QueryRow(ctx, "SELECT count(*) FROM market_agent_calls WHERE id='p1' AND payout_id IS NULL").Scan(&waiting); err != nil || waiting != 1 {
+		t.Fatal("the call of a statement below a cent is given back", waiting, err)
+	}
+	// The next month: rich's statement is made though the first still waits for review, and carries its half in;
+	// poor's two calls make a cent together.
+	call("p2", "m-poor", poor, 700_000, next.Add(time.Hour))
+	if err := h.a.makeMarketStatements(ctx, after); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := read(rich, next); err != nil || s != (statement{1, 2_500_000, 500_000, 500_000, 2, "review"}) {
+		t.Fatal("rich's next month carries the half in", s, err)
+	}
+	if s, err := read(poor, next); err != nil || s != (statement{2, 1_100_000, 0, 100_000, 1, "review"}) {
+		t.Fatal("poor's calls of both months make a cent", s, err)
+	}
+	// A statement cannot be put on its way without an approval, and with transfers on the settlement job sends nothing
+	// no administrator approved.
+	if _, err := h.db.Exec(ctx, "UPDATE market_payouts SET status='pending' WHERE author_user_id=$1", poor); err == nil {
+		t.Fatal("a statement went on its way without an approval")
+	}
+	h.a.cfg.MarketPayouts = true
+	h.a.settleMarket(ctx)
+	h.a.payMarketEarnings(ctx)
+	mu.Lock()
+	defer mu.Unlock()
+	var attempts int
+	if err := h.db.QueryRow(ctx, "SELECT COALESCE(sum(attempts),0) FROM market_payouts").Scan(&attempts); err != nil || attempts != 0 || asked != 0 {
+		t.Fatal("nothing unapproved is sent", attempts, asked, err)
+	}
+}
+
+// A month the job did not run in still gets its own statement: earnings made final in October and in November, with
+// the job first running in December, make an October statement and a November one, in that order.
+func TestPostgresMarketStatementsCatchUpMonthByMonth(t *testing.T) {
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	_, _, author := h.register(t, "author-late@example.test")
+	h.a.cfg.ClawHuntURL = "https://clawhunt.invalid"
+	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'9',$2)", h.a.cfg.ClawHuntURL, author)
+	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-late',$1,'listed',1)", author)
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	november := october.AddDate(0, 1, 0)
+	for i, c := range []struct {
+		earned    int64
+		finalized time.Time
+	}{{1_500_000, october.Add(30*24*time.Hour + 23*time.Hour)}, {2_000_000, november.Add(3 * 24 * time.Hour)}, {1_000_000, november}} {
+		execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+			VALUES($1,'m-late',1,$2,0,2500,'charged','completed','final',$3,$4)`, "late"+strconv.Itoa(i), author, c.earned, c.finalized)
+	}
+	if err := h.a.makeMarketStatements(ctx, time.Date(2026, 12, 1, 0, 5, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := h.db.Query(ctx, "SELECT to_char(period_month,'YYYY-MM'),calls,microcredits,carry_in_microcredits,carry_out_microcredits,amount_cents FROM market_payouts WHERE author_user_id=$1 ORDER BY period_month", author)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for rows.Next() {
+		var month string
+		var calls int
+		var micro, in, out, cents int64
+		if err = rows.Scan(&month, &calls, &micro, &in, &out, &cents); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, month+" "+strconv.Itoa(calls)+" "+strconv.FormatInt(micro, 10)+" "+strconv.FormatInt(in, 10)+" "+strconv.FormatInt(out, 10)+" "+strconv.FormatInt(cents, 10))
+	}
+	rows.Close()
+	// The earning made final at November's first instant is November's.
+	if want := []string{"2026-10 1 1500000 0 500000 1", "2026-11 2 3500000 500000 500000 3"}; !slices.Equal(got, want) {
+		t.Fatal("each month its own statement, in order", got)
+	}
+	// An earning made final in October that turns up only now goes on the next statement: no statement is made out of
+	// order, and none twice.
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('late-old','m-late',1,$1,0,2500,'charged','completed','final',4000000,$2)`, author, october.Add(24*time.Hour))
+	for _, now := range []time.Time{time.Date(2026, 12, 1, 0, 15, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 5, 0, 0, time.UTC)} {
+		if err = h.a.makeMarketStatements(ctx, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var statements int
+	var december string
+	if err = h.db.QueryRow(ctx, "SELECT count(*),max(to_char(period_month,'YYYY-MM')) FROM market_payouts WHERE author_user_id=$1", author).Scan(&statements, &december); err != nil || statements != 3 || december != "2026-12" {
+		t.Fatal("the late October earning goes on December's statement", statements, december, err)
+	}
+	// Asked for one all the same, as a second API process might be, no statement is made before the latest.
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('late-sep','m-late',1,$1,0,2500,'charged','completed','final',5000000,$2)`, author, october.AddDate(0, -1, 3))
+	if err = h.a.makeMarketStatement(ctx, author, "9", october.AddDate(0, -1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var early, taken int
+	if err = h.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE period_month<'2026-10-01'),(SELECT count(*) FROM market_agent_calls WHERE id='late-sep' AND payout_id IS NOT NULL) FROM market_payouts WHERE author_user_id=$1", author).Scan(&early, &taken); err != nil || early != 0 || taken != 0 {
+		t.Fatal("a statement before the latest", early, taken, err)
+	}
+}
+
+// One author's failure holds up no other author's statement, and the round answers it.
+func TestPostgresMarketStatementsGoOnAfterOneAuthorFails(t *testing.T) {
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	h.a.cfg.ClawHuntURL = "https://clawhunt.invalid"
+	next := marketMonthAfter(time.Now())
+	month := next.AddDate(0, -1, 0)
+	for i, id := range []string{"u-fails", "u-goes-on"} {
+		execSQL(t, h, "INSERT INTO users(id,email,name,password_hash) VALUES($1,$2,$1,'x')", id, id+"@example.test")
+		execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,$2,$3)", h.a.cfg.ClawHuntURL, strconv.Itoa(i+1), id)
+		execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES($1,$2,'listed',1)", "m-"+id, id)
+		// The failing author's earning is the older, so the round comes to them first.
+		execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+			VALUES($1,$2,1,$3,0,2500,'charged','completed','final',2000000,$4)`, "f-"+id, "m-"+id, id, month.Add(time.Duration(i+1)*time.Hour))
+	}
+	// The first author's statement cannot be written: its id is taken (by a row no real statement would be).
+	execSQL(t, h, "INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month) VALUES($1,'u-goes-on','2',1000000,1,'review',$2::date)",
+		marketStatementID("u-fails", month), month.AddDate(0, -2, 0).Format("2006-01-02"))
+	err := h.a.makeMarketStatements(ctx, next)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatal("the round answers the first author's failure", err)
+	}
+	var made, taken int
+	if err = h.db.QueryRow(ctx, "SELECT count(*),(SELECT count(*) FROM market_agent_calls WHERE id='f-u-fails' AND payout_id IS NOT NULL) FROM market_payouts WHERE id=$1 AND amount_cents=2",
+		marketStatementID("u-goes-on", month)).Scan(&made, &taken); err != nil || made != 1 || taken != 0 {
+		t.Fatal("the next author's statement is made, and the failing author's calls are given back", made, taken, err)
+	}
+}
+
+// More authors than a round takes, across months the job missed: each round brings whole authors up to date, so
+// the authors of the next round still get each month's own statement.
+func TestPostgresMarketStatementsRoundsTakeWholeAuthors(t *testing.T) {
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	h.a.cfg.ClawHuntURL = "https://clawhunt.invalid"
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	authors := marketPayoutBatch + 3
+	for i := range authors {
+		id := "u-batch-" + strconv.Itoa(i)
+		execSQL(t, h, "INSERT INTO users(id,email,name,password_hash) VALUES($1,$2,$1,'x')", id, id+"@example.test")
+		execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,$2,$3)", h.a.cfg.ClawHuntURL, strconv.Itoa(1000+i), id)
+		execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES($1,$2,'listed',1)", "m-"+id, id)
+		// An October earning and a November one, each of a cent and more; the oldest waiting authors come first.
+		execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+			VALUES($1,$2,1,$3,0,2500,'charged','completed','final',1000000,$4),($5,$2,1,$3,0,2500,'charged','completed','final',2000000,$6)`,
+			"b-oct-"+strconv.Itoa(i), "m-"+id, id, october.Add(time.Duration(i)*time.Minute), "b-nov-"+strconv.Itoa(i), october.AddDate(0, 1, 2))
+	}
+	december := time.Date(2026, 12, 1, 0, 5, 0, 0, time.UTC)
+	count := func() (statements, authorsDone int) {
+		if err := h.db.QueryRow(ctx, "SELECT count(*),count(DISTINCT author_user_id) FROM market_payouts").Scan(&statements, &authorsDone); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := h.a.makeMarketStatements(ctx, december); err != nil {
+		t.Fatal(err)
+	}
+	if statements, done := count(); statements != 2*marketPayoutBatch || done != marketPayoutBatch {
+		t.Fatal("a round takes whole authors, both of their months", statements, done)
+	}
+	if err := h.a.makeMarketStatements(ctx, december.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var wrong int
+	if err := h.db.QueryRow(ctx, `SELECT count(*) FROM market_payouts p WHERE p.calls<>1 OR p.amount_cents<>(CASE WHEN p.period_month='2026-10-01' THEN 1 ELSE 2 END)
+		OR EXISTS(SELECT 1 FROM market_agent_calls c WHERE c.payout_id=p.id AND date_trunc('month', c.finalized_at AT TIME ZONE 'UTC') <> p.period_month)`).Scan(&wrong); err != nil {
+		t.Fatal(err)
+	}
+	if statements, done := count(); statements != 2*authors || done != authors || wrong != 0 {
+		t.Fatal("the next round's authors get each month's own statement too", statements, done, wrong)
+	}
+}
+
+// marketMonthCloseWaiters counts the requests waiting for this schema's month-close lock (its 64-bit key is pg_locks'
+// classid and objid).
+const marketMonthCloseWaiters = `SELECT count(*) FROM pg_locks l, (SELECT ` + marketMonthCloseLock + ` AS k) key WHERE l.locktype='advisory' AND NOT l.granted
+	AND l.objsubid=1 AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+	AND l.classid::bigint=((key.k >> 32) & 4294967295) AND l.objid::bigint=(key.k & 4294967295)`
+
+// A statement waits for an earning still committing that was made final before its month ended, as another API
+// process may be finalizing one when the month closes.
+func TestPostgresMarketStatementWaitsForAnEarningStillCommitting(t *testing.T) {
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	_, _, author := h.register(t, "author-commit@example.test")
+	h.a.cfg.ClawHuntURL = "https://clawhunt.invalid"
+	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'10',$2)", h.a.cfg.ClawHuntURL, author)
+	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-commit',$1,'listed',1)", author)
+	next := marketMonthAfter(time.Now())
+	month := next.AddDate(0, -1, 0)
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('done-1','m-commit',1,$1,0,2500,'charged','completed','final',1500000,$2),('open-1','m-commit',1,$1,0,2500,'charged','completed','open',NULL,NULL)`, author, month.Add(time.Hour))
+	// Finalizing the second, as finalizeMarketPeriod does, stamped before the month's end and not committed yet.
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared("+marketMonthCloseLock+")"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, "UPDATE market_agent_calls SET earned_microcredits=1000000,settlement='final',finalized_at=$1 WHERE id='open-1'", next.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- h.a.makeMarketStatements(ctx, next) }()
+	// The statement must wait: it finishes only once the earning has committed.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		select {
+		case err := <-done:
+			t.Fatal("the statement was made while an earning of its month was still committing", err)
+		default:
+		}
+		var waiting int
+		if err = h.db.QueryRow(ctx, marketMonthCloseWaiters).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the statement neither waited nor finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	var calls int
 	var cents int64
-	if err := h.db.QueryRow(context.Background(), "SELECT amount_cents FROM market_payouts WHERE status='held'").Scan(&cents); err != nil || cents != 1 {
-		t.Fatal("the carried remainder makes a cent with the new call", cents, err)
+	if err = h.db.QueryRow(ctx, "SELECT calls,amount_cents FROM market_payouts WHERE id=$1", marketStatementID(author, month)).Scan(&calls, &cents); err != nil || calls != 2 || cents != 2 {
+		t.Fatal("the month's statement holds the earning that was committing", calls, cents, err)
 	}
+	// And finalizing waits while a statement is being made, which holds the lock alone.
+	closing, err := h.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closing.Rollback(context.Background())
+	if _, err = closing.Exec(ctx, "SELECT pg_advisory_xact_lock("+marketMonthCloseLock+")"); err != nil {
+		t.Fatal(err)
+	}
+	finalized := make(chan error, 1)
+	go func() { finalized <- h.a.finalizeMarketPeriod(ctx, author, month) }()
+	for deadline := time.Now().Add(20 * time.Second); ; {
+		select {
+		case err := <-finalized:
+			t.Fatal("finalizing went on while a statement was being made", err)
+		default:
+		}
+		var waiting int
+		if err = h.db.QueryRow(ctx, marketMonthCloseWaiters).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("finalizing neither waited nor finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err = closing.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-finalized; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A statement ClawHunt refuses keeps the code ClawHunt gave, so the administrator reads why (its cap, say); a refusal
+// whose detail is no code keeps the status alone.
+func TestPostgresMarketStatementRefusedByClawHuntSaysWhy(t *testing.T) {
+	var mu sync.Mutex
+	detail := "amount_above_cap"
+	clawhunt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		writeJSON(w, 400, map[string]any{"detail": detail})
+	}))
+	defer clawhunt.Close()
+	h, _ := marketTestHarness(t)
+	ctx := context.Background()
+	_, _, author := h.register(t, "author-cap@example.test")
+	_, _, admin := h.register(t, "admin-cap@example.test")
+	makeAdmin(t, h, admin)
+	h.a.cfg.ClawHuntURL, h.a.cfg.ClawHuntClientID, h.a.cfg.ClawHuntClientSecret, h.a.cfg.MarketPayouts = clawhunt.URL, "awwo", strings.Repeat("s", 32), true
+	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'12',$2)", clawhunt.URL, author)
+	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-cap',$1,'listed',1)", author)
+	next := marketMonthAfter(time.Now())
+	month := next.AddDate(0, -1, 0)
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('cap-1','m-cap',1,$1,0,2500,'charged','completed','final',3000000,$2)`, author, month.Add(time.Hour))
+	if err := h.a.makeMarketStatements(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	id := marketStatementID(author, month)
+	if code, out := approveMarketStatementAs(t, h, admin, id, 3); code != 200 || out["status"] != "pending" || out["lastError"] != "answer_400:amount_above_cap" {
+		t.Fatal("a refusal keeps ClawHunt's code", code, out)
+	}
+	mu.Lock()
+	detail = "Something <b>else</b> went wrong"
+	mu.Unlock()
+	execSQL(t, h, "UPDATE market_payouts SET next_attempt_at=clock_timestamp() WHERE id=$1", id)
+	h.a.payMarketEarnings(ctx)
+	var lastError string
+	if err := h.db.QueryRow(ctx, "SELECT last_error FROM market_payouts WHERE id=$1", id).Scan(&lastError); err != nil || lastError != "answer_400" {
+		t.Fatal("a detail that is no code is not kept", lastError, err)
+	}
+}
+
+// 046 refuses a database that holds transfers from before statements still on their way, which nothing would send or
+// approve after it, and keeps those that went out.
+func TestPostgresMarketStatementsMigrationRefusesTransfersOnTheirWay(t *testing.T) {
+	h := newHarness(t, "")
+	ctx := context.Background()
+	_, _, author := h.register(t, "statement-upgrade@awwo.invalid")
+	sql, e := migrations.ReadFile("migrations/046_market_statements.sql")
+	if e != nil || len(sql) == 0 {
+		t.Fatal("046 is not embedded", e)
+	}
+	for _, c := range []struct {
+		status string
+		ok     bool
+	}{{"sent", true}, {"failed", true}, {"pending", false}, {"held", false}} {
+		tx, e := h.db.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		// As before 046: no check of statements, and a transfer as the API made it by itself then.
+		if _, e = tx.Exec(ctx, "ALTER TABLE market_payouts DROP CONSTRAINT market_payouts_approved_statement_check"); e != nil {
+			tx.Rollback(ctx)
+			t.Fatal(e)
+		}
+		if _, e = tx.Exec(ctx, "INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status) VALUES('a-old',$1,'1',1000000,1,$2)", author, c.status); e != nil {
+			tx.Rollback(ctx)
+			t.Fatal(e)
+		}
+		_, e = tx.Exec(ctx, string(sql))
+		tx.Rollback(ctx)
+		if c.ok != (e == nil) || (!c.ok && !strings.Contains(e.Error(), "transfers from before monthly statements")) {
+			t.Fatal("046 over a transfer from before statements that is", c.status, e)
+		}
+	}
+}
+
+// 046 runs again harmlessly on a database that already holds statements, and keeps one statement per author and
+// month, on its first day.
+func TestPostgresMarketStatementsMigrationRunsAgain(t *testing.T) {
+	h := newHarness(t, "")
+	ctx := context.Background()
+	_, _, author := h.register(t, "statement-migration@awwo.invalid")
+	execSQL(t, h, `INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month,calls,credits)
+		VALUES('a-s1',$1,'1',1000000,1,'review','2026-09-01',1,1)`, author)
+	sql, e := migrations.ReadFile("migrations/046_market_statements.sql")
+	if e != nil || len(sql) == 0 {
+		t.Fatal("046 is not embedded", e)
+	}
+	for run := 0; run < 2; run++ {
+		tx, e := h.db.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = tx.Exec(ctx, string(sql)); e != nil {
+			tx.Rollback(ctx)
+			t.Fatal("046 run again, run", run+1, e)
+		}
+		if e = tx.Commit(ctx); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var kept int
+	if e := h.db.QueryRow(ctx, "SELECT count(*) FROM market_payouts WHERE id='a-s1' AND status='review'").Scan(&kept); e != nil || kept != 1 {
+		t.Fatal("the statement kept its row", kept, e)
+	}
+	for _, refused := range []string{
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month) VALUES('a-s2',$1,'1',1000000,1,'review','2026-09-01')`,
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month) VALUES('a-s3',$1,'1',1000000,1,'review','2026-10-15')`,
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month) VALUES('a-s4',$1,'1',1000000,1,'approved','2026-11-01')`,
+		// The transfer an API older than 046 made by itself, after a rollback: no month, no approval; and a row with
+		// no month at all.
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,carry_in_microcredits,carry_out_microcredits,amount_cents) VALUES('a-s7',$1,'1',1000000,0,0,1)`,
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status) VALUES('a-s9',$1,'1',1000000,1,'review')`,
+		`INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month) VALUES('a-s8',$1,'1',1000000,1,'pending','2026-12-01')`,
+		`UPDATE market_payouts SET status='sent' WHERE id='a-s1' AND author_user_id=$1`,
+	} {
+		if _, e := h.db.Exec(ctx, refused, author); e == nil {
+			t.Fatal("refused by 046", refused)
+		}
+	}
+	// Two approved statements of an author can be on their way at once (the one-open-payout index is gone).
+	execSQL(t, h, `INSERT INTO market_payouts(id,author_user_id,subject,microcredits,amount_cents,status,period_month,approved_at) VALUES('a-s5',$1,'1',1000000,1,'pending','2026-10-01',clock_timestamp()),
+		('a-s6',$1,'1',1000000,1,'pending','2026-11-01',clock_timestamp())`, author)
 }
 
 func TestPostgresMarketReconcileReleasesFeesOfRunsThatEndedElsewhere(t *testing.T) {
@@ -1338,28 +1915,38 @@ func TestPostgresMarketPayoutWhoseAnswerIsCutShortIsAskedAgainWithItsReference(t
 	}))
 	defer clawhunt.Close()
 	h, _ := marketTestHarness(t)
+	ctx := context.Background()
 	_, _, author := h.register(t, "author7@example.test")
+	_, _, admin := h.register(t, "admin7@example.test")
+	makeAdmin(t, h, admin)
 	h.a.cfg.ClawHuntURL, h.a.cfg.ClawHuntClientID, h.a.cfg.ClawHuntClientSecret, h.a.cfg.MarketPayouts = clawhunt.URL, "awwo", strings.Repeat("s", 32), true
 	execSQL(t, h, "INSERT INTO external_identities(issuer,subject,user_id) VALUES($1,'77',$2)", clawhunt.URL, author)
 	execSQL(t, h, "INSERT INTO market_agents(id,author_user_id,status,listed_version) VALUES('m-cut',$1,'listed',1)", author)
-	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits)
-		VALUES('cut-1','m-cut',1,$1,0,2500,'charged','completed','final',2500000)`, author)
-	h.a.payMarketEarnings(context.Background())
-	var status string
-	var attempts int
-	if err := h.db.QueryRow(context.Background(), "SELECT status,attempts FROM market_payouts WHERE author_user_id=$1", author).Scan(&status, &attempts); err != nil || status != "pending" || attempts != 1 {
-		t.Fatal("an answer cut short leaves the payout pending", status, attempts, err)
+	execSQL(t, h, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,price_credits,fee_bps,status,outcome,settlement,earned_microcredits,finalized_at)
+		VALUES('cut-1','m-cut',1,$1,0,2500,'charged','completed','final',2500000,clock_timestamp())`, author)
+	next := marketMonthAfter(time.Now())
+	if err := h.a.makeMarketStatements(ctx, next); err != nil {
+		t.Fatal(err)
 	}
-	// No second payout opens while it is pending, and the next attempt asks again with the same reference.
+	id := marketStatementID(author, next.AddDate(0, -1, 0))
+	// Approved, it is sent at once; the answer is cut short, so it stays pending.
+	if code, out := approveMarketStatementAs(t, h, admin, id, 2); code != 200 || out["status"] != "pending" || out["attempts"] != 1.0 {
+		t.Fatal("an answer cut short leaves the statement pending", code, out)
+	}
+	// No second statement is made for the month, and the next attempt asks again with the same reference.
+	if err := h.a.makeMarketStatements(ctx, next); err != nil {
+		t.Fatal(err)
+	}
 	execSQL(t, h, "UPDATE market_payouts SET next_attempt_at=clock_timestamp()")
-	h.a.payMarketEarnings(context.Background())
+	h.a.payMarketEarnings(ctx)
 	var payouts int
-	if err := h.db.QueryRow(context.Background(), "SELECT count(*),max(status) FROM market_payouts WHERE author_user_id=$1", author).Scan(&payouts, &status); err != nil || payouts != 1 || status != "sent" {
-		t.Fatal("the same payout is sent on the next attempt", payouts, status, err)
+	var status string
+	if err := h.db.QueryRow(ctx, "SELECT count(*),max(status) FROM market_payouts WHERE author_user_id=$1", author).Scan(&payouts, &status); err != nil || payouts != 1 || status != "sent" {
+		t.Fatal("the same statement is sent on the next attempt", payouts, status, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 2 || seen[0] != seen[1] || len(credited) != 1 {
+	if len(seen) != 2 || seen[0] != id || seen[1] != id || len(credited) != 1 {
 		t.Fatal("both attempts carried one reference", seen, credited)
 	}
 }
