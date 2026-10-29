@@ -9,8 +9,8 @@ import { MarketReviewAdmin } from './market/MarketReviewAdmin';
 import { useMarketSettings } from './market/useMarket';
 import './admin.css';
 
-/** The tabs: the paged record lists, and 市场审核 where this server has the Agent market (市场转账 while it is closed:
- *  what was earned still transfers). */
+/** The tabs: the paged record lists, and 市场审核 where this server has the Agent market (市场账单 while it is closed:
+ *  what was earned still settles on monthly statements, approved there). */
 type AdminTab = AdminKind | 'market';
 
 export function AdminPanel({ identity, controls }: { identity: Identity; controls?: ReactNode }) {
@@ -62,7 +62,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   };
   if (!isAdmin) return <main className="saas-notice"><h1>{t('无平台管理权限', 'Platform access denied')}</h1><p>{t('请联系平台管理员。', 'Contact a platform administrator.')}</p><a href="/">{t('返回工作区', 'Back to workspace')}</a></main>;
   const labels: Partial<Record<AdminTab, string>> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log'), interests: t('付费意向', 'Upgrade interest'), deletions: t('删除申请', 'Deletion requests'),
-    ...(market ? { market: t('市场审核', 'Market review') } : market === null ? { market: t('市场转账', 'Market transfers') } : {}) };
+    ...(market ? { market: t('市场审核', 'Market review') } : market === null ? { market: t('市场账单', 'Market statements') } : {}) };
   const date = (value: string) => value ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '—';
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">{t('返回工作区', 'Back to workspace')}</a>{controls}</header>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('仅平台管理员可见', 'Visible to platform administrators')}</span><h1>{t('平台管理', 'Platform administration')}</h1><p>{t('管理工作区状态与执行额度，查询用户、运行及审计记录。', 'Manage workspace status and run limits; inspect users, runs and audit records.')}</p></section>

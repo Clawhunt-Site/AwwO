@@ -69,12 +69,15 @@ export interface MarketDraft extends Omit<MarketDraftInput, 'skills'> {
   agentId: string; version: number; state: MarketVersionState; reviewNote: string; skills: MarketDraftSkill[]; listedAuthorName: string;
 }
 
-export interface MarketPayout { id: string; amountCents: number; status: string; createdAt: string; sentAt: string | null }
-/** The author's earnings, in credits (1 credit = 1 US cent): waiting for their period to settle (pending), settled and not
- *  yet in a transfer (available), in a transfer not yet sent (transferring), and sent (paid), as of `asOf`. */
+/** A monthly statement: the earnings of a calendar month (`month`, YYYY-MM in UTC) gathered for one author, its calls and
+ *  what they were charged in credits, what it sends in cents, and how far it went (market_settle.go). */
+export interface MarketPayout { id: string; month: string | null; calls: number; credits: number; amountCents: number; status: string; createdAt: string; sentAt: string | null }
+/** The author's earnings, in credits (1 credit = 1 US cent): waiting for their period to settle (pending), settled and on
+ *  no statement yet (available), on a statement the platform has not approved (inReview), approved and not yet sent
+ *  (transferring), and sent (paid), as of `asOf`. */
 export interface MarketEarnings {
   feeBps: number; holdDays: number; payoutsEnabled: boolean; clawHuntLinked: boolean;
-  pending: number; available: number; transferring: number; paid: number; asOf: string | null; payouts: MarketPayout[];
+  pending: number; available: number; inReview: number; transferring: number; paid: number; asOf: string | null; payouts: MarketPayout[];
 }
 
 export interface MarketReviewSkill extends MarketSkillInfo { body: string; hash: string; source: string }
@@ -88,8 +91,19 @@ export interface MarketReview {
   /** What the decision names: the version as read here. */
   reviewHash: string;
 }
-/** A transfer as the administrator reads it: whose, the ClawHunt transaction it became, and why the last attempt failed. */
-export interface MarketAdminPayout extends MarketPayout { author: string; transaction: string; lastError: string; attempts: number }
+/** A statement's calls of one Agent, for its review. */
+export interface MarketStatementAgent { id: string; name: string; calls: number; credits: number; earnedMicrocredits: number }
+/** A statement as the administrator reviews it: whose, what it carried in from the one before, who approved it, the
+ *  ClawHunt transaction it became, why its last attempt failed, and its calls by Agent. */
+export interface MarketAdminPayout extends MarketPayout {
+  author: string; transaction: string; lastError: string; attempts: number; microcredits: number; carryInMicrocredits: number;
+  approvedBy: string; approvedAt: string | null; agents: MarketStatementAgent[];
+  /** Every figure an approval rests on came back as the contract says (an id, a month, whole counts and an amount of a
+   *  cent or more); a statement read otherwise is shown as it came and cannot be approved here. */
+  complete: boolean;
+}
+/** The statements, and whether transfers are on: approving one sends it, so with them off none can be approved. */
+export interface MarketStatements { items: MarketAdminPayout[]; payoutsEnabled: boolean }
 
 /** A run made with a market Agent (GET /tenants/{t}/runs/{id}). `insider`: the Agent's author (or a workspace they belong
  *  to) ran it, which costs no fee and does not count in the ranking. */
@@ -179,9 +193,27 @@ function draftOf(x: unknown, agentId: string): MarketDraft {
     price: count(draft.price), examples: examplesOf(draft.examples), authorName: str(draft.authorName) || str(x.authorName),
     listedAuthorName: str(x.listedAuthorName) };
 }
+/** A statement's month as the server writes it: YYYY-MM, a real month. */
+const isStatementMonth = (x: unknown): x is string => typeof x === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(x);
 function payoutOf(item: Record<string, unknown>): MarketPayout {
-  return { id: str(item.id), amountCents: count(item.amountCents), status: str(item.status, 'pending'), createdAt: str(item.createdAt),
-    sentAt: typeof item.sentAt === 'string' && item.sentAt ? item.sentAt : null };
+  return { id: str(item.id), month: isStatementMonth(item.month) ? item.month : null,
+    calls: count(item.calls), credits: count(item.credits), amountCents: count(item.amountCents), status: str(item.status, 'pending'),
+    createdAt: str(item.createdAt), sentAt: typeof item.sentAt === 'string' && item.sentAt ? item.sentAt : null };
+}
+function adminPayoutOf(item: Record<string, unknown>): MarketAdminPayout {
+  const author = object(item.author) ? item.author : {};
+  const agents = Array.isArray(item.agents) ? item.agents.filter(object).map(agent => ({ id: str(agent.id), name: str(agent.name), calls: count(agent.calls),
+    credits: count(agent.credits), earnedMicrocredits: count(agent.earnedMicrocredits) })) : [];
+  const wholeCount = (x: unknown) => typeof x === 'number' && Number.isSafeInteger(x) && x >= 0;
+  const complete = typeof item.id === 'string' && /^a[A-Za-z0-9_-]{32}$/.test(item.id) && isStatementMonth(item.month)
+    && typeof author.id === 'string' && author.id !== '' && wholeCount(item.calls) && wholeCount(item.credits)
+    && wholeCount(item.microcredits) && wholeCount(item.carryInMicrocredits) && wholeCount(item.amountCents) && (item.amountCents as number) >= 1
+    && (Array.isArray(item.agents) && item.agents.every(agent => object(agent) && typeof agent.id === 'string' && wholeCount(agent.calls)
+      && wholeCount(agent.credits) && wholeCount(agent.earnedMicrocredits)));
+  return { ...payoutOf(item), author: [str(author.name), str(author.email)].filter(Boolean).join(' · ') || str(item.author),
+    transaction: str(item.clawHuntTransaction), lastError: str(item.lastError), attempts: count(item.attempts), microcredits: count(item.microcredits),
+    carryInMicrocredits: count(item.carryInMicrocredits), approvedBy: str(item.approvedBy),
+    approvedAt: typeof item.approvedAt === 'string' && item.approvedAt ? item.approvedAt : null, agents, complete };
 }
 function reviewOf(x: unknown): MarketReview {
   if (!object(x) || typeof x.agentId !== 'string' || !x.agentId || !version(x.version)) invalid();
@@ -261,7 +293,8 @@ export async function readMarketEarnings(signal?: AbortSignal): Promise<MarketEa
   const fee = whole(value.feeBps, 2500);
   const credits = (x: unknown) => Math.max(0, finite(x) ?? 0);
   return { feeBps: fee >= 0 && fee <= 10000 ? fee : 2500, holdDays: count(value.holdDays), payoutsEnabled: value.payoutsEnabled === true,
-    clawHuntLinked: value.clawHuntLinked === true, pending: credits(value.pending), available: credits(value.available), transferring: credits(value.transferring),
+    clawHuntLinked: value.clawHuntLinked === true, pending: credits(value.pending), available: credits(value.available), inReview: credits(value.inReview),
+    transferring: credits(value.transferring),
     paid: credits(value.paid), asOf: typeof value.asOf === 'string' && value.asOf ? value.asOf : null,
     payouts: Array.isArray(value.payouts) ? value.payouts.filter(object).map(payoutOf) : [] };
 }
@@ -277,12 +310,20 @@ export async function decideMarketReview(agentId: string, versionNumber: number,
 export async function setMarketAgentStatus(id: string, status: 'suspended' | 'listed'): Promise<void> {
   await post(`/admin/market/agents/${encodeURIComponent(id)}/status`, { status });
 }
-export async function readMarketPayouts(signal?: AbortSignal): Promise<MarketAdminPayout[]> {
-  return itemsOf(await api<unknown>('/admin/market/payouts', { signal })).filter(object).map(item => {
-    const author = object(item.author) ? item.author : {};
-    return { ...payoutOf(item), author: [str(author.name), str(author.email)].filter(Boolean).join(' · ') || str(item.author),
-      transaction: str(item.clawHuntTransaction), lastError: str(item.lastError), attempts: count(item.attempts) };
-  });
+/** The monthly statements, those waiting for review first. */
+export async function readMarketPayouts(signal?: AbortSignal): Promise<MarketStatements> {
+  const value = await api<unknown>('/admin/market/payouts', { signal });
+  return { items: itemsOf(value).filter(object).map(adminPayoutOf), payoutsEnabled: object(value) && value.payoutsEnabled === true };
+}
+/** Approves a statement waiting for review, of the amount the administrator confirmed (the server approves nothing of
+ *  another: market_statement_changed), which sends it at once; answers the statement as it stands after the attempt
+ *  (sent, held, or pending with the reason the job tries again). */
+export async function approveMarketStatement(id: string, amountCents: number): Promise<MarketAdminPayout> {
+  const value = await post(`/admin/market/payouts/${encodeURIComponent(id)}/approve`, { amountCents });
+  // The answer must be this statement, of the amount confirmed, on its way or arrived; anything else is never announced
+  // as a transfer (the list, read again, shows how it stands).
+  if (!object(value) || value.id !== id || value.amountCents !== amountCents || !['pending', 'held', 'sent'].includes(str(value.status))) invalid();
+  return adminPayoutOf(value);
 }
 
 /** 👍 (1), 👎 (-1) or no rating (0) for a run made with a market Agent that completed or was charged; members and above.

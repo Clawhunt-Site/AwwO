@@ -34,8 +34,27 @@ const CALL_NAMES: Record<MarketCallStatus, [string, string]> = { reserved: ['预
   released: ['未扣', 'Not charged'] };
 export const callStatusName = (status: MarketCallStatus, t: MarketT) => t(...CALL_NAMES[status]);
 
-const PAYOUT_NAMES: Record<string, [string, string]> = { pending: ['待转入', 'Waiting to transfer'], sent: ['已转入', 'Transferred'], held: ['暂缓', 'On hold'], failed: ['失败', 'Failed'] };
+// A monthly statement waits for the platform's review, is approved and on its way (or held while the author's ClawHunt
+// account cannot receive it), arrives, or fails (an operator's mark).
+const PAYOUT_NAMES: Record<string, [string, string]> = { review: ['待审核', 'Awaiting review'], pending: ['已批准，转入中', 'Approved, transferring'],
+  sent: ['已转入', 'Transferred'], held: ['暂缓', 'On hold'], failed: ['失败', 'Failed'] };
 export const payoutStatusName = (status: string, t: MarketT) => PAYOUT_NAMES[status] ? t(...PAYOUT_NAMES[status]) : status;
+// Why a statement's last transfer did not go through (market_settle.go sendMarketPayout: unreachable, payee_ineligible,
+// or answer_<status> with the code ClawHunt gave after a colon); another reason shows as it is.
+const PAYOUT_ERRORS: Record<string, [string, string]> = {
+  unreachable: ['ClawHunt 没有应答或暂停了入账，会自动重试', 'ClawHunt did not answer or has paused crediting; it is tried again by itself'],
+  payee_ineligible: ['作者的 ClawHunt 账号现在不能收款，每天重试', 'The author’s ClawHunt account cannot receive it now; tried again daily'],
+  'answer_400:amount_above_cap': ['超过 ClawHunt 的单笔上限：请 ClawHunt 调高上限，之后每小时重试', 'Above ClawHunt’s cap for one transfer: have ClawHunt raise it; tried again hourly'],
+  'answer_400:reference_conflict': ['ClawHunt 已经按另一个金额记过这张账单：需要人工核对，重试不会成功', 'ClawHunt already credited this statement for another amount: an operator must look into it, retrying will not help'],
+};
+export const payoutErrorText = (code: string, t: MarketT) => {
+  if (PAYOUT_ERRORS[code]) return t(...PAYOUT_ERRORS[code]);
+  const refused = /^answer_(\d{3})(?::([a-z0-9_]+))?$/.exec(code);
+  return refused ? t(`ClawHunt 拒收（${refused[1]}${refused[2] ? `，${refused[2]}` : ''}），之后自动重试`, `ClawHunt refused it (${refused[1]}${refused[2] ? `, ${refused[2]}` : ''}); tried again by itself`) : code;
+};
+/** A statement's month (YYYY-MM, a UTC calendar month) as words. */
+export const monthText = (month: string | null, locale: 'zh' | 'en') => month
+  ? new Date(`${month}-01T00:00:00Z`).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', timeZone: 'UTC' }) : '—';
 
 export const priceText = (price: number, t: MarketT) => price > 0 ? t(`每次 ${price} 点`, `${price} ${price === 1 ? 'credit' : 'credits'} a call`) : t('免费', 'Free');
 export const authorText = (agent: { official: boolean; author: { name: string } | null }, t: MarketT) =>
