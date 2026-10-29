@@ -158,7 +158,7 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 
 ## ClawHunt 一侧
 
-`POST /api/awwo/sso/earnings`，AwwO 客户端凭证（与 `/plan` 相同），请求 `{subject, amount_cents, reference, note}`（2026-10-29 已上线，ClawHunt-Store/clawproduct-hunt#1114）：
+`POST /api/awwo/sso/earnings`，AwwO 客户端凭证（与 `/plan` 相同），请求 `{subject, amount_cents, reference, note}`（ClawHunt 2026-10-29 已上线）：
 
 - 按 `reference` 幂等：同一个 reference 第二次请求返回第一次的结果（`duplicate: true`）；同一个 reference 配另一个账号或金额时 400 `reference_conflict`，不记账。AwwO 发的 reference 是月度账单的 id（`a` 加 32 个 base64url 字符）。
 - 单笔超过 `AWWO_EARNINGS_MAX_CENTS`（默认 $10,000）400 `amount_above_cap`；24 小时合计超过 `AWWO_EARNINGS_DAILY_MAX_CENTS`（默认 $20,000）或入账关闭（`AWWO_EARNINGS_ENABLED`）时 503。
