@@ -1,0 +1,21 @@
+/* The 经验 workbench (CanvasLessons.tsx), inside the library frame (canvas-library.css), and a run's 👍 / 👎 in the
+   成果 view's receipt (RunRating.tsx). */
+.awwo-lessons-runs { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
+.awwo-lessons-runs h3 { margin: 0 0 8px; color: var(--library-muted); font-size: 12px; font-weight: 600; }
+.awwo-lessons-runs ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.awwo-lessons-runs li { display: grid; grid-template-columns: minmax(0, 11em) minmax(60px, 1fr) auto; align-items: center; gap: 2px 10px; font-size: 12px; }
+.awwo-lessons-runs li small { grid-column: 1 / -1; color: var(--library-muted); }
+.awwo-lessons-run-date { overflow: hidden; color: var(--library-muted); text-overflow: ellipsis; white-space: nowrap; }
+.awwo-lessons-run-bar { position: relative; height: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--library-accent) 14%, transparent); }
+.awwo-lessons-run-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--library-accent); }
+.awwo-lessons-run-figure { font-variant-numeric: tabular-nums; }
+.awwo-lessons-suggestion { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--library-accent) 10%, transparent); }
+.awwo-lessons-rule { margin-top: 4px; }
+.awwo-lessons-rule summary { color: var(--library-muted); font-size: 12px; cursor: pointer; }
+.awwo-lessons-rule p { margin: 6px 0 0; color: var(--library-muted); font-size: 12px; }
+.awwo-run-rating { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.awwo-run-rating button { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border: 1px solid var(--saas-border, #dfe5e8); border-radius: 999px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.awwo-run-rating button[aria-pressed='true'] { border-color: var(--saas-accent, #187b70); color: var(--saas-accent, #187b70); }
+.awwo-run-rating button:disabled { opacity: .55; cursor: default; }
+.awwo-run-rating [role='alert'] { color: var(--saas-danger, #c14040); }

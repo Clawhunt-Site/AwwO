@@ -406,6 +406,88 @@ describe('the 成果 view’s run receipt', () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  // The reader rates the result of the run the step made, which the run's own read names: no second read of the run.
+  it('lets the reader rate the step’s result, from the one read of the run it names', async () => {
+    const done = run('rated-run', 'done', { nodes: [{ nodeId: 'design', state: 'cached' }, { nodeId: 'build', state: 'done', runId: 'step-run-1' }] });
+    let rating = 0;
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      calls.push({ url, method: init.method ?? 'GET', body: init.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith('/graph-runs/rated-run')) return Response.json(done);
+      if (url === '/api/v1/tenants/tenant-a/runs/step-run-1/rating') {
+        if (init.method === 'PUT') rating = JSON.parse(String(init.body)).rating;
+        return Response.json({ runId: 'step-run-1', rating });
+      }
+      return Response.json({ error: { code: 'not_found', message: 'Resource not found' } }, { status: 404 });
+    }));
+    publish('canvas-rated', [done]);
+    receipt(finalNode, 'canvas-rated');
+    const region = screen.getByRole('region', { name: '运行回执' });
+    const thumbs = await within(region).findByRole('group', { name: '这次的结果' });
+    const up = within(thumbs).getByRole('button', { name: '好' });
+    await waitFor(() => expect(calls.map(call => call.url)).toContain('/api/v1/tenants/tenant-a/runs/step-run-1/rating'));
+    fireEvent.click(up);
+    await waitFor(() => expect(up).toHaveAttribute('aria-pressed', 'true'));
+    expect(calls.filter(call => call.method === 'PUT')).toEqual([{ url: '/api/v1/tenants/tenant-a/runs/step-run-1/rating', method: 'PUT', body: { rating: 1 } }]);
+    expect(calls.filter(call => call.url.includes('/graph-runs/'))).toHaveLength(1);
+  });
+
+  // A read taken while the run was going saw its steps as they were then: one waiting to be retried after a failed
+  // attempt names that attempt's run, not the one that completed it.
+  it('reads a going run again, without its canvas, for a step that ended after the read', async () => {
+    const design = step('design', '玩法与数值', 'markdown', '数值表');
+    const going = run('going-run', 'running', { status: 'running', nodes: [{ nodeId: 'design', state: 'done', runId: 'design-run' }, { nodeId: 'build', state: 'waiting', runId: 'attempt-1' }] });
+    const ended = { ...going, status: 'completed' as const, nodes: [{ nodeId: 'design', state: 'done' as const, runId: 'design-run' }, { nodeId: 'build', state: 'done' as const, runId: 'build-run' }] };
+    const reads: string[] = [];
+    const ratings: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/graph-runs/going-run')) {
+        reads.push(url);
+        const { document: _held, ...light } = ended;
+        return Response.json(reads.length === 1 ? going : light);
+      }
+      ratings.push(url);
+      return Response.json({ runId: url.split('/').at(-2), rating: 0 });
+    }));
+    publish('canvas-going', [going]);
+    receipt(design, 'canvas-going');
+    expect(await screen.findByRole('group', { name: '这次的结果' })).toBeVisible();
+    cleanup();
+    publish('canvas-going', [ended]);
+    receipt(finalNode, 'canvas-going');
+    // The canvas held from the first read is shown at once; the step's run comes from the second.
+    expect(screen.getByText('整张画布')).toBeVisible();
+    expect(await screen.findByRole('group', { name: '这次的结果' })).toBeVisible();
+    expect(reads).toEqual(['/api/v1/tenants/tenant-a/canvases/canvas-going/graph-runs/going-run',
+      '/api/v1/tenants/tenant-a/canvases/canvas-going/graph-runs/going-run?document=false']);
+    await waitFor(() => expect(ratings).toEqual(['/api/v1/tenants/tenant-a/runs/design-run/rating', '/api/v1/tenants/tenant-a/runs/build-run/rating']));
+  });
+
+  // A read again that fails is tried again a few seconds later: the list's poll may bring nothing new to try it.
+  it('tries a failed read again of a going run, for a step that ended after the first', async () => {
+    const design = step('design', '玩法与数值', 'markdown', '数值表');
+    const going = run('retry-run', 'running', { status: 'running', nodes: [{ nodeId: 'design', state: 'done', runId: 'design-run' }, { nodeId: 'build', state: 'waiting', runId: 'attempt-1' }] });
+    const ended = { ...going, status: 'completed' as const, nodes: [{ nodeId: 'design', state: 'done' as const, runId: 'design-run' }, { nodeId: 'build', state: 'done' as const, runId: 'build-run' }] };
+    let reads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/graph-runs/retry-run')) {
+        reads++;
+        if (reads === 2) return Response.json({ error: { code: 'internal_error', message: 'down' } }, { status: 500 });
+        const { document: _held, ...light } = ended;
+        return Response.json(reads === 1 ? going : light);
+      }
+      return Response.json({ runId: url.split('/').at(-2), rating: 0 });
+    }));
+    publish('canvas-retry', [going]);
+    receipt(design, 'canvas-retry');
+    expect(await screen.findByRole('group', { name: '这次的结果' })).toBeVisible();
+    cleanup();
+    publish('canvas-retry', [ended]);
+    receipt(finalNode, 'canvas-retry');
+    expect(await screen.findByRole('group', { name: '这次的结果' }, { timeout: 6000 })).toBeVisible();
+    expect(reads).toBe(3);
+  }, 10000);
+
   // Unread, the receipt says only what the list says: the steps in the run's scope, and no models.
   it('says what the list says of the run when its own read fails, and claims nothing from the canvas it froze', async () => {
     vi.stubGlobal('fetch', serve());

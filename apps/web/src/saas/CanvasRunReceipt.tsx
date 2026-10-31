@@ -1,8 +1,9 @@
 // The 成果 view's run receipt: what the run records say about the result shown, and nothing they do not.
 // It names the latest graph run that completed the result's step (a later single-node run or a manual
 // publication may have replaced that step's output since, so it never claims more than "this run
-// completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again, and the
-// canvas the run it names froze at admission from that run's own read, which the list does not carry.
+// completed this step"). It reads the run panel's poll (graphRuns feed) instead of polling again, and, from the
+// own read of the run it names, what the list does not carry: the canvas that run froze at admission and the run its
+// step made, whose result the reader rates here.
 import { useEffect, useState } from 'react';
 import { caseRunLabel, isMarketReference, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { nodeModelName, type ModelNameSources } from '../canvas/modelNames';
@@ -11,6 +12,7 @@ import { graphPath, latestGraphRuns, publishGraphRuns, readGraphRun, subscribeGr
 import { useSaaSPreferences } from './preferences';
 import { currentSaaSCanvas } from './canvasBridge';
 import { MarketRunFee, useRunMarket } from './market/MarketRunFee';
+import { RunRating } from './RunRating';
 
 type T = ReturnType<typeof useSaaSPreferences>['t'];
 const statusLabel = (t: T, status: GraphRunSummary['status']) => ({ queued: t('排队中', 'Queued'), running: t('运行中', 'Running'),
@@ -51,15 +53,18 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   const matches = (state: string) => partial ? state === 'failed' || state === 'cancelled' || state === 'blocked' : state === 'done';
   const run = final && runs?.find(item => item.nodes.some(node => node.nodeId === final.id && matches(node.state)));
   const latest = runs?.[0];
-  // The canvas the run froze names the models its steps ran on and tells whether it ran the whole canvas (a copied
-  // case's recording names no run, so none is read for it).
-  const frozen = useFrozenCanvas(tenantId, canvasId, run && output?.source !== 'case' ? run.id : '');
-  // The step's own run, read for a market Agent's fee and rating where the step uses one (a run without one shows
-  // nothing more).
+  // The run's own read: the canvas it froze names the models its steps ran on and tells whether it ran the whole
+  // canvas, and the step's own run carries the reader's rating of its result, and a market Agent's fee and rating where
+  // the step uses one (a copied case's recording names no run of this workspace, so none is read for it).
   const step = final && run ? run.nodes.find(node => node.nodeId === final.id) : undefined;
+  const read = useRunRead(tenantId, canvasId, run && output?.source !== 'case' ? run.id : '', final?.id ?? '', step?.state ?? '');
+  const frozen = read === undefined ? undefined : read?.canvas ?? null;
+  // The step's run as a read that saw it end as the list says names it (a read taken earlier may name an attempt the
+  // step was retried after).
+  const held = final ? read?.steps.get(final.id) : undefined;
+  const stepRunId = held && held.state === step?.state ? held.runId : undefined;
   const marketStep = final?.kind === 'session' && isMarketReference(final.agentRef) && output?.source !== 'case';
-  const stepRunId = useStepRunId(tenantId, canvasId, marketStep && run ? run.id : '', final?.id ?? '');
-  const market = useRunMarket(tenantId, stepRunId);
+  const market = useRunMarket(tenantId, marketStep ? stepRunId : undefined);
   let body;
   // A copied case's recording ran in the case, not here: no run of this workspace is claimed for it.
   if (output?.source === 'case') body = <p className="awwo-results-receipt-note">{t(`这份交付是复制来的案例实录（${caseRunLabel(output)}），没有在这个工作区运行；运行整张图会换成你自己的结果。`,
@@ -98,6 +103,9 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
         {models.size > 0 && <div><dt>{t('模型', 'Models')}</dt><dd>{[...models].map(([model, count]) => t(`${model}（${count} 步）`, `${model} (${count})`)).join('，')}</dd></div>}
         {market && stepRunId && <div><dt>{t('市场 Agent', 'Market Agent')}</dt><dd><MarketRunFee tenantId={tenantId} runId={stepRunId} market={market}
           completed={step?.state === 'done'} canRate={currentSaaSCanvas()?.tenant.role !== 'reader'} /></dd></div>}
+        {/* A market Agent's run is rated in its own row, where the rating counts in the Agent's ranking. */}
+        {!marketStep && stepRunId && step?.state === 'done' && <div><dt>{t('评分', 'Rating')}</dt><dd><RunRating key={stepRunId} tenantId={tenantId}
+          runId={stepRunId} canRate={currentSaaSCanvas()?.tenant.role !== 'reader'} /></dd></div>}
         <div><dt>{t('运行编号', 'Run')}</dt><dd>{run.id.slice(0, 10)}</dd></div>
       </dl>
       {output && output.at > 0 && Date.parse(run.updatedAt ?? run.createdAt) + 60_000 < output.at && <p className="awwo-results-receipt-note">
@@ -120,47 +128,48 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
 
 const graphFinished = (run: GraphRunSummary) => run.status !== 'queued' && run.status !== 'running';
 
-/** The run a graph run's step made (the run list does not carry it), read only where it is asked for: a step whose node
- *  uses a market Agent, whose fee and rating are the run's. */
-function useStepRunId(tenantId: string, canvasId: string, graphRunId: string, nodeId: string): string | undefined {
-  const key = JSON.stringify([tenantId, canvasId, graphRunId, nodeId]);
-  const [read, setRead] = useState<{ key: string; runId?: string } | null>(null);
-  useEffect(() => {
-    if (!graphRunId || !nodeId) return;
-    const controller = new AbortController();
-    readGraphRun(tenantId, canvasId, graphRunId, controller.signal).then(run => {
-      if (!controller.signal.aborted) setRead({ key, runId: run.nodes.find(node => node.nodeId === nodeId)?.runId });
-    }, () => undefined);
-    return () => controller.abort();
-  }, [tenantId, canvasId, graphRunId, nodeId, key]);
-  return read?.key === key ? read.runId : undefined;
-}
-
-// The canvases runs froze at admission, as their own reads gave them, by tenant, canvas and run. A run's frozen canvas
-// never changes, so a page reads it once; the few kept are the latest read (a film's is a megabyte).
-const frozenCanvases = new Map<string, CanvasDocument | null>();
-const FROZEN_CANVASES_KEPT = 4;
-/** The canvas a run froze at admission (null when it cannot be read, or the run has none), or undefined while it is read. */
-function useFrozenCanvas(tenantId: string, canvasId: string, runId: string): CanvasDocument | null | undefined {
+/** What a run's own read gave (the list carries neither): the canvas it froze at admission (null when the run has
+ *  none) and each step's state and run then, by step; `going` while the run was still queued or running. */
+interface RunRead { canvas: CanvasDocument | null; steps: ReadonlyMap<string, { state: string; runId?: string }>; going: boolean }
+const UNREAD: RunRead = { canvas: null, steps: new Map(), going: false };
+// Runs' own reads, by tenant, canvas and run. A run's frozen canvas never changes, so a page reads it once; the few kept
+// are the latest read (a film's is a megabyte).
+const runReads = new Map<string, RunRead>();
+const RUN_READS_KEPT = 4;
+const RUN_READ_RETRIES = 3;
+const RUN_READ_RETRY_MS = 3000;
+/** A run's own read, or undefined while it is first read (an unreadable run reads as UNREAD: its canvas null, no steps).
+ *  A read taken while the run was going saw its steps as they were then: where a step has moved on since (the list
+ *  says stepState), it is read again, without the canvas already held. */
+function useRunRead(tenantId: string, canvasId: string, runId: string, nodeId: string, stepState: string): RunRead | null | undefined {
   const key = JSON.stringify([tenantId, canvasId, runId]);
-  const [read, setRead] = useState<{ key: string; canvas: CanvasDocument | null } | null>(null);
+  const [read, setRead] = useState<{ key: string; run: RunRead } | null>(null);
+  // A read again that fails is tried again a few times, a few seconds apart (the list's poll may bring nothing new).
+  const [retry, setRetry] = useState({ key: '', count: 0 });
+  const tries = retry.key === key + nodeId + stepState ? retry.count : 0;
   useEffect(() => {
     if (!runId) return;
+    const held = runReads.get(key);
     // Held here too: another receipt's later read may push it out of the page's few.
-    if (frozenCanvases.has(key)) { setRead({ key, canvas: frozenCanvases.get(key) ?? null }); return; }
+    if (held) setRead({ key, run: held });
+    if (held && (!held.going || held.steps.get(nodeId)?.state === stepState)) return;
     const controller = new AbortController();
-    readGraphRun(tenantId, canvasId, runId, controller.signal).then(run => {
-      const canvas = run.document ?? null;
-      frozenCanvases.delete(key); frozenCanvases.set(key, canvas);
-      for (const old of [...frozenCanvases.keys()].slice(0, -FROZEN_CANVASES_KEPT)) frozenCanvases.delete(old);
-      if (!controller.signal.aborted) setRead({ key, canvas });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    readGraphRun(tenantId, canvasId, runId, controller.signal, held?.canvas ?? undefined).then(run => {
+      const value: RunRead = { canvas: run.document ?? null, going: run.status === 'queued' || run.status === 'running',
+        steps: new Map(run.nodes.map(node => [node.nodeId, { state: node.state, runId: node.runId }] as const)) };
+      runReads.delete(key); runReads.set(key, value);
+      for (const old of [...runReads.keys()].slice(0, -RUN_READS_KEPT)) runReads.delete(old);
+      if (!controller.signal.aborted) setRead({ key, run: value });
     }, () => {
+      if (controller.signal.aborted) return;
       // Unread, the receipt says what the list says (the steps in the run's scope, no models); a later visit reads again.
-      if (!controller.signal.aborted) setRead({ key, canvas: null });
+      if (!held) setRead({ key, run: UNREAD });
+      // A read again that fails leaves the one held, and is tried again.
+      else if (tries < RUN_READ_RETRIES) timer = setTimeout(() => setRetry({ key: key + nodeId + stepState, count: tries + 1 }), RUN_READ_RETRY_MS);
     });
-    return () => controller.abort();
-  }, [tenantId, canvasId, runId, key]);
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [tenantId, canvasId, runId, nodeId, stepState, key, tries]);
   if (!runId) return null;
-  if (frozenCanvases.has(key)) return frozenCanvases.get(key) ?? null;
-  return read?.key === key ? read.canvas : undefined;
+  return runReads.get(key) ?? (read?.key === key ? read.run : undefined);
 }

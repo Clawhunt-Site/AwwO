@@ -243,6 +243,8 @@ function serviceCodes(): Record<string, [string, string]> {
     memory_version_conflict: ['这条记忆刚被别人改过。请先复制你的修改，取消编辑并刷新，再重新编辑它。', 'Someone changed this note meanwhile. Copy your changes first, cancel and refresh, then edit it again.'],
     memory_limit: ['这个范围最多保存 200 条记忆，请先归档或删除一些。', 'This scope keeps at most 200 notes. Archive or delete some first.'],
     memory_duplicate: ['这个范围里已经有一条内容相同的记忆在用，不需要再保留第二条。', 'A note with the same text is already in use in this scope, so a second one is not kept.'],
+    run_not_rateable: ['只能给完成了的运行结果打分。', 'Only a completed run’s result can be rated.'],
+    invalid_lessons_response: ['经验没有读全，请重试。', 'The lessons came back incomplete. Try again.'],
     invalid_render: ['视频参数无效：宽和高 64–1920 像素，帧率 1–60，时长 0.5–20 秒，总帧数不超过 1,800。', 'Invalid video settings: 64–1920 pixels wide and high, 1–60 frames per second, 0.5–20 seconds and at most 1,800 frames.'],
     render_unavailable: ['这个服务器没有开启视频渲染，请联系管理员。', 'Video rendering is not enabled on this server. Contact an administrator.'],
     render_busy: ['这个工作区已有一个视频正在渲染，等它完成后再试。', 'This workspace is already rendering a video. Try again when it finishes.'],

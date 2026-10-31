@@ -38,6 +38,7 @@ import { ProductionCases } from './ProductionCases';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
+import { CanvasLessons } from './CanvasLessons';
 import { CanvasWebReader } from './CanvasWebReader';
 import { CanvasLibraryTools } from './CanvasLibraryTools';
 import { executionHost } from './AssistantExecution';
@@ -432,7 +433,8 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   return <div className="saas-canvas-shell">
     <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
-      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly extraTools={<CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} readOnly />} /> : undefined}
+      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} readOnly /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} readOnly /></>} />
+        : <CanvasLessons tenantId={tenant.id} canvasId={canvasId} readOnly />}
       assistantExecution={executionHost(execution)}
       results={resultsView}
       headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></>}</div>} />
@@ -941,8 +943,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
-      taskDraft={knowledgeTaskDraft} canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} />} />
-        : <CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} />}
+      taskDraft={knowledgeTaskDraft} canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /></>} />
+        : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /></>}
       assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
