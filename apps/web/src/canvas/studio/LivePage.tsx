@@ -1,6 +1,6 @@
 // One delivered page, running (liveDocument.ts) in an opaque-origin sandbox. Used by the studio and by enlarged cards.
 // A page holding a market Agent's words shows still, its scripts not run, until the reader chooses to run it.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import { htmlPreviewDocument } from '../htmlDeliverable';
 import { useCanvasI18n } from '../i18n';
@@ -49,20 +49,26 @@ export function LivePage({ html, title, path, resolve, device = 'desktop', reloa
     if (!still) return null;
     try { return htmlPreviewDocument(html); } catch { return null; }
   }, [still, html]);
+  // The page the frame runs now, for an error report it posts (pageErrors.ts): its line numbers are this document's.
+  const builtRef = useRef(built); builtRef.current = built;
   useEffect(() => {
     if (still) return;
     let live = true;
     setFailed(false);
     void buildLiveDocument(html, { path, resolve, market }).then(document => {
       if (!live) return;
-      builds.current += 1;
-      setBuilt({ source: html, market, document, id: builds.current });
+      // A build that comes out as the document the frame runs keeps that frame. The canvas hands every page a new
+      // resolver whenever any of its nodes publishes (CanvasSurface's canvasEntries), and a new frame would start the
+      // page again from a blank first paint: every page on the board flashed each time a node finished in a run.
+      const current = builtRef.current;
+      if (!current || current.source !== html || current.market !== market || current.document !== document) {
+        builds.current += 1;
+        setBuilt({ source: html, market, document, id: builds.current });
+      }
       documentRef.current?.(document);
     }).catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [html, path, resolve, market, still]);
-  // The page the frame runs now, for an error report it posts (pageErrors.ts): its line numbers are this document's.
-  const builtRef = useRef(built); builtRef.current = built;
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow) return;
@@ -80,12 +86,15 @@ export function LivePage({ html, title, path, resolve, device = 'desktop', reloa
   // (three times within 15 seconds) is stopped, as the 成果 preview does.
   const [epoch, setEpoch] = useState(0);
   const [navigation, setNavigation] = useState<'none' | 'restored' | 'stopped'>('none');
-  const loads = useRef({ key: '', count: 0 });
+  // Loads are counted per frame element: a frame mounted again under the same key (a market page shown still and then
+  // run again, now that a build of the same document keeps its key) loads its own document once more, which is no
+  // redirect.
+  const loads = useRef<{ frame: EventTarget | null; count: number }>({ frame: null, count: 0 });
   const redirects = useRef<number[]>([]);
   useEffect(() => { setNavigation('none'); redirects.current = []; }, [html, reloadKey]);
   const frameKey = `${reloadKey}:${epoch}:${built?.id ?? 0}`;
-  const onFrameLoad = () => {
-    if (loads.current.key !== frameKey) loads.current = { key: frameKey, count: 0 };
+  const onFrameLoad = (event: SyntheticEvent<HTMLIFrameElement>) => {
+    if (loads.current.frame !== event.currentTarget) loads.current = { frame: event.currentTarget, count: 0 };
     loads.current.count += 1;
     if (loads.current.count === 1) return;
     const now = Date.now();

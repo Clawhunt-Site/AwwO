@@ -42,3 +42,53 @@ describe('live page', () => {
     expect(frame()).toBeNull();
   });
 });
+
+// The canvas hands every page a new resolver whenever any of its nodes publishes (CanvasSurface's canvasEntries): on the
+// board an enlarged card's page, a 预览展示 window's or the studio's was started again in a new frame each time, a flash
+// on every page for every node that finished in a run (2026-10-31). Only a changed document is a new frame.
+describe('live page given a new resolver', () => {
+  const PAGE = '<p>交付的页面</p><img src="pic.png">';
+  const resolverOf = (bytes: number[]) => async (path: string) => path === 'pic.png' ? { bytes: new Uint8Array(bytes), name: 'pic.png' } : null;
+  /** Let a build that awaits the resolver finish. */
+  const settle = () => act(async () => { for (let tick = 0; tick < 5; tick += 1) await new Promise(resolve => setTimeout(resolve, 0)); });
+
+  it('keeps the running frame when the page builds into the same document', async () => {
+    const view = render(<LivePage html={PAGE} title="交付页面" resolve={resolverOf([1, 2, 3])} />);
+    await waitFor(() => expect(frame()?.getAttribute('srcdoc')).toContain('data:image/png;base64,AQID'));
+    const first = frame()!;
+    await ownLoad();
+    let asked = 0;
+    const same = resolverOf([1, 2, 3]);
+    view.rerender(<LivePage html={PAGE} title="交付页面" resolve={async path => { asked += 1; return same(path); }} />);
+    await settle();
+    expect(asked).toBeGreaterThan(0);
+    expect(frame()).toBe(first);
+    expect(screen.queryByText(RESTORED)).toBeNull();
+  });
+
+  it('does not take a frame mounted again under the same key for a page sending itself elsewhere', async () => {
+    // A market page the reader ran, replaced by another delivery (shown still) and then back: the same document keeps
+    // its key, and the frame mounted again loads its own document once more.
+    const view = render(<LivePage html={PAGE} title="交付页面" market resolve={resolverOf([1, 2, 3])} />);
+    fireEvent.click(await screen.findByRole('button', { name: '运行页面' }));
+    await waitFor(() => expect(frame()?.getAttribute('sandbox')).toBe(LIVE_PAGE_SANDBOX));
+    await ownLoad();
+    view.rerender(<LivePage html="<p>另一份交付</p>" title="交付页面" market resolve={resolverOf([1, 2, 3])} />);
+    await waitFor(() => expect(frame()?.getAttribute('sandbox')).toBe(''));
+    view.rerender(<LivePage html={PAGE} title="交付页面" market resolve={resolverOf([1, 2, 3])} />);
+    await waitFor(() => expect(frame()?.getAttribute('sandbox')).toBe(LIVE_PAGE_SANDBOX));
+    await ownLoad();
+    await settle();
+    expect(screen.queryByText(RESTORED)).toBeNull();
+  });
+
+  it('starts a new frame when a file the page shows changed', async () => {
+    const view = render(<LivePage html={PAGE} title="交付页面" resolve={resolverOf([1, 2, 3])} />);
+    await waitFor(() => expect(frame()?.getAttribute('srcdoc')).toContain('data:image/png;base64,AQID'));
+    const first = frame()!;
+    await ownLoad();
+    view.rerender(<LivePage html={PAGE} title="交付页面" resolve={resolverOf([4, 5, 6])} />);
+    await waitFor(() => expect(frame()?.getAttribute('srcdoc')).toContain('data:image/png;base64,BAUG'));
+    expect(frame()).not.toBe(first);
+  });
+});
