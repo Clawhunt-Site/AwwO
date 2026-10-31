@@ -268,6 +268,25 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 **视频渲染** 需要单独部署 `apps/render-worker`（Playwright + Chromium + ffmpeg，见其 README），并配置 `AWWO_RENDER_URL`、`AWWO_RENDER_TOKEN` 和 `AWWO_MEDIA_DIR`（`AWWO_RENDERS_PER_DAY` 默认 20、`AWWO_RENDERS_SITE_PER_DAY` 默认 300、`AWWO_RENDER_TIMEOUT` 默认 8m）。前端发送成果工作台里构建好的页面文档；页面定义 `window.renderAt(t)` 时逐帧精确（渲染约定），否则在虚拟时钟下运行。渲染器一次只渲染一个：其他工作区的渲染保持 queued 排队，渲染器仍在释放上一个时会重试；渲染器没有接手的渲染（忙、不可用、服务重启、排队时被停止）不计入每日次数。MP4（以及可选的 GIF、帧缩略图）全部校验 hash 与文件类型后，与完成状态在同一事务里存为画布的媒体文件，随画布删除与清理；渲染记录本身是每日次数的账本，画布删除后仍保留，画布在渲染排队或进行中时不能删除。服务重启或关闭时排队或进行中的渲染标记为 `interrupted`，不会重复渲染。
 
+## 画布经验与结果评分
+
+以下路径以 `/tenants/{tenantId}` 开头；读取需 reader，写入需 member（写入事务里按当时的角色再查一次）。
+
+| 方法与后缀 | 请求 / 查询 | 说明 |
+| --- | --- | --- |
+| GET /canvases/{canvasId}/lessons | 无 | `{lessons,runs}`：画布节点的经验（最多 200 条，生效中的在前；每条含 nodeTitle、kind、rule、given、status、retiredReason、seen、applied、succeeded、failed、proposal、proposalState、evidence），以及该画布最近 20 次整图运行（ran、firstPass、retried、failed、givenLessons） |
+| PATCH /canvas-lessons/{id} | status?（active / retired）, proposalState?（open / asked / dismissed） | 停用或恢复一条经验，及其建议是否已交给画布助手；记 `canvas_lesson.updated` 审计；自动停用（`ineffective`）后恢复的经验重新计失败次数，人停用后恢复的保留计数 |
+| GET /runs/{id}/rating | 无 | `{runId,rating}`：当前登录者给这次运行结果的评分（1 好、-1 不好、0 未评） |
+| PUT /runs/{id}/rating | rating（1 / -1 / 0） | 只能给已完成的运行评分（否则 409 `run_not_rateable`）；0 收回 |
+
+**经验**（`canvas_lessons.go`，迁移 047）在整图运行结束时写下：每个失败的节点按它的结束方式归类（停在输出上限、工具步数用完、超时、工具输出塞满上下文、交付不符合输出字段，以及只带建议、不交给模型的上下文超限与模型服务不可用），每个节点每类一条，再次出现时计数（seen）。写进经验的只有 AwwO 自己写好的固定句子：交付被拒时只记拒绝的类别，不引用拒绝原文（原文里的字段 id 可能由规划器——一个模型——写成），证据只有运行 id 与平台代码。整图结束后后台写入；没赶上的由每 5 分钟一次的补写在 14 天内补上，每次运行只写一次（`graph_runs.lessons_at`）。协作运行、团队节点和图片 / 视频 / 3D 节点不写也不带经验。
+
+该节点之后的运行（整图运行与节点自己的对话）在受理时冻结它生效中的经验（最多 6 条、3 KiB，按类别固定顺序，便于提示缓存），放在记忆之后的系统提示里；放不下时这次运行不带经验，绝不因此被拒。运行结束时按它自己的快照计数：完成算一次成功，同一类失败再次出现算一次失败，别的可避免失败只计次数，中断、服务不可用、额度用尽等不计；失败 3 次且从未帮上忙的经验自动停用（`ineffective`）。经验还可能带一条针对画布本身的建议（`proposal`：调低推理强度、换上下文更长或别的模型），服务器从不自动修改画布：网页把建议作为用户的请求放进画布助手的输入框，由用户发送。
+
+**规划器的经验**（`planner_lessons.go`）：规划方案被校验拒绝时，按校验自身给出的第一个失败原因记一个固定的词（`planner_refusals`，不含方案原文，随工作区删除），连同规划所用的模型。7 天内被拒至少 3 次、且出现在至少 2 个工作区的原因（最多 6 个），以 AwwO 写好的一句话说明校验要求，加进所有规划器的指令；最多每 10 分钟读一次，按固定顺序排列，只在出现或消失一个原因时改变。
+
+**评分** 写在 `run_ratings`（随运行和评分者删除），供经验和之后的改进参考。
+
 ## Agent 市场
 
 设计与规则见 [awwo-agent-market.md](awwo-agent-market.md)。市场默认关闭（`AWWO_MARKET=on` 开启）；关闭时以下市场路径返回 404 `market_unavailable`（`GET /market/earnings`、`GET /admin/market/payouts` 与批准账单除外：已经发生的调用照常结算、确定和出账单，作者和管理员照常读得到，管理员照常可批准），节点里的市场引用在初始化与运行受理时被拒绝。市场路径不带工作区前缀，需要登录；用到工作区时以调用方的工作区判断。
