@@ -14,9 +14,11 @@ vi.mock('../src/saas/FirstRunTour', () => ({
     <button onClick={() => { onClose(false); onAction?.('create-canvas'); }}>Create canvas action</button>
   </section> : null,
 }));
+// Like the real one: a × closes it either way, and only an optional one can be skipped.
 vi.mock('../src/saas/WorkModeTutorial', () => ({
   default: ({ open, mandatory, readOnly, onClose, onStart }: WorkModeTutorialProps) => open ? <section role="dialog" aria-label="tutorial">
     <span>{mandatory ? 'Mandatory' : 'Optional'}</span><span>{readOnly ? 'Read only' : 'Editable'}</span>
+    <button onClick={() => onClose(false)}>Close tutorial</button>
     {!mandatory && <button onClick={() => onClose(false)}>Skip tutorial</button>}
     <button onClick={() => onClose(true)}>Finish tutorial</button>
     {onStart && <button onClick={() => { onClose(true); onStart(); }}>Write my first brief</button>}
@@ -62,7 +64,7 @@ it('opens the tutorial for an existing account once, when the page is ready, and
   expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
 });
 
-it('makes a new account finish the tutorial: it comes back until it is completed', async () => {
+it('makes the tutorial mandatory for a new account: no skip, and a dismissal does not keep it away', async () => {
   const user = newcomer(); const view = render(content(user));
   await screen.findByRole('dialog', { name: 'tutorial' });
   expect(screen.getByText('Mandatory')).toBeInTheDocument();
@@ -75,6 +77,36 @@ it('makes a new account finish the tutorial: it comes back until it is completed
   expect(localStorage.getItem(tutorialStorageKey(user.user.id))).toBe('completed');
   again.unmount(); render(content(user));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('lets a new account close the tutorial with its ×, which keeps it away on this device', async () => {
+  const user = newcomer(); const key = tutorialStorageKey(user.user.id); const view = render(content(user));
+  await screen.findByText('Mandatory');
+  fireEvent.click(screen.getByRole('button', { name: 'Close tutorial' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(localStorage.getItem(key)).toBe('skipped');
+  view.unmount(); const again = render(content(user));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  // A replay closed before its end leaves it skipped; finishing one records completion.
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  expect(await screen.findByText('Optional')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Skip tutorial' }));
+  expect(localStorage.getItem(key)).toBe('skipped');
+  fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Finish tutorial' }));
+  expect(localStorage.getItem(key)).toBe('completed');
+  again.unmount(); render(content(user));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('counts a skipped tutorial as seen for every account, from storage alone', async () => {
+  for (const user of [newcomer(), identity()]) {
+    localStorage.setItem(tutorialStorageKey(user.user.id), 'skipped');
+    const view = render(content(user));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    view.unmount();
+  }
 });
 
 it('keeps accounts apart and never fetches or creates anything', async () => {
@@ -148,7 +180,7 @@ it('keeps the page tour on request, with read-only and workspace-engine instruct
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-it('still makes a new account finish the tutorial where nothing can be remembered', async () => {
+it('still gives a new account the mandatory tutorial where nothing can be remembered', async () => {
   const original = localStorage.setItem; localStorage.setItem = () => { throw new Error('disabled'); };
   try {
     render(content(newcomer()));
@@ -156,6 +188,26 @@ it('still makes a new account finish the tutorial where nothing can be remembere
     expect(screen.queryByRole('button', { name: 'Skip tutorial' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Finish tutorial' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  } finally { localStorage.setItem = original; }
+});
+
+it('keeps a tutorial closed with its × away for the rest of the page where nothing can be remembered', async () => {
+  const original = localStorage.setItem; localStorage.setItem = () => { throw new Error('disabled'); };
+  try {
+    const user = newcomer(); const view = render(content(user));
+    expect(await screen.findByText('Mandatory')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close tutorial' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // The page holds the close in memory: the host mounted again on this page does not open the tutorial.
+    view.unmount(); render(content(user));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // A replay skipped before its end does not take the close back.
+    fireEvent.click(screen.getByRole('button', { name: 'How AwwO works' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip tutorial' }));
+    cleanup(); render(content(user));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   } finally { localStorage.setItem = original; }
 });
 

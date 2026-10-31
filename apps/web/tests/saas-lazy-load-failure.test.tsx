@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ProductionCases } from '../src/saas/ProductionCases';
 import { SaaSOnboarding } from '../src/saas/SaaSOnboarding';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -36,7 +36,7 @@ const account = (id: string, createdAt: string): Identity => ({ user: { id, name
   tenants: [{ id: 'team', name: 'Team', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 20, createdAt }] });
 const home = (user: Identity) => render(<SaaSPreferencesProvider><SaaSOnboarding identity={user}><main data-onboarding="canvas-list">workspace home</main></SaaSOnboarding></SaaSPreferencesProvider>);
 
-it('asks a new account to reload when the tutorial cannot load, instead of letting it skip the tutorial', async () => {
+it('asks a new account to reload when the tutorial cannot load, and lets neither Escape nor a forced close slip past it', async () => {
   home(account('lazy-new', new Date().toISOString()));
   const notice = await screen.findByRole('alertdialog');
   expect(notice).toHaveTextContent('新手教程没能加载');
@@ -49,6 +49,35 @@ it('asks a new account to reload when the tutorial cannot load, instead of letti
   expect(screen.getByRole('button', { name: '刷新页面' })).toHaveFocus();
   expect(localStorage.getItem('awwo.workmode.v1:lazy-new')).toBeNull();   // nothing recorded: it opens again after the reload
   expect(reload).not.toHaveBeenCalled();
+});
+
+it('lets a new account close the notice for now, which keeps it away on this device like the tutorial’s ×', async () => {
+  const user = account('lazy-close', new Date().toISOString());
+  const view = home(user);
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: '先关闭' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  expect(screen.getByText('workspace home')).toBeVisible();
+  expect(localStorage.getItem('awwo.workmode.v1:lazy-close')).toBe('skipped');
+  expect(reload).not.toHaveBeenCalled();
+  view.unmount(); home(user);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+});
+
+it('reloads nothing once the notice was closed for now while the save ran', async () => {
+  const user = account('lazy-close-saving', new Date().toISOString());
+  let saved: () => void = () => {};
+  configureSaaSCanvas({ tenant: user.tenants[0], canvasId: 'canvas-1' });
+  configureSaaSCanvasSave(() => new Promise<void>(resolve => { saved = resolve; }));
+  home(user);
+  fireEvent.click(await screen.findByRole('button', { name: '刷新页面' }));
+  expect(screen.getByRole('button', { name: '刷新页面' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '先关闭' }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  await act(async () => { saved(); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(reload).not.toHaveBeenCalled();
+  expect(localStorage.getItem('awwo.workmode.v1:lazy-close-saving')).toBe('skipped');
 });
 
 it('saves the open canvas before the tutorial’s reload, and says so when it cannot', async () => {

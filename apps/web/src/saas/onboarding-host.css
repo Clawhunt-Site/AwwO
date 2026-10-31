@@ -13,3 +13,8 @@
 .saas-tutorial-unavailable p:where(:not(.saas-stale-build *)) { margin:0 0 16px; font-size:14px; line-height:1.7; }
 .saas-tutorial-unavailable button:where(:not(.saas-stale-build *)) { min-height:40px; padding:0 18px; border:0; border-radius:10px; background:var(--saas-accent,#31563d); color:#fff; font-weight:600; cursor:pointer; }
 .saas-tutorial-unavailable button:where(:not(.saas-stale-build *)):focus-visible { outline:2px solid var(--saas-accent,#31563d); outline-offset:3px; }
+.saas-tutorial-unavailable-actions { display:flex; flex-wrap:wrap; gap:8px; }
+/* Closing for now is the quieter choice beside the reload: an outline, not the ink pill both button rules give
+   (above and design/system.css), which these name the dialog and the button's class to outrank. */
+dialog.saas-tutorial-unavailable button.saas-tutorial-unavailable-close { border:1px solid var(--saas-border-strong,#c9d2d6); background:transparent; color:var(--saas-text,#23342b); }
+dialog.saas-tutorial-unavailable button.saas-tutorial-unavailable-close:hover { background:var(--saas-soft,#eef2f1); }

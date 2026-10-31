@@ -82,17 +82,16 @@ it('unlocks each step only after its scene has played, and never locks a step ag
   expect(onClose).not.toHaveBeenCalled();
 });
 
-it('cannot be closed or skipped when it is mandatory, by button or by Escape', () => {
+it('cannot be skipped or escaped when it is mandatory, and a forced close brings it back', () => {
   const onClose = vi.fn();
   render(<WorkModeTutorial {...base} mandatory onClose={onClose} />);
   const dialog = screen.getByRole('dialog');
-  expect(screen.queryByRole('button', { name: '关闭讲解' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '跳过' })).not.toBeInTheDocument();
   fireEvent.keyDown(dialog, { key: 'Escape' });
   const cancel = new Event('cancel', { cancelable: true }); dialog.dispatchEvent(cancel);
   expect(cancel.defaultPrevented).toBe(true);
   expect(onClose).not.toHaveBeenCalled();
-  expect(screen.getByText(/看完全部 8 步就能开始使用/)).toBeVisible();
+  expect(screen.getByText(/建议看完全部 8 步；也可以点右上角 × 先关掉/)).toBeVisible();
   // A browser that closes it anyway (a repeated-Escape close watcher) has it shown again.
   dialog.removeAttribute('open'); fireEvent(dialog, new Event('close'));
   expect(showModal).toHaveBeenCalledTimes(2);
@@ -101,9 +100,29 @@ it('cannot be closed or skipped when it is mandatory, by button or by Escape', (
   expect(onClose).toHaveBeenCalledExactlyOnceWith(true);
 });
 
+it('closes with its × when it is mandatory, which does not count as completed and is not undone', () => {
+  const onClose = vi.fn();
+  render(<WorkModeTutorial {...base} mandatory onClose={onClose} />);
+  const dialog = screen.getByRole('dialog');
+  expect(screen.queryByRole('button', { name: '关闭讲解' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '关闭新手引导' }));
+  expect(onClose).toHaveBeenCalledExactlyOnceWith(false);
+  expect(dialog).not.toHaveAttribute('open');
+  // Its own close is not taken for a forced one: it is not shown again.
+  fireEvent(dialog, new Event('close'));
+  expect(showModal).toHaveBeenCalledTimes(1);
+  expect(onClose).toHaveBeenCalledTimes(1);
+  cleanup(); render(<WorkModeTutorial {...base} locale="en" mandatory onClose={onClose} />);
+  expect(screen.getByText(/you can also close it with × at the top right and replay it any time/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Close the tutorial' }));
+  expect(onClose).toHaveBeenLastCalledWith(false);
+  expect(onClose).toHaveBeenCalledTimes(2);
+});
+
 it('can be closed, skipped or escaped when optional, which does not count as completed', () => {
   const onClose = vi.fn();
   const { unmount } = render(<WorkModeTutorial {...base} onClose={onClose} />);
+  expect(screen.getByRole('button', { name: '关闭讲解' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '跳过' }));
   expect(onClose).toHaveBeenLastCalledWith(false);
   unmount(); render(<WorkModeTutorial {...base} onClose={onClose} />);

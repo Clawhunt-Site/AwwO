@@ -7,7 +7,7 @@ import './work-mode-tutorial.css';
 
 export type WorkModeTutorialProps = {
   open: boolean;
-  /** A new account must walk through every step: no close, no skip, and Escape does nothing. */
+  /** For a new account: no skip, and Escape does nothing; besides finishing, its × is the one way out. */
   mandatory?: boolean;
   locale: UiLocale;
   readOnly?: boolean;
@@ -174,13 +174,13 @@ export default function WorkModeTutorial({ open, mandatory = false, locale, read
     <div className="wmt-shell">
       <header className="wmt-header"><span className="wmt-brand">AwwO <span>{zh ? '工作模式' : 'Work mode'}</span></span>
         <span className="wmt-count">{zh ? `第 ${index + 1} / ${STEPS.length} 步` : `Step ${index + 1} of ${STEPS.length}`}</span>
-        {!mandatory && <button type="button" className="wmt-close" aria-label={zh ? '关闭讲解' : 'Close the tutorial'} onClick={() => finish(false)}><X size={18} aria-hidden="true" /></button>}</header>
+        <button type="button" className="wmt-close" aria-label={zh ? (mandatory ? '关闭新手引导' : '关闭讲解') : 'Close the tutorial'} onClick={() => finish(false)}><X size={18} aria-hidden="true" /></button></header>
       <div className="wmt-body" ref={body}>
         <div className="wmt-visual" aria-hidden="true" key={step.key}><Scene step={step.key} locale={locale} record={record} /><small className="wmt-source">{source}</small></div>
         <div className="wmt-copy">
           <h2 ref={heading} id={`${id}-title`} tabIndex={-1}>{text(step.title, locale)}</h2>
           <p id={`${id}-body`}>{text(readOnly && step.readOnlyBody ? step.readOnlyBody : step.body, locale)}</p>
-          {mandatory && index === 0 && <p className="wmt-note">{zh ? `这是新账号的入门讲解，看完全部 ${STEPS.length} 步就能开始使用；之后可从「更多选项 → AwwO 工作模式」随时重看。` : `This is the introduction for new accounts: go through all ${STEPS.length} steps to start. You can replay it any time from More options → How AwwO works.`}</p>}
+          {mandatory && index === 0 && <p className="wmt-note">{zh ? `这是新账号的入门讲解，建议看完全部 ${STEPS.length} 步；也可以点右上角 × 先关掉，之后可从「更多选项 → AwwO 工作模式」随时重看。` : `This is the introduction for new accounts. Going through all ${STEPS.length} steps is recommended; you can also close it with × at the top right and replay it any time from More options → How AwwO works.`}</p>}
         </div>
       </div>
       <footer className="wmt-footer">
