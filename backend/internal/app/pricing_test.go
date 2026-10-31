@@ -38,6 +38,37 @@ func TestPricingExactFrozenCost(t *testing.T) {
 		t.Fatal("missing token estimated")
 	}
 }
+
+// The workers report Bedrock's cache writes since 2026-10-31 (the bridges' cache_write_tokens). Under the live table's
+// semantics for every model (cache reads and writes folded into the input rate), a call that now reports its writes
+// costs exactly what it cost when they were left out; a price that says writes are unsupported cannot price it.
+func TestPricingAReportedCacheWriteLeavesAFoldedInCostUnchanged(t *testing.T) {
+	folded := `{"version":"live-shape","currency":"USD","models":{"pi:bedrock.claude-opus-5-5":{"ratesMicrousdPerMillion":{"input":"4000000","output":"20000000","cachedInput":null,"cacheWrite":null,"reasoning":null},"semantics":{"cachedInput":"included_in_input_rate","cacheWrite":"included_in_input","reasoning":"included_in_output"},"rounding":"ceil_per_component"}}}`
+	p, e := ParseModelPricing(folded)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, snapshot := p.Freeze("pi", "bedrock.claude-opus-5-5")
+	without := InvocationUsage{Status: "reported", InputTokens: int64ptr(5635), OutputTokens: int64ptr(48), CachedInputTokens: int64ptr(5575)}
+	with := without
+	with.CacheWriteTokens = int64ptr(58)
+	before, reason := EstimateInvocationCost(snapshot, without)
+	after, again := EstimateInvocationCost(snapshot, with)
+	if before == nil || after == nil || *before != *after || reason != "none" || again != "none" {
+		t.Fatal("a reported write changed a folded-in cost", before, after, reason, again)
+	}
+	if creditsFor(*before) != creditsFor(*after) {
+		t.Fatal("a reported write changed the credits")
+	}
+	unsupported, e := ParseModelPricing(strings.Replace(folded, `"cacheWrite":"included_in_input"`, `"cacheWrite":"unsupported"`, 1))
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, snapshot = unsupported.Freeze("pi", "bedrock.claude-opus-5-5")
+	if cost, reason := EstimateInvocationCost(snapshot, with); cost != nil || reason != "unavailable" {
+		t.Fatal("a price without cache writes priced one", cost, reason)
+	}
+}
 func TestPricingStrictSchemaAndMissing(t *testing.T) {
 	for _, raw := range []string{strings.Replace(pricingFixture, `"2000000"`, `2000000`, 1), strings.Replace(pricingFixture, "half_up_per_component", "bankers", 1), strings.Replace(pricingFixture, "included_in_output", "whatever", 1), strings.Replace(pricingFixture, `"currency":"USD"`, `"currency":"EUR"`, 1), strings.Replace(pricingFixture, `"version":"test-v1"`, `"version":"test-v1","secret":"bad"`, 1), strings.Replace(pricingFixture, `"500000"`, `null`, 1), strings.Replace(pricingFixture, `"2000000"`, `"01"`, 1), strings.Replace(pricingFixture, `"2000000"`, `"9223372036854775808"`, 1)} {
 		if _, e := ParseModelPricing(raw); e == nil {

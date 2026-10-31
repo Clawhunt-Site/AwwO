@@ -71,7 +71,7 @@ python scripts/bedrock-catalog-check.py --region us-east-1 --profile <aws-profil
 | `AWWO_BEDROCK_REGION` | Bedrock 运行时区域，默认 `us-east-1`；只接受商业区域白名单。内置目录只在它的 `regions` 内可用，`*_MODELS_JSON` 档案可用任意白名单区域 |
 | `AWWO_BEDROCK_MODELS` | 空：上一项模式提供的、默认归属本 worker 的模型；否则为逗号分隔的目录 ID（按目录顺序生效，明确列出即视为运营方确认可调用，含未核验模型）。OpenAI Agents worker 拒绝没有工具能力的模型，Pi 可以承载任何目录模型 |
 | `AWWO_BEDROCK_API_KEY` | 可选 Bedrock API Key。留空时用 worker 自己的 AWS 凭证链签名（EC2 实例角色），不在文件里保存长期密钥 |
-| `AWWO_BEDROCK_PROMPT_CACHE_MODELS` | 空（默认）：请求与以前完全相同。逗号分隔的目录 ID：只对这些 Claude 目录模型启用显式提示缓存——带历史的对话或工具循环（多于一条消息）在工具定义后、系统提示后、最后一条消息末尾各加一个 `cachePoint`（默认 5 分钟 TTL），单条消息的请求不变。点名的必须是本 worker 从内置目录提供的 Anthropic 模型，否则 worker 拒绝启动。价格不变：用量仍把缓存读写都计入 prompt tokens。三个 worker（Pi、JS、Python）各读自己的环境；计费取舍见 `docs/awwo-cost-and-abuse-review.md` |
+| `AWWO_BEDROCK_PROMPT_CACHE_MODELS` | 空（默认）：请求与以前完全相同。逗号分隔的目录 ID：只对这些 Claude 目录模型启用显式提示缓存——带历史的对话或工具循环（多于一条消息）在工具定义后、系统提示后、最后一条消息末尾各加一个 `cachePoint`（默认 5 分钟 TTL）。Pi、JS 和沙箱 worker 的桥（`apps/bedrock-bridge.ts`）从 2026-10-31 起对**带工具的第一条请求**也这样加：它是工具循环的第一步，下一步会把同样的前缀再发一次，于是第二步读第一步写下的缓存，不再把整段前缀重写一遍（实测 Opus 5.5：第二步读到 5,575 token）；只配了工具、`maxTurns: 1` 的 JS 单 Agent 运行因此会多付一次写入溢价（生产环境的 worker 不提供工具）。Python worker 的运行只调用一次，单条消息的请求一律不变。不带工具的单条消息请求都不变。点名的必须是本 worker 从内置目录提供的 Anthropic 模型，否则 worker 拒绝启动。价格不变：用量仍把缓存读写都计入 prompt tokens，读取另报为 `cached_tokens`、写入另报为 `cache_write_tokens`（2026-10-31 起，账本的 `cache_write_tokens` 列有值）。三个 worker（Pi、JS、Python）各读自己的环境；计费取舍见 `docs/awwo-cost-and-abuse-review.md` |
 | `AWWO_PLATFORM_PROVIDERS` | `AWWO_LLMGATE_ONLY=true` 时允许的运营方目标，默认 `llmgate`；要启用 Bedrock 设为 `llmgate,bedrock`，再加 `deepseek` 允许 DeepSeek API 档案（见 `docs/awwo-deepseek.md`）。规范顺序为 `llmgate,bedrock,deepseek`。**API 与 worker 都要设置** |
 
 也可以在 `*_MODELS_JSON` 里写单个 Bedrock 档案，不带 URL、协议、思考强度或结构化输出：

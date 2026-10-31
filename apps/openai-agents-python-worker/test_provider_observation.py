@@ -24,6 +24,32 @@ class ProviderObservationTests(unittest.TestCase):
         self.assertIsNone(usage["cachedInputTokens"])
         self.assertNotIn("SECRET", json.dumps(usage))
 
+    def test_a_cache_write_count_is_a_subset_of_the_input_taken_only_where_it_fits(self):
+        # The Bedrock bridge's report of a call: Converse's input, reads and writes all counted as prompt tokens.
+        bridged = normalize_usage({"prompt_tokens": 5635, "completion_tokens": 48,
+                                   "prompt_tokens_details": {"cached_tokens": 5575, "cache_write_tokens": 58}}, "chat_completions")
+        self.assertEqual((bridged["status"], bridged["inputTokens"], bridged["cachedInputTokens"], bridged["cacheWriteTokens"],
+                          bridged["computedTotalTokens"]), ("reported", 5635, 5575, 58, 5683))
+        self.assertEqual(normalize_usage({"prompt_tokens": 9, "completion_tokens": 2, "prompt_tokens_details": {"cache_write_tokens": 6}},
+                                         "chat_completions")["cacheWriteTokens"], 6)
+        self.assertEqual(normalize_usage({"input_tokens": 20, "output_tokens": 1,
+                                          "input_tokens_details": {"cached_tokens": 7, "cache_write_tokens": 13}}, "responses")["cacheWriteTokens"], 13)
+        # A count that does not fit, or is no count, is left out and the report stands as it did before writes were read.
+        for details in ({"cached_tokens": 5, "cache_write_tokens": 6}, {"cache_write_tokens": 11}, {"cache_write_tokens": -1},
+                        {"cache_write_tokens": 1.5}, {"cache_write_tokens": "3"}, {"cache_write_tokens": True}):
+            with self.subTest(details=details):
+                usage = normalize_usage({"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": details}, "chat_completions")
+                self.assertEqual((usage["status"], usage["cacheWriteTokens"], usage["inputTokens"]), ("reported", None, 10))
+        self.assertIsNone(normalize_usage({"completion_tokens": 2, "prompt_tokens_details": {"cache_write_tokens": 3}},
+                                          "chat_completions")["cacheWriteTokens"])
+        # A report that is invalid for another reason (a malformed read, reasoning beyond the output) keeps no write either.
+        for raw in ({"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": "x", "cache_write_tokens": 3}},
+                    {"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": {"cache_write_tokens": 3},
+                     "completion_tokens_details": {"reasoning_tokens": 5}}):
+            with self.subTest(raw=raw):
+                usage = normalize_usage(raw, "chat_completions")
+                self.assertEqual((usage["status"], usage["cacheWriteTokens"]), ("invalid", None))
+
     def test_split_crlf_utf8_and_multiline_frames_preserve_raw_usage_and_finish(self):
         observer = ProviderObservation("chat_completions")
         raw = ('data: {"choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":"length"}],\r\n'

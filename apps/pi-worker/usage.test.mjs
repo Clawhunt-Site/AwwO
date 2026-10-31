@@ -22,6 +22,29 @@ test('provider missing, explicit zero, partial, cache and reasoning have distinc
   assert.equal(normalizeUsage({ prompt_tokens: 4, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 5 } }, 'chat_completions').status, 'invalid');
 });
 
+test('a cache-write count is a subset of the input beside the reads, taken only where it fits', () => {
+  // The Bedrock bridge's report of a tool loop's call: Converse's input, reads and writes all counted as prompt tokens.
+  const bridged = normalizeUsage({ prompt_tokens: 5635, completion_tokens: 48, prompt_tokens_details: { cached_tokens: 5575, cache_write_tokens: 58 } }, 'chat_completions');
+  assert.equal(bridged.status, 'reported'); assert.equal(bridged.inputTokens, 5635); assert.equal(bridged.cachedInputTokens, 5575);
+  assert.equal(bridged.cacheWriteTokens, 58); assert.equal(bridged.computedTotalTokens, 5683);
+  assert.equal(normalizeUsage({ prompt_tokens: 9, completion_tokens: 2, prompt_tokens_details: { cache_write_tokens: 6 } }, 'chat_completions').cacheWriteTokens, 6);
+  assert.equal(normalizeUsage({ input_tokens: 20, output_tokens: 1, input_tokens_details: { cached_tokens: 7, cache_write_tokens: 13 } }, 'responses').cacheWriteTokens, 13);
+  // A count that does not fit, or is no count, is left out and the report stands as it did before writes were read.
+  for (const [details, why] of [[{ cached_tokens: 5, cache_write_tokens: 6 }, 'reads and writes exceed the input'], [{ cache_write_tokens: 11 }, 'writes exceed the input'],
+    [{ cache_write_tokens: -1 }, 'negative'], [{ cache_write_tokens: 1.5 }, 'fractional'], [{ cache_write_tokens: '3' }, 'words'],
+    [{ cache_write_tokens: true }, 'a boolean']]) {
+    const usage = normalizeUsage({ prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: details }, 'chat_completions');
+    assert.equal(usage.status, 'reported', why); assert.equal(usage.cacheWriteTokens, null, why); assert.equal(usage.inputTokens, 10, why);
+  }
+  // A report that is invalid for another reason (a malformed read, reasoning beyond the output) keeps no write either.
+  for (const raw of [{ prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 'x', cache_write_tokens: 3 } },
+    { prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: { cache_write_tokens: 3 }, completion_tokens_details: { reasoning_tokens: 5 } }]) {
+    const usage = normalizeUsage(raw, 'chat_completions');
+    assert.equal(usage.status, 'invalid'); assert.equal(usage.cacheWriteTokens, null);
+  }
+  assert.equal(normalizeUsage({ completion_tokens: 2, prompt_tokens_details: { cache_write_tokens: 3 } }, 'chat_completions').cacheWriteTokens, null, 'no input to fit it in');
+});
+
 test('raw stream observer preserves original chunks, strips W3C only and uses monotonic provider timing', async () => {
   let time = 100, received;
   const original = 'data: {"choices":[{"delta":{"content":"private-output"}}]}\r\n\r\ndata: {"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7},"choices":[]}\n\ndata: [DONE]\n\n';

@@ -435,17 +435,23 @@ export function withSummarizedThinking(command: Json): Json {
 
 /**
  * Claude explicit prompt caching for one Converse command, where the operator turned it on for the profile
- * (AWWO_BEDROCK_PROMPT_CACHE_MODELS). Only a request that re-sends an earlier exchange — a conversation with
- * history, or a tool loop — gets cache checkpoints, because only its prefix is sent again: after the tool
- * definitions, after the system prompt and at the end of the last message, three of Claude's four. A
- * single-message request stays as it was, so a one-off call never pays the cache-write premium for a prefix
- * nothing reads. A prefix shorter than the model's minimum is simply not cached; the call still succeeds. The
- * default five-minute TTL applies. Prices are untouched: usage still reports every prompt token (cache reads
- * and writes included) as prompt tokens, with the reads as cached tokens.
+ * (AWWO_BEDROCK_PROMPT_CACHE_MODELS). Only a request whose prefix is sent again gets cache checkpoints: one that
+ * re-sends an earlier exchange (a conversation with history, or a tool loop's later calls), and one that offers
+ * tools, which opens a tool loop here (the sandbox's runs, managed execution's calls) whose next call sends its prefix
+ * again. A tool loop's first call writes its prefix, so its second reads it instead of writing it all again (probed on
+ * Claude Opus 5.5 on 2026-10-31: the second call read the first call's 5,575 tokens, though only the first asked for
+ * summarized thinking). A caller that offers tools on a run of one call (the JS worker's single agent with tools
+ * configured, a relayed one-call runtime) pays the write for nothing; production offers no such tools. Checkpoints go after the tool
+ * definitions, after the system prompt and at the end of the last message, three of Claude's four. A single
+ * tool-free message stays as it was, so a one-off call never pays the cache-write premium for a prefix nothing
+ * reads. A prefix shorter than the model's minimum is simply not cached; the call still succeeds. The default
+ * five-minute TTL applies. Prices are untouched: usage still reports every prompt token (cache reads and writes
+ * included) as prompt tokens, with the reads as cached tokens and the writes as cache-write tokens (chatUsage).
  */
 export function withClaudePromptCache(command: Json): Json {
   const messages = Array.isArray(command.messages) ? command.messages as ConverseMessage[] : [];
-  if (messages.length < 2) return command;
+  const tools = plain(command.toolConfig) && Array.isArray(command.toolConfig.tools) && command.toolConfig.tools.length > 0;
+  if (!messages.length || (messages.length < 2 && !tools)) return command;
   const point = () => ({ cachePoint: { type: 'default' } });
   const out: Json = { ...command };
   if (plain(command.toolConfig) && Array.isArray(command.toolConfig.tools) && command.toolConfig.tools.length) {
@@ -469,17 +475,23 @@ const STREAM_EXCEPTIONS: Record<string, number> = {
 
 const nonNegative = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
-/** Converse usage → Chat Completions usage. Cache reads are a subset of prompt tokens, as OpenAI reports them. */
+/** Converse usage → Chat Completions usage. Cache reads and writes are subsets of prompt tokens, as OpenAI reports reads
+ *  (prompt_tokens_details.cached_tokens) and OpenRouter writes (prompt_tokens_details.cache_write_tokens); Converse's
+ *  inputTokens counts neither. */
 export function chatUsage(usage: unknown): Json | undefined {
   if (!plain(usage) || !nonNegative(usage.inputTokens) || !nonNegative(usage.outputTokens)) return undefined;
-  const cacheRead = nonNegative(usage.cacheReadInputTokens) ? usage.cacheReadInputTokens : 0;
-  const cacheWrite = nonNegative(usage.cacheWriteInputTokens) ? usage.cacheWriteInputTokens : 0;
+  const cacheRead = nonNegative(usage.cacheReadInputTokens) ? usage.cacheReadInputTokens : undefined;
+  const cacheWrite = nonNegative(usage.cacheWriteInputTokens) ? usage.cacheWriteInputTokens : undefined;
+  const details: Json = {
+    ...(cacheRead !== undefined ? { cached_tokens: cacheRead } : {}),
+    ...(cacheWrite !== undefined ? { cache_write_tokens: cacheWrite } : {}),
+  };
   // No total is reported: the observer computes it, so a provider total that counts
   // something else can never be mistaken for a mismatch.
   return {
-    prompt_tokens: usage.inputTokens + cacheRead + cacheWrite,
+    prompt_tokens: usage.inputTokens + (cacheRead ?? 0) + (cacheWrite ?? 0),
     completion_tokens: usage.outputTokens,
-    ...(nonNegative(usage.cacheReadInputTokens) ? { prompt_tokens_details: { cached_tokens: usage.cacheReadInputTokens } } : {}),
+    ...(Object.keys(details).length ? { prompt_tokens_details: details } : {}),
   };
 }
 

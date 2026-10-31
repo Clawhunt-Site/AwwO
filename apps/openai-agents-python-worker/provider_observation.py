@@ -49,6 +49,15 @@ def normalize_usage(raw, protocol):
         (result["cachedInputTokens"], incoming), (result["reasoningTokens"], outgoing),
     )):
         return empty_usage("invalid", "total_mismatch")
+    # A cache-write count (OpenRouter's cache_write_tokens beside cached_tokens, which the Bedrock bridge reports too) is
+    # a subset of the input, as reads are. It is taken only where it is a count that fits in the input beside the reads;
+    # anything else is left out, as every such count was before, and never puts the rest of the report in doubt. Taken
+    # only from a report that is otherwise valid (the Node workers' usage.mjs may keep it on one they mark invalid, whose
+    # counts the ledger drops anyway).
+    write = details.get("cache_write_tokens") if isinstance(details, dict) else None
+    if (type(write) is int and 0 <= write <= MAX_INTEGER and incoming is not None
+            and (result["cachedInputTokens"] or 0) + write <= incoming):
+        result["cacheWriteTokens"] = write
     result["status"] = "reported" if incoming is not None and outgoing is not None else "partial"
     result["reason"] = "none" if result["status"] == "reported" else "field_missing"
     return result

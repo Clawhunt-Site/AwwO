@@ -1510,7 +1510,9 @@ def chat_body(**overrides):
 
 
 class PromptCacheTests(unittest.IsolatedAsyncioTestCase):
-    """with_claude_prompt_cache matches withClaudePromptCache in apps/bedrock-bridge.ts."""
+    """with_claude_prompt_cache matches withClaudePromptCache in apps/bedrock-bridge.ts, except on purpose for a single
+    message that offers tools: the Node bridge marks it (it opens their tool loops), this worker leaves it unchanged (its
+    runs make one call)."""
 
     def test_a_re_sent_prefix_gets_three_checkpoints_and_a_single_message_none(self):
         loop = to_converse_input(chat_body(tools=TIME_TOOL, messages=TOOL_LOOP), CLAUDE)
@@ -1527,6 +1529,7 @@ class PromptCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("system", chat_cached)
         self.assertNotIn("toolConfig", chat_cached)
         self.assertEqual(chat_cached["messages"][-1]["content"], [{"text": "More"}, CACHE_POINT])
+        # A single message stays as it was, even one that offers tools: this worker's runs make one call.
         single = to_converse_input(chat_body(tools=TIME_TOOL), CLAUDE)
         self.assertIs(with_claude_prompt_cache(single), single)
 
@@ -1561,7 +1564,8 @@ class PromptCacheTests(unittest.IsolatedAsyncioTestCase):
             if enabled:
                 self.assertEqual(sent.count('"cachePoint"'), 3)
                 usage_frame = json.loads(frames[-2][len("data: "):])
-                self.assertEqual(usage_frame["usage"], {"prompt_tokens": 2043, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 2000}})
+                self.assertEqual(usage_frame["usage"], {"prompt_tokens": 2043, "completion_tokens": 2,
+                                                        "prompt_tokens_details": {"cached_tokens": 2000, "cache_write_tokens": 40}})
             else:
                 self.assertEqual(record["input"], with_summarized_thinking(to_converse_input(body, CLAUDE), CLAUDE),
                                  "off sends exactly the request the bridge builds without checkpoints")

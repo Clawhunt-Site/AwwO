@@ -70,6 +70,14 @@ export function normalizeUsage(raw, protocol, complete = true) {
   for (const key of TOKEN_FIELDS) if (result[key] !== null && !integer(result[key])) result[key] = null;
   result.status = invalid || mismatch ? 'invalid' : !present ? 'unavailable' : complete && result.computedTotalTokens !== null ? 'reported' : 'partial';
   result.reason = mismatch ? 'total_mismatch' : invalid ? 'protocol_invalid' : result.status === 'reported' ? 'none' : !present ? 'provider_missing' : 'field_missing';
+  // A cache-write count (OpenRouter's cache_write_tokens beside cached_tokens, which the Bedrock bridge reports too) is a
+  // subset of the input, as reads are. It is taken only from a report that is otherwise valid, where it is a count that
+  // fits in the input beside the reads; anything else is left out, as every such count was before, and never puts the
+  // rest of the report in doubt (as the Python worker's provider_observation.py takes it).
+  if (protocol !== 'anthropic' && result.status !== 'invalid') {
+    const write = raw[protocol === 'chat_completions' ? 'prompt_tokens_details' : 'input_tokens_details']?.cache_write_tokens;
+    if (integer(write) && result.inputTokens !== null && (result.cachedInputTokens ?? 0) + write <= result.inputTokens) result.cacheWriteTokens = write;
+  }
   return result;
 }
 

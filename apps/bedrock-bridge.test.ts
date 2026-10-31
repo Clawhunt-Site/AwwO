@@ -233,7 +233,14 @@ test('usage is reported only when complete and never invents a total', () => {
   assert.equal(chatUsage(undefined), undefined);
   assert.equal(chatUsage({ inputTokens: 1 }), undefined);
   assert.equal(chatUsage({ inputTokens: -1, outputTokens: 2 }), undefined);
-  assert.deepEqual(chatUsage({ inputTokens: 3, outputTokens: 2, totalTokens: 99, cacheWriteInputTokens: 5 }), { prompt_tokens: 8, completion_tokens: 2 });
+  assert.deepEqual(chatUsage({ inputTokens: 3, outputTokens: 2, totalTokens: 99, cacheWriteInputTokens: 5 }),
+    { prompt_tokens: 8, completion_tokens: 2, prompt_tokens_details: { cache_write_tokens: 5 } });
+  // Reads and writes are both subsets of the prompt tokens: Converse's inputTokens counts neither.
+  assert.deepEqual(chatUsage({ inputTokens: 2, outputTokens: 48, cacheReadInputTokens: 5575, cacheWriteInputTokens: 58 }),
+    { prompt_tokens: 5635, completion_tokens: 48, prompt_tokens_details: { cached_tokens: 5575, cache_write_tokens: 58 } });
+  assert.deepEqual(chatUsage({ inputTokens: 3, outputTokens: 2 }), { prompt_tokens: 3, completion_tokens: 2 });
+  // A malformed count is left out, never counted.
+  assert.deepEqual(chatUsage({ inputTokens: 3, outputTokens: 2, cacheReadInputTokens: -1, cacheWriteInputTokens: 1.5 }), { prompt_tokens: 3, completion_tokens: 2 });
 });
 
 test('SDK failures keep only a status and an exception type, never the account-bearing message', () => {
@@ -797,9 +804,19 @@ test('the prompt cache marks a re-sent prefix after the tools, the system prompt
   assert.deepEqual((chatCached.messages as { content: unknown[] }[]).at(-1)!.content, [{ text: 'More' }, CACHE_POINT]);
 });
 
-test('a single-message request is left as it was, so a one-off call never pays for a cache write', () => {
-  const single = toConverseInput(request({ tools: TIME_TOOL }), MODEL);
+test('a single tool-free message is left as it was, so a one-off call never pays for a cache write', () => {
+  const single = toConverseInput(request(), MODEL);
   assert.equal(withClaudePromptCache(single), single);
+  // A first call that offers tools is a tool loop's: its next call sends the same prefix again, so it is marked like
+  // the loop's later calls are, and that call reads what this one wrote.
+  const first = toConverseInput(request({ tools: TIME_TOOL }), MODEL);
+  const marked = withClaudePromptCache(first);
+  assert.deepEqual((marked.toolConfig as { tools: unknown[] }).tools, [...(first.toolConfig as { tools: unknown[] }).tools, CACHE_POINT]);
+  assert.deepEqual(marked.system, [{ text: 'Be brief.' }, CACHE_POINT]);
+  assert.deepEqual(marked.messages, [{ role: 'user', content: [{ text: 'Hello' }, CACHE_POINT] }]);
+  assert.equal(JSON.stringify(first).includes('cachePoint'), false, 'the input command is not mutated');
+  // Tools offered on an empty list are no tools: a request with `tools: []` sends no toolConfig at all.
+  assert.equal(withClaudePromptCache({ ...single, toolConfig: { tools: [] } }).messages, single.messages);
   // Thinking and caching compose: the thinking request (tool-free, with history) keeps its thinking field.
   const thought = withClaudeThinking(toConverseInput(request({ max_tokens: 8000,
     messages: [{ role: 'user', content: 'Plan' }, { role: 'assistant', content: 'Draft' }, { role: 'user', content: 'Again' }] }), MODEL), 2048);
@@ -818,8 +835,15 @@ test('the fetch sends cache checkpoints only when the operator turned the cache 
   const response = await cachedFetch(ENDPOINT, post(body));
   const chunks = frames(await response.text()).slice(0, -1).map(frame => JSON.parse(frame));
   assert.equal(JSON.stringify(sent[0].input).split('"cachePoint"').length - 1, 3);
-  // Usage keeps counting every prompt token, reads and writes included, with the reads as cached tokens.
-  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 2043, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 2000 } });
+  // Usage keeps counting every prompt token, reads and writes included, with the reads as cached tokens and the writes
+  // as cache-write tokens.
+  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 2043, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 2000, cache_write_tokens: 40 } });
+  // A tool loop's first call to Claude Opus 5.5 asks for its thinking summarized and carries the three checkpoints (the
+  // shape the 2026-10-31 probe sent: its next call read what this one wrote).
+  const firstCall = request({ tools: TIME_TOOL });
+  await (await cachedFetch(ENDPOINT, post(firstCall))).text();
+  assert.deepEqual(sent.at(-1)!.input.additionalModelRequestFields, SUMMARY);
+  assert.equal(JSON.stringify(sent.at(-1)!.input).split('"cachePoint"').length - 1, 3);
   // Off (the default) and false send exactly the request the bridge sent before: a tool loop's history keeps Claude
   // Opus 5.5's request as it was too (withSummarizedThinking).
   for (const options of [{}, { promptCache: false }]) {

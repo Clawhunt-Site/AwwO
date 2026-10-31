@@ -2419,7 +2419,10 @@
      "choices": [],
      "usage": {
       "prompt_tokens": 9,
-      "completion_tokens": 2
+      "completion_tokens": 2,
+      "prompt_tokens_details": {
+       "cache_write_tokens": 6
+      }
      }
     }
    ]
@@ -2800,6 +2803,190 @@
      "usage": {
       "prompt_tokens": 20,
       "completion_tokens": 30
+     }
+    }
+   ]
+  },
+  {
+   "name": "cache-read-and-write",
+   "events": [
+    {
+     "messageStart": {
+      "role": "assistant"
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "text": "OK"
+      }
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "end_turn"
+     }
+    },
+    {
+     "metadata": {
+      "usage": {
+       "inputTokens": 2,
+       "outputTokens": 48,
+       "cacheReadInputTokens": 5575,
+       "cacheWriteInputTokens": 58
+      }
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "content": "OK"
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "stop"
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [],
+     "usage": {
+      "prompt_tokens": 5635,
+      "completion_tokens": 48,
+      "prompt_tokens_details": {
+       "cached_tokens": 5575,
+       "cache_write_tokens": 58
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "malformed-cache-counts",
+   "events": [
+    {
+     "messageStart": {
+      "role": "assistant"
+     }
+    },
+    {
+     "contentBlockDelta": {
+      "contentBlockIndex": 0,
+      "delta": {
+       "text": "OK"
+      }
+     }
+    },
+    {
+     "messageStop": {
+      "stopReason": "end_turn"
+     }
+    },
+    {
+     "metadata": {
+      "usage": {
+       "inputTokens": 3,
+       "outputTokens": 2,
+       "cacheReadInputTokens": true,
+       "cacheWriteInputTokens": 9007199254740992
+      }
+     }
+    }
+   ],
+   "expect": [
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "role": "assistant",
+        "content": ""
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {
+        "content": "OK"
+       },
+       "finish_reason": null
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [
+      {
+       "index": 0,
+       "delta": {},
+       "finish_reason": "stop"
+      }
+     ]
+    },
+    {
+     "id": "chatcmpl-vector",
+     "object": "chat.completion.chunk",
+     "created": 1,
+     "model": "global.anthropic.claude-opus-5-5",
+     "choices": [],
+     "usage": {
+      "prompt_tokens": 3,
+      "completion_tokens": 2
      }
     }
    ]

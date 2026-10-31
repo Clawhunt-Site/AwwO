@@ -426,7 +426,10 @@ def with_claude_prompt_cache(command: dict) -> dict:
     """Claude explicit prompt caching for one Converse command (see withClaudePromptCache in
     apps/bedrock-bridge.ts). Only a request that re-sends an earlier exchange, a conversation with
     history or a tool loop, gets checkpoints: after the tool definitions, after the system prompt
-    and at the end of the last message. A single-message request is returned unchanged."""
+    and at the end of the last message. A single-message request is returned unchanged, even one
+    that offers tools: the Node workers' bridge marks such a request because it opens their tool
+    loops, but this worker's runs make one call (max_turns=1), so no call of the same run sends
+    that prefix again (as for a tool-free first turn)."""
     messages = command.get("messages")
     if not isinstance(messages, list) or len(messages) < 2:
         return command
@@ -447,18 +450,26 @@ def with_claude_prompt_cache(command: dict) -> dict:
 
 
 def _non_negative(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    """A count as the TS bridge's nonNegative reads one (Number.isSafeInteger): a whole number from 0 to 2**53 - 1."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 9007199254740991
 
 
 def chat_usage(usage: Any) -> dict | None:
-    """Converse usage to Chat Completions usage; cache reads are a subset of prompt tokens."""
+    """Converse usage to Chat Completions usage (see chatUsage in apps/bedrock-bridge.ts): cache reads and writes are
+    subsets of prompt tokens, reported as prompt_tokens_details.cached_tokens and cache_write_tokens; Converse's
+    inputTokens counts neither."""
     if not isinstance(usage, dict) or not _non_negative(usage.get("inputTokens")) or not _non_negative(usage.get("outputTokens")):
         return None
-    read = usage.get("cacheReadInputTokens") if _non_negative(usage.get("cacheReadInputTokens")) else 0
-    write = usage.get("cacheWriteInputTokens") if _non_negative(usage.get("cacheWriteInputTokens")) else 0
-    result = {"prompt_tokens": usage["inputTokens"] + read + write, "completion_tokens": usage["outputTokens"]}
-    if _non_negative(usage.get("cacheReadInputTokens")):
-        result["prompt_tokens_details"] = {"cached_tokens": usage["cacheReadInputTokens"]}
+    read = usage.get("cacheReadInputTokens") if _non_negative(usage.get("cacheReadInputTokens")) else None
+    write = usage.get("cacheWriteInputTokens") if _non_negative(usage.get("cacheWriteInputTokens")) else None
+    result = {"prompt_tokens": usage["inputTokens"] + (read or 0) + (write or 0), "completion_tokens": usage["outputTokens"]}
+    details = {}
+    if read is not None:
+        details["cached_tokens"] = read
+    if write is not None:
+        details["cache_write_tokens"] = write
+    if details:
+        result["prompt_tokens_details"] = details
     return result
 
 
