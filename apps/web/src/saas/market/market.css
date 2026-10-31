@@ -6,14 +6,20 @@
 .awwo-market .awwo-market-sort { display: flex; flex-direction: row; align-items: center; gap: 6px; color: var(--library-muted); font-size: 12px; white-space: nowrap; }
 .awwo-market .awwo-market-sort select { width: auto; }
 .awwo-market-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
-.awwo-market-card {
-  display: grid; gap: 4px; width: 100%; height: 100%; padding: 12px 14px; text-align: left; cursor: pointer;
+/* A card is a button, and the pages it shows on style every button: the hosted shell's rule (design/system.css, a pill
+   on the workspace home) and the library frame's (canvas-library.css) outrank a bare class. So the card's rules name
+   the list it sits in, and its hover and press name :not(:disabled) as those pages' own hover and press rules do. */
+.awwo-market-cards button.awwo-market-card {
+  display: grid; align-content: start; justify-content: stretch; gap: 4px; width: 100%; height: 100%; min-height: 0;
+  padding: 12px 14px; text-align: left; cursor: pointer;
   border: 1px solid var(--library-border, var(--saas-border, #dfe5e8)); border-radius: 12px;
   background: var(--library-surface, var(--saas-card, #fff)); color: var(--library-ink, var(--saas-text, #25323c)); font: inherit;
 }
-.awwo-library button.awwo-market-card { display: grid; justify-content: stretch; align-content: start; }
-.awwo-market-card:hover { border-color: color-mix(in srgb, var(--library-accent, var(--saas-accent, #187b70)) 45%, var(--library-border, var(--saas-border, #dfe5e8))); }
-.awwo-market-card.is-selected { border-color: var(--library-accent, var(--saas-accent, #187b70)); box-shadow: 0 0 0 1px var(--library-accent, var(--saas-accent, #187b70)); }
+.awwo-market-cards button.awwo-market-card:not(:disabled):is(:hover, :active) {
+  border-color: color-mix(in srgb, var(--library-accent, var(--saas-accent, #187b70)) 45%, var(--library-border, var(--saas-border, #dfe5e8)));
+  background: var(--library-surface, var(--saas-card, #fff));
+}
+.awwo-market-cards button.awwo-market-card.is-selected:not(:disabled) { border-color: var(--library-accent, var(--saas-accent, #187b70)); box-shadow: 0 0 0 1px var(--library-accent, var(--saas-accent, #187b70)); }
 .awwo-market-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
 .awwo-market-card-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .awwo-market-price { flex-shrink: 0; color: var(--library-muted, var(--saas-muted, #75818c)); font-size: 12px; }
