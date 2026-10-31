@@ -45,6 +45,9 @@ type executionSnapshot struct {
 	Skills *skillContext `json:"skills,omitempty"`
 	// Memory is the workspace notes relevant to this node's task, quoted as untrusted data (memory.go).
 	Memory *memoryContext `json:"memory,omitempty"`
+	// Lessons are what earlier runs of this node taught, AwwO's own sentences (canvas_lessons.go); settling the node
+	// counts each by its id.
+	Lessons *lessonContext `json:"lessons,omitempty"`
 	// Market is the market Agent's version this run runs (market_use.go); its instructions and skills are in
 	// Instructions and Skills, and this snapshot never leaves the server.
 	Market   *marketRunSnapshot `json:"market,omitempty"`

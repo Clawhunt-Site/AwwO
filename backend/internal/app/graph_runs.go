@@ -402,6 +402,14 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.dbError(w, e)
 					return
 				}
+				// A team's members are framed by their own turns (team_context.go), which carry no lessons, and a
+				// collaboration's turns are not counted as a node's run (canvas_lessons.go), so they get none either.
+				if team == nil && b.Collaboration == nil {
+					if snap.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, cid, n.ID); e != nil {
+						a.dbError(w, e)
+						return
+					}
+				}
 				// Freeze a structured contract only when the deployment has switched contracts
 				// on, and only for a plain single-agent node whose own model advertises the
 				// capability. A team turn is excluded because its members deliver into the
@@ -630,6 +638,8 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 			tag, e := a.db.Exec(ctx, "UPDATE graph_runs SET status=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status='running'", tid, id, final)
 			if e == nil && tag.RowsAffected() == 1 {
 				a.observeGraph(final)
+				// What its failed nodes teach is written down for their next runs (canvas_lessons.go).
+				a.scheduleGraphLessons(tid, id)
 			}
 			return
 		}
@@ -784,10 +794,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, detail string) {
 	var runID *string
 	// A node that was retried settles its pending experiences in the same statement: done as succeeded, any other end as
-	// failed (graph_retry.go). A node never retried has none, and the second statement then reads nothing.
+	// failed (graph_retry.go). A node never retried has none, and the second statement then reads nothing. So does a
+	// node whose run was given lessons count them, by the kind of its failure (canvas_lessons.go); one given none counts
+	// nothing.
 	err := a.db.QueryRow(ctx, `WITH settled AS (UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6,retry_at=NULL WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND state IN ('waiting','running') AND state<>$4 AND EXISTS(SELECT 1 FROM graph_runs WHERE tenant_id=$1 AND id=$2 AND status='running') RETURNING run_id,attempts),
-		experiences AS (UPDATE canvas_experiences SET outcome=CASE WHEN $4='done' THEN 'succeeded' ELSE 'failed' END,detail=detail||jsonb_build_object('nodeState',$4::text),updated_at=now() WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND outcome='pending' AND EXISTS(SELECT 1 FROM settled WHERE attempts>0))
-		SELECT run_id FROM settled`, tid, gid, nid, state, output, detail).Scan(&runID)
+		experiences AS (UPDATE canvas_experiences SET outcome=CASE WHEN $4='done' THEN 'succeeded' ELSE 'failed' END,detail=detail||jsonb_build_object('nodeState',$4::text),updated_at=now() WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3 AND outcome='pending' AND EXISTS(SELECT 1 FROM settled WHERE attempts>0)),
+		`+settleNodeLessonsSQL+`
+		SELECT run_id FROM settled`, tid, gid, nid, state, output, detail, givenLessonKind(state, detail)).Scan(&runID)
 	if err == nil {
 		a.observeGraphNodeState(state)
 		if runID != nil && state == "failed" {
@@ -1003,13 +1016,20 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	prompt = attachmentUserPrompt(prompt, uploads)
 	instructions := graphSystemPrompt(snap.Instructions, effectiveOutputPolicy(snap))
 	framed := func() string {
-		return a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap)
+		return a.sentInstructions(lessonsSystemPrompt(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snap.Skills), snap.TaskFrame), snap.Knowledge), snap.Memory), snap.Lessons), snap)
 	}
 	framedInstructions := framed()
 	framedPrompt := evidenceUserPrompt(prompt, snap.Knowledge, snap.Memory)
 	promptTooLarge := utf16Len(framedPrompt) > maxRunPromptUnits
 	tooLargeForModel := func() bool {
 		return snap.Team == nil && (snap.tokens(framedPrompt)+snap.tokens(framedInstructions)+snap.Overhead+outputContractReserve(snap) > snap.Budget || len(utf16.Encode([]rune(framedInstructions))) > 32768)
+	}
+	// A node's lessons help its run, never refuse it (canvas_lessons.go): a run they would not let fit goes without them,
+	// and its run's snapshot, which settling counts, names none.
+	lessons := snap.Lessons
+	if snap.Lessons != nil && !promptTooLarge && tooLargeForModel() {
+		snap.Lessons = nil
+		framedInstructions = framed()
 	}
 	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
 	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
@@ -1018,6 +1038,14 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		framedInstructions = framed()
 		if !tooLargeForModel() {
 			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nid, "sandbox", snap.Workspace != nil)
+		}
+		// Lessons left out for room that leaving the skills out then made come back where they fit now.
+		if lessons != nil && snap.Lessons == nil {
+			snap.Lessons = lessons
+			if framedInstructions = framed(); tooLargeForModel() {
+				snap.Lessons = nil
+				framedInstructions = framed()
+			}
 		}
 	}
 	if promptTooLarge || tooLargeForModel() {
@@ -1164,7 +1192,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
-		status, e = reconcileCancelledGraph(r.Context(), tx, tid, id)
+		status, e = a.reconcileCancelledGraph(r.Context(), tx, tid, id)
 		if e != nil {
 			a.dbError(w, e)
 			return
@@ -1309,7 +1337,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
-		status, e = reconcileCancelledGraph(r.Context(), tx, tid, gid)
+		status, e = a.reconcileCancelledGraph(r.Context(), tx, tid, gid)
 		if e != nil {
 			a.dbError(w, e)
 			return
@@ -1358,7 +1386,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 // Child finalization can commit just before cancellation while the graph's
 // polling projection still says running. Reconcile inside the cancellation
 // transaction so completed deliverables and partial cancellation evidence survive.
-func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (string, error) {
+func (a *App) reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (string, error) {
 	var raw []byte
 	var collaborationRaw []byte
 	if e := tx.QueryRow(ctx, "SELECT document,collaboration FROM graph_runs WHERE tenant_id=$1 AND id=$2", tid, gid).Scan(&raw, &collaborationRaw); e != nil {
@@ -1375,18 +1403,18 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 	for _, n := range doc.Nodes {
 		nodes[n.ID] = n
 	}
-	rows, e := tx.Query(ctx, "SELECT n.node_id,n.state,n.output,n.detail,COALESCE(r.status,''),COALESCE(r.output,''),COALESCE(r.error,''),n.state='waiting' AND n.retry_at IS NOT NULL FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id WHERE n.tenant_id=$1 AND n.graph_id=$2 FOR UPDATE OF n", tid, gid)
+	rows, e := tx.Query(ctx, "SELECT n.node_id,n.state,n.output,n.detail,COALESCE(n.run_id,''),COALESCE(r.status,''),COALESCE(r.output,''),COALESCE(r.error,''),n.state='waiting' AND n.retry_at IS NOT NULL FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id WHERE n.tenant_id=$1 AND n.graph_id=$2 FOR UPDATE OF n", tid, gid)
 	if e != nil {
 		return "", e
 	}
 	type row struct {
-		id, state, output, detail, runStatus, runOutput, runError string
-		retrying                                                  bool
+		id, state, output, detail, runID, runStatus, runOutput, runError string
+		retrying                                                         bool
 	}
 	all := []row{}
 	for rows.Next() {
 		var r row
-		if e = rows.Scan(&r.id, &r.state, &r.output, &r.detail, &r.runStatus, &r.runOutput, &r.runError, &r.retrying); e != nil {
+		if e = rows.Scan(&r.id, &r.state, &r.output, &r.detail, &r.runID, &r.runStatus, &r.runOutput, &r.runError, &r.retrying); e != nil {
 			rows.Close()
 			return "", e
 		}
@@ -1421,6 +1449,12 @@ func reconcileCancelledGraph(ctx context.Context, tx pgx.Tx, tid, gid string) (s
 			}
 			if _, e = tx.Exec(ctx, "UPDATE graph_run_nodes SET state=$4,output=$5,detail=$6,retry_at=NULL WHERE tenant_id=$1 AND graph_id=$2 AND node_id=$3", tid, gid, r.id, r.state, r.output, r.detail); e != nil {
 				return "", e
+			}
+			// A node whose run ended just before the stop counts the lessons that run was given, as setGraphNode would.
+			if r.state == "done" || r.state == "failed" {
+				if err := countRunLessons(ctx, tx, tid, r.runID, r.state, r.detail); err != nil {
+					a.log.Warn("a stopped canvas run's node did not count its lessons", "error_type", errorType(err))
+				}
 			}
 		}
 		if r.state == "cancelled" {

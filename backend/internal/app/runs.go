@@ -665,6 +665,14 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
+		// A node's own message gets what its earlier runs taught, as its canvas runs do (canvas_lessons.go); a team's
+		// members are framed by their own turns.
+		if team == nil {
+			if snapshot.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, canvasID, nodeID); e != nil {
+				a.dbError(w, e)
+				return
+			}
+		}
 	}
 	if kind == "computer" {
 		var owner string
@@ -742,18 +750,32 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 	var modelExcess int
 	// Whether the run is refused for its size, measured with the skills it holds now.
 	refused := func() bool {
-		framedInstructions = a.sentInstructions(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot)
-		instructionsFit = (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
+		framedInstructions = a.sentInstructions(lessonsSystemPrompt(memorySystemPrompt(knowledgeSystemPrompt(taskFrameSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.TaskFrame), snapshot.Knowledge), snapshot.Memory), snapshot.Lessons), snapshot)
+		instructionsFit = (snapshot.TaskFrame == nil && snapshot.Knowledge == nil && snapshot.Skills == nil && snapshot.Memory == nil && snapshot.Lessons == nil) || len(utf16.Encode([]rune(framedInstructions))) <= 32768
 		modelExcess = snapshot.tokens(framedPrompt) + snapshot.tokens(framedInstructions) + overhead - budget
 		return team == nil && (promptExcess > 0 || modelExcess > 0 || !instructionsFit)
 	}
 	tooLarge := refused()
+	// A node's lessons help its run, never refuse it (canvas_lessons.go): a run they would not let fit goes without them,
+	// and counts none.
+	lessons := snapshot.Lessons
+	if tooLarge && snapshot.Lessons != nil && promptExcess <= 0 {
+		snapshot.Lessons = nil
+		tooLarge = refused()
+	}
 	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
 	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
 	if team == nil && snapshot.Market == nil && plannerPageSkills(snapshot.Skills) && promptExcess <= 0 && (snapshot.Workspace != nil || tooLarge) {
 		snapshot.Skills = nil
 		if tooLarge = refused(); !tooLarge {
 			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nodeID, "sandbox", snapshot.Workspace != nil)
+		}
+		// Lessons left out for room that leaving the skills out then made come back where they fit now.
+		if lessons != nil && snapshot.Lessons == nil && !tooLarge {
+			if snapshot.Lessons = lessons; refused() {
+				snapshot.Lessons = nil
+				tooLarge = refused()
+			}
 		}
 	}
 	if tooLarge {
@@ -953,7 +975,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
-	instructions = memorySystemPrompt(knowledgeSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.Knowledge), snapshot.Memory)
+	instructions = lessonsSystemPrompt(memorySystemPrompt(knowledgeSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.Knowledge), snapshot.Memory), snapshot.Lessons)
 	prompt = evidenceUserPrompt(prompt, snapshot.Knowledge, snapshot.Memory)
 	if kind == "computer" {
 		a.executeComputer(ctx, tid, id, sid, prompt, instructions, snapshot)
@@ -964,7 +986,7 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		return
 	}
 	instructions = a.sentInstructions(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot)
-	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil) && (snapshot.tokens(prompt)+snapshot.tokens(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
+	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil || snapshot.Lessons != nil) && (snapshot.tokens(prompt)+snapshot.tokens(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}
@@ -1533,6 +1555,8 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 		return e
 	}
 	var sid string
+	// Why the plan gate refused a plan (planner_lessons.go), recorded once the run's row moves.
+	refusal := ""
 	if status == "completed" {
 		var kind string
 		var raw json.RawMessage
@@ -1554,6 +1578,15 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			} else {
 				status = "failed"
 				code = "invalid_canvas_plan"
+				// Read before the run's row is locked; its record takes the workspace row's key share, locked first, as a
+				// cancellation locks the workspace before the run, and only where it is free at once (sideWrite): the
+				// record is left out sooner than the refusal waits.
+				if refusal = planRefusalReason(output, planned.PlanNewNodeModel); plannerHints[refusal] == "" {
+					refusal = ""
+				} else if err := sideWrite(ctx, tx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); err != nil {
+					a.log.Warn("a refused plan's reason was not recorded", "error_type", errorType(err))
+					refusal = ""
+				}
 			}
 		}
 		if kind == "knowledge" {
@@ -1591,6 +1624,9 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 			runKind = "team"
 		}
 	}
+	if refusal != "" {
+		a.recordPlanRefusal(ctx, tx, tid, refusal, snap.Model)
+	}
 	// A direct task the platform failed or interrupted gives its calls back (direct_task_refund.go): noted in the
 	// transaction that moves it there, so a stop that wins the race leaves no refund behind.
 	if runKind == "computer" && (status == "interrupted" || (status == "failed" && computerRefundable(code))) {
@@ -1627,6 +1663,14 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	}
 	if e = settle(tx); e != nil {
 		return e
+	}
+	// A node's own message counts the lessons it was given (canvas_lessons.go; a canvas run's node counts them as its
+	// canvas run settles it). Last, so the lesson rows are held after every write that locks the workspace row (a
+	// person's update of a lesson locks that row first).
+	if state := map[string]string{"completed": "done", "failed": "failed"}[status]; runKind == "node" && state != "" && snap.Lessons != nil {
+		if err := countRunLessons(ctx, tx, tid, id, state, code); err != nil {
+			a.log.Warn("a node's message did not count its lessons", "error_type", errorType(err))
+		}
 	}
 	return commit(tx)
 }

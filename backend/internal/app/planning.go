@@ -47,6 +47,8 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 		personal, c.dropped = "", personal
 	}
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
+	// With the mistakes recent plans made (planner_lessons.go), read before the canvas is locked.
+	instructions := a.plannerInstructionsNow(r.Context())
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		a.dbError(w, e)
@@ -71,7 +73,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	if noRows(e) {
 		sid = randomID()
 		aid := randomID()
-		if _, e = tx.Exec(r.Context(), "INSERT INTO agents(id,tenant_id,name,role,instructions,internal) VALUES($1,$2,'Canvas planner','planner',$3,true)", aid, tid, plannerInstructions); e != nil {
+		if _, e = tx.Exec(r.Context(), "INSERT INTO agents(id,tenant_id,name,role,instructions,internal) VALUES($1,$2,'Canvas planner','planner',$3,true)", aid, tid, instructions); e != nil {
 			a.dbError(w, e)
 			return
 		}
@@ -89,7 +91,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	// Planner instructions are server-owned. Existing canvas sessions must use
 	// the current protocol too; already accepted runs retain their snapshots.
-	if _, e = tx.Exec(r.Context(), "UPDATE agents a SET instructions=$3 FROM node_sessions s WHERE s.tenant_id=$1 AND s.id=$2 AND s.kind='planner' AND a.tenant_id=s.tenant_id AND a.id=s.agent_id AND a.internal", tid, sid, plannerInstructions); e != nil {
+	if _, e = tx.Exec(r.Context(), "UPDATE agents a SET instructions=$3 FROM node_sessions s WHERE s.tenant_id=$1 AND s.id=$2 AND s.kind='planner' AND a.tenant_id=s.tenant_id AND a.id=s.agent_id AND a.internal", tid, sid, instructions); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -109,7 +111,7 @@ func (a *App) planCanvas(w http.ResponseWriter, r *http.Request) {
 	extras := personal
 	if full, compact := a.plannerNodeLimits(r.Context(), tid); full != "" {
 		ceiling := func(extra string) bool {
-			return len(prompt)+len(extra)+len(plannerInstructions) <= a.cfg.PlannerMaxInputBytes
+			return len(prompt)+len(extra)+len(instructions) <= a.cfg.PlannerMaxInputBytes
 		}
 		fits := func(limits string) bool {
 			sponsored := a.cfg.PlannerModel == "" || a.cfg.UserCredentials || !ceiling(personal) || ceiling(limits+personal)
@@ -212,66 +214,80 @@ var planFieldTypes = []string{"text", "markdown", "html", "number", "boolean", "
 
 // This gate validates the transport schema. Frontend applyCanvasPlan separately
 // validates references, field compatibility, cycles and the currently loaded graph.
-func validatePlan(raw string) bool {
+func validatePlan(raw string) bool { return planGateReason(raw) == "" }
+
+// planGateReason is why the plan gate refuses raw, as the first check it fails names it in a word of plannerHints
+// (planner_lessons.go, where a refused plan records it), or "" for a plan it takes.
+func planGateReason(raw string) string {
 	raw = planJSONBody(raw)
 	if utf8.RuneCountInString(raw) > 120000 {
-		return false
+		return "too_long"
 	}
 	var p map[string]any
-	if json.Unmarshal([]byte(raw), &p) != nil || !planKeys(p, "version", "summary", "operations") || p["version"] != float64(1) || !planText(p["summary"], 1000, false) {
-		return false
+	if json.Unmarshal([]byte(raw), &p) != nil {
+		return "not_json"
+	}
+	if !planKeys(p, "version", "summary", "operations") || p["version"] != float64(1) {
+		return "shape"
+	}
+	if !planText(p["summary"], 1000, false) {
+		return "summary"
 	}
 	ops, ok := p["operations"].([]any)
-	if !ok || len(ops) > 100 {
-		return false
+	if !ok {
+		return "shape"
+	}
+	if len(ops) > 100 {
+		return "too_many_operations"
 	}
 	refs := map[string]bool{}
 	for _, item := range ops {
 		op, ok := item.(map[string]any)
 		if !ok {
-			return false
+			return "operation_shape"
 		}
 		typ, _ := op["type"].(string)
+		bad := "operation:" + typ
 		switch typ {
 		case "add_node":
 			// A new node's constraints follow the user's request, which the canvas gives every new node first (canvasPlan.ts):
 			// 27 of the 40 plans of Claude Haiku 4.5 refused in the 7 days to 2026-10-23 gave them here, before add_node took them.
 			if !planKeys(op, "type", "ref", "templateId", "title", "persona", "inputValues", "constraints", "acceptanceCriteria") || !planID(op["ref"]) || !oneOf(op["templateId"], planTemplateIDs...) {
-				return false
+				return bad
 			}
 			for _, key := range []string{"constraints", "acceptanceCriteria"} {
 				if v, ok := op[key]; ok {
 					if _, ok := planTaskList(v); !ok {
-						return false
+						return bad
 					}
 				}
 			}
 			ref := op["ref"].(string)
 			if refs[ref] {
-				return false
+				return "references"
 			}
 			refs[ref] = true
 			if !optionalPlanText(op, "title", 200, false) || !optionalPlanText(op, "persona", 8000, true) {
-				return false
+				return bad
 			}
 			if v, ok := op["inputValues"]; ok {
 				m, ok := v.(map[string]any)
 				if !ok || len(m) > 64 {
-					return false
+					return bad
 				}
 				for k, v := range m {
 					if !planID(k) || !planText(v, 16000, true) {
-						return false
+						return bad
 					}
 				}
 			}
 		case "update_node":
 			if !planKeys(op, "type", "nodeId", "title", "persona") || !planID(op["nodeId"]) || !optionalPlanText(op, "title", 200, false) || !optionalPlanText(op, "persona", 8000, true) {
-				return false
+				return bad
 			}
 			if _, a := op["title"]; !a {
 				if _, b := op["persona"]; !b {
-					return false
+					return bad
 				}
 			}
 		case "set_task":
@@ -280,118 +296,118 @@ func validatePlan(raw string) bool {
 			// the list the step leaves in place and on the shared requirements an @R name expands to, and a step over it
 			// is left out there with a note, where refusing it here would lose the whole plan.
 			if !planKeys(op, "type", "nodeId", "constraints", "acceptanceCriteria") || !planID(op["nodeId"]) {
-				return false
+				return bad
 			}
 			given := 0
 			for _, key := range []string{"constraints", "acceptanceCriteria"} {
 				if v, ok := op[key]; ok {
 					if _, valid := planTaskList(v); !valid {
-						return false
+						return bad
 					}
 					given++
 				}
 			}
 			if given == 0 {
-				return false
+				return bad
 			}
 		case "set_model":
 			// The model a node runs, named as the context lists it; the canvas checks it against the workspace's catalogue
 			// and picks the runtime itself.
 			if !planKeys(op, "type", "nodeId", "model", "effort") || !planID(op["nodeId"]) || !planText(op["model"], 200, false) {
-				return false
+				return bad
 			}
 			if v, ok := op["effort"]; ok {
 				effort, isText := v.(string)
 				if !isText || (effort != "" && !validEffortLevel(effort)) {
-					return false
+					return bad
 				}
 			}
 		case "set_input":
 			if !planKeys(op, "type", "nodeId", "fieldId", "value") || !planID(op["nodeId"]) || !planID(op["fieldId"]) || !planText(op["value"], 16000, true) {
-				return false
+				return bad
 			}
 		case "add_field":
 			if !planKeys(op, "type", "nodeId", "side", "field") || !planID(op["nodeId"]) || !oneOf(op["side"], "input", "output") {
-				return false
+				return bad
 			}
 			f, ok := op["field"].(map[string]any)
 			if !ok || !planKeys(f, "id", "label", "type", "required", "value", "help", "placeholder") || !planID(f["id"]) || f["value"] != "" || !planText(f["label"], 200, false) || !oneOf(f["type"], planFieldTypes...) {
-				return false
+				return bad
 			}
 			if _, ok = f["required"].(bool); !ok {
-				return false
+				return bad
 			}
 			if !optionalPlanText(f, "help", 2000, true) || !optionalPlanText(f, "placeholder", 2000, true) {
-				return false
+				return bad
 			}
 		case "update_field":
 			if !planKeys(op, "type", "nodeId", "side", "fieldId", "changes") || !planID(op["nodeId"]) || !planID(op["fieldId"]) || !oneOf(op["side"], "input", "output") {
-				return false
+				return bad
 			}
 			f, ok := op["changes"].(map[string]any)
 			if !ok || len(f) == 0 || !planKeys(f, "label", "type", "required", "help", "placeholder") || !optionalPlanText(f, "label", 200, false) || !optionalPlanText(f, "help", 2000, true) || !optionalPlanText(f, "placeholder", 2000, true) {
-				return false
+				return bad
 			}
 			if v, ok := f["type"]; ok && !oneOf(v, planFieldTypes...) {
-				return false
+				return bad
 			}
 			if v, ok := f["required"]; ok {
 				if _, valid := v.(bool); !valid {
-					return false
+					return bad
 				}
 			}
 		case "remove_field":
 			if !planKeys(op, "type", "nodeId", "side", "fieldId") || !planID(op["nodeId"]) || !planID(op["fieldId"]) || !oneOf(op["side"], "input", "output") {
-				return false
+				return bad
 			}
 		case "remove_node":
 			if !planKeys(op, "type", "nodeId") || !planID(op["nodeId"]) {
-				return false
+				return bad
 			}
 		case "connect":
 			if !planKeys(op, "type", "fromNode", "fromField", "toNode", "toField", "kind") || !planID(op["fromNode"]) || !planID(op["fromField"]) || !planID(op["toNode"]) || !planID(op["toField"]) {
-				return false
+				return bad
 			}
 			if v, ok := op["kind"]; ok && !oneOf(v, "data", "feedback") {
-				return false
+				return bad
 			}
 		case "set_edge_kind":
 			if !planKeys(op, "type", "edgeId", "kind") || !planText(op["edgeId"], 600, false) || !oneOf(op["kind"], "data", "feedback") {
-				return false
+				return bad
 			}
 		case "set_team":
 			// A node's collaboration team (canvasPlan.ts): a template's, or the members the plan writes; never a model,
 			// effort, runtime or tool.
 			if _, given := op["template"]; given {
 				if !planKeys(op, "type", "nodeId", "template") || !planID(op["nodeId"]) || !oneOf(op["template"], planTeamTemplateIDs...) {
-					return false
+					return bad
 				}
 			} else if !planTeam(op) {
-				return false
+				return bad
 			}
 		case "set_execution":
 			switch op["mode"] {
 			case "workflow":
 				if !planKeys(op, "type", "mode") {
-					return false
+					return bad
 				}
 			case "review":
 				rounds, ok := op["maxRounds"].(float64)
 				if !planKeys(op, "type", "mode", "maxRounds", "reviewerNodeId", "verdictFieldId") || !ok || rounds != float64(int(rounds)) || rounds < 1 || rounds > 5 || !planID(op["reviewerNodeId"]) || !planID(op["verdictFieldId"]) {
-					return false
+					return bad
 				}
 			default:
-				return false
+				return bad
 			}
 		case "disconnect":
 			if !planKeys(op, "type", "edgeId") || !planText(op["edgeId"], 600, false) {
-				return false
+				return bad
 			}
 		default:
-			return false
+			return "unknown_operation"
 		}
 	}
-	return true
+	return ""
 }
 
 // planTeamText is a team member's name or role: text of at most max characters that is not blank as the canvas trims it.
@@ -710,8 +726,18 @@ func acceptPlanFor(raw, newNodeModel string) (string, bool) {
 	if json.Compact(&compact, []byte(body)) == nil && validatePlan(compact.String()) {
 		return compact.String(), true
 	}
+	plan, ok := repairedPlan(raw, newNodeModel)
+	if !ok || !validatePlan(plan) {
+		return "", false
+	}
+	return plan, true
+}
+
+// repairedPlan is a planner's answer with the slips normalizePlanOperations repairs, written out again as the gate
+// reads it last (acceptPlanFor), or false for an answer that is not JSON.
+func repairedPlan(raw, newNodeModel string) (string, bool) {
 	var p map[string]any
-	if json.Unmarshal([]byte(body), &p) != nil {
+	if json.Unmarshal([]byte(planJSONBody(raw)), &p) != nil {
 		return "", false
 	}
 	if ops, ok := p["operations"].([]any); ok {
@@ -723,11 +749,7 @@ func acceptPlanFor(raw, newNodeModel string) (string, bool) {
 	if encoder.Encode(p) != nil {
 		return "", false
 	}
-	plan := strings.TrimSpace(buffer.String())
-	if !validatePlan(plan) {
-		return "", false
-	}
-	return plan, true
+	return strings.TrimSpace(buffer.String()), true
 }
 
 // planReservedIDs are the names the canvas refuses as ids (canvasPlan.ts RESERVED: they are JavaScript object keys).

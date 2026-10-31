@@ -62,6 +62,8 @@ type App struct {
 	registry *skillRegistry
 	// marketStats holds the market's ranking figures for a minute (market_browse.go).
 	marketStats marketStatsCache
+	// plannerHints holds the mistakes recent plans made, named to every planner, between reads (planner_lessons.go).
+	plannerHints plannerHintCache
 	// signupClock is the clock of the per-address sign-up count's UTC day (clawhunt_signup.go); nil is time.Now.
 	signupClock func() time.Time
 	// promptClock is the clock of the date a model call's system prompt names (model_identity.go); nil is time.Now.
@@ -236,6 +238,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.startPlanSync(watch)
 	a.startRelaySweeper(watch)
 	a.startMarketSettlement(watch)
+	a.startLessonSweeper(watch)
 	if a.cfg.MarketEnabled {
 		if e = a.seedOfficialMarketAgents(ctx); e != nil {
 			a.log.Warn("the market's official Agents were not listed", "error_type", errorType(e))
@@ -392,6 +395,10 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/evidence", a.tenant(a.getRunEvidence, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/archive", a.tenant(a.downloadRunArchive, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/turns", a.tenant(a.runTurns, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/lessons", a.tenant(a.canvasLessons, 1))
+	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/canvas-lessons/{id}", a.tenant(a.updateCanvasLesson, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.runRating, 1))
+	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.rateRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.createGraphRun, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.listGraphRuns, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs/{id}", a.tenant(a.getGraphRun, 1))
