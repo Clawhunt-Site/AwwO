@@ -230,6 +230,10 @@ func seedAccount(t *testing.T, h *harness) {
 			('i-other','w-team','other','reader','th-4',now()+interval '1 day',NULL,NULL),
 			('i-solo','w-solo','person','reader','th-5',now()+interval '1 day',NULL,NULL)`,
 		"INSERT INTO artifacts(id,tenant_id,canvas_id,name,size,sha256,content) VALUES('art-solo','w-solo','cv-solo','notes.txt',5,'x','\\x6e6f746573')",
+		// The lessons canvas runs taught their nodes, and a workspace's own (no canvas): they go with their canvas or workspace.
+		`INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,fingerprint,rule,status) VALUES
+			('l-solo','w-solo','cv-solo','n','output_limit','f-solo','Rule.','active'),('l-team','w-team','cv-team','n','output_limit','f-team','Rule.','active')`,
+		"INSERT INTO canvas_lessons(id,tenant_id,kind,rule,status) VALUES('l-solo-workspace','w-solo','output_limit','Rule.','active')",
 		// A document's current revision is checked at commit, so it is set once the revisions exist.
 		"INSERT INTO knowledge_documents(id,tenant_id,kind,title,source_hash) VALUES('kd','w-solo','source','Source','sh')",
 		"INSERT INTO knowledge_revisions(id,tenant_id,document_id,version,title,content,content_hash,actor_id) VALUES('kr-1','w-solo','kd',1,'Source','v1','c1','person')",
@@ -468,6 +472,7 @@ func TestPostgresDeletionKeepsSharedWorkAndReplays(t *testing.T) {
 		"SELECT count(*) FROM runs WHERE tenant_id='w-solo'":                                         0,
 		"SELECT count(*) FROM artifacts WHERE tenant_id='w-solo'":                                    0,
 		"SELECT count(*) FROM graph_runs WHERE tenant_id='w-solo'":                                   0,
+		"SELECT count(*) FROM canvas_lessons WHERE tenant_id='w-solo'":                               0,
 		"SELECT count(*) FROM knowledge_documents WHERE tenant_id='w-solo'":                          0,
 		"SELECT count(*) FROM knowledge_revisions WHERE tenant_id='w-solo'":                          0,
 		"SELECT count(*) FROM knowledge_source_origins WHERE tenant_id='w-solo'":                     0,
@@ -498,6 +503,7 @@ func TestPostgresDeletionKeepsSharedWorkAndReplays(t *testing.T) {
 		"SELECT count(*) FROM tenant_invites WHERE id IN ('i-sent-pending','i-accepted')":                      0,
 		"SELECT count(*) FROM tenant_invites WHERE id='i-other'":                                               1,
 		"SELECT count(*) FROM knowledge_source_origins WHERE tenant_id='w-team'":                               1,
+		"SELECT count(*) FROM canvas_lessons WHERE id='l-team'":                                                1,
 		"SELECT count(*) FROM memberships WHERE tenant_id='w-team'":                                            2,
 		"SELECT count(*) FROM auth_sessions WHERE user_id='member'":                                            1,
 		"SELECT count(*) FROM relay_keys WHERE user_id='member' AND tenant_id='w-own'":                         1,

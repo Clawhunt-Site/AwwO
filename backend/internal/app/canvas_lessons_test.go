@@ -152,6 +152,7 @@ func TestPostgresCanvasLessonsSchema(t *testing.T) {
 	for _, statement := range []string{
 		"INSERT INTO users(id,email,name,password_hash) VALUES('u','lessons@example.test','L','x')",
 		"INSERT INTO tenants(id,name) VALUES('t','Lessons workspace')",
+		"INSERT INTO canvases(id,tenant_id,name) VALUES('c','t','Canvas')",
 		"INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,fingerprint,rule,status) VALUES('l','t','c','n','output_limit','f','Rule.','active')",
 	} {
 		if e = exec(statement); e != nil {

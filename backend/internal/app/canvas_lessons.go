@@ -264,6 +264,21 @@ func (a *App) scheduleGraphLessons(tid, gid string) {
 	}()
 }
 
+// lessonLockBound is how long each lock wait of distillGraphLessons may last (the App's lessonLockWait, where a test
+// sets one). It holds its workspace row's key share, which every write to that workspace waits behind, so one lock it
+// cannot get in time (its canvas's row left locked by a transaction opened by hand, say) fails it instead: the sweeper
+// goes on, and a later sweep learns from the run.
+const lessonLockBound = 5 * time.Second
+
+// lessonLockTimeout is distillGraphLessons' lock_timeout setting, in milliseconds.
+func (a *App) lessonLockTimeout() string {
+	wait := a.lessonLockWait
+	if wait <= 0 {
+		wait = lessonLockBound
+	}
+	return strconv.FormatInt(max(wait.Milliseconds(), 1), 10)
+}
+
 // distillGraphLessons writes the lessons canvas run gid's failed nodes teach, once: the run is marked (lessons_at) in
 // the same transaction, so a second call, a sweep or a restart writes nothing more. A run that is not over, or was
 // cancelled, teaches nothing and is marked only once it has ended. A collaboration teaches nothing: it ends every one
@@ -274,8 +289,15 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 		return err
 	}
 	defer tx.Rollback(context.Background())
-	// A new lesson's insert takes the workspace row's key share: taken first, before any lesson row, as a person's update
-	// of a lesson locks the workspace row first.
+	if _, err = tx.Exec(ctx, "SELECT set_config('lock_timeout',$1,true)", a.lessonLockTimeout()); err != nil {
+		return err
+	}
+	// A new lesson's insert takes the workspace row's key share (and its canvas row's: migration 048's key). The workspace
+	// row is taken first, before any lesson row, as a person's update of a lesson locks it first. A deletion of the run's
+	// canvas, or of its workspace, locks the workspace row first too, so it never interleaves with this: one that got here
+	// first has left no run to learn from, and one that comes after takes the lessons written here with the canvas. A
+	// deletion by hand should lock the workspace row first as well: one that locks the canvas and then its runs without it
+	// can deadlock with a canvas's first lesson here, and PostgreSQL ends one of the two (neither leaves a lesson behind).
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); err != nil {
 		return err
 	}
@@ -515,15 +537,19 @@ func (a *App) sweepGraphLessons(ctx context.Context) error {
 	if err = rows.Err(); err != nil {
 		return err
 	}
+	// A run whose lessons cannot be written holds up none after it in the batch: the first failure is returned (and
+	// logged) once the batch is done, and that run is due again at the next sweep, unless its canvas went and took it
+	// along. (A whole batch of runs that each keep failing would still hold up the runs due after them.)
+	var failed error
 	for _, p := range due {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err = a.distillGraphLessons(ctx, p.tid, p.id); err != nil {
-			return err
+		if err = a.distillGraphLessons(ctx, p.tid, p.id); err != nil && failed == nil {
+			failed = err
 		}
 	}
-	return nil
+	return failed
 }
 
 // lessonJSON is a lesson as the canvas's RSI view and its updates return it.
