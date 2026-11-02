@@ -290,7 +290,7 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),
-  the outcome records its canvas runs left (migration 050), usage ledger, and everyone's memberships and invitations.
+  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), usage ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.

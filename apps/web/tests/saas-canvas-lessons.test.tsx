@@ -283,6 +283,33 @@ describe('the lessons workbench', () => {
     expect(within(rows[0]).queryByRole('button', { name: '推广到工作区' })).toBeNull();
   });
 
+  it('lists the notes proposed from runs, for a member to accept or set aside', async () => {
+    const note = (id: string, patch: Record<string, unknown> = {}) => ({ id, canvasId: 'canvas-a', scope: 'canvas', title: `标题 ${id}`, body: `正文 ${id}`, kind: 'decision',
+      status: 'proposed', origin: 'run', pinned: false, source: { graphId: 'g1', distilled: true }, contentHash: id, version: 1, useCount: 0, lastUsedAt: null,
+      createdAt: '2026-11-02T01:00:00Z', updatedAt: '2026-11-02T01:00:00Z', ...patch });
+    let notes = [note('n1'), note('n2'), note('mine', { origin: 'user', source: {} }), note('other', { canvasId: null, scope: 'workspace' })];
+    const calls = server(call => {
+      if (call.method === 'GET' && call.url.startsWith(`${tenant}/memory?`)) return json({ items: notes.filter(item => item.status === 'proposed') });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+      if (call.method === 'PATCH') {
+        const id = call.url.split('/').pop()!;
+        notes = notes.map(item => item.id === id ? { ...item, status: call.body.status, version: 2 } : item);
+        return json(notes.find(item => item.id === id));
+      }
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    const section = await screen.findByRole('region', { name: '从运行中提炼的记忆' });
+    // Only the canvas's notes AwwO proposed from its runs: not a person's, not the workspace's.
+    expect(within(section).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(section).queryByText('标题 mine')).toBeNull();
+    fireEvent.click(within(within(section).getAllByRole('listitem')[0]).getByRole('button', { name: '接受' }));
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '从运行中提炼的记忆' })).getAllByRole('listitem')).toHaveLength(1));
+    fireEvent.click(within(screen.getByRole('region', { name: '从运行中提炼的记忆' })).getByRole('button', { name: '忽略' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '从运行中提炼的记忆' })).toBeNull());
+    expect(calls.filter(call => call.method === 'PATCH').map(call => [call.url, call.body])).toEqual([
+      [`${tenant}/memory/n1`, { version: 1, status: 'active' }], [`${tenant}/memory/n2`, { version: 1, status: 'archived' }]]);
+  });
+
   it('names its refusals in both languages', () => {
     for (const code of ['run_not_rateable', 'invalid_lessons_response']) {
       const error = new SaaSApiError(400, code, 'server text');

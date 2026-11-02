@@ -6,7 +6,9 @@ export type MemoryKind = 'preference' | 'fact' | 'decision' | 'lesson' | 'style'
 export type MemoryStatus = 'active' | 'proposed' | 'archived';
 export interface MemoryNote {
   id: string; canvasId: string | null; scope: 'canvas' | 'workspace'; title: string; body: string; kind: MemoryKind; status: MemoryStatus;
-  origin: 'user' | 'run' | 'assistant'; pinned: boolean; source: { runId?: string; nodeId?: string }; contentHash: string; version: number;
+  origin: 'user' | 'run' | 'assistant'; pinned: boolean;
+  /** The run it came from; `distilled` for one AwwO's own model proposed from a canvas run (graphId), for a person to accept. */
+  source: { runId?: string; nodeId?: string; graphId?: string; distilled?: boolean }; contentHash: string; version: number;
   useCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string;
 }
 export interface MemoryDraft { canvasId?: string; title: string; body?: string; kind?: MemoryKind; pinned?: boolean; status?: 'active' | 'proposed'; source?: { runId?: string; nodeId?: string } }

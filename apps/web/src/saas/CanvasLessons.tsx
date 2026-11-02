@@ -11,6 +11,7 @@ import { WorkbenchOverlay, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
 import { promoteCanvasLesson, readCanvasLessons, updateCanvasLesson, type CanvasLesson, type CanvasLessonsView } from './lessonsApi';
+import { readMemory, updateMemory, type MemoryNote } from './memoryApi';
 import './canvas-library.css';
 import './canvas-lessons.css';
 
@@ -158,6 +159,45 @@ export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraf
   </>;
 }
 
+/** The notes AwwO's own model proposed from this canvas's runs (run_memory.go), waiting for a member: one accepted joins
+ *  the canvas's memory, which its runs are given as background data; one ignored is set aside and never proposed again.
+ *  Nothing shows while there is none (or they cannot be read: the lessons are the panel's own business). */
+function DistilledNotes({ tenantId, canvasId, readOnly }: { tenantId: string; canvasId: string; readOnly: boolean }) {
+  const { t, locale } = useSaaSPreferences();
+  const [notes, setNotes] = useState<MemoryNote[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const load = useCallback(async () => {
+    try {
+      const value = await readMemory(tenantId, { canvasId, status: 'proposed' });
+      if (alive.current) setNotes(value.filter(note => note.canvasId === canvasId && note.origin === 'run' && note.source.distilled === true));
+    } catch { if (alive.current) setNotes([]); }
+  }, [tenantId, canvasId]);
+  useEffect(() => { void load(); }, [load]);
+  const settle = async (note: MemoryNote, status: 'active' | 'archived') => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try { await updateMemory(tenantId, note.id, { version: note.version, status }); if (alive.current) await load(); }
+    catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  if (!notes.length) return null;
+  return <section className="awwo-lessons-notes" aria-label={t('从运行中提炼的记忆', 'Notes proposed from runs')}>
+    <h3>{t('从运行中提炼的记忆：接受后，这张画布之后的运行会把它当作背景资料', 'Notes proposed from runs: once accepted, this canvas’s runs take them as background')}</h3>
+    {error !== null && <p className="awwo-library-alert" role="alert">{saasErrorMessage(error, locale)}</p>}
+    <ul>{notes.map(note => <li key={note.id}>
+      <strong>{note.title}</strong>
+      {note.body && <p>{note.body}</p>}
+      {!readOnly && <div className="awwo-library-item-actions">
+        <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => void settle(note, 'active')}><Check size={14} aria-hidden="true" />{t('接受', 'Accept')}</button>
+        <button type="button" disabled={busy} onClick={() => void settle(note, 'archived')}>{t('忽略', 'Ignore')}</button>
+      </div>}
+    </li>)}</ul>
+  </section>;
+}
+
 export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve, onClose }: Props & { onClose: () => void }) {
   const { t, locale } = useSaaSPreferences();
   const [view, setView] = useState<CanvasLessonsView | null>(null);
@@ -238,6 +278,7 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     {notice && <p className="awwo-library-notice" role="status"><Check size={14} aria-hidden="true" />{notice}</p>}
     <div className="awwo-library-body">
       <div className="awwo-library-list-column">
+        <DistilledNotes tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} />
         {runs.length > 0 && <section className="awwo-lessons-runs" aria-label={t('最近的运行', 'Recent runs')}>
           <h3>{t('最近的运行：首轮就完成的节点', 'Recent runs: nodes done on their first attempt')}</h3>
           <ol>{runs.map(run => {

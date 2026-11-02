@@ -246,6 +246,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.startRelaySweeper(watch)
 	a.startMarketSettlement(watch)
 	a.startLessonSweeper(watch)
+	a.startMemoryDistiller(watch)
 	if a.cfg.MarketEnabled {
 		if e = a.seedOfficialMarketAgents(ctx); e != nil {
 			a.log.Warn("the market's official Agents were not listed", "error_type", errorType(e))

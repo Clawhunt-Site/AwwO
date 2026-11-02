@@ -369,6 +369,8 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 		if err = a.tuneGraphEfforts(ctx, tx, tid, canvasID, gid, outcomes); err != nil {
 			return err
 		}
+		// A run worth learning from is queued for the memory its record holds (run_memory.go).
+		a.queueGraphDistillation(ctx, tx, tid, canvasID, gid)
 	}
 	return tx.Commit(ctx)
 }

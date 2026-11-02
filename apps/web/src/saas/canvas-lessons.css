@@ -9,6 +9,10 @@
 .awwo-lessons-run-bar { position: relative; height: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--library-accent) 14%, transparent); }
 .awwo-lessons-run-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--library-accent); }
 .awwo-lessons-run-figure { font-variant-numeric: tabular-nums; }
+.awwo-lessons-notes { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
+.awwo-lessons-notes h3 { margin: 0 0 8px; color: var(--library-muted); font-size: 12px; font-weight: 600; }
+.awwo-lessons-notes ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.awwo-lessons-notes p { margin: 4px 0 0; color: var(--library-muted); font-size: 12px; }
 .awwo-lessons-suggestion { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--library-accent) 10%, transparent); }
 .awwo-lessons-rule { margin-top: 4px; }
 .awwo-lessons-rule summary { color: var(--library-muted); font-size: 12px; cursor: pointer; }
