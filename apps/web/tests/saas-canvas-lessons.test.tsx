@@ -1,11 +1,13 @@
 // The canvas's 经验 tool (CanvasLessons.tsx): what AwwO learnt from a canvas's runs, retiring and restoring a lesson,
-// handing a lesson's suggestion to the canvas assistant's box; and a run's 👍 / 👎 in the results receipt (RunRating).
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+// applying a lesson's suggested reasoning effort on the canvas, handing its suggested model to the canvas assistant's
+// box; and a run's 👍 / 👎 in the results receipt (RunRating).
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CanvasLessons, LessonsWorkbench, lessonOutcome, lessonRequest, lessonSuggests } from '../src/saas/CanvasLessons';
+import type { CanvasEvolution } from '../src/canvas/CanvasSurface';
+import { CanvasLessons, LessonsWorkbench, lessonEffort, lessonOfEvolution, lessonOutcome, lessonRequest, lessonSatisfied, lessonSuggests, useLessonEvolutions } from '../src/saas/CanvasLessons';
 import { RunRating } from '../src/saas/RunRating';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
-import type { CanvasLesson } from '../src/saas/lessonsApi';
+import { readCanvasLessons, type CanvasLesson } from '../src/saas/lessonsApi';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 
 const tenant = '/api/v1/tenants/tenant-a';
@@ -22,7 +24,8 @@ function server(routes: (call: Call) => Response | undefined) {
 }
 const lesson = (patch: Partial<CanvasLesson> = {}): CanvasLesson => ({ id: 'l1', canvasId: 'canvas-a', nodeId: 'page', nodeTitle: '生成页面', kind: 'output_limit',
   source: 'rule', rule: 'An earlier run of this node stopped at the model\'s output limit before it finished.', given: true, status: 'active', retiredReason: '',
-  seen: 2, applied: 1, succeeded: 1, failed: 0, proposal: 'lower_effort', proposalState: 'open', evidence: [{ graphId: 'g1', runId: 'r1', code: 'output_limit' }],
+  seen: 2, applied: 1, succeeded: 1, failed: 0, proposal: 'lower_effort', proposalState: 'open', scope: { runtime: 'pi', model: 'claude-opus-5-5', effort: '' },
+  evidence: [{ graphId: 'g1', runId: 'r1', code: 'output_limit' }],
   lastSeenAt: '2026-10-31T01:00:00Z', lastAppliedAt: '2026-10-31T02:00:00Z', createdAt: '2026-10-30T01:00:00Z', updatedAt: '2026-10-31T02:00:00Z', ...patch });
 const runs = [{ id: 'g1', status: 'failed', createdAt: '2026-10-30T01:00:00Z', endedAt: '2026-10-30T01:05:00Z', ran: 2, firstPass: 1, retried: 0, failed: 1, givenLessons: 0 },
   { id: 'g2', status: 'completed', createdAt: '2026-10-31T01:00:00Z', endedAt: '2026-10-31T01:04:00Z', ran: 2, firstPass: 2, retried: 0, failed: 0, givenLessons: 1 }];
@@ -42,6 +45,32 @@ describe('a lesson\'s suggestion', () => {
     expect(lessonSuggests(lesson({ proposalState: 'dismissed' }))).toBe(false);
     expect(lessonSuggests(lesson({ proposal: 'other_model', kind: 'provider', given: false, seen: 1 }))).toBe(false);
     expect(lessonSuggests(lesson({ proposal: 'other_model', kind: 'provider', given: false, seen: 2 }))).toBe(true);
+    expect(lessonSuggests(lesson({ proposalState: 'applied' }))).toBe(false);
+  });
+
+  it('runs its node at low for a lower effort and at medium for a higher one, the latter once its failure came twice', () => {
+    expect(lessonEffort(lesson())).toBe('low');
+    expect(lessonEffort(lesson({ proposal: 'raise_effort', kind: 'delivery' }))).toBe('medium');
+    expect(lessonEffort(lesson({ proposal: 'larger_context', kind: 'context_limit' }))).toBe('');
+    expect(lessonSuggests(lesson({ proposal: 'raise_effort', kind: 'delivery', seen: 1 }))).toBe(false);
+    expect(lessonSuggests(lesson({ proposal: 'raise_effort', kind: 'delivery', seen: 2 }))).toBe(true);
+    expect(lessonRequest(lesson({ proposal: 'raise_effort', kind: 'delivery', seen: 2 }), zh))
+      .toBe('「生成页面」最近一次在 low 推理强度下没能完成交付（同样的问题已出现 2 次）。把它的推理强度调回 medium，模型不变。');
+    // A node already at the effort, in the canvas as saved, is offered nothing; one applied is offered nothing again
+    // until its failure comes back (the server opens it again), whatever the node runs at now.
+    expect(lessonSatisfied(lesson({ nodeEffort: 'low' }))).toBe(true);
+    expect(lessonSuggests(lesson({ nodeEffort: 'low' }))).toBe(false);
+    expect(lessonSuggests(lesson({ nodeEffort: 'medium' }))).toBe(true);
+    expect(lessonSuggests(lesson({ nodeEffort: '', proposalState: 'applied' }))).toBe(false);
+    expect(lessonSuggests(lesson({ nodeEffort: null, proposalState: 'applied' }))).toBe(false);
+    expect(lessonSuggests(lesson({ nodeEffort: 'medium', proposalState: 'dismissed' }))).toBe(false);
+    // Any effort but low satisfies a higher one, the model's default ('') included.
+    expect(lessonSatisfied(lesson({ proposal: 'raise_effort', kind: 'delivery', nodeEffort: '' }))).toBe(true);
+    expect(lessonSuggests(lesson({ proposal: 'raise_effort', kind: 'delivery', seen: 2, nodeEffort: 'low' }))).toBe(true);
+    expect(lessonSatisfied(lesson({ proposal: 'larger_context', kind: 'context_limit', nodeEffort: 'low' }))).toBeNull();
+    // A request names its lesson, whatever the lesson's id holds.
+    expect(lessonOfEvolution('lesson:l:1:2:1788398979451')).toBe('l:1:2');
+    expect(lessonOfEvolution('draft-1')).toBe('');
   });
 
   it('says how the runs given a lesson went, and what has not judged it yet', () => {
@@ -130,6 +159,95 @@ describe('the lessons workbench', () => {
     expect(await within(dialog).findByText(/还没有经验/)).toBeVisible();
     fireEvent.click(within(dialog).getByRole('button', { name: '关闭经验' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('applies a suggested effort on the canvas, and hands only a suggested model to the assistant', async () => {
+    const items = [lesson(), lesson({ id: 'l3', nodeId: 'search', nodeTitle: '检索', kind: 'context_limit', given: false, proposal: 'larger_context' }),
+      lesson({ id: 'l4', kind: 'delivery', proposal: 'raise_effort', proposalState: 'applied', seen: 3 })];
+    const calls = server(call => call.method === 'GET' ? json({ lessons: items, runs: [] }) : undefined);
+    const evolutions: CanvasEvolution[] = [];
+    const drafts: { id: string; prompt: string }[] = [];
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onEvolve={item => evolutions.push(item)} onTaskDraft={draft => drafts.push(draft)} onClose={() => {}} />));
+    const rows = within(await screen.findByRole('list', { name: '经验' })).getAllByRole('listitem');
+    expect(within(rows[0]).queryByRole('button', { name: '交给画布助手' })).toBeNull();
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '应用建议' }));
+    expect(evolutions).toEqual([{ id: expect.stringMatching(/^lesson:l1:\d+$/), nodeId: 'page', effort: 'low', model: 'claude-opus-5-5', note: lessonRequest(lesson(), zh) }]);
+    expect(lessonOfEvolution(evolutions[0].id)).toBe('l1');
+    // The canvas marks it applied once its plan changed the node: the panel itself writes nothing.
+    expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(0);
+    expect(within(rows[1]).queryByRole('button', { name: '应用建议' })).toBeNull();
+    fireEvent.click(within(rows[1]).getByRole('button', { name: '交给画布助手' }));
+    expect(drafts.map(draft => draft.prompt)).toEqual([lessonRequest(items[1], zh)]);
+    // One applied says so, and is not offered again.
+    expect(within(rows[2]).getByText(/建议已应用/)).toBeVisible();
+    expect(within(rows[2]).queryByRole('button', { name: '应用建议' })).toBeNull();
+  });
+
+  it('offers no effort its node already runs at, and an applied one not again until its failure comes back', async () => {
+    const items = [lesson({ proposalState: 'applied', nodeEffort: 'medium' }), lesson({ id: 'l2', nodeId: 'other', nodeTitle: '另一个', nodeEffort: 'low' })];
+    server(call => call.method === 'GET' ? json({ lessons: items, runs: [] }) : undefined);
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onEvolve={() => {}} onClose={() => {}} />));
+    const rows = within(await screen.findByRole('list', { name: '经验' })).getAllByRole('listitem');
+    expect(within(rows[0]).queryByRole('button', { name: '应用建议' })).toBeNull();
+    expect(within(rows[0]).getByText(/建议已应用/)).toBeVisible();
+    expect(within(rows[1]).queryByRole('button', { name: '应用建议' })).toBeNull();
+    expect(within(rows[1]).queryByText(lessonRequest(items[1], zh))).toBeNull();
+  });
+
+  it('applies the efforts it is handed in turn, and marks one applied only once the cloud holds it', async () => {
+    const calls = server(call => call.method === 'PATCH' ? json({ ...lesson(), proposalState: 'applied' }) : undefined);
+    const { result } = renderHook(() => useLessonEvolutions('tenant-a'));
+    const first = { id: 'lesson:l1:1788398979451', nodeId: 'page', effort: 'low', model: 'm', note: 'n' };
+    const second = { ...first, id: 'lesson:l2:1788398979452', nodeId: 'other' };
+    const third = { ...first, id: 'lesson:l3:1788398979453', nodeId: 'third', effort: 'medium' };
+    const canvas = (efforts: Record<string, string>) => ({ nodes: Object.entries(efforts).map(([id, effort]) => ({ id, kind: 'session', effort })) });
+    act(() => { result.current.saved(canvas({ page: 'medium', other: 'medium', third: 'medium' })); result.current.enqueue(first); result.current.enqueue(second); });
+    expect(result.current.evolution?.id).toBe(first.id);
+    act(() => result.current.settled(first.id, { applied: true }));
+    expect(result.current.evolution?.id).toBe(second.id);
+    act(() => result.current.settled(second.id, { applied: false, reason: 'busy' }));
+    expect(result.current.evolution).toBeNull();
+    // Not yet: the cloud still holds the node at medium.
+    expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(0);
+    // A canvas the cloud confirmed with it: marked. One never confirmed (undone, or another tab's canvas won) is not.
+    act(() => result.current.saved(canvas({ page: 'low', other: 'medium', third: 'medium' })));
+    await waitFor(() => expect(calls.filter(call => call.method === 'PATCH').map(call => call.url)).toEqual([`${tenant}/canvas-lessons/l1`]));
+    // Already so, as the cloud has it: marked at once.
+    act(() => { result.current.enqueue(third); result.current.settled(third.id, { applied: false, satisfied: true }); });
+    await waitFor(() => expect(calls.filter(call => call.method === 'PATCH').map(call => call.url)).toEqual([`${tenant}/canvas-lessons/l1`, `${tenant}/canvas-lessons/l3`]));
+    act(() => result.current.saved(canvas({ page: 'low', other: 'low', third: 'medium' })));
+    expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(2);
+  });
+
+  it('reads a suggestion or a state it does not know as none, and goes on showing the lesson', async () => {
+    server(call => call.method === 'GET' ? json({ lessons: [{ ...lesson(), proposal: 'split_node', proposalState: 'snoozed' }], runs: [] }) : undefined);
+    const view = await readCanvasLessons('tenant-a', 'canvas-a');
+    expect(view.lessons[0]).toMatchObject({ proposal: '', proposalState: 'dismissed' });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onEvolve={() => {}} onTaskDraft={() => {}} onClose={() => {}} />));
+    const row = within(await screen.findByRole('list', { name: '经验' })).getAllByRole('listitem')[0];
+    expect(within(row).getByText('停在输出上限')).toBeVisible();
+    expect(within(row).queryByRole('button', { name: '应用建议' })).toBeNull();
+    expect(within(row).queryByRole('button', { name: '交给画布助手' })).toBeNull();
+  });
+
+  it('closes over the canvas once it hands a suggested effort over', async () => {
+    server(call => call.method === 'GET' ? json({ lessons: [lesson()], runs: [] }) : undefined);
+    const evolutions: CanvasEvolution[] = [];
+    render(preferences(<div className="awwo-canvas-bar"><CanvasLessons tenantId="tenant-a" canvasId="canvas-a" onEvolve={item => evolutions.push(item)} /></div>));
+    fireEvent.click(screen.getByRole('button', { name: '经验' }));
+    const dialog = await screen.findByRole('dialog', { name: '经验与进化' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: '应用建议' }));
+    expect(evolutions).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('reads the lessons of an API that returns no scope, as having none', async () => {
+    const { scope: _drop, ...old } = lesson();
+    server(call => call.method === 'GET' ? json({ lessons: [old], runs: [] }) : undefined);
+    const view = await readCanvasLessons('tenant-a', 'canvas-a');
+    expect(view.lessons[0].scope).toEqual({});
+    server(call => call.method === 'GET' ? json({ lessons: [{ ...old, scope: { model: 7 } }], runs: [] }) : undefined);
+    await expect(readCanvasLessons('tenant-a', 'canvas-a')).rejects.toMatchObject({ code: 'invalid_lessons_response' });
   });
 
   it('names its refusals in both languages', () => {

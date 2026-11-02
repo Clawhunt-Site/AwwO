@@ -55,7 +55,7 @@ import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
 import { createModelNode, MODEL_DRAG_MIME, modelDragPayload, resolveModelDrop } from './canvasModelDrop';
 import { applyJevPlan, readJevPlannerStatus, requestJevPlan } from './jevPlanning';
-import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, PLAN_NOTES_SHOWN, planContextCondensed, planNewNodeModel, type CanvasPlanMedia } from './canvasPlan';
+import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, PLAN_NOTES_SHOWN, planContextCondensed, planNewNodeModel, type CanvasPlan, type CanvasPlanMedia } from './canvasPlan';
 import { componentModelEntry, planComponentModel, withAssistantModel } from './assistantModel';
 import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 import { describePlanChanges } from './planChanges';
@@ -361,6 +361,11 @@ export interface CanvasSurfaceProps {
   results?: CanvasResultsOptions;
   /** A new external draft, never sent without the normal planning action. */
   taskDraft?: { id: string; prompt: string } | null;
+  /** A change the host's lessons suggest for one node (the 经验 panel's 应用), applied once per id as a plan of the
+   *  canvas plan protocol, through the same validation as any plan and undoable as one; its outcome goes back to
+   *  onEvolutionSettled. */
+  evolution?: CanvasEvolution | null;
+  onEvolutionSettled?: (id: string, result: CanvasEvolutionResult) => void;
   onOpenSettings?: () => void;
   /** A run or a plan this page was watching has ended (the host may tell a reader who is away). */
   onWorkSettled?: (event: { kind: 'run' | 'plan'; failed: boolean }) => void;
@@ -379,6 +384,13 @@ export interface CanvasSurfaceProps {
    *  it in the planning prompt box and, when `start` holds, plans it once. Native never passes it. */
   initialPlan?: InitialPlanRequest | null;
 }
+
+/** A lesson's suggestion for one node: run it at `effort`, on the model it runs (or `model`, the one its lesson's runs
+ *  ran with, where it takes the workspace's default). `note` is the assistant's reply saying why, in the reader's words. */
+export interface CanvasEvolution { id: string; nodeId: string; effort: string; model: string; note: string }
+/** How a suggestion went: `applied` when its plan changed the node, `satisfied` when the node already ran that way, and
+ *  otherwise why it was not taken (said in the assistant's panel too). */
+export interface CanvasEvolutionResult { applied: boolean; satisfied?: boolean; reason?: string }
 
 /** A planning request handed over by the host, with the host's own record of whether it was sent. */
 export interface InitialPlanRequest {
@@ -446,7 +458,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -3189,11 +3201,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       ? plannerStatus.error || (locale === 'zh' ? '画布助手暂不可用，请重试。' : 'The canvas assistant is unavailable. Please retry.')
       : '');
   // Why a plan cannot start now: null when it can, '' where the composer already shows why (a check or a stop in
-  // flight, an earlier plan to resume, one under way), else the reason to show.
-  const planBlocker = (resume = false): string | null => {
+  // flight, an earlier plan to resume, one under way), else the reason to show. A plan built here (a lesson's
+  // suggestion: applyEvolution) needs no planner, so the planner's availability does not hold it up (`planner` false).
+  const planBlocker = (resume = false, planner = true): string | null => {
     // A message being handled (routed, becoming a task) is the one request in flight; nothing else plans meanwhile.
     if (readOnlyRef.current || pendingRef.current) return '';
-    if (!resume && planningUnavailableReason) return planningUnavailableReason;
+    if (!resume && planner && planningUnavailableReason) return planningUnavailableReason;
     if (recoveryStopInFlight.current || (canInitialize && (!recoveryLoaded || recoveryChecking || (resume && !recoveryForDocument)))) return '';
     if (resume && !planningRecovery?.operationId) return '';
     if (planningRecovery?.pending && (!resume || !planningRecovery.matches)) return '';
@@ -3358,6 +3371,93 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       }
     }
   };
+  // A lesson's suggestion (CanvasEvolution) applied as a plan of one step: the node's reasoning effort, on the model it
+  // runs (or the one its lesson's runs ran with, for a node on the workspace's default), through applyCanvasPlan as
+  // any plan, so a node it does not fit (media, a team, a model that does not offer the effort) is left as it is and
+  // the reply says why. Committed as a plan ('ai:'), the assistant's undo takes it back; it clears the node's outputs
+  // and those downstream as any change of its model does. Refused while a plan, a run or a message is under way.
+  // What a suggestion's request comes to is said in the assistant's panel, opened for it (the 经验 panel it came from
+  // has closed), in its conversation under the suggestion's own words, so a later reply leaves it standing. While a
+  // turn of the conversation is in flight (a message being handled, a plan being made) nothing can join it: a refusal
+  // then shows where a plan's refusal would (planningError) and is held, to join the conversation, and leave that
+  // place, with the next thing a suggestion says.
+  const heldEvolutionReplies = useRef<{ text: string; reason: string }[]>([]);
+  const sayEvolution = (text: string, status?: 'applied') => {
+    for (const held of heldEvolutionReplies.current.splice(0)) {
+      appendPlanningMessage(`lesson-${Date.now()}-${++planningSequence.current}-assistant`, held.text, undefined, assistantExecution ? 'plan' : undefined);
+      setPlanningError(current => current === held.reason ? '' : current);
+    }
+    appendPlanningMessage(`lesson-${Date.now()}-${++planningSequence.current}-assistant`, text, status, assistantExecution ? 'plan' : undefined);
+  };
+  const refuseEvolution = (reason: string, request: CanvasEvolution): CanvasEvolutionResult => {
+    setAssistantOpen(true);
+    const text = [request.note, reason].join('\n');
+    if (pendingRef.current || planningRequest.current) { setPlanningError(reason); heldEvolutionReplies.current.push({ text, reason }); }
+    else sayEvolution(text);
+    return { applied: false, reason };
+  };
+  const applyEvolution = (request: CanvasEvolution): CanvasEvolutionResult => {
+    // A page whose canvas is out of date keeps none of its edits (patchDoc), so it takes no suggestion either.
+    if (outdatedObserver.current) return refuseEvolution(t('planning.evolutionOutdated'), request);
+    const blocked = planBlocker(false, false);
+    if (blocked !== null) return refuseEvolution(blocked || recoveryReadError.current || surfaceNotice(t, 'planning_busy'), request);
+    if (paletteError) return refuseEvolution(paletteError, request);
+    writePreviews();
+    const before = docRef.current;
+    const node = before.nodes.find(item => item.id === request.nodeId);
+    if (!node) return refuseEvolution(t('planning.evolutionNodeGone'), request);
+    // The node keeps its model; one on the workspace default takes the model its lesson's runs ran with, which a lesson
+    // from an API before 2026-11-02 does not name.
+    const model = (node.kind === 'session' && node.model) || request.model;
+    if (!model) return refuseEvolution(t('planning.evolutionNoModel'), request);
+    const plan: CanvasPlan = { version: 1, summary: request.note, operations: [{ type: 'set_model', nodeId: node.id, model, effort: request.effort }] };
+    const hosted = currentSaaSCanvas() !== null;
+    const modelChoices = planningModels();
+    const applied = applyCanvasPlan(before, plan, locale, '', planMedia, modelChoices, hosted, hosted && !personalCredentialsRequired);
+    // Judged by the node alone: a plan may also tidy the canvas (an edge left without its node), which takes no
+    // suggestion; and a node its plan left at another effort (its model offers no such level) has not taken it.
+    const after = applied.doc.nodes.find(item => item.id === node.id);
+    if (after?.kind !== 'session' || after.effort !== request.effort) return refuseEvolution(applied.adjustments[0] || t('planning.evolutionNotApplied'), request);
+    const id = `lesson-${Date.now()}-${++planningSequence.current}`;
+    const runsAs = (item: SessionNode) => [item.runtime, item.model, item.effort].join('\n');
+    if (node.kind === 'session' && runsAs(after) === runsAs(node)) {
+      setAssistantOpen(true);
+      sayEvolution([request.note, t('planning.evolutionNothing')].join('\n'));
+      return { applied: false, satisfied: true, reason: t('planning.evolutionNothing') };
+    }
+    // Everything said is worked out before the canvas changes, so nothing after the change can leave it unsaid.
+    const modelName = (entry: string) => modelChoices.choices.find(choice => choice.model === entry)?.name || entry;
+    const changes = describePlanChanges(before, applied.doc, locale, t, modelName);
+    const reply = [request.note, ...(changes.length ? [t('planning.changesHeader'), ...changes.map(line => `· ${line}`)] : []),
+      ...applied.adjustments.slice(0, PLAN_NOTES_SHOWN).map(item => `· ${item}`)].join('\n');
+    patchDoc(() => applied.doc, { label: `ai:${id}` });
+    // Taken only once the canvas holds it, judged by the node (patchDoc clears the outputs the change makes stale, so
+    // the canvas it keeps is not the plan's to the byte): a change patchDoc kept from the canvas (a node running there,
+    // a review holding the canvas) is no plan the reader could undo.
+    const committed = docRef.current.nodes.find(item => item.id === node.id);
+    if (docRef.current === before || committed?.kind !== 'session' || runsAs(committed) !== runsAs(after)) return refuseEvolution(t('planning.evolutionNotApplied'), request);
+    planUndoEntry.current = undoStack.current.at(-1) ?? null;
+    setLastPlanRevision(revisionOf(docRef.current));
+    setAssistantOpen(true);
+    sayEvolution(reply, 'applied');
+    return { applied: true };
+  };
+  // Each suggestion the host hands over is applied once (a re-render passes the same request again), once this canvas's
+  // palette, which its model is resolved against, is read, and its check for a plan to resume is done, as a plan of the
+  // assistant's waits for. A palette or a check that could not be read ends the wait, and the suggestion says why.
+  const appliedEvolution = useRef('');
+  const recoveryRead = recoveryLoaded || (recoveryRevision !== null && recoveryRevision === revisionOf(docRef.current));
+  const evolutionWaits = canInitialize && ((!palette && !paletteError) || !recoveryRead || recoveryChecking);
+  useEffect(() => {
+    if (!evolution || readOnly || appliedEvolution.current === evolution.id || evolutionWaits) return;
+    appliedEvolution.current = evolution.id;
+    // A suggestion that cannot be made into a plan says so; it never takes the canvas down with it.
+    let result: CanvasEvolutionResult;
+    try { result = applyEvolution(evolution); } catch { result = refuseEvolution(t('planning.evolutionNotApplied'), evolution); }
+    onEvolutionSettled?.(evolution.id, result);
+    // The request and what it waits for decide: the surface's state it reads is the latest at the time they arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evolution, readOnly, evolutionWaits]);
   const cancelPlanning = async () => {
     if (readOnlyRef.current || recoveryStopInFlight.current) return;
     const request = planningRequest.current;

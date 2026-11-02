@@ -38,7 +38,7 @@ import { ProductionCases } from './ProductionCases';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
-import { CanvasLessons } from './CanvasLessons';
+import { CanvasLessons, useLessonEvolutions } from './CanvasLessons';
 import { CanvasWebReader } from './CanvasWebReader';
 import { CanvasLibraryTools } from './CanvasLibraryTools';
 import { executionHost } from './AssistantExecution';
@@ -477,6 +477,10 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   // A request typed on the workspace home for this canvas, handed to the surface to plan once.
   const [initialPlan, setInitialPlan] = useState<InitialPlanRequest | null>(null);
   const [knowledgeTaskDraft, setKnowledgeTaskDraft] = useState<CanvasTaskDraft | null>(null);
+  // The lessons' suggested reasoning efforts, which the surface applies as plans, one at a time: each suggestion taken is
+  // marked applied once the cloud confirms a canvas that holds it (lessonCanvasSaved, at each canvas the cloud confirms).
+  const lessonEvolutions = useLessonEvolutions(tenant.id);
+  const lessonCanvasSaved = lessonEvolutions.saved;
   const current = useRef<CanvasRecord | null>(null);
   const pending = useRef<CanvasDocument | null>(null);
   const writerId = useRef(crypto.randomUUID()).current;
@@ -650,7 +654,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           } catch { /* The run panel shows connectivity errors; backend admission prevents overlap. */ }
         }
         if (controller.signal.aborted) return;
-        current.current = value; setRuntime(health); setRecord(value);
+        current.current = value; setRuntime(health); setRecord(value); lessonCanvasSaved(value.document);
         if (storageFull) { failed.current = true; setSaveState('未同步'); setError(localDraftFailure(storageFull)); }
       }).catch(async error => {
         if (controller.signal.aborted) return;
@@ -738,7 +742,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             if (draft.current?.revision === sent.revision) draft.current = null;
             else if (draft.current) draft.current = { ...draft.current, baseVersion: saved.version, sending: undefined };
             // The save is no longer out once this page's drafts build on it (a failure above leaves the record standing).
-            current.current = saved; busyRetries = 0; sending.current = null;
+            current.current = saved; busyRetries = 0; sending.current = null; lessonCanvasSaved(saved.document);
             storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
             if (!disposed) setSaveState(failed.current ? '未同步' : pending.current ? '等待同步…' : '已同步');
           } catch (error) {
@@ -815,7 +819,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
         if (saved.id !== before.id || saved.tenantId !== tenant.id || !Number.isSafeInteger(saved.version) || saved.version < before.version
             || payload?.version !== 2 || !Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) throw new Error('初始化响应与当前画布不一致。');
         const document = sanitizeDocument(saved.document);
-        current.current = { ...saved, document };
+        current.current = { ...saved, document }; lessonCanvasSaved(document);
         rememberCanvasBaseline(storage, saved.version, document);
         storage.setItem('awwo.cloud.version', String(saved.version));
         storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(document));
@@ -943,8 +947,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
-      taskDraft={knowledgeTaskDraft} canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /></>} />
-        : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /></>}
+      taskDraft={knowledgeTaskDraft} evolution={lessonEvolutions.evolution} onEvolutionSettled={lessonEvolutions.settled}
+      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} /></>} />
+        : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} /></>}
       assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}

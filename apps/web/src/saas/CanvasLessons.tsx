@@ -1,9 +1,11 @@
 // The canvas bar's 经验 tool: what AwwO learnt from this canvas's runs (canvas_lessons.go). When a run ends, each node
 // that failed in a way it could avoid gets a lesson, which its next runs are given and which each of them counts; a
 // lesson that never helps retires itself, and a person can retire or restore any. A lesson's suggestion for the canvas
-// goes to the canvas assistant's box as a request the reader sends: nothing here edits the canvas.
+// is the reader's to take: a reasoning effort is applied as a plan (onEvolve: the canvas surface's applyEvolution,
+// undoable as any plan), a change of model goes to the canvas assistant's box as a request the reader sends.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, Check, GraduationCap, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
+import { Archive, Check, GraduationCap, RefreshCw, RotateCcw, Send, Wand2, X } from 'lucide-react';
+import type { CanvasEvolution, CanvasEvolutionResult } from '../canvas/CanvasSurface';
 import { WorkbenchOverlay, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
@@ -12,7 +14,14 @@ import './canvas-library.css';
 import './canvas-lessons.css';
 
 type Translate = (zh: string, en: string) => string;
-interface Props { tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void }
+interface Props { tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void; onEvolve?: (evolution: CanvasEvolution) => void }
+
+/** The id of a lesson's evolution request, which names its lesson (lessonOfEvolution reads it back). */
+export const evolutionId = (lessonId: string) => `lesson:${lessonId}:${Date.now()}`;
+export const lessonOfEvolution = (id: string): string => /^lesson:(.+):\d+$/.exec(id)?.[1] ?? '';
+
+/** The reasoning effort a lesson's suggestion runs its node at, or '' for a suggestion that is not an effort. */
+export const lessonEffort = (lesson: CanvasLesson): string => ({ lower_effort: 'low', raise_effort: 'medium' } as Record<string, string>)[lesson.proposal] ?? '';
 
 export const lessonKindName = (kind: string, t: Translate): string => ({
   output_limit: t('停在输出上限', 'Stopped at its output limit'),
@@ -32,6 +41,9 @@ export function lessonRequest(lesson: CanvasLesson, t: Translate): string {
     case 'lower_effort':
       return t(`「${node}」已经 ${lesson.seen} 次停在模型的输出上限，没有交付完。把它的推理强度调成 low，模型不变。`,
         `“${node}” has stopped at its model's output limit ${lesson.seen} times without finishing. Set its reasoning effort to low and keep its model.`);
+    case 'raise_effort':
+      return t(`「${node}」最近一次在 low 推理强度下没能完成交付（同样的问题已出现 ${lesson.seen} 次）。把它的推理强度调回 medium，模型不变。`,
+        `“${node}” last failed to deliver at low reasoning effort (the same failure has come ${lesson.seen} times). Set its reasoning effort back to medium and keep its model.`);
     case 'larger_context':
       return t(`「${node}」的输入 ${lesson.seen} 次超出了模型的上下文长度。把它换成上下文更长的模型，或者缩短喂给它的内容。`,
         `“${node}”'s inputs were too large for its model's context window ${lesson.seen} times. Switch it to a model with a longer context, or shorten what feeds it.`);
@@ -54,13 +66,62 @@ export function lessonOutcome(lesson: CanvasLesson, t: Translate): string {
     other ? t(`别的原因没完成 ${other} 次`, `other failures ${times(other)}`) : ''].filter(Boolean).join(t('，', ', '));
 }
 
-/** Whether a lesson's suggestion is worth offering now: one not dismissed or already handed over, and for a provider
- *  that could not answer, only once it happened twice (one outage is no reason to change a node's model). */
-export function lessonSuggests(lesson: CanvasLesson): boolean {
-  return lesson.proposal !== '' && lesson.proposalState === 'open' && (lesson.proposal !== 'other_model' || lesson.seen >= 2);
+/** Whether the node a suggested effort is for already runs at it, in the canvas as saved: low for a lower effort, any
+ *  but low for a higher one ('' is the model's default). Unknown (null) for a node no longer on the canvas or a view
+ *  that does not say. */
+export function lessonSatisfied(lesson: CanvasLesson): boolean | null {
+  if (!lessonEffort(lesson) || typeof lesson.nodeEffort !== 'string') return null;
+  return lesson.proposal === 'lower_effort' ? lesson.nodeEffort === 'low' : lesson.nodeEffort !== 'low';
 }
 
-export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraft }: Props) {
+/** Whether a lesson's suggestion is worth offering now: one open (not dismissed, applied or handed over: one applied is
+ *  offered again only when its failure comes back, canvas_lessons.go), and for a provider that could not answer, or a
+ *  node that failed at low effort, only once it happened twice (one outage is no reason to change a node's model, nor
+ *  one bad delivery to make every run of it cost more). A suggested effort its node already runs at, in the canvas as
+ *  saved, is not offered. */
+export function lessonSuggests(lesson: CanvasLesson): boolean {
+  return lesson.proposal !== '' && lesson.proposalState === 'open' && lessonSatisfied(lesson) !== true
+    && ((lesson.proposal !== 'other_model' && lesson.proposal !== 'raise_effort') || lesson.seen >= 2);
+}
+
+/** The requests to apply a suggested effort, in turn: a request handed over while one waits (the canvas reads its
+ *  palette first) waits behind it rather than replacing it. `evolution` is the one the canvas takes now, and `settled`
+ *  takes it off. A suggestion the canvas took (its plan changed the node, or the node already ran that way) is marked
+ *  applied once the cloud confirms a canvas with its node at that effort (`saved`, told each canvas the cloud
+ *  confirmed): one whose change was undone, or never saved (another tab's newer canvas won), stays open. A mark that
+ *  cannot be written is let go: the suggestion is then offered again, and taking it again marks it. */
+export function useLessonEvolutions(tenantId: string) {
+  const queue = useRef<CanvasEvolution[]>([]);
+  const [, setShown] = useState(0);
+  const tenant = useRef(tenantId);
+  tenant.current = tenantId;
+  const marks = useRef<CanvasEvolution[]>([]);
+  // The canvas as the cloud last confirmed it, read only for its nodes' efforts.
+  const confirmed = useRef<unknown>(null);
+  const mark = useCallback(() => {
+    const nodes = confirmed.current && typeof confirmed.current === 'object' ? (confirmed.current as { nodes?: unknown }).nodes : undefined;
+    if (!Array.isArray(nodes)) return;
+    marks.current = marks.current.filter(taken => {
+      const node = nodes.find(item => !!item && typeof item === 'object' && (item as { id?: unknown }).id === taken.nodeId) as { kind?: unknown; effort?: unknown } | undefined;
+      if (node?.kind !== 'session' || node.effort !== taken.effort) return true;
+      const lesson = lessonOfEvolution(taken.id);
+      if (lesson) void updateCanvasLesson(tenant.current, lesson, { proposalState: 'applied' }).catch(() => undefined);
+      return false;
+    });
+  }, []);
+  const enqueue = useCallback((evolution: CanvasEvolution) => { queue.current = [...queue.current, evolution]; setShown(value => value + 1); }, []);
+  const settled = useCallback((id: string, result: CanvasEvolutionResult) => {
+    const taken = queue.current.find(item => item.id === id);
+    queue.current = queue.current.filter(item => item.id !== id);
+    if (taken && (result.applied || result.satisfied)) marks.current = [...marks.current, taken];
+    setShown(value => value + 1);
+    mark();
+  }, [mark]);
+  const saved = useCallback((document: unknown) => { confirmed.current = document; mark(); }, [mark]);
+  return { evolution: queue.current[0] ?? null, enqueue, settled, saved };
+}
+
+export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve }: Props) {
   const { t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
   const name = t('经验', 'Lessons');
@@ -69,12 +130,13 @@ export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraf
       <GraduationCap size={15} aria-hidden="true" /><span>{name}</span></button>
     {open && <WorkbenchOverlay label={t('经验与进化', 'Lessons and evolution')} onClose={() => setOpen(false)}>
       <LessonsWorkbench key={`${tenantId}/${canvasId}`} tenantId={tenantId} canvasId={canvasId} readOnly={readOnly}
-        onTaskDraft={onTaskDraft && (draft => { onTaskDraft(draft); setOpen(false); })} onClose={() => setOpen(false)} />
+        onTaskDraft={onTaskDraft && (draft => { onTaskDraft(draft); setOpen(false); })}
+        onEvolve={onEvolve && (evolution => { onEvolve(evolution); setOpen(false); })} onClose={() => setOpen(false)} />
     </WorkbenchOverlay>}
   </>;
 }
 
-export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskDraft, onClose }: Props & { onClose: () => void }) {
+export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve, onClose }: Props & { onClose: () => void }) {
   const { t, locale } = useSaaSPreferences();
   const [view, setView] = useState<CanvasLessonsView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -112,6 +174,13 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     void updateCanvasLesson(tenantId, lesson.id, { proposalState: 'asked' }).catch(() => undefined);
     onTaskDraft({ id: `lesson:${lesson.id}:${Date.now()}`, prompt });
   };
+  // A reasoning effort is applied on the canvas itself, as a plan: the canvas marks the suggestion applied once its
+  // plan changed the node (SaaSApp), and says why when it did not.
+  const evolution = (lesson: CanvasLesson): CanvasEvolution | null => {
+    const effort = lessonEffort(lesson);
+    return effort && lesson.nodeId && onEvolve
+      ? { id: evolutionId(lesson.id), nodeId: lesson.nodeId, effort, model: lesson.scope.model ?? '', note: lessonRequest(lesson, t) } : null;
+  };
   const date = (value: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '';
   const lessons = view?.lessons ?? [];
   const runs = view?.runs ?? [];
@@ -123,8 +192,8 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     <header className="awwo-library-header">
       <div className="awwo-library-heading"><span className="awwo-library-mark"><GraduationCap size={20} aria-hidden="true" /></span><div>
         <h2>{t('经验与进化', 'Lessons and evolution')}</h2>
-        <p>{t('画布运行结束后，失败的节点会在这里留下经验：下次运行时它带着这些经验跑，每次运行都会记下经验帮没帮上忙，一直帮不上忙的会自动停用。改画布的建议会交给画布助手，由你确认后发送。',
-          'When a canvas run ends, each node that failed leaves a lesson here: its next runs take the lesson with them, each run records whether it helped, and one that never helps retires itself. Suggestions for the canvas go to the canvas assistant, for you to send.')}</p>
+        <p>{t('画布运行结束后，失败的节点会在这里留下经验：下次运行时它带着这些经验跑，每次运行都会记下经验帮没帮上忙，一直帮不上忙的会自动停用。调推理强度的建议可以直接应用到画布上（可以撤销），换模型的建议会交给画布助手，由你确认后发送。',
+          'When a canvas run ends, each node that failed leaves a lesson here: its next runs take the lesson with them, each run records whether it helped, and one that never helps retires itself. A suggested reasoning effort can be applied to the canvas here (and undone); a suggested change of model goes to the canvas assistant, for you to send.')}</p>
       </div></div>
       <div className="awwo-library-actions">
         <button type="button" disabled={loading || busy} onClick={() => void load()} aria-label={t('刷新经验', 'Refresh lessons')}><RefreshCw size={16} aria-hidden="true" /></button>
@@ -160,11 +229,14 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
             <small>{t(`出现 ${lesson.seen} 次`, `Seen ${lesson.seen} ${lesson.seen === 1 ? 'time' : 'times'}`)}
               {/* Counted only by the runs a lesson is judged by: done, or failed in a way a lesson could prevent. */}
               {lesson.given ? ` · ${lessonOutcome(lesson, t)}` : ''}
-              {` · ${t('最近一次', 'Last')} ${date(lesson.lastSeenAt)}`}</small>
+              {` · ${t('最近一次', 'Last')} ${date(lesson.lastSeenAt)}`}
+              {lesson.proposalState === 'applied' ? ` · ${t('建议已应用', 'Suggestion applied')}` : ''}</small>
             {lesson.given && <details className="awwo-lessons-rule"><summary>{t('交给模型的话', 'What the model is told')}</summary><p lang="en">{lesson.rule}</p></details>}
             {lessonSuggests(lesson) && <p className="awwo-lessons-suggestion">{lessonRequest(lesson, t)}</p>}
             {!readOnly && <div className="awwo-library-item-actions">
-              {lessonSuggests(lesson) && onTaskDraft && <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => ask(lesson)}><Send size={14} aria-hidden="true" />{t('交给画布助手', 'Hand to the assistant')}</button>}
+              {lessonSuggests(lesson) && (evolution(lesson)
+                ? <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => { const next = evolution(lesson); if (next) onEvolve?.(next); }}><Wand2 size={14} aria-hidden="true" />{t('应用建议', 'Apply')}</button>
+                : onTaskDraft && <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => ask(lesson)}><Send size={14} aria-hidden="true" />{t('交给画布助手', 'Hand to the assistant')}</button>)}
               {lessonSuggests(lesson) && <button type="button" disabled={busy} onClick={() => void patch(lesson, { proposalState: 'dismissed' }, t('已忽略这条建议。', 'Suggestion dismissed.'))}>{t('忽略建议', 'Dismiss')}</button>}
               {lesson.given && (lesson.status === 'active'
                 ? <button type="button" disabled={busy} onClick={() => void patch(lesson, { status: 'retired' }, t('已停用：之后的运行不再带它。', 'Retired: later runs no longer take it.'))}><Archive size={14} aria-hidden="true" />{t('停用', 'Retire')}</button>

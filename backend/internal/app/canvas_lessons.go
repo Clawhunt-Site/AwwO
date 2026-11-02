@@ -26,8 +26,10 @@ import (
 // prevent; an end no lesson could change (an interruption, an outage) counts nothing. A lesson that failed
 // lessonRetireAfter runs and helped none is retired: it is not helping. A person can retire or restore any lesson (a
 // restored one starts its count of failures again). A lesson may carry a suggestion for the canvas itself
-// (proposal): what to change about the node so it stops failing (its reasoning effort, its model), which the canvas
-// assistant carries out when a person asks it to (the web's 接下来 card) — the server never edits a canvas.
+// (proposal): what to change about the node so it stops failing (its reasoning effort, its model). The web's 经验 panel
+// applies a reasoning effort as a plan the person takes there (undone as any plan is), and hands a change of model to
+// the canvas assistant, which carries it out when the person sends it: the server never edits a canvas. A suggestion
+// applied is offered again when its failure comes back at a setting it would change.
 //
 // The rules only ever write fixed sentences AwwO authored, with nothing from a run's output in them: what a lesson tells
 // a model is AwwO's own instruction, never text a model or a web page could have planted. Lessons are written from
@@ -144,6 +146,8 @@ type lessonFailure struct {
 	nodeID, state, detail, runStatus, runError, runID string
 	attempts                                          int
 	snapshot                                          []byte
+	// admitted is when the node's run was admitted (its canvas run's, for a node refused at admission).
+	admitted time.Time
 }
 
 // lessonKindOf names what a failed node's end teaches, and for a refused delivery the reason deliveryRefusals keeps, or
@@ -242,11 +246,16 @@ func lessonRule(kind, reason string) string {
 }
 
 // lessonProposal is what a lesson of kind suggests for its node, from what the node ran with: a lower reasoning effort
-// only where the model takes one and the node did not already run at low.
+// only where the model takes one and the node did not already run at low; and medium again for a node put at low that
+// then delivered what its outputs refused or ran out of tool steps (the reasoning low leaves out may be what it
+// lacked), where the model takes medium.
 func lessonProposal(kind string, snap executionSnapshot) string {
 	proposal := lessonKinds[kind].proposal
 	if proposal == "lower_effort" && (snap.Effort == "low" || !snap.Health.supportsEffort(snap.Model, "low")) {
 		return ""
+	}
+	if proposal == "" && snap.Effort == "low" && (kind == "delivery" || kind == "step_limit") && snap.Health.supportsEffort(snap.Model, "medium") {
+		return "raise_effort"
 	}
 	return proposal
 }
@@ -303,8 +312,9 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 	}
 	var canvasID string
 	var collaboration bool
+	var admitted time.Time
 	err = tx.QueryRow(ctx, `UPDATE graph_runs SET lessons_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND lessons_at IS NULL
-		AND status IN ('completed','failed','interrupted') RETURNING canvas_id,collaboration IS NOT NULL`, tid, gid).Scan(&canvasID, &collaboration)
+		AND status IN ('completed','failed','interrupted') RETURNING canvas_id,collaboration IS NOT NULL,created_at`, tid, gid).Scan(&canvasID, &collaboration, &admitted)
 	if noRows(err) {
 		return nil
 	}
@@ -314,16 +324,17 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 	if collaboration {
 		return tx.Commit(ctx)
 	}
-	rows, err := tx.Query(ctx, `SELECT n.node_id,n.state,n.detail,n.attempts,n.execution_snapshot,COALESCE(r.status,''),COALESCE(r.error,''),COALESCE(r.id,'')
+	rows, err := tx.Query(ctx, `SELECT n.node_id,n.state,n.detail,n.attempts,n.execution_snapshot,COALESCE(r.status,''),COALESCE(r.error,''),COALESCE(r.id,''),
+		COALESCE(r.created_at,$3)
 		FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id
-		WHERE n.tenant_id=$1 AND n.graph_id=$2 AND n.state='failed' ORDER BY n.ordinal`, tid, gid)
+		WHERE n.tenant_id=$1 AND n.graph_id=$2 AND n.state='failed' ORDER BY n.ordinal`, tid, gid, admitted)
 	if err != nil {
 		return err
 	}
 	failures := []lessonFailure{}
 	for rows.Next() {
 		var f lessonFailure
-		if err = rows.Scan(&f.nodeID, &f.state, &f.detail, &f.attempts, &f.snapshot, &f.runStatus, &f.runError, &f.runID); err != nil {
+		if err = rows.Scan(&f.nodeID, &f.state, &f.detail, &f.attempts, &f.snapshot, &f.runStatus, &f.runError, &f.runID, &f.admitted); err != nil {
 			rows.Close()
 			return err
 		}
@@ -356,21 +367,28 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 		scope, _ := json.Marshal(map[string]string{"runtime": snapshotRuntime(snap), "model": snap.Model, "effort": snap.Effort})
 		// The evidence names the run and how it ended in the platform's codes, never a word of its output or refusal.
 		evidence, _ := json.Marshal([]map[string]any{{"graphId": gid, "runId": f.runID, "code": f.runError, "reason": reason, "attempts": f.attempts}})
-		// A lesson a person retired stays retired, and a suggestion they dismissed or asked for stays as they left it;
-		// the rule's words and the evidence follow the failure that wrote it again.
+		// A lesson a person retired stays retired, and a suggestion they dismissed or asked for stays as they left it; one
+		// they applied is offered again when its failure comes back with a suggestion (lessonProposal makes none for a
+		// node still at the effort it was put at) in a run admitted after they applied it (one admitted before, learnt
+		// from late, ran before the change). The rule's words and the evidence follow the failure that wrote it again.
 		if _, err = tx.Exec(ctx, `INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,source,fingerprint,rule,scope,evidence,status,proposal)
 			VALUES($1,$2,$3,$4,$5,'rule',$6,$7,$8,$9,'active',$10)
 			ON CONFLICT (tenant_id,fingerprint) WHERE fingerprint IS NOT NULL DO UPDATE SET seen=canvas_lessons.seen+1,last_seen_at=clock_timestamp(),
 			rule=EXCLUDED.rule,scope=EXCLUDED.scope,
 			evidence=(SELECT COALESCE(jsonb_agg(e ORDER BY o),'[]'::jsonb) FROM (SELECT e,o FROM jsonb_array_elements(EXCLUDED.evidence||canvas_lessons.evidence) WITH ORDINALITY AS x(e,o) ORDER BY o LIMIT $11) kept),
-			proposal=CASE WHEN canvas_lessons.proposal_state='open' THEN EXCLUDED.proposal ELSE canvas_lessons.proposal END,
+			proposal=CASE WHEN canvas_lessons.proposal_state='open' OR (`+reopenedSQL+`) THEN EXCLUDED.proposal ELSE canvas_lessons.proposal END,
+			proposal_state=CASE WHEN `+reopenedSQL+` THEN 'open' ELSE canvas_lessons.proposal_state END,
 			updated_at=clock_timestamp()`,
-			randomID(), tid, canvasID, f.nodeID, kind, lessonFingerprint(canvasID, f.nodeID, kind), rule, scope, evidence, lessonProposal(kind, snap), maxLessonEvidence); err != nil {
+			randomID(), tid, canvasID, f.nodeID, kind, lessonFingerprint(canvasID, f.nodeID, kind), rule, scope, evidence, lessonProposal(kind, snap), maxLessonEvidence, f.admitted); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
 }
+
+// reopenedSQL is when the lesson upsert offers an applied suggestion again: the failure that came back ($12, when its
+// run was admitted) has a suggestion and ran after the person applied it.
+const reopenedSQL = `canvas_lessons.proposal_state='applied' AND EXCLUDED.proposal<>'' AND $12::timestamptz>COALESCE(canvas_lessons.proposal_at,'-infinity'::timestamptz)`
 
 // freezeNodeLessons is what node nodeID of canvas canvasID is given at admission: its active lessons that give a model
 // something, then the canvas's and the workspace's, newest first, whole lessons only within maxNodeLessons and
@@ -555,7 +573,7 @@ func (a *App) sweepGraphLessons(ctx context.Context) error {
 // lessonJSON is a lesson as the canvas's RSI view and its updates return it.
 const lessonJSON = `jsonb_build_object('id',l.id,'canvasId',l.canvas_id,'nodeId',l.node_id,'kind',l.kind,'source',l.source,'rule',l.rule,
 	'given',l.kind<>ALL($9::text[]),'status',l.status,'retiredReason',l.retired_reason,'seen',l.seen,'applied',l.applied,'succeeded',l.succeeded,
-	'failed',l.failed,'proposal',l.proposal,'proposalState',l.proposal_state,'evidence',l.evidence,'lastSeenAt',l.last_seen_at,
+	'failed',l.failed,'proposal',l.proposal,'proposalState',l.proposal_state,'scope',l.scope,'evidence',l.evidence,'lastSeenAt',l.last_seen_at,
 	'lastAppliedAt',l.last_applied_at,'createdAt',l.created_at,'updatedAt',l.updated_at)`
 
 // silentLessonKinds are the kinds whose lessons give a model nothing, as SQL reads them ($9 of lessonJSON).
@@ -582,12 +600,16 @@ func (a *App) canvasLessons(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Canvas not found")
 		return
 	}
-	// Each lesson names its node as the canvas titles it now ("" for a node no longer on the canvas): the canvas's
-	// titles are read once, not once a lesson (a film's canvas is a megabyte).
-	lessons, e := rowsJSON(r.Context(), a.db, `WITH titles AS MATERIALIZED (SELECT DISTINCT ON (n->>'id') n->>'id' AS id,n->>'title' AS title
+	// Each lesson names its node as the canvas titles it now ("" for a node no longer on the canvas), and the reasoning
+	// effort the node is set to there (its Agent's, for a node whose canvas names none; null for one no longer on it),
+	// which the panel judges a suggested effort by: the canvas's nodes are read once, not once a lesson (a film's canvas
+	// is a megabyte).
+	lessons, e := rowsJSON(r.Context(), a.db, `WITH titles AS MATERIALIZED (SELECT DISTINCT ON (n->>'id') n->>'id' AS id,n->>'title' AS title,
+			CASE WHEN jsonb_typeof(n->'effort')='string' THEN n->>'effort'
+				ELSE COALESCE((SELECT g.effort FROM agents g WHERE g.tenant_id=c.tenant_id AND g.id=n->'binding'->>'agentId'),'') END AS effort
 		FROM canvases c CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n
 		WHERE c.tenant_id=$1 AND c.id=$2 AND jsonb_typeof(n)='object')
-		SELECT `+strings.ReplaceAll(lessonJSON, "$9", "$3")+`||jsonb_build_object('nodeTitle',COALESCE(t.title,'')) FROM canvas_lessons l
+		SELECT `+strings.ReplaceAll(lessonJSON, "$9", "$3")+`||jsonb_build_object('nodeTitle',COALESCE(t.title,''),'nodeEffort',t.effort) FROM canvas_lessons l
 		LEFT JOIN titles t ON t.id=l.node_id
 		WHERE l.tenant_id=$1 AND l.canvas_id=$2 ORDER BY l.status='active' DESC,l.last_seen_at DESC,l.id LIMIT 200`, tid, cid, silentLessonKinds())
 	if e != nil {
@@ -614,7 +636,7 @@ func (a *App) canvasLessons(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateCanvasLesson is a person's word on a lesson: retire it (it is no longer given to the node) or restore it, and
-// a suggestion asked for, dismissed or open again.
+// a suggestion asked for, applied, dismissed or open again.
 func (a *App) updateCanvasLesson(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Status        *string `json:"status"`
@@ -624,8 +646,8 @@ func (a *App) updateCanvasLesson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if (b.Status == nil && b.ProposalState == nil) || (b.Status != nil && *b.Status != "active" && *b.Status != "retired") ||
-		(b.ProposalState != nil && *b.ProposalState != "open" && *b.ProposalState != "asked" && *b.ProposalState != "dismissed") {
-		fail(w, 400, "invalid_input", "A lesson is active or retired, and its suggestion open, asked or dismissed")
+		(b.ProposalState != nil && !slices.Contains([]string{"open", "asked", "applied", "dismissed"}, *b.ProposalState)) {
+		fail(w, 400, "invalid_input", "A lesson is active or retired, and its suggestion open, asked, applied or dismissed")
 		return
 	}
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
@@ -645,7 +667,8 @@ func (a *App) updateCanvasLesson(w http.ResponseWriter, r *http.Request) {
 		retired_reason=CASE WHEN $3::text IS NULL THEN l.retired_reason WHEN $3='retired' THEN 'person' ELSE '' END,
 		failed=CASE WHEN $3='active' AND l.status='retired' AND l.retired_reason='ineffective' THEN 0 ELSE l.failed END,
 		applied=CASE WHEN $3='active' AND l.status='retired' AND l.retired_reason='ineffective' THEN l.succeeded ELSE l.applied END,
-		proposal_state=COALESCE($4,l.proposal_state),updated_at=clock_timestamp() WHERE l.tenant_id=$1 AND l.id=$2 RETURNING `+strings.ReplaceAll(lessonJSON, "$9", "$5"),
+		proposal_state=COALESCE($4,l.proposal_state),proposal_at=CASE WHEN $4::text IS NULL THEN l.proposal_at ELSE clock_timestamp() END,
+		updated_at=clock_timestamp() WHERE l.tenant_id=$1 AND l.id=$2 RETURNING `+strings.ReplaceAll(lessonJSON, "$9", "$5"),
 		tid, id, b.Status, b.ProposalState, silentLessonKinds())
 	if noRows(e) {
 		fail(w, 404, "not_found", "Lesson not found")

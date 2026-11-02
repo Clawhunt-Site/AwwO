@@ -110,8 +110,8 @@ func TestLessonsSystemPromptAddsOnlyWhatARunWasGiven(t *testing.T) {
 	}
 }
 
-func TestLessonProposalSuggestsALowerEffortOnlyWhereTheModelTakesOne(t *testing.T) {
-	efforts := piHealth{Models: []piModel{{ID: "m", ReasoningEfforts: []string{"low", "medium", "high"}}}}
+func TestLessonProposalSuggestsAnEffortOnlyWhereTheModelTakesIt(t *testing.T) {
+	efforts := piHealth{Models: []piModel{{ID: "m", ReasoningEfforts: []string{"low", "medium", "high"}}, {ID: "low-only", ReasoningEfforts: []string{"low"}}}}
 	for _, c := range []struct {
 		kind  string
 		snap  executionSnapshot
@@ -124,6 +124,12 @@ func TestLessonProposalSuggestsALowerEffortOnlyWhereTheModelTakesOne(t *testing.
 		{"context_limit", executionSnapshot{Model: "m", Health: efforts}, "larger_context"},
 		{"provider", executionSnapshot{Model: "m"}, "other_model"},
 		{"step_limit", executionSnapshot{Model: "m", Health: efforts}, ""},
+		// A node put at low that then delivered what its outputs refused, or ran out of steps, is suggested medium.
+		{"delivery", executionSnapshot{Model: "m", Effort: "low", Health: efforts}, "raise_effort"},
+		{"step_limit", executionSnapshot{Model: "m", Effort: "low", Health: efforts}, "raise_effort"},
+		{"delivery", executionSnapshot{Model: "m", Effort: "medium", Health: efforts}, ""},
+		{"run_timeout", executionSnapshot{Model: "m", Effort: "low", Health: efforts}, ""},
+		{"delivery", executionSnapshot{Model: "low-only", Effort: "low", Health: efforts}, ""},
 	} {
 		if got := lessonProposal(c.kind, c.snap); got != c.wants {
 			t.Errorf("%s %+v: got %q want %q", c.kind, c.snap.Effort, got, c.wants)
@@ -144,6 +150,10 @@ func TestPostgresCanvasLessonsSchema(t *testing.T) {
 	}
 	if _, e = tx.Exec(ctx, string(sql)); e != nil {
 		t.Fatal("047 is not re-runnable", e)
+	}
+	sql, _ = migrations.ReadFile("migrations/049_lesson_suggestions.sql")
+	if _, e = tx.Exec(ctx, string(sql)); e != nil {
+		t.Fatal("049 is not re-runnable", e)
 	}
 	if e = tx.Commit(ctx); e != nil {
 		t.Fatal(e)
@@ -192,6 +202,8 @@ func TestPostgresCanvasLessonsSchema(t *testing.T) {
 		"INSERT INTO planner_refusals(tenant_id,reason,model) VALUES('t','operation:set_execution','bedrock.claude-opus-5-5')",
 		"INSERT INTO planner_refusals(tenant_id,reason) VALUES('t','too_many_operations')",
 		"SELECT lessons_at FROM graph_runs LIMIT 0",
+		// A suggested effort applied on the canvas, and medium again for a node put at low (049).
+		"INSERT INTO canvas_lessons(id,tenant_id,rule,proposal,proposal_state) VALUES('l8','t','Rule.','raise_effort','applied')",
 	} {
 		if e = exec(statement); e != nil {
 			t.Fatal(statement, e)
@@ -199,7 +211,8 @@ func TestPostgresCanvasLessonsSchema(t *testing.T) {
 	}
 }
 
-// lessonPi is a Pi worker answering each node's calls as reply says, recording each call's system prompt.
+// lessonPi is a Pi worker answering each node's calls as reply says, recording each call's system prompt; its one model
+// takes the reasoning efforts newLessonPiOn names.
 type lessonPi struct {
 	server *httptest.Server
 	mu     sync.Mutex
@@ -208,10 +221,18 @@ type lessonPi struct {
 }
 
 func newLessonPi(t *testing.T, reply func(node string, call int) piReply) *lessonPi {
+	return newLessonPiOn(t, nil, reply)
+}
+
+func newLessonPiOn(t *testing.T, efforts []string, reply func(node string, call int) piReply) *lessonPi {
 	p := &lessonPi{counts: map[string]int{}, system: map[string][]string{}}
+	model := map[string]any{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144}
+	if efforts != nil {
+		model["reasoningEfforts"] = efforts
+	}
 	p.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144}}})
+			writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test", "models": []map[string]any{model}})
 			return
 		}
 		if r.Method == "DELETE" {
@@ -248,14 +269,14 @@ func (p *lessonPi) prompts(node string) []string {
 }
 
 type lessonRow struct {
-	id, kind, status, reason, proposal, rule string
-	seen, applied, succeeded, failed         int
-	evidence                                 []map[string]any
+	id, kind, status, reason, proposal, state, rule string
+	seen, applied, succeeded, failed                int
+	evidence                                        []map[string]any
 }
 
 func nodeLessons(t *testing.T, h *harness, tid, cid, node string) []lessonRow {
 	t.Helper()
-	rows, err := h.db.Query(context.Background(), `SELECT id,kind,status,retired_reason,proposal,rule,seen,applied,succeeded,failed,evidence
+	rows, err := h.db.Query(context.Background(), `SELECT id,kind,status,retired_reason,proposal,proposal_state,rule,seen,applied,succeeded,failed,evidence
 		FROM canvas_lessons WHERE tenant_id=$1 AND canvas_id=$2 AND node_id=$3 ORDER BY created_at,id`, tid, cid, node)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +286,7 @@ func nodeLessons(t *testing.T, h *harness, tid, cid, node string) []lessonRow {
 	for rows.Next() {
 		var l lessonRow
 		var raw []byte
-		if err = rows.Scan(&l.id, &l.kind, &l.status, &l.reason, &l.proposal, &l.rule, &l.seen, &l.applied, &l.succeeded, &l.failed, &raw); err != nil {
+		if err = rows.Scan(&l.id, &l.kind, &l.status, &l.reason, &l.proposal, &l.state, &l.rule, &l.seen, &l.applied, &l.succeeded, &l.failed, &raw); err != nil {
 			t.Fatal(err)
 		}
 		if err = json.Unmarshal(raw, &l.evidence); err != nil {
@@ -832,4 +853,116 @@ func TestPostgresARunsResultCanBeRated(t *testing.T) {
 	h.request(t, other, "PUT", "/tenants/"+otherTenant+"/runs/"+doneRun+"/rating", map[string]any{"rating": 1}, 404)
 	h.request(t, other, "GET", "/tenants/"+otherTenant+"/runs/"+doneRun+"/rating", nil, 404)
 	h.request(t, c, "GET", path+"no-such-run/rating", nil, 404)
+}
+
+// effortCanvas is retryCanvas with its nodes' Agent at a reasoning effort, which effortAgent changes as the 经验 panel's
+// plan would have changed its node.
+func effortCanvas(t *testing.T, h *harness, c *http.Cookie, tid, effort string) (string, string) {
+	t.Helper()
+	prefix := "/tenants/" + tid
+	agent := h.request(t, c, "POST", prefix+"/agents", map[string]any{"name": "Effort worker", "adapterType": "pi", "model": "test-model", "effort": effort, "instructions": "Work"}, 201)["id"].(string)
+	binding := map[string]string{"companyId": tid, "agentId": agent}
+	doc := map[string]any{"nodes": []any{
+		map[string]any{"id": "up", "kind": "session", "title": "up", "runtime": "pi", "agentKind": "llm", "binding": binding},
+		map[string]any{"id": "down", "kind": "session", "title": "down", "runtime": "pi", "agentKind": "llm", "binding": binding, "x": 320},
+	}, "edges": []map[string]string{{"id": "up-down", "fromNode": "up", "fromPort": "result", "toNode": "down", "toPort": "context", "dataType": "text"}}}
+	return h.request(t, c, "POST", prefix+"/canvases", map[string]any{"name": "Effort", "document": doc}, 201)["id"].(string), agent
+}
+
+func effortAgent(t *testing.T, h *harness, c *http.Cookie, tid, agent, effort string) {
+	t.Helper()
+	h.request(t, c, "PUT", "/tenants/"+tid+"/agents/"+agent, map[string]any{"name": "Effort worker", "adapterType": "pi", "model": "test-model", "effort": effort, "instructions": "Work"}, 200)
+}
+
+// A suggested lower effort, applied (the 经验 panel's plan put the node at low and marked it so), is not offered again
+// while the node fails at low, where it would change nothing; put back at medium, the same failure offers it again.
+// The view gives each lesson what its runs ran with.
+func TestPostgresAnAppliedEffortSuggestionComesBackWhereItWouldChangeTheNode(t *testing.T) {
+	pi := newLessonPiOn(t, []string{"low", "medium", "high"}, func(node string, call int) piReply {
+		if node == "up" {
+			return piReply{failed: "MODEL_OUTPUT_LIMIT"}
+		}
+		return piReply{text: "RESULT-" + node}
+	})
+	h := newHarness(t, pi.server.URL)
+	h.a.cfg.GraphNodeRetries = 0
+	c, tid, _ := h.register(t, "lessons-effort@example.test")
+	cid, agent := effortCanvas(t, h, c, tid, "medium")
+	base := "/tenants/" + tid + "/canvases/" + cid + "/graph-runs"
+
+	runGraph(t, h, c, base, "effort-run-1", "failed")
+	l := awaitLessons(t, h, tid, cid, "up", func(l []lessonRow) bool { return len(l) == 1 })[0]
+	if l.kind != "output_limit" || l.proposal != "lower_effort" || l.state != "open" {
+		t.Fatalf("the lesson written: %+v", l)
+	}
+	view := h.request(t, c, "GET", "/tenants/"+tid+"/canvases/"+cid+"/lessons", nil, 200)
+	listed := view["lessons"].([]any)[0].(map[string]any)
+	if scope, _ := listed["scope"].(map[string]any); scope["runtime"] != "pi" || scope["model"] != "test-model" || scope["effort"] != "medium" || listed["proposalState"] != "open" {
+		t.Fatal("the lesson as the view lists it", listed)
+	}
+	applied := h.request(t, c, "PATCH", "/tenants/"+tid+"/canvas-lessons/"+l.id, map[string]any{"proposalState": "applied"}, 200)
+	if applied["proposalState"] != "applied" || applied["proposal"] != "lower_effort" {
+		t.Fatal(applied)
+	}
+	h.request(t, c, "PATCH", "/tenants/"+tid+"/canvas-lessons/"+l.id, map[string]any{"proposalState": "done"}, 400)
+
+	// At low, the same failure counts again and leaves the suggestion applied.
+	effortAgent(t, h, c, tid, agent, "low")
+	runGraph(t, h, c, base, "effort-run-2", "failed")
+	l = awaitLessons(t, h, tid, cid, "up", func(l []lessonRow) bool { return len(l) == 1 && l[0].seen == 2 })[0]
+	if l.proposal != "lower_effort" || l.state != "applied" {
+		t.Fatalf("after a failure at low: %+v", l)
+	}
+	// Put back at medium by hand: the suggestion is offered again.
+	effortAgent(t, h, c, tid, agent, "medium")
+	runGraph(t, h, c, base, "effort-run-3", "failed")
+	l = awaitLessons(t, h, tid, cid, "up", func(l []lessonRow) bool { return len(l) == 1 && l[0].seen == 3 })[0]
+	if l.proposal != "lower_effort" || l.state != "open" {
+		t.Fatalf("after a failure at medium again: %+v", l)
+	}
+	// Applied again, a failure of a run admitted before that, learnt from late (the sweeper), leaves it applied.
+	h.request(t, c, "PATCH", "/tenants/"+tid+"/canvas-lessons/"+l.id, map[string]any{"proposalState": "applied"}, 200)
+	ctx := context.Background()
+	var late string
+	if e := h.db.QueryRow(ctx, "UPDATE graph_runs SET lessons_at=NULL WHERE tenant_id=$1 AND operation_id='effort-run-3' RETURNING id", tid).Scan(&late); e != nil {
+		t.Fatal(e)
+	}
+	if e := h.a.distillGraphLessons(ctx, tid, late); e != nil {
+		t.Fatal(e)
+	}
+	if l = nodeLessons(t, h, tid, cid, "up")[0]; l.seen != 4 || l.state != "applied" {
+		t.Fatalf("an older failure learnt from late re-opened it: %+v", l)
+	}
+	// One dismissed stays dismissed, whatever comes after.
+	h.request(t, c, "PATCH", "/tenants/"+tid+"/canvas-lessons/"+l.id, map[string]any{"proposalState": "dismissed"}, 200)
+	runGraph(t, h, c, base, "effort-run-4", "failed")
+	if l = awaitLessons(t, h, tid, cid, "up", func(l []lessonRow) bool { return len(l) == 1 && l[0].seen == 5 })[0]; l.state != "dismissed" {
+		t.Fatalf("a dismissed suggestion came back: %+v", l)
+	}
+	// The view gives the node's effort: its Agent's, as the canvas names none here.
+	if listed := h.request(t, c, "GET", "/tenants/"+tid+"/canvases/"+cid+"/lessons", nil, 200)["lessons"].([]any)[0].(map[string]any); listed["nodeEffort"] != "medium" {
+		t.Fatal("the node's effort as the view gives it", listed["nodeEffort"])
+	}
+}
+
+// A node put at low effort that then delivers what its outputs refuse is suggested medium again, and its lesson still
+// gives a model its rule.
+func TestPostgresADeliveryRefusedAtLowEffortSuggestsMedium(t *testing.T) {
+	pi := newLessonPiOn(t, []string{"low", "medium", "high"}, func(node string, call int) piReply {
+		return piReply{text: "plain prose, not the declared object"}
+	})
+	h := newHarness(t, pi.server.URL)
+	c, tid, _ := h.register(t, "lessons-raise@example.test")
+	base := structuredCanvas(t, h, c, tid, "Shaped", "pi", "test-model", []graphField{{ID: "summary", Label: "Summary", Type: "text", Required: true}, {ID: "score", Label: "Score", Type: "number", Required: true}}, nil)
+	cid := strings.Split(strings.TrimPrefix(base, "/tenants/"+tid+"/canvases/"), "/")[0]
+	var agent string
+	if e := h.db.QueryRow(context.Background(), "SELECT id FROM agents WHERE tenant_id=$1 AND name='Structured'", tid).Scan(&agent); e != nil {
+		t.Fatal(e)
+	}
+	h.request(t, c, "PUT", "/tenants/"+tid+"/agents/"+agent, map[string]any{"name": "Structured", "adapterType": "pi", "model": "test-model", "effort": "low", "instructions": "NODE-PERSONA"}, 200)
+	runGraph(t, h, c, base, "raise-run-1", "failed")
+	l := awaitLessons(t, h, tid, cid, "only", func(l []lessonRow) bool { return len(l) == 1 })[0]
+	if l.kind != "delivery" || l.proposal != "raise_effort" || l.state != "open" || l.rule == "" {
+		t.Fatalf("%+v", l)
+	}
 }

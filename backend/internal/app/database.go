@@ -174,6 +174,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 48, "migrations/048_canvas_lessons_cascade.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 49, "migrations/049_lesson_suggestions.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
