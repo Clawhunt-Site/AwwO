@@ -11,8 +11,13 @@ export interface CanvasLesson {
   id: string; canvasId: string | null; nodeId: string | null; nodeTitle: string; kind: string; source: 'rule' | 'model' | 'person';
   rule: string; given: boolean; status: 'proposed' | 'active' | 'retired'; retiredReason: string; seen: number; applied: number;
   succeeded: number; failed: number; proposal: LessonProposal; proposalState: LessonProposalState;
-  /** What the runs it was written from ran with: their runtime, model and reasoning effort. */
-  scope: { runtime?: string; model?: string; effort?: string };
+  /** What the runs it was written from ran with (runtime, model, reasoning effort); for a lesson of the whole workspace,
+   *  the template whose nodes are given it. */
+  scope: { runtime?: string; model?: string; effort?: string; templateId?: string };
+  /** Its node's template on the canvas, and whether the lesson went to the whole workspace (both absent from an API
+   *  before 2026-11-02). A lesson of the whole workspace has no canvas (canvasId null). */
+  nodeTemplate?: string;
+  promoted?: boolean;
   /** The reasoning effort its node is set to in the canvas as saved ('' for the model's default), or null for a node no
    *  longer on the canvas (absent from an API before 2026-11-02). */
   nodeEffort?: string | null;
@@ -32,12 +37,13 @@ const count = (x: unknown): x is number => Number.isSafeInteger(x) && (x as numb
 const PROPOSALS: readonly string[] = ['', 'lower_effort', 'raise_effort', 'larger_context', 'other_model'];
 const STATES: readonly string[] = ['open', 'asked', 'dismissed', 'applied'];
 // An API from before 2026-11-02 returns no scope: a lesson read from it has none.
-const scope = (x: unknown): boolean => x === undefined || (object(x) && ['runtime', 'model', 'effort'].every(key => x[key] === undefined || text(x[key])));
+const scope = (x: unknown): boolean => x === undefined || (object(x) && ['runtime', 'model', 'effort', 'templateId'].every(key => x[key] === undefined || text(x[key])));
 function lesson(x: unknown): x is CanvasLesson {
   return object(x) && text(x.id) && (x.nodeId === null || text(x.nodeId)) && text(x.nodeTitle ?? '') && text(x.kind) && text(x.rule)
     && typeof x.given === 'boolean' && ['proposed', 'active', 'retired'].includes(String(x.status)) && text(x.retiredReason)
     && count(x.seen) && count(x.applied) && count(x.succeeded) && count(x.failed) && text(x.proposal) && text(x.proposalState)
-    && scope(x.scope) && (x.nodeEffort === undefined || x.nodeEffort === null || text(x.nodeEffort)) && Array.isArray(x.evidence);
+    && scope(x.scope) && (x.nodeEffort === undefined || x.nodeEffort === null || text(x.nodeEffort)) && (x.nodeTemplate === undefined || text(x.nodeTemplate))
+    && (x.promoted === undefined || typeof x.promoted === 'boolean') && Array.isArray(x.evidence);
 }
 function known(item: CanvasLesson): CanvasLesson {
   return { ...item, nodeTitle: item.nodeTitle ?? '', scope: item.scope ?? {},
@@ -58,6 +64,12 @@ export async function readCanvasLessons(tenantId: string, canvasId: string, sign
 }
 export async function updateCanvasLesson(tenantId: string, id: string, patch: { status?: 'active' | 'retired'; proposalState?: LessonProposalState }, signal?: AbortSignal): Promise<CanvasLesson> {
   const value = await api<unknown>(tenantPath(tenantId, `/canvas-lessons/${encodeURIComponent(id)}`), { method: 'PATCH', body: JSON.stringify(patch), signal });
+  return known(checked({ nodeTitle: '', ...(object(value) ? value : {}) }, lesson));
+}
+/** Makes a node's lesson that helped its runs the whole workspace's, for every node of its template; answers the
+ *  workspace's lesson. */
+export async function promoteCanvasLesson(tenantId: string, id: string, signal?: AbortSignal): Promise<CanvasLesson> {
+  const value = await api<unknown>(tenantPath(tenantId, `/canvas-lessons/${encodeURIComponent(id)}/promote`), { method: 'POST', body: '{}', signal });
   return known(checked({ nodeTitle: '', ...(object(value) ? value : {}) }, lesson));
 }
 export type RunRating = 1 | -1 | 0;

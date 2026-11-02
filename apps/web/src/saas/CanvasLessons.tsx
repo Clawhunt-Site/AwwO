@@ -4,12 +4,13 @@
 // is the reader's to take: a reasoning effort is applied as a plan (onEvolve: the canvas surface's applyEvolution,
 // undoable as any plan), a change of model goes to the canvas assistant's box as a request the reader sends.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, Check, GraduationCap, RefreshCw, RotateCcw, Send, Wand2, X } from 'lucide-react';
+import { Archive, Check, GraduationCap, RefreshCw, RotateCcw, Send, Share2, Wand2, X } from 'lucide-react';
+import { AGENT_TEMPLATE_IDS, getAgentTemplate, type AgentTemplateId } from '../canvas/agentTemplates';
 import type { CanvasEvolution, CanvasEvolutionResult } from '../canvas/CanvasSurface';
 import { WorkbenchOverlay, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
-import { readCanvasLessons, updateCanvasLesson, type CanvasLesson, type CanvasLessonsView } from './lessonsApi';
+import { promoteCanvasLesson, readCanvasLessons, updateCanvasLesson, type CanvasLesson, type CanvasLessonsView } from './lessonsApi';
 import './canvas-library.css';
 import './canvas-lessons.css';
 
@@ -68,6 +69,23 @@ export function lessonOutcome(lesson: CanvasLesson, t: Translate): string {
   return [t(`带着它完成 ${lesson.succeeded} 次`, `finished with it ${times(lesson.succeeded)}`),
     lesson.failed ? t(`同样的问题又出现 ${lesson.failed} 次`, `the same failure came back ${times(lesson.failed)}`) : '',
     other ? t(`别的原因没完成 ${other} 次`, `other failures ${times(other)}`) : ''].filter(Boolean).join(t('，', ', '));
+}
+
+/** A node's lesson goes to the whole workspace once it helped this many of its runs and failed at most one
+ *  (workspace_lessons.go). */
+const PROMOTE_AFTER = 3;
+
+/** Whether a node's lesson may go to the whole workspace, for every node of its template: an active lesson its node is
+ *  given, which helped at least PROMOTE_AFTER of its runs and failed at most one, of a node on the canvas with an Agent
+ *  template, not there already. */
+export function lessonPromotable(lesson: CanvasLesson): boolean {
+  return lesson.canvasId !== null && !!lesson.nodeId && lesson.given && lesson.status === 'active' && lesson.succeeded >= PROMOTE_AFTER && lesson.failed <= 1
+    && !lesson.promoted && AGENT_TEMPLATE_IDS.has(lesson.nodeTemplate ?? '');
+}
+
+/** A template's name as the canvas's library shows it, or its id for one it does not know. */
+export function templateName(id: string | undefined, locale: 'zh' | 'en'): string {
+  return id && AGENT_TEMPLATE_IDS.has(id) ? getAgentTemplate(id as AgentTemplateId, locale).title : id ?? '';
 }
 
 /** Whether the node a suggested effort is for already runs at it, in the canvas as saved: low for a lower effort, any
@@ -171,6 +189,18 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     } catch (cause) { if (alive.current) setError(cause); }
     finally { if (alive.current) setBusy(false); }
   };
+  const promote = async (lesson: CanvasLesson) => {
+    if (busy) return;
+    setBusy(true); setError(null); setNotice('');
+    try {
+      await promoteCanvasLesson(tenantId, lesson.id);
+      if (!alive.current) return;
+      const name = templateName(lesson.nodeTemplate, locale);
+      setNotice(t(`已推广：工作区里所有「${name}」节点之后都会带上这条经验。`, `Promoted: every “${name}” node in the workspace takes this lesson from now on.`));
+      await load();
+    } catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setBusy(false); }
+  };
   const ask = (lesson: CanvasLesson) => {
     const prompt = lessonRequest(lesson, t);
     if (!prompt || !onTaskDraft) return;
@@ -226,7 +256,9 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
           : !lessons.length ? <p className="awwo-library-empty">{t('还没有经验。画布运行结束后，没完成的节点会在这里留下经验，下次运行时带上。', 'No lessons yet. When a canvas run ends, the nodes that did not finish leave lessons here, and take them into their next runs.')}</p>
           : <ul className="awwo-library-list" aria-label={t('经验', 'Lessons')}>{lessons.map(lesson => <li key={lesson.id}>
             <div className="awwo-library-item-head">
-              <span className="awwo-library-badge">{lesson.nodeTitle || t('已不在画布上的节点', 'A node no longer on the canvas')}</span>
+              <span className="awwo-library-badge">{lesson.canvasId === null
+                ? t(`工作区 · 所有「${templateName(lesson.scope.templateId, locale)}」节点`, `Workspace · every “${templateName(lesson.scope.templateId, locale)}” node`)
+                : lesson.nodeTitle || t('已不在画布上的节点', 'A node no longer on the canvas')}</span>
               <span className={`awwo-library-badge${lesson.status === 'active' ? ' is-pinned' : ''}`}>{status(lesson)}</span>
             </div>
             <strong>{lessonKindName(lesson.kind, t)}</strong>
@@ -234,7 +266,8 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
               {/* Counted only by the runs a lesson is judged by: done, or failed in a way a lesson could prevent. */}
               {lesson.given ? ` · ${lessonOutcome(lesson, t)}` : ''}
               {` · ${t('最近一次', 'Last')} ${date(lesson.lastSeenAt)}`}
-              {lesson.proposalState === 'applied' ? ` · ${t('建议已应用', 'Suggestion applied')}` : ''}</small>
+              {lesson.proposalState === 'applied' ? ` · ${t('建议已应用', 'Suggestion applied')}` : ''}
+              {lesson.promoted ? ` · ${t('已推广到工作区', 'Promoted to the workspace')}` : ''}</small>
             {lesson.given && <details className="awwo-lessons-rule"><summary>{t('交给模型的话', 'What the model is told')}</summary><p lang="en">{lesson.rule}</p></details>}
             {lessonSuggests(lesson) && <p className="awwo-lessons-suggestion">{lessonRequest(lesson, t)}</p>}
             {!readOnly && <div className="awwo-library-item-actions">
@@ -242,6 +275,8 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
                 ? <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => { const next = evolution(lesson); if (next) onEvolve?.(next); }}><Wand2 size={14} aria-hidden="true" />{t('应用建议', 'Apply')}</button>
                 : onTaskDraft && <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => ask(lesson)}><Send size={14} aria-hidden="true" />{t('交给画布助手', 'Hand to the assistant')}</button>)}
               {lessonSuggests(lesson) && <button type="button" disabled={busy} onClick={() => void patch(lesson, { proposalState: 'dismissed' }, t('已忽略这条建议。', 'Suggestion dismissed.'))}>{t('忽略建议', 'Dismiss')}</button>}
+              {lessonPromotable(lesson) && <button type="button" disabled={busy} title={t(`让工作区里所有「${templateName(lesson.nodeTemplate, locale)}」节点都带上这条经验`, `Give this lesson to every “${templateName(lesson.nodeTemplate, locale)}” node in the workspace`)}
+                onClick={() => void promote(lesson)}><Share2 size={14} aria-hidden="true" />{t('推广到工作区', 'Promote to the workspace')}</button>}
               {lesson.given && (lesson.status === 'active'
                 ? <button type="button" disabled={busy} onClick={() => void patch(lesson, { status: 'retired' }, t('已停用：之后的运行不再带它。', 'Retired: later runs no longer take it.'))}><Archive size={14} aria-hidden="true" />{t('停用', 'Retire')}</button>
                 : <button type="button" disabled={busy} onClick={() => void patch(lesson, { status: 'active' }, lesson.retiredReason === 'ineffective'

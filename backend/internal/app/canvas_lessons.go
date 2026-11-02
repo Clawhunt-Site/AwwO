@@ -429,25 +429,33 @@ func writeNodeLesson(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID, kind
 // run was admitted) has a suggestion and ran after the person applied it.
 const reopenedSQL = `canvas_lessons.proposal_state='applied' AND EXCLUDED.proposal<>'' AND $12::timestamptz>COALESCE(canvas_lessons.proposal_at,'-infinity'::timestamptz)`
 
-// freezeNodeLessons is what node nodeID of canvas canvasID is given at admission: its active lessons that give a model
-// something, then the canvas's and the workspace's, newest first, whole lessons only within maxNodeLessons and
-// maxNodeLessonBytes. A node without any freezes nothing.
-func freezeNodeLessons(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID string) (*lessonContext, error) {
+// freezeNodeLessons is what node nodeID of canvas canvasID, of template templateID, is given at admission: its active
+// lessons that give a model something, then the canvas's, then the workspace's for nodes of its template
+// (workspace_lessons.go) less those of a kind one of its own already gives, newest first, whole lessons only within
+// maxNodeLessons and maxNodeLessonBytes. A node without any freezes nothing.
+func freezeNodeLessons(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID, templateID string) (*lessonContext, error) {
 	if canvasID == "" || nodeID == "" {
 		return nil, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id,kind,rule FROM canvas_lessons WHERE tenant_id=$1 AND status='active' AND kind<>ALL($4::text[])
-		AND (canvas_id IS NULL OR (canvas_id=$2 AND (node_id IS NULL OR node_id=$3)))
-		ORDER BY node_id IS NOT NULL DESC,canvas_id IS NOT NULL DESC,last_seen_at DESC,id LIMIT $5`, tid, canvasID, nodeID, silentLessonKinds(), maxNodeLessonCandidates)
+	rows, err := tx.Query(ctx, `SELECT id,kind,rule,canvas_id IS NULL FROM canvas_lessons WHERE tenant_id=$1 AND status='active' AND kind<>ALL($4::text[])
+		AND ((canvas_id=$2 AND (node_id IS NULL OR node_id=$3)) OR (canvas_id IS NULL AND $6<>'' AND scope->>'templateId'=$6))
+		ORDER BY node_id IS NOT NULL DESC,canvas_id IS NOT NULL DESC,last_seen_at DESC,id LIMIT $5`, tid, canvasID, nodeID, silentLessonKinds(), maxNodeLessonCandidates, templateID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items, used := []lessonNote{}, len(lessonsHeading)
+	items, used, own := []lessonNote{}, len(lessonsHeading), map[string]bool{}
 	for rows.Next() {
 		var note lessonNote
-		if err = rows.Scan(&note.ID, &note.Kind, &note.Rule); err != nil {
+		var workspace bool
+		if err = rows.Scan(&note.ID, &note.Kind, &note.Rule, &workspace); err != nil {
 			return nil, err
+		}
+		if workspace && own[note.Kind] {
+			continue
+		}
+		if !workspace {
+			own[note.Kind] = true
 		}
 		size := len(note.Rule) + 3
 		if len(items) == maxNodeLessons || used+size > maxNodeLessonBytes {
@@ -640,18 +648,23 @@ func (a *App) canvasLessons(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found", "Canvas not found")
 		return
 	}
-	// Each lesson names its node as the canvas titles it now ("" for a node no longer on the canvas), and the reasoning
-	// effort the node is set to there (its Agent's, for a node whose canvas names none; null for one no longer on it),
-	// which the panel judges a suggested effort by: the canvas's nodes are read once, not once a lesson (a film's canvas
-	// is a megabyte).
+	// Each lesson names its node as the canvas titles it now ("" for a node no longer on the canvas), the reasoning effort
+	// the node is set to there (its Agent's, for a node whose canvas names none; null for one no longer on it), which the
+	// panel judges a suggested effort by, its template, and whether the lesson went to the whole workspace
+	// (workspace_lessons.go). The workspace's lessons for the templates on the canvas are listed with it. The canvas's
+	// nodes are read once, not once a lesson (a film's canvas is a megabyte).
 	lessons, e := rowsJSON(r.Context(), a.db, `WITH titles AS MATERIALIZED (SELECT DISTINCT ON (n->>'id') n->>'id' AS id,n->>'title' AS title,
 			CASE WHEN jsonb_typeof(n->'effort')='string' THEN n->>'effort'
-				ELSE COALESCE((SELECT g.effort FROM agents g WHERE g.tenant_id=c.tenant_id AND g.id=n->'binding'->>'agentId'),'') END AS effort
+				ELSE COALESCE((SELECT g.effort FROM agents g WHERE g.tenant_id=c.tenant_id AND g.id=n->'binding'->>'agentId'),'') END AS effort,
+			CASE WHEN jsonb_typeof(n->'templateId')='string' THEN n->>'templateId' ELSE '' END AS template
 		FROM canvases c CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.document->'nodes')='array' THEN c.document->'nodes' ELSE '[]'::jsonb END) n
 		WHERE c.tenant_id=$1 AND c.id=$2 AND jsonb_typeof(n)='object')
-		SELECT `+strings.ReplaceAll(lessonJSON, "$9", "$3")+`||jsonb_build_object('nodeTitle',COALESCE(t.title,''),'nodeEffort',t.effort) FROM canvas_lessons l
+		SELECT `+strings.ReplaceAll(lessonJSON, "$9", "$3")+`||jsonb_build_object('nodeTitle',COALESCE(t.title,''),'nodeEffort',t.effort,'nodeTemplate',COALESCE(t.template,''),
+			'promoted',EXISTS(SELECT 1 FROM canvas_lessons w WHERE w.tenant_id=l.tenant_id AND w.canvas_id IS NULL
+				AND w.evidence @> jsonb_build_array(jsonb_build_object('lessonId',l.id)))) FROM canvas_lessons l
 		LEFT JOIN titles t ON t.id=l.node_id
-		WHERE l.tenant_id=$1 AND l.canvas_id=$2 ORDER BY l.status='active' DESC,l.last_seen_at DESC,l.id LIMIT 200`, tid, cid, silentLessonKinds())
+		WHERE l.tenant_id=$1 AND (l.canvas_id=$2 OR (l.canvas_id IS NULL AND l.scope->>'templateId' IN (SELECT template FROM titles WHERE template<>'')))
+		ORDER BY l.status='active' DESC,l.last_seen_at DESC,l.id LIMIT 200`, tid, cid, silentLessonKinds())
 	if e != nil {
 		a.dbError(w, e)
 		return

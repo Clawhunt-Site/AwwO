@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasEvolution } from '../src/canvas/CanvasSurface';
-import { CanvasLessons, LessonsWorkbench, lessonEffort, lessonOfEvolution, lessonOutcome, lessonRequest, lessonSatisfied, lessonSuggests, useLessonEvolutions } from '../src/saas/CanvasLessons';
+import { CanvasLessons, LessonsWorkbench, lessonEffort, lessonOfEvolution, lessonOutcome, lessonPromotable, lessonRequest, lessonSatisfied, lessonSuggests, useLessonEvolutions } from '../src/saas/CanvasLessons';
 import { RunRating } from '../src/saas/RunRating';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { readCanvasLessons, type CanvasLesson } from '../src/saas/lessonsApi';
@@ -253,6 +253,34 @@ describe('the lessons workbench', () => {
     expect(view.lessons[0].scope).toEqual({});
     server(call => call.method === 'GET' ? json({ lessons: [{ ...old, scope: { model: 7 } }], runs: [] }) : undefined);
     await expect(readCanvasLessons('tenant-a', 'canvas-a')).rejects.toMatchObject({ code: 'invalid_lessons_response' });
+  });
+
+  it('promotes a lesson that helped to every node of its template, and lists the workspace’s lessons', async () => {
+    const proved = lesson({ id: 'l1', applied: 3, succeeded: 3, failed: 0, nodeTemplate: 'frontend', proposal: '' });
+    expect(lessonPromotable(proved)).toBe(true);
+    expect(lessonPromotable({ ...proved, succeeded: 2 })).toBe(false);
+    expect(lessonPromotable({ ...proved, failed: 2, applied: 5 })).toBe(false);
+    expect(lessonPromotable({ ...proved, nodeTemplate: '' })).toBe(false);
+    expect(lessonPromotable({ ...proved, promoted: true })).toBe(false);
+    expect(lessonPromotable({ ...proved, given: false })).toBe(false);
+    let items = [proved, lesson({ id: 'w1', canvasId: null, nodeId: null, nodeTitle: '', source: 'person', proposal: '', scope: { templateId: 'review' } })];
+    const calls = server(call => {
+      if (call.method === 'GET') return json({ lessons: items, runs: [] });
+      if (call.method === 'POST' && call.url === `${tenant}/canvas-lessons/l1/promote`) {
+        items = [{ ...proved, promoted: true }, items[1]];
+        return json(lesson({ id: 'w2', canvasId: null, nodeId: null, source: 'person', proposal: '', scope: { templateId: 'frontend' } }));
+      }
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    let rows = within(await screen.findByRole('list', { name: '经验' })).getAllByRole('listitem');
+    expect(within(rows[1]).getByText('工作区 · 所有「交付验收」节点')).toBeVisible();
+    expect(within(rows[1]).queryByRole('button', { name: '推广到工作区' })).toBeNull();
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '推广到工作区' }));
+    expect(await screen.findByText('已推广：工作区里所有「前端开发」节点之后都会带上这条经验。')).toBeVisible();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+    rows = within(screen.getByRole('list', { name: '经验' })).getAllByRole('listitem');
+    expect(within(rows[0]).getByText(/已推广到工作区/)).toBeVisible();
+    expect(within(rows[0]).queryByRole('button', { name: '推广到工作区' })).toBeNull();
   });
 
   it('names its refusals in both languages', () => {

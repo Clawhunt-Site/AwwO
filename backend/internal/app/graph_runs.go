@@ -405,7 +405,7 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 				// A team's members are framed by their own turns (team_context.go), which carry no lessons, and a
 				// collaboration's turns are not counted as a node's run (canvas_lessons.go), so they get none either.
 				if team == nil && b.Collaboration == nil {
-					if snap.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, cid, n.ID); e != nil {
+					if snap.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, cid, n.ID, n.TemplateID); e != nil {
 						a.dbError(w, e)
 						return
 					}

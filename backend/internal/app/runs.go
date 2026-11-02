@@ -668,7 +668,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// A node's own message gets what its earlier runs taught, as its canvas runs do (canvas_lessons.go); a team's
 		// members are framed by their own turns.
 		if team == nil {
-			if snapshot.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, canvasID, nodeID); e != nil {
+			if snapshot.Lessons, e = freezeNodeLessons(r.Context(), tx, tid, canvasID, nodeID, savedNodeTemplate(document, nodeID)); e != nil {
 				a.dbError(w, e)
 				return
 			}
