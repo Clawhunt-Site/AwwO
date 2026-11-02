@@ -73,7 +73,7 @@ OTLP 仅发送固定 span 名和有限运行元数据。禁止导出 prompt、sy
 
 Go exporter 使用有界批处理队列，worker 使用有界 JSON OTLP 队列，导出请求有超时且不无限重试；失败计数不包含 collector 返回正文。队列满或 collector 不可用允许丢 span，不能阻塞模型收费链或伪装业务失败。`AWWO_OTEL_ENABLED` 与 OpenAI SDK 托管 tracing 分开；后者继续显式关闭。自托管 collector 的存储访问控制、留存和告警属于运维交付。
 
-## 5. 四个授权只读 API
+## 5. 五个授权只读 API
 
 下表路径均需加 `/api/v1` 前缀，沿用会话 cookie、租户成员与平台权限中间件。租户 owner 不自动拥有平台管理员权限。
 
@@ -83,6 +83,7 @@ Go exporter 使用有界批处理队列，worker 使用有界 JSON OTLP 队列�
 | `/tenants/{tenantId}/runs/{id}/invocations` | tenant reader / member / admin / owner | 可选 `pageSize,cursor`；同一租户存在的 run；`{items,page:{nextCursor},freshness}` |
 | `/admin/observability/summary` | platform admin | 可选成对的 `from,to`，默认截至数据库时钟的最近 24h；可选精确 `tenantId`；`{summary,freshness}` |
 | `/admin/observability/invocations/{id}` | platform admin | 精确 invocation ID；`{invocation}`；读取成功同事务写审计 |
+| `/admin/observability/cache` | platform admin | 可选 `days=1..30`（默认 7）；`{days,asOf,alert,paths}`，见下文「提示缓存」 |
 
 非本租户成员或跨租户 run 返回 404，租户内角色不足返回 403。reader / member 的 invocation DTO **完全没有** `costStatus,estimatedCostMicrousd,currency,pricingVersion,priceSnapshot` 这些 key，不能仅赋 null。admin / owner 可见费用字段；平台单条查看也可见，审计 action 为 `observability.invocation.read`。平台 summary 指定 `tenantId` 时审计 `observability.summary.read`，不提供默认租户排行榜。
 
@@ -106,6 +107,10 @@ Token、计数和 micro-USD 用十进制 JSON **字符串**传输，避免 JavaS
 `freshness.source="ledger"`，`asOf` 是读取 cutoff，`retainedFrom` 是已知保留边界，`stale=false` 表示本次账本查询成功。tenant aggregate 成功还返回 `completeForRequestedRange=true`，含义是请求范围在保留边界内，不代表所有 provider 都报告了 Token。数据库不可用时返回 503，不伪造 stale=false 的缓存结果。
 
 summary 返回 invocation 数、failed/interrupted 数、unknown usage 数、errorRate、meanProviderMs、meanProviderTtftMs，以及 `protocolVersions` 的版本分布。它没有分页；同一次短事务读取，默认 24h，不是 Prometheus 查询代理。
+
+### 提示缓存（持续监控）
+
+`/admin/observability/cache`（`prompt_cache_view.go`，管理后台「提示缓存」页）按**路径**汇总服务商提示缓存：路径 = runtime + 会话类型（`node_sessions.kind`：画布节点、规划器、直接执行、资料库；不属于任何会话的调用为空串）+ 模型。只计 usage 为 reported/partial 且有输入 Token 的调用，按 `created_at` 取最近 `days` 天与之前同样长的一段（截至数据库时钟 `asOf`）。每条路径给出本段的调用数、其中服务商报告了缓存读取的调用数 `cacheKnownCalls`，以及 input / cachedInput / cacheWrite / output Token（十进制字符串）；`readShare` 只按报告了缓存读取的调用计算（缓存读到 ÷ 这些调用的输入，四位小数；没有这样的调用为 null），未报告的调用不当作「读到 0」；前一段给出 `previous.calls`、`previous.cacheKnownCalls` 和 `previous.readShare`。两段都至少 `alert.calls`（20）次报告了缓存的调用、且读到比例下降 `alert.drop`（0.2）及以上的路径 `falling=true`（按各段总和的交叉乘积精确比较，正好 20 个百分点也算）：多半是改提示词或工具定义打破了前缀缓存。`days` 出现但不是 1..30 的整数（包括空值）返回 400。按本段输入 Token 降序，最多 50 条；只有计数，没有工作区、run 或文本，读取不写审计。已按保留策略删除的账本行不计入。
 
 错误结构为 `{error:{code,message,requestId,details}}`。常见错误：400 `invalid_time_range / invalid_group_by / invalid_pagination / invalid_cursor`，422 `range_too_large / range_not_retained`，503 `usage_unavailable`。超保留边界时 `details.retainedFrom` 说明可查询起点。SQL statement timeout 为 3 秒，请求处理 context 为 4 秒；失败不泄露 SQL 或数据库错误正文。
 

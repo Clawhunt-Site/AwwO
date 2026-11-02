@@ -4,14 +4,15 @@ import { adminPage, collectAdminExport, downloadJSON, type AdminKind, type Admin
 import type { RouteName } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
 import { AdminRunSummary } from './AdminRunSummary';
+import { AdminPromptCache } from './AdminPromptCache';
 import { DeletionDecisionDialog, deletionStatusLabel, type DeletionOutcome } from './DeletionDecision';
 import { MarketReviewAdmin } from './market/MarketReviewAdmin';
 import { useMarketSettings } from './market/useMarket';
 import './admin.css';
 
-/** The tabs: the paged record lists, and 市场审核 where this server has the Agent market (市场账单 while it is closed:
- *  what was earned still settles on monthly statements, approved there). */
-type AdminTab = AdminKind | 'market';
+/** The tabs: the paged record lists, 提示缓存 (the prompt cache by path), and 市场审核 where this server has the Agent
+ *  market (市场账单 while it is closed: what was earned still settles on monthly statements, approved there). */
+type AdminTab = AdminKind | 'cache' | 'market';
 
 export function AdminPanel({ identity, controls }: { identity: Identity; controls?: ReactNode }) {
   const { t, locale } = useSaaSPreferences();
@@ -31,7 +32,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   const isAdmin = identity.user.platformRole === 'admin';
   const cursor = cursors[cursors.length - 1];
   useEffect(() => {
-    if (!isAdmin || tab === 'market') return;
+    if (!isAdmin || tab === 'market' || tab === 'cache') return;
     const controller = new AbortController();
     setRows(null); setNextCursor(null); setError('');
     adminPage(tab, cursor, controller.signal).then(page => {
@@ -42,7 +43,7 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   useEffect(() => () => { exporting.current?.abort(); }, []);
   const refresh = () => { setCursors([null]); setRevision(value => value + 1); };
   const exportAll = async () => {
-    if (tab === 'market') return;
+    if (tab === 'market' || tab === 'cache') return;
     const controller = new AbortController();
     exporting.current = controller; setExportCount(0); setError('');
     try {
@@ -62,13 +63,13 @@ export function AdminPanel({ identity, controls }: { identity: Identity; control
   };
   if (!isAdmin) return <main className="saas-notice"><h1>{t('无平台管理权限', 'Platform access denied')}</h1><p>{t('请联系平台管理员。', 'Contact a platform administrator.')}</p><a href="/">{t('返回工作区', 'Back to workspace')}</a></main>;
   const labels: Partial<Record<AdminTab, string>> = { tenants: t('租户', 'Tenants'), users: t('用户', 'Users'), runs: t('运行', 'Runs'), audit: t('审计日志', 'Audit log'), interests: t('付费意向', 'Upgrade interest'), deletions: t('删除申请', 'Deletion requests'),
-    ...(market ? { market: t('市场审核', 'Market review') } : market === null ? { market: t('市场账单', 'Market statements') } : {}) };
+    cache: t('提示缓存', 'Prompt cache'), ...(market ? { market: t('市场审核', 'Market review') } : market === null ? { market: t('市场账单', 'Market statements') } : {}) };
   const date = (value: string) => value ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '—';
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a><a href="/">{t('返回工作区', 'Back to workspace')}</a>{controls}</header>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('仅平台管理员可见', 'Visible to platform administrators')}</span><h1>{t('平台管理', 'Platform administration')}</h1><p>{t('管理工作区状态与执行额度，查询用户、运行及审计记录。', 'Manage workspace status and run limits; inspect users, runs and audit records.')}</p></section>
     <AdminRunSummary key={identity.user.id} identity={identity} />
     <nav className="saas-tabs saas-admin-tabs" aria-label={t('管理分类', 'Administration sections')}>{Object.entries(labels).map(([key, label]) => <button key={key} disabled={pending || exportCount !== null} aria-pressed={tab === key} onClick={() => { setCursors([null]); setTab(key as AdminTab); }}>{label}</button>)}<button disabled={pending} onClick={refresh}>{t('刷新数据', 'Refresh')}</button></nav>
-    {tab === 'market' ? <MarketReviewAdmin key={revision} open={Boolean(market)} /> : <>
+    {tab === 'market' ? <MarketReviewAdmin key={revision} open={Boolean(market)} /> : tab === 'cache' ? <AdminPromptCache revision={revision} /> : <>
     <div className="saas-admin-tools"><p>{t('每页 50 条；导出会读取当前分类的全部分页，范围以首次查询时间限定。记录内容以各页读取时为准。', '50 records per page. Export reads all pages in this section, bounded by the first query time. Record values reflect when each page is read.')}</p>
       {exportCount === null ? <button onClick={exportAll}>{t('导出全部 JSON', 'Export all JSON')}</button> : <><span role="status">{t(`已读取 ${exportCount} 条`, `Read ${exportCount} records`)}</span><button onClick={() => exporting.current?.abort()}>{t('取消导出', 'Cancel export')}</button></>}
     </div>

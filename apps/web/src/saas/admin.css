@@ -23,3 +23,9 @@
 
 .saas-admin-tabs { flex-wrap:wrap; }
 .saas-admin-tabs button { white-space:nowrap; }
+
+.saas-admin-cache { margin:18px 0; }
+.saas-admin-cache > p { font-size:13px; line-height:1.6; color:var(--saas-muted); }
+.saas-admin-days { display:inline-flex; align-items:center; gap:8px; margin:0 0 14px; font-size:13px; }
+.saas-admin-cache td { font-variant-numeric:tabular-nums; }
+.saas-admin-falling td { color:var(--saas-danger); }

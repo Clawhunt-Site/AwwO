@@ -140,6 +140,7 @@ func (a *App) registerUsageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/invocations", a.tenant(a.runInvocations, 1))
 	mux.HandleFunc("GET /api/v1/admin/observability/summary", a.admin(a.adminUsageSummary))
 	mux.HandleFunc("GET /api/v1/admin/observability/invocations/{id}", a.admin(a.adminInvocation))
+	mux.HandleFunc("GET /api/v1/admin/observability/cache", a.admin(a.adminPromptCache))
 }
 
 const usageAggregateProjection = `jsonb_build_object('group',jsonb_build_object('type',$5::text,'value',group_value),'currency',currency,'pricingVersion',pricing_version,
