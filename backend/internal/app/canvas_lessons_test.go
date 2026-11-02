@@ -212,7 +212,8 @@ func TestPostgresCanvasLessonsSchema(t *testing.T) {
 }
 
 // lessonPi is a Pi worker answering each node's calls as reply says, recording each call's system prompt; its one model
-// takes the reasoning efforts newLessonPiOn names.
+// takes the reasoning efforts newLessonPiOn names, and a model that takes them reports each call's usage, writing less
+// at low (100 output tokens) than at another effort (400), as reasoning does.
 type lessonPi struct {
 	server *httptest.Server
 	mu     sync.Mutex
@@ -239,7 +240,10 @@ func newLessonPiOn(t *testing.T, efforts []string, reply func(node string, call 
 			w.WriteHeader(202)
 			return
 		}
-		var call observedPiCall
+		var call struct {
+			observedPiCall
+			Effort string `json:"effort"`
+		}
 		if e := json.NewDecoder(r.Body).Decode(&call); e != nil {
 			t.Error(e)
 		}
@@ -256,7 +260,17 @@ func newLessonPiOn(t *testing.T, efforts []string, reply func(node string, call 
 			failWorker(w, answer.failed)
 			return
 		}
-		completePi(w, answer.text)
+		if efforts == nil {
+			completePi(w, answer.text)
+			return
+		}
+		output := 400
+		if call.Effort == "low" {
+			output = 100
+		}
+		event, _ := json.Marshal(map[string]any{"type": "completed", "text": answer.text, "observability": map[string]any{"version": 1,
+			"usage": map[string]any{"status": "reported", "source": "provider_raw", "inputTokens": 1000, "outputTokens": output}}})
+		fmt.Fprintf(w, "data: %s\n\n", event)
 	}))
 	t.Cleanup(p.server.Close)
 	return p
@@ -501,9 +515,14 @@ func TestPostgresTheSweeperWritesMissedLessonsOnce(t *testing.T) {
 	if l := nodeLessons(t, h, tid, cid, "up"); len(l) != 0 {
 		t.Fatalf("the sweeper learnt from a run older than its window: %+v", l)
 	}
-	// A team's node, or a media node, is never given a lesson, so none is written for it.
+	// A team's node, or a media node, is never given a lesson, so none is written for it (its run's snapshot says what it
+	// is, as the node's does).
 	for _, part := range []string{`{"team":{}}`, `{"media":{}}`} {
 		if _, e := h.db.Exec(ctx, "UPDATE graph_run_nodes SET execution_snapshot=execution_snapshot||$2::jsonb WHERE tenant_id=$1 AND node_id='up'", tid, part); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := h.db.Exec(ctx, `UPDATE runs r SET execution_snapshot=r.execution_snapshot||$2::jsonb FROM graph_run_nodes n
+			WHERE n.tenant_id=$1 AND n.node_id='up' AND r.tenant_id=n.tenant_id AND r.id=n.run_id`, tid, part); e != nil {
 			t.Fatal(e)
 		}
 		if _, e := h.db.Exec(ctx, "UPDATE graph_runs SET lessons_at=NULL,updated_at=now()-interval '10 minutes' WHERE tenant_id=$1", tid); e != nil {
@@ -516,6 +535,10 @@ func TestPostgresTheSweeperWritesMissedLessonsOnce(t *testing.T) {
 			t.Fatalf("%s: a lesson no run is given: %+v", part, l)
 		}
 		if _, e := h.db.Exec(ctx, "UPDATE graph_run_nodes SET execution_snapshot=execution_snapshot-'team'-'media' WHERE tenant_id=$1 AND node_id='up'", tid); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := h.db.Exec(ctx, `UPDATE runs r SET execution_snapshot=r.execution_snapshot-'team'-'media' FROM graph_run_nodes n
+			WHERE n.tenant_id=$1 AND n.node_id='up' AND r.tenant_id=n.tenant_id AND r.id=n.run_id`, tid); e != nil {
 			t.Fatal(e)
 		}
 	}

@@ -20,17 +20,19 @@ import (
 // 2026-10-31), and what effort tuning counts. A row goes with its canvas run, and so with its canvas and workspace.
 //
 // Effort tuning (the plan's 1.3: effort 按经验调). A node that keeps finishing on its first attempt at its reasoning
-// effort, of a template whose runs on the same model finish as well at low, in at least two workspaces, is suggested
-// low: a lesson of kind effort_tuning, which gives a model nothing and carries the suggestion lower_effort, which the
-// 经验 panel applies as a plan the person takes there. A node put at low that then fails to deliver is suggested medium
-// again (lessonProposal's raise_effort), so the loop comes back by itself where low did not do.
+// effort, of a template whose runs on the same model finish as well at low with less output, in runs from at least two
+// workspaces, is suggested low: a lesson of kind effort_tuning, which gives a model nothing and carries the suggestion
+// lower_effort, which the 经验 panel applies as a plan the person takes there. A node put at low that then fails to
+// deliver is suggested medium again (lessonProposal's raise_effort), so the loop comes back by itself where low did not
+// do, and low is not suggested again to a node that did not finish first time at low in the counts' window.
 
 const (
 	// Effort tuning counts the outcomes of the last effortTuningWindow, read again at most every effortStatsEvery.
 	effortTuningWindow = 14 * 24 * time.Hour
 	effortStatsEvery   = 10 * time.Minute
 	// Low is suggested where the template's runs on the model at low finished on their first attempt at least as often
-	// as at the node's effort, less effortTuningMargin, and stopped at the output limit no more often.
+	// as at the node's effort, less effortTuningMargin, stopped at the output limit no more often, and those done first
+	// time wrote less output on average.
 	effortTuningMargin = 0.05
 )
 
@@ -49,9 +51,13 @@ func (a *App) effortTuning() effortTuningLimits {
 }
 
 // effortKey and effortStat are the platform's outcome counts for one template on one model at one effort: the node
-// runs, those done on their first attempt, those that stopped at the output limit, and the workspaces they came from.
+// runs, those done on their first attempt, those that stopped at the output limit, the workspaces they came from, and
+// the output tokens of the runs done first time whose usage is known, with how many those are.
 type effortKey struct{ template, model, effort string }
-type effortStat struct{ runs, firstPass, outputLimit, workspaces int }
+type effortStat struct {
+	runs, firstPass, outputLimit, workspaces, outputRuns int
+	output                                               int64
+}
 
 // effortStatsCache holds the counts between reads (effortStatsEvery).
 type effortStatsCache struct {
@@ -72,8 +78,9 @@ func (a *App) effortStatsNow(ctx context.Context) map[effortKey]effortStat {
 	read, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	rows, err := a.db.Query(read, `SELECT template,model,effort,count(*),count(*) FILTER (WHERE state='done' AND attempts=0),
-		count(*) FILTER (WHERE code='output_limit'),count(DISTINCT tenant_id) FROM node_outcomes
-		WHERE created_at>now()-$1::bigint*interval '1 millisecond' AND run_id IS NOT NULL AND template<>'' AND model<>'' GROUP BY template,model,effort`,
+		count(*) FILTER (WHERE code='output_limit'),count(DISTINCT tenant_id),count(output_tokens) FILTER (WHERE state='done' AND attempts=0),
+		COALESCE(sum(output_tokens) FILTER (WHERE state='done' AND attempts=0),0)::bigint FROM node_outcomes
+		WHERE ran_at>now()-$1::bigint*interval '1 millisecond' AND run_id IS NOT NULL AND template<>'' AND model<>'' GROUP BY template,model,effort`,
 		effortTuningWindow.Milliseconds())
 	if err != nil {
 		a.log.Warn("the platform's node outcomes were not read", "error_type", errorType(err))
@@ -83,7 +90,7 @@ func (a *App) effortStatsNow(ctx context.Context) map[effortKey]effortStat {
 	for rows.Next() {
 		var k effortKey
 		var s effortStat
-		if rows.Scan(&k.template, &k.model, &k.effort, &s.runs, &s.firstPass, &s.outputLimit, &s.workspaces) == nil {
+		if rows.Scan(&k.template, &k.model, &k.effort, &s.runs, &s.firstPass, &s.outputLimit, &s.workspaces, &s.outputRuns, &s.output) == nil {
 			stats[k] = s
 		}
 	}
@@ -104,9 +111,13 @@ func effortTuningSuggests(stats map[effortKey]effortStat, template, model, effor
 	if effort == "low" || own < limits.ownRuns || low.runs < limits.minRuns || low.workspaces < limits.minWorkspaces || at.runs < limits.minRuns {
 		return false
 	}
+	if low.outputRuns == 0 || at.outputRuns == 0 {
+		return false
+	}
 	lowPass, atPass := float64(low.firstPass)/float64(low.runs), float64(at.firstPass)/float64(at.runs)
 	lowStop, atStop := float64(low.outputLimit)/float64(low.runs), float64(at.outputLimit)/float64(at.runs)
-	return lowPass >= atPass-effortTuningMargin && lowStop <= atStop
+	lowOut, atOut := float64(low.output)/float64(low.outputRuns), float64(at.output)/float64(at.outputRuns)
+	return lowPass >= atPass-effortTuningMargin && lowStop <= atStop && lowOut < atOut
 }
 
 // outcomeNode is what the record reads of a node of the canvas run's frozen document.
@@ -219,14 +230,14 @@ func (a *App) recordGraphOutcomes(ctx context.Context, tx pgx.Tx, tid, canvasID,
 		o := nodeOutcome{nodeID: f.nodeID, runID: f.runID, template: facts.role, model: facts.model, effort: effort, state: f.state, attempts: f.attempts,
 			admitted: f.admitted, node: node, snap: snap}
 		if err := sideWrite(ctx, tx, `INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,run_id,template,output_type,runtime,model,effort,state,code,
-			attempts,lessons,skills,input_tokens,output_tokens,cached_input_tokens,cache_write_tokens,reasoning_tokens,cost_microusd,credits,worker_ms)
-			SELECT $1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,sum(m.input_tokens)::bigint,sum(m.output_tokens)::bigint,
+			attempts,lessons,skills,ran_at,input_tokens,output_tokens,cached_input_tokens,cache_write_tokens,reasoning_tokens,cost_microusd,credits,worker_ms)
+			SELECT $1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$17,sum(m.input_tokens)::bigint,sum(m.output_tokens)::bigint,
 				sum(m.cached_input_tokens)::bigint,sum(m.cache_write_tokens)::bigint,sum(m.reasoning_tokens)::bigint,sum(m.estimated_cost_microusd)::bigint,
 				sum(m.credit_charge)::bigint,sum(m.worker_total_ms)::bigint
 			FROM (SELECT 1) one LEFT JOIN model_invocations m ON m.tenant_id=$1 AND m.run_id=ANY($16::text[])
 			ON CONFLICT (tenant_id,graph_id,node_id) DO NOTHING`,
 			tid, canvasID, gid, f.nodeID, f.runID, clip(o.template, 32), clip(facts.outputType, 64), clip(facts.runtime, 32), clip(o.model, 200), clip(effort, 32),
-			f.state, outcomeCode(f), f.attempts, lessons, skills, runs); err != nil {
+			f.state, outcomeCode(f), f.attempts, lessons, skills, runs, f.admitted); err != nil {
 			a.log.Warn("a canvas node's outcome was not recorded", "error_type", errorType(err))
 			continue
 		}
@@ -249,7 +260,8 @@ func clip(s string, n int) string {
 // tuneGraphEfforts writes, in transaction tx, an effort_tuning lesson for each node of the canvas run's outcomes that
 // could run at low as well as at its effort (effortTuningSuggests): a node done on its first attempt, an Agent of a
 // template (no team, no workspace Agent, no media), on a model that takes low, which has finished on its first attempt
-// at its effort often enough before.
+// at its effort often enough before, and never ran on the model at low without finishing first time (a node put back
+// from low, raise_effort, is not sent there again) in the counts' window.
 func (a *App) tuneGraphEfforts(ctx context.Context, tx pgx.Tx, tid, canvasID, gid string, outcomes []nodeOutcome) error {
 	var stats map[effortKey]effortStat
 	limits := a.effortTuning()
@@ -261,13 +273,11 @@ func (a *App) tuneGraphEfforts(ctx context.Context, tx pgx.Tx, tid, canvasID, gi
 		if stats == nil {
 			stats = a.effortStatsNow(ctx)
 		}
-		var own int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM node_outcomes WHERE tenant_id=$1 AND canvas_id=$2 AND node_id=$3 AND model=$4 AND effort=$5
-			AND state='done' AND attempts=0 AND created_at>now()-$6::bigint*interval '1 millisecond'`,
-			tid, canvasID, o.nodeID, o.model, o.effort, effortTuningWindow.Milliseconds()).Scan(&own); err != nil {
+		own, missedAtLow, err := nodeEffortHistory(ctx, tx, tid, canvasID, o.nodeID, o.model, o.effort)
+		if err != nil {
 			return err
 		}
-		if !effortTuningSuggests(stats, o.template, o.model, o.effort, own, limits) {
+		if missedAtLow > 0 || !effortTuningSuggests(stats, o.template, o.model, o.effort, own, limits) {
 			continue
 		}
 		scope, _ := json.Marshal(map[string]string{"runtime": snapshotRuntime(o.snap), "model": o.snap.Model, "effort": o.snap.Effort})
@@ -277,4 +287,14 @@ func (a *App) tuneGraphEfforts(ctx context.Context, tx pgx.Tx, tid, canvasID, gi
 		}
 	}
 	return nil
+}
+
+// nodeEffortHistory is what node nodeID of canvas canvasID ran on model in the counts' window, by when each run ran: its
+// runs done on their first attempt at effort, and its runs at low that were not.
+func nodeEffortHistory(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID, model, effort string) (own, missedAtLow int, err error) {
+	err = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE effort=$5 AND state='done' AND attempts=0),
+		count(*) FILTER (WHERE effort='low' AND run_id IS NOT NULL AND NOT (state='done' AND attempts=0))
+		FROM node_outcomes WHERE tenant_id=$1 AND canvas_id=$2 AND node_id=$3 AND model=$4 AND ran_at>now()-$6::bigint*interval '1 millisecond'`,
+		tid, canvasID, nodeID, model, effort, effortTuningWindow.Milliseconds()).Scan(&own, &missedAtLow)
+	return own, missedAtLow, err
 }

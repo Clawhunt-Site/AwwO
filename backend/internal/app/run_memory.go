@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -36,8 +37,11 @@ const (
 	memoryDistillDeploymentDay = 300
 	// The distiller takes at most memoryDistillBatch queued runs every memoryDistillEvery, each call bounded by
 	// memoryDistillTimeout and memoryDistillMaxTokens, and only while the worker keeps two slots free for nodes.
-	memoryDistillEvery     = 2 * time.Minute
-	memoryDistillBatch     = 3
+	memoryDistillEvery = 2 * time.Minute
+	memoryDistillBatch = 3
+	// A run whose question the worker could not take (busy, unreachable) is asked again at the next round, at most
+	// memoryDistillAttempts times in all.
+	memoryDistillAttempts  = 5
 	memoryDistillTimeout   = 90 * time.Second
 	memoryDistillMaxTokens = 1500
 	// A briefing gives each node at most these many characters of its task and of its delivery, and holds at most
@@ -67,10 +71,29 @@ type memoryDistillNote struct {
 	Body  string `json:"body"`
 }
 
+// memoryNoteLink finds what reads as a link or an address in a proposed note: a URL of any scheme, a mail, script, data
+// or file address, a www., localhost, IP or punycode address, or a host name in a common web domain (example.com or
+// 例子.中国, with a path or without, its names in any script, combining marks included, and its dots ASCII or
+// full-width). A Chinese domain is taken only after a name with a letter in it and before anything but a letter, so
+// that a numbered line (1.公司…) or a sentence running on (….公司的) is no link. It finds more than links (a file named
+// logo.ai reads as one): a note it finds is left out, and the run's other notes are still proposed.
+var memoryNoteLink = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://|\b(?:mailto|javascript):|\bdata:[a-z]+/|\bfile:/|\bwww[.．｡]|\blocalhost\b|` +
+	`\b\d{1,3}(?:[.．｡]\d{1,3}){3}\b|\bxn--[a-z0-9-]+|` +
+	`[\p{L}\p{M}\p{N}-]+(?:[.．｡][\p{L}\p{M}\p{N}-]+)*[.．｡](?:com|net|org|edu|gov|io|ai|dev|app|co|cn|hk|tw|sg|jp|kr|uk|us|de|fr|ru|eu|me|` +
+	`tv|fm|ly|gg|xyz|top|biz|site|online|shop|cloud|tech|club|vip|icu|example|invalid|internal)\b|` +
+	`[\p{L}\p{M}\p{N}-]*\p{L}[\p{L}\p{M}\p{N}-]*(?:[.．｡][\p{L}\p{M}\p{N}-]+)*[.．｡](?:中国|中國|公司|网络|網絡|在线|网址|商城|集团|手机|移动|网店|` +
+	`中文网|香港|台湾|台灣)(?:[^\p{L}\p{M}\p{N}]|$)`)
+
 // parseMemoryDistillReply reads the model's answer: one JSON object with at most memoryDistillNotes notes, each of a kind
-// it may propose, a one-line title and a bounded body, with no hidden text. A note that does not hold to that is left
-// out; an answer that is not that object gives none.
+// it may propose, a one-line title and a bounded body, with no link (memoryNoteLink) and no hidden text. A note that does
+// not hold to that is left out; an answer that is not that object gives none. Reasoning a model wraps in <think> is not
+// the answer, and an answer cut off inside it is none (as the canvas assistant's router reads its model's).
 func parseMemoryDistillReply(content string) []memoryDistillNote {
+	if end := strings.LastIndex(content, "</think>"); end >= 0 {
+		content = content[end+len("</think>"):]
+	} else if strings.Contains(content, "<think>") {
+		return nil
+	}
 	content = strings.TrimSpace(content)
 	content = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(content, "```json"), "```"), "```")
 	var reply struct {
@@ -85,7 +108,8 @@ func parseMemoryDistillReply(content string) []memoryDistillNote {
 	for _, note := range reply.Notes {
 		note.Title, note.Body = strings.TrimSpace(note.Title), strings.TrimSpace(strings.ReplaceAll(note.Body, "\r\n", "\n"))
 		if len(out) == memoryDistillNotes || !memoryDistillKinds[note.Kind] || utf8.RuneCountInString(note.Title) > memoryDistillTitleRunes ||
-			utf8.RuneCountInString(note.Body) > memoryDistillBodyRunes || strings.Contains(note.Body, "://") || validateMemoryText(note.Title, note.Body, note.Kind) != nil {
+			utf8.RuneCountInString(note.Body) > memoryDistillBodyRunes || memoryNoteLink.MatchString(note.Title) || memoryNoteLink.MatchString(note.Body) ||
+			validateMemoryText(note.Title, note.Body, note.Kind) != nil {
 			continue
 		}
 		out = append(out, note)
@@ -105,13 +129,28 @@ const queueGraphDistillationSQL = `INSERT INTO run_distillations(tenant_id,graph
 		AND (SELECT count(*) FROM run_distillations d WHERE d.created_at>now()-interval '1 day')<$5
 	ON CONFLICT (tenant_id,graph_id) DO NOTHING`
 
-// queueGraphDistillation queues canvas run gid for its memory (queueGraphDistillationSQL), as a side write: one that
-// cannot be made at once is left out, and the run's lessons do not wait for it.
+// memoryDistillQueueLock serializes the queue's inserts, so that two canvas runs ending at once cannot both see room
+// under a day's limit and both take it.
+const memoryDistillQueueLock = 0x617777_6f6d656d
+
+// queueGraphDistillation queues canvas run gid for its memory (queueGraphDistillationSQL) under memoryDistillQueueLock,
+// as a side write: one that cannot be made at once is left out, and the run's lessons do not wait for it.
 func (a *App) queueGraphDistillation(ctx context.Context, tx pgx.Tx, tid, canvasID, gid string) {
 	if !a.cfg.MemoryDistill || a.cfg.UserCredentials || a.routerRuntime() == "" {
 		return
 	}
-	if err := sideWrite(ctx, tx, queueGraphDistillationSQL, tid, gid, canvasID, memoryDistillPerDay, memoryDistillDeploymentDay); err != nil {
+	savepoint, err := tx.Begin(ctx)
+	if err == nil {
+		if err = boundedExec(ctx, savepoint, "SELECT pg_advisory_xact_lock($1)", int64(memoryDistillQueueLock)); err == nil {
+			err = boundedExec(ctx, savepoint, queueGraphDistillationSQL, tid, gid, canvasID, memoryDistillPerDay, memoryDistillDeploymentDay)
+		}
+		if err == nil {
+			err = savepoint.Commit(ctx)
+		} else {
+			_ = savepoint.Rollback(ctx)
+		}
+	}
+	if err != nil {
 		a.log.Warn("a canvas run was not queued for its memory", "error_type", errorType(err))
 	}
 }
@@ -140,10 +179,16 @@ func (a *App) startMemoryDistiller(watch context.Context) {
 }
 
 // distillQueuedMemory distils up to memoryDistillBatch queued runs. A run the model cannot be asked about now (the worker
-// busy, no free model) stays queued for the next round, and one queued a day ago is let go.
+// busy, no free model) stays queued for the next round, and one queued a day ago is let go. A run is asked about at
+// most memoryDistillAttempts times, each counted before it is asked: one whose last question went unanswered (this
+// process stopped during it) is let go as given up, never asked again.
 func (a *App) distillQueuedMemory(ctx context.Context) error {
 	if _, err := a.db.Exec(ctx, `UPDATE run_distillations SET state='skipped',reason='expired',updated_at=clock_timestamp()
 		WHERE state='queued' AND created_at<now()-interval '1 day'`); err != nil {
+		return err
+	}
+	if _, err := a.db.Exec(ctx, `UPDATE run_distillations SET state='failed',reason='gave_up_unanswered',updated_at=clock_timestamp()
+		WHERE state='queued' AND attempts>=$1`, memoryDistillAttempts); err != nil {
 		return err
 	}
 	rows, err := a.db.Query(ctx, `SELECT tenant_id,graph_id,canvas_id FROM run_distillations WHERE state='queued' ORDER BY created_at LIMIT $1`, memoryDistillBatch)
@@ -168,10 +213,20 @@ func (a *App) distillQueuedMemory(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		var attempts int
+		if err = a.db.QueryRow(ctx, `UPDATE run_distillations SET attempts=attempts+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND graph_id=$2 AND state='queued'
+			AND attempts<$3 RETURNING attempts`, q.tid, q.gid, memoryDistillAttempts).Scan(&attempts); noRows(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
 		state, notes, reason := a.distillRunMemory(ctx, q.tid, q.cid, q.gid)
 		if state == "queued" {
-			// The model could not be asked now: the rest wait too.
-			return nil
+			if attempts < memoryDistillAttempts {
+				// The worker could not take the question now: this run and the rest wait for the next round.
+				return nil
+			}
+			state, reason = "failed", "gave_up_"+reason
 		}
 		if _, err = a.db.Exec(ctx, `UPDATE run_distillations SET state=$3,notes=$4,reason=$5,updated_at=clock_timestamp() WHERE tenant_id=$1 AND graph_id=$2 AND state='queued'`,
 			q.tid, q.gid, state, notes, reason); err != nil {
@@ -185,6 +240,22 @@ func (a *App) distillQueuedMemory(ctx context.Context) error {
 // canvas. It answers the run's new state ("queued" when the model could not be asked now), the notes written and a
 // code for why none were.
 func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (string, int, string) {
+	// A workspace that is suspended, or exists only under its owner's paid plan while that plan does not allow it, has
+	// the model asked nothing for it, as the canvas assistant's router asks nothing (routeNeedsPlan).
+	var status string
+	if err := a.db.QueryRow(ctx, "SELECT status FROM tenants WHERE id=$1", tid).Scan(&status); noRows(err) {
+		return "skipped", 0, "workspace_gone"
+	} else if err != nil {
+		return "queued", 0, "workspace_unreadable"
+	}
+	if status != "active" {
+		return "skipped", 0, "workspace_suspended"
+	}
+	if needsPlan, err := a.routeNeedsPlan(ctx, tid); err != nil {
+		return "queued", 0, "plan_unreadable"
+	} else if needsPlan {
+		return "skipped", 0, "plan_required"
+	}
 	briefing, err := a.distillationBriefing(ctx, tid, gid)
 	if err != nil {
 		return "failed", 0, "briefing_unreadable"
@@ -195,7 +266,8 @@ func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (
 	content, code := a.freeModelCompletion(ctx, tid, memoryDistillInstructions, briefing, memoryDistillMaxTokens)
 	switch code {
 	case "":
-	case "worker_busy", "worker_unavailable":
+	case "worker_busy", "worker_unavailable", "timeout", "transport", "status_429", "status_502", "status_503":
+		// The worker could not take the question now (busy, unreachable, refusing for capacity): asked again later.
 		return "queued", 0, code
 	default:
 		return "failed", 0, code
@@ -378,9 +450,17 @@ func (a *App) freeModelCompletion(ctx context.Context, tid, system, user string,
 		return "", "transport"
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if err != nil || resp.StatusCode != 200 {
+	// A refusal is its status, whatever became of its body.
+	if resp.StatusCode != 200 {
 		return "", fmt.Sprintf("status_%d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		// The answer was cut off on its way back: the question is asked again later, as one the worker could not take.
+		if ctx.Err() != nil {
+			return "", "timeout"
+		}
+		return "", "transport"
 	}
 	var reply struct {
 		Completion struct {

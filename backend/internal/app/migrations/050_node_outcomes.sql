@@ -31,13 +31,15 @@ CREATE TABLE IF NOT EXISTS node_outcomes (
   cost_microusd bigint,
   credits bigint,
   worker_ms bigint,
+  -- When the node's run was admitted (its canvas run's, for a node refused at admission): the counts' window reads it.
+  ran_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (tenant_id, graph_id, node_id),
   FOREIGN KEY (tenant_id, graph_id) REFERENCES graph_runs(tenant_id, id) ON DELETE CASCADE
 );
 -- Effort tuning reads the platform's last 14 days by template and model, and a node's own runs on its canvas.
-CREATE INDEX IF NOT EXISTS node_outcomes_recent ON node_outcomes(created_at, template, model);
-CREATE INDEX IF NOT EXISTS node_outcomes_node ON node_outcomes(tenant_id, canvas_id, node_id, created_at);
+CREATE INDEX IF NOT EXISTS node_outcomes_recent ON node_outcomes(ran_at, template, model);
+CREATE INDEX IF NOT EXISTS node_outcomes_node ON node_outcomes(tenant_id, canvas_id, node_id, ran_at);
 ALTER TABLE graph_runs ADD COLUMN IF NOT EXISTS outcomes_at timestamptz;
 UPDATE graph_runs SET outcomes_at = updated_at
   WHERE outcomes_at IS NULL AND status IN ('completed', 'failed', 'interrupted') AND updated_at < now() - interval '14 days';

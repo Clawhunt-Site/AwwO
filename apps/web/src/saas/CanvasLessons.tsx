@@ -43,8 +43,8 @@ export function lessonRequest(lesson: CanvasLesson, t: Translate): string {
   switch (lesson.proposal) {
     case 'lower_effort':
       return lesson.kind === 'effort_tuning'
-        ? t(`在别的工作区里，和「${node}」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少、更省。把它的推理强度调成 low，模型不变。`,
-          `In other workspaces, nodes like “${node}” on the same model finished on their first attempt as often at low reasoning effort, with less output and lower cost. Set its reasoning effort to low and keep its model.`)
+        ? t(`在至少两个工作区的运行里，和「${node}」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少。把它的推理强度调成 low，模型不变。`,
+          `In runs from at least two workspaces, nodes like “${node}” on the same model finished on their first attempt as often at low reasoning effort, with less output. Set its reasoning effort to low and keep its model.`)
         : t(`「${node}」已经 ${lesson.seen} 次停在模型的输出上限，没有交付完。把它的推理强度调成 low，模型不变。`,
           `“${node}” has stopped at its model's output limit ${lesson.seen} times without finishing. Set its reasoning effort to low and keep its model.`);
     case 'raise_effort':
@@ -233,10 +233,14 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     if (busy) return;
     setBusy(true); setError(null); setNotice('');
     try {
-      await promoteCanvasLesson(tenantId, lesson.id);
+      const promoted = await promoteCanvasLesson(tenantId, lesson.id);
       if (!alive.current) return;
       const name = templateName(lesson.nodeTemplate, locale);
-      setNotice(t(`已推广：工作区里所有「${name}」节点之后都会带上这条经验。`, `Promoted: every “${name}” node in the workspace takes this lesson from now on.`));
+      // One a person retired stays retired: they restore it, here, for the nodes to take it.
+      setNotice(promoted.status === 'active'
+        ? t(`已推广：工作区里的「${name}」节点之后都会带上这条经验（自己已有同类经验的节点除外）。`,
+          `Promoted: every “${name}” node in the workspace takes this lesson from now on, unless it has a lesson of its own of this kind.`)
+        : t(`这条经验已经在工作区里，但被停用了：在下面恢复它，所有「${name}」节点才会带上它。`, `This lesson is already the workspace’s, but retired: restore it below for every “${name}” node to take it.`));
       await load();
     } catch (cause) { if (alive.current) setError(cause); }
     finally { if (alive.current) setBusy(false); }

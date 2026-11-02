@@ -74,7 +74,7 @@ var lessonKinds = map[string]struct{ rule, proposal string }{
 var lessonDescriptions = map[string]string{
 	"context_limit": "The node's inputs and instructions were too large for its model's context window.",
 	"provider":      "The node's model provider could not answer, after its automatic retries.",
-	"effort_tuning": "Nodes like this one, on the same model, finished on their first attempt as often at low reasoning effort, with less output, in other workspaces' runs: this node could run at low.",
+	"effort_tuning": "Nodes like this one, on the same model, finished on their first attempt as often at low reasoning effort, with less output, in runs from at least two workspaces: this node could run at low.",
 }
 
 // deliveryRefusals are the platform's refusals of a node's delivery (graphOutputFiles, fieldValue, artifactName,
@@ -331,7 +331,11 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 	if collaboration {
 		return tx.Commit(ctx)
 	}
-	rows, err := tx.Query(ctx, `SELECT n.node_id,n.state,n.detail,n.attempts,n.execution_snapshot,COALESCE(r.status,''),COALESCE(r.error,''),COALESCE(r.id,''),
+	// A node's run keeps the snapshot it ran with (admission may move it to a model that sees its pictures, or leave out
+	// guidance that did not fit), which the node's own row does not: the run's is read where there is one.
+	rows, err := tx.Query(ctx, `SELECT n.node_id,n.state,n.detail,n.attempts,
+		CASE WHEN r.id IS NOT NULL AND r.execution_snapshot<>'{}'::jsonb THEN r.execution_snapshot ELSE n.execution_snapshot END,
+		COALESCE(r.status,''),COALESCE(r.error,''),COALESCE(r.id,''),
 		COALESCE(r.created_at,$3),COALESCE((SELECT array_agg(e->>'runId') FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.attempt_log)='array'
 			THEN n.attempt_log ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e)='object' AND COALESCE(e->>'runId','')<>''),'{}')
 		FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id
@@ -433,31 +437,26 @@ const reopenedSQL = `canvas_lessons.proposal_state='applied' AND EXCLUDED.propos
 
 // freezeNodeLessons is what node nodeID of canvas canvasID, of template templateID, is given at admission: its active
 // lessons that give a model something, then the canvas's, then the workspace's for nodes of its template
-// (workspace_lessons.go) less those of a kind one of its own already gives, newest first, whole lessons only within
+// (workspace_lessons.go) less those of a kind the node or its canvas has a lesson of, active or retired (one it gives
+// already, or advice that did not help it or a person turned down), newest first, whole lessons only within
 // maxNodeLessons and maxNodeLessonBytes. A node without any freezes nothing.
 func freezeNodeLessons(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID, templateID string) (*lessonContext, error) {
 	if canvasID == "" || nodeID == "" {
 		return nil, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id,kind,rule,canvas_id IS NULL FROM canvas_lessons WHERE tenant_id=$1 AND status='active' AND kind<>ALL($4::text[])
-		AND ((canvas_id=$2 AND (node_id IS NULL OR node_id=$3)) OR (canvas_id IS NULL AND $6<>'' AND scope->>'templateId'=$6))
-		ORDER BY node_id IS NOT NULL DESC,canvas_id IS NOT NULL DESC,last_seen_at DESC,id LIMIT $5`, tid, canvasID, nodeID, silentLessonKinds(), maxNodeLessonCandidates, templateID)
+	rows, err := tx.Query(ctx, `SELECT l.id,l.kind,l.rule FROM canvas_lessons l WHERE l.tenant_id=$1 AND l.status='active' AND l.kind<>ALL($4::text[])
+		AND ((l.canvas_id=$2 AND (l.node_id IS NULL OR l.node_id=$3)) OR (l.canvas_id IS NULL AND $6<>'' AND l.scope->>'templateId'=$6
+			AND NOT EXISTS (SELECT 1 FROM canvas_lessons o WHERE o.tenant_id=$1 AND o.canvas_id=$2 AND (o.node_id IS NULL OR o.node_id=$3) AND o.kind=l.kind)))
+		ORDER BY l.node_id IS NOT NULL DESC,l.canvas_id IS NOT NULL DESC,l.last_seen_at DESC,l.id LIMIT $5`, tid, canvasID, nodeID, silentLessonKinds(), maxNodeLessonCandidates, templateID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items, used, own := []lessonNote{}, len(lessonsHeading), map[string]bool{}
+	items, used := []lessonNote{}, len(lessonsHeading)
 	for rows.Next() {
 		var note lessonNote
-		var workspace bool
-		if err = rows.Scan(&note.ID, &note.Kind, &note.Rule, &workspace); err != nil {
+		if err = rows.Scan(&note.ID, &note.Kind, &note.Rule); err != nil {
 			return nil, err
-		}
-		if workspace && own[note.Kind] {
-			continue
-		}
-		if !workspace {
-			own[note.Kind] = true
 		}
 		size := len(note.Rule) + 3
 		if len(items) == maxNodeLessons || used+size > maxNodeLessonBytes {

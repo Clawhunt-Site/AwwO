@@ -70,7 +70,7 @@ describe('a lesson\'s suggestion', () => {
     expect(lessonSatisfied(lesson({ proposal: 'larger_context', kind: 'context_limit', nodeEffort: 'low' }))).toBeNull();
     // One written from the platform's counts says so, and asks for low.
     const tuning = lesson({ kind: 'effort_tuning', given: false, seen: 1 });
-    expect(lessonRequest(tuning, zh)).toBe('在别的工作区里，和「生成页面」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少、更省。把它的推理强度调成 low，模型不变。');
+    expect(lessonRequest(tuning, zh)).toBe('在至少两个工作区的运行里，和「生成页面」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少。把它的推理强度调成 low，模型不变。');
     expect(lessonEffort(tuning)).toBe('low');
     expect(lessonSuggests(tuning)).toBe(true);
     // A request names its lesson, whatever the lesson's id holds.
@@ -276,11 +276,23 @@ describe('the lessons workbench', () => {
     expect(within(rows[1]).getByText('工作区 · 所有「交付验收」节点')).toBeVisible();
     expect(within(rows[1]).queryByRole('button', { name: '推广到工作区' })).toBeNull();
     fireEvent.click(within(rows[0]).getByRole('button', { name: '推广到工作区' }));
-    expect(await screen.findByText('已推广：工作区里所有「前端开发」节点之后都会带上这条经验。')).toBeVisible();
+    expect(await screen.findByText('已推广：工作区里的「前端开发」节点之后都会带上这条经验（自己已有同类经验的节点除外）。')).toBeVisible();
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
     rows = within(screen.getByRole('list', { name: '经验' })).getAllByRole('listitem');
     expect(within(rows[0]).getByText(/已推广到工作区/)).toBeVisible();
     expect(within(rows[0]).queryByRole('button', { name: '推广到工作区' })).toBeNull();
+  });
+
+  it('says to restore a workspace lesson a person retired, rather than that it now goes to every node', async () => {
+    const proved = lesson({ id: 'l1', applied: 3, succeeded: 3, failed: 0, nodeTemplate: 'frontend', proposal: '' });
+    server(call => {
+      if (call.method === 'GET') return json({ lessons: [proved], runs: [] });
+      if (call.method === 'POST') return json(lesson({ id: 'w1', canvasId: null, nodeId: null, source: 'person', proposal: '', status: 'retired', retiredReason: 'person', scope: { templateId: 'frontend' } }));
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    const row = within(await screen.findByRole('list', { name: '经验' })).getAllByRole('listitem')[0];
+    fireEvent.click(within(row).getByRole('button', { name: '推广到工作区' }));
+    expect(await screen.findByText('这条经验已经在工作区里，但被停用了：在下面恢复它，所有「前端开发」节点才会带上它。')).toBeVisible();
   });
 
   it('lists the notes proposed from runs, for a member to accept or set aside', async () => {

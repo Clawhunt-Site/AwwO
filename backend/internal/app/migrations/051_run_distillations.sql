@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS run_distillations (
   canvas_id text NOT NULL,
   state text NOT NULL CHECK (state IN ('queued', 'done', 'skipped', 'failed')),
   notes integer NOT NULL DEFAULT 0 CHECK (notes >= 0),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   reason text NOT NULL DEFAULT '' CHECK (reason ~ '^[a-z0-9_]{0,64}$'),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),

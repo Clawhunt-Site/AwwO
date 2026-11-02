@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // A node's end is recorded in the platform's codes only: never a refusal's or an error's own words.
@@ -55,16 +58,17 @@ func TestOutcomeEffortIsTheModelsDefaultWhereTheNodeChoseNone(t *testing.T) {
 }
 
 // Low is suggested only on enough evidence: the template's low runs, from enough workspaces, finish first time as often
-// (within the margin) and stop at the output limit no more often than at the node's effort, and the node itself has
-// finished first time often enough there.
+// (within the margin), stop at the output limit no more often and write less output than at the node's effort, and the
+// node itself has finished first time often enough there.
 func TestEffortTuningSuggestsLowOnlyOnEnoughEvidence(t *testing.T) {
 	limits := defaultEffortTuning
 	key := func(effort string) effortKey { return effortKey{"frontend", "opus", effort} }
 	base := map[effortKey]effortStat{
-		key("low"):    {runs: 40, firstPass: 34, outputLimit: 0, workspaces: 3},
-		key("medium"): {runs: 50, firstPass: 44, outputLimit: 4, workspaces: 9},
+		key("low"):    {runs: 40, firstPass: 34, outputLimit: 0, workspaces: 3, outputRuns: 34, output: 34 * 900},
+		key("medium"): {runs: 50, firstPass: 44, outputLimit: 4, workspaces: 9, outputRuns: 40, output: 40 * 2400},
 	}
-	// 85% first time at low against 88% at medium: within the margin, and low never stopped at the output limit.
+	// 85% first time at low against 88% at medium: within the margin, low never stopped at the output limit, and it wrote
+	// 900 tokens a run against 2,400.
 	if !effortTuningSuggests(base, "frontend", "opus", "medium", 3, limits) {
 		t.Fatal("as good at low, with the evidence: not suggested")
 	}
@@ -84,11 +88,13 @@ func TestEffortTuningSuggestsLowOnlyOnEnoughEvidence(t *testing.T) {
 		"the node finished first time too seldom": {base, "medium", 2},
 		"already at low":                               {base, "low", 9},
 		"another template":                             {map[effortKey]effortStat{{"backend", "opus", "low"}: base[key("low")], key("medium"): base[key("medium")]}, "medium", 3},
-		"too few low runs":                             {with("low", effortStat{runs: 19, firstPass: 19, workspaces: 3}), "medium", 3},
-		"low runs from one workspace":                  {with("low", effortStat{runs: 40, firstPass: 40, workspaces: 1}), "medium", 3},
-		"too few runs at the node's effort":            {with("medium", effortStat{runs: 19, firstPass: 10, workspaces: 5}), "medium", 3},
-		"low finishes first time less often":           {with("low", effortStat{runs: 40, firstPass: 30, workspaces: 3}), "medium", 3},
-		"low stops at the output limit more often":     {with("low", effortStat{runs: 40, firstPass: 38, outputLimit: 4, workspaces: 3}), "medium", 3},
+		"too few low runs":                             {with("low", effortStat{runs: 19, firstPass: 19, workspaces: 3, outputRuns: 19, output: 19 * 900}), "medium", 3},
+		"low runs from one workspace":                  {with("low", effortStat{runs: 40, firstPass: 40, workspaces: 1, outputRuns: 40, output: 40 * 900}), "medium", 3},
+		"too few runs at the node's effort":            {with("medium", effortStat{runs: 19, firstPass: 10, workspaces: 5, outputRuns: 10, output: 10 * 2400}), "medium", 3},
+		"low finishes first time less often":           {with("low", effortStat{runs: 40, firstPass: 30, workspaces: 3, outputRuns: 30, output: 30 * 900}), "medium", 3},
+		"low stops at the output limit more often":     {with("low", effortStat{runs: 40, firstPass: 38, outputLimit: 4, workspaces: 3, outputRuns: 38, output: 38 * 900}), "medium", 3},
+		"low writes as much":                           {with("low", effortStat{runs: 40, firstPass: 34, workspaces: 3, outputRuns: 34, output: 34 * 2400}), "medium", 3},
+		"no usage known at low":                        {with("low", effortStat{runs: 40, firstPass: 34, workspaces: 3}), "medium", 3},
 		"no runs at the node's effort (high) recorded": {base, "high", 3},
 	} {
 		if effortTuningSuggests(c.stats, "frontend", "opus", c.effort, c.own, limits) {
@@ -96,7 +102,7 @@ func TestEffortTuningSuggestsLowOnlyOnEnoughEvidence(t *testing.T) {
 		}
 	}
 	// Two workspaces are enough.
-	if !effortTuningSuggests(with("low", effortStat{runs: 40, firstPass: 34, workspaces: 2}), "frontend", "opus", "medium", 3, limits) {
+	if !effortTuningSuggests(with("low", effortStat{runs: 40, firstPass: 34, workspaces: 2, outputRuns: 30, output: 30 * 900}), "frontend", "opus", "medium", 3, limits) {
 		t.Fatal("low runs from two workspaces: not suggested")
 	}
 }
@@ -119,15 +125,31 @@ func TestPostgresNodeOutcomesSchema(t *testing.T) {
 	if e = tx.Commit(ctx); e != nil {
 		t.Fatal(e)
 	}
+	// A canvas run to hold the rows, so that each refused row is refused by the rule it breaks.
 	for _, statement := range []string{
-		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state) VALUES('t','c','g','n','blocked')",
-		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,code) VALUES('t','c','g','n','failed','Output must be a JSON object')",
-		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,effort) VALUES('t','c','g','n','done','LOW!')",
-		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state) VALUES('t','c','no-such-run','n','done')",
+		"INSERT INTO tenants(id,name) VALUES('t','T')",
+		"INSERT INTO users(id,email,name,password_hash) VALUES('u','u@example.test','U','synthetic-password-hash')",
+		"INSERT INTO canvases(id,tenant_id,name) VALUES('c','t','C')",
+		"INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status) VALUES('g','t','c','u','op','h',1,'{}','[]','completed')",
 	} {
-		if _, err := db.Exec(ctx, statement); err == nil {
-			t.Fatal("accepted", statement)
+		if _, e = db.Exec(ctx, statement); e != nil {
+			t.Fatal(statement, e)
 		}
+	}
+	for statement, code := range map[string]string{
+		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,ran_at) VALUES('t','c','g','n','blocked',now())":                                    "23514",
+		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,code,ran_at) VALUES('t','c','g','n','failed','Output must be a JSON object',now())": "23514",
+		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,effort,ran_at) VALUES('t','c','g','n','done','LOW!',now())":                         "23514",
+		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,ran_at) VALUES('t','c','no-such-run','n','done',now())":                             "23503",
+		"INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state) VALUES('t','c','g','n','done')":                                                    "23502",
+	} {
+		var pgErr *pgconn.PgError
+		if _, err := db.Exec(ctx, statement); !errors.As(err, &pgErr) || pgErr.Code != code {
+			t.Errorf("%s: %v, want SQLSTATE %s", statement, err, code)
+		}
+	}
+	if _, e = db.Exec(ctx, "INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,state,ran_at) VALUES('t','c','g','n','done',now())"); e != nil {
+		t.Fatal("a well-formed record was refused", e)
 	}
 	if _, e = db.Exec(ctx, "SELECT outcomes_at FROM graph_runs LIMIT 0"); e != nil {
 		t.Fatal(e)
@@ -219,8 +241,32 @@ func TestPostgresNodeOutcomesAreRecordedAndTuneEfforts(t *testing.T) {
 			t.Fatalf("suggested on too little (run %d): %+v", i, l)
 		}
 	}
+	// A node that ran on the model at low without finishing first time is not sent back there: one such run of its own
+	// (of another template then, so that the platform's counts for its template stay as they are) holds back what the
+	// counts would now suggest; with it gone, low is suggested.
+	ctx := context.Background()
+	for _, statement := range []string{
+		`INSERT INTO graph_runs SELECT (jsonb_populate_record(NULL::graph_runs,to_jsonb(g)||'{"id":"g-missed-low","operation_id":"missed-low"}'::jsonb)).*
+			FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 ORDER BY g.created_at LIMIT 1`,
+		`INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,run_id,template,model,effort,state,code,ran_at)
+			VALUES($1,$2,'g-missed-low','page','r-missed-low','review','test-model','low','failed','output_limit',now())`,
+	} {
+		if _, e := h.db.Exec(ctx, statement, tid, cid); e != nil {
+			t.Fatal(e)
+		}
+	}
 	fresh()
 	runGraph(t, h, c, base, "tuning-own-3", "completed")
+	awaitOutcomes(t, h, tid, cid, 4)
+	time.Sleep(100 * time.Millisecond)
+	if l := nodeLessons(t, h, tid, cid, "page"); len(l) != 0 {
+		t.Fatalf("suggested low again to a node that did not do at low: %+v", l)
+	}
+	if _, e := h.db.Exec(ctx, "DELETE FROM graph_runs WHERE tenant_id=$1 AND id='g-missed-low'", tid); e != nil {
+		t.Fatal(e)
+	}
+	fresh()
+	runGraph(t, h, c, base, "tuning-own-4", "completed")
 	l := awaitLessons(t, h, tid, cid, "page", func(l []lessonRow) bool { return len(l) == 1 })[0]
 	if l.kind != "effort_tuning" || l.proposal != "lower_effort" || l.state != "open" || l.status != "active" || l.rule != lessonDescriptions["effort_tuning"] {
 		t.Fatalf("the effort lesson: %+v", l)
@@ -230,17 +276,17 @@ func TestPostgresNodeOutcomesAreRecordedAndTuneEfforts(t *testing.T) {
 		t.Fatal("the effort lesson as the view lists it", listed)
 	}
 	// Given to no model: the next run's prompt has no lessons.
-	runGraph(t, h, c, base, "tuning-own-4", "completed")
+	runGraph(t, h, c, base, "tuning-own-5", "completed")
 	if prompts := pi.prompts("page"); strings.Contains(prompts[len(prompts)-1], lessonsHeading) {
 		t.Fatal("an effort lesson was given to a model")
 	}
 	// Each run recorded once: writing a run's lessons again records nothing more.
-	outcomes := awaitOutcomes(t, h, tid, cid, 4)
+	outcomes := awaitOutcomes(t, h, tid, cid, 5)
 	var gid string
-	if e := h.db.QueryRow(context.Background(), "SELECT id FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 ORDER BY created_at LIMIT 1", tid, cid).Scan(&gid); e != nil {
+	if e := h.db.QueryRow(ctx, "SELECT id FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 ORDER BY created_at LIMIT 1", tid, cid).Scan(&gid); e != nil {
 		t.Fatal(e)
 	}
-	if e := h.a.distillGraphLessons(context.Background(), tid, gid); e != nil {
+	if e := h.a.distillGraphLessons(ctx, tid, gid); e != nil {
 		t.Fatal(e)
 	}
 	if again := nodeOutcomes(t, h, tid, cid); len(again) != len(outcomes) {
@@ -271,14 +317,76 @@ func TestPostgresTheSweeperRecordsOutcomesOfRunsAlreadyLearntFrom(t *testing.T) 
 	if _, e := h.db.Exec(ctx, "UPDATE graph_runs SET outcomes_at=NULL,updated_at=now()-interval '2 minutes' WHERE tenant_id=$1", tid); e != nil {
 		t.Fatal(e)
 	}
+	// What the run itself ran with is recorded, not the node's row's copy (admission may move a node to another model).
+	if _, e := h.db.Exec(ctx, `UPDATE runs SET execution_snapshot=jsonb_set(execution_snapshot,'{model}','"seen-model"'),created_at=created_at-interval '20 days'
+		WHERE tenant_id=$1`, tid); e != nil {
+		t.Fatal(e)
+	}
 	if e := h.a.sweepGraphLessons(ctx); e != nil {
 		t.Fatal(e)
 	}
 	got := nodeOutcomes(t, h, tid, cid)
-	if len(got) != 1 || got[0].state != "failed" || got[0].code != "output_limit" {
+	if len(got) != 1 || got[0].state != "failed" || got[0].code != "output_limit" || got[0].model != "seen-model" {
 		t.Fatalf("the sweeper's record: %+v", got)
+	}
+	// Dated when its run was admitted, so a run recorded late counts only within its own window.
+	var ranAt bool
+	if e := h.db.QueryRow(ctx, `SELECT o.ran_at=r.created_at FROM node_outcomes o JOIN runs r ON r.tenant_id=o.tenant_id AND r.id=o.run_id WHERE o.tenant_id=$1`, tid).Scan(&ranAt); e != nil || !ranAt {
+		t.Fatal("the record's date", ranAt, e)
 	}
 	if l := nodeLessons(t, h, tid, cid, "up"); len(l) != 1 || l[0].seen != 1 {
 		t.Fatalf("the run was learnt from again: %+v", l)
+	}
+}
+
+// The counts' window is when each node ran, not when its outcome was written: outcomes written today of runs from three
+// weeks ago (by the sweeper, or as migration 050 found them) count neither in the platform's counts nor in the node's own.
+func TestPostgresEffortCountsReadWhenNodesRan(t *testing.T) {
+	h := newHarness(t, "")
+	_, tid, user := h.register(t, "effort-window@example.test")
+	ctx := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, e := h.db.Exec(ctx, sql, args...); e != nil {
+			t.Fatal(sql, e)
+		}
+	}
+	exec("INSERT INTO canvases(id,tenant_id,name) VALUES('cv-window',$1,'Window')", tid)
+	for i, row := range []struct{ effort, state, ran string }{
+		{"medium", "done", "21 days"}, {"medium", "done", "21 days"}, {"low", "failed", "21 days"}, {"medium", "done", "1 hour"},
+	} {
+		gid := fmt.Sprintf("g-window-%d", i)
+		exec(`INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status)
+			VALUES($1,$2,'cv-window',$3,$1,'h',1,'{}','[]','completed')`, gid, tid, user)
+		exec(`INSERT INTO node_outcomes(tenant_id,canvas_id,graph_id,node_id,run_id,template,model,effort,state,code,ran_at)
+			VALUES($1,'cv-window',$2,'n',$2,'review','window-model',$3,$4,CASE WHEN $4='failed' THEN 'output_limit' ELSE '' END,now()-$5::interval)`,
+			tid, gid, row.effort, row.state, row.ran)
+	}
+	counts := func() (map[effortKey]effortStat, int, int) {
+		t.Helper()
+		h.a.effortStats.mu.Lock()
+		h.a.effortStats.at = time.Time{}
+		h.a.effortStats.mu.Unlock()
+		stats := h.a.effortStatsNow(ctx)
+		tx, e := h.db.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer tx.Rollback(ctx)
+		own, missed, e := nodeEffortHistory(ctx, tx, tid, "cv-window", "n", "window-model", "medium")
+		if e != nil {
+			t.Fatal(e)
+		}
+		return stats, own, missed
+	}
+	stats, own, missed := counts()
+	if s := stats[effortKey{"review", "window-model", "medium"}]; s.runs != 1 || own != 1 || missed != 0 || stats[effortKey{"review", "window-model", "low"}].runs != 0 {
+		t.Fatalf("old runs counted: %+v, own %d, missed at low %d", stats, own, missed)
+	}
+	// Had they run recently, they would count.
+	exec("UPDATE node_outcomes SET ran_at=now()-interval '1 hour' WHERE tenant_id=$1", tid)
+	stats, own, missed = counts()
+	if s := stats[effortKey{"review", "window-model", "medium"}]; s.runs != 3 || own != 3 || missed != 1 || stats[effortKey{"review", "window-model", "low"}].runs != 1 {
+		t.Fatalf("recent runs: %+v, own %d, missed at low %d", stats, own, missed)
 	}
 }

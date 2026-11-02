@@ -14,7 +14,8 @@ import (
 // lessonPromoteFailures) can be made the whole workspace's by a person, from the 经验 panel: one lesson of the workspace
 // (no canvas, no node) for every node of the same template, in AwwO's sentence for nodes like it (workspaceLessonKinds)
 // — never the node's words, nor anything a model wrote. Nodes of that template are given it at admission after their
-// own lessons (freezeNodeLessons; a node given its own lesson of the kind is not given the workspace's too), and each
+// own lessons (freezeNodeLessons; a node with a lesson of its own of the kind, active or retired, is not given the
+// workspace's: it gives that advice already, or the advice did not help it, or a person turned it down), and each
 // run counts it as it counts any lesson: one that never helps retires itself, and a person can retire or restore it.
 
 const (

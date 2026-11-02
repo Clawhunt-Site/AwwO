@@ -101,6 +101,41 @@ func TestPostgresALessonThatHelpedGoesToTheWorkspace(t *testing.T) {
 		applied != 1 || succeeded != 1 {
 		t.Fatalf("the workspace's lesson's counts: %d %d %v", applied, succeeded, err)
 	}
+	// A node whose own lesson of the kind a person retired is given neither: they turned that advice down for it.
+	h.request(t, c, "PATCH", "/tenants/"+tid+"/canvas-lessons/"+l.id, map[string]any{"status": "retired"}, 200)
+	runGraph(t, h, c, base, "workspace-run-6", "completed")
+	upPrompts = pi.prompts("up")
+	if last := upPrompts[len(upPrompts)-1]; strings.Contains(last, lessonsHeading) {
+		t.Fatal("the node whose own lesson was retired was given the workspace's", last)
+	}
+	// A node of another template is never given it, beside one of its template that is.
+	if _, err := h.db.Exec(context.Background(), `UPDATE canvases SET document=jsonb_set(document,'{nodes}',(SELECT jsonb_agg(CASE WHEN n->>'id'='down'
+		THEN n||'{"templateId":"backend"}'::jsonb ELSE n END ORDER BY o) FROM jsonb_array_elements(document->'nodes') WITH ORDINALITY AS x(n,o))) WHERE tenant_id=$1 AND id=$2`, tid, other); err != nil {
+		t.Fatal(err)
+	}
+	runGraph(t, h, c, "/tenants/"+tid+"/canvases/"+other+"/graph-runs", "workspace-other-2", "completed")
+	upPrompts, downPrompts = pi.prompts("up"), pi.prompts("down")
+	if last := upPrompts[len(upPrompts)-1]; !strings.Contains(last, workspaceLessonKinds["output_limit"]) {
+		t.Fatal("the other canvas's frontend node lost the workspace's lesson", last)
+	}
+	if last := downPrompts[len(downPrompts)-1]; strings.Contains(last, lessonsHeading) {
+		t.Fatal("a backend node was given the frontend nodes' lesson", last)
+	}
+	var template string
+	if err := h.db.QueryRow(context.Background(), `SELECT n->>'templateId' FROM graph_runs g, jsonb_array_elements(g.document->'nodes') n
+		WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND n->>'id'='down' ORDER BY g.created_at DESC LIMIT 1`, tid, other).Scan(&template); err != nil || template != "backend" {
+		t.Fatalf("the run's down node is of template %q: %v", template, err)
+	}
+	// A lesson of the whole canvas of that kind, though retired, keeps the workspace's from the canvas's nodes as well.
+	if _, err := h.db.Exec(context.Background(), `INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,fingerprint,rule,status)
+		VALUES('canvas-wide',$1,$2,NULL,'output_limit','canvas-wide','Rule.','retired')`, tid, other); err != nil {
+		t.Fatal(err)
+	}
+	runGraph(t, h, c, "/tenants/"+tid+"/canvases/"+other+"/graph-runs", "workspace-other-3", "completed")
+	upPrompts = pi.prompts("up")
+	if last := upPrompts[len(upPrompts)-1]; strings.Contains(last, lessonsHeading) {
+		t.Fatal("a node of a canvas with its own lesson of the kind was given the workspace's", last)
+	}
 	// Another workspace can neither promote nor read it.
 	o, otherTenant, _ := h.register(t, "lessons-workspace-other@example.test")
 	h.request(t, o, "POST", "/tenants/"+otherTenant+"/canvas-lessons/"+l.id+"/promote", map[string]any{}, 404)
