@@ -406,6 +406,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{canvasId}/lessons", a.tenant(a.canvasLessons, 1))
 	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/canvas-lessons/{id}", a.tenant(a.updateCanvasLesson, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvas-lessons/{id}/promote", a.tenant(a.promoteCanvasLesson, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/learning", a.tenant(a.learningSettings, 1))
+	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/learning", a.tenant(a.updateLearningSettings, 3))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.runRating, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.rateRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.createGraphRun, 2))

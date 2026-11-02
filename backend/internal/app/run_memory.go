@@ -1,12 +1,17 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -28,8 +33,9 @@ import (
 // quoted to runs as background data, never as instructions. The model reads run outputs, which may hold text a web page
 // or a document put there, so its answer is held to a strict shape (memoryDistillReply) and nothing in it is followed.
 // A workspace has at most memoryDistillPerDay runs distilled a day, and the deployment memoryDistillDeploymentDay; the
-// local edition (each person's own model keys) distils nothing, and nothing is distilled unless the deployment turns it
-// on (Config.MemoryDistill, AWWO_MEMORY_DISTILL=on: off until ClawHunt's privacy policy names this use).
+// local edition (each person's own model keys) distils nothing. Nothing is distilled unless the deployment offers it
+// (Config.MemoryDistill, AWWO_MEMORY_DISTILL=on: off until ClawHunt's privacy policy names this use) and the workspace's
+// admin turned memory suggestions on (learning.go), and then only from runs begun after that.
 
 const (
 	memoryDistillNotes         = 3
@@ -44,6 +50,8 @@ const (
 	memoryDistillAttempts  = 5
 	memoryDistillTimeout   = 90 * time.Second
 	memoryDistillMaxTokens = 1500
+	// All that is done for one run, the call and the reads and writes around it, is bounded by memoryDistillRunTime.
+	memoryDistillRunTime = 3 * time.Minute
 	// A briefing gives each node at most these many characters of its task and of its delivery, and holds at most
 	// memoryDistillBriefingRunes in all.
 	memoryDistillTaskRunes     = 400
@@ -118,16 +126,26 @@ func parseMemoryDistillReply(content string) []memoryDistillNote {
 }
 
 // queueGraphDistillationSQL queues canvas run $2 of workspace $1 (canvas $3) for its memory, in the transaction that
-// writes its lessons, when it is worth learning from and the day's limits allow ($4 a workspace, $5 the deployment).
+// writes its lessons, when the workspace turned memory suggestions on before the run began (learning.go), the run is
+// worth learning from, and the day's limits allow ($4 a workspace, $5 the deployment).
 const queueGraphDistillationSQL = `INSERT INTO run_distillations(tenant_id,graph_id,canvas_id,state)
 	SELECT $1,$2,$3,'queued' FROM graph_runs g WHERE g.tenant_id=$1 AND g.id=$2 AND g.status='completed' AND g.collaboration IS NULL
 		AND (EXISTS (SELECT 1 FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id AND n.state='done' AND n.attempts>0)
 			OR NOT EXISTS (SELECT 1 FROM graph_runs p WHERE p.tenant_id=g.tenant_id AND p.canvas_id=g.canvas_id AND p.created_at<g.created_at AND p.status='completed')
 			OR (SELECT p.status FROM graph_runs p WHERE p.tenant_id=g.tenant_id AND p.canvas_id=g.canvas_id AND p.created_at<g.created_at
 				AND p.status IN ('completed','failed') ORDER BY p.created_at DESC LIMIT 1)='failed')
+		AND EXISTS (SELECT 1 FROM workspace_learning l WHERE l.tenant_id=$1 AND l.suggestions_at IS NOT NULL AND l.suggestions_at<=g.created_at)
 		AND (SELECT count(*) FROM run_distillations d WHERE d.tenant_id=$1 AND d.created_at>now()-interval '1 day')<$4
 		AND (SELECT count(*) FROM run_distillations d WHERE d.created_at>now()-interval '1 day')<$5
 	ON CONFLICT (tenant_id,graph_id) DO NOTHING`
+
+// suggestionsHoldSQL is whether workspace $1 still lets canvas run $2's record be read for memory suggestions: turned on
+// (learning.go) before the run began.
+const suggestionsHoldSQL = `EXISTS (SELECT 1 FROM workspace_learning l JOIN graph_runs g ON g.tenant_id=l.tenant_id AND g.id=$2
+	WHERE l.tenant_id=$1 AND l.suggestions_at IS NOT NULL AND l.suggestions_at<=g.created_at)`
+
+// errSuggestionsOff is a run whose workspace turned memory suggestions off while it was being distilled.
+var errSuggestionsOff = errors.New("memory suggestions turned off")
 
 // memoryDistillQueueLock serializes the queue's inserts, so that two canvas runs ending at once cannot both see room
 // under a day's limit and both take it.
@@ -240,16 +258,26 @@ func (a *App) distillQueuedMemory(ctx context.Context) error {
 // canvas. It answers the run's new state ("queued" when the model could not be asked now), the notes written and a
 // code for why none were.
 func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (string, int, string) {
+	// The distiller asks about one run at a time: a run whose reads or writes wait (a busy pool, a row another write
+	// holds) is let go after memoryDistillRunTime rather than holding up the rest.
+	ctx, cancel := context.WithTimeout(ctx, memoryDistillRunTime)
+	defer cancel()
 	// A workspace that is suspended, or exists only under its owner's paid plan while that plan does not allow it, has
-	// the model asked nothing for it, as the canvas assistant's router asks nothing (routeNeedsPlan).
+	// the model asked nothing for it, as the canvas assistant's router asks nothing (routeNeedsPlan); nor one whose
+	// memory suggestions are off now, or were turned on only after the run began (learning.go): the word that queued
+	// the run is asked again before its record goes to the model.
 	var status string
-	if err := a.db.QueryRow(ctx, "SELECT status FROM tenants WHERE id=$1", tid).Scan(&status); noRows(err) {
+	var suggestions bool
+	if err := a.db.QueryRow(ctx, `SELECT t.status,`+suggestionsHoldSQL+` FROM tenants t WHERE t.id=$1`, tid, gid).Scan(&status, &suggestions); noRows(err) {
 		return "skipped", 0, "workspace_gone"
 	} else if err != nil {
 		return "queued", 0, "workspace_unreadable"
 	}
 	if status != "active" {
 		return "skipped", 0, "workspace_suspended"
+	}
+	if !suggestions {
+		return "skipped", 0, "suggestions_off"
 	}
 	if needsPlan, err := a.routeNeedsPlan(ctx, tid); err != nil {
 		return "queued", 0, "plan_unreadable"
@@ -263,9 +291,34 @@ func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (
 	if briefing == "" {
 		return "skipped", 0, "nothing_to_read"
 	}
-	content, code := a.freeModelCompletion(ctx, tid, memoryDistillInstructions, briefing, memoryDistillMaxTokens)
+	// Asked once more right before the record goes, holding the workspace row (which turning memory suggestions off
+	// takes) while the record is written to the worker (heldPost): either they go off first and nothing is sent, or the
+	// record goes while they were on. A row another write holds is waited for a few seconds at most.
+	hold := func(ctx context.Context) (func(), bool, error) {
+		tx, err := a.db.Begin(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		let := func() { rollbackWithin(tx) }
+		var holds bool
+		if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err == nil {
+			if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); err == nil {
+				err = tx.QueryRow(ctx, `SELECT `+suggestionsHoldSQL, tid, gid).Scan(&holds)
+			}
+		}
+		if err != nil || !holds {
+			let()
+			return nil, false, err
+		}
+		return let, true, nil
+	}
+	content, code := a.freeModelCompletion(ctx, tid, memoryDistillInstructions, briefing, memoryDistillMaxTokens, hold)
 	switch code {
 	case "":
+	case "suggestions_off":
+		return "skipped", 0, code
+	case "workspace_unreadable":
+		return "queued", 0, code
 	case "worker_busy", "worker_unavailable", "timeout", "transport", "status_429", "status_502", "status_503":
 		// The worker could not take the question now (busy, unreachable, refusing for capacity): asked again later.
 		return "queued", 0, code
@@ -277,6 +330,9 @@ func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (
 		return "done", 0, "none_proposed"
 	}
 	written, err := a.proposeRunNotes(ctx, tid, canvasID, gid, notes)
+	if errors.Is(err, errSuggestionsOff) {
+		return "skipped", 0, "suggestions_off"
+	}
 	if err != nil {
 		return "failed", written, "notes_unwritten"
 	}
@@ -290,10 +346,19 @@ func (a *App) proposeRunNotes(ctx context.Context, tid, canvasID, gid string, no
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback(context.Background())
-	// The workspace row first, as every memory write takes it (memoryMutation), then the canvas's notes.
+	defer rollbackWithin(tx)
+	// The workspace row first, as every memory write takes it (memoryMutation), then the canvas's notes. Turning memory
+	// suggestions off takes that row too (learning.go), so either it comes first and no note is written, or the notes
+	// are written while they were on.
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); err != nil {
 		return 0, err
+	}
+	var holds bool
+	if err = tx.QueryRow(ctx, `SELECT `+suggestionsHoldSQL, tid, gid).Scan(&holds); err != nil {
+		return 0, err
+	}
+	if !holds {
+		return 0, errSuggestionsOff
 	}
 	var live int
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM memory_items WHERE tenant_id=$1 AND canvas_id=$2 AND status<>'archived'", tid, canvasID).Scan(&live); err != nil {
@@ -399,11 +464,21 @@ func (a *App) distillationBriefing(ctx context.Context, tid, gid string) (string
 	return clipRunes(b.String(), memoryDistillBriefingRunes), nil
 }
 
+// memoryDistillSendWait is the longest a run's record may take to be written to the worker while its workspace row is
+// held (heldPost): a write not done by then is given up, and the run asked about again later.
+const memoryDistillSendWait = 5 * time.Second
+
+// memoryDistillWritten, when set (tests), runs once the record has been written, before what its last check held is let
+// go.
+var memoryDistillWritten func()
+
 // freeModelCompletion asks the platform's own free model on the router runtime (the canvas assistant router's: the
 // worker's default, where it costs nothing) one question, with its thinking off and at most maxTokens of answer. It is
 // the platform's call, not the workspace's: not admitted against its allowance, not charged, and its text never logged.
 // It is made only while the worker keeps two slots free. It answers the model's text, or a code for why there is none.
-func (a *App) freeModelCompletion(ctx context.Context, tid, system, user string, maxTokens int) (string, string) {
+// hold is asked last, just before the question is written (heldPost): it answers whether it may go, and holds what it
+// checked while the question is written.
+func (a *App) freeModelCompletion(ctx context.Context, tid, system, user string, maxTokens int, hold func(context.Context) (func(), bool, error)) (string, string) {
 	runtime := a.routerRuntime()
 	if runtime == "" || a.cfg.UserCredentials {
 		return "", "unconfigured"
@@ -442,11 +517,15 @@ func (a *App) freeModelCompletion(ctx context.Context, tid, system, user string,
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.client.Do(req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", "timeout"
-		}
+	resp, err := heldPost(ctx, req, hold)
+	switch {
+	case errors.Is(err, errSuggestionsOff):
+		return "", "suggestions_off"
+	case errors.Is(err, errHoldUnreadable):
+		return "", "workspace_unreadable"
+	case err != nil && ctx.Err() != nil:
+		return "", "timeout"
+	case err != nil:
 		return "", "transport"
 	}
 	defer resp.Body.Close()
@@ -475,4 +554,99 @@ func (a *App) freeModelCompletion(ctx context.Context, tid, system, user string,
 		return "", "reply_unreadable"
 	}
 	return *reply.Completion.Choices[0].Message.Content, ""
+}
+
+// memoryDistillCleanup is the longest a distillation's transaction waits to be rolled back: a database that does not
+// answer by then has its connection dropped (the pool discards a connection left in a transaction), so neither the
+// distiller nor the rows it held wait on it.
+const memoryDistillCleanup = 5 * time.Second
+
+// rollbackWithin rolls tx back, waiting at most memoryDistillCleanup.
+func rollbackWithin(tx pgx.Tx) {
+	ctx, cancel := context.WithTimeout(context.Background(), memoryDistillCleanup)
+	defer cancel()
+	_ = tx.Rollback(ctx)
+}
+
+// errHoldUnreadable is a request whose hold (heldPost) could not check what it holds.
+var errHoldUnreadable = errors.New("what the request is held by could not be read")
+
+// heldPost sends req, whose body is in memory, on a connection of its own to the worker. Once connected, it asks hold
+// whether the request may go; if it may, the request is written whole in one write while what hold checked is held,
+// and that is let go once the write has handed over every byte or given up (after memoryDistillSendWait). No byte of the
+// request is written after: the connection is no other request's, the request is never retried, and the connection
+// carries nothing else out. It answers the worker's reply, whose body closes the connection.
+func heldPost(ctx context.Context, req *http.Request, hold func(context.Context) (func(), bool, error)) (*http.Response, error) {
+	req.Close = true
+	var wire bytes.Buffer
+	if err := req.Write(&wire); err != nil {
+		return nil, err
+	}
+	conn, err := dialWorker(ctx, req.URL)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	fail := func(err error) (*http.Response, error) {
+		stop()
+		_ = conn.Close()
+		return nil, err
+	}
+	release, ok, err := hold(ctx)
+	if err != nil {
+		return fail(errors.Join(errHoldUnreadable, err))
+	}
+	if !ok {
+		return fail(errSuggestionsOff)
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(memoryDistillSendWait))
+	_, err = conn.Write(wire.Bytes())
+	if memoryDistillWritten != nil {
+		memoryDistillWritten()
+	}
+	release()
+	if err != nil {
+		return fail(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		return fail(err)
+	}
+	resp.Body = &connBody{ReadCloser: resp.Body, conn: conn, stop: stop}
+	return resp, nil
+}
+
+// dialWorker connects to the worker at u, directly: over TCP for http, with TLS (its certificate checked) for https.
+func dialWorker(ctx context.Context, u *url.URL) (net.Conn, error) {
+	port := u.Port()
+	switch {
+	case u.Scheme == "http" && port == "":
+		port = "80"
+	case u.Scheme == "https" && port == "":
+		port = "443"
+	}
+	address := net.JoinHostPort(u.Hostname(), port)
+	switch u.Scheme {
+	case "http":
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", address)
+	case "https":
+		d := tls.Dialer{Config: &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}}
+		return d.DialContext(ctx, "tcp", address)
+	}
+	return nil, fmt.Errorf("a worker endpoint must be http or https, not %q", u.Scheme)
+}
+
+// connBody is a reply's body that closes its connection with it (first, so that what is left of the body is not read).
+type connBody struct {
+	io.ReadCloser
+	conn net.Conn
+	stop func() bool
+}
+
+func (b *connBody) Close() error {
+	b.stop()
+	_ = b.conn.Close()
+	_ = b.ReadCloser.Close()
+	return nil
 }

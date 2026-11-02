@@ -139,6 +139,8 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"user_appearance user_id users c", "user_connections user_id users c", "user_plans user_id users c",
 			"user_preferences user_id users c", "web_reads tenant_id tenants c", "workspace_checkins tenant_id tenants c",
 			"workspace_checkins user_id users c",
+			// A workspace's learning settings go with it, and its owner's consent with their account (migration 052).
+			"workspace_learning consent_by users n", "workspace_learning tenant_id tenants c",
 		}},
 		"references without an ON DELETE action": {fmt.Sprintf(foreignKeysSQL, "c.confdeltype IN ('a','r') AND c.confrelid NOT IN ('users'::regclass,'tenants'::regclass)"), []string{
 			"graph_collaboration_turns tenant_id,run_id runs a", "graph_run_nodes tenant_id,run_id runs a",

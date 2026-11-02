@@ -6,6 +6,7 @@ import { accountURL } from '../PersonalAccount';
 import { useSaaSPreferences } from '../preferences';
 import { SettingsCard, SettingsIntro } from './general';
 import { ImportCard } from './importCard';
+import { LearningCard } from './learning';
 
 // A handled request belongs to an account the operator deleted, so a signed-in person never reads one.
 type DeletionStatus = 'pending' | 'withdrawn' | 'declined';
@@ -142,6 +143,7 @@ export function DataSettings({ identity }: { identity: Identity }) {
         <ExportButton />
       </SettingsCard>
       {local && <ImportCard identity={identity} />}
+      {!local && <LearningCard identity={identity} />}
       {local ? <LocalDeletionCard /> : <DeletionRequestCard identity={identity} />}
     </div>
   </>;

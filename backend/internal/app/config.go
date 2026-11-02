@@ -108,6 +108,9 @@ type Config struct {
 	// GraphNodeRetries is how many times a canvas node may run again by itself after its run failed for a transient
 	// reason (graph_retry.go, AWWO_GRAPH_NODE_RETRIES: 0-5, unset 2); 0 retries nothing.
 	GraphNodeRetries int
+	// LearningConsent offers a workspace's owner Help improve AwwO (learning.go; AWWO_LEARNING_CONSENT=on): off unless on,
+	// until ClawHunt's privacy policy says what the operator's learning export takes from a workspace that turns it on.
+	LearningConsent bool
 	// MemoryDistill lets canvas runs worth learning from propose memory notes, read from their record by the platform's
 	// default model (run_memory.go; AWWO_MEMORY_DISTILL=on). Off unless on: ClawHunt's privacy policy names that model
 	// for planning, routing and nodes without a model of their own, and a run's record may come from a model the person
@@ -172,6 +175,13 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if c.GraphNodeRetries, err = parseGraphNodeRetries(os.Getenv("AWWO_GRAPH_NODE_RETRIES")); err != nil {
 		return c, err
+	}
+	switch os.Getenv("AWWO_LEARNING_CONSENT") {
+	case "", "off":
+	case "on":
+		c.LearningConsent = true
+	default:
+		return c, errors.New("AWWO_LEARNING_CONSENT must be on or off")
 	}
 	switch os.Getenv("AWWO_MEMORY_DISTILL") {
 	case "", "off":

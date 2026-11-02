@@ -21,12 +21,12 @@ export function useSettingsTenant(identity: Identity): [Tenant | undefined, (id:
   return [identity.tenants.find(item => item.id === id), choose];
 }
 
-export function TenantPicker({ identity, tenant, onChange, label }: { identity: Identity; tenant?: Tenant; onChange: (id: string) => void; label?: string }) {
+export function TenantPicker({ identity, tenant, onChange, label, disabled = false }: { identity: Identity; tenant?: Tenant; onChange: (id: string) => void; label?: string; disabled?: boolean }) {
   const { t } = useSaaSPreferences();
   if (identity.tenants.length < 2) return null;
   return <label className="saas-settings-tenant">
     {label || t('工作区', 'Workspace')}
-    <select value={tenant?.id || ''} onChange={event => onChange(event.target.value)}>
+    <select value={tenant?.id || ''} disabled={disabled} onChange={event => onChange(event.target.value)}>
       {identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}
     </select>
   </label>;

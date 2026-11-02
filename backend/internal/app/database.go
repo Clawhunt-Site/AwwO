@@ -183,6 +183,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 51, "migrations/051_run_distillations.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 52, "migrations/052_learning_settings.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

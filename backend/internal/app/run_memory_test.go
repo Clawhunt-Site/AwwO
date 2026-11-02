@@ -101,6 +101,8 @@ type distillPi struct {
 	refuse   atomic.Bool  // the free-model call answers 503, as a worker at capacity does
 	cut      atomic.Int32 // the free-model call's answer, of this status, stops after its first bytes (0: whole)
 	lastUser atomic.Value // string
+	// onHealth and onAsk, when set, run as the worker is asked for its health and for the free model's answer.
+	onHealth, onAsk atomic.Value // func()
 }
 
 func newDistillPi(t *testing.T) *distillPi {
@@ -109,6 +111,9 @@ func newDistillPi(t *testing.T) *distillPi {
 	p.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/health":
+			if hook, _ := p.onHealth.Load().(func()); hook != nil {
+				hook()
+			}
 			active := 0
 			if p.busy.Load() {
 				active = 7
@@ -117,6 +122,9 @@ func newDistillPi(t *testing.T) *distillPi {
 				"completionOptions": []string{"thinking", "maxTokens"}, "models": []map[string]any{{"id": "test-model", "provider": "test", "maxContextTextBytes": 262144}}})
 		case r.URL.Path == "/internal/computer-model":
 			p.asked.Add(1)
+			if hook, _ := p.onAsk.Load().(func()); hook != nil {
+				hook()
+			}
 			if p.refuse.Load() {
 				http.Error(w, "busy", http.StatusServiceUnavailable)
 				return
@@ -208,6 +216,14 @@ func TestPostgresAFinishedCanvasRunProposesMemoryNotes(t *testing.T) {
 		t.Fatalf("queued while off: %d %v", none, err)
 	}
 	h.a.cfg.MemoryDistill = true
+	// Offered, but the workspace has not turned it on: still nothing queued.
+	none2 := retryCanvas(t, h, c, tid)
+	runGraph(t, h, c, "/tenants/"+tid+"/canvases/"+none2+"/graph-runs", "distill-off-2", "completed")
+	time.Sleep(200 * time.Millisecond)
+	if err := h.db.QueryRow(context.Background(), "SELECT count(*) FROM run_distillations WHERE tenant_id=$1", tid).Scan(&none); err != nil || none != 0 {
+		t.Fatalf("queued while the workspace has it off: %d %v", none, err)
+	}
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
 	cid := retryCanvas(t, h, c, tid)
 	base := "/tenants/" + tid + "/canvases/" + cid + "/graph-runs"
 	runGraph(t, h, c, base, "distill-run-1", "completed")
@@ -268,7 +284,11 @@ func TestPostgresAFinishedCanvasRunProposesMemoryNotes(t *testing.T) {
 	if snap := lastRunSnapshot(t, h, tid); !strings.Contains(snap, "Pages are dark") {
 		t.Fatal("the accepted note was not given to the next run", snap)
 	}
-	written, err := h.a.proposeRunNotes(ctx, tid, cid, "g", parseMemoryDistillReply(pi.answer.Load().(string)))
+	var distilled string
+	if err := h.db.QueryRow(ctx, "SELECT graph_id FROM run_distillations WHERE tenant_id=$1 AND canvas_id=$2", tid, cid).Scan(&distilled); err != nil {
+		t.Fatal(err)
+	}
+	written, err := h.a.proposeRunNotes(ctx, tid, cid, distilled, parseMemoryDistillReply(pi.answer.Load().(string)))
 	if err != nil || written != 0 || len(canvasNotes(t, h, tid, cid)) != 1 {
 		t.Fatalf("the same note again: %d %v", written, err)
 	}
@@ -282,6 +302,7 @@ func TestPostgresADistillationTheWorkerCannotTakeWaitsThenGivesUp(t *testing.T) 
 	h := newHarness(t, pi.server.URL)
 	h.a.cfg.MemoryDistill = true
 	c, tid, _ := h.register(t, "distill-busy@example.test")
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
 	cid := retryCanvas(t, h, c, tid)
 	runGraph(t, h, c, "/tenants/"+tid+"/canvases/"+cid+"/graph-runs", "distill-busy-1", "completed")
 	ctx := context.Background()
@@ -392,7 +413,7 @@ func TestPostgresTwoRunsEndingAtOnceTakeOnePlace(t *testing.T) {
 			t.Fatal(sql, e)
 		}
 	}
-	_ = c
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
 	// Each of its runs is a canvas's first to finish whole, worth learning from; the day has memoryDistillPerDay-1 already.
 	for i := 0; i <= memoryDistillPerDay; i++ {
 		id := fmt.Sprintf("race-%d", i)
@@ -471,6 +492,11 @@ func TestPostgresTheDistillationQueueTakesItsLock(t *testing.T) {
 	pi := newDistillPi(t)
 	h := newHarness(t, pi.server.URL)
 	c, tid, _ := h.register(t, "distill-lock@example.test")
+	// The workspace turns memory suggestions on before the run, and the deployment offers them only after it, so that
+	// the run's own lessons queued nothing.
+	h.a.cfg.MemoryDistill = true
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
+	h.a.cfg.MemoryDistill = false
 	cid := retryCanvas(t, h, c, tid)
 	runGraph(t, h, c, "/tenants/"+tid+"/canvases/"+cid+"/graph-runs", "distill-lock-1", "completed")
 	h.a.cfg.MemoryDistill = true
@@ -511,6 +537,147 @@ func TestPostgresTheDistillationQueueTakesItsLock(t *testing.T) {
 	}
 	if n := queue(); n != 1 {
 		t.Fatal("not queued with the lock free")
+	}
+	// Turned off once the run was queued: turning them off lets go of it, and its record goes to no model.
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": false}, 200)
+	if state, reason, _ := distillation(t, h, tid); state != "skipped" || reason != "suggestions_off" {
+		t.Fatalf("a queued run of a workspace that turned memory suggestions off: %s %s", state, reason)
+	}
+	if err = h.a.distillQueuedMemory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if pi.asked.Load() != 0 {
+		t.Fatalf("asked %d", pi.asked.Load())
+	}
+	// Turned off at each step of the run's distillation, as far as the database says: before it starts, while the
+	// worker is asked for its health (just before the record would go), and while the model answers (its notes are then
+	// not written).
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
+	turnOff := func() {
+		if _, err := h.db.Exec(ctx, "UPDATE workspace_learning SET suggestions_at=NULL WHERE tenant_id=$1", tid); err != nil {
+			t.Error(err)
+		}
+	}
+	for step, asked := range map[string]int32{"before": 0, "health": 0, "answer": 1} {
+		if _, err = h.db.Exec(ctx, `UPDATE workspace_learning SET suggestions_at=now()-interval '1 hour' WHERE tenant_id=$1`, tid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = h.db.Exec(ctx, "DELETE FROM run_distillations WHERE tenant_id=$1", tid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = h.db.Exec(ctx, "UPDATE graph_runs SET created_at=now() WHERE tenant_id=$1 AND id=$2", tid, gid); err != nil {
+			t.Fatal(err)
+		}
+		if n := queue(); n != 1 {
+			t.Fatal(step, "not queued")
+		}
+		pi.asked.Store(0)
+		switch step {
+		case "before":
+			turnOff()
+		case "health":
+			pi.onHealth.Store(turnOff)
+		case "answer":
+			pi.onAsk.Store(turnOff)
+		}
+		if err = h.a.distillQueuedMemory(ctx); err != nil {
+			t.Fatal(err)
+		}
+		pi.onHealth.Store(func() {})
+		pi.onAsk.Store(func() {})
+		if state, reason, n := distillation(t, h, tid); state != "skipped" || reason != "suggestions_off" || n != 0 || pi.asked.Load() != asked {
+			t.Fatalf("turned off %s: %s %s, %d notes, asked %d", step, state, reason, n, pi.asked.Load())
+		}
+		if notes := canvasNotes(t, h, tid, cid); len(notes) != 0 {
+			t.Fatalf("turned off %s: notes written %+v", step, notes)
+		}
+	}
+	// Turned off while the record's last check holds: the turning off waits until the record has been written to the
+	// worker, all of it.
+	if _, err = h.db.Exec(ctx, `UPDATE workspace_learning SET suggestions_at=now()-interval '1 hour' WHERE tenant_id=$1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.db.Exec(ctx, "DELETE FROM run_distillations WHERE tenant_id=$1", tid); err != nil {
+		t.Fatal(err)
+	}
+	if n := queue(); n != 1 {
+		t.Fatal("not queued for the held check")
+	}
+	pi.asked.Store(0)
+	turnedOff := make(chan struct{})
+	memoryDistillWritten = func() {
+		go func() {
+			defer close(turnedOff)
+			h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": false}, 200)
+		}()
+		select {
+		case <-turnedOff:
+			t.Error("turned off while the record was being written")
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	defer func() { memoryDistillWritten = nil }()
+	if err = h.a.distillQueuedMemory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	memoryDistillWritten = nil
+	select {
+	case <-turnedOff:
+	case <-time.After(5 * time.Second):
+		t.Fatal("never turned off once the record had gone")
+	}
+	if pi.asked.Load() != 1 {
+		t.Fatalf("the record was not sent while they were on: asked %d", pi.asked.Load())
+	}
+	// A workspace row another write holds is waited for a few seconds at most: the run stays queued for the next round,
+	// and its record goes to no model.
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
+	if _, err = h.db.Exec(ctx, `UPDATE workspace_learning SET suggestions_at=now()-interval '1 hour' WHERE tenant_id=$1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.db.Exec(ctx, "DELETE FROM run_distillations WHERE tenant_id=$1", tid); err != nil {
+		t.Fatal(err)
+	}
+	if n := queue(); n != 1 {
+		t.Fatal("not queued for the held row")
+	}
+	pi.asked.Store(0)
+	locker, err := h.db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Rollback(context.Background())
+	if _, err = locker.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR UPDATE", tid); err != nil {
+		t.Fatal(err)
+	}
+	distilled := make(chan error, 1)
+	go func() { distilled <- h.a.distillQueuedMemory(ctx) }()
+	select {
+	case err = <-distilled:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the distiller kept waiting on a workspace row another write holds")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = locker.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if state, _, _ := distillation(t, h, tid); state != "queued" || pi.asked.Load() != 0 {
+		t.Fatalf("with its workspace row held: %s, asked %d", state, pi.asked.Load())
+	}
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": false}, 200)
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
+	if _, err = h.db.Exec(ctx, "UPDATE graph_runs SET created_at=now()-interval '1 hour' WHERE tenant_id=$1 AND id=$2", tid, gid); err != nil {
+		t.Fatal(err)
+	}
+	// Turned on again only after the run began: it is not queued again.
+	h.request(t, c, "PUT", "/tenants/"+tid+"/learning", map[string]any{"memorySuggestions": true}, 200)
+	if _, err = h.db.Exec(ctx, "DELETE FROM run_distillations WHERE tenant_id=$1", tid); err != nil {
+		t.Fatal(err)
+	}
+	if n := queue(); n != 0 {
+		t.Fatal("queued a run that began before its workspace turned memory suggestions on")
 	}
 }
 

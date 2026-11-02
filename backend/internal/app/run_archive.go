@@ -7,94 +7,31 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"awwo/backend/internal/redact"
 )
 
 const defaultRunArchiveMaxBytes int64 = 16 << 20
 
-var runSecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)["']?(?:api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password)["']?\s*[:=]\s*(?:"(?:[^"\\]|\\[\s\S])*(?:"|\\?$)|'(?:[^'\\]|\\[\s\S])*(?:'|\\?$)|[^\s,;]+)`),
-	// Header values can contain spaces, authentication schemes and multiple
-	// cookies. An unfinished quoted value stays redacted through the snapshot.
-	regexp.MustCompile(`(?im)["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=][ \t]*(?:"(?:[^"\\]|\\[\s\S])*(?:"|\\?$)|'(?:[^'\\]|\\[\s\S])*(?:'|\\?$)|[^\r\n]+)`),
-	regexp.MustCompile(`(?i)\bBearer[ \t]+[A-Za-z0-9._~+/=-]+`),
-	regexp.MustCompile(`\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)`),
-	regexp.MustCompile(`(?s)-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----.*?(?:-----END(?: [A-Z0-9]+)? PRIVATE KEY-----|$)`),
-}
-
-type runRedactionSpan struct{ start, end int }
+// A run's archive and its evidence leave the database with its secrets redacted (the redact package, which the
+// operator's learning export uses too).
+type runRedactionSpan = redact.Span
 
 func runRedactionSpans(text string, secrets []string) []runRedactionSpan {
-	spans := []runRedactionSpan{}
-	for _, pattern := range runSecretPatterns {
-		for _, match := range pattern.FindAllStringIndex(text, -1) {
-			spans = append(spans, runRedactionSpan{match[0], match[1]})
-		}
-	}
-	for _, secret := range secrets {
-		if len(secret) < 8 {
-			continue
-		}
-		for offset := 0; offset < len(text); {
-			at := strings.Index(text[offset:], secret)
-			if at < 0 {
-				break
-			}
-			at += offset
-			spans = append(spans, runRedactionSpan{at, at + len(secret)})
-			offset = at + len(secret)
-		}
-	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
-	merged := []runRedactionSpan{}
-	for _, span := range spans {
-		if len(merged) > 0 && span.start <= merged[len(merged)-1].end {
-			if span.end > merged[len(merged)-1].end {
-				merged[len(merged)-1].end = span.end
-			}
-		} else {
-			merged = append(merged, span)
-		}
-	}
-	return merged
+	return redact.Spans(text, secrets)
 }
 
-// Redaction ranges are computed over the joined delta stream first. A secret
-// split across database events is removed from every fragment, not merely the
-// first event that contains a recognizable prefix.
 func redactRunSegment(text string, offset int, spans []runRedactionSpan) string {
-	var out strings.Builder
-	end, cursor := offset+len(text), offset
-	first := sort.Search(len(spans), func(i int) bool { return spans[i].end > offset })
-	for _, span := range spans[first:] {
-		if span.start >= end {
-			break
-		}
-		left := max(span.start, offset)
-		if left > cursor {
-			out.WriteString(text[cursor-offset : left-offset])
-		}
-		if span.start >= offset {
-			out.WriteString("[REDACTED]")
-		}
-		cursor = min(span.end, end)
-	}
-	if cursor < end {
-		out.WriteString(text[cursor-offset:])
-	}
-	return out.String()
+	return redact.Segment(text, offset, spans)
 }
 
-func redactRunText(text string, secrets []string) string {
-	return redactRunSegment(text, 0, runRedactionSpans(text, secrets))
-}
+func redactRunText(text string, secrets []string) string { return redact.Text(text, secrets) }
 
 func (a *App) runArchiveSecrets() []string {
 	v := []string{a.cfg.PIToken, a.cfg.OpenAIAgentsToken, a.cfg.SMTPPassword}

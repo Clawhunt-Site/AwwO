@@ -290,7 +290,7 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),
-  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), usage ledger, and everyone's memberships and invitations.
+  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), usage ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.
@@ -379,6 +379,47 @@ AWWO_TEST_DATABASE_URL='<dedicated local PostgreSQL DSN>' go test -race ./... -c
 ```
 
 The database tests create and drop only their own randomly named PostgreSQL schema. Without `AWWO_TEST_DATABASE_URL`, integration tests explicitly skip. Tests exercise real PostgreSQL transactions and an in-process HTTP sidecar fixture; they do not demonstrate a real provider/model call. Runtime provider acceptance is a separate stack smoke test.
+
+### Exporting learning data
+
+`awwo-control learning-export` (`internal/operator/learning.go`) writes the data AwwO's learning from runs uses, for
+evaluating and training models, to a new file on the host. It reads the database and changes nothing in it.
+
+```sh
+./awwo-control learning-export --out /ABSOLUTE/NEW_FILE.jsonl --since 2026-11-01 [--until 2026-12-01] [--content]
+```
+
+- The file must not exist. It is written as `NEW_FILE.jsonl.partial` (readable by its owner alone), synced, and linked
+  to its name when done, so a stopped export leaves only a `.partial` file. Write it in a directory only the operator
+  can write. The receipt gives the counts, the bytes, the number of deployment secrets redacted and the file's SHA-256.
+- The window is at most 92 days, `--until` (a day, exclusive) defaulting to now. An export over 8 GiB, or over 20,000
+  content runs, is refused: ask for a narrower window.
+- Each line is one JSON object. `outcome` lines come from every workspace: one per node a canvas run ran
+  (`node_outcomes`), with no word of a prompt or an output. Every id is replaced by a keyed hash whose key is made for
+  that export and kept nowhere, so the lines of one export join one another and no id outside the file. A person's own
+  connection's model (`byok_…`) is hashed the same way. The lines come in an order of that key, not of time, but their
+  counts (tokens, cost, credits, worker time) and day stay exact: whoever holds the database can still match them.
+- `--content` needs OS effective UID 0, `AWWO_LEARNING_CONSENT=on` and the API's environment (`AWWO_PI_TOKEN` set). It
+  adds `run` lines, only from active workspaces whose owner turned Help improve AwwO on (`workspace_learning.consent_at`)
+  and still owns them (`consent_by`), and only runs admitted after that. Market Agents' runs (their author's
+  instructions) and media runs are left out.
+  - Each line carries the run's instructions, prompt, messages and output, read in bounded parts. Redacted from them:
+    what a secret looks like (`internal/redact`), what a personal email address or phone number looks like, every
+    value of the command's environment whose name says it is a secret (tokens, keys, passwords, credentials, a database
+    URL), and every credential a value of it holds within it (a URL's password or credential parameter, a connection
+    string's password or key passphrase, a JSON setting's tokens), read from the value alone.
+  - It also carries the run's model, provider and ratings.
+  - Every run is for evaluation only (`trainable: false`). Which runs may train other models depends on who wrote
+    every word in them: a node's instructions and inputs may be the planner's (a model), its input upstream nodes'
+    deliveries, its history earlier runs'; and a catalog id need not name the model that answered. AwwO does not record
+    that per run yet.
+- The consents are read again as the file is published, holding their rows (the workspace, its learning settings and
+  its owner's membership). A consent withdrawn, given anew or handed over while the export ran, or its workspace
+  suspended, makes it fail and remove its file: run it again. One being changed at that moment waits until the file is
+  published, and counts from the next export. A workspace whose consent does not hold gives no `run` lines, whatever it
+  gave before.
+- The hashing key is discarded, so a file cannot be purged of one workspace later: keep each file only as long as
+  clause 08 of the privacy policy says, and build each dataset again from a new export.
 
 ## Backend observability and usage
 
