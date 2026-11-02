@@ -68,6 +68,11 @@ describe('a lesson\'s suggestion', () => {
     expect(lessonSatisfied(lesson({ proposal: 'raise_effort', kind: 'delivery', nodeEffort: '' }))).toBe(true);
     expect(lessonSuggests(lesson({ proposal: 'raise_effort', kind: 'delivery', seen: 2, nodeEffort: 'low' }))).toBe(true);
     expect(lessonSatisfied(lesson({ proposal: 'larger_context', kind: 'context_limit', nodeEffort: 'low' }))).toBeNull();
+    // One written from the platform's counts says so, and asks for low.
+    const tuning = lesson({ kind: 'effort_tuning', given: false, seen: 1 });
+    expect(lessonRequest(tuning, zh)).toBe('在别的工作区里，和「生成页面」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少、更省。把它的推理强度调成 low，模型不变。');
+    expect(lessonEffort(tuning)).toBe('low');
+    expect(lessonSuggests(tuning)).toBe(true);
     // A request names its lesson, whatever the lesson's id holds.
     expect(lessonOfEvolution('lesson:l:1:2:1788398979451')).toBe('l:1:2');
     expect(lessonOfEvolution('draft-1')).toBe('');

@@ -4,7 +4,7 @@ import { api, SaaSApiError, tenantPath } from './api';
  *  to the node's next runs (when `given`), counted as applied and as succeeded or failed by each settled run that was
  *  given it, and retired when it never helps (or by a person). `proposal` is what it suggests changing about the node,
  *  which the 经验 panel applies as a plan (a reasoning effort) or hands to the canvas assistant (a model). */
-export type LessonKind = 'output_limit' | 'step_limit' | 'run_timeout' | 'workspace_context' | 'delivery' | 'context_limit' | 'provider';
+export type LessonKind = 'output_limit' | 'step_limit' | 'run_timeout' | 'workspace_context' | 'delivery' | 'context_limit' | 'provider' | 'effort_tuning';
 export type LessonProposal = '' | 'lower_effort' | 'raise_effort' | 'larger_context' | 'other_model';
 export type LessonProposalState = 'open' | 'asked' | 'dismissed' | 'applied';
 export interface CanvasLesson {

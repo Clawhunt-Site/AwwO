@@ -74,6 +74,10 @@ type App struct {
 	// lessonLockWait bounds each lock wait of writing a canvas run's lessons (canvas_lessons.go); zero is the 5 s every
 	// deployment uses. Tests set it.
 	lessonLockWait time.Duration
+	// effortStats holds the platform's node outcome counts between reads, and effortTuningLimits how much of them effort
+	// tuning needs: zero is defaultEffortTuning, which tests lower (node_outcomes.go).
+	effortStats        effortStatsCache
+	effortTuningLimits effortTuningLimits
 	// capabilityNotes remembers which cleared worker capabilities were already logged,
 	// bounded by capabilityNoteLimit; capabilityNotesCapped marks the one-time notice.
 	capabilityNotes       sync.Map

@@ -31,6 +31,7 @@ export const lessonKindName = (kind: string, t: Translate): string => ({
   delivery: t('交付不符合输出字段', 'Delivery did not match its outputs'),
   context_limit: t('输入超出模型的上下文', 'Inputs too large for its model'),
   provider: t('模型服务不可用', 'Model provider unavailable'),
+  effort_tuning: t('推理强度可以更低', 'Could run at a lower effort'),
 } as Record<string, string>)[kind] ?? kind;
 
 /** The request a lesson's suggestion puts in the canvas assistant's box, in the reader's words: what to change about
@@ -39,8 +40,11 @@ export function lessonRequest(lesson: CanvasLesson, t: Translate): string {
   const node = lesson.nodeTitle || lesson.nodeId || '';
   switch (lesson.proposal) {
     case 'lower_effort':
-      return t(`「${node}」已经 ${lesson.seen} 次停在模型的输出上限，没有交付完。把它的推理强度调成 low，模型不变。`,
-        `“${node}” has stopped at its model's output limit ${lesson.seen} times without finishing. Set its reasoning effort to low and keep its model.`);
+      return lesson.kind === 'effort_tuning'
+        ? t(`在别的工作区里，和「${node}」同类、用同一个模型的节点，用 low 推理强度首轮完成得一样多，输出更少、更省。把它的推理强度调成 low，模型不变。`,
+          `In other workspaces, nodes like “${node}” on the same model finished on their first attempt as often at low reasoning effort, with less output and lower cost. Set its reasoning effort to low and keep its model.`)
+        : t(`「${node}」已经 ${lesson.seen} 次停在模型的输出上限，没有交付完。把它的推理强度调成 low，模型不变。`,
+          `“${node}” has stopped at its model's output limit ${lesson.seen} times without finishing. Set its reasoning effort to low and keep its model.`);
     case 'raise_effort':
       return t(`「${node}」最近一次在 low 推理强度下没能完成交付（同样的问题已出现 ${lesson.seen} 次）。把它的推理强度调回 medium，模型不变。`,
         `“${node}” last failed to deliver at low reasoning effort (the same failure has come ${lesson.seen} times). Set its reasoning effort back to medium and keep its model.`);

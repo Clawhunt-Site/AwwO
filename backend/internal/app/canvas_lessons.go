@@ -66,12 +66,15 @@ var lessonKinds = map[string]struct{ rule, proposal string }{
 	// Nothing a model is told fixes these: they only carry their suggestion.
 	"context_limit": {"", "larger_context"},
 	"provider":      {"", "other_model"},
+	// Written from the platform's outcome counts, not a failure (node_outcomes.go tuneGraphEfforts).
+	"effort_tuning": {"", "lower_effort"},
 }
 
 // lessonDescriptions are what a lesson that gives a model nothing says in its rule column, for the people who read it.
 var lessonDescriptions = map[string]string{
 	"context_limit": "The node's inputs and instructions were too large for its model's context window.",
 	"provider":      "The node's model provider could not answer, after its automatic retries.",
+	"effort_tuning": "Nodes like this one, on the same model, finished on their first attempt as often at low reasoning effort, with less output, in other workspaces' runs: this node could run at low.",
 }
 
 // deliveryRefusals are the platform's refusals of a node's delivery (graphOutputFiles, fieldValue, artifactName,
@@ -310,11 +313,15 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR KEY SHARE", tid); err != nil {
 		return err
 	}
+	// The run's lessons and its nodes' outcomes (node_outcomes.go) are each written once. A run learnt from before
+	// outcomes were recorded (lessons_at set, outcomes_at not: the sweeper finds it) has its outcomes recorded, and its
+	// lessons, and the effort lessons the outcomes would write, are left as they were.
 	var canvasID string
-	var collaboration bool
+	var collaboration, lessonsDue bool
 	var admitted time.Time
-	err = tx.QueryRow(ctx, `UPDATE graph_runs SET lessons_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND lessons_at IS NULL
-		AND status IN ('completed','failed','interrupted') RETURNING canvas_id,collaboration IS NOT NULL,created_at`, tid, gid).Scan(&canvasID, &collaboration, &admitted)
+	err = tx.QueryRow(ctx, `WITH t AS (SELECT clock_timestamp() AS at) UPDATE graph_runs g SET lessons_at=COALESCE(g.lessons_at,t.at),outcomes_at=t.at FROM t
+		WHERE g.tenant_id=$1 AND g.id=$2 AND (g.lessons_at IS NULL OR g.outcomes_at IS NULL) AND g.status IN ('completed','failed','interrupted')
+		RETURNING g.canvas_id,g.collaboration IS NOT NULL,g.created_at,g.lessons_at=t.at`, tid, gid).Scan(&canvasID, &collaboration, &admitted, &lessonsDue)
 	if noRows(err) {
 		return nil
 	}
@@ -325,65 +332,97 @@ func (a *App) distillGraphLessons(ctx context.Context, tid, gid string) error {
 		return tx.Commit(ctx)
 	}
 	rows, err := tx.Query(ctx, `SELECT n.node_id,n.state,n.detail,n.attempts,n.execution_snapshot,COALESCE(r.status,''),COALESCE(r.error,''),COALESCE(r.id,''),
-		COALESCE(r.created_at,$3)
+		COALESCE(r.created_at,$3),COALESCE((SELECT array_agg(e->>'runId') FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.attempt_log)='array'
+			THEN n.attempt_log ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e)='object' AND COALESCE(e->>'runId','')<>''),'{}')
 		FROM graph_run_nodes n LEFT JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=n.run_id
-		WHERE n.tenant_id=$1 AND n.graph_id=$2 AND n.state='failed' ORDER BY n.ordinal`, tid, gid, admitted)
+		WHERE n.tenant_id=$1 AND n.graph_id=$2 AND n.state IN ('done','failed') ORDER BY n.ordinal`, tid, gid, admitted)
 	if err != nil {
 		return err
 	}
-	failures := []lessonFailure{}
+	settled, attemptRuns := []lessonFailure{}, map[string][]string{}
 	for rows.Next() {
 		var f lessonFailure
-		if err = rows.Scan(&f.nodeID, &f.state, &f.detail, &f.attempts, &f.snapshot, &f.runStatus, &f.runError, &f.runID, &f.admitted); err != nil {
+		var earlier []string
+		if err = rows.Scan(&f.nodeID, &f.state, &f.detail, &f.attempts, &f.snapshot, &f.runStatus, &f.runError, &f.runID, &f.admitted, &earlier); err != nil {
 			rows.Close()
 			return err
 		}
-		failures = append(failures, f)
+		settled, attemptRuns[f.nodeID] = append(settled, f), earlier
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	for _, f := range failures {
-		kind, reason := lessonKindOf(f)
-		if kind == "" {
-			continue
-		}
-		var snap executionSnapshot
-		if len(f.snapshot) > 0 {
-			_ = json.Unmarshal(f.snapshot, &snap)
-		}
-		if snap.Media != nil || snap.Team != nil {
-			// An image, video, 3D or audio node's prompt is not a model's instructions (graph_media.go), and a team's
-			// members are framed by their own turns: neither is ever given a lesson.
-			continue
-		}
-		rule := lessonRule(kind, reason)
-		if rule == "" {
-			if rule = lessonDescriptions[kind]; rule == "" {
-				continue
+	nodes, err := graphOutcomeNodes(ctx, tx, tid, gid)
+	if err != nil {
+		return err
+	}
+	if lessonsDue {
+		for _, f := range settled {
+			if err = a.learnFromNode(ctx, tx, tid, canvasID, gid, f, nodes[f.nodeID]); err != nil {
+				return err
 			}
 		}
-		scope, _ := json.Marshal(map[string]string{"runtime": snapshotRuntime(snap), "model": snap.Model, "effort": snap.Effort})
-		// The evidence names the run and how it ended in the platform's codes, never a word of its output or refusal.
-		evidence, _ := json.Marshal([]map[string]any{{"graphId": gid, "runId": f.runID, "code": f.runError, "reason": reason, "attempts": f.attempts}})
-		// A lesson a person retired stays retired, and a suggestion they dismissed or asked for stays as they left it; one
-		// they applied is offered again when its failure comes back with a suggestion (lessonProposal makes none for a
-		// node still at the effort it was put at) in a run admitted after they applied it (one admitted before, learnt
-		// from late, ran before the change). The rule's words and the evidence follow the failure that wrote it again.
-		if _, err = tx.Exec(ctx, `INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,source,fingerprint,rule,scope,evidence,status,proposal)
-			VALUES($1,$2,$3,$4,$5,'rule',$6,$7,$8,$9,'active',$10)
-			ON CONFLICT (tenant_id,fingerprint) WHERE fingerprint IS NOT NULL DO UPDATE SET seen=canvas_lessons.seen+1,last_seen_at=clock_timestamp(),
-			rule=EXCLUDED.rule,scope=EXCLUDED.scope,
-			evidence=(SELECT COALESCE(jsonb_agg(e ORDER BY o),'[]'::jsonb) FROM (SELECT e,o FROM jsonb_array_elements(EXCLUDED.evidence||canvas_lessons.evidence) WITH ORDINALITY AS x(e,o) ORDER BY o LIMIT $11) kept),
-			proposal=CASE WHEN canvas_lessons.proposal_state='open' OR (`+reopenedSQL+`) THEN EXCLUDED.proposal ELSE canvas_lessons.proposal END,
-			proposal_state=CASE WHEN `+reopenedSQL+` THEN 'open' ELSE canvas_lessons.proposal_state END,
-			updated_at=clock_timestamp()`,
-			randomID(), tid, canvasID, f.nodeID, kind, lessonFingerprint(canvasID, f.nodeID, kind), rule, scope, evidence, lessonProposal(kind, snap), maxLessonEvidence, f.admitted); err != nil {
+	}
+	outcomes := a.recordGraphOutcomes(ctx, tx, tid, canvasID, gid, nodes, settled, attemptRuns)
+	if lessonsDue {
+		if err = a.tuneGraphEfforts(ctx, tx, tid, canvasID, gid, outcomes); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// learnFromNode writes the lesson a failed node of canvas run gid teaches, if any (lessonKindOf). A node whose own setup
+// decides its model and effort (a workspace or market Agent) gets the lesson but no suggestion for them, which a plan
+// could not carry out.
+func (a *App) learnFromNode(ctx context.Context, tx pgx.Tx, tid, canvasID, gid string, f lessonFailure, node outcomeNode) error {
+	kind, reason := lessonKindOf(f)
+	if kind == "" {
+		return nil
+	}
+	var snap executionSnapshot
+	if len(f.snapshot) > 0 {
+		_ = json.Unmarshal(f.snapshot, &snap)
+	}
+	if snap.Media != nil || snap.Team != nil {
+		// An image, video, 3D or audio node's prompt is not a model's instructions (graph_media.go), and a team's
+		// members are framed by their own turns: neither is ever given a lesson.
+		return nil
+	}
+	rule := lessonRule(kind, reason)
+	if rule == "" {
+		if rule = lessonDescriptions[kind]; rule == "" {
+			return nil
+		}
+	}
+	proposal := lessonProposal(kind, snap)
+	if node.AgentRef || node.Team || snap.Market != nil {
+		proposal = ""
+	}
+	scope, _ := json.Marshal(map[string]string{"runtime": snapshotRuntime(snap), "model": snap.Model, "effort": snap.Effort})
+	// The evidence names the run and how it ended in the platform's codes, never a word of its output or refusal.
+	evidence, _ := json.Marshal([]map[string]any{{"graphId": gid, "runId": f.runID, "code": f.runError, "reason": reason, "attempts": f.attempts}})
+	return writeNodeLesson(ctx, tx, tid, canvasID, f.nodeID, kind, rule, scope, evidence, proposal, f.admitted)
+}
+
+// writeNodeLesson writes lesson kind of node nodeID of canvas canvasID, in tx, or counts it again (seen): one per node
+// and kind (lessonFingerprint). A lesson a person retired stays retired, and a suggestion they dismissed or asked for
+// stays as they left it; one they applied is offered again when its failure comes back with a suggestion
+// (lessonProposal makes none for a node still at the effort it was put at) in a run admitted after they applied it (one
+// admitted before, learnt from late, ran before the change). The rule's words and the evidence follow the run that
+// wrote it again.
+func writeNodeLesson(ctx context.Context, tx pgx.Tx, tid, canvasID, nodeID, kind, rule string, scope, evidence []byte, proposal string, admitted time.Time) error {
+	_, err := tx.Exec(ctx, `INSERT INTO canvas_lessons(id,tenant_id,canvas_id,node_id,kind,source,fingerprint,rule,scope,evidence,status,proposal)
+		VALUES($1,$2,$3,$4,$5,'rule',$6,$7,$8,$9,'active',$10)
+		ON CONFLICT (tenant_id,fingerprint) WHERE fingerprint IS NOT NULL DO UPDATE SET seen=canvas_lessons.seen+1,last_seen_at=clock_timestamp(),
+		rule=EXCLUDED.rule,scope=EXCLUDED.scope,
+		evidence=(SELECT COALESCE(jsonb_agg(e ORDER BY o),'[]'::jsonb) FROM (SELECT e,o FROM jsonb_array_elements(EXCLUDED.evidence||canvas_lessons.evidence) WITH ORDINALITY AS x(e,o) ORDER BY o LIMIT $11) kept),
+		proposal=CASE WHEN canvas_lessons.proposal_state='open' OR (`+reopenedSQL+`) THEN EXCLUDED.proposal ELSE canvas_lessons.proposal END,
+		proposal_state=CASE WHEN `+reopenedSQL+` THEN 'open' ELSE canvas_lessons.proposal_state END,
+		updated_at=clock_timestamp()`,
+		randomID(), tid, canvasID, nodeID, kind, lessonFingerprint(canvasID, nodeID, kind), rule, scope, evidence, proposal, maxLessonEvidence, admitted)
+	return err
 }
 
 // reopenedSQL is when the lesson upsert offers an applied suggestion again: the failure that came back ($12, when its
@@ -513,8 +552,9 @@ func boundedExec(ctx context.Context, savepoint pgx.Tx, statement string, args .
 	return err
 }
 
-// startLessonSweeper writes, every lessonSweepEvery, the lessons of canvas runs that ended without them being written
-// (this process stopped first, or a write failed): those that ended within lessonSweepWindow, oldest first.
+// startLessonSweeper writes, every lessonSweepEvery, the lessons and node outcomes of canvas runs that ended without
+// them being written (this process stopped first, a write failed, or the run ended before outcomes were recorded):
+// those that ended within lessonSweepWindow, oldest first.
 func (a *App) startLessonSweeper(watch context.Context) {
 	a.tasks.Add(1)
 	go func() {
@@ -535,7 +575,7 @@ func (a *App) startLessonSweeper(watch context.Context) {
 }
 
 func (a *App) sweepGraphLessons(ctx context.Context) error {
-	rows, err := a.db.Query(ctx, `SELECT tenant_id,id FROM graph_runs WHERE lessons_at IS NULL AND status IN ('completed','failed','interrupted')
+	rows, err := a.db.Query(ctx, `SELECT tenant_id,id FROM graph_runs WHERE (lessons_at IS NULL OR outcomes_at IS NULL) AND status IN ('completed','failed','interrupted')
 		AND updated_at<now()-$1::bigint*interval '1 millisecond' AND updated_at>now()-$2::bigint*interval '1 millisecond' ORDER BY updated_at LIMIT $3`,
 		lessonSweepSettle.Milliseconds(), lessonSweepWindow.Milliseconds(), lessonSweepBatch)
 	if err != nil {

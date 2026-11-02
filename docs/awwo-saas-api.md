@@ -274,7 +274,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 | 方法与后缀 | 请求 / 查询 | 说明 |
 | --- | --- | --- |
-| GET /canvases/{canvasId}/lessons | 无 | `{lessons,runs}`：画布节点的经验（最多 200 条，生效中的在前；每条含 nodeTitle、kind、rule、given、status、retiredReason、seen、applied、succeeded、failed、proposal、proposalState、scope（写下它的运行所用的 runtime、model、effort）、evidence，以及 nodeEffort：节点在保存的画布里设的推理强度，画布没写时取它绑定的 Agent 的，节点已不在画布上时为 null；网页不认识的 proposal / proposalState 当作没有建议 / 已忽略），以及该画布最近 20 次整图运行（ran、firstPass、retried、failed、givenLessons） |
+| GET /canvases/{canvasId}/lessons | 无 | `{lessons,runs}`：画布节点的经验（最多 200 条，生效中的在前；每条含 nodeTitle、kind（失败的类别，或 `effort_tuning`）、rule、given、status、retiredReason、seen、applied、succeeded、failed、proposal、proposalState、scope（写下它的运行所用的 runtime、model、effort）、evidence，以及 nodeEffort：节点在保存的画布里设的推理强度，画布没写时取它绑定的 Agent 的，节点已不在画布上时为 null；网页不认识的 proposal / proposalState 当作没有建议 / 已忽略），以及该画布最近 20 次整图运行（ran、firstPass、retried、failed、givenLessons） |
 | PATCH /canvas-lessons/{id} | status?（active / retired）, proposalState?（open / asked / applied / dismissed） | 停用或恢复一条经验，及其建议是否已交给画布助手或已应用到画布（设置建议状态时记下时间 `proposal_at`）；记 `canvas_lesson.updated` 审计；自动停用（`ineffective`）后恢复的经验重新计失败次数，人停用后恢复的保留计数 |
 | GET /runs/{id}/rating | 无 | `{runId,rating}`：当前登录者给这次运行结果的评分（1 好、-1 不好、0 未评） |
 | PUT /runs/{id}/rating | rating（1 / -1 / 0） | 只能给已完成的运行评分（否则 409 `run_not_rateable`）；0 收回 |
@@ -284,6 +284,10 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 该节点之后的运行（整图运行与节点自己的对话）在受理时冻结它生效中的经验（最多 6 条、3 KiB，按类别固定顺序，便于提示缓存），放在记忆之后的系统提示里；放不下时这次运行不带经验，绝不因此被拒。运行结束时按它自己的快照计数：完成算一次成功，同一类失败再次出现算一次失败，别的可避免失败只计次数，中断、服务不可用、额度用尽等不计；失败 3 次且从未帮上忙的经验自动停用（`ineffective`）。经验还可能带一条针对画布本身的建议（`proposal`：调低推理强度、调回 medium、换上下文更长或别的模型），服务器从不自动修改画布：推理强度的建议由用户在「经验」面板里应用，网页把它作为一份画布方案放到画布上（和画布助手的方案一样校验、可以撤销），节点用它现在的模型（用工作区默认模型的节点改用写下经验的运行所用的模型；经验没写明模型时不应用），等画布的模型目录读到后才应用，一次一条；节点按方案改成了建议的推理强度、画布也收下了这次改动，或者节点本来就是这样运行的，建议才标为 `applied`，否则在画布助手的面板里说明原因（节点正在运行、页面的画布已过期、模型没有这档推理强度等）。节点在保存的画布里已经是建议的推理强度时，面板不再提出这条建议。换模型的建议作为用户的请求放进画布助手的输入框，由用户发送。用 low 推理强度的节点交付不符合输出字段、或工具步数用完时，经验建议调回 medium（`raise_effort`，同样的失败出现两次才提出）。已应用的建议只在它针对的失败再次出现、出现时的设置是它会改变的设置、且那次运行是在应用之后受理的时候重新提出（迁移 049 的 `proposal_at`：之后补写的更早的运行不算）；忽略的建议一直保持忽略。
 
 **规划器的经验**（`planner_lessons.go`）：规划方案被校验拒绝时，按校验自身给出的第一个失败原因记一个固定的词（`planner_refusals`，不含方案原文，随工作区删除），连同规划所用的模型。7 天内被拒至少 3 次、且出现在至少 2 个工作区的原因（最多 6 个），以 AwwO 写好的一句话说明校验要求，加进所有规划器的指令；最多每 10 分钟读一次，按固定顺序排列，只在出现或消失一个原因时改变。
+
+**节点结果记录**（`node_outcomes.go`，迁移 050）：整图运行写经验的同一个事务里，给这次运行跑过的每个节点（以及受理时就被拒的节点）写一条记录（`node_outcomes`）：节点的模板、交付的类型、执行引擎、模型、推理强度（节点没选时记模型的默认档）、结束状态和平台代码（交付被拒只记拒绝的类别）、重试次数、带了几条经验和技能，以及这次节点所有尝试的 token、估算成本、积分和 worker 用时；不含任何提示词或输出的内容，随整图运行（画布、工作区）删除。每次运行只记一次（`graph_runs.outcomes_at`）；迁移时 14 天前结束的运行直接标为已记，其余由经验的补写在 14 天窗口内补记（这些运行的经验已经写过，不再重写）。
+
+**推理强度自调**（`effort_tuning`）：一个用 medium 等非 low 档首轮完成、近 14 天在这张画布上同样首轮完成至少 3 次的 Agent 节点（不是团队、工作区或市场 Agent、媒体节点），如果全平台同一模板、同一模型 low 档的运行（至少 20 次、来自至少 2 个工作区）首轮完成率不低于它这一档的（减 5 个百分点以内）、停在输出上限的比例不高于它这一档的（这一档也至少 20 次），就写一条 `effort_tuning` 经验：不交给模型，只带「调低推理强度」的建议，由用户在「经验」面板里应用。只用计数，最多每 10 分钟读一次。
 
 **评分** 写在 `run_ratings`（随运行和评分者删除），供经验和之后的改进参考。
 
