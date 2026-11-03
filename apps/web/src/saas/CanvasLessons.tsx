@@ -12,11 +12,16 @@ import { saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
 import { promoteCanvasLesson, readCanvasLessons, updateCanvasLesson, type CanvasLesson, type CanvasLessonsView } from './lessonsApi';
 import { readMemory, updateMemory, type MemoryNote } from './memoryApi';
+import { readCanvasEvolution, updateCanvasEvolution, type CanvasEvolutionView, type EvolutionEntry } from './evolutionApi';
 import './canvas-library.css';
 import './canvas-lessons.css';
 
 type Translate = (zh: string, en: string) => string;
-interface Props { tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void; onEvolve?: (evolution: CanvasEvolution) => void }
+interface Props {
+  tenantId: string; canvasId: string; readOnly?: boolean; onTaskDraft?: (draft: CanvasTaskDraft) => void; onEvolve?: (evolution: CanvasEvolution) => void;
+  /** Takes back a change the canvas made by itself (canvasEvolution.ts: a plan on the canvas, then its record). */
+  onRevert?: (entry: EvolutionEntry) => void;
+}
 
 /** The id of a lesson's evolution request, which names its lesson (lessonOfEvolution reads it back). */
 export const evolutionId = (lessonId: string) => `lesson:${lessonId}:${Date.now()}`;
@@ -109,7 +114,7 @@ export function lessonSuggests(lesson: CanvasLesson): boolean {
 
 /** The requests to apply a suggested effort, in turn: a request handed over while one waits (the canvas reads its
  *  palette first) waits behind it rather than replacing it. `evolution` is the one the canvas takes now, and `settled`
- *  takes it off. A suggestion the canvas took (its plan changed the node, or the node already ran that way) is marked
+ *  takes it off; `withdraw` takes one off that the canvas has not taken (whether it was still waiting). A suggestion the canvas took (its plan changed the node, or the node already ran that way) is marked
  *  applied once the cloud confirms a canvas with its node at that effort (`saved`, told each canvas the cloud
  *  confirmed): one whose change was undone, or never saved (another tab's newer canvas won), stays open. A mark that
  *  cannot be written is let go: the suggestion is then offered again, and taking it again marks it. */
@@ -133,6 +138,11 @@ export function useLessonEvolutions(tenantId: string) {
     });
   }, []);
   const enqueue = useCallback((evolution: CanvasEvolution) => { queue.current = [...queue.current, evolution]; setShown(value => value + 1); }, []);
+  const withdraw = useCallback((id: string) => {
+    const waiting = queue.current.some(item => item.id === id);
+    if (waiting) { queue.current = queue.current.filter(item => item.id !== id); setShown(value => value + 1); }
+    return waiting;
+  }, []);
   const settled = useCallback((id: string, result: CanvasEvolutionResult) => {
     const taken = queue.current.find(item => item.id === id);
     queue.current = queue.current.filter(item => item.id !== id);
@@ -141,10 +151,10 @@ export function useLessonEvolutions(tenantId: string) {
     mark();
   }, [mark]);
   const saved = useCallback((document: unknown) => { confirmed.current = document; mark(); }, [mark]);
-  return { evolution: queue.current[0] ?? null, enqueue, settled, saved };
+  return { evolution: queue.current[0] ?? null, enqueue, withdraw, settled, saved };
 }
 
-export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve }: Props) {
+export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve, onRevert }: Props) {
   const { t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
   const name = t('经验', 'Lessons');
@@ -154,9 +164,84 @@ export function CanvasLessons({ tenantId, canvasId, readOnly = false, onTaskDraf
     {open && <WorkbenchOverlay label={t('经验与进化', 'Lessons and evolution')} onClose={() => setOpen(false)}>
       <LessonsWorkbench key={`${tenantId}/${canvasId}`} tenantId={tenantId} canvasId={canvasId} readOnly={readOnly}
         onTaskDraft={onTaskDraft && (draft => { onTaskDraft(draft); setOpen(false); })}
-        onEvolve={onEvolve && (evolution => { onEvolve(evolution); setOpen(false); })} onClose={() => setOpen(false)} />
+        onEvolve={onEvolve && (evolution => { onEvolve(evolution); setOpen(false); })}
+        onRevert={onRevert && (entry => { onRevert(entry); setOpen(false); })} onClose={() => setOpen(false)} />
     </WorkbenchOverlay>}
   </>;
+}
+
+const effortWord = (effort: string, t: Translate) => effort || t('模型默认', 'model default');
+
+/** A line of the canvas's evolution log, in the reader's words. */
+export function evolutionEntryText(entry: EvolutionEntry, t: Translate): string {
+  const node = entry.nodeTitle || t('已不在画布上的节点', 'a node no longer on the canvas');
+  const from = effortWord(entry.from, t), to = effortWord(entry.to, t);
+  // A change claimed is under way until the page settles it; one never settled was let go.
+  if (entry.state === 'claimed') return entry.kind === 'revert'
+    ? t(`「${node}」正在改回 ${to}`, `“${node}” is being set back to ${to}`)
+    : t(`「${node}」正在调整推理强度 ${from} → ${to}`, `“${node}” is being changed: reasoning effort ${from} → ${to}`);
+  if (entry.state === 'expired') return t(`「${node}」的调整没有完成：页面在完成前关闭了`, `“${node}”’s change did not finish: the page closed first`);
+  switch (entry.kind) {
+    case 'effort': return t(`「${node}」推理强度 ${from} → ${to}${entry.reverted ? '（已改回）' : ''}`,
+      `“${node}” reasoning effort ${from} → ${to}${entry.reverted ? ' (taken back)' : ''}`);
+    case 'revert': return entry.auto
+      ? t(`「${node}」改回 ${to}：调整之后的运行都没完成`, `“${node}” set back to ${to}: the runs after the change did not finish`)
+      : t(`「${node}」被手动改回 ${to}`, `“${node}” set back to ${to} by hand`);
+    case 'skip': return entry.reason
+      ? t(`「${node}」没能自动调整：${entry.reason}`, `“${node}” could not be changed by itself: ${entry.reason}`)
+      : t(`「${node}」的调整没有完成：页面在完成前关闭了`, `“${node}”’s change did not finish: the page closed first`);
+    case 'rerun': return t('自动重跑了上次没完成的节点', 'Reran the unfinished nodes by itself');
+  }
+}
+
+/** The 经验 panel's 自动进化: the canvas's two switches, off until a member turns them on, and what it did by itself, a
+ *  change of effort taken back here (改回) as a plan on the canvas. Nothing shows until it is read, nor when it cannot
+ *  be (an API before it: the lessons are the panel's own business); a reader sees it and changes nothing. */
+function CanvasAutoEvolution({ tenantId, canvasId, readOnly, onRevert }: { tenantId: string; canvasId: string; readOnly: boolean; onRevert?: (entry: EvolutionEntry) => void }) {
+  const { t, locale } = useSaaSPreferences();
+  const [view, setView] = useState<CanvasEvolutionView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // The newest read or switch decides what shows: an older answer that comes after it is dropped.
+  const latest = useRef(0);
+  useEffect(() => {
+    const mine = ++latest.current;
+    const controller = new AbortController();
+    readCanvasEvolution(tenantId, canvasId, controller.signal).then(value => { if (latest.current === mine) setView(value); }, () => undefined);
+    return () => controller.abort();
+  }, [tenantId, canvasId]);
+  const toggle = async (change: { autoApply?: boolean; autoRerun?: boolean }) => {
+    if (busy) return;
+    const mine = ++latest.current;
+    setBusy(true); setError(null);
+    try { const value = await updateCanvasEvolution(tenantId, canvasId, change); if (alive.current && latest.current === mine) setView(value); }
+    catch (cause) { if (alive.current) setError(cause); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  if (!view) return null;
+  const date = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '';
+  const perDay = view.limits.rerunsPerDay;
+  return <section className="awwo-lessons-evolution" aria-label={t('自动进化', 'Auto-evolve')}>
+    <h3>{t('自动进化：从开启之后结束的运行开始', 'Auto-evolve: from the runs that end after you turn it on')}</h3>
+    {error !== null && <p className="awwo-library-alert" role="alert">{saasErrorMessage(error, locale)}</p>}
+    <label className="awwo-library-check awwo-lessons-switch"><input type="checkbox" checked={view.autoApply.on} disabled={readOnly || busy}
+      onChange={event => void toggle({ autoApply: event.target.checked })} />
+      <span><strong>{t('自动应用建议', 'Apply suggestions by itself')}</strong>
+        <small>{t(`运行结束后，没完成的节点自动换上经验建议的推理强度：只改推理强度，不改模型和画布结构，可以撤销。同一个节点 ${view.limits.changeEveryHours} 小时内最多调整一次、一周最多 ${view.limits.changesPerWeek} 次；调整后接下来的 ${view.limits.revertAfterRuns} 次运行都没完成，就马上自动改回（改回也算一次调整）。`,
+          `When a run ends, each node that did not finish takes the reasoning effort its lesson suggests: only the effort, never the model or the canvas’s shape, and it can be undone. A node is changed at most once in ${view.limits.changeEveryHours} hours and ${view.limits.changesPerWeek} times a week; if its next ${view.limits.revertAfterRuns} runs after a change all fail, the change is taken back at once (which counts as a change).`)}</small></span></label>
+    <label className="awwo-library-check awwo-lessons-switch"><input type="checkbox" checked={view.autoRerun.on} disabled={readOnly || busy}
+      onChange={event => void toggle({ autoRerun: event.target.checked })} />
+      <span><strong>{t('自动重跑没完成的节点', 'Rerun unfinished nodes by itself')}</strong>
+        <small>{t(`运行没完成时，把没完成的节点再跑一次，带上刚学到的经验。会消耗额度（图片、视频等生成也算）；每 24 小时最多 ${perDay} 次，重跑本身没完成不会再重跑。`,
+          `When a run does not finish, its unfinished nodes run once more, with what was just learnt. This spends credits (image, video and other generations too); at most ${perDay} times in 24 hours, and a rerun that does not finish is not rerun.`)}</small></span></label>
+    {view.log.length > 0 && <ol className="awwo-lessons-evolution-log" aria-label={t('自动进化记录', 'What auto-evolve did')}>{view.log.map(entry => <li key={entry.id}>
+      <span>{evolutionEntryText(entry, t)}</span><time dateTime={entry.createdAt}>{date(entry.createdAt)}</time>
+      {entry.standing && !readOnly && onRevert
+        && <button type="button" onClick={() => onRevert(entry)}><RotateCcw size={13} aria-hidden="true" />{t('改回', 'Undo')}</button>}
+    </li>)}</ol>}
+  </section>;
 }
 
 /** The notes AwwO's own model proposed from this canvas's runs (run_memory.go), waiting for a member: one accepted joins
@@ -198,7 +283,7 @@ function DistilledNotes({ tenantId, canvasId, readOnly }: { tenantId: string; ca
   </section>;
 }
 
-export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve, onClose }: Props & { onClose: () => void }) {
+export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskDraft, onEvolve, onRevert, onClose }: Props & { onClose: () => void }) {
   const { t, locale } = useSaaSPreferences();
   const [view, setView] = useState<CanvasLessonsView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -282,6 +367,7 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     {notice && <p className="awwo-library-notice" role="status"><Check size={14} aria-hidden="true" />{notice}</p>}
     <div className="awwo-library-body">
       <div className="awwo-library-list-column">
+        <CanvasAutoEvolution tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} onRevert={onRevert} />
         <DistilledNotes tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} />
         {runs.length > 0 && <section className="awwo-lessons-runs" aria-label={t('最近的运行', 'Recent runs')}>
           <h3>{t('最近的运行：首轮就完成的节点', 'Recent runs: nodes done on their first attempt')}</h3>

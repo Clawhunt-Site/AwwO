@@ -222,10 +222,37 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		collaborationRaw, _ = json.Marshal(b.Collaboration)
 	}
 	scopeRaw, _ := json.Marshal(scope)
-	_, e = tx.Exec(r.Context(), "INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status,collaboration) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10)", id, tid, cid, currentUser(r).ID, b.OperationID, hash, version, raw, scopeRaw, collaborationRaw)
+	// An auto rerun counts as a run after the changes of its run's end: those the saved canvas holds are recorded first
+	// (canvas_evolution.go).
+	if _, auto := autoRerunParent(b.OperationID); auto {
+		if e = settleEvolutionClaims(r.Context(), tx, tid, cid, ""); e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
+	// A canvas run's time is taken as it is admitted, under the locks above (not at its transaction's start): canvas runs
+	// are ordered as they were admitted, and a change recorded just before comes before it.
+	_, e = tx.Exec(r.Context(), "INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status,collaboration,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued',$10,clock_timestamp(),clock_timestamp())", id, tid, cid, currentUser(r).ID, b.OperationID, hash, version, raw, scopeRaw, collaborationRaw)
 	if e != nil {
 		a.dbError(w, e)
 		return
+	}
+	// A canvas's auto rerun (canvas_evolution.go) is admitted only as its rules allow, decided under the canvas row's
+	// lock taken above, before anything of its nodes is.
+	if parent, auto := autoRerunParent(b.OperationID); auto {
+		if parent == "" || b.Collaboration != nil {
+			fail(w, 400, "invalid_input", "An auto rerun names the canvas run it reruns, and is no collaboration")
+			return
+		}
+		code, message, err := claimAutoRerun(r.Context(), tx, tid, cid, parent, id, currentUser(r).ID, scope)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		if code != "" {
+			fail(w, 409, code, message)
+			return
+		}
 	}
 	// Collected here and counted after commit: a graph that is rejected or rolled
 	// back decided nothing, and a metric emitted inside the transaction would claim

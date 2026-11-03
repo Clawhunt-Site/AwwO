@@ -229,6 +229,12 @@ export function graphAdmissionRejected(error: unknown): boolean {
   ));
 }
 
+/** The id of the canvas run admitted under `operationId` (a run journal's, whose admission answer was lost), if any. */
+export async function graphIdOfOperation(graph: { tenantId: string; canvasId: string }, operationId: string, signal?: AbortSignal): Promise<string | undefined> {
+  const base = graphPath(graph.tenantId, graph.canvasId);
+  return (await api<{ items: GraphRunSummary[] }>(`${base}?operationId=${encodeURIComponent(operationId)}`, { signal })).items.find(item => item.operationId === operationId)?.id;
+}
+
 export async function submitCloudGraph(operationId: string, scope: readonly string[], collaboration?: GraphCollaborationPolicy): Promise<GraphRunSnapshot> {
   const captured = currentSaaSCanvas();
   if (!captured) throw new GraphNotSubmittedError('Cloud canvas is unavailable');
@@ -267,11 +273,9 @@ export async function observeCloudGraph(journal: CanvasRunJournal, signal?: Abor
     // Stop names the operation's graph when there is one; the snapshot read by it must still be the operation's.
     if (!known && typeof result.graphId === 'string' && result.graphId) known = result.graphId;
   }
-  const base = graphPath(graph.tenantId, graph.canvasId);
   // Without the run's id (its POST's response was lost), the list finds it by the operation; the list carries no outputs,
   // so the run is then read by its id, as when the journal knows it.
-  const id = known
-    || (await api<{ items: GraphRunSummary[] }>(`${base}?operationId=${encodeURIComponent(journal.id)}`, { signal })).items.find(item => item.operationId === journal.id)?.id;
+  const id = known || await graphIdOfOperation(graph, journal.id, signal);
   // A missing response is not proof that an in-flight POST failed. Retain the lock and
   // recover by the same operation identity; observation never submits another model call.
   if (!id) return journal;

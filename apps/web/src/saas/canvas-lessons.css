@@ -9,6 +9,17 @@
 .awwo-lessons-run-bar { position: relative; height: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--library-accent) 14%, transparent); }
 .awwo-lessons-run-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--library-accent); }
 .awwo-lessons-run-figure { font-variant-numeric: tabular-nums; }
+.awwo-lessons-evolution { display: grid; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
+.awwo-lessons-evolution h3 { margin: 0; color: var(--library-muted); font-size: 12px; font-weight: 600; }
+.awwo-library .awwo-lessons-switch { align-items: flex-start; }
+.awwo-lessons-switch input { margin-top: 3px; }
+.awwo-lessons-switch > span { display: grid; gap: 2px; }
+.awwo-lessons-switch small { color: var(--library-muted); font-size: 12px; line-height: 1.5; }
+.awwo-lessons-evolution-log { display: grid; gap: 6px; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--library-border); list-style: none; font-size: 12px; }
+.awwo-lessons-evolution-log li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.awwo-lessons-evolution-log li > span { flex: 1 1 14em; min-width: 0; }
+.awwo-lessons-evolution-log time { color: var(--library-muted); }
+.awwo-lessons-evolution-log button { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 2px 8px; font-size: 12px; }
 .awwo-lessons-notes { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
 .awwo-lessons-notes h3 { margin: 0 0 8px; color: var(--library-muted); font-size: 12px; font-weight: 600; }
 .awwo-lessons-notes ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { CanvasSurface, type CanvasEvolution } from '../src/canvas/CanvasSurface';
 import type { AssistantExecutionHost } from '../src/canvas/assistantRouting';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
-import { CANVAS_STORAGE_KEY, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
+import { CANVAS_STORAGE_KEY, dropOverriddenEvolutionMarks, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { resetAllSessions, setStreaming } from '../src/canvas/sessions';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
@@ -133,6 +133,132 @@ it('says why it applied nothing while a node is talking or when the palette coul
   render(<CanvasSurface readOnly storageMode="cloud" runtimeReadJson={runtimeReader} evolution={evolution({ id: 'lesson:l1:4' })} onEvolutionSettled={fourth} />);
   await new Promise(resolve => setTimeout(resolve, 50));
   expect(fourth).not.toHaveBeenCalled();
+});
+
+// A change the canvas's evolution claimed from one effort (`expect`) is made only on a node still at it: a person who
+// changed the node since keeps their change.
+it('leaves a node changed since its change was claimed as it is, and makes it on one still as claimed', async () => {
+  seed(page({ effort: 'high' }));
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  rerender(surface(settled, evolution({ id: 'evolution:1', expect: '' })));
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('evolution:1', { applied: false, reason: '这个节点的推理强度在这之后改过了，这项调整没有应用。' }));
+  expect(stored()?.effort).toBe('high');
+  rerender(surface(settled, evolution({ id: 'evolution:2', expect: 'high' })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:2', { applied: true }));
+  await waitFor(() => expect(stored()?.effort).toBe('low'));
+});
+
+// A change of the canvas's evolution marks the node it makes with its id, which the server records it by: undone with
+// the plan, and never on a suggestion of the 经验 panel's own.
+it('marks the node a change of the canvas’s evolution makes, and only that', async () => {
+  seed(page(), page({ id: 'brief', title: '简报' }));
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  rerender(surface(settled, evolution({ id: 'evolution:1', expect: '', change: 'aChange1' })));
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('evolution:1', { applied: true }));
+  await waitFor(() => expect(stored()).toMatchObject({ effort: 'low', evolution: { change: 'aChange1' } }));
+  fireEvent.click(await sidebar().findByRole('button', { name: '撤销本次更改' }));
+  await waitFor(() => expect(stored()?.effort).toBe(''));
+  expect(stored()?.evolution).toBeUndefined();
+  rerender(surface(settled, evolution({ id: 'lesson:l1:2', nodeId: 'brief' })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('lesson:l1:2', { applied: true }));
+  const brief = () => loadDocumentWithStatus().doc.nodes.find(item => item.id === 'brief') as SessionNode | undefined;
+  await waitFor(() => expect(brief()?.effort).toBe('low'));
+  expect(brief()?.evolution).toBeUndefined();
+});
+
+// The mark goes once anything but its change sets the node's effort (a person, a plan, the panel's own suggestion): the
+// change no longer stands.
+it('takes the mark away when anything but its change sets the node’s effort', async () => {
+  seed(page());
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  rerender(surface(settled, evolution({ id: 'evolution:1', expect: '', change: 'aChange1' })));
+  await waitFor(() => expect(stored()).toMatchObject({ effort: 'low', evolution: { change: 'aChange1' } }));
+  rerender(surface(settled, evolution({ id: 'lesson:l1:3', effort: 'medium' })));
+  await waitFor(() => expect(stored()?.effort).toBe('medium'));
+  expect(stored()?.evolution).toBeUndefined();
+});
+
+it('takes off only a mark whose node’s effort something else changed', () => {
+  const marked = page({ effort: 'low', evolution: { change: 'a1' } });
+  const doc = { ...emptyDocument(), nodes: [marked] };
+  const renamed = { ...doc, nodes: [{ ...marked, title: '另一个名字' }] };
+  expect(dropOverriddenEvolutionMarks(doc, renamed)).toBe(renamed);
+  expect(dropOverriddenEvolutionMarks(doc, { ...doc, nodes: [{ ...marked, effort: 'high' }] }).nodes[0]).not.toHaveProperty('evolution');
+  // Its own plan sets the effort and the mark together.
+  expect(dropOverriddenEvolutionMarks(doc, { ...doc, nodes: [{ ...marked, effort: '', evolution: { change: 'a2' } }] }).nodes[0])
+    .toMatchObject({ effort: '', evolution: { change: 'a2' } });
+  expect(dropOverriddenEvolutionMarks(doc, doc)).toBe(doc);
+});
+
+// A change claimed is made only on a node whose effort nothing set since its claim, even back to the same value, on the
+// page's monotonic clock: a system clock set back meanwhile changes nothing.
+it('keeps the times of claims and edits on a clock a system clock set back does not move', async () => {
+  seed(page({ effort: 'high' }));
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  const claimed = performance.now();
+  // The system clock goes back an hour, and the node goes to medium and back.
+  const wall = Date.now();
+  const now = vi.spyOn(Date, 'now').mockReturnValue(wall - 3_600_000);
+  try {
+    rerender(surface(settled, evolution({ id: 'lesson:l1:7', effort: 'medium' })));
+    await waitFor(() => expect(stored()?.effort).toBe('medium'));
+    rerender(surface(settled, evolution({ id: 'lesson:l1:8', effort: 'high' })));
+    await waitFor(() => expect(stored()?.effort).toBe('high'));
+    rerender(surface(settled, evolution({ id: 'evolution:9', effort: 'low', expect: 'high', since: claimed, change: 'aChange9' })));
+    await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:9', { applied: false, reason: '这个节点的推理强度在这之后改过了，这项调整没有应用。' }));
+  } finally { now.mockRestore(); }
+});
+
+// A change claimed is made only on a node whose effort nothing set since its claim, even back to the same value.
+it('leaves a node whose effort was set since its change was claimed, even back to the same value', async () => {
+  seed(page({ effort: 'high' }));
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  const claimed = performance.now();
+  // Meanwhile the node goes to medium and back to high (here by suggestions of the panel's own).
+  rerender(surface(settled, evolution({ id: 'lesson:l1:5', effort: 'medium' })));
+  await waitFor(() => expect(stored()?.effort).toBe('medium'));
+  rerender(surface(settled, evolution({ id: 'lesson:l1:6', effort: 'high' })));
+  await waitFor(() => expect(stored()?.effort).toBe('high'));
+  rerender(surface(settled, evolution({ id: 'evolution:1', effort: 'low', expect: 'high', since: claimed, change: 'aChange1' })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:1', { applied: false, reason: '这个节点的推理强度在这之后改过了，这项调整没有应用。' }));
+  expect(stored()?.effort).toBe('high');
+  // One claimed after those edits is made.
+  rerender(surface(settled, evolution({ id: 'evolution:2', effort: 'low', expect: 'high', since: performance.now(), change: 'aChange2' })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:2', { applied: true }));
+  await waitFor(() => expect(stored()).toMatchObject({ effort: 'low', evolution: { change: 'aChange2' } }));
+});
+
+// A revert is made only on a node the change it takes back still marks: a person's own edit since took the mark away.
+it('takes back a change only from a node that change still marks', async () => {
+  seed(page({ effort: 'low', evolution: { change: 'aChange1' } }), page({ id: 'brief', title: '简报', effort: 'low' }));
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  rerender(surface(settled, evolution({ id: 'evolution:1', nodeId: 'brief', effort: '', expect: 'low', expectMark: 'aChange1', change: 'aRevert0' })));
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('evolution:1', { applied: false, reason: '这个节点的推理强度在这之后改过了，这项调整没有应用。' }));
+  rerender(surface(settled, evolution({ id: 'evolution:2', effort: '', expect: 'low', expectMark: 'aChange1', change: 'aRevert1' })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:2', { applied: true }));
+  await waitFor(() => expect(stored()).toMatchObject({ effort: '', evolution: { change: 'aRevert1' } }));
+  const brief = loadDocumentWithStatus().doc.nodes.find(item => item.id === 'brief') as SessionNode | undefined;
+  expect(brief?.effort).toBe('low');
+});
+
+// A change its host took back before the canvas came to it (it waited too long, or the page left) is dropped unsaid.
+it('drops unsaid a change its host took back before the canvas came to it', async () => {
+  seed(page());
+  const settled = vi.fn();
+  const { rerender } = render(surface(settled));
+  rerender(surface(settled, evolution({ id: 'evolution:1', expect: '', wanted: () => false })));
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('evolution:1', { applied: false }));
+  expect(stored()?.effort).toBe('');
+  expect(document.body.textContent).not.toContain('把它的推理强度调成 low');
+  rerender(surface(settled, evolution({ id: 'evolution:2', expect: '', wanted: () => true })));
+  await waitFor(() => expect(settled).toHaveBeenLastCalledWith('evolution:2', { applied: true }));
+  await waitFor(() => expect(stored()?.effort).toBe('low'));
 });
 
 it('leaves a node whose model has no such effort as it was, saying so', async () => {

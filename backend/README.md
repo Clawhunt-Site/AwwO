@@ -287,10 +287,12 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Their graph runs and graph cancellation records require an actor, so they become that workspace's owner's. The API
     never shows that id and reads it only while a graph runs.
   - Their invitations, sent and accepted, are deleted: one passed to another sender could come back to life.
+  - The switches a canvas evolves by that they turned on, and the changes of its evolution they recorded, keep no
+    name (`apply_by`, `rerun_by`, `actor_id` become NULL, migration 053).
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),
-  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), usage ledger, and everyone's memberships and invitations.
+  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), its canvases' evolution switches and logs (migration 053), usage ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.

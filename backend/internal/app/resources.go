@@ -395,6 +395,8 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// A change of the canvas's evolution this save makes is done with it (canvas_evolution.go).
+	a.settleEvolutionBySave(r.Context(), tx, tid, id, currentUser(r).ID)
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return

@@ -119,6 +119,9 @@ export interface SessionNode extends CanvasNodeBase {
   skills?: string[];
   /** Image and video nodes only: choices for the model's closed parameters. */
   mediaParams?: MediaParams;
+  /** The change of the canvas's evolution that set this node's effort last (its id in the evolution's log): the server
+   *  records a change as made only on a node that runs at its effort and carries its id (canvas_evolution.go). */
+  evolution?: { change: string };
 }
 
 /** Conversation metadata and drafts persist locally; transcripts are restored from the server. */
@@ -589,10 +592,38 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       ...(Object.hasOwn(r, 'taskFrame') ? { taskFrame: r.taskFrame } : {}),
       ...(skills ? { skills } : {}),
       ...(mediaParams ? { mediaParams } : {}),
+      ...(evolutionMark(r.evolution) ? { evolution: evolutionMark(r.evolution)! } : {}),
     };
   }
 
   return null;
+}
+
+/** `next` with the mark of the change of the canvas's evolution taken off each session node whose effort changed since
+ *  `prev` while its mark did not: an effort set by anything but the change that marks it (a person's own edit, a plan,
+ *  a suggestion of the 经验 panel's) is no longer that change's, which then neither stands nor is reverted. The same
+ *  document when there is none to take off. */
+export function dropOverriddenEvolutionMarks(prev: CanvasDocument, next: CanvasDocument): CanvasDocument {
+  if (prev === next) return next;
+  const before = new Map(prev.nodes.map(node => [node.id, node]));
+  let dropped = false;
+  const nodes = next.nodes.map(node => {
+    if (node.kind !== 'session' || !node.evolution) return node;
+    const old = before.get(node.id);
+    if (old?.kind !== 'session' || old.effort === node.effort || old.evolution?.change !== node.evolution.change) return node;
+    dropped = true;
+    const unmarked: SessionNode = { ...node };
+    delete unmarked.evolution;
+    return unmarked;
+  });
+  return dropped ? { ...next, nodes } : next;
+}
+
+/** A node's mark of the change of the canvas's evolution that set its effort, as the server names changes. */
+function evolutionMark(raw: unknown): { change: string } | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const change = (raw as Record<string, unknown>).change;
+  return typeof change === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(change) ? { change } : undefined;
 }
 
 /** A node skill reference as the server accepts it (skills.go). */

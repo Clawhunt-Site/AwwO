@@ -15,7 +15,7 @@ import { marketSettingsOf, type MarketSettings } from '../saas/marketApi';
 import { useCanvasMarket } from './canvasMarket';
 import { keepMarketMark, MarketPagesContext, marketPageNodes, unmarkedMarketNodes } from './marketPages';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
-import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
+import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphIdOfOperation, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
 //
 // One infinite canvas whose nodes ARE agent sessions: each tile holds a live conversation that
@@ -99,6 +99,7 @@ import {
   createAssembleNode,
   createEditNode,
   createSessionNode,
+  dropOverriddenEvolutionMarks,
   loadDocumentWithStatus,
   migrateFromLegacy,
   sanitizeDocument,
@@ -366,9 +367,16 @@ export interface CanvasSurfaceProps {
    *  onEvolutionSettled. */
   evolution?: CanvasEvolution | null;
   onEvolutionSettled?: (id: string, result: CanvasEvolutionResult) => void;
+  /** A run the host's canvas evolution asks for (saas/canvasEvolution.ts): its nodes, run once as a run of their own
+   *  under the operation id the server admits it by, its `note` said in the assistant's panel when it starts. Whether
+   *  it started goes back to onAutoRunSettled. */
+  autoRun?: CanvasAutoRun | null;
+  onAutoRunSettled?: (id: string, result: { started: boolean }) => void;
   onOpenSettings?: () => void;
-  /** A run or a plan this page was watching has ended (the host may tell a reader who is away). */
-  onWorkSettled?: (event: { kind: 'run' | 'plan'; failed: boolean }) => void;
+  /** A run or a plan this page was watching has ended (the host may tell a reader who is away). `graphIds` names the
+   *  cloud canvas runs this page started that it saw end (absent for a node's own message, a native run, a run refused
+   *  at admission, or one found in a journal another load or tab left). */
+  onWorkSettled?: (event: { kind: 'run' | 'plan'; failed: boolean; graphIds?: string[] }) => void;
   /** Hosted accounts either supply their own model credential or use a platform-managed one. */
   personalCredentialsRequired?: boolean;
   /** A host-provided reason execution is unavailable. Cloud canvases remain editable. */
@@ -386,11 +394,21 @@ export interface CanvasSurfaceProps {
 }
 
 /** A lesson's suggestion for one node: run it at `effort`, on the model it runs (or `model`, the one its lesson's runs
- *  ran with, where it takes the workspace's default). `note` is the assistant's reply saying why, in the reader's words. */
-export interface CanvasEvolution { id: string; nodeId: string; effort: string; model: string; note: string }
+ *  ran with, where it takes the workspace's default). `note` is the assistant's reply saying why, in the reader's words.
+ *  `expect`, where given, is the node's own effort the change was claimed from: a node at another (a person changed it
+ *  since) is left as it is. `wanted`, where given, says whether the host still wants it as the surface comes to take it:
+ *  one it took back meanwhile is dropped unsaid (settled as not applied). `change`, where given, is the id of the change
+ *  of the canvas's evolution it makes: the node it changes carries it (SessionNode.evolution), which is how the server
+ *  knows the canvas, not a person, made it. `expectMark`, where given, is the mark the node must still carry (a revert's:
+ *  the change it takes back, which a person's own edit since has taken away). `since`, where given, is when the change
+ *  was claimed, on this page's monotonic clock (performance.now(), which a system clock set back does not move): a node
+ *  whose effort anything set after that, even back to the same value, is left as it is. */
+export interface CanvasEvolution { id: string; nodeId: string; effort: string; model: string; note: string; expect?: string; wanted?: () => boolean; change?: string; expectMark?: string; since?: number }
 /** How a suggestion went: `applied` when its plan changed the node, `satisfied` when the node already ran that way, and
  *  otherwise why it was not taken (said in the assistant's panel too). */
 export interface CanvasEvolutionResult { applied: boolean; satisfied?: boolean; reason?: string }
+/** A run the canvas's evolution asks for: `scope` run once under `operationId`. */
+export interface CanvasAutoRun { id: string; scope: string[]; operationId: string; note: string }
 
 /** A planning request handed over by the host, with the host's own record of whether it was sent. */
 export interface InitialPlanRequest {
@@ -458,7 +476,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -676,7 +694,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (opts?.lane === undefined && laneGuard.current.exclusive()) return;
       const prev = docRef.current;
       const proposed = mut(prev);
-      const next = opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed);
+      // A node's effort set by anything but the change whose mark it carries takes the mark away.
+      const next = dropOverriddenEvolutionMarks(prev, opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed));
       if (next === prev) return;
       const busy = laneGuard.current.busy(opts?.lane);
       if (busy.size && touchesBusyNodes(prev, next, busy)) {
@@ -702,6 +721,17 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     },
     [syncHistory],
   );
+  // When each node's effort last changed in this page, whatever changed it (an edit, an undo, a plan, a recovery), for a
+  // change of the canvas's evolution claimed before that (CanvasEvolution.since), which then leaves the node as it is.
+  const effortsSeen = useRef<globalThis.Map<string, string> | null>(null);
+  const effortChangedAt = useRef(new globalThis.Map<string, number>());
+  useEffect(() => {
+    const now = performance.now();
+    const efforts = new globalThis.Map<string, string>(doc.nodes.flatMap(node => node.kind === 'session' ? [[node.id, node.effort ?? ''] as const] : []));
+    const seen = effortsSeen.current;
+    if (seen) for (const [id, effort] of efforts) if (seen.has(id) && seen.get(id) !== effort) effortChangedAt.current.set(id, now);
+    effortsSeen.current = efforts;
+  }, [doc]);
   // A node a market Agent's text reaches is marked once (marketFed), so that what it delivered keeps the stricter
   // preview after it is wired otherwise; the mark is no edit, and makes nothing stale.
   useEffect(() => {
@@ -1345,6 +1375,21 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const lanes = useRef<RunLane[] | null>(null);
   if (!lanes.current) lanes.current = RUN_LANES.map(lane => ({ journal: { current: initialOf(lane) }, abort: { current: null }, reserved: null }));
   const laneList = lanes.current;
+  // The cloud canvas runs this page saw end since it last said that work ended (onWorkSettled's graphIds): only runs it
+  // started itself, in this load (their journals' ids), not one it found in a journal another load or tab left.
+  const endedGraphs = useRef<string[]>([]);
+  const startedJournals = useRef(new Set<string>());
+  // A canvas run this page started whose journal is gone (another tab saw it end and let the journal go, or replaced it
+  // with one of its own) is named at the end of the work this page watches: by the id its journal holds or, where its
+  // admission answer was lost, by its operation (a read that fails names nothing).
+  const nameOwnedGraph = async (owned: CanvasRunJournal | null | undefined, signal?: AbortSignal) => {
+    if (!owned?.serverGraph || !startedJournals.current.has(owned.id)) return;
+    const id = owned.serverGraph.id || await graphIdOfOperation(owned.serverGraph, owned.id,
+      signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)).catch(() => undefined);
+    if (id && startedJournals.current.delete(owned.id)) { endedGraphs.current.push(id); setNamedGraphs(count => count + 1); }
+  };
+  // Each run named: one named after the work it ended with was over still reaches the host (the run-end effect below).
+  const [namedGraphs, setNamedGraphs] = useState(0);
   // Two nodes bound to one agent take turns, even when they run in different lanes.
   const agentQueue = useRef(new globalThis.Map<string, Promise<unknown>>());
   const [laneRuns, setLaneRuns] = useState<Array<Record<string, RunView>>>(() => RUN_LANES.map(lane => initialOf(lane)?.nodes ?? {}));
@@ -1426,6 +1471,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       const active = loadRunJournal(laneStorage(lane));
       if (active) {
         const { setRuns, setRunning, setRecovering } = laneSetters[lane];
+        const previous = laneList[lane].journal.current;
+        if (previous && previous.id !== active.id) void nameOwnedGraph(previous);
         laneList[lane].journal.current = active; setRuns(timelineRuns({}, active.nodes, Date.now())); setReviewRound(active.review?.round ?? 0); setRunning(true); setRecovering(true);
       }
     };
@@ -1526,6 +1573,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             if (getSessionSnapshot(storeKey).history !== 'loaded') { retry(); return; }
             refreshedHistories.add(identity);
           }
+        }
+        // A run this page started is named as it ends here.
+        if (observed?.serverGraph && startedJournals.current.has(observed.id)) {
+          await nameOwnedGraph(observed, controller.signal);
+          if (!observerIsActive()) return;
         }
         // Structural/session edits in another tab are possible after it clears the journal.
         // Do not publish our pre-fetch document over those edits or unlock a newer run.
@@ -1645,6 +1697,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           }
           if (!stillCurrent()) return;
         }
+        if (next.serverGraph?.id && startedJournals.current.delete(next.id)) endedGraphs.current.push(next.serverGraph.id);
         clearRunJournal(next.id); journal.current = null;
         setRecovering(false); setRunning(false);
         setRunSummary(journalSummary(next));
@@ -1723,8 +1776,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // `asked`, for a start from the rerun question (RerunConfirm.tsx): the question the reader answered, or null for a run
   // of the whole canvas that had none to ask. It is held to once the run's ownership, and then its nodes' setup, are
   // through. Undefined for every other run.
+  // `operationId` is the one a run the host asks for is admitted under (an auto rerun's, autoRun); any other run has a
+  // new one.
   const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy,
-    asked?: WholeRunChoice | null) => {
+    asked?: WholeRunChoice | null, operationId?: string) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
     writePreviewsNow.current();
@@ -1922,7 +1977,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const ac = new AbortController();
     // A failed or stopped retry must never leave its previous success available to downstream nodes.
     const executing = new Set(scope ?? runNodes.map(n => n.id));
-    const pending: CanvasRunJournal = { version: 1, id: crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(runDocument, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(runNodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
+    const pending: CanvasRunJournal = { version: 1, id: operationId ?? crypto.randomUUID(), startedAt: Date.now(), scope: [...executing], inputFingerprint: runInputFingerprint(runDocument, [...executing]), ...(manualMessage ? { manual: true, manualMessage } : {}), nodes: Object.fromEntries(runNodes.filter(n => executing.has(n.id)).map(n => [n.id, { nodeId: n.id, threadId: n.kind === 'session' ? activeThreadId(n) : 'form', operationId: n.kind === 'session' ? crypto.randomUUID() : null, companyId: n.kind === 'session' ? n.binding?.companyId ?? null : null, agentId: n.kind === 'session' ? n.binding?.agentId ?? null : null, issueId: n.kind === 'session' ? n.issueId ?? null : null, runId: null, state: 'waiting' as const }])) };
     if (reviewPolicy) pending.review = { round: 0, maxRounds: reviewPolicy.maxRounds, outcome: 'running', turns: [] };
     if (collaboration) pending.collaboration = { ...collaboration, maxModelCalls: 2 * executing.size * collaboration.rounds + 1, phase: 'proposal', round: 0, turns: [] };
     const cloud = currentSaaSCanvas();
@@ -1952,6 +2007,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     docRef.current = acceptedDocument; setDoc(acceptedDocument);
     journal.current = pending;
+    if (pending.serverGraph) startedJournals.current.add(pending.id);
     runAbort.current = ac;
     if (consumeDraft) onAccepted?.();
     setRunning(true);
@@ -3056,14 +3112,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const settledRuns = useRef(runs);
   settledRuns.current = runs;
   // A run counts as watched once it is seen running after recovery has settled: a journal-restored run that recovery
-  // finds already over ends without a word.
+  // finds already over ends without a word. A canvas run this page started is named at its end either way (another
+  // lane's recovery may last the whole run).
   const watchingRun = useRef(false);
   useEffect(() => {
     if (running && !recovering) watchingRun.current = true;
     if (running) return;
-    if (watchingRun.current) workSettled.current?.({ kind: 'run', failed: Object.values(settledRuns.current).some(run => run.state === 'failed' || run.state === 'blocked') });
+    const graphIds = endedGraphs.current.splice(0);
+    if (watchingRun.current || graphIds.length) workSettled.current?.({ kind: 'run', failed: Object.values(settledRuns.current).some(run => run.state === 'failed' || run.state === 'blocked'), ...(graphIds.length ? { graphIds } : {}) });
     watchingRun.current = false;
-  }, [running, recovering]);
+  }, [running, recovering, namedGraphs]);
   // A plan that ends says whether it failed (its error is set in the same update); one the reader stopped says nothing.
   const wasPlanning = useRef(false);
   const planStopped = useRef(false);
@@ -3382,12 +3440,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // then shows where a plan's refusal would (planningError) and is held, to join the conversation, and leave that
   // place, with the next thing a suggestion says.
   const heldEvolutionReplies = useRef<{ text: string; reason: string }[]>([]);
-  const sayEvolution = (text: string, status?: 'applied') => {
+  // A note that is no reply to a message of the conversation (an auto rerun's, `routed` false) carries no route's label.
+  const sayEvolution = (text: string, status?: 'applied', routed = true) => {
     for (const held of heldEvolutionReplies.current.splice(0)) {
       appendPlanningMessage(`lesson-${Date.now()}-${++planningSequence.current}-assistant`, held.text, undefined, assistantExecution ? 'plan' : undefined);
       setPlanningError(current => current === held.reason ? '' : current);
     }
-    appendPlanningMessage(`lesson-${Date.now()}-${++planningSequence.current}-assistant`, text, status, assistantExecution ? 'plan' : undefined);
+    appendPlanningMessage(`lesson-${Date.now()}-${++planningSequence.current}-assistant`, text, status, routed && assistantExecution ? 'plan' : undefined);
   };
   const refuseEvolution = (reason: string, request: CanvasEvolution): CanvasEvolutionResult => {
     setAssistantOpen(true);
@@ -3406,6 +3465,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const before = docRef.current;
     const node = before.nodes.find(item => item.id === request.nodeId);
     if (!node) return refuseEvolution(t('planning.evolutionNodeGone'), request);
+    if (request.expect !== undefined && (node.kind !== 'session' || (node.effort ?? '') !== request.expect)) return refuseEvolution(t('planning.evolutionChanged'), request);
+    if (request.expectMark !== undefined && (node.kind !== 'session' || node.evolution?.change !== request.expectMark)) return refuseEvolution(t('planning.evolutionChanged'), request);
+    if (request.since !== undefined && (effortChangedAt.current.get(node.id) ?? 0) > request.since) return refuseEvolution(t('planning.evolutionChanged'), request);
     // The node keeps its model; one on the workspace default takes the model its lesson's runs ran with, which a lesson
     // from an API before 2026-11-02 does not name.
     const model = (node.kind === 'session' && node.model) || request.model;
@@ -3413,7 +3475,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const plan: CanvasPlan = { version: 1, summary: request.note, operations: [{ type: 'set_model', nodeId: node.id, model, effort: request.effort }] };
     const hosted = currentSaaSCanvas() !== null;
     const modelChoices = planningModels();
-    const applied = applyCanvasPlan(before, plan, locale, '', planMedia, modelChoices, hosted, hosted && !personalCredentialsRequired);
+    const planned = applyCanvasPlan(before, plan, locale, '', planMedia, modelChoices, hosted, hosted && !personalCredentialsRequired);
+    // A change of the canvas's evolution leaves its mark on the node it makes (undone with it, as the plan is).
+    const change = request.change;
+    const applied = change ? { ...planned, doc: { ...planned.doc, nodes: planned.doc.nodes.map(item => item.id === node.id && item.kind === 'session'
+      ? { ...item, evolution: { change } } : item) } } : planned;
     // Judged by the node alone: a plan may also tidy the canvas (an edge left without its node), which takes no
     // suggestion; and a node its plan left at another effort (its model offers no such level) has not taken it.
     const after = applied.doc.nodes.find(item => item.id === node.id);
@@ -3451,6 +3517,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   useEffect(() => {
     if (!evolution || readOnly || appliedEvolution.current === evolution.id || evolutionWaits) return;
     appliedEvolution.current = evolution.id;
+    if (evolution.wanted?.() === false) { onEvolutionSettled?.(evolution.id, { applied: false }); return; }
     // A suggestion that cannot be made into a plan says so; it never takes the canvas down with it.
     let result: CanvasEvolutionResult;
     try { result = applyEvolution(evolution); } catch { result = refuseEvolution(t('planning.evolutionNotApplied'), evolution); }
@@ -3458,6 +3525,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // The request and what it waits for decide: the surface's state it reads is the latest at the time they arrive.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [evolution, readOnly, evolutionWaits]);
+  // A run the host's canvas evolution asks for starts once, once the canvas is ready as a suggestion waits for it, as
+  // any run the reader starts would (refused the same way, with the same notes). Once it started, the assistant's panel
+  // says why the canvas runs by itself. Whether it started goes back to the host.
+  const startedAutoRun = useRef('');
+  useEffect(() => {
+    if (!autoRun || readOnly || startedAutoRun.current === autoRun.id || evolutionWaits) return;
+    startedAutoRun.current = autoRun.id;
+    const request = autoRun;
+    void startRun(request.scope, undefined, undefined, undefined, undefined, undefined, request.operationId).catch(() => undefined).then(() => {
+      const started = laneList.some(lane => lane.journal.current?.id === request.operationId);
+      if (started && mounted.current) { setAssistantOpen(true); sayEvolution(request.note, undefined, false); }
+      onAutoRunSettled?.(request.id, { started });
+    });
+    // The request and what it waits for decide, as for a suggestion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, readOnly, evolutionWaits]);
   const cancelPlanning = async () => {
     if (readOnlyRef.current || recoveryStopInFlight.current) return;
     const request = planningRequest.current;

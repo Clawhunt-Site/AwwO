@@ -9,7 +9,7 @@ import { configureCanvasStorage, canvasStorage, canvasStorageKey, canvasStore, c
 import { sweepLegacyCanvasStorage } from './canvasStoreSweep';
 import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, preserveLegacyCanvasCache, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, canvasDocumentHash, restorableCanvasDraftBase, type CanvasDraft, type CanvasDraftSending, type SavedCanvasDraft } from './canvasDraft';
 import { AUTOSAVE_QUIET_MS, autosavePace } from './autosavePace';
-import { CanvasSurface, type CanvasResultsOptions, type InitialPlanRequest } from '../canvas/CanvasSurface';
+import { CanvasSurface, type CanvasEvolutionResult, type CanvasResultsOptions, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
@@ -39,6 +39,7 @@ import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHando
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { CanvasLessons, useLessonEvolutions } from './CanvasLessons';
+import { useCanvasEvolution } from './canvasEvolution';
 import { CanvasWebReader } from './CanvasWebReader';
 import { CanvasLibraryTools } from './CanvasLibraryTools';
 import { executionHost } from './AssistantExecution';
@@ -480,7 +481,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   // The lessons' suggested reasoning efforts, which the surface applies as plans, one at a time: each suggestion taken is
   // marked applied once the cloud confirms a canvas that holds it (lessonCanvasSaved, at each canvas the cloud confirms).
   const lessonEvolutions = useLessonEvolutions(tenant.id);
-  const lessonCanvasSaved = lessonEvolutions.saved;
+  // The canvas evolving by itself (canvasEvolution.ts) hands its changes to the same queue, and records each once the
+  // cloud confirms a canvas that holds it. It takes what is due once the page shows the canvas (not its drafts).
+  const evolutionDriver = useCanvasEvolution(tenant.id, canvasId, lessonEvolutions, t, !recovery && record !== null);
+  const lessonSaved = lessonEvolutions.saved;
+  const evolutionSaved = evolutionDriver.saved;
+  const lessonCanvasSaved = useCallback((document: unknown) => { lessonSaved(document); evolutionSaved(document); }, [lessonSaved, evolutionSaved]);
+  const lessonSettled = lessonEvolutions.settled;
+  const evolutionSettled = evolutionDriver.settled;
+  const evolutionTaken = useCallback((id: string, result: CanvasEvolutionResult) => { lessonSettled(id, result); evolutionSettled(id, result); }, [lessonSettled, evolutionSettled]);
   const current = useRef<CanvasRecord | null>(null);
   const pending = useRef<CanvasDocument | null>(null);
   const writerId = useRef(crypto.randomUUID()).current;
@@ -947,15 +956,20 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
     <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
-      taskDraft={knowledgeTaskDraft} evolution={lessonEvolutions.evolution} onEvolutionSettled={lessonEvolutions.settled}
-      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} /></>} />
-        : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} /></>}
+      taskDraft={knowledgeTaskDraft} evolution={lessonEvolutions.evolution} onEvolutionSettled={evolutionTaken}
+      autoRun={evolutionDriver.autoRun} onAutoRunSettled={evolutionDriver.autoRunSettled}
+      canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} onRevert={evolutionDriver.revert} /></>} />
+        : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} onRevert={evolutionDriver.revert} /></>}
       assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
-      onWorkSettled={event => notifyTaskFinished(event.kind === 'plan'
-        ? { title: event.failed ? t('画布规划没有完成', 'Canvas plan did not finish') : t('画布规划已完成', 'Canvas plan finished'), body: record.name, failed: event.failed }
-        : { title: event.failed ? t('画布运行结束，有节点未完成', 'Canvas run ended with unfinished nodes') : t('画布运行已完成', 'Canvas run finished'), body: record.name, failed: event.failed })}
+      onWorkSettled={event => {
+        // A run this page watched end may have taught the canvas something to take by itself.
+        if (event.kind === 'run') evolutionDriver.runEnded(event.graphIds ?? []);
+        notifyTaskFinished(event.kind === 'plan'
+          ? { title: event.failed ? t('画布规划没有完成', 'Canvas plan did not finish') : t('画布规划已完成', 'Canvas plan finished'), body: record.name, failed: event.failed }
+          : { title: event.failed ? t('画布运行结束，有节点未完成', 'Canvas run ended with unfinished nodes') : t('画布运行已完成', 'Canvas run finished'), body: record.name, failed: event.failed });
+      }}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
       headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />}{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
         if (pending.current || saving.current || failed.current || !scopedStorage.current) return;
