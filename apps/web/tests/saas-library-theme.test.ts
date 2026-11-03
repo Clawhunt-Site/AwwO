@@ -2,7 +2,8 @@
 // workspace home's market and the settings centre's libraries. Its colours came only from the canvas workspace's
 // variables (--awwo-*), which those pages lack, so in a dark theme it was a light frame under the page's light heading
 // and label colours, unreadable (2026-10-31: 1.1:1 in Night dive), and a primary button kept white text on a dark
-// theme's light accent (2.85:1). The rules are pinned at the stylesheet's source; jsdom resolves no custom property.
+// theme's light accent (2.85:1). Its fields kept the browser's placeholder grey (2026-11-04: 3.54:1 in Night dive, just
+// under 4.5:1 on Paper). The rules are pinned at the stylesheet's source; jsdom resolves no custom property.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,6 +35,17 @@ describe('the library frame on a page without a canvas', () => {
     expect(rule).toMatch(/color: oklch\(from var\(--library-accent\) clamp\(0, \(0\.64 - l\) \* 1000, 1\) 0 0\);/);
     // It comes after the rules that set white text, so at their specificity it wins.
     expect(css.indexOf('@supports (color: oklch(from red l c h))')).toBeGreaterThan(css.indexOf('.awwo-library button.awwo-library-primary:not(:disabled):is(:hover, :active) {'));
+  });
+
+  it("gives a field's placeholder the page's own placeholder colour, not the browser's grey", () => {
+    // A canvas's muted ink first, then the hosted pages' placeholder colour (design/system.css gives theirs --saas-subtle).
+    expect(block('.awwo-library'), '--library-subtle').toMatch(/--library-subtle: var\(--awwo-muted, var\(--saas-subtle[,)]/);
+    // The whole rule, so a later declaration in it cannot win; whole (opacity 1), as a placeholder's own opacity would dim
+    // it as much as a paler colour (Firefox's default is 0.54).
+    expect(block('.awwo-library :is(input, textarea)::placeholder')).toBe('.awwo-library :is(input, textarea)::placeholder { color: var(--library-subtle); opacity: 1; ');
+    // Nothing else in the sheet sets a placeholder or the variable again.
+    expect(css.match(/::placeholder/g), 'placeholder rules').toHaveLength(1);
+    expect(css.match(/--library-subtle:/g), 'declarations of --library-subtle').toHaveLength(1);
   });
 
   it("mixes a proposal badge's amber with the ink, so it reads on a dark frame", () => {

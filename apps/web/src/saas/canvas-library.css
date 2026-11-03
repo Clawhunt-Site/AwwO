@@ -5,6 +5,8 @@
 .awwo-library {
   --library-ink: var(--awwo-ink, var(--saas-text, var(--text, #25323c)));
   --library-muted: var(--awwo-muted, var(--saas-muted, var(--text-muted, #75818c)));
+  /* A field's hint: the page's own placeholder colour (a canvas's muted ink, the hosted pages' --saas-subtle). */
+  --library-subtle: var(--awwo-muted, var(--saas-subtle, var(--text-muted, #75818c)));
   --library-border: var(--awwo-border, var(--saas-border, var(--border, #dfe5e8)));
   --library-surface: var(--awwo-surface, var(--saas-card, var(--panel, #ffffff)));
   --library-bg: var(--awwo-bg, var(--saas-bg, var(--bg, #f5f7f8)));
@@ -39,6 +41,8 @@
   width: 100%; min-width: 0; padding: 7px 10px; border: 1px solid var(--library-border); border-radius: 8px;
   background: var(--library-surface); color: var(--library-ink);
 }
+/* The browser's own placeholder grey is 3.5:1 on a dark theme's frame (Night dive's) and just under 4.5:1 on Paper's. */
+.awwo-library :is(input, textarea)::placeholder { color: var(--library-subtle); opacity: 1; }
 .awwo-library textarea { resize: vertical; line-height: 1.6; }
 .awwo-library h2, .awwo-library h3, .awwo-library p { margin: 0; }
 .awwo-library h2 { font-size: 18px; }
