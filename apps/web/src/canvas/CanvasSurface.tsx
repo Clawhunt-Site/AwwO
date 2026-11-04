@@ -3492,7 +3492,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       return { applied: false, satisfied: true, reason: t('planning.evolutionNothing') };
     }
     // Everything said is worked out before the canvas changes, so nothing after the change can leave it unsaid.
-    const modelName = (entry: string) => modelChoices.choices.find(choice => choice.model === entry)?.name || entry;
+    const modelName = (entry: string) => [...modelChoices.choices, ...(modelChoices.userChosen ?? [])].find(choice => choice.model === entry)?.name || entry;
     const changes = describePlanChanges(before, applied.doc, locale, t, modelName);
     const reply = [request.note, ...(changes.length ? [t('planning.changesHeader'), ...changes.map(line => `· ${line}`)] : []),
       ...applied.adjustments.slice(0, PLAN_NOTES_SHOWN).map(item => `· ${item}`)].join('\n');

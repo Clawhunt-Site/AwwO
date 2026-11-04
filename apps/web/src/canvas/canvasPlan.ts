@@ -134,8 +134,9 @@ export interface CanvasPlanMedia { models: Partial<Record<MediaKind, string>>; p
 /** What a host tells a plan about the chat models its nodes can run (the palette): a set_model names one of these, by id
  *  or by its name, and may pick one of the levels its entry advertises. Without it a plan cannot change a model. */
 export interface CanvasPlanModelChoice { runtime: string; model: string; available: boolean; name?: string; efforts?: ReadonlyArray<string> }
-/** `userChosen`: the models only a user may choose, which a plan never puts a node on (userChosenModels.ts planModelsOf). */
-export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice>; userChosen?: ReadonlyArray<{ model: string; name?: string }> }
+/** `userChosen`: the models only a user may choose, each entry as `choices` gives one, which a plan never puts a node on;
+ *  a node the reader set on one keeps it, its effort a plan's to set there (userChosenModels.ts planModelsOf). */
+export interface CanvasPlanModels { choices: ReadonlyArray<CanvasPlanModelChoice>; userChosen?: ReadonlyArray<CanvasPlanModelChoice> }
 
 /** The fields of each node a plan's context showed only in part (canvasPlanning.ts fitPlanningContext): 'persona',
  *  'constraints' (its own items or a shared requirement it holds), 'acceptanceCriteria', 'input:<field id>' (a form's
@@ -1012,15 +1013,21 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         const folded = wanted.toLowerCase();
         const id = choices.find(choice => choice.model === wanted)?.model
           ?? choices.find(choice => choice.model.toLowerCase() === folded || (choice.name ?? '').trim().toLowerCase() === folded)?.model;
-        const entry = id ? automaticEntry(id, choices) : undefined;
-        const own = entry ? undefined : models?.userChosen?.find(choice => choice.model === wanted
+        const found = id ? automaticEntry(id, choices) : undefined;
+        const own = found ? undefined : models?.userChosen?.find(choice => choice.model === wanted
           || choice.model.toLowerCase() === folded || (choice.name ?? '').trim().toLowerCase() === folded);
-        if (own) {
+        // A plan never puts a node on a model only a person may choose (userChosenModels.ts: AwwO never moves a request
+        // there by itself), but a node the reader set on one keeps it: there a plan may set its reasoning effort (a
+        // lesson's suggestion, applied as this step: CanvasSurface applyEvolution), which moves no request to the model.
+        const kept = own && node.model === own.model;
+        if (own && !kept) {
           const name = own.name || own.model;
           adjust(`没有把「${title}」改用「${name}」：这个模型只能由你自己在节点设置里选，助手不替你选`,
             `Did not switch “${title}” to “${name}”: only you can choose this model, in the node’s settings; the assistant does not choose it for you`);
           break;
         }
+        const offered = (kept && models?.userChosen) || choices;
+        const entry = kept ? automaticEntry(own.model, offered) : found;
         if (!entry) {
           adjust(`没有把「${title}」改用「${wanted}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${wanted}”: this workspace has no such model ready`);
           break;
@@ -1031,7 +1038,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             `Did not switch “${title}” to “${entry.name || entry.model}”: its team cannot run on that model’s engine`);
           break;
         }
-        const placed = sandboxed ? choices.find(choice => choice.runtime === SANDBOX_RUNTIME && choice.model === entry.model && choice.available) : entry;
+        const placed = sandboxed ? offered.find(choice => choice.runtime === SANDBOX_RUNTIME && choice.model === entry.model && choice.available) : entry;
         if (!placed) {
           adjust(`没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${entry.name || entry.model}」`,
             `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${entry.name || entry.model}”`);

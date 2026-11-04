@@ -12,12 +12,14 @@ export function automaticChoices<T extends { userChosen?: boolean }>(entries: Re
 }
 
 /** The models a canvas plan may put a node on, from the canvas's palette: each entry with its name and effort levels,
- *  less the models only a user may choose. The planner never sees those; they are named apart (`userChosen`) so that a
- *  plan's set_model asking for one says why the node was left as it was (canvasPlan.ts applyCanvasPlan). */
+ *  less the models only a user may choose. The planner never sees those; they are named apart (`userChosen`, entries of
+ *  the same shape) so that a plan's set_model asking for one says why the node was left as it was, and a node the reader
+ *  set on one keeps it at the effort a plan asks for where its entry offers it (canvasPlan.ts applyCanvasPlan). */
 export function planModelsOf(palette: ReadonlyArray<ModelPaletteSelection>): CanvasPlanModels & { choices: Array<CanvasPlanModelChoice & { requiresUpgrade?: boolean }> } {
+  const choice = (entry: ModelPaletteSelection) => ({ runtime: entry.runtime, model: entry.model, available: entry.available, name: entry.displayName || entry.label,
+    ...(entry.efforts ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { requiresUpgrade: true } : {}) });
   return {
-    choices: automaticChoices(palette).map(entry => ({ runtime: entry.runtime, model: entry.model, available: entry.available, name: entry.displayName || entry.label,
-      ...(entry.efforts ? { efforts: entry.efforts } : {}), ...(entry.requiresUpgrade ? { requiresUpgrade: true } : {}) })),
-    userChosen: palette.filter(entry => entry.userChosen === true).map(entry => ({ model: entry.model, name: entry.displayName || entry.label })),
+    choices: automaticChoices(palette).map(choice),
+    userChosen: palette.filter(entry => entry.userChosen === true).map(choice),
   };
 }

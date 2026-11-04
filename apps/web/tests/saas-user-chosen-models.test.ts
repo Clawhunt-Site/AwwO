@@ -37,7 +37,7 @@ it('never lets a canvas plan put a node on a model only a user may choose, and s
   const palette = groupModels(status, 'en').flatMap(group => group.models);
   const models = planModelsOf(palette);
   expect(models.choices.map(choice => choice.model)).toEqual(['qwen3.8-27b-p6']);
-  expect(models.userChosen).toEqual([{ model: 'deepseek-flash', name: 'DeepSeek V4.1 Flash' }]);
+  expect(models.userChosen).toEqual([{ runtime: 'pi', model: 'deepseek-flash', available: true, name: 'DeepSeek V4.1 Flash' }]);
   const page = { ...createAgentTemplate('general', { x: 0, y: 0 }, 'zh'), id: 'page', title: '页面', runtime: 'pi', model: 'qwen3.8-27b-p6' } as SessionNode;
   const plan = (model: string) => parseCanvasPlan({ version: 1, summary: 'S', operations: [{ type: 'set_model', nodeId: 'page', model }] });
   // By id or by name, the reader asking for it included: the node keeps its model, and the reply says the reader picks it.
@@ -49,6 +49,47 @@ it('never lets a canvas plan put a node on a model only a user may choose, and s
   // A model the workspace does not have is still said to be missing.
   const missing = applyCanvasPlan({ ...emptyDocument(), nodes: [page] }, plan('gpt-9'), 'zh', '', undefined, models);
   expect(missing.adjustments).toEqual([expect.stringContaining('此工作区现在没有可用的这个模型')]);
+});
+
+// A node the reader set on such a model keeps it: a plan may set its reasoning effort there (a lesson's suggestion is
+// applied as such a step), which sends no request anywhere it did not go already; the entry it runs on decides the levels.
+it('keeps a node the reader set on a model only a user may choose there, at the effort a plan asks for where its entry offers it', () => {
+  const offered: SaaSRuntimeStatus = { ...status,
+    runtimes: [...status.runtimes, { id: 'openai-agents', name: 'OpenAI Agents', available: true, configured: true, supportsEffortSelection: true, tools: [] }],
+    models: [...status.models, { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', runtime: 'openai-agents', provider: 'deepseek', route: 'gate', userChosen: true,
+      reasoningEfforts: ['low', 'medium', 'high'] }] };
+  const models = planModelsOf(groupModels(offered, 'en').flatMap(group => group.models));
+  expect(models.choices.map(choice => choice.model)).toEqual(['qwen3.8-27b-p6']);
+  const node = (patch: Partial<SessionNode> = {}) => ({ ...createAgentTemplate('general', { x: 0, y: 0 }, 'zh'), id: 'page', title: '页面',
+    runtime: 'openai-agents', model: 'deepseek-flash', effort: 'high', ...patch } as SessionNode);
+  const plan = (model: string, effort?: string) => parseCanvasPlan({ version: 1, summary: 'S', operations: [{ type: 'set_model', nodeId: 'page', model, ...(effort ? { effort } : {}) }] });
+  const apply = (on: SessionNode, model: string, effort?: string) => applyCanvasPlan({ ...emptyDocument(), nodes: [on] }, plan(model, effort), 'zh', '', undefined, models);
+  // By id or by name: the node stays on its model and runtime, at the level asked for.
+  for (const model of ['deepseek-flash', 'deepseek v4.1 flash']) {
+    const applied = apply(node(), model, 'low');
+    expect(applied.doc.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'deepseek-flash', effort: 'low' });
+    expect(applied.adjustments).toEqual([]);
+    expect(applied.modelSetNodeIds).toEqual(['page']);
+  }
+  // A level its entry does not offer leaves it at the model's own default, saying so.
+  const unoffered = apply(node(), 'deepseek-flash', 'xhigh');
+  expect(unoffered.doc.nodes[0]).toMatchObject({ model: 'deepseek-flash', effort: '' });
+  expect(unoffered.adjustments).toEqual([expect.stringContaining('没有「xhigh」这档思考强度')]);
+  // A node set on it on Pi, which offers it no levels, runs it where AwwO runs it (as a canvas run would move it).
+  expect(apply(node({ runtime: 'pi', effort: '' }), 'deepseek-flash', 'low').doc.nodes[0]).toMatchObject({ runtime: 'openai-agents', model: 'deepseek-flash', effort: 'low' });
+  // Never onto it: a node on another model, or on the workspace default, keeps its own, and the reply says who picks it.
+  for (const from of [node({ runtime: 'pi', model: 'qwen3.8-27b-p6', effort: '' }), node({ runtime: '', model: '', effort: '' })]) {
+    const refused = apply(from, 'deepseek-flash', 'low');
+    expect(refused.doc.nodes[0]).toMatchObject({ runtime: from.runtime, model: from.model, effort: '' });
+    expect(refused.adjustments).toEqual([expect.stringContaining('这个模型只能由你自己在节点设置里选，助手不替你选')]);
+    expect(refused.modelSetNodeIds).toEqual([]);
+  }
+  // Kept only where the workspace still runs it: with no runtime ready for it, the node is left as it is.
+  const gone = planModelsOf(groupModels({ ...offered, runtimes: offered.runtimes.map(runtime => ({ ...runtime, available: false })) }, 'en')
+    .flatMap(group => group.models));
+  const left = applyCanvasPlan({ ...emptyDocument(), nodes: [node()] }, plan('deepseek-flash', 'low'), 'zh', '', undefined, gone);
+  expect(left.doc.nodes[0]).toMatchObject({ model: 'deepseek-flash', effort: 'high' });
+  expect(left.adjustments).toEqual([expect.stringContaining('此工作区现在没有可用的这个模型')]);
 });
 
 it('tells the API’s listings that the page honours their userChosen mark', async () => {

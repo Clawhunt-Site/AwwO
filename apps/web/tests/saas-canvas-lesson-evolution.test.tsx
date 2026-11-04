@@ -85,6 +85,31 @@ it('puts a node on the workspace default on the model its lesson’s runs ran wi
   await waitFor(() => expect(stored()).toMatchObject({ runtime: 'openai-agents', model: 'opus-fixture', effort: 'low' }));
 });
 
+// A model only a user may choose (the DeepSeek API's, userChosenModels.ts) is one the canvas never puts a node on, but a
+// node the reader set on one keeps it, and takes its lesson's effort there (live on 2026-11-04 the change was refused,
+// the plan step naming the model the node already ran).
+it('applies it to a node the reader set on a model only a user may choose, which stays on it, and never moves a node there', async () => {
+  const chosen = { ...status, models: [...status.models, { id: 'deepseek-fixture', name: 'DeepSeek fixture', runtime: 'openai-agents', provider: 'deepseek',
+    reasoningEfforts: ['low', 'medium', 'high'], userChosen: true }] };
+  runtimeRead = async () => new Response(JSON.stringify(chosen));
+  seed(page({ model: 'deepseek-fixture', effort: 'high' }));
+  const settled = vi.fn();
+  const { rerender, unmount } = render(surface(settled));
+  rerender(surface(settled, evolution({ model: 'deepseek-fixture', expect: 'high', change: 'change-1' })));
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('lesson:l1:1', { applied: true }));
+  await waitFor(() => expect(stored()).toMatchObject({ runtime: 'openai-agents', model: 'deepseek-fixture', effort: 'low', evolution: { change: 'change-1' } }));
+  unmount();
+  // A node on the workspace default whose lesson's runs ran it is not put on it: it keeps the default, saying who picks it.
+  cleanup(); localStorage.setItem('superclaw_locale', 'zh');
+  seed(page({ runtime: '', model: '' }));
+  const refused = vi.fn();
+  const second = render(surface(refused));
+  second.rerender(surface(refused, evolution({ id: 'lesson:l2:1', model: 'deepseek-fixture' })));
+  await waitFor(() => expect(refused).toHaveBeenCalledWith('lesson:l2:1', expect.objectContaining({ applied: false,
+    reason: expect.stringContaining('这个模型只能由你自己在节点设置里选，助手不替你选') })));
+  expect(stored()).toMatchObject({ runtime: '', model: '', effort: '' });
+});
+
 it('waits for the canvas’s palette, and says why it applied nothing where there was nothing to apply', async () => {
   seed(page({ effort: 'low' }));
   let answer!: () => void;
