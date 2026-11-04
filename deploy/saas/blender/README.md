@@ -24,8 +24,8 @@ speaks MCP to the server over stdio and the server speaks to the add-on over its
 ## Build
 
 ```
-deploy/saas/blender/fetch-sources.sh /srv/awwo/blender-sources
-docker build --build-context sources=/srv/awwo/blender-sources --build-arg BASE=awwo-workspace:<tag> -t awwo-blender:<tag> deploy/saas/blender
+deploy/saas/blender/fetch-sources.sh <sources dir>
+docker build --build-context sources=<sources dir> --build-arg BASE=awwo-workspace:<tag> -t awwo-blender:<tag> deploy/saas/blender
 ```
 
 The last build step runs `check.py`: Blender starts as the supervisor starts it, its bridge answers, the MCP server
