@@ -100,6 +100,20 @@ files when distributing the runtime image. Source reference:
 execution runtime behind AwwO's Go control plane and does not change AwwO's own
 license.
 
+The Blender workstation image (`deploy/saas/blender`, the `blender` runtime)
+runs Blender 5.2.3 LTS (blender.org, GPL-3.0-or-later, with its bundled
+libraries under their own licenses in the release's `license/` folder) and the
+Blender Lab MCP server and add-on 1.0.3 (projects.blender.org/lab/blender_mcp,
+GPL-3.0-or-later), with the server's Python packages hash-pinned in
+`deploy/saas/blender/requirements.lock` (each under its own license, mostly MIT,
+BSD and Apache-2.0). None of them is kept in this repository: the image build
+downloads the three release files and checks each against its publisher's
+hash. They run unmodified as separate programs inside the operator-built image;
+AwwO's worker speaks MCP to the server over stdio, and the server to the add-on
+over its loopback socket. Preserve their license files in any image that is
+distributed. `deploy/saas/blender/awwo_param`, which agents import inside
+Blender, is AwwO's own code under its MIT License, which is GPL-compatible.
+
 The Go API (`backend/`) reads the text layer of attached PDFs with
 `github.com/ledongthuc/pdf`, pinned to `v0.0.0-20260907135840-6c8c28e0e8a0` in
 `backend/go.mod` and `backend/go.sum`. It declares the BSD-3-Clause license
