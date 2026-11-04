@@ -399,6 +399,9 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   gap: 104px clamp(40px, 7vw, 120px);
   padding: max(72px, 10vh) max(36px, calc((100vw - 1200px) / 2)) 48px;
   background: var(--saas-bg);
+  /* The orb is wider than the card's column it is centred on: from 1080 to 1300 px it reached past the window's edge
+     (6 px at 1280), and the page scrolled sideways. clip, not hidden, so nothing on the page becomes a scroller. */
+  overflow-x: clip;
 }
 .saas-login::before {
   content: ''; grid-row: 1; grid-column: 1 / -1; align-self: stretch; z-index: 0;
@@ -466,6 +469,10 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login > .saas-preferences button:not(:disabled):active { background: rgb(255 255 255 / 14%); }
 /* On the dark tank, focus is the tank's own light colour (the paper teal would all but vanish there). */
 .saas-login > :is(.saas-preferences, .saas-login-brand) :focus-visible { outline-color: var(--saas-tank-focus, #6cc6c8); }
+/* A Chinese heading's phrases (the headline in SaaSApp Login): each stays whole on its line, and breaks inside only on a
+   screen narrower than the phrase. The headline's first, 让 Agent, is a line of its own, as at every width before. */
+.saas-login :is(h1, h2) .saas-phrase { display: inline-block; }
+.saas-login-brand h1 .saas-phrase:first-child { display: block; }
 
 /* ── Workspace home: one prompt, recent canvases, cases ─────────────────────────────────────── */
 /* The main site's AwwO welcome: the orb, the workspace as a lit pill, the condensed title, the composer
@@ -718,6 +725,8 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-login > .saas-login-footer { margin-top: 0; }
   .saas-login::after { display: none; }
   .saas-login-brand h1, .saas-login h1 { margin: 20px 0 10px; font-size: 34px; }
+  /* Its second line, 在同一张画布上协作。, is ten characters of one em: it keeps to one line down to a 320 px screen. */
+  :root:lang(zh) .saas-login-brand h1 { font-size: min(34px, calc(10vw - 5px)); }
   .saas-login-brand > p { font-size: var(--saas-text-md); }
   .saas-login-preview { display: none; }
   .saas-card { padding: 22px; }
