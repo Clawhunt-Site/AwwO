@@ -53,6 +53,7 @@ import { AppearanceScope } from './SaaSAppearance';
 import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
 import { AcademyLauncher, AcademyProvider } from './Academy';
+import { pageTitle, useDocumentTitle } from './pageTitle';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
@@ -204,6 +205,7 @@ function ssoFailureHeading(reason: SSOFailureReason, t: (zh: string, en: string)
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
+  useDocumentTitle(pageTitle(t('登录', 'Sign in')));
   const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
   const accountURL = reason === 'email_unverified' ? clawHuntAccountURL(options?.clawhuntSiteURL) : null;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
@@ -232,6 +234,8 @@ function LinkExistingAccount({ onAuthenticated }: { onAuthenticated: (identity: 
       .catch(cause => { if (!controller.signal.aborted) setLoadError(cause instanceof SaaSApiError && (cause.code === 'sso_expired' || [400, 404, 410].includes(cause.status)) ? 'expired' : 'unavailable'); });
     return () => controller.abort();
   }, []);
+  // A request that cannot be read hands the page to SSOFailure, which names it.
+  useDocumentTitle(loadError ? null : pageTitle(t('关联已有账号', 'Link your account')));
   if (loadError) return <SSOFailure reason={loadError} />;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('保留你原来的工作区', 'Keep your existing workspace')}</h1><p>{t('已确认 ClawHunt 账号。关联前，请证明这个旧 AwwO 账号也属于你。', 'Your ClawHunt account is confirmed. Before linking, prove that the existing AwwO account is yours too.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
@@ -301,7 +305,10 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   // The local edition takes no new accounts (its person is its first administrator); an API that does not say takes them.
   const canRegister = options?.registration !== false;
   const register = registering && canRegister;
-  if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
+  const recovering = forgot && options?.localAuth === true;
+  // The first page a visitor sees, and what a search result or bookmark shows: AwwO and what it does.
+  useDocumentTitle(recovering ? null : t('AwwO · 让 Agent 在同一张画布上协作', 'AwwO · Bring your agents together on one canvas'));
+  if (recovering) return <PasswordRecovery onBack={() => setForgot(false)} />;
   return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
@@ -338,6 +345,9 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const requested = params.get('tenant');
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
+  // A canvas page is named by the canvas (CloudCanvas, ReadOnlyCanvas); the home by its workspace.
+  useDocumentTitle(canvasId && tenant?.status === 'active' ? null
+    : pageTitle(!tenant ? t('选择工作区', 'Choose a workspace') : tenant.status !== 'active' ? t('工作区已暂停', 'Workspace suspended') : tenant.name));
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
   // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options.
   const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy />;
@@ -411,6 +421,8 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
+  // Named by its canvas once it is read, and as 画布 while it loads or when it cannot open.
+  useDocumentTitle(pageTitle(record?.name || t('画布', 'Canvas')));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
   useEffect(() => {
@@ -467,6 +479,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     : `本机草稿保存失败：${message(error)}。请立即导出本地副本。`;
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
+  // Named by its canvas once it is read (draft recovery included), and as 画布 while it loads or when it cannot open.
+  useDocumentTitle(pageTitle(record?.name || t('画布', 'Canvas')));
   const [saveState, setSaveState] = useState('正在加载…');
   const [runtime, setRuntime] = useState<CloudRuntimeStatus | null>(null);
   const [runtimeChecking, setRuntimeChecking] = useState(false);
