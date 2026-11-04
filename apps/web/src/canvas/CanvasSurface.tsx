@@ -4502,6 +4502,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const shelfGroups = useMemo(() => automaticGroups(palette?.groups ?? []), [palette?.groups]);
   // The models a node can run in its own sandbox computer; a node gets there only through its settings' switch.
   const sandboxShelf = useMemo(() => sandboxGroups(palette?.groups ?? []), [palette?.groups]);
+  // And those it can run in the Blender workstation, by its settings' other switch.
+  const blenderShelf = useMemo(() => sandboxGroups(palette?.groups ?? [], 'blender'), [palette?.groups]);
   const modelShelf = canInitialize && !readOnly && !simple ? <ModelPersonaShelf modelsOnly
     configureModelsHref={personalCredentialsRequired ? accountURL('engines') : undefined}
     operatorManaged={!personalCredentialsRequired} groups={shelfGroups}
@@ -4600,7 +4602,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
       editFiles={node.kind === 'edit' ? editWiredFiles(node, nodes, edges) : undefined}
-      modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
+      modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} blenderGroups={canInitialize ? blenderShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
       onRetryModels={() => setPaletteRefresh(value => value + 1)}
       market={canInitialize ? market.inspector : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}

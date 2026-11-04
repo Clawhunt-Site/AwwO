@@ -15,7 +15,7 @@ export function canonicalCanvasText(document: { readonly nodes: ReadonlyArray<Ca
   // An assemble node's template and file name are what it runs, and a sandbox node's runtime is what it is; absent on
   // every other node, they leave the text of canvases published before them as it was.
   document.nodes.forEach((node, index) => walk({ kind: node.kind, title: node.title, persona: node.persona, contract: node.contract,
-    template: node.template, fileName: node.fileName, runtime: node.runtime === 'sandbox' ? node.runtime : undefined }, String(index)));
+    template: node.template, fileName: node.fileName, runtime: node.runtime === 'sandbox' || node.runtime === 'blender' ? node.runtime : undefined }, String(index)));
   const position = new Map(document.nodes.map((node, index) => [node.id, index]));
   const wires = (document.edges ?? []).map(edge => JSON.stringify([position.get(edge.fromNode) ?? null, edge.fromPort ?? null, position.get(edge.toNode) ?? null, edge.toPort ?? null, edge.dataType ?? null])).sort();
   const byPath = ([a]: [string, unknown], [b]: [string, unknown]) => (a < b ? -1 : a > b ? 1 : 0);

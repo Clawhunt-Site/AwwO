@@ -1232,6 +1232,8 @@ export const SessionTile = memo(function SessionTile({
         </span>
         {node.kind === 'session' && node.runtime === 'sandbox' ? <span className="awwo-sandbox-badge" data-testid={`sandbox-badge-${nodeId}`}
           title={t('inspector.sandbox')}>{t('tile.sandbox')}</span> : null}
+        {node.kind === 'session' && node.runtime === 'blender' ? <span className="awwo-sandbox-badge" data-testid={`blender-badge-${nodeId}`}
+          title={t('inspector.blender')}>{t('tile.blender')}</span> : null}
         {!compact && node.kind === 'session' && node.team ? <span className="node-team-badge" data-testid={`node-team-badge-${nodeId}`}>
           {node.team.members.length} Agent · {nodeTeamModeLabel(node.team.mode, locale)}
         </span> : null}

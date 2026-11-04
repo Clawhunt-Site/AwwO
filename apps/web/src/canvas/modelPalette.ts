@@ -139,11 +139,11 @@ export function automaticGroups(groups: ReadonlyArray<ModelPaletteGroup>): Model
   return groups.map(group => ({ ...group, models: automaticEntries(group.models) }));
 }
 
-/** The models a node can run in its own sandbox computer (the 'sandbox' runtime), each once; none where the deployment
- *  has no sandbox. Groups keep their order. */
-export function sandboxGroups(groups: ReadonlyArray<ModelPaletteGroup>): ModelPaletteGroup[] {
+/** The models a node can run in its own sandbox computer (the 'sandbox' runtime), or in the Blender workstation (the
+ *  'blender' runtime), each once; none where the deployment has no such computer. Groups keep their order. */
+export function sandboxGroups(groups: ReadonlyArray<ModelPaletteGroup>, runtime: 'sandbox' | 'blender' = 'sandbox'): ModelPaletteGroup[] {
   return groups.map(group => {
-    const models = group.models.filter(model => model.runtime === 'sandbox');
+    const models = group.models.filter(model => model.runtime === runtime);
     return { ...group, models, available: models.some(model => model.available) };
   });
 }

@@ -35,7 +35,7 @@ import { useCanvasI18n, type CanvasTranslate } from './i18n';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
 import { NodeModelSettings } from './NodeModelSettings';
-import { SANDBOX_RUNTIME } from './nodeRuntime';
+import { BLENDER_RUNTIME, computerRuntime, SANDBOX_RUNTIME } from './nodeRuntime';
 import { registerUnsavedEdits } from './unsavedEdits';
 import { AssembleSettings } from './AssembleSettings';
 import { EditSettings } from './EditSettings';
@@ -85,6 +85,9 @@ export interface InspectorPanelProps {
   /** The models a node can run in its own sandbox computer (sandboxGroups); with any of them ready, the node's settings
    *  offer the sandbox switch. */
   sandboxGroups?: ReadonlyArray<ModelPaletteGroup>;
+  /** The models a node can run in the Blender workstation (sandboxGroups(…, 'blender')); with any of them ready, the
+   *  node's settings offer the workstation switch. */
+  blenderGroups?: ReadonlyArray<ModelPaletteGroup>;
   modelsLoading?: boolean;
   modelsError?: string;
   onRetryModels?: () => void;
@@ -199,6 +202,7 @@ export function InspectorPanel({
   editFiles,
   modelGroups,
   sandboxGroups,
+  blenderGroups,
   modelsLoading = false,
   modelsError = '',
   onRetryModels,
@@ -290,6 +294,9 @@ export function InspectorPanel({
   const sandboxEntries = (sandboxGroups ?? []).flatMap(group => group.models);
   const sandboxReady = sandboxEntries.some(entry => entry.available);
   const sandboxNode = sessionDraft?.runtime === SANDBOX_RUNTIME;
+  const blenderEntries = (blenderGroups ?? []).flatMap(group => group.models);
+  const blenderReady = blenderEntries.some(entry => entry.available);
+  const blenderNode = sessionDraft?.runtime === BLENDER_RUNTIME;
   const formDraft = draft.kind === 'form' ? draft : null;
   const assembleDraft = draft.kind === 'assemble' ? draft : null;
   const editNodeDraft = draft.kind === 'edit' ? draft : null;
@@ -542,9 +549,17 @@ export function InspectorPanel({
                     ? (locale === 'en' ? 'A market Agent runs as a text Agent, without a sandbox computer. Take the Agent off to use one.' : '市场 Agent 只作为文字 Agent 运行，不带沙箱电脑。要用沙箱电脑，先取下这个 Agent。')
                     : t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.sandboxHint')}</small></span>
                 </label> : null}
-                <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode}
+                {/* The workstation is a sandbox computer with Blender in it: the same rules, its own switch. */}
+                {blenderReady || blenderNode ? <label className="awwo-sandbox-switch">
+                  <input type="checkbox" checked={blenderNode} disabled={busy || Boolean(sessionDraft.team) || (!blenderNode && (!blenderReady || Boolean(marketRef)))}
+                    onChange={event => editDraft(withComputer(sessionDraft, BLENDER_RUNTIME, event.target.checked, blenderEntries))} />
+                  <span><strong>{t('inspector.blender')}</strong><small>{marketRef && !blenderNode
+                    ? (locale === 'en' ? 'A market Agent runs as a text Agent, without a Blender workstation. Take the Agent off to use one.' : '市场 Agent 只作为文字 Agent 运行，不带 Blender 工作站。要用工作站，先取下这个 Agent。')
+                    : t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.blenderHint')}</small></span>
+                </label> : null}
+                <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : blenderNode && blenderGroups ? blenderGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode || blenderNode}
                   disabled={busy}
-                  onChange={next => editDraft({ ...sessionDraft, ...next,
+                  onChange={next => editDraft({ ...withModelChoice(sessionDraft, next),
                     ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNode(sessionDraft.team, sessionDraft, next.runtime) } : {}) })} />
                 {teamModelOverrides.length ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
@@ -766,10 +781,23 @@ export function InspectorPanel({
  *  ready model, never one only a user may choose: userChosenModels.ts), or back out to the runtime AwwO chooses. A
  *  reasoning level is not carried across. */
 export function withSandbox(node: SessionNode, on: boolean, entries: ReadonlyArray<{ runtime: string; model: string; available: boolean; userChosen?: boolean }>): SessionNode {
-  if (!on) return node.runtime === SANDBOX_RUNTIME ? { ...node, runtime: '', effort: '' } : node;
-  const ready = entries.filter(entry => entry.runtime === SANDBOX_RUNTIME && entry.available);
+  return withComputer(node, SANDBOX_RUNTIME, on, entries);
+}
+
+/** The node with a model picked in its settings. A node on a computer of its own stays there, whatever the picker says
+ *  of the runtime (its default choice names none): only its switch takes it off. */
+export function withModelChoice(node: SessionNode, next: { runtime: string; model: string; effort: string }): SessionNode {
+  return { ...node, ...next, ...(computerRuntime(node.runtime) ? { runtime: node.runtime } : {}) };
+}
+
+/** withSandbox for either computer of the node's own: the sandbox, or the Blender workstation. Switching one on moves
+ *  the node off the other; switching it off moves the node back to the runtime AwwO chooses. */
+export function withComputer(node: SessionNode, runtime: typeof SANDBOX_RUNTIME | typeof BLENDER_RUNTIME, on: boolean,
+  entries: ReadonlyArray<{ runtime: string; model: string; available: boolean; userChosen?: boolean }>): SessionNode {
+  if (!on) return node.runtime === runtime ? { ...node, runtime: '', effort: '' } : node;
+  const ready = entries.filter(entry => entry.runtime === runtime && entry.available);
   const model = ready.some(entry => entry.model === node.model) ? node.model : automaticChoices(ready)[0]?.model ?? node.model;
-  return { ...node, runtime: SANDBOX_RUNTIME, model, effort: '' };
+  return { ...node, runtime, model, effort: '' };
 }
 
 function patchField(node: FormNode, fieldId: string, patch: Partial<FormField>): FormNode {

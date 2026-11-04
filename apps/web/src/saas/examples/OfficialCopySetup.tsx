@@ -4,11 +4,12 @@ import { runtimeDefinitions, runtimeModels, withPlanTag, type SaaSRuntimeStatus 
 import type { CanvasDocument } from '../../canvas/canvasDoc';
 import { mediaKindOf } from '../../canvas/mediaCatalog';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
-import { automaticEntries, SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
+import { automaticEntries, BLENDER_RUNTIME, SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
 import './official-copy-setup.css';
 
-/** `sandbox`: the sandbox computer offers the model too, so the agents of a canvas that works there take it with them. */
-export type OfficialCopyModel = { runtime: string; model: string; label: string; sandbox?: true };
+/** `sandbox`: the sandbox computer offers the model too, so the agents of a canvas that works there take it with them;
+ *  `blender`: the Blender workstation does, for the agents that model there. */
+export type OfficialCopyModel = { runtime: string; model: string; label: string; sandbox?: true; blender?: true };
 const modelKey = (value: OfficialCopyModel) => JSON.stringify([value.runtime, value.model]);
 
 /** The homepage has no active canvas bridge. Read this tenant directly and reuse
@@ -37,8 +38,9 @@ export async function readOfficialCopyModels(tenantId: string, signal?: AbortSig
     // Each model once, on the runtime AwwO runs it on (nodeRuntime.ts): a member picks a model, never a runtime. A model
     // the sandbox computer offers too says so, for the agents that stay there (a flagship's).
     const sandbox = new Set(offered.filter(value => value.runtime === SANDBOX_RUNTIME).map(value => value.model));
+    const blender = new Set(offered.filter(value => value.runtime === BLENDER_RUNTIME).map(value => value.model));
     return automaticEntries(offered.map(value => ({ ...value, available: true }))).map(({ available: _available, ...value }) =>
-      sandbox.has(value.model) ? { ...value, sandbox: true as const } : value);
+      ({ ...value, ...(sandbox.has(value.model) ? { sandbox: true as const } : {}), ...(blender.has(value.model) ? { blender: true as const } : {}) }));
   } catch { throw invalid(); }
 }
 
@@ -53,6 +55,7 @@ export function createOfficialCopyDocument(item: OfficialWorkflow, model: Offici
   return { ...document, nodes: document.nodes.map(node => {
     if (node.kind !== 'session' || mediaKindOf(node.agentKind)) return node;
     if (node.runtime === SANDBOX_RUNTIME) return { ...node, model: model.sandbox ? model.model : node.model, effort: '' };
+    if (node.runtime === BLENDER_RUNTIME) return { ...node, model: model.blender ? model.model : node.model, effort: '' };
     return { ...node, runtime: model.runtime, model: model.model, effort: '' };
   }) };
 }

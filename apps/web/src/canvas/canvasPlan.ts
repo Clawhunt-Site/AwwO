@@ -11,7 +11,7 @@ import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
-import { SANDBOX_RUNTIME, automaticEntry } from './nodeRuntime';
+import { automaticEntry, computerRuntime } from './nodeRuntime';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, inheritingRuntime, newTeamRuntime, nodeTeamRuntimeLabel, validateNodeTeam, type NodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
 
@@ -1004,11 +1004,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         }
         const follow = () => { if (node.team) node.team = { ...node.team, runtime: newTeamRuntime(node) }; };
         const wanted = op.model.trim();
-        // A node on its sandbox computer stays there: the sandbox is the node's own choice, which AwwO never makes or
-        // undoes for it (nodeRuntime.ts SANDBOX_RUNTIME), so a plan changes only its model and effort, as the sandbox
-        // offers them (2026-10-26: the planner now sets page nodes' effort with set_model, which moved such a node off).
-        const sandboxed = node.runtime === SANDBOX_RUNTIME;
-        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = sandboxed ? SANDBOX_RUNTIME : ''; node.model = ''; node.effort = ''; follow(); modelSetNodeIds.add(node.id); break; }
+        // A node on its sandbox computer (or its Blender workstation) stays there: that computer is the node's own choice,
+        // which AwwO never makes or undoes for it (nodeRuntime.ts computerRuntime), so a plan changes only its model and
+        // effort, as the computer offers them (2026-10-26: the planner now sets page nodes' effort with set_model, which
+        // moved such a node off).
+        const computer = computerRuntime(node.runtime) ? node.runtime : '';
+        if (wanted.toLowerCase() === DEFAULT_MODEL_REFERENCE) { node.runtime = computer; node.model = ''; node.effort = ''; follow(); modelSetNodeIds.add(node.id); break; }
         const choices = models?.choices ?? [];
         const folded = wanted.toLowerCase();
         const id = choices.find(choice => choice.model === wanted)?.model
@@ -1038,10 +1039,12 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             `Did not switch “${title}” to “${entry.name || entry.model}”: its team cannot run on that model’s engine`);
           break;
         }
-        const placed = sandboxed ? offered.find(choice => choice.runtime === SANDBOX_RUNTIME && choice.model === entry.model && choice.available) : entry;
+        const placed = computer ? offered.find(choice => choice.runtime === computer && choice.model === entry.model && choice.available) : entry;
         if (!placed) {
-          adjust(`没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${entry.name || entry.model}」`,
-            `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${entry.name || entry.model}”`);
+          adjust(computer === 'blender' ? `没有改动「${title}」的模型：它在 Blender 工作站上运行，工作站没有「${entry.name || entry.model}」`
+            : `没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${entry.name || entry.model}」`,
+          computer === 'blender' ? `Left the model of “${title}” as it was: it runs on its Blender workstation, which does not offer “${entry.name || entry.model}”`
+            : `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${entry.name || entry.model}”`);
           break;
         }
         const effort = op.effort && placed.efforts?.includes(op.effort) ? op.effort : '';
@@ -1072,9 +1075,11 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
           adjust(`没有给「${title}」配团队：它使用工作区 Agent，按那个 Agent 的设置运行`, `Did not give “${title}” a team: it runs a workspace Agent as that Agent is set up`);
           break;
         }
-        // A sandbox node runs one agent in its sandbox computer; the API refuses a team on it (runtime_workers.go).
-        if (node.runtime === SANDBOX_RUNTIME) {
-          adjust(`没有给「${title}」配团队：它在沙箱电脑里运行，只能是单个 Agent`, `Did not give “${title}” a team: it runs in a sandbox computer, as one Agent`);
+        // A sandbox (or Blender workstation) node runs one agent in its own computer; the API refuses a team on it
+        // (runtime_workers.go, teams.go).
+        if (computerRuntime(node.runtime)) {
+          adjust(node.runtime === 'blender' ? `没有给「${title}」配团队：它在 Blender 工作站里运行，只能是单个 Agent` : `没有给「${title}」配团队：它在沙箱电脑里运行，只能是单个 Agent`,
+            node.runtime === 'blender' ? `Did not give “${title}” a team: it runs in a Blender workstation, as one Agent` : `Did not give “${title}” a team: it runs in a sandbox computer, as one Agent`);
           break;
         }
         // A team runs where its node runs (newTeamRuntime), which it cannot on an engine that runs no team.

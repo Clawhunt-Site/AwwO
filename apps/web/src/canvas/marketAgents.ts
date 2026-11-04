@@ -7,7 +7,7 @@ import { createAgentTemplate } from './agentTemplates';
 import type { SessionNode } from './canvasDoc';
 import { mediaKindOf } from './mediaCatalog';
 import type { ModelPaletteSelection } from './modelPalette';
-import { SANDBOX_RUNTIME } from './nodeRuntime';
+import { computerRuntime } from './nodeRuntime';
 import type { UiLocale } from '../locale';
 import type { MarketAgentSummary } from '../saas/marketApi';
 import type { MarketModelDecision } from '../saas/market/marketModel';
@@ -36,7 +36,7 @@ export function marketChoice(agent: Pick<MarketAgentSummary, 'id' | 'name' | 've
 /** Whether a node can take a market Agent: a text or coding node, not a team, not a sandbox computer, not set to one of
  *  the workspace's Agents. */
 export function marketUsable(node: SessionNode): boolean {
-  return marketPublishable(node) && node.runtime !== SANDBOX_RUNTIME;
+  return marketPublishable(node) && !computerRuntime(node.runtime);
 }
 
 /** Whether a node's persona, skills and model can be published as a market Agent: a text or coding node (a sandbox one

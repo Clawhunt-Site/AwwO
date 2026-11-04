@@ -1305,7 +1305,10 @@ const EN = {
   'inspector.sandbox': 'Run in a sandbox computer',
   'inspector.sandboxHint': 'The node gets its own isolated computer: it reads its inputs as files, writes code, runs commands and tests (Node.js, Python, a headless Chromium, the REA code reader) and delivers real files. It makes several model calls and takes longer than a single answer.',
   'inspector.sandboxTeam': 'A team runs on its members’ own runtimes; a sandbox node is a single agent.',
+  'inspector.blender': 'Model in the Blender workstation',
+  'inspector.blenderHint': 'The node gets its own sandbox computer with Blender 5.2 and a GPU: it models, lights, renders and exports real 3D with Blender’s own tools (the Blender MCP server), and delivers the model, renders and other files. It makes several model calls and takes longer than a single answer.',
   'tile.sandbox': 'Sandbox',
+  'tile.blender': 'Blender',
 } as const;
 
 export type CanvasTextKey = keyof typeof EN;
@@ -2143,7 +2146,10 @@ const ZH: Record<CanvasTextKey, string> = {
   'inspector.sandbox': '在沙箱电脑里执行',
   'inspector.sandboxHint': '这个节点获得自己的隔离电脑：把输入当作文件读取，写代码、运行命令和测试（Node.js、Python、无头 Chromium、REA 代码分析），然后交付真实的文件。它会多次调用模型，比一次性回答慢。',
   'inspector.sandboxTeam': '团队由成员各自的运行时执行；沙箱节点只运行一个 Agent。',
+  'inspector.blender': '在 Blender 工作站里建模',
+  'inspector.blenderHint': '这个节点获得一台装有 Blender 5.2 和 GPU 的沙箱电脑：用 Blender 自己的工具（Blender MCP 服务）建模、布光、渲染、导出真正的 3D，然后交付模型、渲染图和其他文件。它会多次调用模型，比一次性回答慢。',
   'tile.sandbox': '沙箱',
+  'tile.blender': 'Blender',
 };
 
 const CATALOG: Record<UiLocale, Record<CanvasTextKey, string>> = { en: EN, zh: ZH };

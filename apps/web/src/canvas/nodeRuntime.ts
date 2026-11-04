@@ -14,6 +14,10 @@ export const AUTOMATIC_RUNTIME_ORDER: ReadonlyArray<string> = ['openai-agents', 
 /** The sandbox computer is a node's own choice (its settings' switch), never one AwwO makes for it: a sandbox node runs
  *  many model calls and real commands, so the automatic choice neither moves a node there nor away from it. */
 export const SANDBOX_RUNTIME = 'sandbox';
+/** The Blender workstation: a sandbox computer with Blender in it (and a GPU), chosen by the same rule. */
+export const BLENDER_RUNTIME = 'blender';
+/** Whether a runtime is a computer of the node's own (the sandbox or the Blender workstation). */
+export const computerRuntime = (runtime: string | undefined): boolean => runtime === SANDBOX_RUNTIME || runtime === BLENDER_RUNTIME;
 
 /** One model a runtime offers this workspace (a palette entry). */
 export interface RuntimeEntry { runtime: string; model: string; available: boolean }
@@ -28,7 +32,7 @@ function rank(runtime: string): number {
 export function automaticEntry<T extends RuntimeEntry>(model: string, entries: ReadonlyArray<T>): T | undefined {
   let best: T | undefined;
   for (const entry of entries) {
-    if (!model || entry.model !== model || !entry.available || !entry.runtime || entry.runtime === SANDBOX_RUNTIME) continue;
+    if (!model || entry.model !== model || !entry.available || !entry.runtime || computerRuntime(entry.runtime)) continue;
     if (!best || rank(entry.runtime) < rank(best.runtime)) best = entry;
   }
   return best;
@@ -40,7 +44,7 @@ export function automaticEntries<T extends RuntimeEntry>(entries: ReadonlyArray<
   const at = new Map<string, number>();
   const result: T[] = [];
   for (const entry of entries) {
-    if (entry.runtime === SANDBOX_RUNTIME) continue;
+    if (computerRuntime(entry.runtime)) continue;
     const index = at.get(entry.model);
     if (index === undefined) { at.set(entry.model, result.length); result.push(entry); continue; }
     const current = result[index];
@@ -54,7 +58,7 @@ export function automaticEntries<T extends RuntimeEntry>(entries: ReadonlyArray<
  *  own setup made for it (node_setup.go), so it does not count: setting the node up again on another runtime is what a
  *  model change does too. */
 export function choosesRuntime(node: CanvasNode): node is SessionNode {
-  return node.kind === 'session' && !mediaKindOf(node.agentKind) && !node.team && !node.agentRef && node.runtime !== SANDBOX_RUNTIME;
+  return node.kind === 'session' && !mediaKindOf(node.agentKind) && !node.team && !node.agentRef && !computerRuntime(node.runtime);
 }
 
 /** The reasoning-effort levels a runtime's entry for a model advertises (empty: none). */

@@ -3,7 +3,7 @@
 // sends. The server checks every one of these again.
 import { SaaSApiError, saasErrorMessage } from '../api';
 import type { SessionNode } from '../../canvas/canvasDoc';
-import { SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
+import { computerRuntime } from '../../canvas/nodeRuntime';
 import { MARKET_LIMITS, type MarketAgentKind, type MarketCategory, type MarketDraft, type MarketDraftInput, type MarketExample, type MarketModel } from '../marketApi';
 import type { MarketT } from './marketText';
 
@@ -26,7 +26,7 @@ export function formFromNode(node: SessionNode, tenantId: string): PublishForm {
   return { name: [...node.title.trim()].slice(0, MARKET_LIMITS.name).join(''), tagline: '', description: '', category: 'other',
     kind: 'llm', instructions: node.persona, instructionsPublic: false,
     skills: (node.skills ?? []).map(ref => ({ tenantId: skillTenant(ref, tenantId), ref, title: '' })),
-    model: { runtime: node.runtime === SANDBOX_RUNTIME ? '' : node.runtime, id: node.model, effort: node.effort, locked: false }, price: '0', examples: [], authorName: '' };
+    model: { runtime: computerRuntime(node.runtime) ? '' : node.runtime, id: node.model, effort: node.effort, locked: false }, price: '0', examples: [], authorName: '' };
 }
 export function formFromDraft(draft: MarketDraft): PublishForm {
   return { name: draft.name, tagline: draft.tagline, description: draft.description, category: draft.category, kind: 'llm',

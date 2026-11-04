@@ -13,7 +13,7 @@ const choiceKey = (runtime: string, id: string) => JSON.stringify([runtime, id])
 
 export function ModelField({ model, models, disabled, onChange }: { model: MarketModel; models: ReadonlyArray<ModelPaletteSelection> | null; disabled: boolean; onChange: (model: MarketModel) => void }) {
   const { t } = useMarketI18n();
-  const choices = useMemo(() => automaticEntries((models ?? []).filter(entry => entry.runtime !== 'sandbox')), [models]);
+  const choices = useMemo(() => automaticEntries((models ?? []).filter(entry => entry.runtime !== 'sandbox' && entry.runtime !== 'blender')), [models]);
   const current = choices.find(entry => entry.model === model.id);
   const value = model.id ? current ? choiceKey(current.runtime, current.model) : choiceKey(model.runtime, model.id) : '';
   const efforts = current?.efforts ?? [];

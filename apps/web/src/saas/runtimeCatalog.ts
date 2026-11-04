@@ -21,8 +21,8 @@ export function withPlanTag(label: string, model: { requiresUpgrade?: boolean })
 }
 /** The runtimes a node can be set up on: a team's runtimes, and the sandbox computer (a node that works in its own
  *  isolated computer, with files, a shell and tests; never a team). */
-export type NodeRuntime = NodeTeamRuntime | 'sandbox';
-export const NODE_RUNTIMES: readonly NodeRuntime[] = [...NODE_TEAM_RUNTIMES, 'sandbox'];
+export type NodeRuntime = NodeTeamRuntime | 'sandbox' | 'blender';
+export const NODE_RUNTIMES: readonly NodeRuntime[] = [...NODE_TEAM_RUNTIMES, 'sandbox', 'blender'];
 export type SaaSRuntimeDefinition = {
   id: NodeRuntime; name: string; available: boolean; configured: boolean;
   /** True when at least one model of this runtime advertises effort levels. Per-model levels still rule. */
@@ -62,7 +62,7 @@ export function runtimeDefinitions(status: SaaSRuntimeStatus): SaaSRuntimeDefini
     if (seen.has(runtime.id) || !Array.isArray(runtime.tools)) throw new Error('Invalid runtime inventory.');
     seen.add(runtime.id);
     const workspace = runtime.workspace;
-    const workspaceValid = (runtime.id === 'openai-agents' || runtime.id === 'sandbox')
+    const workspaceValid = (runtime.id === 'openai-agents' || runtime.id === 'sandbox' || runtime.id === 'blender')
       && workspace?.version === 1 && typeof workspace.available === 'boolean' && Number.isInteger(workspace.maxModelCalls)
       && workspace.maxModelCalls >= 2 && workspace.maxModelCalls <= 64;
     return { id: runtime.id, name: runtime.name || nodeTeamRuntimeLabel(runtime.id),

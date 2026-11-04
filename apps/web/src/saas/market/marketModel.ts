@@ -2,7 +2,7 @@
 // locked it, the server runs that model or refuses (market_agent_model_unavailable), and otherwise it is a suggestion the
 // node takes only where this workspace offers it and AwwO may choose it by itself: a model only a person may pick
 // (canvas/userChosenModels.ts) is never put on a node unasked. A locked one the reader is shown before choosing the Agent.
-import { automaticEntry, SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
+import { automaticEntry, computerRuntime } from '../../canvas/nodeRuntime';
 import type { ModelPaletteSelection } from '../../canvas/modelPalette';
 import type { MarketModel } from '../marketApi';
 import type { MarketT } from './marketText';
@@ -24,7 +24,7 @@ export function marketModelDecision(model: MarketModel, catalogue: ReadonlyArray
   if (!model.id) return { kind: 'keep', reason: 'none', label: '' };
   if (!catalogue) return model.locked ? { kind: 'apply', runtime: model.runtime, model: model.id, effort: model.effort, label: model.id, userChosen: false }
     : { kind: 'keep', reason: 'unknown', label: model.id };
-  const offered = catalogue.filter(entry => entry.model === model.id && entry.runtime !== SANDBOX_RUNTIME);
+  const offered = catalogue.filter(entry => entry.model === model.id && !computerRuntime(entry.runtime));
   const exact = offered.find(item => item.runtime === model.runtime && item.available);
   // A locked model runs on its own runtime, at its own effort, and no other: the server puts the version's runtime,
   // model and effort on the node, and refuses a workspace that cannot run that one.

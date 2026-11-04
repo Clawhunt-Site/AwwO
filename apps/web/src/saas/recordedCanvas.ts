@@ -1,6 +1,6 @@
 import { emptyDocument, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { mediaKindOf } from '../canvas/mediaCatalog';
-import { SANDBOX_RUNTIME } from '../canvas/nodeRuntime';
+import { BLENDER_RUNTIME, SANDBOX_RUNTIME } from '../canvas/nodeRuntime';
 import type { OfficialCopyModel } from './examples/OfficialCopySetup';
 import type { ProductionRunRecord } from './productionRuns';
 import { recordedCanvasText, type RecordedCanvas } from './recordedCanvasText';
@@ -42,6 +42,7 @@ export function createRecordedCopyDocument(canvas: RecordedCanvas, model: Offici
     const fresh = { ...copy, binding: null, bindAttempt: null, issueId: null, preview: '', lastOutput: null };
     if (mediaKindOf(copy.agentKind) || !model) return fresh;
     if (copy.runtime === SANDBOX_RUNTIME) return { ...fresh, model: model.sandbox ? model.model : copy.model, effort: '' };
+    if (copy.runtime === BLENDER_RUNTIME) return { ...fresh, model: model.blender ? model.model : copy.model, effort: '' };
     return { ...fresh, runtime: model.runtime, model: model.model, effort: '' };
   });
   return { ...emptyDocument(), nodes, edges: canvas.edges.map(edge => ({ ...edge })) };

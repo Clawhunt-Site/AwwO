@@ -7,9 +7,10 @@ import { PREVIEW_FONT_RULE } from '../../canvas/previewFontList';
 import { THREE_MODULES_IMPORT_MAP } from '../../canvas/previewImportMap';
 import type { OfficialMediaNode } from './officialMedia';
 
-/** nodeRuntime.ts SANDBOX_RUNTIME, written out: that module loads the media catalog, which plain bundles of the case
- * canvases (the case runner's job generator) cannot load. */
+/** nodeRuntime.ts SANDBOX_RUNTIME and BLENDER_RUNTIME, written out: that module loads the media catalog, which plain
+ * bundles of the case canvases (the case runner's job generator) cannot load. */
 const SANDBOX_RUNTIME = 'sandbox';
+const BLENDER_RUNTIME = 'blender';
 
 /** Every production case is English, in both interface languages (owner 2026-10-14): its canvas, tasks and
  * deliveries are written and run in English, so a copy is the same canvas whatever the reader's language. */
@@ -29,6 +30,9 @@ export interface OfficialWorkflowNode {
   readonly assemble?: { readonly template: string; readonly file?: true; readonly fileName?: string; readonly fileOnly?: true };
   /** The agent runs in the sandbox computer (the `sandbox` runtime): its inputs as files, real commands and tests. */
   readonly sandbox?: true;
+  /** The agent runs in the Blender workstation (the `blender` runtime): a sandbox with Blender and its MCP tools, where it
+   *  models, lights, renders and exports the case's 3D. */
+  readonly blender?: true;
   /** A second, Markdown output (`report`) beside its result, for what downstream reads instead of a large result. */
   readonly report?: string;
   /** A sandbox agent's file output (`file`) beside its result, labelled so: what it hands to the agent after it (a file
@@ -115,7 +119,7 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const shows = pictures.length
       ? modern ? `${MEDIA_PAGE_R186}${models ? MEDIA_MODEL_PAGE_R186 : ''}${animated ? MEDIA_ANIMATED_MODEL_PAGE_R186 : ''}`
         : `${MEDIA_PAGE}${models ? MEDIA_MODEL_PAGE : ''}` : '';
-    return { ...base, title: spec.title, w: 560, h: 420, ...(spec.sandbox ? { runtime: SANDBOX_RUNTIME } : {}),
+    return { ...base, title: spec.title, w: 560, h: 420, ...(spec.blender ? { runtime: BLENDER_RUNTIME } : spec.sandbox ? { runtime: SANDBOX_RUNTIME } : {}),
       // These nodes have purpose-built contracts; assigning a built-in templateId would display
       // that template's unrelated guide instead of the official case's task and acceptance.
       persona: `${spec.task}\n\nAcceptance:\n${spec.acceptance.map(check => `- ${check}`).join('\n')}\n\n${EVIDENCE}${html}${shows}`,

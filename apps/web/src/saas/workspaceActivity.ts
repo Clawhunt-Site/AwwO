@@ -1,4 +1,5 @@
-export const workspaceTools = ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_exec', 'workspace_publish', 'workspace_archive'] as const;
+// workspace_blender: one of a Blender workstation's Blender tools (the worker relays that label alone).
+export const workspaceTools = ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_exec', 'workspace_publish', 'workspace_archive', 'workspace_blender'] as const;
 export type WorkspaceTool = typeof workspaceTools[number];
 export interface WorkspaceActivity { items: { step: number; tool: WorkspaceTool }[]; truncated: boolean }
 export interface RunExecutionMetadata {
@@ -21,7 +22,8 @@ export function readRunExecutionMetadata(value: unknown): RunExecutionMetadata |
   for (const raw of activity.items) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const event = raw as Record<string, unknown>;
-    if (!Number.isInteger(event.step) || Number(event.step) < 1 || Number(event.step) > 16 || Number(event.step) < previousStep
+    // A run takes up to 64 model calls (the API's maxWorkspaceModelCalls); its steps are numbered by them.
+    if (!Number.isInteger(event.step) || Number(event.step) < 1 || Number(event.step) > 64 || Number(event.step) < previousStep
       || typeof event.tool !== 'string' || !workspaceTools.includes(event.tool as WorkspaceTool)) return null;
     previousStep = Number(event.step);
     items.push({ step: previousStep, tool: event.tool as WorkspaceTool });
@@ -37,6 +39,7 @@ export function workspaceToolLabel(tool: WorkspaceTool, locale: 'zh' | 'en'): st
     workspace_exec: ['执行终端操作', 'Run a terminal command'],
     workspace_publish: ['发布交付', 'Publish a deliverable'],
     workspace_archive: ['打包项目', 'Package the project'],
+    workspace_blender: ['在 Blender 里操作', 'Work in Blender'],
   };
   return labels[tool][locale === 'zh' ? 0 : 1];
 }

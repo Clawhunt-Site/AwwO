@@ -11,7 +11,7 @@ import type { PlanningMessage, PlanProgressReporter } from './canvasPlanning';
 import { deliveryProfiles, type DeliveryProfile } from './deliveryProfiles';
 
 /** Jev may give a building role the sandbox computer (it prefers project execution for building and testing). */
-export interface JevModelAssignment { ref: string; runtime: 'pi' | 'openai-agents' | 'sandbox'; model: string }
+export interface JevModelAssignment { ref: string; runtime: 'pi' | 'openai-agents' | 'sandbox' | 'blender'; model: string }
 export interface JevPlanResult {
   plan: CanvasPlan;
   modelAssignments: JevModelAssignment[];
@@ -119,7 +119,8 @@ export async function requestJevPlan(prompt: string, doc: CanvasDocument, messag
     if (reason) throw new Error(reason);
     // Rank only newly planned roles. Existing nodes and their model selections are untouched. Jev assigns the models
     // itself, so never one only a user may choose (userChosenModels.ts).
-    const models = automaticChoices(palette.models).filter(model => model.available).sort((a, b) => Number(b.execution === 'workspace') - Number(a.execution === 'workspace'));
+    // The Blender workstation is for 3D work a node is switched to by hand, not for the roles Jev plans.
+    const models = automaticChoices(palette.models).filter(model => model.available && model.runtime !== 'blender').sort((a, b) => Number(b.execution === 'workspace') - Number(a.execution === 'workspace'));
     if (!models.length) fail(locale, '工作区没有可用于执行节点的模型。', 'This workspace has no available node execution model.');
     if (models.length > 255) fail(locale, '当前可用模型超过 Jev 候选上限，请先缩小工作区模型目录。', 'The available model catalog exceeds the Jev candidate limit. Narrow the workspace catalog first.');
     const availableRoles = roles(locale);

@@ -9,7 +9,7 @@ import { CANVAS_PLAN_NODE_OPERATION_TYPES, CANVAS_PLAN_OPERATION_TYPES, CANVAS_P
   sharedRequirements, withMediaNodes, type CanvasPlan, type CanvasPlanOperationType, type PlanContextCondensed } from './canvasPlan';
 import { isTaskFrame } from './taskFrame';
 import { NEW_NODE_LINE } from './planNewNodeModel';
-import { SANDBOX_RUNTIME } from './nodeRuntime';
+import { BLENDER_RUNTIME, computerRuntime } from './nodeRuntime';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import { nodeTeamTemplates } from './nodeTeamTemplates';
@@ -341,8 +341,10 @@ function planningContext(doc: CanvasDocument, messages: PlanningMessage[], local
         // A workspace Agent's node runs as its Agent is set up: a plan changes neither its model nor its effort, which
         // the node shows as copied from the Agent (canvasPlan.ts set_model, workspaceAgents.ts).
         ...(node.agentRef ? { workspaceAgent: true } : {}),
-        // A node on its own sandbox computer, which a plan's effort does not reach (canvasPlan.ts set_model).
-        ...(node.runtime === SANDBOX_RUNTIME ? { sandbox: true } : {}),
+        // A node on its own sandbox computer (a Blender workstation is one), which a plan's effort does not reach
+        // (canvasPlan.ts set_model).
+        ...(computerRuntime(node.runtime) ? { sandbox: true } : {}),
+        ...(node.runtime === BLENDER_RUNTIME ? { blender: true } : {}),
         inputs: node.contract?.inputs.map(({ id, label, type, required, value }) => ({ id, label, type, required, value: short(node.id, `input:${id}`, value) })),
         outputs: node.contract?.outputs.map(({ id, label, type, required }) => ({ id, label, type, required })),
         ...(node.lastOutput && !node.lastOutput.partial ? { delivered: true } : {}),
