@@ -4,6 +4,10 @@ import { API_BASE, api, SaaSApiError, tenantPath } from './api';
  *  userChosen: a model only a user may choose (canvas/userChosenModels.ts), never the one a task starts on by itself. */
 export interface ExecutionModel { id: string; label: string; runtime: string; efforts?: string[]; route?: string; requiresUpgrade?: boolean; userChosen?: boolean }
 export interface ExecutionRuntime { ready: boolean; reason?: string; capabilities: { workspace: boolean; approvals: boolean }; models: ExecutionModel[] }
+/** The two reasons the API gives for a workspace's execution not being ready (computer_execution.go), which the pages
+ *  say in the reader's language: its service did not answer, or the workspace may use no model. */
+export const EXECUTION_SERVICE_NOT_READY = 'Managed execution service is not ready';
+export const EXECUTION_NO_MODEL = 'Configure an available model in My engines';
 /** error: how a task that ended without its result ended (the run's error code; empty otherwise). */
 export interface ExecutionRunSummary { id: string; status: string; prompt: string; createdAt: string; updatedAt: string; error?: string }
 export interface ExecutionRuns { items: ExecutionRunSummary[]; truncated?: boolean }

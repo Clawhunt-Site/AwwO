@@ -14,8 +14,8 @@ import { announceRouteUsageChanged } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
 import { useAccountPreferences } from './accountPreferences';
 import { notifyTaskFinished } from './taskNotifications';
-import { cancelExecutionRun, createExecutionRun, executionArtifactURL, executionTerminal, readExecutionRun, readExecutionRuns, readExecutionRuntime,
-  respondToExecutionRun, type ExecutionApproval, type ExecutionArtifact, type ExecutionInput, type ExecutionModel,
+import { EXECUTION_NO_MODEL, EXECUTION_SERVICE_NOT_READY, cancelExecutionRun, createExecutionRun, executionArtifactURL, executionTerminal, readExecutionRun, readExecutionRuns,
+  readExecutionRuntime, respondToExecutionRun, type ExecutionApproval, type ExecutionArtifact, type ExecutionInput, type ExecutionModel,
   type ExecutionResponseInput, type ExecutionRun, type ExecutionRuns, type ExecutionRuntime } from './managedExecutionApi';
 
 export const executionModelKey = (runtime: string, model: string) => JSON.stringify([runtime, model]);
@@ -464,9 +464,9 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
 
   const ready = Boolean(runtime?.ready && runtime.capabilities.workspace);
   const needsModel = runtime?.capabilities.workspace === true && runtime.models.length === 0;
-  const serviceReason = runtime?.reason === 'Configure an available model in My engines'
+  const serviceReason = runtime?.reason === EXECUTION_NO_MODEL
     ? t('连接一个模型即可开始。请在「我的引擎」中选择或添加可用模型。', 'Connect a model to begin. Choose or add an available model in My engines.')
-    : runtime?.reason === 'Managed execution service is not ready'
+    : runtime?.reason === EXECUTION_SERVICE_NOT_READY
       ? t('工作区执行服务暂时不可用，请稍后重新检查。', 'Workspace execution is temporarily unavailable. Check again later.') : runtime?.reason;
   const startBlockedReason = readOnly ? t('只读访问不能发起任务。', 'Read-only access cannot start tasks.')
     // A read again of a service already known (the conversation shown again, a refresh) keeps what was read.
