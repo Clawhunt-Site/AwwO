@@ -208,19 +208,6 @@
   align-items: center;
   gap: 8px;
 }
-/* A link in a section's own text (模型服务's 「通用」, 关于's 隐私政策 and 开源许可, 数据管理's 本机) took the browser's
-   default blue, and purple once visited: the theme's link colour instead. :where() keeps the rule at zero
-   specificity, so a component's own link colour (the skill library's licence link) and every link drawn as a
-   button or chip, which carry a class, stay as they are. */
-:where(.saas-settings-content a:not([class])) {
-  color: var(--saas-link);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-:where(.saas-settings-content a:not([class])):hover {
-  color: var(--saas-link-hover);
-}
 .saas-settings-help {
   display: flex;
   flex-wrap: wrap;

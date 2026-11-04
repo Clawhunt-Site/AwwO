@@ -60,6 +60,16 @@ html { scrollbar-color: color-mix(in srgb, var(--saas-text) 20%, transparent) tr
 }
 .production-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
 
+/* A link no rule gives a colour of its own took the browser's default blue, and purple once visited: 返回登录 on a
+   ClawHunt sign-in that failed, 返回工作区 where the admin is refused or an invitation is gone, a settings section's
+   通用, 隐私政策 and 开源许可. It takes the theme's link colour instead. The whole selector is inside :where(), so
+   its specificity is zero: a component's own link colour (the skill library's licence link, the footer's, the
+   menus') and every link drawn as a button or chip, which carry a class, stay as they are. */
+:where(:is(.saas-login, .saas-dashboard, .saas-notice, .saas-native-dialog) a:not([class])) {
+  color: var(--saas-link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+:where(:is(.saas-login, .saas-dashboard, .saas-notice, .saas-native-dialog) a:not([class]):hover) { color: var(--saas-link-hover); }
+
 /* ── Controls ───────────────────────────────────────────────────────────────────────────────── */
 /* Every button on these pages starts as a quiet secondary control. Only the properties the older
    generic rules already set are touched here, so component buttons that reset them stay as built. */
