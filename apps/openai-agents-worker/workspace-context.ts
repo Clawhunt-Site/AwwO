@@ -179,7 +179,7 @@ function receiptSummary(item: Extract<Item, { type: 'function_call' }>, result: 
       if (excerptBytes === 0) summary.commandOmitted = true;
     }
   }
-  if (record(receipt)) for (const key of ['written', 'published', 'path', 'bytes', 'byteLength', 'sha256', 'exitCode', 'truncated', 'error']) {
+  if (record(receipt)) for (const key of ['written', 'published', 'path', 'bytes', 'byteLength', 'sha256', 'deliveryRoomBytes', 'exitCode', 'truncated', 'error']) {
     if (typeof receipt[key] === 'string' || typeof receipt[key] === 'number' || typeof receipt[key] === 'boolean') summary[key] = receipt[key];
   }
   // Keep explicit excerpts and the actual exit status; never infer success.
