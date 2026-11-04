@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases';
 import { EDIT_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
@@ -128,6 +128,83 @@ it('shows one row on the workspace home until the visitor asks for all of them',
   expect(cards()).toHaveLength(PRODUCTION_CASES.length);
   fireEvent.click(toggle);
   expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
+});
+
+// A stage drew as one unbreakable line, so the long ones (PALLWARD's twenty builders, THE LONG CHORD's reel editors)
+// ran out of their card, which clips (2026-11-04).
+it('draws each stage as one line that breaks after its dots, not at its roles’ spaces, a role it has more than once with its count', () => {
+  view();
+  const team = (card: HTMLElement) => [...within(card).getByRole('list', { name: 'Agent team, by stage' }).children].map(stage => stage.textContent!);
+  const counted = (role: string) => /^(.*) ×(\d+)$/.exec(role);
+  PRODUCTION_CASES.forEach((item, index) => team(cards()[index]).forEach((text, position) => {
+    // The only spaces a line can break at follow a dot: a role's own spaces, and the one before its dot, don't break.
+    expect(text.replace(/· /g, ''), item.id).not.toContain(' ');
+    const shown = text.split('\u00a0· ').map(role => role.replace(/\u00a0/g, ' ')), roles = item.stages[position];
+    expect(shown.map(role => counted(role)?.[1] ?? role), item.id).toEqual([...new Set(roles)]);
+    expect(shown.reduce((sum, role) => sum + Number(counted(role)?.[2] ?? 1), 0), item.id).toBe(roles.length);
+  }));
+  // A run chip breaks after its dot, and only there.
+  const chips = [...document.querySelectorAll('.production-card .production-run-chip')];
+  expect(chips.length).toBeGreaterThan(0);
+  for (const chip of chips) expect(chip.textContent!.replace(/\xa0/g, '~')).toMatch(/^Real~run~· \d+\/\d+~nodes~done$/);
+  const chord = cards()[PRODUCTION_CASES.findIndex(item => item.id === 'the-long-chord')];
+  expect(team(chord).map(text => text.replace(/\u00a0/g, ' '))).toEqual(['Media', 'Media',
+    'Reel 1 editor · Reel 2 editor · Reel 3 editor · Reel 4 editor · Reel 5 editor · Reel 6 editor', 'Edit node ×6', 'Edit node ×3', 'Edit node']);
+});
+
+// jsdom lays nothing out, so the rules are pinned at the stylesheets' source; Chrome measured them at 320-1440 px wide.
+it('lets a card’s long stage, cover labels and run chip wrap in the card, not run out of it or over each other', () => {
+  for (const file of ['src/saas/production-cases.css', 'src/saas/design/system.css']) {
+    const css = readFileSync(resolve(process.cwd(), file), 'utf8');
+    // (The kind, a word or two, keeps to one line: it moves under the label instead.) None of them is raised to the
+    // title's overlay either, which would let it take the card's clicks again.
+    const rules = [...css.matchAll(/\.production-(?:team li|run-chip|card-tags)[^{,]*\{[^}]*\}/g)].map(match => match[0]);
+    expect(rules.length, file).toBeGreaterThan(0);
+    for (const rule of rules) { expect(rule, file).not.toMatch(/white-space:\s*nowrap/); expect(rule, file).not.toMatch(/z-index/); }
+  }
+  const css = readFileSync(resolve(process.cwd(), 'src/saas/production-cases.css'), 'utf8');
+  // A selector's first rule, which must exist, and declarations it must hold, in any order.
+  const rule = (selector: string) => { const at = css.indexOf(`${selector} {`); expect(at, selector).toBeGreaterThanOrEqual(0); return css.slice(at, css.indexOf('}', at)); };
+  const has = (selector: string, ...declarations: string[]) => { for (const declaration of declarations) expect(rule(selector), selector).toContain(declaration); };
+  // A stage and the run chip wrap whatever their parents say; a stage's arrow sits beside its middle.
+  has('.production-team li', 'white-space: normal', 'overflow-wrap: anywhere');
+  has('.production-run-chip', 'white-space: normal');
+  has('.production-team li:not(:last-child)::after', 'top: 50%', 'transform: translateY(-50%)');
+  // The cover's two labels share one wrapping row instead of a corner each.
+  view();
+  for (const card of cards())
+    expect([...card.querySelector('.production-card-media > .production-card-tags')!.children].map(tag => tag.className)).toEqual([expect.stringMatching(/^production-label\b/), 'production-kind']);
+  has('.production-card-tags', 'position: absolute', 'display: flex', 'flex-wrap: wrap');
+  has('.production-card-tags > .production-label', 'white-space: normal');
+  has('.production-kind', 'margin-left: auto');
+  expect(rule('.production-kind')).not.toContain('position: absolute');
+  expect(css).not.toContain('.production-card-media > .production-label');
+  // A stage holds its arrow as a positioned box: the title's overlay lies above it, so a click on a stage opens the case.
+  has('.production-card', 'isolation: isolate');
+  has('.production-card-open::after', 'position: absolute', 'inset: 0', 'z-index: 1');
+  // The case dialog, which a translator may lengthen, keeps its close button on a phone's screen.
+  has('.production-dialog-body > header > div', 'min-width: 0');
+  has('.production-dialog-meta > .production-label', 'white-space: normal');
+});
+
+// A bilingual page translator added its Chinese to every label and stage of a card, which pushed them over each other
+// and out of the card (2026-11-04); a case is read, and can be translated, in its dialog.
+it('keeps each card in its English under a page translator, not the section heading or the case dialog', () => {
+  view();
+  for (const card of cards()) expect(card).toHaveAttribute('translate', 'no');
+  expect(screen.getByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' }).closest('[translate="no"]')).toBeNull();
+  // The legend's sample labels read as the cards show them; what they mean can be translated.
+  const samples = [...document.querySelectorAll('.production-legend .production-label')];
+  expect(samples.length).toBeGreaterThan(0);
+  for (const sample of samples) expect(sample).toHaveAttribute('translate', 'no');
+  expect(screen.getByText('The cover is a screen recording of that delivery').closest('[translate="no"]')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Pixel platformer' }));
+  const dialog = screen.getByRole('dialog', { name: 'Pixel platformer' });
+  expect(dialog.closest('[translate="no"]')).toBeNull();
+  // Nor is the dialog's own cover label: only the cards and the legend's samples keep their English.
+  const labels = [...dialog.querySelectorAll('.production-label')];
+  expect(labels.length).toBeGreaterThan(0);
+  for (const label of labels) expect(label).not.toHaveAttribute('translate');
 });
 
 

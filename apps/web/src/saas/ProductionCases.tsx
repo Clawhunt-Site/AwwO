@@ -16,6 +16,14 @@ export const COMPACT_CASE_COUNT = 3;
 const reducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const saveData = () => (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
 const quote = (text: string) => `“${text}”`;
+/** A stage as its card shows it: each role once, with its count where the stage has it more than once ("Edit node ×6"),
+ * joined by middle dots. The spaces inside a role and before its dot don't break, so a long stage wraps in its box
+ * between roles, each line ending on a dot (a role's own hyphen, as in X-ray, may still break). */
+const stageLine = (stage: ReadonlyArray<string>) => {
+  const counts = new Map<string, number>();
+  for (const role of stage) counts.set(role, (counts.get(role) ?? 0) + 1);
+  return [...counts].map(([role, count]) => (count > 1 ? `${role} ×${count}` : role).replace(/ /g, '\u00a0')).join('\u00a0· ');
+};
 const outside = (box: DOMRect, x: number, y: number) => x < box.left || x > box.right || y < box.top || y > box.bottom;
 
 /** A muted loop. Its poster and source load once it nears the viewport (a poster ignores
@@ -51,8 +59,8 @@ function Footage({ stem, active = true, label, eager = false }: { stem: string; 
 
 /** What the cover footage is: a recording of the delivery, an excerpt of the film the run delivered, or an AI-generated
  * illustration. */
-function Label({ recording, excerpt, id }: { recording?: boolean; excerpt?: boolean; id?: string }) {
-  return <span id={id} className={`production-label${recording ? ' is-real' : ''}`}>{excerpt ? 'Excerpt of the delivered film' : recording ? 'Recorded delivery' : 'Cover: AI illustration'}</span>;
+function Label({ recording, excerpt, id, translate }: { recording?: boolean; excerpt?: boolean; id?: string; translate?: 'no' }) {
+  return <span id={id} className={`production-label${recording ? ' is-real' : ''}`} translate={translate}>{excerpt ? 'Excerpt of the delivered film' : recording ? 'Recorded delivery' : 'Cover: AI illustration'}</span>;
 }
 
 /** Delivered only when the published run delivered it; otherwise it is still the brief's goal. */
@@ -66,19 +74,23 @@ function RunChip({ item }: { item: ProductionCase }) {
   const run = PRODUCTION_RUN_SUMMARY[item.id];
   if (!run) return null;
   const done = run.completed + (run.media?.completed ?? 0), total = run.total + (run.media?.total ?? 0);
-  return <span className="production-run-chip">{`Real run · ${done}/${total} nodes done`}</span>;
+  // On a narrow card it wraps after its dot.
+  return <span className="production-run-chip">{`Real\u00a0run\u00a0· ${done}/${total}\u00a0nodes\u00a0done`}</span>;
 }
 
 function CaseCard({ item, active, onOpen }: { item: ProductionCase; active: boolean; onOpen: (item: ProductionCase, trigger: HTMLButtonElement) => void }) {
   const id = useId();
-  return <li className={`production-card${item.recording ? ' is-real' : ''}`}>
-    <div className="production-card-media"><Footage stem={item.footage} active={active} /><Label recording={item.recording} excerpt={item.excerpt} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div>
+  // A card stays in its English as drawn: a page translator's added lines doubled its labels and stages and pushed them
+  // over each other and out of the card (2026-11-04). The case dialog, where the text is read, can still be translated.
+  return <li className={`production-card${item.recording ? ' is-real' : ''}`} translate="no">
+    <div className="production-card-media"><Footage stem={item.footage} active={active} />
+      <div className="production-card-tags"><Label recording={item.recording} excerpt={item.excerpt} id={`${id}-label`} /><span className="production-kind">{PRODUCTION_KIND_LABELS[item.kind]}</span></div></div>
     <div className="production-card-copy">
       <h3><button type="button" className="production-card-open" aria-haspopup="dialog" aria-describedby={`${id}-label ${id}-brief`} data-case-id={item.id}
         onClick={event => onOpen(item, event.currentTarget)}>{item.title}</button></h3>
       <p id={`${id}-brief`} className="production-brief">{quote(item.brief)}</p>
       <ol role="list" className="production-team" aria-label="Agent team, by stage">
-        {item.stages.map((stage, index) => <li key={index}>{stage.join(' · ')}</li>)}
+        {item.stages.map((stage, index) => <li key={index}>{stageLine(stage)}</li>)}
       </ol>
       <div className="production-card-footer"><Deliverable item={item} /><RunChip item={item} /></div>
     </div>
@@ -188,10 +200,11 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
         <p>{ran === PRODUCTION_CASES.length
           ? 'Every case is a real AwwO canvas that actually ran: a one-line brief, a team of agents working in stages, and the deliverable. Open one to see what each agent actually handed over and how the canvas ran, step by step.'
           : `Every case is a real AwwO canvas: a one-line brief, a team of agents working in stages, and the deliverable. ${ran} of them have actually run in AwwO; open one to see what each agent handed over. The others show their run once it is published.`}</p>
-        <p className="production-legend"><span><span className="production-label is-real">Real run</span>The canvas’s actual AwwO run and what it delivered</span>
-          <span><Label recording />The cover is a screen recording of that delivery</span>
-          {excerpts && <span><Label recording excerpt />The cover is a few seconds of the film that run delivered</span>}
-          {illustrated && <span><Label />Cover footage made by an AI video model, for illustration only</span>}</p></div>
+        {/* The legend's sample labels read as the cards show them (translate="no"); what they mean can be translated. */}
+        <p className="production-legend"><span><span className="production-label is-real" translate="no">Real run</span>The canvas’s actual AwwO run and what it delivered</span>
+          <span><Label recording translate="no" />The cover is a screen recording of that delivery</span>
+          {excerpts && <span><Label recording excerpt translate="no" />The cover is a few seconds of the film that run delivered</span>}
+          {illustrated && <span><Label translate="no" />Cover footage made by an AI video model, for illustration only</span>}</p></div>
       {compact && <button type="button" className="production-toggle" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Show fewer' : `See all ${PRODUCTION_CASES.length} cases`}</button>}
     </div>

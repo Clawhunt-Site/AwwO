@@ -30,42 +30,53 @@
 
 /* cards */
 .production-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 0; list-style: none; }
-.production-card { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--production-line); border-radius: var(--saas-radius-lg, 18px);
+.production-card { position: relative; isolation: isolate; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--production-line); border-radius: var(--saas-radius-lg, 18px);
   background: var(--saas-card); box-shadow: var(--saas-raise, none); transition: transform .22s var(--saas-ease, ease), box-shadow .22s var(--saas-ease, ease), border-color .22s; }
 .production-card:hover, .production-card:focus-within { transform: translateY(-2px); border-color: color-mix(in srgb, var(--saas-accent) 40%, transparent); box-shadow: var(--saas-raise-hover, 0 12px 32px #0000001f); }
 .production-card.is-real { border-color: color-mix(in srgb, var(--production-real) 45%, transparent); }
 .production-card-media { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--saas-soft); }
 .production-card-media video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.production-card-media > .production-label { position: absolute; top: 10px; left: 10px; }
-.production-kind { position: absolute; top: 10px; right: 10px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; line-height: 1.4; color: #fff; background: #0b122080; backdrop-filter: blur(6px); white-space: nowrap; }
+/* the cover's label and its kind along its top: side by side while both fit, the kind under the label when not (each
+   held at a corner, a film's label ran under its kind on a narrow card) */
+.production-card-tags { position: absolute; top: 10px; right: 10px; left: 10px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
+.production-card-tags > .production-label { min-width: 0; white-space: normal; }
+.production-kind { margin-left: auto; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; line-height: 1.4; color: #fff; background: #0b122080; backdrop-filter: blur(6px); white-space: nowrap; }
 .production-card-copy { display: flex; flex: 1; flex-direction: column; gap: 10px; padding: 16px 18px; }
 .production-card h3 { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; }
 .production-cases button.production-card-open { min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.production-card-open::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+/* the whole card opens its case: the title's overlay lies above the card's positioned parts (its stages, which hold
+   their arrows, and the cover's labels), within the card's own stacking context (isolation, above) */
+.production-card-open::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
 .production-cases button.production-card-open:focus-visible { outline: none; }
 .production-card-open:focus-visible::after { outline: 2px solid var(--saas-accent); outline-offset: -2px; border-radius: var(--saas-radius-lg, 18px); }
 /* two classes deep: .saas-login p and .saas-native-dialog p would otherwise mute these and reset their spacing */
 .production-cases .production-brief, .production-dialog .production-brief { margin: 0; color: var(--saas-text); font-size: 13px; line-height: 1.7; }
 .production-card .production-brief { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .production-team { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; margin: 0; padding: 0; list-style: none; color: var(--saas-muted); font-size: 11.5px; line-height: 1.4; }
-.production-team li { position: relative; padding: 3px 8px; border: 1px solid var(--production-line); border-radius: 6px; white-space: nowrap; }
+/* A stage wider than its card wraps in its box, between roles (ProductionCases.tsx stageLine), never past the card's
+   edge, which clips; a single role wider than the box would break inside. It wraps whatever its parents say. */
+.production-team li { position: relative; min-width: 0; padding: 3px 8px; border: 1px solid var(--production-line); border-radius: 6px; white-space: normal; overflow-wrap: anywhere; }
 .production-team li:not(:last-child) { margin-right: 18px; }   /* the arrow trails its stage, so a wrapped line starts with a stage */
-.production-team li:not(:last-child)::after { content: '→'; content: '→' / ''; position: absolute; right: -15px; color: color-mix(in srgb, var(--saas-muted) 70%, transparent); }
+.production-team li:not(:last-child)::after { content: '→'; content: '→' / ''; position: absolute; top: 50%; right: -15px; transform: translateY(-50%); color: color-mix(in srgb, var(--saas-muted) 70%, transparent); }
 .production-card-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--production-line); font-size: 12px; }
 .production-cases .production-delivered, .production-dialog .production-delivered { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-width: 0; margin: 0; color: var(--saas-text); font-weight: 500; }
 .production-delivered b { color: var(--saas-muted); font-weight: 600; }
 .production-delivered.is-done b, .production-delivered svg { color: var(--production-real); }
 .production-delivered svg { flex-shrink: 0; margin-right: -2px; }
-.production-run-chip { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+.production-run-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: auto; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: normal;
   color: var(--production-real); background: color-mix(in srgb, var(--production-real) 12%, transparent); }
-.production-run-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.production-run-chip::before { content: ''; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
 .production-dialog p.production-made-pending { margin: 26px 0 0; padding-top: 22px; border-top: 1px solid var(--production-line); color: var(--saas-muted); font-size: 12.5px; }
 
 /* the case, opened: footage beside the three steps */
 .production-dialog.saas-native-dialog { width: min(1120px, 94vw); max-height: 92dvh; }
 .production-dialog-body { padding: 22px 24px 24px; }
 .production-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+/* the title's column gives way to the close button: a translator's text after the label held it wide enough to push the
+   button off a phone's screen */
+.production-dialog-body > header > div { min-width: 0; }
 .production-dialog-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--saas-muted); font-size: 12px; }
+.production-dialog-meta > .production-label { white-space: normal; }
 .production-dialog h2 { margin: 8px 0 0; font-size: 24px; font-weight: 650; line-height: 1.3; letter-spacing: -.5px; }
 .production-dialog button.production-close { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; padding: 0; border: 1px solid var(--production-line);
   border-radius: 10px; background: var(--saas-card); color: var(--saas-muted); cursor: pointer; }
