@@ -23,7 +23,14 @@
 .saas-login *, .saas-dashboard *, .saas-notice * { box-sizing: border-box; }
 ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 html { scrollbar-color: color-mix(in srgb, var(--saas-text) 20%, transparent) transparent; }
-.saas-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Out of sight, still read aloud and still a file picker's anchor. Each declaration is !important because a page's own
+   field rules outrank one class: under .saas-personal an input is width: 100% and min-height: 44px, and the absolutely
+   placed SKILL.md picker of 设置 → 技能 then reached 1440 px past its button, so the page scrolled sideways. */
+.saas-visually-hidden {
+  position: absolute !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important;
+  margin: -1px !important; padding: 0 !important; border: 0 !important;
+  overflow: hidden !important; clip-path: inset(50%) !important; white-space: nowrap !important;
+}
 
 /* Headings: Latin display text is narrowed and tightened; Chinese keeps natural spacing and a little
    more leading (the tracking and leading tokens change under :lang(zh), see tokens.css). */
