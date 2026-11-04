@@ -1,5 +1,4 @@
 import { SecretInput } from './SecretInput';
-import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale, Settings2 } from 'lucide-react';
@@ -35,6 +34,7 @@ import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
 import { ProductionCases } from './ProductionCases';
+import { LandingFooter, LandingPreview, LandingStory } from './Landing';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
@@ -274,27 +274,6 @@ function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   if (!retry) return <BootSurface text={text} canvas={Boolean(new URLSearchParams(window.location.search).get('canvas'))} />;
   return <main className="saas-notice"><PreferenceControls /><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</main>;
 }
-const LOGIN_PREVIEW_DOCUMENT = {
-  nodes: [
-    { id: 'plan', x: 0, y: 150, w: 300, h: 190 },
-    { id: 'build', x: 420, y: 0, w: 300, h: 190 },
-    { id: 'api', x: 420, y: 300, w: 300, h: 190 },
-    { id: 'review', x: 840, y: 150, w: 300, h: 190 },
-  ],
-  edges: [{ fromNode: 'plan', toNode: 'build' }, { fromNode: 'plan', toNode: 'api' }, { fromNode: 'build', toNode: 'review' }, { fromNode: 'api', toNode: 'review' }],
-};
-/** Decorative: shows what a workspace canvas looks like before the visitor has one. */
-function LoginPreview() {
-  const { t } = useSaaSPreferences();
-  return <div className="saas-login-preview">
-    <CanvasThumbnail document={LOGIN_PREVIEW_DOCUMENT} />
-    <ul>
-      <li>{t('多个 Agent 节点按依赖顺序协作', 'Agent nodes run in dependency order')}</li>
-      <li>{t('每个节点保留独立会话与交付物', 'Every node keeps its own session and output')}</li>
-      <li>{t('使用你自己的模型服务与密钥', 'Bring your own model service and key')}</li>
-    </ul>
-  </div>;
-}
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const { options, optionsError, retryOptions } = useAuthOptions();
@@ -312,7 +291,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   // The Chinese headline in its phrases: 让 Agent on a line of its own, then 在同一张 and 画布上协作。, together where they
   // fit and on lines of their own where not, so it never breaks inside a word (a phone broke it inside 同一张).
   const headline = locale === 'zh' ? <><span className="saas-phrase">让 Agent</span>{' '}<span className="saas-phrase">在同一张</span><span className="saas-phrase">画布上协作。</span></> : 'Bring your agents together on one canvas.';
-  return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{headline}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
+  return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{headline}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LandingPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
     : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><a className="saas-sso-signup" href={clawHuntStartURL(location.search, { signup: true })}>{t('没有账号？注册 ClawHunt 账号', 'New here? Create a ClawHunt account')}</a><small>{t('还没开通 AwwO？注册或登录后会弹出邀请码输入框，输入后即可进入。', 'No access yet? After you sign up or sign in, a box asks for your invite code and you go straight in.')}</small></section>}
@@ -339,8 +318,8 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
         : <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中。忘记了改过的密码时，停止 AwwO 本地版，再运行 npm run local -- --reset-password，新密码会写进这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder. If you forget a password you changed, stop AwwO Local and run npm run local -- --reset-password: the new one is written to that file.')}</small>)}
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}<ProductionCases />
-    <footer className="saas-login-footer"><LicensesLink /></footer></main>;
+    </div>}<LandingStory where={!options ? null : !isLocalEdition(options) ? 'hosted' : inLocalWindow(options) ? 'window' : 'local'} /><ProductionCases />
+    <LandingFooter siteURL={options?.clawhuntSiteURL} licenses={<LicensesLink />} /></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
