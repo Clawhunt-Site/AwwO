@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { BLENDER_BRIDGE_WAIT, BLENDER_KEEP_ALIVE, BLENDER_MCP_CALL, BLENDER_MCP_OUTPUT_BYTES, BLENDER_MEMORY_MB, BLENDER_SNAPSHOT_LEAVE_OUT, BLENDER_TMPFS_BYTES,
+  blenderArguments, blenderBridge, blenderCallResult, blenderDockerOptions, blenderGpu, blenderTools, type BlenderAbilities, type BlenderCallResult,
+  type WorkspaceBlender } from './workspace-blender.ts';
 
 /**
  * The web, for a workspace: the container still has no network interface but loopback. The egress proxy
@@ -26,6 +29,8 @@ export interface WorkspaceSandboxConfig {
   /** The AwwO instance whose containers these are (AWWO_WORKSPACE_INSTANCE), labelled so that instance can remove what a
    *  stopped worker left on a Docker daemon other instances share (AwwO 本地版 does at every start and stop). */
   instance?: string;
+  /** A Blender workstation (workspace-blender.ts): the image runs Blender and the Blender MCP server besides. */
+  blender?: WorkspaceBlender;
 }
 /** The label naming a workspace container's instance, when one is configured. */
 export const WORKSPACE_INSTANCE_LABEL = 'awwo.workspace-instance';
@@ -69,10 +74,15 @@ export interface WorkspaceSandbox {
   write(path: string, content: string, encoding?: 'utf8' | 'base64'): Promise<WorkspaceRead>;
   exec(command: string, options?: { timeoutMs?: number }): Promise<WorkspaceExecResult>;
   publish(path: string): Promise<WorkspaceRead>;
-  archive(): Promise<WorkspaceFile>;
+  archive(options?: { snapshot?: boolean }): Promise<WorkspaceFile>;
   close(): Promise<void>;
   /** Values commands can read (the run's proxy password) that a worker never shows in what it relays. */
   readonly secrets?: readonly string[];
+  /** A Blender workstation's: what its agent is offered and told, and one call of an offered tool. */
+  readonly blender?: {
+    abilities(): Promise<BlenderAbilities>;
+    call(name: string, args: Record<string, unknown>): Promise<BlenderCallResult>;
+  };
 }
 
 const MiB = 1024 * 1024;
@@ -224,6 +234,24 @@ FILE_LIMIT = payload['fileLimit']
 ARCHIVE_LIMIT = payload['archiveLimit']
 TOTAL_LIMIT = 33554432
 ENTRY_LIMIT = 1024
+# A Blender workstation's snapshot leaves out its outputs (top-level folders such as out/), .blend files, binaries, links
+# and every file over the limit, instead of failing on them: they are delivered by publishing, and the scene is rebuilt
+# from its script.
+LEAVE_OUT = payload.get('snapshotLeaveOut')
+
+def binary(fd, name):
+    try: f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    except OSError: return True
+    try: return b'\0' in os.read(f, 4096)
+    finally: os.close(f)
+
+def left_out(fd, prefix, name, info):
+    if not LEAVE_OUT: return False
+    if stat.S_ISDIR(info.st_mode): return not prefix and name in LEAVE_OUT['dirs']
+    stem, dot, extension = name.rpartition('.')
+    if info.st_size > LEAVE_OUT['fileLimit'] or (dot and (extension == 'blend' or (extension.startswith('blend') and extension[5:].isdigit()))): return True
+    # Binaries (textures, models, renders) are made again by the scripts that are kept.
+    return binary(fd, name)
 
 def parts(path, root=False):
     if root and path in ('', '.'): return []
@@ -295,7 +323,10 @@ def walk(fd, prefix='', result=None):
         parts(path)
         info = os.stat(name, dir_fd=fd, follow_symlinks=False)
         if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+            # A workstation's snapshot leaves links and special files out (Blender run from a command makes some).
+            if LEAVE_OUT: continue
             raise ValueError('Workspace contains a symlink or special file: ' + path)
+        if left_out(fd, prefix, name, info): continue
         if len(result) >= ENTRY_LIMIT: raise ValueError('Workspace has too many entries')
         result.append((path, stat.S_ISDIR(info.st_mode)))
         if stat.S_ISDIR(info.st_mode):
@@ -392,12 +423,27 @@ print(json.dumps(result, ensure_ascii=True, separators=(',', ':')))
 `;
 
 // Timeout is enforced again by the parent, which removes the entire container. Shell exit alone is not cancellation.
-const COMMAND_HELPER = String.raw`
+export const COMMAND_HELPER = String.raw`
 import os, sys, json, subprocess, selectors, signal, time
 payload = json.load(sys.stdin)
 limit = 65536
 chunks = {'stdout': bytearray(), 'stderr': bytearray()}
 truncated = False
+# A Blender workstation's bridge (supervisor.py) carries AWWO_KEEP_ALIVE in its environment and outlives each command:
+# the one Blender the supervisor started (its pid in /tmp/awwo-blender.pid), running before this command began. A process
+# Blender or a command starts inherits or claims the mark in vain.
+keep = payload.get('keepAlive')
+before = set(item for item in os.listdir('/proc') if item.isdigit())
+bridge = ''
+if keep:
+    try:
+        with open('/tmp/awwo-blender.pid', encoding='ascii') as handle: bridge = handle.read().strip()
+    except OSError: pass
+def kept(pid):
+    if not keep or pid not in before or pid != bridge: return False
+    try:
+        with open('/proc/' + pid + '/environ', 'rb') as handle: return ('AWWO_KEEP_ALIVE=' + keep).encode() in handle.read().split(b'\0')
+    except OSError: return False
 # Each command's whole environment (the image's own ENV lines do not reach it): matplotlib draws to files and keeps its
 # font cache in /tmp, out of the workspace and its snapshot.
 env = {'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':'/workspace','LANG':'C.UTF-8','PYTHONDONTWRITEBYTECODE':'1','MPLBACKEND':'Agg','MPLCONFIGDIR':'/tmp/matplotlib'}
@@ -435,7 +481,7 @@ finally:
     for item in os.listdir('/proc'):
         if not item.isdigit() or int(item) in (1, os.getpid()): continue
         try:
-            if os.stat('/proc/' + item).st_uid == os.getuid(): os.kill(int(item), signal.SIGKILL)
+            if os.stat('/proc/' + item).st_uid == os.getuid() and not kept(item): os.kill(int(item), signal.SIGKILL)
         except (ProcessLookupError, FileNotFoundError, PermissionError): pass
     selector.close()
 print(json.dumps({'exitCode': exit_code, 'stdout': bytes(chunks['stdout']).decode('utf-8', errors='replace'), 'stderr': bytes(chunks['stderr']).decode('utf-8', errors='replace'), 'truncated': truncated}))
@@ -467,26 +513,35 @@ async def main():
 asyncio.run(main())
 `;
 
-export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }, memoryMB: number = WORKSPACE_MEMORY_MB.default, instance?: string): string[] {
-  if (!Number.isSafeInteger(memoryMB) || memoryMB < WORKSPACE_MEMORY_MB.min || memoryMB > WORKSPACE_MEMORY_MB.max) throw new Error('Invalid workspace memory');
+export function workspaceDockerArgs(name: string, image: string, egress?: { socketDir: string; proxyURL: string }, memoryMB?: number, instance?: string, blender?: WorkspaceBlender): string[] {
+  const bounds = blender ? BLENDER_MEMORY_MB : WORKSPACE_MEMORY_MB;
+  memoryMB ??= bounds.default;
+  if (!Number.isSafeInteger(memoryMB) || memoryMB < bounds.min || memoryMB > bounds.max) throw new Error('Invalid workspace memory');
   if (instance !== undefined && !validInstance(instance)) throw new Error('Invalid workspace instance');
+  // A workstation has no web yet: its PID 1 is Blender's supervisor, not the proxy's forwarder.
+  if (blender && egress) throw new Error('A Blender workstation has no web');
   const memory = memoryMB === 1024 ? '1g' : `${memoryMB}m`;
   const web = egress ? ['--mount', `type=bind,source=${egress.socketDir},target=${EGRESS_MOUNT},readonly`,
     ...['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'].flatMap(key => ['--env', `${key}=${egress.proxyURL}`]),
     ...['NO_PROXY', 'no_proxy'].flatMap(key => ['--env', `${key}=localhost,127.0.0.1,::1`])] : [];
+  // Blender's threads count as processes, and a scene's textures as open files.
+  const limits = blender ? [`--cpus=${blender.cpus}`, '--pids-limit=1024', '--ulimit=nofile=8192:8192'] : ['--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024'];
+  const sizes = blender ? { workspace: `size=${BLENDER_TMPFS_BYTES.workspace},nr_inodes=16384`, tmp: `size=${BLENDER_TMPFS_BYTES.tmp},nr_inodes=4096` }
+    : { workspace: 'size=134217728,nr_inodes=8192', tmp: 'size=33554432,nr_inodes=2048' };
+  const main = blender ? ['/opt/awwo/blender/supervisor.py']
+    : ['-c', egress ? EGRESS_FORWARDER : 'import signal,time,os; signal.signal(signal.SIGCHLD, signal.SIG_IGN); time.sleep(86400)'];
   return ['run', '--detach', '--pull=never', '--name', name, '--label', 'awwo.workspace-sandbox=true',
     ...(instance ? ['--label', `${WORKSPACE_INSTANCE_LABEL}=${instance}`] : []),
     '--network=none', '--read-only', '--user=1000:1000', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-    `--memory=${memory}`, `--memory-swap=${memory}`, '--cpus=1', '--pids-limit=128', '--ulimit=nofile=1024:1024',
+    `--memory=${memory}`, `--memory-swap=${memory}`, ...limits,
     // exec: tools a project installs (a bundler's native binary) run from /workspace; /inputs and /tmp stay noexec.
-    '--tmpfs', '/workspace:rw,nosuid,nodev,size=134217728,nr_inodes=8192,uid=1000,gid=1000,mode=0700,exec',
+    '--tmpfs', `/workspace:rw,nosuid,nodev,${sizes.workspace},uid=1000,gid=1000,mode=0700,exec`,
     // 8 MiB of inputs plus a page for each file's last partial one: tmpfs counts whole 4 KiB pages.
     '--tmpfs', '/inputs:rw,nosuid,nodev,noexec,size=9437184,nr_inodes=2048,uid=0,gid=0,mode=0755',
-    '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=33554432,nr_inodes=2048,uid=1000,gid=1000,mode=0700',
-    ...web,
+    '--tmpfs', `/tmp:rw,nosuid,nodev,noexec,${sizes.tmp},uid=1000,gid=1000,mode=0700`,
+    ...web, ...(blender ? blenderDockerOptions(blender) : []),
     '--workdir=/workspace', '--env', 'HOME=/workspace', '--env', 'PYTHONDONTWRITEBYTECODE=1',
-    '--entrypoint=python3', image, '-I', '-S', '-c',
-    egress ? EGRESS_FORWARDER : 'import signal,time,os; signal.signal(signal.SIGCHLD, signal.SIG_IGN); time.sleep(86400)'];
+    '--entrypoint=python3', image, '-I', '-S', ...main];
 }
 
 export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
@@ -499,8 +554,8 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
   for (const value of [options.workspaceId, options.runId]) if (typeof value !== 'string' || !value || value.length > 256) throw new Error('Invalid workspace identity');
   const fileLimit = boundedInteger(config.maxFileBytes, FILE_LIMIT, FILE_LIMIT);
   const archiveLimit = boundedInteger(config.maxArchiveBytes, ARCHIVE_LIMIT, ARCHIVE_LIMIT);
-  // With the web, installs and clones need more than a quick command's 30 s.
-  const timeoutMs = boundedInteger(config.commandTimeoutMs, config.egress ? 120_000 : 30_000, 120_000);
+  // With the web, installs and clones need more than a quick command's 30 s; a workstation's encodes and bakes too.
+  const timeoutMs = boundedInteger(config.commandTimeoutMs, config.egress || config.blender ? 120_000 : 30_000, config.blender ? 600_000 : 120_000);
   if (signal?.aborted) throw new Error('Workspace operation cancelled');
   const identity = sha256(Buffer.from(options.workspaceId + '\0' + options.runId));
   const name = `awwo-ws-${identity.slice(0,24)}-${randomBytes(6).toString('hex')}`;
@@ -570,16 +625,52 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
     }
     return { path, name: path.split('/').at(-1)!, content, encoding, byteLength: bytes.length, sha256: value.sha256, mimeType: mimeType(path) };
   };
+  // A workstation's: one call of mcp_call.py in the container, whose JSON answer the caller checks.
+  const mcp = async (request: Record<string, unknown>, timeoutMs: number): Promise<unknown> => {
+    let result: DockerResult;
+    try {
+      result = await runDocker(['exec', '--interactive', '--user', '1000:1000', name, 'python3', '-I', '-S', BLENDER_MCP_CALL],
+        { input: JSON.stringify(request), timeoutMs, maxOutputBytes: BLENDER_MCP_OUTPUT_BYTES, signal });
+    } catch (error) { await close(); throw error; }
+    if (result.code !== 0) throw new Error('Blender MCP call failed');
+    try { return JSON.parse(result.stdout.toString('utf8')); } catch { throw new Error('Invalid Blender MCP response'); }
+  };
   try {
     // Set before run: a client timeout may occur after the daemon has already created the container.
     created = true;
-    const start = await runDocker(workspaceDockerArgs(name, config.image, egress, config.memoryMB, config.instance), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
+    const start = await runDocker(workspaceDockerArgs(name, config.image, egress, config.memoryMB, config.instance, config.blender), { timeoutMs: 20_000, maxOutputBytes: 16_384, signal });
     if (start.code !== 0) throw new Error(`Workspace sandbox could not start: ${start.stderr.toString('utf8').slice(-1024)}`);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) throw new Error('Workspace operation cancelled');
     if (inputs.length) await invoke('inputs', { inputs }, '0:0');
     if (options.snapshot) await invoke('restore', { content: options.snapshot.content });
+    if (config.blender) {
+      // Blender opens its bridge about a second after the container starts (supervisor.py).
+      const ready = await runDocker(['exec', '--user', '1000:1000', name, 'python3', '-I', '-S', '-c', BLENDER_BRIDGE_WAIT], { timeoutMs: 75_000, maxOutputBytes: 16_384, signal });
+      if (ready.code !== 0) throw new Error('Blender did not start in its workstation');
+    }
   } catch (error) { await close(); throw error; }
+  let listing: Promise<BlenderAbilities> | undefined;
+  // The Blender that gave the last answer: a call that finds another one running says the scene was lost in between.
+  let bridge: string | null = null;
+  const blender = config.blender && {
+    abilities: () => (listing ??= serialized(async () => {
+      const value = await mcp({ op: 'list' }, 60_000);
+      bridge = blenderBridge(value, 'after');
+      return { ...blenderTools(value), gpu: blenderGpu(isRecord(value) ? value.gpu : undefined), callSeconds: config.blender!.callSeconds };
+    })),
+    call: (tool: string, args: Record<string, unknown>) => serialized(async () => {
+      // Only a tool the agent was offered, with arguments its schema takes (the task process checked them as well).
+      const offered = listing && (await listing).tools.find(item => item.name === tool);
+      const fitting = offered && blenderArguments(offered, args);
+      if (!fitting) throw new Error('Invalid Blender tool call');
+      const seconds = config.blender!.callSeconds;
+      const value = await mcp({ op: 'call', name: tool, arguments: fitting, timeoutSeconds: seconds }, (seconds + 20) * 1000);
+      const lost = bridge !== null && blenderBridge(value, 'before') !== bridge;
+      bridge = blenderBridge(value, 'after');
+      return blenderCallResult(value, lost);
+    }),
+  };
 
   return {
     list: (path = '') => serialized(async () => {
@@ -604,7 +695,7 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
       let result: DockerResult;
       try {
         result = await runDocker(['exec', '--interactive', '--user', '1000:1000', name, 'python3', '-I', '-S', '-c', COMMAND_HELPER],
-          { input: JSON.stringify({ command, timeoutMs: commandTimeout }), timeoutMs: commandTimeout + 2000,
+          { input: JSON.stringify({ command, timeoutMs: commandTimeout, ...(config.blender ? { keepAlive: BLENDER_KEEP_ALIVE } : {}) }), timeoutMs: commandTimeout + 2000,
             maxOutputBytes: COMMAND_OUTPUT_LIMIT * 6 + 4096, signal });
         if (result.code !== 0) throw new Error('Workspace command failed or timed out');
         const value: unknown = JSON.parse(result.stdout.toString('utf8'));
@@ -613,8 +704,11 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
       } catch (error) { await close(); throw error; }
     }),
     publish: path => serialized(async () => verified(await invoke('publish', { path: validateWorkspacePath(path) }), path, fileLimit)),
-    archive: () => serialized(async () => verified(await invoke('archive'), 'workspace.zip', archiveLimit, true) as WorkspaceFile),
+    // A workstation's snapshot (not the project ZIP an agent publishes) leaves its outputs and binaries out.
+    archive: (archiveOptions = {}) => serialized(async () => verified(await invoke('archive', config.blender && archiveOptions.snapshot ? { snapshotLeaveOut: BLENDER_SNAPSHOT_LEAVE_OUT } : {}),
+      'workspace.zip', archiveLimit, true) as WorkspaceFile),
     close,
     secrets: egressPassword ? [egressPassword] : [],
+    ...(blender ? { blender } : {}),
   };
 }

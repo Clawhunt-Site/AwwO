@@ -1,12 +1,19 @@
 import { createHash } from 'node:crypto';
 import type { Model } from '@openai/agents';
 import { RuntimeError } from './errors.mjs';
+import { BLENDER_ERROR_PREFIX, BLENDER_SCENE_LOST, BLENDER_TOOL_NAMES } from './workspace-blender.ts';
 
 type Request = Parameters<Model['getStreamedResponse']>[0];
 type Item = Exclude<Request['input'], string>[number];
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? '');
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const PAGED_READ = 'The complete file remains in the workspace. Do not repeat an unbounded workspace_read for this file. Use workspace_exec with Python to open the relative path, seek to an explicit byte offset, and read at most 4096 bytes per call (decode text as UTF-8 with replacement if a page splits a character). For binary files inspect metadata or selected bytes, not the entire base64 payload. Never claim that an omitted region was read.';
+const WORKSPACE_TOOL = /^workspace_(list|read|write|exec|publish|archive)$/;
+const BLENDER_TOOLS: ReadonlySet<string> = new Set(BLENDER_TOOL_NAMES);
+/** Whether a completed call of the tool may become a receipt: the workspace's own tools, and a workstation's Blender
+ *  tools (workspace-blender.ts), whose answers are text of up to 64 KiB. */
+const compactable = (name: string) => WORKSPACE_TOOL.test(name) || BLENDER_TOOLS.has(name);
+const BLENDER_LESS = 'Only the start of this Blender answer is visible. Ask Blender for less at a time: a narrower query, or code that returns a short summary and writes long details to a workspace file, read in pages. Never claim that an omitted part was read.';
+const PAGED_READ ='The complete file remains in the workspace. Do not repeat an unbounded workspace_read for this file. Use workspace_exec with Python to open the relative path, seek to an explicit byte offset, and read at most 4096 bytes per call (decode text as UTF-8 with replacement if a page splits a character). For binary files inspect metadata or selected bytes, not the entire base64 payload. Never claim that an omitted region was read.';
 
 /** Counts only: never return model text, commands, paths, field IDs or hashes. */
 export function workspaceContextSize(request: Request, budget: number, projected: Request = request): Record<string, number> {
@@ -82,7 +89,7 @@ function reasoningGroups(items: Item[]): { reasoning: number[]; calls: number[];
     while (items[next]?.type === 'function_call_result') group.results.push(next++);
     group.complete = group.complete && (group.calls.length ? group.calls.every(callIndex => {
       const call = items[callIndex];
-      return call.type === 'function_call' && /^workspace_(list|read|write|exec|publish|archive)$/.test(call.name)
+      return call.type === 'function_call' && compactable(call.name)
         && group.results.some(resultIndex => { const result = items[resultIndex]; return result.type === 'function_call_result'
           && result.callId === call.callId && result.name === call.name && result.status === 'completed'; });
     }) : completedMessage);
@@ -100,10 +107,49 @@ function prefix(value: string, maxBytes: number): string {
   return result;
 }
 
+function rawOutput(item: Item): string {
+  if (item.type !== 'function_call_result') return '';
+  return typeof item.output === 'string' ? item.output : record(item.output) && item.output.type === 'text' ? String(item.output.text) : '';
+}
+
 function parsedOutput(item: Item): unknown {
   if (item.type !== 'function_call_result') return undefined;
-  const raw = typeof item.output === 'string' ? item.output : record(item.output) && item.output.type === 'text' ? String(item.output.text) : '';
-  try { return JSON.parse(raw); } catch { return undefined; }
+  try { return JSON.parse(rawOutput(item)); } catch { return undefined; }
+}
+
+/** What a receipt says of a Blender answer besides its text: that Blender called it an error, and that the scene was
+ *  lost (blenderCallResult says so first, so even an excerpt of no bytes keeps it). */
+function blenderFlags(answer: string): { isError?: true; sceneLost?: true } {
+  const body = answer.startsWith(BLENDER_ERROR_PREFIX) ? answer.slice(BLENDER_ERROR_PREFIX.length) : answer;
+  return { ...(body !== answer ? { isError: true as const } : {}),
+    ...(Object.values(BLENDER_SCENE_LOST).some(note => body.startsWith(note)) ? { sceneLost: true as const } : {}) };
+}
+
+/** A Blender call's receipt: its code identified as a command is, its other (short) arguments, and an excerpt of its
+ *  answer, which is text (workspace-runtime.ts), JSON or not. */
+function blenderReceipt(item: Extract<Item, { type: 'function_call' }>, result: Item, excerptBytes: number): Record<string, unknown> {
+  let args: unknown; try { args = JSON.parse(item.arguments); } catch { args = {}; }
+  const summary: Record<string, unknown> = { tool: item.name, sourceOmitted: true };
+  const excerpt = (key: string, value: string) => {
+    summary[key] = prefix(value, excerptBytes);
+    summary[`${key}Bytes`] = Buffer.byteLength(value);
+    if (Buffer.byteLength(value) > excerptBytes) {
+      summary[`${key}Excerpt`] = true;
+      if (excerptBytes === 0) summary[`${key}Omitted`] = true;
+    }
+  };
+  if (record(args)) {
+    if (typeof args.code === 'string') {
+      excerpt('code', args.code);
+      summary.codeSHA256 = createHash('sha256').update(args.code).digest('hex');
+    }
+    const rest = Object.entries(args).filter(([key, value]) => key !== 'code' && ['string', 'number', 'boolean'].includes(typeof value));
+    if (rest.length) summary.arguments = Object.fromEntries(rest.map(([key, value]) => [key, typeof value === 'string' ? prefix(value, 256) : value]));
+  }
+  const answer = rawOutput(result);
+  Object.assign(summary, blenderFlags(answer));
+  excerpt('answer', answer);
+  return summary;
 }
 
 function completedResultIndex(items: Item[], callIndex: number, call: Extract<Item, { type: 'function_call' }>, removed: ReadonlySet<number>): number {
@@ -118,6 +164,7 @@ function completedResultIndex(items: Item[], callIndex: number, call: Extract<It
 }
 
 function receiptSummary(item: Extract<Item, { type: 'function_call' }>, result: Item, excerptBytes = 1200): Record<string, unknown> {
+  if (BLENDER_TOOLS.has(item.name)) return blenderReceipt(item, result, excerptBytes);
   let args: unknown; try { args = JSON.parse(item.arguments); } catch { args = {}; }
   const receipt = parsedOutput(result);
   const summary: Record<string, unknown> = { tool: item.name, sourceOmitted: true };
@@ -149,6 +196,12 @@ function receiptSummary(item: Extract<Item, { type: 'function_call' }>, result: 
 
 function boundedLatestResult(item: Extract<Item, { type: 'function_call' }>, result: Item, previewBytes: number): Item | undefined {
   if (result.type !== 'function_call_result') return undefined;
+  if (BLENDER_TOOLS.has(item.name)) {
+    // The call itself (its code) stays as it was; its answer becomes a bounded preview.
+    const answer = rawOutput(result);
+    return { ...result, output: JSON.stringify({ tool: item.name, contextTruncated: true, ...blenderFlags(answer),
+      answerPreview: prefix(answer, previewBytes), answerBytes: Buffer.byteLength(answer), outputNotice: BLENDER_LESS }) };
+  }
   const receipt = parsedOutput(result);
   const summary = receiptSummary(item, result);
   if (item.name === 'workspace_read' && record(receipt) && typeof receipt.content === 'string') {
@@ -206,7 +259,7 @@ export function fitWorkspaceContext(request: Request, budget: number): Request {
   };
   if (fits(project())) return project();
   for (const { item, index } of calls.slice(0, -1)) {
-    if (!/^workspace_(list|read|write|exec|publish|archive)$/.test(item.name)) continue;
+    if (!compactable(item.name)) continue;
     const resultIndex = completedResultIndex(items, index, item, removed);
     if (resultIndex < 0) continue;
     const result = items[resultIndex];
@@ -242,7 +295,7 @@ export function fitWorkspaceContext(request: Request, budget: number): Request {
       // The latest completed group may contain source arguments or a large
       // reasoning item. Replace the entire known group together, preserving
       // verified receipts/exit status without orphaning provider reasoning.
-      if (/^workspace_(list|read|write|exec|publish|archive)$/.test(latest.item.name)) {
+      if (compactable(latest.item.name)) {
         summaries.push({ item: latest.item, result: originalResult, latestInteraction: true });
         removed.add(latest.index); removed.add(resultIndex);
         for (const excerptBytes of [1200, 512, 128, 0]) {

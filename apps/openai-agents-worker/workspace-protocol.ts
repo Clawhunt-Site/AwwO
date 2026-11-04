@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { BLENDER_MEMORY_MB, loadWorkspaceBlender, type BlenderAbilities, type WorkspaceBlender } from './workspace-blender.ts';
 import { loadWorkspaceEgress, parseWorkspaceTools, WORKSPACE_MEMORY_MB, type WorkspaceEgress, type WorkspaceTool } from './workspace-sandbox.ts';
 
 export const WORKSPACE_BODY_BYTES = 16 * 1024 * 1024;
@@ -20,13 +21,18 @@ export interface WorkspaceConfig {
   tools: ReadonlySet<WorkspaceTool>;
   /** The web through the egress proxy; absent = no network. */
   egress?: WorkspaceEgress;
-  /** One command's limit (AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS): 30 s, or 120 s with the web. */
+  /** One command's limit (AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS): 30 s, or 120 s with the web or Blender. */
   commandTimeoutMs: number;
-  /** The container's memory in MiB (AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB); absent = 1,024. */
+  /** The container's memory in MiB (AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB); absent = 1,024 (8,192 with Blender). */
   memoryMB?: number;
+  /** The Docker CLI context the containers start on (AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT): another host's daemon,
+   *  such as a GPU host's; absent = the local daemon. */
+  dockerContext?: string;
+  /** A Blender workstation (AWWO_OPENAI_AGENTS_WORKSPACE_BLENDER=on, workspace-blender.ts). */
+  blender?: WorkspaceBlender;
 }
-/** What the task process tells its agent about the workspace. */
-export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean }
+/** What the task process tells its agent about the workspace; a workstation's Blender part is read from its container. */
+export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean; blender?: BlenderAbilities }
 export const workspaceAbilities = (config: Partial<WorkspaceConfig>): WorkspaceAbilities => ({ tools: [...(config.tools ?? [])], web: !!config.egress });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const FIELD_TYPES = new Set(['text', 'markdown', 'html', 'file', 'number', 'boolean']);
@@ -49,14 +55,21 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
     || !/^\d+$/.test(rawCalls) || Number(rawCalls) < 2 || Number(rawCalls) > WORKSPACE_MAX_MODEL_CALLS) throw new Error('Invalid workspace execution configuration');
   const tools = parseWorkspaceTools(env.AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS, 'AWWO_OPENAI_AGENTS_WORKSPACE_TOOLS');
   const egress = loadWorkspaceEgress(env);
+  const blender = loadWorkspaceBlender(env);
+  if (blender && egress) throw new Error('A Blender workstation has no web: leave AWWO_WORKSPACE_EGRESS_DIR unset');
   const rawTimeout = env.AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS;
-  const commandTimeoutMs = rawTimeout ? Number(rawTimeout) : egress ? 120_000 : 30_000;
-  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > 120_000) throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS must be 1000-120000');
+  const commandTimeoutMs = rawTimeout ? Number(rawTimeout) : egress || blender ? 120_000 : 30_000;
+  const timeoutMax = blender ? 600_000 : 120_000;
+  if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs < 1000 || commandTimeoutMs > timeoutMax) throw new Error(`AWWO_OPENAI_AGENTS_WORKSPACE_COMMAND_TIMEOUT_MS must be 1000-${timeoutMax}`);
   const rawMemory = env.AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB;
   const memoryMB = rawMemory ? Number(rawMemory) : undefined;
-  if (memoryMB !== undefined && (!/^\d+$/.test(rawMemory!) || memoryMB < WORKSPACE_MEMORY_MB.min || memoryMB > WORKSPACE_MEMORY_MB.max))
-    throw new Error(`AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB must be ${WORKSPACE_MEMORY_MB.min}-${WORKSPACE_MEMORY_MB.max}`);
-  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}), ...(memoryMB !== undefined ? { memoryMB } : {}) });
+  const bounds = blender ? BLENDER_MEMORY_MB : WORKSPACE_MEMORY_MB;
+  if (memoryMB !== undefined && (!/^\d+$/.test(rawMemory!) || memoryMB < bounds.min || memoryMB > bounds.max))
+    throw new Error(`AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB must be ${bounds.min}-${bounds.max}`);
+  const dockerContext = env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT || undefined;
+  if (dockerContext !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(dockerContext)) throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT must be a Docker context name');
+  return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}),
+    ...(memoryMB !== undefined ? { memoryMB } : {}), ...(dockerContext ? { dockerContext } : {}), ...(blender ? { blender } : {}) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
   if (!object(value) || typeof value.name !== 'string' || !value.name || value.name.length > 200

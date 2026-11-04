@@ -34,11 +34,22 @@ async function readBody(request, limit = INPUT_LIMITS.bodyBytes) {
   return validateRequest(JSON.parse(Buffer.concat(chunks).toString('utf8')));
 }
 
+/** @returns {Promise<{ blender?: { gpu: string, eevee: string, tools: number } } | undefined>} what health may say of it */
 export async function probeWorkspace(config, signal) {
   const sandbox = await createWorkspaceSandbox(config, { workspaceId: 'health', runId: 'startup' }, signal);
   try {
     const result = await sandbox.exec('node --version && python3 --version', { timeoutMs: 5000 });
     if (result.exitCode !== 0) throw new Error('Workspace probe failed');
+    // A workstation is ready when its Blender answers through the MCP server; health says on what it renders.
+    if (sandbox.blender) {
+      const abilities = await sandbox.blender.abilities();
+      const answer = await sandbox.blender.call('execute_blender_code', { code: "import bpy\nresult = {'version': bpy.app.version_string}" });
+      let status;
+      try { status = JSON.parse(answer.text).status; } catch { status = undefined; }
+      if (answer.isError || status !== 'ok') throw new Error('Workspace probe failed');
+      return { blender: { gpu: abilities.gpu.cycles, eevee: abilities.gpu.eevee, tools: abilities.tools.length } };
+    }
+    return {};
   } finally { await sandbox.close(); }
 }
 
@@ -48,9 +59,10 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, 
   const observability = createWorkerObservability(config, () => active.size);
   let shuttingDown = false;
   let workspaceAvailable = false;
+  let workspaceFacts = {};
   const probeAbort = new AbortController();
   const workspaceReady = config.workspace
-    ? workspaceProbe(config.workspace, probeAbort.signal).then(() => { workspaceAvailable = true; }, () => { workspaceAvailable = false; })
+    ? workspaceProbe(config.workspace, probeAbort.signal).then((facts) => { workspaceAvailable = true; workspaceFacts = facts ?? {}; }, () => { workspaceAvailable = false; })
     : Promise.resolve();
   const server = createServer(async (request, response) => {
     let pathname;
@@ -60,7 +72,7 @@ export function createOpenAIAgentsServer(config, { startRun = startIsolatedRun, 
       return json(response, 400, { error: { code: 'INVALID_REQUEST_TARGET', message: 'Invalid HTTP request target.' } });
     }
     if (request.method === 'GET' && pathname === '/health') {
-      const health = publicHealth(config, active.size, workspaceAvailable);
+      const health = publicHealth(config, active.size, workspaceAvailable, workspaceFacts);
       // Which per-call options /internal/computer-model keeps, so the API sends them only where they hold.
       health.completionOptions = [...COMPUTER_COMPLETION_OPTIONS];
       health.maxConcurrency = config.maxConcurrency;

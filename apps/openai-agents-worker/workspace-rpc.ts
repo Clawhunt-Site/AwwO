@@ -33,22 +33,30 @@ export function childWorkspaceBroker(signal: AbortSignal): { call: WorkspaceBrok
   } };
 }
 
-export async function dispatchWorkspaceTool(sandbox: WorkspaceSandbox, name: WorkspaceToolName | 'snapshot', args: Record<string, unknown>): Promise<unknown> {
+export async function dispatchWorkspaceTool(sandbox: WorkspaceSandbox, name: WorkspaceCallName, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case 'workspace_list': return sandbox.list(String(args.path));
     case 'workspace_read': return sandbox.read(String(args.path));
     case 'workspace_write': return sandbox.write(String(args.path), String(args.content));
     case 'workspace_exec': return sandbox.exec(String(args.command));
     case 'workspace_publish': return sandbox.publish(String(args.path));
-    case 'workspace_archive': case 'snapshot': return sandbox.archive();
+    case 'workspace_archive': return sandbox.archive();
+    case 'snapshot': return sandbox.archive({ snapshot: true });
+    // A workstation's Blender tool: the sandbox checks the tool and its arguments against what it offered.
+    case 'blender_call': {
+      if (!sandbox.blender || typeof args.tool !== 'string' || !args.arguments || typeof args.arguments !== 'object' || Array.isArray(args.arguments)) throw new Error('Unknown workspace operation');
+      return sandbox.blender.call(args.tool, args.arguments as Record<string, unknown>);
+    }
     default: throw new Error('Unknown workspace operation');
   }
 }
-export function validWorkspaceCall(value: unknown): value is { type: 'workspace_call'; sequence: number; name: WorkspaceToolName | 'snapshot'; args: Record<string, unknown> } {
+/** What the task process may ask its supervisor for: the workspace tools, the snapshot, and a workstation's Blender call. */
+export type WorkspaceCallName = WorkspaceToolName | 'snapshot' | 'blender_call';
+export function validWorkspaceCall(value: unknown): value is { type: 'workspace_call'; sequence: number; name: WorkspaceCallName; args: Record<string, unknown> } {
   if (!value || typeof value !== 'object') return false;
   const message = value as Record<string, unknown>;
   return message.type === 'workspace_call' && Number.isSafeInteger(message.sequence) && Number(message.sequence) > 0
-    && [...WORKSPACE_TOOL_NAMES, 'snapshot'].includes(String(message.name))
+    && [...WORKSPACE_TOOL_NAMES, 'snapshot', 'blender_call'].includes(String(message.name))
     && !!message.args && typeof message.args === 'object' && !Array.isArray(message.args)
     && Buffer.byteLength(JSON.stringify(message.args)) <= 2 * 1024 * 1024;
 }

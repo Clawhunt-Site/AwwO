@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import type { Model } from '@openai/agents';
+import { BLENDER_ERROR_PREFIX, BLENDER_SCENE_LOST } from './workspace-blender.ts';
 import { fitWorkspaceContext, workspaceContextSize } from './workspace-context.ts';
 import { errorDiagnostic } from './errors.mjs';
 import { executeWorkspaceAgent } from './workspace-runtime.ts';
@@ -15,6 +16,8 @@ const checksum = (value: string) => createHash('sha256').update(value).digest('h
 const user: Item = { type: 'message', role: 'user', content: 'Build the authorized game. Preserve the original requirements and do not invent successful tests.' };
 const call = (id: string, name: string, args: Record<string, unknown>): Item => ({ type: 'function_call', callId: id, name, arguments: JSON.stringify(args) });
 const output = (id: string, name: string, result: unknown): Item => ({ type: 'function_call_result', callId: id, name, output: JSON.stringify(result), status: 'completed' });
+// A Blender tool's answer is text, as the task process gives it (workspace-runtime.ts).
+const textOutput = (id: string, name: string, text: string): Item => ({ type: 'function_call_result', callId: id, name, output: text, status: 'completed' });
 const reasoning = (id: string, length = 1200): Item => ({ type: 'reasoning', id, content: [], rawContent: [{ type: 'reasoning_text', text: 'private-reasoning-' + id + '-'.repeat(length) }] });
 const request = (input: Item[]): Request => ({ systemInstructions: 'Original developer requirements must remain byte-for-byte.', input, modelSettings: { maxTokens: 4096 }, tools: [], outputType: 'text', handoffs: [], tracing: false });
 function deepFreeze<T>(value: T): T {
@@ -68,6 +71,43 @@ test('checkpoint records the actual failed command, exit code and explicit log t
   assert.ok(text.includes('node --test failing.mjs')); assert.ok(text.includes('"exitCode":1'));
   assert.ok(text.includes('"stdoutExcerpt":true')); assert.ok(text.includes('invalid state'));
   assertPairs(result.input);
+});
+
+test('a workstation\'s finished Blender calls become receipts, as workspace calls do', () => {
+  // Two answers of 64,000 characters outgrew a 98,048-byte budget that the same history of workspace_exec calls fits.
+  const code = 'import bpy\nresult = [tuple(v.co) for v in bpy.data.objects["Lamp"].data.vertices]';
+  const firstAnswer = JSON.stringify({ status: 'ok', result: 'v'.repeat(64_000) });
+  const second = call('b2', 'search_api_docs', { query: 'bpy.types.Mesh' });
+  const secondResult = textOutput('b2', 'search_api_docs', 'Mesh '.repeat(12_800));
+  const source = deepFreeze(request([user, call('b1', 'execute_blender_code', { code }), textOutput('b1', 'execute_blender_code', firstAnswer), second, secondResult]));
+  assert.ok(bytes(source) > 98_048);
+  const result = fitWorkspaceContext(source, 98_048);
+  assert.ok(bytes(result) <= 98_048);
+  assertPairs(result.input);
+  const receipts = checkpoint(result);
+  assert.ok(receipts.includes('"tool":"execute_blender_code"') && receipts.includes(checksum(code)) && receipts.includes('"answerExcerpt":true'), receipts);
+  assert.ok(receipts.includes('"answer":"{\\"status\\":\\"ok\\"') && !receipts.includes('v'.repeat(2000)));
+  assert.ok(Array.isArray(result.input));
+  assert.deepEqual(result.input.slice(-2), [second, secondResult]);
+});
+
+test('the latest Blender answer becomes a bounded preview that still says it was an error and the scene was lost', () => {
+  const answer = `${BLENDER_ERROR_PREFIX}${BLENDER_SCENE_LOST.during}\n${'Traceback '.repeat(8000)}`;
+  const source = deepFreeze(request([user, call('b1', 'execute_blender_code', { code: 'import os\nos._exit(1)' }), textOutput('b1', 'execute_blender_code', answer)]));
+  const result = fitWorkspaceContext(source, 3000);
+  assert.ok(bytes(result) <= 3000);
+  assert.ok(Array.isArray(result.input));
+  const latest = result.input.at(-1)!;
+  assert.ok(latest.type === 'function_call_result' && typeof latest.output === 'string');
+  const preview = JSON.parse(latest.output);
+  assert.deepEqual([preview.tool, preview.isError, preview.sceneLost, preview.contextTruncated, preview.answerBytes],
+    ['execute_blender_code', true, true, true, Buffer.byteLength(answer)]);
+  assert.ok(answer.startsWith(preview.answerPreview) && preview.answerPreview.length < 2000);
+  // Older receipts keep the same two facts with no excerpt at all.
+  const older = deepFreeze(request([user, call('b1', 'execute_blender_code', { code: 'x' }), textOutput('b1', 'execute_blender_code', answer),
+    call('recent', 'workspace_list', { path: '.' }), output('recent', 'workspace_list', [])]));
+  const compact = checkpoint(fitWorkspaceContext(older, 3500));
+  assert.ok(compact.includes('"isError":true') && compact.includes('"sceneLost":true'), compact);
 });
 
 test('unknown tools, incomplete calls, mismatched names and human instructions are never silently elided', () => {

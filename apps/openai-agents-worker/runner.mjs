@@ -77,10 +77,13 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
   const directory = await mkdtemp(join(tmpdir(), 'awwo-openai-agents-'));
   let child;
   let sandbox;
+  let blenderAbilities;
   const sandboxAbort = new AbortController();
   const maxOutput = request.workspace ? WORKSPACE_BODY_BYTES : config.maxOutputBytes;
   try {
     if (request.workspace) sandbox = await createSandbox(config.workspace, { workspaceId: request.workspace.id, runId: request.runId, inputs: request.workspace.inputs, snapshot: request.workspace.snapshot }, sandboxAbort.signal);
+    // A workstation's tools and guidance come from its own container (the Blender MCP server's list), before the task starts.
+    if (sandbox?.blender) blenderAbilities = await sandbox.blender.abilities();
     const provenance = `# Temporary OpenAI Agents execution directory\n\nCreated by AWWO OpenAI Agents worker on ${new Date().toISOString()}.\nScope: one isolated agent run; deleted after the child exits.\n`;
     await writeFile(join(directory, 'creator.md'), provenance, { mode: 0o600 });
     const guard = moduleGuardOptions();
@@ -163,7 +166,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
       return;
     }
     if (event?.type === 'workspace_activity' && sandbox && !cancellation && !terminalEvent) {
-      if (Number.isSafeInteger(event.step) && event.step > 0 && event.step <= request.workspace.maxModelCalls && /^workspace_(list|read|write|exec|publish|archive)$/.test(event.tool)) onEvent({ type: 'workspace_activity', step: event.step, tool: event.tool });
+      if (Number.isSafeInteger(event.step) && event.step > 0 && event.step <= request.workspace.maxModelCalls && /^workspace_(list|read|write|exec|publish|archive|blender)$/.test(event.tool)) onEvent({ type: 'workspace_activity', step: event.step, tool: event.tool });
       return;
     }
     if (terminalEvent || !event || typeof event !== 'object') return;
@@ -227,7 +230,7 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     type: 'run',
     acceptedAtNs,
     request,
-    ...(request.workspace ? { workspaceAbilities: workspaceAbilities(config.workspace) } : {}),
+    ...(request.workspace ? { workspaceAbilities: { ...workspaceAbilities(config.workspace), ...(blenderAbilities ? { blender: blenderAbilities } : {}) } } : {}),
     modelConfig: {
       provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL,
       // A Bedrock key travels only inside its auth record, never as an OpenAI SDK key.

@@ -277,7 +277,7 @@ export function loadConfig(env = process.env) {
   });
 }
 
-export function publicHealth(config, activeRuns = 0, workspaceAvailable = false) {
+export function publicHealth(config, activeRuns = 0, workspaceAvailable = false, workspaceFacts = {}) {
   return {
     status: config.ready ? 'ready' : 'unconfigured',
     ready: config.ready,
@@ -293,7 +293,9 @@ export function publicHealth(config, activeRuns = 0, workspaceAvailable = false)
     runtime: 'openai-agents',
     tracingEnabled: false,
     maxModelCallsPerRun: 1,
-    ...(config.workspace ? { workspace: { version: 1, available: workspaceAvailable, maxModelCalls: config.workspace.maxModelCalls } } : {}),
+    // A Blender workstation says so, and once its probe answered, on what it renders (server.mjs probeWorkspace).
+    ...(config.workspace ? { workspace: { version: 1, available: workspaceAvailable, maxModelCalls: config.workspace.maxModelCalls,
+      ...(config.workspace.blender ? { blender: { available: workspaceAvailable && !!workspaceFacts.blender, ...(workspaceFacts.blender ?? {}) } } : {}) } } : {}),
     // True when at least one profile advertises levels. The control plane still
     // decides per model: a request naming a level its profile lacks is refused.
     supportsEffortSelection: config.models.some((profile) => profile.reasoningEfforts.length > 0),
