@@ -248,11 +248,13 @@ function IdentityAvatar({ label, image }: { label: string; image?: string | null
   return <span className="account-avatar account-avatar-fallback" aria-hidden="true">{initials(label)}</span>;
 }
 
+/** `person`: whose card it is, for the avatar's initials; a card that is no one's takes its label's. */
 function AccountStatusCard({
   eyebrow,
   label,
   detail,
   image,
+  person,
   badge,
   action,
 }: {
@@ -260,12 +262,13 @@ function AccountStatusCard({
   label: string;
   detail: string;
   image?: string | null;
+  person?: string;
   badge?: string;
   action?: ReactNode;
 }) {
   return (
     <section className="account-identity-card" aria-label={eyebrow}>
-      <IdentityAvatar label={label} image={image} />
+      <IdentityAvatar label={person || label} image={image} />
       <div className="account-identity-copy">
         <span className="account-eyebrow">{eyebrow}</span>
         <strong>{label}</strong>
@@ -548,6 +551,7 @@ export function AccountWorkspacePanel({
           label={clawHuntIdentity ? text.externalConnected(clawHuntIdentity.username) : text.externalDisconnected}
           detail={clawHuntIdentity?.email || text.externalPurpose}
           image={clawHuntIdentity?.avatar_url}
+          person={clawHuntIdentity?.username}
           action={
             <button
               type="button"
@@ -573,6 +577,7 @@ export function AccountWorkspacePanel({
             label={text.signedIn}
             detail={text.signedInAs(identityLabel(bootstrap.profile, bootstrap.session.user.id))}
             image={bootstrap.profile?.image}
+            person={identityLabel(bootstrap.profile, bootstrap.session.user.id)}
             badge={bootstrap.access?.isInstanceAdmin ? (locale === 'zh' ? '实例管理员' : 'Instance admin') : undefined}
           />
         ) : (
