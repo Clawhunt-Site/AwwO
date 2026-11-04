@@ -121,9 +121,14 @@ func historicalSchemaState(ctx context.Context, tx pgx.Tx) (string, string, erro
 	if e != nil {
 		return "", "", e
 	}
-	if runtime == "partial" {
-		// Migration 034 widens 011's check to the sandbox runtime; that check is 011's schema as later migrations left it.
-		widened, e := schemaSignature(ctx, tx, "agents", []schemaColumn{{"runtime", "text", true, "'pi'::text"}}, []string{"CHECK (runtime = ANY (ARRAY['pi'::text, 'openai-agents'::text, 'sandbox'::text]))"}, true)
+	// Migration 034 widens 011's check to the sandbox runtime, and 054 to the Blender workstation; either check is 011's
+	// schema as later migrations left it.
+	for _, check := range []string{"CHECK (runtime = ANY (ARRAY['pi'::text, 'openai-agents'::text, 'sandbox'::text]))",
+		"CHECK (runtime = ANY (ARRAY['pi'::text, 'openai-agents'::text, 'sandbox'::text, 'blender'::text]))"} {
+		if runtime != "partial" {
+			break
+		}
+		widened, e := schemaSignature(ctx, tx, "agents", []schemaColumn{{"runtime", "text", true, "'pi'::text"}}, []string{check}, true)
 		if e != nil {
 			return "", "", e
 		}

@@ -571,3 +571,11 @@ untrusted attachments; their content type is never guessed into the app origin.
 This path uses the existing run, graph and artifact tables; it requires no new
 migration. It does not enable host shell access, arbitrary MCP servers, runtime
 plugin installation, uncontrolled network access or autonomous publishing.
+
+A node may also run on the `blender` runtime, the Blender workstation: a sandbox computer whose image runs Blender
+and the Blender Lab MCP server (`deploy/saas/blender/README.md`), served by its own OpenAI Agents worker
+(`AWWO_BLENDER_AGENTS_URL` and `AWWO_BLENDER_AGENTS_TOKEN`, both or neither, with `AWWO_WORKSPACE_CALLBACK_URL`). The
+runtime catalogue lists it only where it is configured, and offers it only while that worker's health says its Blender
+answered (`workspace.blender.available`). Everything else is the sandbox's: one agent, never a team, a market Agent or a
+personal model connection; every model call admitted and settled through the workspace callback and priced as an
+`openai-agents` call; the node chooses it with its own switch, and AwwO never moves a node onto it or off it.

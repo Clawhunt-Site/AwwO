@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,38 @@ type workspaceCapability struct {
 	Version       int  `json:"version"`
 	Available     bool `json:"available"`
 	MaxModelCalls int  `json:"maxModelCalls"`
+	// Blender is a workstation worker's (apps/openai-agents-worker config.mjs publicHealth): whether its Blender
+	// answered the worker's probe, and what it renders on.
+	Blender *blenderCapability `json:"blender,omitempty"`
+}
+
+// blenderCapability is what a Blender workstation's worker says of its Blender. GPU and EEVEE are shown to members,
+// so they are kept only in the closed forms the worker writes (workspace-blender.ts blenderGpu).
+type blenderCapability struct {
+	Available bool   `json:"available"`
+	GPU       string `json:"gpu,omitempty"`
+	EEVEE     string `json:"eevee,omitempty"`
+	Tools     int    `json:"tools,omitempty"`
+}
+
+var blenderGPUShown = regexp.MustCompile(`^(?:none|(?:OPTIX|CUDA|GPU): [A-Za-z0-9 .()+_,-]{1,200})$`)
+
+// shownBlender keeps a worker's Blender facts that hold, and nothing else.
+func shownBlender(c *blenderCapability) *blenderCapability {
+	if c == nil {
+		return nil
+	}
+	out := &blenderCapability{Available: c.Available}
+	if blenderGPUShown.MatchString(c.GPU) {
+		out.GPU = c.GPU
+	}
+	if c.EEVEE == "gpu" || c.EEVEE == "software" {
+		out.EEVEE = c.EEVEE
+	}
+	if c.Tools > 0 && c.Tools <= 64 {
+		out.Tools = c.Tools
+	}
+	return out
 }
 type workspacePlan struct {
 	Version       int                   `json:"version"`
@@ -81,7 +114,8 @@ func validWorkspaceActivity(step int, tool string) bool {
 		return false
 	}
 	switch tool {
-	case "workspace_list", "workspace_read", "workspace_write", "workspace_exec", "workspace_publish", "workspace_archive":
+	// workspace_blender: one of a workstation's Blender tools (the worker relays no more than that label).
+	case "workspace_list", "workspace_read", "workspace_write", "workspace_exec", "workspace_publish", "workspace_archive", "workspace_blender":
 		return true
 	}
 	return false
@@ -95,7 +129,7 @@ func (a *App) projectRunExecution(ctx context.Context, tid, rid string, raw json
 	// small projection, and keep malformed historical snapshots readable.
 	if err := a.db.QueryRow(ctx, `SELECT CASE
 	 WHEN jsonb_typeof(execution_snapshot->'team')='object' THEN 'team'
-	 WHEN jsonb_typeof(execution_snapshot->'workspace')='object' AND execution_snapshot->>'runtime' IN ('openai-agents','sandbox') THEN 'workspace'
+	 WHEN jsonb_typeof(execution_snapshot->'workspace')='object' AND execution_snapshot->>'runtime' IN ('openai-agents','sandbox','blender') THEN 'workspace'
 	 ELSE 'text' END FROM runs WHERE tenant_id=$1 AND id=$2`, tid, rid).Scan(&kind); err != nil {
 		return nil, err
 	}
@@ -145,7 +179,11 @@ func validWorkspaceCallbackURL(raw string) bool {
 	return err == nil && port > 0 && port <= 65535 && (u.Hostname() == "127.0.0.1" || u.Hostname() == "::1")
 }
 func validWorkspaceCapability(runtime string, c *workspaceCapability) bool {
-	return (runtime == runtimeOpenAIAgents || runtime == runtimeSandbox) && c != nil && c.Version == 1 && c.Available && c.MaxModelCalls >= 2 && c.MaxModelCalls <= maxWorkspaceModelCalls
+	// A workstation's workspace counts only with its Blender ready: without it, a Blender node would have nothing to work in.
+	if runtime == runtimeBlender && (c == nil || c.Blender == nil || !c.Blender.Available) {
+		return false
+	}
+	return (runtime == runtimeOpenAIAgents || sandboxRuntime(runtime)) && c != nil && c.Version == 1 && c.Available && c.MaxModelCalls >= 2 && c.MaxModelCalls <= maxWorkspaceModelCalls
 }
 
 // The generic runtime also has turn limits, but only project execution carries
@@ -162,7 +200,7 @@ func workspaceRuntimeFailureCode(workerCode string, contract bool) string {
 func (a *App) requireWorkspaceSnapshot(s executionSnapshot) error {
 	// A sandbox node always needs its sandbox; a plain openai-agents node needs one only where no sandbox worker is
 	// configured and every such node runs in project execution.
-	needs := s.Runtime == runtimeSandbox || (s.Runtime == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "")
+	needs := sandboxRuntime(s.Runtime) || (s.Runtime == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "")
 	if a.cfg.WorkspaceCallbackURL != "" && needs && s.Team == nil && s.Workspace == nil {
 		return setupError{"workspace_unavailable", "The project sandbox is unavailable; restore it before running this node"}
 	}
@@ -670,7 +708,7 @@ func (a *App) executeWorkspace(ctx context.Context, tid, rid, sid, prompt, instr
 		a.finish(tid, rid, status, "", code)
 	}
 	p := snap.Workspace
-	if kind == "planner" || kind == "knowledge" || snap.Team != nil || (snap.Runtime != runtimeOpenAIAgents && snap.Runtime != runtimeSandbox) || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > maxWorkspaceModelCalls || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
+	if kind == "planner" || kind == "knowledge" || snap.Team != nil || (snap.Runtime != runtimeOpenAIAgents && !sandboxRuntime(snap.Runtime)) || p == nil || p.Version != 1 || p.MaxModelCalls < 2 || p.MaxModelCalls > maxWorkspaceModelCalls || snap.OutputContract != nil || !validWorkspaceCallbackURL(a.cfg.WorkspaceCallbackURL) || !validWorkspaceCapability(snap.Runtime, snap.Health.Workspace) || p.MaxModelCalls > snap.Health.Workspace.MaxModelCalls {
 		failRun("workspace_unavailable")
 		return
 	}

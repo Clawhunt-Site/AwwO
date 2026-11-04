@@ -181,11 +181,18 @@ func jsTrim(s string) string {
 // TestTeamBoundsMatchTheCanvas); the plan gate (planTeam) takes the same.
 var teamModes = []string{"sequential", "parallel", "debate", "review"}
 
+// teamRuntime reports whether a team, or one of its members, may run on runtime: not in a computer of its own (the
+// sandbox, the Blender workstation), whose runs take one agent and a workspace no team turn has. The page offers a team
+// Pi or OpenAI Agents alone (apps/web/src/canvas/nodeTeam.ts).
+func teamRuntime(runtime string) bool {
+	return validRuntime(runtime) && !sandboxRuntime(runtime)
+}
+
 func validateTeam(t *nodeTeam) error {
 	if t == nil {
 		return nil
 	}
-	if t.Version != 1 || !validRuntime(t.Runtime) || t.MaxRounds < 1 || t.MaxRounds > 8 || t.MaxTurns < 1 || t.MaxTurns > 64 || t.TimeoutSeconds < 10 || t.TimeoutSeconds > 1800 || len(t.Members) < 1 || len(t.Members) > 8 {
+	if t.Version != 1 || !teamRuntime(t.Runtime) || t.MaxRounds < 1 || t.MaxRounds > 8 || t.MaxTurns < 1 || t.MaxTurns > 64 || t.TimeoutSeconds < 10 || t.TimeoutSeconds > 1800 || len(t.Members) < 1 || len(t.Members) > 8 {
 		return errors.New("Invalid team version, runtime, bounds or member count")
 	}
 	if !slices.Contains(teamModes, t.Mode) {
@@ -196,7 +203,7 @@ func validateTeam(t *nodeTeam) error {
 	}
 	ids := map[string]bool{}
 	for _, m := range t.Members {
-		if jsTrim(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || jsTrim(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || jsTrim(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validEffortLevel(m.Effort) || !validRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
+		if jsTrim(m.ID) == "" || utf8.RuneCountInString(m.ID) > 128 || ids[m.ID] || jsTrim(m.Name) == "" || utf8.RuneCountInString(m.Name) > 128 || jsTrim(m.Role) == "" || utf8.RuneCountInString(m.Role) > 512 || utf8.RuneCountInString(m.Instructions) > 16000 || utf8.RuneCountInString(m.Model) > 256 || !validEffortLevel(m.Effort) || !teamRuntime(memberRuntime(t, m)) || !validRuntimeTools(memberRuntime(t, m), m.Tools) || (m.Context != "task" && m.Context != "shared") {
 			return errors.New("Invalid member identity, runtime, model, context or tools")
 		}
 		ids[m.ID] = true

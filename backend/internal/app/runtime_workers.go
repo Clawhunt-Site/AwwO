@@ -19,6 +19,10 @@ const (
 	// mode (AWWO_SANDBOX_AGENTS_URL), with files, a shell and its tests, chosen node by node. Plain openai-agents nodes
 	// keep running as single calls on their own worker.
 	runtimeSandbox        = "sandbox"
+	// runtimeBlender is the sandbox computer with Blender in it (the Blender workstation, deploy/saas/blender): an OpenAI
+	// Agents worker of its own (AWWO_BLENDER_AGENTS_URL) whose workspaces run Blender and the Blender MCP server, on a GPU
+	// host. A node chooses it as it chooses the sandbox, and everything a sandbox node is, it is too.
+	runtimeBlender        = "blender"
 	maxRuntimeModels      = 256
 	maxRuntimeHealthBytes = 512 * 1024
 )
@@ -26,13 +30,19 @@ const (
 type runtimeCatalog map[string]piHealth
 
 func validRuntime(runtime string) bool {
-	return runtime == runtimePI || runtime == runtimeOpenAIAgents || runtime == runtimeSandbox
+	return runtime == runtimePI || runtime == runtimeOpenAIAgents || sandboxRuntime(runtime)
 }
 
-// workerRuntime is the runtime the worker itself serves, as the run request names it: a sandbox run goes to an
-// OpenAI Agents worker, which knows itself as openai-agents.
+// sandboxRuntime reports whether a node on runtime works in a computer of its own: the sandbox, or the Blender
+// workstation, which is a sandbox with Blender in it. AwwO never chooses either for a node, nor moves a node off one.
+func sandboxRuntime(runtime string) bool {
+	return runtime == runtimeSandbox || runtime == runtimeBlender
+}
+
+// workerRuntime is the runtime the worker itself serves, as the run request names it: a sandbox or workstation run goes
+// to an OpenAI Agents worker, which knows itself as openai-agents.
 func workerRuntime(runtime string) string {
-	if runtime == runtimeSandbox {
+	if sandboxRuntime(runtime) {
 		return runtimeOpenAIAgents
 	}
 	return defaultRuntime(runtime)
@@ -60,7 +70,7 @@ func memberRuntime(t *nodeTeam, m teamMember) string {
 	return t.Runtime
 }
 func runtimeTools(runtime string) []string {
-	if runtime == runtimeOpenAIAgents || runtime == runtimeSandbox {
+	if runtime == runtimeOpenAIAgents || sandboxRuntime(runtime) {
 		return []string{"calculator", "current_time"}
 	}
 	return []string{}
@@ -121,6 +131,8 @@ func (a *App) runtimeEndpoint(runtime string) (string, string, error) {
 		endpoint, token = a.cfg.OpenAIAgentsURL, a.cfg.OpenAIAgentsToken
 	case runtimeSandbox:
 		endpoint, token = a.cfg.SandboxAgentsURL, a.cfg.SandboxAgentsToken
+	case runtimeBlender:
+		endpoint, token = a.cfg.BlenderAgentsURL, a.cfg.BlenderAgentsToken
 	default:
 		return "", "", errors.New("Unsupported runtime")
 	}
@@ -132,7 +144,7 @@ func (a *App) runtimeEndpoint(runtime string) (string, string, error) {
 
 func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error) {
 	var h piHealth
-	if a.cfg.UserCredentials && runtime == runtimeSandbox {
+	if a.cfg.UserCredentials && sandboxRuntime(runtime) {
 		// A sandbox runs on the operator's platform models; personal connections are not wired to it.
 		return h, errors.New("The sandbox computer is not available with personal model connections")
 	}
@@ -193,12 +205,23 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 	if resp.StatusCode != 200 || json.Unmarshal(body, &h) != nil || !h.Ready || h.Model == "" {
 		return piHealth{}, errors.New("Runtime provider is not ready")
 	}
+	if h.Workspace != nil {
+		// Blender facts belong to a workstation's worker alone, in the forms it writes.
+		h.Workspace.Blender = shownBlender(h.Workspace.Blender)
+		if runtime != runtimeBlender {
+			h.Workspace.Blender = nil
+		}
+	}
 	if !validWorkspaceCapability(runtime, h.Workspace) {
 		h.Workspace = nil
 	}
 	if runtime == runtimeSandbox && h.Workspace == nil {
 		// A sandbox node is nothing but its sandbox: a worker that cannot open one does not serve it.
 		return piHealth{}, errors.New("The sandbox computer is not available")
+	}
+	if runtime == runtimeBlender && h.Workspace == nil {
+		// A workstation is a sandbox whose Blender answered its worker's probe (validWorkspaceCapability).
+		return piHealth{}, errors.New("The Blender workstation is not available")
 	}
 	if a.cfg.LLMGateOnly {
 		var policy struct {
@@ -227,9 +250,9 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.Runtime == "" && runtime == runtimePI {
 			m.Runtime = runtimePI
 		}
-		// The sandbox's worker is an OpenAI Agents worker and lists its models as that runtime's.
-		if runtime == runtimeSandbox && m.Runtime == runtimeOpenAIAgents {
-			m.Runtime = runtimeSandbox
+		// The sandbox's (and the workstation's) worker is an OpenAI Agents worker and lists its models as that runtime's.
+		if sandboxRuntime(runtime) && m.Runtime == runtimeOpenAIAgents {
+			m.Runtime = runtime
 		}
 		if m.Runtime != runtime || m.ID == "" || len(m.ID) > 200 || len(m.Provider) > 200 || seen[m.ID] || !validEffortCatalog(m) {
 			return piHealth{}, errors.New("Runtime model catalog is invalid")
@@ -242,7 +265,7 @@ func (a *App) probeRuntime(ctx context.Context, runtime string) (piHealth, error
 		if m.structuredOutputMalformed {
 			cleared = append(cleared, clearing{m.ID, "malformed"})
 		}
-		if runtime == runtimeSandbox {
+		if sandboxRuntime(runtime) {
 			// A sandbox delivers through its published files and final JSON, never a provider schema.
 			m.StructuredOutput = false
 		} else if runtime != runtimeOpenAIAgents && m.StructuredOutput {
@@ -379,13 +402,13 @@ func (a *App) runtimeSnapshot(ctx context.Context, entitlement modelEntitlement,
 	}
 	snapshot := executionSnapshot{Runtime: runtime, Instructions: instructions, Model: model, Effort: effort, Budget: budget, Overhead: overhead,
 		ProseRate: frozenRate(h.modelRate(model)), Team: resolved, Health: h, RuntimeHealth: used}
-	if runtime == runtimeSandbox && resolved != nil {
+	if sandboxRuntime(runtime) && resolved != nil {
 		return executionSnapshot{}, invalidSetup("A sandbox node runs one agent, not a team")
 	}
-	// With a sandbox worker configured, only sandbox nodes get a sandbox; without one, an openai-agents worker that
-	// advertises project execution runs every node that way, as before.
+	// With a sandbox worker configured, only sandbox (and workstation) nodes get a sandbox; without one, an openai-agents
+	// worker that advertises project execution runs every node that way, as before.
 	if resolved == nil && a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(runtime, h.Workspace) &&
-		(runtime == runtimeSandbox || a.cfg.SandboxAgentsURL == "") {
+		(sandboxRuntime(runtime) || a.cfg.SandboxAgentsURL == "") {
 		snapshot.Workspace = &workspacePlan{Version: 1, MaxModelCalls: h.Workspace.MaxModelCalls, OutputFields: []outputContractField{}}
 	}
 	return snapshot, nil

@@ -101,7 +101,7 @@ func marketFeedRefused(title string) error {
 // marketSandboxed says whether a run of the snapshot works in a sandbox, which a market Agent's never does: one that has
 // a sandbox workspace, or whose runtime this deployment runs only in one (requireWorkspaceSnapshot's rule).
 func (a *App) marketSandboxed(s executionSnapshot) bool {
-	return s.Workspace != nil || s.Runtime == runtimeSandbox ||
+	return s.Workspace != nil || sandboxRuntime(s.Runtime) ||
 		(a.cfg.WorkspaceCallbackURL != "" && defaultRuntime(s.Runtime) == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "")
 }
 
@@ -224,7 +224,7 @@ func (a *App) resolveMarketNode(ctx context.Context, tx pgx.Tx, tid, cid string,
 	if kind != "" && kind != "llm" {
 		return nil, nil, nil, marketNotUsable("A market Agent runs on a text node")
 	}
-	if runtime == runtimeSandbox {
+	if sandboxRuntime(runtime) {
 		return nil, nil, nil, marketSandboxRefused()
 	}
 	// A node already running this Agent (its own conversation on this canvas does) keeps it, and its version, even after
@@ -248,7 +248,7 @@ func (a *App) resolveMarketNode(ctx context.Context, tx pgx.Tx, tid, cid string,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if v.Kind != "llm" || v.Model.Runtime == runtimeSandbox {
+	if v.Kind != "llm" || sandboxRuntime(v.Model.Runtime) {
 		return nil, nil, nil, marketNotUsable("A market Agent runs on a text node")
 	}
 	putJSON(node, "agentKind", v.Kind)
@@ -338,7 +338,7 @@ func (a *App) admitMarketRun(ctx context.Context, tx pgx.Tx, tid, sid, nodeID, a
 	if v.ContentHash != prior.Market.ContentHash {
 		return nil, workspaceAgentSetupRequired()
 	}
-	if v.Kind != "llm" || v.Model.Runtime == runtimeSandbox {
+	if v.Kind != "llm" || sandboxRuntime(v.Model.Runtime) {
 		return nil, marketNotUsable("A market Agent runs on a text node")
 	}
 	use := &marketRun{Agent: m, Version: v, Price: v.Price}

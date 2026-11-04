@@ -428,7 +428,7 @@ func (in marketDraftInput) validate(maxPrice int) (marketVersion, string, error)
 	v.Price = in.Price
 	m := in.Model
 	m.Runtime, m.ID, m.Effort = strings.TrimSpace(m.Runtime), strings.TrimSpace(m.ID), strings.TrimSpace(m.Effort)
-	if (m.Runtime != "" && (!validRuntime(m.Runtime) || m.Runtime == runtimeSandbox)) || (m.ID != "" && !validMarketModelID(m.ID)) ||
+	if (m.Runtime != "" && (!validRuntime(m.Runtime) || sandboxRuntime(m.Runtime))) || (m.ID != "" && !validMarketModelID(m.ID)) ||
 		!validEffortLevel(m.Effort) || (m.Effort != "" && m.ID == "") {
 		return v, "", marketInvalid("The recommended model names a text runtime, a model and an effort the way a node does")
 	}

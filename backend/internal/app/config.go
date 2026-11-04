@@ -53,6 +53,9 @@ type Config struct {
 	OpenAIAgentsURL, OpenAIAgentsToken                                                    string
 	// The sandbox computer runtime (runtimeSandbox): an OpenAI Agents worker in project-execution mode.
 	SandboxAgentsURL, SandboxAgentsToken string
+	// The Blender workstation (runtimeBlender): an OpenAI Agents worker whose workspaces run Blender
+	// (AWWO_BLENDER_AGENTS_URL / _TOKEN). Unset, the runtime is not offered.
+	BlenderAgentsURL, BlenderAgentsToken string
 	SessionTTL, RunTimeout               time.Duration
 	PIAdmissionWait                      time.Duration
 	MaxBodyBytes                         int64
@@ -210,6 +213,7 @@ func ConfigFromEnv() (Config, error) {
 	c.PIAdmissionWait = 5 * time.Second
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = os.Getenv("AWWO_OPENAI_AGENTS_URL"), os.Getenv("AWWO_OPENAI_AGENTS_TOKEN")
 	c.SandboxAgentsURL, c.SandboxAgentsToken = os.Getenv("AWWO_SANDBOX_AGENTS_URL"), os.Getenv("AWWO_SANDBOX_AGENTS_TOKEN")
+	c.BlenderAgentsURL, c.BlenderAgentsToken = os.Getenv("AWWO_BLENDER_AGENTS_URL"), os.Getenv("AWWO_BLENDER_AGENTS_TOKEN")
 	for key, dst := range map[string]*time.Duration{"AWWO_SESSION_TTL": &c.SessionTTL, "AWWO_RUN_TIMEOUT": &c.RunTimeout, "AWWO_PI_SESSION_WAIT": &c.PIAdmissionWait} {
 		if s := os.Getenv(key); s != "" {
 			v, e := time.ParseDuration(s)
@@ -396,6 +400,22 @@ func (c Config) Validate() error {
 		// The sandbox's model calls are admitted one by one through the workspace callback.
 		if c.WorkspaceCallbackURL == "" {
 			return errors.New("AWWO_SANDBOX_AGENTS_URL requires AWWO_WORKSPACE_CALLBACK_URL")
+		}
+	}
+	if (c.BlenderAgentsURL == "") != (c.BlenderAgentsToken == "") {
+		return errors.New("AWWO_BLENDER_AGENTS_URL and AWWO_BLENDER_AGENTS_TOKEN must be configured together")
+	}
+	if c.BlenderAgentsURL != "" {
+		u, e := url.Parse(c.BlenderAgentsURL)
+		if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("invalid AWWO_BLENDER_AGENTS_URL")
+		}
+		if len(c.BlenderAgentsToken) < 32 || strings.ContainsAny(c.BlenderAgentsToken, "\r\n") {
+			return errors.New("AWWO_BLENDER_AGENTS_TOKEN must be at least 32 characters")
+		}
+		// A workstation is a sandbox: its model calls are admitted through the workspace callback too.
+		if c.WorkspaceCallbackURL == "" {
+			return errors.New("AWWO_BLENDER_AGENTS_URL requires AWWO_WORKSPACE_CALLBACK_URL")
 		}
 	}
 	if strings.Contains(c.PublicOrigin, "example.com") && c.Env != "development" {

@@ -265,6 +265,10 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 	if a.cfg.SandboxAgentsURL != "" {
 		ids = append(ids, runtimeSandbox)
 	}
+	// So is the Blender workstation, where one is configured.
+	if a.cfg.BlenderAgentsURL != "" {
+		ids = append(ids, runtimeBlender)
+	}
 	results := make(chan struct {
 		runtime string
 		discovery
@@ -292,15 +296,15 @@ func (a *App) runtimeCatalogue(w http.ResponseWriter, r *http.Request, entitleme
 		// Effort selection is a per-model fact taken from the worker catalog, so
 		// the same runtime can advertise it for one profile and refuse it for another.
 		// The picker treats the levels as a closed enum ("select"), never free text.
-		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents", runtimeSandbox: "Sandbox computer"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
-		if (id == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "" || id == runtimeSandbox) && a.cfg.WorkspaceCallbackURL != "" {
+		descriptor := map[string]any{"id": id, "name": map[string]string{runtimePI: "Pi", runtimeOpenAIAgents: "OpenAI Agents", runtimeSandbox: "Sandbox computer", runtimeBlender: "Blender workstation"}[id], "configured": configError == nil, "available": result.err == nil, "supportsEffortSelection": result.err == nil && h.supportsEffortSelection(), "effortInputMode": "select", "tools": enabledRuntimeTools(h, id)}
+		if (id == runtimeOpenAIAgents && a.cfg.SandboxAgentsURL == "" || sandboxRuntime(id)) && a.cfg.WorkspaceCallbackURL != "" {
 			descriptor["workspace"] = &workspaceCapability{Version: 1, Available: false, MaxModelCalls: defaultWorkspaceModelCalls}
 		}
 		if result.err != nil {
 			descriptor["reason"] = result.err.Error()
 		} else {
 			descriptor["defaultModel"] = h.defaultModel()
-			if a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(id, h.Workspace) && (id == runtimeSandbox || a.cfg.SandboxAgentsURL == "") {
+			if a.cfg.WorkspaceCallbackURL != "" && validWorkspaceCapability(id, h.Workspace) && (sandboxRuntime(id) || a.cfg.SandboxAgentsURL == "") {
 				descriptor["workspace"] = h.Workspace
 			}
 			seen := map[string]bool{}

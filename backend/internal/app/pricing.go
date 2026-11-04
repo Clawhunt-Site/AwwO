@@ -174,8 +174,8 @@ func (p *ModelPricing) Freeze(runtime, model string) (string, json.RawMessage) {
 	if p == nil {
 		return "", nil
 	}
-	// A sandbox run's calls are its OpenAI Agents worker's, priced as that runtime's.
-	if runtime == runtimeSandbox {
+	// A sandbox (or workstation) run's calls are its OpenAI Agents worker's, priced as that runtime's.
+	if sandboxRuntime(runtime) {
 		runtime = runtimeOpenAIAgents
 	}
 	key := runtime + ":" + model
