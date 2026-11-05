@@ -32,18 +32,26 @@ export function ModelPreview({ file }: { file: PreviewFile }) {
     void (async () => {
       try {
         const content = validateModel(file);
-        const [THREE, { OrbitControls }, { GLTFLoader }, { OBJLoader }] = await Promise.all([
+        const [THREE, { OrbitControls }, { GLTFLoader }, { OBJLoader }, { RoomEnvironment }] = await Promise.all([
           import('three'), import('three/examples/jsm/controls/OrbitControls.js'), import('three/examples/jsm/loaders/GLTFLoader.js'), import('three/examples/jsm/loaders/OBJLoader.js'),
+          import('three/examples/jsm/environments/RoomEnvironment.js'),
         ]);
         if (disposed || !host.current) return;
         const target = host.current;
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        // Khronos PBR Neutral keeps a material's own colour (ACES Filmic and no tone mapping turn gold olive), and a
+        // neutral room to reflect gives a metal its colour: with lights alone a metallic surface reflects nothing. The
+        // room is kept faint and the key light strong, so a pale matte model keeps its shading on the light background
+        // (2026-11-05, compared by eye on the GYROID ring and the CANOPY pavilion).
+        renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.NeutralToneMapping;
         const scene = new THREE.Scene(); scene.background = new THREE.Color('#f1f4f2');
+        const environment = new THREE.PMREMGenerator(renderer);
+        scene.environment = environment.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.45;
         const camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = false; controls.minDistance = 0.05;
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x536552, 2.8));
-        const light = new THREE.DirectionalLight(0xffffff, 3); light.position.set(4, 6, 5); scene.add(light);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 0.3));
+        const light = new THREE.DirectionalLight(0xffffff, 2.4); light.position.set(4, 6, 5); scene.add(light);
         const paint = () => { if (!disposed) renderer.render(scene, camera); };
         const resize = () => {
           if (disposed) return;
@@ -61,7 +69,8 @@ export function ModelPreview({ file }: { file: PreviewFile }) {
         cleanup = () => {
           observer.disconnect(); controls.removeEventListener('change', paint); controls.dispose();
           renderer.domElement.removeEventListener('webglcontextlost', lost);
-          disposeObject(object); renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove(); reset.current = () => undefined;
+          disposeObject(object); scene.environment?.dispose(); environment.dispose();
+          renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove(); reset.current = () => undefined;
         };
         resize();
         // Preflight rejects every externally supplied URI. Only loader-created blob URLs
