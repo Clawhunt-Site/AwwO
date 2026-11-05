@@ -929,13 +929,15 @@ func (a *App) executeTeamTurn(ctx context.Context, tid, rid, sid string, snap ex
 	return "", errors.New(code)
 }
 
-// Kept here to make transaction ownership explicit for snapshot admission helpers.
+// Kept here to make transaction ownership explicit for snapshot admission helpers. The notes the snapshot gives its run
+// are kept apart from it as well (given_notes: givenNotes reads them without the snapshot's conversation history).
 func saveRunSnapshot(ctx context.Context, tx pgx.Tx, tid, rid, actor string, snap executionSnapshot) error {
 	raw, _ := json.Marshal(snap)
 	var team any
 	if snap.Team != nil {
 		team, _ = json.Marshal(snap.Team)
 	}
-	_, e := tx.Exec(ctx, "UPDATE runs SET execution_snapshot=$3,team_snapshot=$4,actor_id=NULLIF($5,'') WHERE tenant_id=$1 AND id=$2", tid, rid, raw, team, actor)
+	_, e := tx.Exec(ctx, "UPDATE runs SET execution_snapshot=$3,team_snapshot=$4,actor_id=NULLIF($5,''),given_notes=$6 WHERE tenant_id=$1 AND id=$2", tid, rid, raw, team, actor,
+		givenNotesOf(snap.Memory))
 	return e
 }

@@ -84,7 +84,12 @@
 /* Amber mixed with the ink, as the registry's notes are, so a proposal reads on a dark frame too. */
 .awwo-library-badge.is-proposed { background: color-mix(in srgb, #c08a1e 16%, transparent); color: color-mix(in srgb, #c08a1e 60%, var(--library-ink)); }
 .awwo-library-badge.is-pinned, .awwo-library-badge.kind-decision { color: var(--library-accent); }
+.awwo-library-badge.is-auto { background: color-mix(in srgb, var(--library-accent) 12%, transparent); color: var(--library-accent); }
+/* Hollow, as a note not yet given to runs: an inset ring keeps the badge the size of the others. */
+.awwo-library-badge.is-probation { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--library-muted) 55%, transparent); color: var(--library-muted); }
 .awwo-library-badge.is-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; }
+/* The note a note on probation was written to take the place of, said below its text. */
+.awwo-library-list .awwo-library-replaces { color: var(--library-muted); font-size: 12px; font-style: italic; }
 .awwo-library-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .awwo-library-item-actions button { min-height: 28px; padding: 3px 9px; font-size: 12px; }
 .awwo-library-editor, .awwo-library-detail { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 16px 20px; border-left: 1px solid var(--library-border); overflow-y: auto; overscroll-behavior: contain; background: var(--library-bg); }

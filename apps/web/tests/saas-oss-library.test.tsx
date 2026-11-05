@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KnowledgeWorkbench } from '../src/saas/KnowledgeWorkbench';
-import { MemoryWorkbench } from '../src/saas/MemoryWorkbench';
+import { MemoryWorkbench, memoryArchivedReason, memoryDeletedNotice } from '../src/saas/MemoryWorkbench';
 import { SkillLibrary } from '../src/saas/SkillLibrary';
 import { CanvasLibraryTools } from '../src/saas/CanvasLibraryTools';
 import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
@@ -87,10 +87,10 @@ describe('memory workbench', () => {
   it('lists both scopes, confirms a proposal, pins, adds a canvas note and deletes in two steps', async () => {
     let items = [note(), note({ id: 'm2', canvasId: 'canvas-a', scope: 'canvas', title: '主色用 #E76F51', kind: 'decision', status: 'proposed', pinned: false, version: 1, useCount: 0 })];
     const calls = server(call => {
-      if (call.method === 'GET' && call.url.startsWith(`${tenant}/memory?`)) return json({ items });
+      if (call.method === 'GET' && call.url.startsWith(`${tenant}/memory?`)) return json({ items: items.filter(item => (item.status === 'archived') === call.url.includes('status=archived')) });
       if (call.method === 'PATCH') { const id = call.url.split('/').pop()!; items = items.map(item => item.id === id ? { ...item, ...call.body, version: Number(item.version) + 1 } : item); return json(items.find(item => item.id === id)); }
       if (call.method === 'POST') { const created = note({ id: 'm3', canvasId: call.body.canvasId ?? null, scope: call.body.canvasId ? 'canvas' : 'workspace', title: call.body.title, body: call.body.body, kind: call.body.kind, pinned: call.body.pinned, version: 1, useCount: 0 }); items = [...items, created]; return json(created, 201); }
-      if (call.method === 'DELETE') { const id = call.url.split('/').pop()!; items = items.filter(item => item.id !== id); return new Response(null, { status: 204 }); }
+      if (call.method === 'DELETE') { const id = call.url.split('/').pop()!; items = items.filter(item => item.id !== id); return json({ setAside: 2 }); }
     });
     render(preferences(<MemoryWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
     const list = await screen.findByRole('list');
@@ -121,6 +121,121 @@ describe('memory workbench', () => {
     expect(calls.some(call => call.method === 'DELETE')).toBe(false);
     fireEvent.click(within(created).getByRole('button', { name: '确认删除' }));
     await waitFor(() => expect(calls.find(call => call.method === 'DELETE')?.url).toBe(`${tenant}/memory/m3`));
+    // The notes of AwwO's the deletion set aside are said, for the person to delete them too.
+    await screen.findByText(/AwwO 说同一件事的 2 条笔记也已归档/);
+
+    // An edit of a note's text says that AwwO's notes of its old text are archived, or, of the whole workspace, no longer
+    // given to the canvas of a canvas's note; one of its pin alone says neither.
+    const edited = within(screen.getByRole('list')).getByText('主色用 #E76F51').closest('li')!;
+    fireEvent.click(within(edited).getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '主色用 #F4A261' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await screen.findByText('记忆已更新；AwwO 若有说着它原来内容的笔记，已一并归档（在各自所在的「已归档」里），整个工作区里的这类笔记不再交给这张画布。');
+    // The text it was opened with tells, though the list shown meanwhile no longer holds the note.
+    const workspace = within(screen.getByRole('list')).getByText('对外文案用简体中文').closest('li')!;
+    fireEvent.click(within(workspace).getByRole('button', { name: '编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    await screen.findByText('没有匹配的记忆。');
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '对外文案用繁体中文' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await screen.findByText('记忆已更新；AwwO 若有说着它原来内容的笔记，已一并归档（在各自所在的「已归档」里）。');
+    fireEvent.click(screen.getByRole('button', { name: '在用' }));
+    // A save of the pin alone, or of the kind alone, says the note was updated, and nothing of AwwO's notes.
+    const changes: Array<() => void> = [
+      () => fireEvent.click(screen.getByLabelText('置顶：每次运行都优先引用，不论是否相关')),
+      () => fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'fact' } }),
+    ];
+    for (const change of changes) {
+      const again = (await within(await screen.findByRole('list')).findByText('对外文案用繁体中文')).closest('li')!;
+      fireEvent.click(within(again).getByRole('button', { name: '编辑' }));
+      change();
+      fireEvent.click(screen.getByRole('button', { name: '保存' }));
+      await screen.findByText('记忆已更新。');
+      expect(screen.queryByText(/已一并归档/)).toBeNull();
+    }
+    expect(calls.filter(call => call.method === 'PATCH').slice(-2).map(call => call.body)).toEqual([
+      { version: 5, title: '对外文案用繁体中文', body: '', kind: 'style', pinned: true },
+      { version: 6, title: '对外文案用繁体中文', body: '', kind: 'fact', pinned: true },
+    ]);
+  });
+
+  it("names why AwwO archived a note that restated a person's", () => {
+    expect(memoryArchivedReason('restated', (_zh: string, english: string) => english)).toBe('Restated a person’s note that was deleted or changed');
+    expect(memoryArchivedReason('restated', (chinese: string) => chinese)).toBe('复述了一条被删掉或改掉的人写笔记');
+  });
+
+  it('says what a deletion archived apart from what it holds back from the canvas', () => {
+    const en = (_zh: string, english: string) => english, zh = (chinese: string) => chinese;
+    expect(memoryDeletedNotice({ setAside: 2, heldBack: 1 }, en)).toBe("Note deleted. 2 notes of AwwO's that said the same are archived (each under Archived where it was kept, to delete as well), and one of the whole workspace is no longer given to this canvas. Runs already admitted keep the copy they froze.");
+    expect(memoryDeletedNotice({ setAside: 1, heldBack: 0 }, en)).toBe("Note deleted, and a note of AwwO's that said the same archived (each under Archived where it was kept, to delete as well). Runs already admitted keep the copy they froze.");
+    expect(memoryDeletedNotice({ setAside: 0, heldBack: 3 }, en)).toBe("Note deleted, and 3 notes of AwwO's for the whole workspace that said the same no longer given to this canvas. Runs already admitted keep the copy they froze.");
+    expect(memoryDeletedNotice({ setAside: 0, heldBack: 0 }, en)).toBe('Note deleted. Runs already admitted keep the copy they froze.');
+    expect(memoryDeletedNotice({ setAside: 0, heldBack: 1 }, zh)).toBe('记忆已删除，整个工作区里 AwwO 说同一件事的 1 条笔记不再交给这张画布。已经开始的运行仍保留当时冻结的副本。');
+  });
+
+  it('marks the notes AwwO keeps, says which wait on probation, and why one was archived', async () => {
+    let confirmed = false;
+    const calls = server(call => {
+      if (call.method === 'PATCH') { confirmed = true; return json(note({ id: 'p1', title: '标题用衬线字体', origin: 'run', status: 'active', locked: true })); }
+      if (!call.url.includes('/memory?')) return undefined;
+      if (call.url.includes('status=archived')) return json({ items: [note({ id: 'a1', title: '旧的笔记', origin: 'run', status: 'archived', archivedReason: 'unused', pinned: false, locked: false, evidence: 1 })] });
+      // Once the replacement is confirmed, the note it takes the place of is archived, and listed in use no more.
+      return json({ items: [
+        note({ id: 'p1', title: '标题用衬线字体', origin: 'run', status: confirmed ? 'active' : 'proposed', pinned: false, locked: confirmed, evidence: 1, replacesId: 'b1' }),
+        ...(confirmed ? [] : [note({ id: 'b1', title: '页面用深色', origin: 'evolution', pinned: false, locked: false, evidence: 3 })]),
+        note({ id: 'o1', title: '我们自己写的', origin: 'user', pinned: false, locked: true, evidence: 1 }),
+      ] });
+    });
+    render(preferences(<MemoryWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    const item = async (title: string) => (await screen.findByText(title)).closest('li')!;
+    const probation = await item('标题用衬线字体');
+    expect(within(probation).getByText('自动')).toBeVisible();
+    expect(within(probation).getByText('试用中')).toBeVisible();
+    expect(within(probation).queryByText('待确认')).toBeNull();
+    const borne = await item('页面用深色');
+    expect(within(borne).getByText('自动')).toBeVisible();
+    expect(within(borne).queryByText('试用中')).toBeNull();
+    expect(borne).toHaveTextContent('3 次运行印证');
+    const own = await item('我们自己写的');
+    expect(within(own).queryByText('自动')).toBeNull();
+    expect(within(own).queryByText('试用中')).toBeNull();
+    // The header says what is kept and for how long, names no cadence (the Lessons panel says it), and says a note moved
+    // to the whole workspace goes with its last canvas; the Auto badge says AwwO no longer changes a note once it is theirs.
+    const header = screen.getByRole('region', { name: '记忆' }).querySelector('header')!;
+    expect(header).toHaveTextContent('一直留到那张画布或这个工作区删掉、或密钥更换');
+    expect(header).toHaveTextContent('会在那张画布里记下那条 AwwO 笔记原文的哈希');
+    expect(header).toHaveTextContent('除非你置顶或改过它的文字');
+    expect(header).toHaveTextContent('运行会留着交给它们的笔记的副本');
+    expect(header).not.toHaveTextContent('每 3 天');
+    expect(header).not.toHaveTextContent('什么都不留');
+    expect(within(probation).getByText('自动')).toHaveAttribute('title', expect.stringContaining('AwwO 不再改它'));
+    // A note written to take another's place says which, and confirming it says that one is archived once it is.
+    expect(within(probation).getByText('将取代「页面用深色」')).toBeVisible();
+    fireEvent.click(within(probation).getByRole('button', { name: '确认' }));
+    expect(await screen.findByText(/它取代的那条已归档/)).toBeVisible();
+    expect(calls.find(call => call.method === 'PATCH')?.body).toEqual({ version: 3, status: 'active' });
+    await waitFor(() => expect(screen.queryByText('页面用深色')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }));
+    const archived = await item('旧的笔记');
+    expect(archived).toHaveTextContent('30 天没有用到');
+    expect(within(archived).queryByText('试用中')).toBeNull();
+  });
+
+  it('says a confirmed replacement archived nothing when the note it was to replace stays in use', async () => {
+    server(call => {
+      if (call.method === 'PATCH') return json(note({ id: 'p1', title: '标题用衬线字体', origin: 'run', status: 'active', locked: true }));
+      if (!call.url.includes('/memory?')) return undefined;
+      // The note it was to replace became a person's meanwhile: the server archived nothing.
+      return json({ items: [
+        note({ id: 'p1', title: '标题用衬线字体', origin: 'run', status: 'proposed', pinned: false, locked: false, evidence: 1, replacesId: 'b1' }),
+        note({ id: 'b1', title: '页面用深色', origin: 'evolution', pinned: true, locked: true, evidence: 3 }),
+      ] });
+    });
+    render(preferences(<MemoryWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    const probation = (await screen.findByText('标题用衬线字体')).closest('li')!;
+    fireEvent.click(within(probation).getByRole('button', { name: '确认' }));
+    expect(await screen.findByText('已确认。之后的运行会引用它。')).toBeVisible();
+    expect(screen.queryByText(/它取代的那条已归档/)).toBeNull();
   });
 
   it('refuses an over-long note before sending it and offers no edits read-only', async () => {

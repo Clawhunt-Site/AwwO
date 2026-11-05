@@ -128,9 +128,14 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"graph_operation_cancellations actor_id users a", "graph_runs actor_id users a",
 			"knowledge_documents tenant_id tenants a", "knowledge_events tenant_id tenants a",
 			"knowledge_operations tenant_id tenants a", "knowledge_proposals tenant_id tenants a",
+			// A workspace's learning cycles go with it, and the changes of theirs a person took back keep no name for who
+			// did (migration 055).
+			"learning_changes undone_by users n", "learning_cycles tenant_id tenants c",
 			// The author's market Agents keep no author: they list and run no more (removeAccount unnames them first).
 			"market_agents author_user_id users n",
 			"media_generations tenant_id tenants c", "memberships tenant_id tenants a", "memberships user_id users a",
+			// The hashes of the notes of AwwO's that a workspace's people deleted go with it (migration 055).
+			"memory_item_dismissals tenant_id tenants c",
 			"memory_items tenant_id tenants c", "model_invocations tenant_id tenants c", "node_sessions tenant_id tenants a",
 			"openmaus_dispatches tenant_id tenants a", "password_resets user_id users c", "plan_watches user_id users c", "planner_refusals tenant_id tenants c",
 			"refunded_calls tenant_id tenants c", "refunded_runs tenant_id tenants c", "relay_keys tenant_id tenants c", "relay_keys user_id users c",
@@ -141,8 +146,9 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"user_appearance user_id users c", "user_connections user_id users c", "user_plans user_id users c",
 			"user_preferences user_id users c", "web_reads tenant_id tenants c", "workspace_checkins tenant_id tenants c",
 			"workspace_checkins user_id users c",
-			// A workspace's learning settings go with it, and its owner's consent with their account (migration 052).
-			"workspace_learning consent_by users n", "workspace_learning tenant_id tenants c",
+			// A workspace's learning settings go with it, and its owner's consent with their account (migration 052); its
+			// self-learning turned off stays off, without a name for who turned it off (migration 055).
+			"workspace_learning consent_by users n", "workspace_learning learning_off_by users n", "workspace_learning tenant_id tenants c",
 		}},
 		"references without an ON DELETE action": {fmt.Sprintf(foreignKeysSQL, "c.confdeltype IN ('a','r') AND c.confrelid NOT IN ('users'::regclass,'tenants'::regclass)"), []string{
 			"graph_collaboration_turns tenant_id,run_id runs a", "graph_run_nodes tenant_id,run_id runs a",

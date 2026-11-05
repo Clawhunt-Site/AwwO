@@ -266,6 +266,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	// A market Agent's text is a third party's: it feeds no node that works with tools (a sandbox, a team), even through
 	// nodes in between, as its instructions could be read there as the task's (market_use.go).
 	fromMarket := marketDescendants(d)
+	// The canvas's dismissals are read once for all its nodes' notes (freezeMemoryContext).
+	var dismissals memoryDismissals
 	for i, n := range d.Nodes {
 		if !needed[n.ID] {
 			continue
@@ -425,7 +427,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					a.skillFailure(w, e)
 					return
 				}
-				if snap.Memory, e = freezeMemoryContext(r.Context(), tx, tid, cid, graphMemoryQuery(n)); e != nil {
+				// A market Agent's node is never given the notes AwwO kept: they may hold what other canvases' runs taught.
+				if snap.Memory, e = a.freezeMemoryContext(r.Context(), tx, tid, cid, graphMemoryQuery(n), market == nil && a.selfLearningOffered(), &dismissals); e != nil {
 					a.dbError(w, e)
 					return
 				}
@@ -512,7 +515,8 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		snapRaw, _ := json.Marshal(snap)
-		_, e = tx.Exec(r.Context(), "INSERT INTO graph_run_nodes(tenant_id,graph_id,node_id,ordinal,state,output,detail,session_id,execution_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9)", tid, id, n.ID, i, state, output, detail, sid, snapRaw)
+		_, e = tx.Exec(r.Context(), "INSERT INTO graph_run_nodes(tenant_id,graph_id,node_id,ordinal,state,output,detail,session_id,execution_snapshot,given_notes) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10)",
+			tid, id, n.ID, i, state, output, detail, sid, snapRaw, givenNotesOf(snap.Memory))
 		if e != nil {
 			a.dbError(w, e)
 			return

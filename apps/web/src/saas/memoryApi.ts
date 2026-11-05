@@ -1,16 +1,25 @@
 import { api, SaaSApiError, tenantPath } from './api';
 
 /** A memory note: a short preference, fact, decision, lesson or style rule saved for one canvas or the whole
- *  workspace. The server quotes the relevant active notes to a node's model as untrusted background data. */
+ *  workspace. The server quotes the relevant active notes to a node's model as untrusted background data. AwwO keeps
+ *  notes of its own from a canvas's runs (origin run) and its learning cycles (origin evolution): until a person writes,
+ *  changes or pins one (locked), AwwO may merge, move or archive it; an archived note says why (archivedReason). */
 export type MemoryKind = 'preference' | 'fact' | 'decision' | 'lesson' | 'style';
 export type MemoryStatus = 'active' | 'proposed' | 'archived';
 export interface MemoryNote {
   id: string; canvasId: string | null; scope: 'canvas' | 'workspace'; title: string; body: string; kind: MemoryKind; status: MemoryStatus;
-  origin: 'user' | 'run' | 'assistant'; pinned: boolean;
-  /** The run it came from; `distilled` for one AwwO's own model proposed from a canvas run (graphId), for a person to accept. */
+  origin: 'user' | 'run' | 'assistant' | 'evolution'; pinned: boolean;
+  /** The run it came from; `distilled` for one AwwO's own model kept from a canvas run (graphId). */
   source: { runId?: string; nodeId?: string; graphId?: string; distilled?: boolean }; contentHash: string; version: number;
   useCount: number; lastUsedAt: string | null; createdAt: string; updatedAt: string;
+  /** How many runs bore it out, and whether it is people's: absent from an API before self-learning. */
+  evidence?: number; locked?: boolean; archivedReason?: MemoryArchivedReason | ''; successorId?: string | null; lastSeenAt?: string | null;
+  /** A note AwwO wrote on probation to take another's place: that one leaves use once this one comes into it. */
+  replacesId?: string | null;
 }
+/** Why AwwO archived a note: merged into another, replaced by a newer one, moved to the whole workspace, unused for a
+ *  month, out of date, restating a person's note that was deleted or changed, or a change that made it taken back. */
+export type MemoryArchivedReason = 'merged' | 'superseded' | 'promoted' | 'unused' | 'outdated' | 'restated' | 'tidied' | 'undone';
 export interface MemoryDraft { canvasId?: string; title: string; body?: string; kind?: MemoryKind; pinned?: boolean; status?: 'active' | 'proposed'; source?: { runId?: string; nodeId?: string } }
 export interface MemoryPatch { version: number; title?: string; body?: string; kind?: MemoryKind; pinned?: boolean; status?: MemoryStatus }
 
@@ -44,6 +53,12 @@ export async function createMemory(tenantId: string, draft: MemoryDraft, signal?
 export async function updateMemory(tenantId: string, id: string, patch: MemoryPatch, signal?: AbortSignal): Promise<MemoryNote> {
   return checked(await api<unknown>(tenantPath(tenantId, `/memory/${encodeURIComponent(id)}`), { method: 'PATCH', body: JSON.stringify(patch), signal }), (x): x is MemoryNote => note(x) && x.id === id);
 }
-export async function deleteMemory(tenantId: string, id: string, signal?: AbortSignal): Promise<void> {
-  await api(tenantPath(tenantId, `/memory/${encodeURIComponent(id)}`), { method: 'DELETE', signal });
+/** What a deletion did to the notes of AwwO's that said the same: how many it archived (setAside), and how many of the
+ * whole workspace it no longer gives the deleted note's canvas (heldBack). */
+export interface MemoryDeleted { setAside: number; heldBack: number }
+/** Deletes a note, and answers what it did to the notes of AwwO's that said the same (MemoryDeleted). */
+export async function deleteMemory(tenantId: string, id: string, signal?: AbortSignal): Promise<MemoryDeleted> {
+  const result = await api<{ setAside?: unknown; heldBack?: unknown } | null>(tenantPath(tenantId, `/memory/${encodeURIComponent(id)}`), { method: 'DELETE', signal });
+  const count = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+  return { setAside: count(result?.setAside), heldBack: count(result?.heldBack) };
 }

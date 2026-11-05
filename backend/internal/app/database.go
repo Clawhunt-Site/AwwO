@@ -192,6 +192,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 54, "migrations/054_blender_runtime.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 55, "migrations/055_self_learning.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

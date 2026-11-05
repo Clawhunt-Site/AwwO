@@ -114,11 +114,16 @@ type Config struct {
 	// LearningConsent offers a workspace's owner Help improve AwwO (learning.go; AWWO_LEARNING_CONSENT=on): off unless on,
 	// until ClawHunt's privacy policy says what the operator's learning export takes from a workspace that turns it on.
 	LearningConsent bool
-	// MemoryDistill lets canvas runs worth learning from propose memory notes, read from their record by the platform's
-	// default model (run_memory.go; AWWO_MEMORY_DISTILL=on). Off unless on: ClawHunt's privacy policy names that model
-	// for planning, routing and nodes without a model of their own, and a run's record may come from a model the person
-	// chose, so it stays off until the policy says so.
-	MemoryDistill bool
+	// SelfLearning lets each workspace learn from its own canvas runs unless an admin turns it off (learning.go,
+	// run_memory.go, learning_cycle.go; AWWO_SELF_LEARNING=on): ClawHunt's default model reads a run's record and keeps
+	// notes for its canvas, and the learning cycles tidy them with the same model. Off unless on, and on only with
+	// SelfLearningSince (AWWO_SELF_LEARNING_SINCE, an RFC 3339 time: when ClawHunt's privacy policy began to name this
+	// use), before which no run is read. Never in the local edition, whose people bring their own model keys.
+	SelfLearning      bool
+	SelfLearningSince time.Time
+	// LearningCycleEvery is how long apart a workspace's learning cycles are (learning_cycle.go,
+	// AWWO_LEARNING_CYCLE_HOURS: 0-720, unset 72); 0 runs none.
+	LearningCycleEvery time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -186,12 +191,11 @@ func ConfigFromEnv() (Config, error) {
 	default:
 		return c, errors.New("AWWO_LEARNING_CONSENT must be on or off")
 	}
-	switch os.Getenv("AWWO_MEMORY_DISTILL") {
-	case "", "off":
-	case "on":
-		c.MemoryDistill = true
-	default:
-		return c, errors.New("AWWO_MEMORY_DISTILL must be on or off")
+	if c.SelfLearning, c.SelfLearningSince, err = parseSelfLearning(os.Getenv("AWWO_SELF_LEARNING"), os.Getenv("AWWO_SELF_LEARNING_SINCE"), os.Getenv("AWWO_MEMORY_DISTILL")); err != nil {
+		return c, err
+	}
+	if c.LearningCycleEvery, err = parseLearningCycleHours(os.Getenv("AWWO_LEARNING_CYCLE_HOURS")); err != nil {
+		return c, err
 	}
 	providers, err := parsePlatformProviders(os.Getenv("AWWO_PLATFORM_PROVIDERS"))
 	if err != nil {
@@ -341,6 +345,10 @@ func (c Config) Validate() error {
 	}
 	if (c.UserCredentials || len(c.CredentialKey) > 0) && len(c.CredentialKey) != 32 {
 		return errors.New("AWWO_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes")
+	}
+	// The texts of the notes people delete are kept as hashes keyed with it (dismissalHash).
+	if c.SelfLearning && len(c.CredentialKey) != 32 {
+		return errors.New("AWWO_SELF_LEARNING=on needs AWWO_CREDENTIAL_ENCRYPTION_KEY: the notes people delete are remembered by hashes keyed with it")
 	}
 	if c.SMTPHost != "" && (!validEmail(c.SMTPFrom) || strings.ContainsAny(c.SMTPHost, " /\r\n") || (c.SMTPPort != "465" && c.SMTPPort != "587")) {
 		return errors.New("SMTP requires a valid host, sender and TLS port 465 or 587")

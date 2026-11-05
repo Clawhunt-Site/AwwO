@@ -289,10 +289,13 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Their invitations, sent and accepted, are deleted: one passed to another sender could come back to life.
   - The switches a canvas evolves by that they turned on, and the changes of its evolution they recorded, keep no
     name (`apply_by`, `rerun_by`, `actor_id` become NULL, migration 053).
+  - Self-learning they turned off stays off, and the learning cycles' changes they took back stay taken back, without
+    their name (`learning_off_by`, `undone_by` become NULL, migration 055). The memory notes they wrote, changed or
+    pinned keep their plain-text `created_by` / `updated_by`, and so stay people's: no learning cycle changes them.
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),
-  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), its canvases' evolution switches and logs (migration 053), usage ledger, and everyone's memberships and invitations.
+  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), its canvases' evolution switches and logs (migration 053), its learning cycles and their changes, the canvases its notes for the whole workspace came from and the hashes of the notes of AwwO's that its people deleted (migration 055), usage ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.
@@ -422,6 +425,195 @@ evaluating and training models, to a new file on the host. It reads the database
   gave before.
 - The hashing key is discarded, so a file cannot be purged of one workspace later: keep each file only as long as
   clause 08 of the privacy policy says, and build each dataset again from a new export.
+
+### Self-learning and the credential key
+
+A note of AwwO's that a person deletes, or whose text they change, is remembered, so that no run or cycle writes it
+there again, nor gives it there, in its words or most of them, only as hashes keyed with
+`AWWO_CREDENTIAL_ENCRYPTION_KEY` (`memory_item_dismissals`): of its text, of each of its words and numbers, sentence by
+sentence and clause by clause too, with the note's kind (a deleted fact or decision holds back more of what a fact or a
+decision says of the same). The text itself is not kept, but whoever holds the key can work much of it out again
+(below). `AWWO_SELF_LEARNING=on` refuses to start without that key; without it no deletion is remembered at all (a hash
+keyed with no key could be guessed). A change dismisses all the text AwwO wrote, whatever it kept of it (a correction, a
+value changed, a denial added, or words added to it): the text is the person's from then on. A person who confirms or
+pins a note of AwwO's leaves its text AwwO's (`written_hash`, kept then for a note written before it was), so that a
+later change or deletion of it dismisses it; a person's change of its text, or their restore of a note AwwO archived as
+restating one of theirs (below), takes `written_hash` and `prompt_version` away, the text theirs from then on.
+
+Either way, a deletion or a change of the text of any note archives the notes AwwO keeps that say what its old text said
+where it was given, those archived so that a run or an undo could bring them back among them, and a deletion answers how
+many (`setAside`; for a note of the whole workspace, in its canvases too); a note of the whole workspace given in other
+canvases too is held back in that canvas alone, its own text dismissed there, and a deletion answers how many of those
+in use or on probation it held back there anew (`heldBack`); without the key, which a dismissal needs, it is archived
+with the others. Where the old text was a person's own, nothing of it is kept: AwwO's notes that said it are archived as
+`restated`, and deleting or changing one of those, while it stays archived so, keeps its very text alone, by the hash of
+it, no word of it nor of the person's note, so that it is not written there again in those words (the notes of AwwO's
+that say what one of those said are its learning since, archived as `outdated`; one a person restores is theirs, and its
+deletion or change keeps nothing); a note of the whole workspace held back for it is held by the hash of its very text
+alone, no word of it.
+
+What says the same is one rule for a deletion, a dismissal and a run that was given a note (`heldTo` in
+`run_memory.go`): a sentence that holds most of what a note, one of its sentences, or a clause of one that reads as a
+statement says ("Headlines use Fraunces" of "Headlines use Fraunces, buttons are teal"), whatever else it says, a
+correction of it at more length among it; a sentence or a clause of a note's body read with its title (a heading over a
+list: "Buttons" over "Teal, rounded"), a title of more than one sentence, and a note of one sentence, each read whole; a
+note that holds every word of one of three words or more, a list among it; a note, or a sentence or a clause of it,
+whose words, two or more and a third of those of the other at least, lie within the whole of the other or within a
+sentence or a clause of its body read with its title, unless they are the very words of a part of the other in the other
+sense; a part that holds most of a clause of it, those half its own words; or a fragment of it in its words. A rule of
+one word ("Always use Tailwind") is said by a whole note, a title or a sentence of two words at most that holds it, not
+by an item of a list. Only the very words of a note said in the other sense (a correction: "Headlines never use
+Fraunces") say the opposite and nothing of it; a no said twice says yes ("Never deploy without a review" says "Always
+deploy with a review"), words that hold a no and say none read as what they say ("nothing but", 不同, 特别, "No. 5"),
+neither…nor says no once (既不…也不… too), and noes whose sense hangs on what they are read with (a denial joined to another
+by and or &: "Never publish without review and without approval") are the opposite of nothing. Words are read in the
+singular and the plural alike (boxes and box, replies and reply, canvases and canvas), and a full stop after an
+abbreviation ends no sentence ("e.g.", "Ph.D."), where one after a dotted name does ("Next.js."). Numbers count as words
+do, one number however it is written (1,000 and 1000, 1.5 and 1.50, 0.250 and 0.25: a point is a decimal mark, a comma
+groups thousands before three digits alone, so 12,14,16 is three, points that part a version or a date keep its parts,
+1.10.2, and a minus before a number is its sign, -5): a short rule with another number is another rule ("Filler 2",
+"Filler 3"), a longer note that differs in a number alone says the same. A title is a sentence of its note: two notes
+that share one are held to each other, whatever their bodies say. Rewordings are held to the newest 1,000 dismissals
+where a note would be given; a note in a dismissal's very words is held back however long ago it was deleted.
+
+A note a cycle moved to the whole workspace in the words of canvases goes with the last of those canvases, whatever a
+person did with it, unless they pinned it or changed its text; so does a dismissal of such a note, in whatever scope
+(`memory_item_dismissal_canvases`), and one a person pinned leaves no dismissal of those canvases' words once they are
+gone. AwwO may then learn it again, on probation, for a person to delete again; the notes of other canvases moved or
+merged into it are archived as unused, in favour of none, for a run there to write them again. The same text deleted
+again is remembered anew.
+
+What a run was given, for later runs to be held to, is kept apart from its snapshot (`runs.given_notes`,
+`graph_run_nodes.given_notes`: each note's id, the hash of its text, its title and body, as the snapshot holds them), in
+the clear, as long as the run is: deleting a note does not take it out of the runs it was given to; deleting their
+canvas, or the workspace, does. Where an API from before migration 055 admitted a canvas run's node, the column is NULL
+and the node's snapshot is read instead; a run such an API admitted, in a node's conversation history, counts as given
+nothing until the statements below fill its column in from its snapshot. Once no such API runs, nor any run one admitted
+is still queued or running (one that finished later would keep its column NULL), and before self-learning is turned on,
+drop an index of the runs left to fill that a failed or cancelled build left (invalid, it would stand in the way of a
+new one, and no statement would use it), build it again (completed runs alone, the only ones read; without locking the
+table), run the backfill until it updates no row (each batch finds its runs through the index, which they leave as they
+are filled), and drop the index. Run each statement alone, not in a transaction (as `psql -c` does; `psql -1` or a
+`BEGIN` refuses an index built or dropped without locking its table); and set `AWWO_SELF_LEARNING_SINCE` no earlier
+than the moment the last such API stopped, so that no run it admitted is read.
+
+```sql
+-- backfill-055-index-drop: first
+DROP INDEX CONCURRENTLY IF EXISTS runs_given_notes_unset;
+```
+
+```sql
+-- backfill-055-index: then
+CREATE INDEX CONCURRENTLY IF NOT EXISTS runs_given_notes_unset ON runs(id) WHERE given_notes IS NULL AND status='completed';
+```
+
+```sql
+-- backfill-055: once no API from before migration 055 runs, until it updates no row
+UPDATE runs r SET given_notes=COALESCE((SELECT jsonb_agg(jsonb_build_object('id',i->'id','contentHash',i->'contentHash','title',i->'title','body',i->'body'))
+  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(r.execution_snapshot->'memory'->'items')='array' THEN r.execution_snapshot->'memory'->'items' ELSE '[]'::jsonb END) i),'[]'::jsonb)
+  WHERE r.id IN (SELECT id FROM runs WHERE given_notes IS NULL AND status='completed' ORDER BY id LIMIT 5000);
+```
+
+```sql
+-- backfill-055-done: last
+DROP INDEX CONCURRENTLY IF EXISTS runs_given_notes_unset;
+```
+
+What the hashes reveal: one who holds the key can test a guess of what a deleted note said, word by word, numbers and
+names among them, and the hash of the text confirms a guess of the whole: a dictionary recovers a note's words in Latin
+letters, not their order, but a note in Chinese, Japanese or Korean is kept as each two characters side by side, which
+overlap, so the pairs a dictionary finds chain back into much of its sentence. Without the key, one who reads the
+database can still see which deleted notes of a workspace share words or numbers (a word's hash is the same in every row
+of the workspace), how many words and numbers each had, which of them stood in one sentence or clause (not in what
+order) and which sentences and clauses held none, which sentence was its title, which part was one word alone, read as a
+statement or said that something is not so (or was unsure of it), its kind, which note said that something is not so or
+was unsure of it, and which was one word alone (a mark for each, the same in every row of the workspace), when it was
+dismissed, where (`canvas_id`) and which canvases' words it held; and where a deleted note's text is still in the clear
+beside them (in the runs it was given to, above, or the person's note that changed it), its words' hashes can be matched
+to it, and so read in the workspace's other dismissals. Rotating the key makes those hashes match nothing; delete them
+with the rotation, so that none stays readable with the old key from an old configuration or a backup: stop every API of
+this release first (one still running would keep new ones with the old key behind the statement), run it, and start them
+again with the new key. AwwO may then learn such a note again, on probation as any other, for a person to delete again;
+and a note of the whole workspace that a deletion held back in a canvas (setAsideAlike) is given there again, in use, at
+the next run, as nothing holds it back there any more:
+
+```sql
+-- rotate-key-055: with a rotation of AWWO_CREDENTIAL_ENCRYPTION_KEY
+WITH links AS (DELETE FROM memory_item_dismissal_canvases) DELETE FROM memory_item_dismissals;
+```
+
+### Rolling the API back past migration 055
+
+An API from before migration 055 gives runs every note in use (status `active`) as a note people saved: it knows nothing
+of the notes AwwO keeps, nor of a workspace's self-learning being off. Notes on probation are `proposed` already, which
+it never gives. Before such an API starts on a database where self-learning has run, stop every API of this release (one
+still running brings notes into use again behind the statement) and set the notes AwwO keeps in use aside as proposals
+too. To start this release again, stop every older API and, with none running: take out what the older API left of the
+canvases deleted while it ran (the notes a cycle moved to the whole workspace in their words alone, with the notes of
+other canvases moved or merged into them archived as unused, in favour of none, and the dismissals and links of their
+words; one a person pinned, or whose text they changed, theirs for good, as this release makes it) and settle what a
+person did under it with notes written to replace others (a note of AwwO's whose replacement a person brought into use
+is superseded by it, one brought back from a cycle's change among them, and so are its other replacements that might yet
+come into use; a replacement of a note a person made theirs is out of date, in use, waiting or archived by a tidy, and
+the cleanup touches no note it deletes, and makes the notes it spares theirs in a statement of its own, in the same
+transaction, as one statement changes a row but once); bring back the notes borne out, those a person pinned or changed
+under the older API among them, as this release would have it (and one a person set on probation through the API; a note
+the statement misses comes back into use the next time a run writes it); run the backfill above for the runs the older
+API admitted; and move `AWWO_SELF_LEARNING_SINCE` to the moment it stopped, as for a first deployment, so that no run it
+admitted is learnt from. Then start this release.
+
+```sql
+-- rollback-055: before an API from before migration 055 starts
+UPDATE memory_items SET status='proposed' WHERE status='active' AND origin IN ('run','evolution')
+  AND created_by IS NULL AND updated_by IS NULL AND NOT pinned;
+```
+
+```sql
+-- rollforward-055-cleanup: with no API running, first
+BEGIN;
+WITH notes AS (DELETE FROM memory_items m WHERE m.canvas_id IS NULL AND m.origin='evolution' AND NOT m.pinned AND m.created_by IS NULL
+    AND CASE WHEN m.written_hash<>'' THEN m.written_hash=m.content_hash ELSE m.updated_by IS NULL OR m.prompt_version<>'' END
+    AND NOT EXISTS (SELECT 1 FROM memory_item_canvases s WHERE s.tenant_id=m.tenant_id AND s.item_id=m.id AND s.words) RETURNING m.tenant_id,m.id),
+  freed AS (UPDATE memory_items s SET archived_reason='unused',successor_id=NULL,version=s.version+1,updated_at=clock_timestamp() FROM notes n
+    WHERE s.tenant_id=n.tenant_id AND s.successor_id=n.id AND s.status='archived' AND s.archived_reason IN ('promoted','merged')
+    AND NOT EXISTS (SELECT 1 FROM notes o WHERE o.tenant_id=s.tenant_id AND o.id=s.id)),
+  superseded AS (UPDATE memory_items m SET status='archived',archived_reason='superseded',successor_id=r.id,version=m.version+1,updated_at=clock_timestamp()
+    FROM memory_items r WHERE r.tenant_id=m.tenant_id AND r.replaces_id=m.id AND r.status='active' AND m.status IN ('active','proposed')
+    AND m.origin IN ('run','evolution') AND m.created_by IS NULL AND m.updated_by IS NULL AND NOT m.pinned
+    AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.tenant_id=m.tenant_id AND n.id=m.id) RETURNING m.tenant_id,m.id,r.id AS successor),
+  rivals AS (UPDATE memory_items x SET status='archived',archived_reason='superseded',successor_id=s.successor,version=x.version+1,updated_at=clock_timestamp()
+    FROM superseded s WHERE x.tenant_id=s.tenant_id AND x.replaces_id=s.id AND x.id<>s.successor
+    AND (x.status='proposed' OR (x.status='archived' AND x.archived_reason='unused'))
+    AND x.origin IN ('run','evolution') AND x.created_by IS NULL AND x.updated_by IS NULL AND NOT x.pinned
+    AND NOT EXISTS (SELECT 1 FROM superseded y WHERE y.tenant_id=x.tenant_id AND y.id=x.id)
+    AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.tenant_id=x.tenant_id AND n.id=x.id)),
+  outdated AS (UPDATE memory_items r SET status='archived',archived_reason='outdated',successor_id=NULL,version=r.version+1,updated_at=clock_timestamp()
+    FROM memory_items m WHERE m.tenant_id=r.tenant_id AND m.id=r.replaces_id AND m.status<>'archived'
+    AND (m.created_by IS NOT NULL OR m.updated_by IS NOT NULL OR m.pinned OR m.origin NOT IN ('run','evolution'))
+    AND (r.status IN ('active','proposed') OR (r.status='archived' AND r.archived_reason IN ('unused','tidied','merged','promoted')))
+    AND r.origin IN ('run','evolution') AND r.created_by IS NULL AND r.updated_by IS NULL AND NOT r.pinned
+    AND NOT EXISTS (SELECT 1 FROM superseded x WHERE x.tenant_id=r.tenant_id AND x.id=r.id)
+    AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.tenant_id=r.tenant_id AND n.id IN (r.id,r.successor_id))),
+  links AS (DELETE FROM memory_item_dismissal_canvases l WHERE l.scope<>'' AND NOT EXISTS (SELECT 1 FROM canvases c WHERE c.tenant_id=l.tenant_id AND c.id=l.scope))
+DELETE FROM memory_item_dismissals d WHERE d.canvas_words
+  AND NOT EXISTS (SELECT 1 FROM memory_item_dismissal_canvases l WHERE l.tenant_id=d.tenant_id AND l.scope=COALESCE(d.canvas_id,'') AND l.content_hash=d.content_hash);
+UPDATE memory_items m SET written_hash='',prompt_version='' WHERE m.canvas_id IS NULL AND m.origin='evolution' AND m.updated_by IS NOT NULL
+  AND (m.pinned OR NOT CASE WHEN m.written_hash<>'' THEN m.written_hash=m.content_hash ELSE m.updated_by IS NULL OR m.prompt_version<>'' END)
+  AND (m.written_hash<>'' OR m.prompt_version<>'')
+  AND NOT EXISTS (SELECT 1 FROM memory_item_canvases s WHERE s.tenant_id=m.tenant_id AND s.item_id=m.id AND s.words);
+COMMIT;
+```
+
+```sql
+-- rollforward-055: after the cleanup, before this release starts
+UPDATE memory_items SET status='active' WHERE status='proposed' AND origin IN ('run','evolution')
+  AND created_by IS NULL AND evidence>=2;
+```
+
+While the older API runs, a person who deletes or changes a note of AwwO's leaves no dismissal (the older API knows
+none), nor are the notes of AwwO's that said what they deleted or changed set aside; a text it changed is the person's
+once this release starts again (`written_hash` tells). The runs it admits keep no `given_notes`, which this release
+reads from their nodes' snapshots instead, and the statements above fill in for the runs of a node's history.
 
 ## Backend observability and usage
 

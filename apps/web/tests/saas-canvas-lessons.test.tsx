@@ -295,35 +295,147 @@ describe('the lessons workbench', () => {
     expect(await screen.findByText('这条经验已经在工作区里，但被停用了：在下面恢复它，所有「前端开发」节点才会带上它。')).toBeVisible();
   });
 
-  it('lists the notes proposed from runs, for a member to accept or set aside', async () => {
-    const note = (id: string, patch: Record<string, unknown> = {}) => ({ id, canvasId: 'canvas-a', scope: 'canvas', title: `标题 ${id}`, body: `正文 ${id}`, kind: 'decision',
-      status: 'proposed', origin: 'run', pinned: false, source: { graphId: 'g1', distilled: true }, contentHash: id, version: 1, useCount: 0, lastUsedAt: null,
-      createdAt: '2026-11-02T01:00:00Z', updatedAt: '2026-11-02T01:00:00Z', ...patch });
-    let notes = [note('n1'), note('n2'), note('mine', { origin: 'user', source: {} }), note('other', { canvasId: null, scope: 'workspace' })];
+  const learningChange = (id: string, patch: Record<string, unknown> = {}) => ({ id, kind: 'merge_notes', canvasId: 'canvas-a', itemId: `n-${id}`, sources: 2,
+    title: `标题 ${id}`, lessonKind: '', templateId: '', canvases: ['canvas-a'], undoneAt: null, createdAt: '2026-11-04T01:00:00Z', undoable: true, ...patch });
+  const learningCycle = (id: string, patch: Record<string, unknown> = {}) => ({ id, state: 'done', reason: '', readNotes: true, counts: {},
+    startedAt: '2026-11-04T01:00:00Z', finishedAt: '2026-11-04T01:01:00Z', changes: [] as ReturnType<typeof learningChange>[], ...patch });
+
+  it('lists what the learning cycles changed of this canvas and of the whole workspace, each to take back once', async () => {
+    // The latest cycle (it failed), one that changed this canvas's notes and the whole workspace's, and one that changed
+    // only another canvas's, which is left out.
+    let cycles = [learningCycle('c3', { state: 'failed', reason: 'worker_busy', readNotes: false, startedAt: '2026-11-05T01:00:00Z' }),
+      learningCycle('c2', { changes: [learningChange('merge'), learningChange('elsewhere', { canvasId: 'canvas-b', canvases: ['canvas-b'] }),
+        learningChange('promote', { kind: 'promote_note', canvasId: null, canvases: ['canvas-a', 'canvas-b'], title: '蓝色是整个工作区的主色' }),
+        learningChange('lesson', { kind: 'promote_lesson', canvasId: null, canvases: ['canvas-b'], title: '', sources: 1, lessonKind: 'output_limit', templateId: 'frontend' }),
+        learningChange('gone', { kind: 'archive_note', title: '', undoable: false })] }),
+      learningCycle('c1', { startedAt: '2026-11-01T01:00:00Z', changes: [learningChange('other', { canvasId: 'canvas-b', canvases: ['canvas-b'] })] })];
     const calls = server(call => {
-      if (call.method === 'GET' && call.url.startsWith(`${tenant}/memory?`)) return json({ items: notes.filter(item => item.status === 'proposed') });
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles, everyHours: 72 });
       if (call.method === 'GET') return json({ lessons: [], runs: [] });
-      if (call.method === 'PATCH') {
-        const id = call.url.split('/').pop()!;
-        notes = notes.map(item => item.id === id ? { ...item, status: call.body.status, version: 2 } : item);
-        return json(notes.find(item => item.id === id));
+      if (call.method === 'POST' && call.url.endsWith('/undo')) {
+        const id = call.url.split('/').slice(-2)[0];
+        cycles = cycles.map(cycle => ({ ...cycle, changes: cycle.changes.map(item => item.id === id ? { ...item, undoneAt: '2026-11-04T02:00:00Z', undoable: false } : item) }));
+        return json({ id, kind: 'merge_notes', undoneAt: '2026-11-04T02:00:00Z' });
       }
     });
     render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
-    const section = await screen.findByRole('region', { name: '从运行中提炼的记忆' });
-    // Only the canvas's notes AwwO proposed from its runs: not a person's, not the workspace's.
-    expect(within(section).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(section).queryByText('标题 mine')).toBeNull();
-    fireEvent.click(within(within(section).getAllByRole('listitem')[0]).getByRole('button', { name: '接受' }));
-    await waitFor(() => expect(within(screen.getByRole('region', { name: '从运行中提炼的记忆' })).getAllByRole('listitem')).toHaveLength(1));
-    fireEvent.click(within(screen.getByRole('region', { name: '从运行中提炼的记忆' })).getByRole('button', { name: '忽略' }));
-    await waitFor(() => expect(screen.queryByRole('region', { name: '从运行中提炼的记忆' })).toBeNull());
-    expect(calls.filter(call => call.method === 'PATCH').map(call => [call.url, call.body])).toEqual([
-      [`${tenant}/memory/n1`, { version: 1, status: 'active' }], [`${tenant}/memory/n2`, { version: 1, status: 'archived' }]]);
+    const section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText(/每 3 天整理一次/)).toBeVisible();
+    // This canvas's changes and the whole workspace's, not another canvas's own.
+    expect(within(section).getByText('把 2 条说法相同的笔记并入「标题 merge」')).toBeVisible();
+    expect(within(section).queryByText(/标题 elsewhere/)).toBeNull();
+    expect(within(section).getByText('提升到整个工作区：「蓝色是整个工作区的主色」（来自 2 条笔记）')).toBeVisible();
+    expect(within(section).getByText('所有「前端开发」节点都带上了这条经验：停在输出上限')).toBeVisible();
+    expect(within(section).getByText('归档了「一条已删除的笔记」')).toBeVisible();
+    expect(within(section).getByText(/改了 4 处/)).toBeVisible();
+    expect(within(section).getByText(/没有做完，稍后会再试/)).toBeVisible();
+    expect(within(section).queryByText(/标题 other/)).toBeNull();
+    expect(within(section).getAllByRole('listitem').filter(item => item.parentElement?.parentElement === section)).toHaveLength(2);
+    const lessonsRead = calls.filter(call => call.method === 'GET' && call.url.endsWith('/lessons')).length;
+    const undo = within(section).getAllByRole('button', { name: '撤销' });
+    expect(undo).toHaveLength(3);
+    fireEvent.click(undo[0]);
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '学习周期' })).getAllByText('已撤销')).toHaveLength(1));
+    expect(within(screen.getByRole('region', { name: '学习周期' })).getAllByRole('button', { name: '撤销' })).toHaveLength(2);
+    expect(calls.filter(call => call.method === 'POST').map(call => call.url)).toEqual([`${tenant}/learning/changes/merge/undo`]);
+    // The panel's lessons are read again: the change taken back may have been one of them.
+    await waitFor(() => expect(calls.filter(call => call.method === 'GET' && call.url.endsWith('/lessons')).length).toBeGreaterThan(lessonsRead));
+  });
+
+  it('says why a change cannot be taken back, lets a reader take nothing back, and shows no cycle it cannot read', async () => {
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [learningCycle('c1', { changes: [learningChange('merge')] })], everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+      if (call.method === 'POST') return json({ error: { code: 'learning_change_changed', message: 'changed' } }, 409);
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    let section = await screen.findByRole('region', { name: '学习周期' });
+    fireEvent.click(within(section).getByRole('button', { name: '撤销' }));
+    expect(await within(section).findByRole('alert')).toHaveTextContent('这处改动之后又被改过了');
+    cleanup();
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [learningCycle('c2', { reason: 'learning_off', readNotes: false, startedAt: '2026-11-05T01:00:00Z' }),
+        learningCycle('c1', { changes: [learningChange('merge')] })], everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" readOnly onClose={() => {}} />));
+    section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText('把 2 条说法相同的笔记并入「标题 merge」')).toBeVisible();
+    expect(within(section).getByText(/关闭了自动学习/)).toBeVisible();
+    expect(within(section).queryByRole('button')).toBeNull();
+    cleanup();
+    server(call => call.method === 'GET' && call.url.endsWith('/lessons') ? json({ lessons: [], runs: [] }) : undefined);
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    expect(await screen.findByText(/还没有经验/)).toBeVisible();
+    expect(screen.queryByRole('region', { name: '学习周期' })).toBeNull();
+    cleanup();
+    // The latest cycle changed only another canvas's notes: it says so.
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [learningCycle('c1', { changes: [learningChange('other', { canvasId: 'canvas-b', canvases: ['canvas-b'] })] })], everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText(/改动都在其他画布的笔记上/)).toBeVisible();
+    expect(within(section).queryByText(/标题 other/)).toBeNull();
+    cleanup();
+    // Cycles paused: the panel says so, and what they changed can still be taken back.
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [learningCycle('c1', { changes: [learningChange('merge')] })], everyHours: 0 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText(/已暂停/)).toBeVisible();
+    expect(within(section).queryByText(/每 0/)).toBeNull();
+    expect(within(section).getByRole('button', { name: '撤销' })).toBeEnabled();
+  });
+
+  it('says how often cycles come before any has run, and nothing where none run nor ran', async () => {
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [], everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    let section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText('学习周期：AwwO 每 3 天整理一次它记下的笔记和经验')).toBeVisible();
+    expect(within(section).getByText('还没有跑过学习周期。')).toBeVisible();
+    cleanup();
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [learningCycle('c1', { state: 'running', finishedAt: null })], everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText('第一次学习周期正在进行。')).toBeVisible();
+    cleanup();
+    server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles: [], everyHours: 0 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    expect(await screen.findByText(/还没有经验/)).toBeVisible();
+    expect(screen.queryByRole('region', { name: '学习周期' })).toBeNull();
+  });
+
+  it('reads the learning cycles again when the panel is refreshed', async () => {
+    let cycles = [learningCycle('c1')];
+    const calls = server(call => {
+      if (call.method === 'GET' && call.url === `${tenant}/learning/cycles`) return json({ cycles, everyHours: 72 });
+      if (call.method === 'GET') return json({ lessons: [], runs: [] });
+    });
+    render(preferences(<LessonsWorkbench tenantId="tenant-a" canvasId="canvas-a" onClose={() => {}} />));
+    const section = await screen.findByRole('region', { name: '学习周期' });
+    expect(within(section).getByText(/没有需要改动的/)).toBeVisible();
+    const read = calls.filter(call => call.method === 'GET' && call.url === `${tenant}/learning/cycles`).length;
+    cycles = [learningCycle('c2', { startedAt: '2026-11-07T01:00:00Z', changes: [learningChange('merge')] }), ...cycles];
+    fireEvent.click(screen.getByRole('button', { name: '刷新经验' }));
+    expect(await screen.findByText('把 2 条说法相同的笔记并入「标题 merge」')).toBeVisible();
+    expect(calls.filter(call => call.method === 'GET' && call.url === `${tenant}/learning/cycles`).length).toBeGreaterThan(read);
   });
 
   it('names its refusals in both languages', () => {
-    for (const code of ['run_not_rateable', 'invalid_lessons_response']) {
+    for (const code of ['run_not_rateable', 'invalid_lessons_response', 'learning_change_changed', 'learning_change_undone', 'invalid_learning_response']) {
       const error = new SaaSApiError(400, code, 'server text');
       expect(saasErrorMessage(error, 'zh')).not.toBe('server text');
       expect(saasErrorMessage(error, 'en')).not.toBe('server text');

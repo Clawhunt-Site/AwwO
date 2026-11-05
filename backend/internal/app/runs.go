@@ -665,7 +665,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind == "node" && nodeID != "" {
-		if snapshot.Memory, e = freezeMemoryContext(r.Context(), tx, tid, canvasID, b.Prompt); e != nil {
+		if snapshot.Memory, e = a.freezeMemoryContext(r.Context(), tx, tid, canvasID, b.Prompt, market == nil && a.selfLearningOffered(), nil); e != nil {
 			a.dbError(w, e)
 			return
 		}

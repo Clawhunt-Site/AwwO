@@ -11,7 +11,7 @@ import { WorkbenchOverlay, type CanvasTaskDraft } from './CanvasKnowledgeDock';
 import { saasErrorMessage } from './api';
 import { useSaaSPreferences } from './preferences';
 import { promoteCanvasLesson, readCanvasLessons, updateCanvasLesson, type CanvasLesson, type CanvasLessonsView } from './lessonsApi';
-import { readMemory, updateMemory, type MemoryNote } from './memoryApi';
+import { readLearningCycles, undoLearningChange, type LearningChange, type LearningCycle, type LearningCycles as LearningCyclesView } from './learningApi';
 import { readCanvasEvolution, updateCanvasEvolution, type CanvasEvolutionView, type EvolutionEntry } from './evolutionApi';
 import './canvas-library.css';
 import './canvas-lessons.css';
@@ -244,42 +244,90 @@ function CanvasAutoEvolution({ tenantId, canvasId, readOnly, onRevert }: { tenan
   </section>;
 }
 
-/** The notes AwwO's own model proposed from this canvas's runs (run_memory.go), waiting for a member: one accepted joins
- *  the canvas's memory, which its runs are given as background data; one ignored is set aside and never proposed again.
- *  Nothing shows while there is none (or they cannot be read: the lessons are the panel's own business). */
-function DistilledNotes({ tenantId, canvasId, readOnly }: { tenantId: string; canvasId: string; readOnly: boolean }) {
+/** A learning cycle's change, in the reader's words: the note's title as it is now (or that it was deleted since), or the
+ *  lesson's kind and the template whose nodes now take it. */
+export function learningChangeText(change: LearningChange, t: Translate, locale: 'zh' | 'en'): string {
+  const title = change.title || t('一条已删除的笔记', 'a note since deleted');
+  switch (change.kind) {
+    case 'promote_lesson': {
+      const name = templateName(change.templateId, locale);
+      return t(`所有「${name}」节点都带上了这条经验：${lessonKindName(change.lessonKind, t)}`, `Every “${name}” node now takes this lesson: ${lessonKindName(change.lessonKind, t)}`);
+    }
+    case 'promote_note':
+      return t(`提升到整个工作区：「${title}」（来自 ${change.sources} 条笔记）`, `Moved to the whole workspace: “${title}” (from ${change.sources} ${change.sources === 1 ? 'note' : 'notes'})`);
+    case 'merge_notes':
+      // The note a merge kept, word for word, and how many it archived in its favour.
+      return t(`把 ${change.sources} 条说法相同的笔记并入「${title}」`, `Merged ${change.sources} ${change.sources === 1 ? 'note' : 'notes'} saying the same into “${title}”`);
+    case 'archive_note':
+      return t(`归档了「${title}」`, `Archived “${title}”`);
+  }
+}
+
+/** How a learning cycle ended, given how many of its changes are shown (those of this canvas and the whole workspace). */
+export function learningCycleSummary(cycle: LearningCycle, shown: number, t: Translate): string {
+  if (cycle.state === 'failed') return t('没有做完，稍后会再试', 'Not finished; it will try again later');
+  if (shown) return t(`改了 ${shown} 处`, `${shown} ${shown === 1 ? 'change' : 'changes'}`);
+  if (cycle.reason === 'learning_off') return t('这个工作区关闭了自动学习，笔记没有动', 'Self-learning is off in this workspace: no note was touched');
+  if (cycle.changes.length) return t('改动都在其他画布的笔记上', 'Its changes were to other canvases’ notes');
+  return t('没有需要改动的', 'Nothing needed changing');
+}
+
+/** What the workspace's learning cycles did (learning_cycle.go): every few days AwwO tidies what it keeps — a lesson that
+ *  kept helping given to every node of its template, notes merged, moved to the whole workspace or archived — and each
+ *  change can be taken back here while what it made is untouched. The latest cycle is listed, and those before it that
+ *  changed this canvas's notes or the whole workspace's (the API lists the latest and those that changed anything),
+ *  with those changes. Nothing shows until they are read, nor when they cannot be (an API before them: the lessons are
+ *  the panel's own business). They are read again when the panel is refreshed (refresh changes). A change taken back
+ *  tells the panel (onChanged), whose lessons it may have changed. */
+function LearningCycles({ tenantId, canvasId, readOnly, refresh, onChanged }: { tenantId: string; canvasId: string; readOnly: boolean; refresh: number; onChanged: () => void }) {
   const { t, locale } = useSaaSPreferences();
-  const [notes, setNotes] = useState<MemoryNote[]>([]);
+  const [view, setView] = useState<LearningCyclesView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const load = useCallback(async () => {
     try {
-      const value = await readMemory(tenantId, { canvasId, status: 'proposed' });
-      if (alive.current) setNotes(value.filter(note => note.canvasId === canvasId && note.origin === 'run' && note.source.distilled === true));
-    } catch { if (alive.current) setNotes([]); }
-  }, [tenantId, canvasId]);
-  useEffect(() => { void load(); }, [load]);
-  const settle = async (note: MemoryNote, status: 'active' | 'archived') => {
+      const value = await readLearningCycles(tenantId);
+      if (alive.current) setView(value);
+    } catch { if (alive.current) setView(null); }
+  }, [tenantId]);
+  useEffect(() => { void load(); }, [load, refresh]);
+  const undo = async (change: LearningChange) => {
     if (busy) return;
     setBusy(true); setError(null);
-    try { await updateMemory(tenantId, note.id, { version: note.version, status }); if (alive.current) await load(); }
-    catch (cause) { if (alive.current) setError(cause); }
+    try {
+      await undoLearningChange(tenantId, change.id);
+      if (alive.current) { await load(); onChanged(); }
+    } catch (cause) { if (alive.current) setError(cause); }
     finally { if (alive.current) setBusy(false); }
   };
-  if (!notes.length) return null;
-  return <section className="awwo-lessons-notes" aria-label={t('从运行中提炼的记忆', 'Notes proposed from runs')}>
-    <h3>{t('从运行中提炼的记忆：接受后，这张画布之后的运行会把它当作背景资料', 'Notes proposed from runs: once accepted, this canvas’s runs take them as background')}</h3>
+  const mine = (change: LearningChange) => change.canvasId === null || change.canvasId === canvasId || change.canvases.includes(canvasId);
+  const cycles = (view?.cycles.filter(cycle => cycle.state !== 'running') ?? []).filter((cycle, index) => index === 0 || cycle.changes.some(mine));
+  // How often cycles come is said before any has run too (the memory panel and the settings page send people here for
+  // it); where none run and none ran, there is nothing to say.
+  if (!view || !cycles.length && view.everyHours <= 0) return null;
+  const running = view.cycles.some(cycle => cycle.state === 'running');
+  const date = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : '';
+  const every = view.everyHours > 0 && view.everyHours % 24 === 0
+    ? t(`每 ${view.everyHours / 24} 天`, `every ${view.everyHours / 24} ${view.everyHours === 24 ? 'day' : 'days'}`)
+    : t(`每 ${view.everyHours} 小时`, `every ${view.everyHours} hours`);
+  return <section className="awwo-lessons-cycles" aria-label={t('学习周期', 'Learning cycles')}>
+    <h3>{view.everyHours > 0 ? t(`学习周期：AwwO ${every}整理一次它记下的笔记和经验`, `Learning cycles: AwwO tidies the notes and lessons it keeps ${every}`)
+      : t('学习周期：已暂停，之前的改动仍可撤销', 'Learning cycles: paused; earlier changes can still be taken back')}</h3>
     {error !== null && <p className="awwo-library-alert" role="alert">{saasErrorMessage(error, locale)}</p>}
-    <ul>{notes.map(note => <li key={note.id}>
-      <strong>{note.title}</strong>
-      {note.body && <p>{note.body}</p>}
-      {!readOnly && <div className="awwo-library-item-actions">
-        <button type="button" className="awwo-library-primary" disabled={busy} onClick={() => void settle(note, 'active')}><Check size={14} aria-hidden="true" />{t('接受', 'Accept')}</button>
-        <button type="button" disabled={busy} onClick={() => void settle(note, 'archived')}>{t('忽略', 'Ignore')}</button>
-      </div>}
-    </li>)}</ul>
+    {!cycles.length && <p>{running ? t('第一次学习周期正在进行。', 'The first learning cycle is running.') : t('还没有跑过学习周期。', 'No learning cycle has run yet.')}</p>}
+    {cycles.length > 0 && <ol>{cycles.map(cycle => {
+      const changes = cycle.changes.filter(mine);
+      return <li key={cycle.id}>
+        <p><time dateTime={cycle.startedAt}>{date(cycle.startedAt)}</time> · {learningCycleSummary(cycle, changes.length, t)}</p>
+        {changes.length > 0 && <ul>{changes.map(change => <li key={change.id}>
+          <span>{learningChangeText(change, t, locale)}</span>
+          {change.undoneAt ? <small>{t('已撤销', 'Taken back')}</small>
+            : change.undoable && !readOnly && <button type="button" disabled={busy} onClick={() => void undo(change)}><RotateCcw size={13} aria-hidden="true" />{t('撤销', 'Undo')}</button>}
+        </li>)}</ul>}
+      </li>;
+    })}</ol>}
   </section>;
 }
 
@@ -290,6 +338,8 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState('');
+  // Counts the panel's refreshes, for the learning cycles to read theirs again too.
+  const [refreshes, setRefreshes] = useState(0);
   const generation = useRef(0);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -355,11 +405,11 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     <header className="awwo-library-header">
       <div className="awwo-library-heading"><span className="awwo-library-mark"><GraduationCap size={20} aria-hidden="true" /></span><div>
         <h2>{t('经验与进化', 'Lessons and evolution')}</h2>
-        <p>{t('画布运行结束后，失败的节点会在这里留下经验：下次运行时它带着这些经验跑，每次运行都会记下经验帮没帮上忙，一直帮不上忙的会自动停用。调推理强度的建议可以直接应用到画布上（可以撤销），换模型的建议会交给画布助手，由你确认后发送。',
-          'When a canvas run ends, each node that failed leaves a lesson here: its next runs take the lesson with them, each run records whether it helped, and one that never helps retires itself. A suggested reasoning effort can be applied to the canvas here (and undone); a suggested change of model goes to the canvas assistant, for you to send.')}</p>
+        <p>{t('画布运行结束后，失败的节点会在这里留下经验：下次运行时它带着这些经验跑，每次运行都会记下经验帮没帮上忙，一直帮不上忙的会自动停用，一直有用的会在学习周期里推广到工作区的同类节点。调推理强度的建议可以直接应用到画布上（可以撤销），换模型的建议会交给画布助手，由你确认后发送。',
+          'When a canvas run ends, each node that failed leaves a lesson here: its next runs take the lesson with them, each run records whether it helped, one that never helps retires itself, and one that keeps helping goes to the workspace’s nodes like it in a learning cycle. A suggested reasoning effort can be applied to the canvas here (and undone); a suggested change of model goes to the canvas assistant, for you to send.')}</p>
       </div></div>
       <div className="awwo-library-actions">
-        <button type="button" disabled={loading || busy} onClick={() => void load()} aria-label={t('刷新经验', 'Refresh lessons')}><RefreshCw size={16} aria-hidden="true" /></button>
+        <button type="button" disabled={loading || busy} onClick={() => { setRefreshes(n => n + 1); void load(); }} aria-label={t('刷新经验', 'Refresh lessons')}><RefreshCw size={16} aria-hidden="true" /></button>
         <button type="button" onClick={onClose} aria-label={t('关闭经验', 'Close lessons')}><X size={19} aria-hidden="true" /></button>
       </div>
     </header>
@@ -368,7 +418,7 @@ export function LessonsWorkbench({ tenantId, canvasId, readOnly = false, onTaskD
     <div className="awwo-library-body">
       <div className="awwo-library-list-column">
         <CanvasAutoEvolution tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} onRevert={onRevert} />
-        <DistilledNotes tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} />
+        <LearningCycles tenantId={tenantId} canvasId={canvasId} readOnly={readOnly} refresh={refreshes} onChanged={() => void load()} />
         {runs.length > 0 && <section className="awwo-lessons-runs" aria-label={t('最近的运行', 'Recent runs')}>
           <h3>{t('最近的运行：首轮就完成的节点', 'Recent runs: nodes done on their first attempt')}</h3>
           <ol>{runs.map(run => {

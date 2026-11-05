@@ -606,6 +606,21 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 		a.dbError(w, e)
 		return
 	}
+	// A note a learning cycle moved to the whole workspace goes with the last of the canvases it came from, unless a
+	// person made it theirs (learning_cycle.go), and so does the dismissal of one a person deleted (memory.go); the
+	// dismissals made in the canvas went with it, and so do their links to the canvases whose words they held.
+	if table == "canvases" {
+		if e = deleteOrphanedNotes(r.Context(), tx, tid); e == nil {
+			e = deleteOrphanedDismissals(r.Context(), tx, tid)
+		}
+		if e == nil {
+			_, e = tx.Exec(r.Context(), "DELETE FROM memory_item_dismissal_canvases WHERE tenant_id=$1 AND scope=$2", tid, id)
+		}
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+	}
 	if e = audit(r.Context(), tx, currentUser(r).ID, tid, action, id); e != nil {
 		a.dbError(w, e)
 		return

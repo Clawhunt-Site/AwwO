@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,12 @@ func TestPostgresMemoryLifecycleIsolationAndRunInjection(t *testing.T) {
 	if err := h.db.QueryRow(context.Background(), "SELECT use_count FROM memory_items WHERE tenant_id=$1 AND id=$2", tid, relevant["id"]).Scan(&uses); err != nil || uses != 1 {
 		t.Fatal("use not recorded", uses, err)
 	}
+	// The notes it was given are kept apart from its snapshot too, for later canvas runs to be held to (givenNotes).
+	var given []string
+	if err := h.db.QueryRow(context.Background(), "SELECT COALESCE(array_agg(item->>'id' ORDER BY item->>'id'),'{}') FROM runs, jsonb_array_elements(given_notes) item WHERE tenant_id=$1 AND id=$2",
+		tid, run["id"]).Scan(&given); err != nil || !slices.Contains(given, pinned["id"].(string)) || !slices.Contains(given, relevant["id"].(string)) {
+		t.Fatal("the notes kept as given", given, err)
+	}
 
 	edited := h.request(t, owner, "PATCH", base+"/"+relevant["id"].(string), map[string]any{"version": 1, "status": "archived"}, 200)
 	if edited["status"] != "archived" || edited["version"] != float64(2) {
@@ -129,7 +136,7 @@ func TestPostgresMemoryLifecycleIsolationAndRunInjection(t *testing.T) {
 	if call = <-seen; strings.Contains(call.Prompt, "RELEVANT-NOTE") {
 		t.Fatal("an archived note was still used")
 	}
-	h.request(t, owner, "DELETE", base+"/"+pinned["id"].(string), nil, 204)
+	h.request(t, owner, "DELETE", base+"/"+pinned["id"].(string), nil, 200)
 	h.request(t, owner, "DELETE", base+"/"+pinned["id"].(string), nil, 404)
 }
 
@@ -192,7 +199,7 @@ func TestPostgresMemoryScoresEveryNoteOfBothScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	frozen, err := freezeMemoryContext(context.Background(), tx, tid, cid, "Paint the glacier poster in teal")
+	frozen, err := h.a.freezeMemoryContext(context.Background(), tx, tid, cid, "Paint the glacier poster in teal", false, nil)
 	if err != nil || frozen == nil || !strings.Contains(frozen.Text, "glacier posters use teal") {
 		t.Fatal("the older matching canvas note was not considered", frozen, err)
 	}

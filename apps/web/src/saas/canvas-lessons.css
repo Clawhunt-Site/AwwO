@@ -20,10 +20,15 @@
 .awwo-lessons-evolution-log li > span { flex: 1 1 14em; min-width: 0; }
 .awwo-lessons-evolution-log time { color: var(--library-muted); }
 .awwo-lessons-evolution-log button { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 2px 8px; font-size: 12px; }
-.awwo-lessons-notes { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
-.awwo-lessons-notes h3 { margin: 0 0 8px; color: var(--library-muted); font-size: 12px; font-weight: 600; }
-.awwo-lessons-notes ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.awwo-lessons-notes p { margin: 4px 0 0; color: var(--library-muted); font-size: 12px; }
+.awwo-lessons-cycles { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--library-border); border-radius: 12px; }
+.awwo-lessons-cycles h3 { margin: 0 0 8px; color: var(--library-muted); font-size: 12px; font-weight: 600; }
+.awwo-lessons-cycles ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.awwo-lessons-cycles p { margin: 0; color: var(--library-muted); font-size: 12px; }
+.awwo-lessons-cycles ul { display: grid; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.awwo-lessons-cycles ul li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
+.awwo-lessons-cycles ul li span { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.awwo-lessons-cycles ul li small { color: var(--library-muted); }
+.awwo-lessons-cycles button { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 2px 8px; font-size: 12px; }
 .awwo-lessons-suggestion { margin: 6px 0 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--library-accent) 10%, transparent); }
 .awwo-lessons-rule { margin-top: 4px; }
 .awwo-lessons-rule summary { color: var(--library-muted); font-size: 12px; cursor: pointer; }

@@ -247,6 +247,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.startMarketSettlement(watch)
 	a.startLessonSweeper(watch)
 	a.startMemoryDistiller(watch)
+	a.startLearningCycles(watch)
 	if a.cfg.MarketEnabled {
 		if e = a.seedOfficialMarketAgents(ctx); e != nil {
 			a.log.Warn("the market's official Agents were not listed", "error_type", errorType(e))
@@ -412,6 +413,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvas-lessons/{id}/promote", a.tenant(a.promoteCanvasLesson, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/learning", a.tenant(a.learningSettings, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/learning", a.tenant(a.updateLearningSettings, 3))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/learning/cycles", a.tenant(a.learningCycles, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/learning/changes/{id}/undo", a.tenant(a.undoLearningChange, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.runRating, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/runs/{id}/rating", a.tenant(a.rateRun, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{canvasId}/graph-runs", a.tenant(a.createGraphRun, 2))
