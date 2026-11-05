@@ -17,6 +17,7 @@ import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, pageErrorScript, readPageErrorMe
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
   pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, REPAIR_RESULT_WINDOW_MS, REPAIR_RETRY_SOON_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
 import { applyRecoveredDocument, runInputFingerprint } from '../src/canvas/runRecoveryDocument';
+import { SaaSApiError, saasErrorMessage } from '../src/saas/api';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
 
@@ -270,6 +271,18 @@ describe('finding the node behind a page', () => {
   it('is nobody for a market Agent’s page: each of its runs may cost its price, which only its caller decides to pay', () => {
     expect(pageRepairTarget([{ ...figure(), agentRef: { source: 'market', agentId: 'agent-1', version: 2 } }], PAGE)).toBeNull();
   });
+
+  it('is nobody for a field whose id holds a line break, which would end the repair’s first line early', () => {
+    const base = figure();
+    for (const id of ['a\nb', 'a"\nb']) {
+      const contract = { ...base.contract!, outputs: base.contract!.outputs.map(field => field.id === 'figure' ? { ...field, id } : field) };
+      const node: SessionNode = { ...base, contract, lastOutput: { ...base.lastOutput!, text: JSON.stringify({ [id]: PAGE }) } };
+      expect(pageRepairTarget([node], PAGE)).toBeNull();
+    }
+    // The same field under an id without one is the node's to repair: what stops it is the line break alone.
+    const contract = { ...base.contract!, outputs: base.contract!.outputs.map(field => field.id === 'figure' ? { ...field, id: 'a"b' } : field) };
+    expect(pageRepairTarget([{ ...base, contract, lastOutput: { ...base.lastOutput!, text: JSON.stringify({ 'a"b': PAGE }) } }], PAGE)?.fieldId).toBe('a"b');
+  });
 });
 
 describe('once per delivery', () => {
@@ -295,6 +308,8 @@ describe('once per delivery', () => {
     expect(pageRepairRetryAfter('premium_quota_exceeded', at)).toBe(Date.UTC(2026, 9, 13));
     expect(pageRepairRetryAfter('credits_exhausted', Date.UTC(2026, 11, 31, 23, 59))).toBe(Date.UTC(2027, 0, 1));
     expect(pageRepairRetryAfter('model_unpriced', at)).toBeNull();
+    // A repair of a repair, which the service never runs (page_repair.go), is not asked again either.
+    expect(pageRepairRetryAfter('page_repair_chained', at)).toBeNull();
     expect(isPageRepairMessage('AwwO page repair · field "figure"\nAwwO ran the page')).toBe(true);
     expect(isPageRepairMessage('this page fails, fix it')).toBe(false);
   });
@@ -350,6 +365,13 @@ describe('the repair request', () => {
     expect(pageRepairDisplayText({ ...report, message: 'x'.repeat(300) }, 'en')).toBe(`The page failed to run, so AwwO is fixing it once: ${'x'.repeat(160)}…`);
   });
 
+  it('says in both languages why the service did not repair a page again, and what the reader can do', () => {
+    const refused = new SaaSApiError(409, 'page_repair_chained', 'refused');
+    // Said as what AwwO did, so it stays true when that repair failed or was stopped before a fixed page came back.
+    expect(saasErrorMessage(refused, 'zh')).toMatch(/^AwwO 已经把这个组件的页面自动送回修复过，不会再自动送回。.*告诉它哪里不对。$/);
+    expect(saasErrorMessage(refused, 'en')).toMatch(/^AwwO already sent this component’s page back for an automatic repair, and does not send it back again by itself\..*tell the component in its chat what is wrong\.$/);
+  });
+
   it('tells the model of a figure that never moves what AwwO tried and saw, and asks for a moving page alone', () => {
     const node = figure();
     const still: PageErrorReport = { page: PAGE, kind: 'still', message: 'The drawing never moved: … The readout stayed "进气 0°".',
@@ -384,6 +406,23 @@ describe('the repair’s reply', () => {
       { id: 'parts', label: '零件数', type: 'number' as const, required: false, value: '' }] };
     const more = { ...node, contract, lastOutput: { ...node.lastOutput!, text: JSON.stringify({ figure: PAGE, notes: '桶里最多 10 个 "令牌"', parts: 36 }) } };
     expect(JSON.parse(pageRepairDelivery(more, request(more), FIXED)!)).toEqual({ figure: FIXED, notes: '桶里最多 10 个 "令牌"', parts: 36 });
+  });
+
+  it('reads a field whose id holds a quote, which a plan may give a field, as the service does', () => {
+    const base = figure();
+    const id = 'page"2';
+    const contract = { ...base.contract!, outputs: base.contract!.outputs.map(field => field.id === 'figure' ? { ...field, id } : field) };
+    const node: SessionNode = { ...base, contract, lastOutput: { ...base.lastOutput!, text: JSON.stringify({ [id]: PAGE }) } };
+    const target = { node, output: node.lastOutput!, fieldId: id, values: { [id]: PAGE } };
+    const message = pageRepairMessage(target, report);
+    expect(message.split('\n')[0]).toBe('AwwO page repair · field "page"2"');
+    expect(isPageRepairMessage(message)).toBe(true);
+    expect(pageRepairMessageKey('fig', message)).toBe('fig');
+    expect(JSON.parse(pageRepairDelivery(node, message, FIXED)!)).toEqual({ [id]: FIXED });
+    const still = pageRepairMessage(target, { ...report, kind: 'still' });
+    expect(still.split('\n')[0]).toBe('AwwO page repair · field "page"2" · still');
+    expect(pageRepairMessageKey('fig', still)).toBe('fig · still');
+    expect(JSON.parse(pageRepairDelivery(node, still, FIXED)!)).toEqual({ [id]: FIXED });
   });
 
   it('is nothing for an ordinary message, a fragment, or a field that is not a page', () => {
@@ -476,6 +515,31 @@ describe('on the canvas', () => {
     savePageRepairRecord(canvasStorage(), 'fig', { ...loadPageRepairRecords(canvasStorage()).fig!, retryAfter: Date.now() - 1 });
     act(() => { reportPageError(report); });
     await waitFor(() => expect(repairs()).toHaveLength(2), { timeout: 8_000 });
+  }, 20_000);
+
+  it('asks nothing more when the service says the node’s page was repaired already, and says so in the node’s chat', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    // Another browser of this canvas repaired the page first: the service refuses this one before any run.
+    const copy = saasErrorMessage(new SaaSApiError(409, 'page_repair_chained', 'refused'), 'zh');
+    const refusal = { code: 'page_repair_chained', error: copy, admissionRejected: true };
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (!String(input).includes('/messages')) return original(input, init);
+      return Promise.resolve((init?.method === 'POST'
+        ? { ok: false, status: 409, json: async () => refusal }
+        : { ok: true, status: 200, json: async () => ({ complete: true, messages: [] }) }) as unknown as Response);
+    });
+    render(<CanvasSurface />);
+    act(() => { reportPageError(report); });
+    await waitFor(() => expect(repairs()).toHaveLength(1));
+    const node = (JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).nodes.find(item => item.id === 'fig') as SessionNode;
+    await waitFor(() => expect(getSnapshot(sessionStoreKey({ ...node, activeThreadId: activeThreadId(node) })).turns
+      .some(turn => turn.role === 'agent' && turn.text.includes(copy))).toBe(true));
+    // The record stays an asked one, with no time to send it again: the same delivery asks nothing more.
+    await waitFor(() => expect(loadPageRepairRecords(canvasStorage()).fig).toMatchObject({ from: 1_000 }));
+    expect(loadPageRepairRecords(canvasStorage()).fig?.retryAfter).toBeUndefined();
+    act(() => { reportPageError(report); });
+    await new Promise(resolve => setTimeout(resolve, 3_500));
+    expect(repairs()).toHaveLength(1);
   }, 20_000);
 
   it('sends a figure that never moves back once of its own, even after the page’s error was repaired', async () => {

@@ -543,6 +543,19 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, canvasID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
 		return
 	}
+	// A page's automatic repairs, whichever browser asks: at most one of each kind in a row (page_repair.go), the rest
+	// refused before anything is paid.
+	if kind == "node" {
+		code, message, e := pageRepairRefusal(r.Context(), tx, tid, b.SessionID, b.Prompt)
+		if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		if code != "" {
+			fail(w, 409, code, message)
+			return
+		}
+	}
 	team, e := savedNodeTeam(document, nodeID)
 	if e != nil {
 		fail(w, 400, "invalid_team", e.Error())

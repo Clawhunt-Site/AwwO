@@ -9,7 +9,11 @@
 // the 成果 view). The report carries the page itself, so the node is found by what it published, not by which view
 // happened to show it. The once-only record lives in the canvas's own browser storage: another tab of the same canvas
 // sees it, a reload keeps it. A request the service refuses before anything runs (today's calls used up, every run
-// slot busy) was no repair: the record says when the same delivery may go back (deferPageRepair).
+// slot busy) was no repair: the record says when the same delivery may go back (deferPageRepair). Another browser, another
+// device or a collaborator has a record of its own, so the service holds them all to the same onces (page_repair.go): of a
+// node's automatic repairs, at most one of each kind runs in a row, and none after that until another run of the node
+// (a person's message, a canvas run), whether or not that run delivered a new page; it refuses the rest as
+// page_repair_chained. It knows a repair by its first line (pageRepairMessage).
 import { isMarketReference, type CanvasNode, type NodeOutput, type SessionNode } from './canvasDoc';
 import { htmlDocumentSource, isCompleteHtmlDocument } from './htmlDeliverable';
 import { parseContractOutput } from './nodeContracts';
@@ -46,7 +50,10 @@ export function pageRepairTarget(nodes: ReadonlyArray<CanvasNode>, page: string)
     if (!output || output.source !== 'run' || output.partial) continue;
     const parsed = parseContractOutput(node.contract, output.text);
     if (parsed.errors.length) continue;
-    const field = node.contract.outputs.find(item => item.type === 'html' && typeof parsed.values[item.id] === 'string'
+    // A field's id goes into the repair's first line as it is (pageRepairMessage), so an id holding a line break, which
+    // a stored contract may have, would end that line early: the page and the service would read another field or no
+    // repair at all. Such a field is nobody's to repair automatically.
+    const field = node.contract.outputs.find(item => item.type === 'html' && !item.id.includes('\n') && typeof parsed.values[item.id] === 'string'
       && normalized(parsed.values[item.id]) === wanted);
     if (field) return { node, output, fieldId: field.id, values: parsed.values };
   }
@@ -104,7 +111,8 @@ export const REPAIR_RETRY_SOON_MS = 30 * 60_000;
 /**
  * When a repair request the service refused before it ran (its code, ExecAgentResult.refusedCode) may go again: after
  * the next UTC midnight, when daily allowances reset, or half an hour on. Null for a refusal waiting does not change
- * (a model that cannot be billed, a malformed request): that request counts as asked.
+ * (a model that cannot be billed, a malformed request, a repair of a repair: page_repair_chained): that request counts
+ * as asked.
  */
 export function pageRepairRetryAfter(code: string, now: number): number | null {
   if (REFUSED_FOR_TODAY.has(code)) {
@@ -121,8 +129,10 @@ export function deferPageRepair(storage: Pick<Storage, 'getItem' | 'setItem'>, n
 }
 
 /** The instruction's first line: it names the field, so the reply (just the fixed page) goes back into that field. The
- *  request for a figure that never moves ends it with " · still". */
-const PAGE_REPAIR_HEADER = /^AwwO page repair · field "([^"\n]+)"( · still)?\n/;
+ *  request for a figure that never moves ends it with " · still". The field's id goes in as it is, and an id may hold a
+ *  quote (a plan's ids may, and a stored contract's may hold almost anything), so the id is the line up to its last quote
+ *  (the service reads it the same way: page_repair.go). */
+const PAGE_REPAIR_HEADER = /^AwwO page repair · field "([^\n]+)"( · still)?\n/;
 
 /** Whether a component chat message is a page repair request (pageRepairMessage). */
 export const isPageRepairMessage = (message: string | undefined): boolean => Boolean(message && PAGE_REPAIR_HEADER.test(message));

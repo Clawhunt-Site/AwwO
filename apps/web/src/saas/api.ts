@@ -190,6 +190,10 @@ function serviceCodes(): Record<string, [string, string]> {
     invalid_upload_name: ['文件名无效，改个名字再上传。', 'The file name is invalid. Rename the file and try again.'],
     tenant_suspended: ['工作区已暂停，请联系管理员或切换工作区。', 'This workspace is suspended. Contact an administrator or switch workspaces.'],
     session_busy: ['此会话正在运行，请稍后重试。', 'This session is running. Try again when it finishes.'],
+    // A page's automatic repair the service did not run (page_repair.go): the node's latest run was such a repair already,
+    // whether or not it got as far as a fixed page.
+    page_repair_chained: ['AwwO 已经把这个组件的页面自动送回修复过，不会再自动送回。页面还有问题的话，在这个组件的对话里告诉它哪里不对。',
+      'AwwO already sent this component’s page back for an automatic repair, and does not send it back again by itself. If the page still fails, tell the component in its chat what is wrong.'],
     // What a run would send was more than its model reads at once: the request, the node's brief and inputs, what
     // upstream nodes delivered, files, selected knowledge and attached skills (a page the assistant plans has two). A
     // node's own history is trimmed to fit by itself and is never the cause, so the copy points at what the reader can
