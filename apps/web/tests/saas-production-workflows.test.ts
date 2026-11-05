@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { PRODUCTION_WORKFLOWS, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_BLENDER, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { agentCount, PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { THREE_MODULES_IMPORT_MAP } from '../src/canvas/previewModules';
@@ -7,7 +7,9 @@ import type { SessionNode } from '../src/canvas/canvasDoc';
 
 // The single-call cases. A published flagship (flagshipWorkflows.ts) or epic (epicWorkflows.ts) works in sandbox computers
 // and assembles its page with no model; tests/saas-flagship-workflows.test.ts and saas-epic-workflows.test.ts hold their rules.
-const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS).filter(item => ![...PUBLISHED_FLAGSHIPS, ...PUBLISHED_EPICS].includes(item.id as never));
+// A Blender case (blenderWorkflows.ts) hands files on, two wires between two nodes where a node takes two of another's
+// files, and ends in its site, which tests itself in its sandbox computer; saas-blender-workflows.test.ts holds its rules.
+const WORKFLOWS = Object.values(PRODUCTION_WORKFLOWS).filter(item => ![...PUBLISHED_FLAGSHIPS, ...PUBLISHED_EPICS, ...PUBLISHED_BLENDER].includes(item.id as never));
 // A case's media nodes (image and video generators, officialMedia.ts) are not agents: on its card the media of one
 // stage count as one slot of the team, beside that stage's agents.
 const stagesOf = (id: string) => {

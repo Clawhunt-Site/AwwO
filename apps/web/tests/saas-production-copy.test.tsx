@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { sanitizeDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { ContractFields } from '../src/canvas/ContractFields';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import { mediaMissingText } from '../src/canvas/mediaOutput';
@@ -36,6 +36,16 @@ const records = new Map<string, ProductionRunRecord>();
 // The film case: a recorded canvas, stored beside its record rather than compiled from a workflow.
 const FILM = 'the-long-chord', FILM_TITLE = 'THE LONG CHORD · Episode I';
 const copyOf = (id: string) => createProductionCopyDocument(WORKFLOWS[id], records.get(id)!, null);
+// A node of a case's copy that the copy's first run makes again, as createProductionCopyDocument leaves it unpinned: an
+// assembly, a team's turn that hands a file on, an agent with a file output (a Blender maker's GLBs and renders, stored
+// in the case's workspace), and a page that names an agent's own files.
+const remadeOnCopy = (id: string, node: CanvasNode, index: number) => {
+  const spec = WORKFLOWS[id].nodes[index], record = records.get(id)!;
+  const recorded = spec && record.nodes.find(value => value.id === spec.id);
+  const agentFiles = record.nodes.flatMap(value => value.files ?? []);
+  return node.kind === 'assemble' || Boolean(spec?.handoff) || Boolean((node as SessionNode).contract?.outputs.some(field => field.type === 'file'))
+    || (spec?.outputType === 'html' && agentFiles.some(file => recorded?.output?.includes(file)));
+};
 const tenant: Tenant = { id: 'copy-workspace', name: 'Copy workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
 const identity: Identity = { user: { id: 'copy-user', name: 'Copy user', email: 'copy@example.invalid', platformRole: 'user' }, tenants: [tenant] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -50,8 +60,8 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(22);
-  expect(RECORDED).toHaveLength(16);
+  expect(CASES).toHaveLength(23);
+  expect(RECORDED).toHaveLength(17);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.
@@ -60,8 +70,9 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
       const recorded = record.nodes.find(value => value.id === workflow.nodes[index].id)!;
       const session = node as SessionNode;
       // A flagship's assembly makes its page file again on the copy's first run, with no model, and an agent that hands
-      // a file on (a team's turn) runs again then: its file is in the case's workspace.
-      if (node.kind === 'assemble' || workflow.nodes[index].handoff) { expect(session.lastOutput, `${id}/${recorded.id}`).toBeUndefined(); return; }
+      // a file on (a team's turn, a Blender maker) runs again then: its file is in the case's workspace; so does a page
+      // that names such files.
+      if (remadeOnCopy(id, node, index)) { expect(session.lastOutput, `${id}/${recorded.id}`).toBeUndefined(); return; }
       // A node with a report beside its result (a flagship's tester) carries both, as one object.
       const text = recorded.report === undefined ? recorded.output : JSON.stringify({ result: recorded.output, report: recorded.report });
       expect(session.lastOutput, `${id}/${recorded.id}`).toEqual({ text,
@@ -79,9 +90,9 @@ it('carries every agent’s recorded delivery into its copy, as the case’s, on
 it('shows every agent what it received: each wired input resolves to its upstream recording, marked as one', () => {
   for (const id of RECORDED) {
     const copy = copyOf(id), byId = new Map(copy.nodes.map(node => [node.id, node as SessionNode]));
-    // What an assembly makes again on the copy's first run reaches the node it feeds then, and so does what a team's turn
-    // makes again then (it hands a file on).
-    const remade = new Set(copy.nodes.filter((node, index) => node.kind === 'assemble' || WORKFLOWS[id].nodes[index]?.handoff).map(node => node.id));
+    // What an assembly makes again on the copy's first run reaches the node it feeds then, and so does what an agent that
+    // hands a file on makes again then (a team's turn, a Blender maker).
+    const remade = new Set(copy.nodes.filter((node, index) => remadeOnCopy(id, node, index)).map(node => node.id));
     for (const node of copy.nodes as SessionNode[]) {
       const incoming = copy.edges.filter(edge => edge.toNode === node.id);
       if (incoming.some(edge => remade.has(edge.fromNode))) continue;
@@ -135,6 +146,9 @@ it('has the assistant count everything a case’s copy still has to make, and ru
     const left = copy.nodes.filter(node => node.kind !== 'form' && !node.lastOutput).map(node => node.id);
     const media = WORKFLOWS[id].media?.length ?? 0;
     if (!left.length) { expect(next.situation, id).toMatchObject({ kind: 'complete' }); continue; }
+    // A copy that carries nothing (a Blender case: every maker hands files on, and the site names them) is a canvas
+    // to run from the start.
+    if (left.length === copy.nodes.filter(node => node.kind !== 'form').length) { expect(next.situation, id).toMatchObject({ kind: 'fresh' }); continue; }
     expect(next.situation, id).toEqual({ kind: 'partial', count: left.length, ...(media ? { media } : {}) });
     expect(next.steps[0], id).toMatchObject({ kind: 'run-rest', nodeIds: left, ...(media ? { generations: media } : {}) });
   }

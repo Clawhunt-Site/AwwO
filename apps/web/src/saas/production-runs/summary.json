@@ -97,6 +97,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "gyroid-jewellery": {
+    "completed": 4,
+    "total": 4,
+    "seconds": 2286,
+    "delivered": true,
+    "capturedOn": "2026-11-05",
+    "model": "Claude Opus 5.5",
+    "runtime": "blender + sandbox"
+  },
   "knowledge-base": {
     "completed": 7,
     "total": 7,

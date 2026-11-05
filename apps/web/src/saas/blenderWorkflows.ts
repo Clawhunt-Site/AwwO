@@ -6,7 +6,7 @@ import type { OfficialWorkflow } from './examples/officialWorkflows';
  * as the local trials of 2026-11-05 did (each look at a render changed something): they build with awwo_param, look at
  * their renders (workspace_view) and correct them, and hand on web GLBs and renders as files of their own, which the
  * case's page loads by `<node id>/<file name>` (OfficialWorkflowNode.files). Listed in PRODUCTION_WORKFLOWS once a run is
- * recorded, as the flagships and epics are. */
+ * recorded, as the flagships and epics are (PUBLISHED_BLENDER: GYROID since its run of 2026-11-05). */
 
 /** The house's look, which every photograph keeps. */
 const LOOK = 'the house’s look: a deep charcoal velvet sweep, a large soft key light, a narrow rim light that draws the metal’s edges, a faint warm fill, a real 18k-gold Principled BSDF (metallic 1, roughness about 0.15, a warm yellow gold)';

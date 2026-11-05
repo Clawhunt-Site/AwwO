@@ -4,6 +4,7 @@ import type { OfficialMediaNode } from './examples/officialMedia';
 import { THREE_MODULES_IMPORT_MAP } from '../canvas/previewImportMap';
 import { FLAGSHIP_WORKFLOWS } from './flagshipWorkflows';
 import { EPIC_WORKFLOWS } from './epicWorkflows';
+import { BLENDER_WORKFLOWS } from './blenderWorkflows';
 
 /** The canvases behind the homepage production cases (productionCatalog.ts). Each one is a real
  * workflow: `createOfficialDocument` compiles it into the canvas a member can copy, and the run
@@ -777,7 +778,12 @@ export const PUBLISHED_FLAGSHIPS = ['umber-photo', 'backprop-lab', 'errand-agent
 /** The epic canvases (epicWorkflows.ts) published as cases, likewise each with its run record. */
 export const PUBLISHED_EPICS = ['pallward'] as const;
 
+/** The Blender cases (blenderWorkflows.ts) published as cases, likewise each with its run record: their makers work in
+ * the Blender workstation. */
+export const PUBLISHED_BLENDER = ['gyroid-jewellery'] as const;
+
 /** Keyed by production case id. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(
   [CAR, CIRCUIT, KEEP, MARS, STUDIO, KNOWLEDGE, NEON, SHANHAI, AURORA, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM,
-    ...PUBLISHED_FLAGSHIPS.map(id => FLAGSHIP_WORKFLOWS[id]), ...PUBLISHED_EPICS.map(id => EPIC_WORKFLOWS[id])].map(item => [item.id, item]));
+    ...PUBLISHED_FLAGSHIPS.map(id => FLAGSHIP_WORKFLOWS[id]), ...PUBLISHED_EPICS.map(id => EPIC_WORKFLOWS[id]),
+    ...PUBLISHED_BLENDER.map(id => BLENDER_WORKFLOWS[id])].map(item => [item.id, item]));

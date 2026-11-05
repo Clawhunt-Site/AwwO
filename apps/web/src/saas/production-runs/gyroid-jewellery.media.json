@@ -1,0 +1,56 @@
+{
+ "photo/detail.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/5930a80d5fb92162.jpg",
+  "type": "image/jpeg",
+  "bytes": 241546,
+  "sha256": "5930a80d5fb92162a9a62af7fb3eaacf3b0f5465e3e71c8a3f0829685ec5726b"
+ },
+ "photo/hero.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/e7b25c2b4cf9c17a.jpg",
+  "type": "image/jpeg",
+  "bytes": 153005,
+  "sha256": "e7b25c2b4cf9c17a40a99fd9abeed5447b6443d878d8ec3dd0d3ae4f20bb5337"
+ },
+ "photo/pair.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/7ad5c0c55ed3b2dc.jpg",
+  "type": "image/jpeg",
+  "bytes": 151951,
+  "sha256": "7ad5c0c55ed3b2dc7fcb05547976798cc9581499a2b1bcb5f740ce5d089e4fc9"
+ },
+ "pieces/earrings.glb": {
+  "src": "/showcase/media/gyroid-jewellery/94132b2ee2002415.glb",
+  "type": "model/gltf-binary",
+  "bytes": 1486252,
+  "sha256": "94132b2ee2002415bb3bb4e2becb23b2611392c4a86582d8c21daefcf913a706"
+ },
+ "pieces/earrings.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/5c52db26b13f601c.jpg",
+  "type": "image/jpeg",
+  "bytes": 230304,
+  "sha256": "5c52db26b13f601c9f97b1cf6011cf7945f593422e4861bc369d0848a8b23c2c"
+ },
+ "pieces/pendant.glb": {
+  "src": "/showcase/media/gyroid-jewellery/c9b5ba058f9e3e95.glb",
+  "type": "model/gltf-binary",
+  "bytes": 1096920,
+  "sha256": "c9b5ba058f9e3e95fa7581c5ed2bedf7e16e2f473e23e0b34e179a6c21784f41"
+ },
+ "pieces/pendant.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/10374302fa2dc32b.jpg",
+  "type": "image/jpeg",
+  "bytes": 320832,
+  "sha256": "10374302fa2dc32b6e67e073616991e0d34b54fa908f00c25795ec81c3a2784b"
+ },
+ "ring/ring.glb": {
+  "src": "/showcase/media/gyroid-jewellery/a9e7ab791b780bd0.glb",
+  "type": "model/gltf-binary",
+  "bytes": 1164996,
+  "sha256": "a9e7ab791b780bd0bec88cf145d8958e5a2476b2a811b8af3d63579ca93f3e16"
+ },
+ "ring/ring.jpg": {
+  "src": "/showcase/media/gyroid-jewellery/71dc8069ad43d4d3.jpg",
+  "type": "image/jpeg",
+  "bytes": 214894,
+  "sha256": "71dc8069ad43d4d328b9d6b779f96294e83eac015a41455af3c6d6f2bbffb82a"
+ }
+}

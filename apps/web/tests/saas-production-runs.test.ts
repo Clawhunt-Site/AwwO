@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { PRODUCTION_RUN_SUMMARY, formatDuration, loadProductionMedia, type ProductionMediaFile, type ProductionRunRecord } from '../src/saas/productionRuns';
-import { PRODUCTION_WORKFLOWS, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_BLENDER, PUBLISHED_EPICS, PUBLISHED_FLAGSHIPS } from '../src/saas/productionWorkflows';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
@@ -241,6 +241,15 @@ it('records each SaaS case run on the very canvas a member can copy today', () =
       expect(record.nodes.filter(node => node.kind !== 'assemble').every(node => node.sandbox), record.caseId).toBe(true);
       expect(record.nodes.filter(node => node.kind === 'assemble').map(node => node.id), record.caseId).toEqual(workflow.nodes.filter(node => node.assemble).map(node => node.id));
       expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 64000, modelCallsPerNode: 64, concurrency: 8, thinking: true });
+      continue;
+    }
+    if ((PUBLISHED_BLENDER as readonly string[]).includes(record.caseId)) {
+      // A Blender case's makers work in the Blender workstation and its site in a sandbox computer, each node where its
+      // canvas puts it, on Claude Opus 5.5 with its 64,000 output tokens a call, its own thinking, and dozens of calls.
+      expect(record.runtime, record.caseId).toBe('blender + sandbox');
+      expect(record.nodes.map(node => [node.id, node.blender === true, node.sandbox === true]), record.caseId).toEqual(
+        workflow.nodes.map(node => [node.id, node.blender === true, node.sandbox === true]));
+      expect(record.limits, record.caseId).toMatchObject({ contextWindow: 200000, maxOutputTokens: 64000, modelCallsPerNode: 64, thinking: true });
       continue;
     }
     // The settings it ran with on production: Claude Opus 5.5's own limits, one model call per node, its thinking on.

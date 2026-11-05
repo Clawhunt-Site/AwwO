@@ -65,6 +65,16 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       [ASSEMBLY_ROLE], ['Test'], [ASSEMBLY_ROLE], ['Second test'], [REVIEW]],
     deliverable: 'An open-world action game in the browser',
   },
+  // The first Blender case (blenderWorkflows.ts): its makers work in the Blender workstation, Blender on a GPU, building
+  // the pieces with awwo_param's lattices and looking at their own renders; a photographer shoots their models, and a
+  // site in a sandbox computer shows them in 3D.
+  {
+    id: 'gyroid-jewellery', kind: 'interactive', recording: true, footage: 'gyroid-real',
+    title: 'GYROID',
+    brief: 'A fine-jewellery collection whose pieces are triply periodic minimal surfaces, after the house founder’s Grasshopper studies: a ring, a pendant and a pair of earrings built as cast-ready lattices in Blender on a GPU, photographed for the campaign, and shown in the round on the collection’s site.',
+    stages: [['Ring maker', 'Pendant and earrings maker'], ['Campaign photographer'], ['Collection site']],
+    deliverable: 'A collection site with the three pieces in 3D and their campaign photographs',
+  },
   // The epic film (a recorded canvas, recordedCanvas.ts): its pictures, clips, voices and score made on one canvas, six
   // reels cut by editor agents, joined by edit nodes, which run no model, into three acts and the episode.
   {
