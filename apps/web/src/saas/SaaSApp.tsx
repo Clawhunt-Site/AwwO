@@ -1,5 +1,4 @@
 import { SecretInput } from './SecretInput';
-import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale, Settings2 } from 'lucide-react';
@@ -35,6 +34,7 @@ import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { WorkspaceHome } from './WorkspaceHome';
 import { ProductionCases } from './ProductionCases';
+import { LandingFooter, LandingPreview, LandingStory } from './Landing';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
 import { CanvasKnowledgeDock, type CanvasTaskDraft } from './CanvasKnowledgeDock';
@@ -53,6 +53,7 @@ import { AppearanceScope } from './SaaSAppearance';
 import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
 import { AcademyLauncher, AcademyProvider } from './Academy';
+import { pageTitle, useDocumentTitle } from './pageTitle';
 import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
@@ -204,6 +205,7 @@ function ssoFailureHeading(reason: SSOFailureReason, t: (zh: string, en: string)
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
+  useDocumentTitle(pageTitle(t('登录', 'Sign in')));
   const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
   const accountURL = reason === 'email_unverified' ? clawHuntAccountURL(options?.clawhuntSiteURL) : null;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
@@ -232,6 +234,8 @@ function LinkExistingAccount({ onAuthenticated }: { onAuthenticated: (identity: 
       .catch(cause => { if (!controller.signal.aborted) setLoadError(cause instanceof SaaSApiError && (cause.code === 'sso_expired' || [400, 404, 410].includes(cause.status)) ? 'expired' : 'unavailable'); });
     return () => controller.abort();
   }, []);
+  // A request that cannot be read hands the page to SSOFailure, which names it.
+  useDocumentTitle(loadError ? null : pageTitle(t('关联已有账号', 'Link your account')));
   if (loadError) return <SSOFailure reason={loadError} />;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('保留你原来的工作区', 'Keep your existing workspace')}</h1><p>{t('已确认 ClawHunt 账号。关联前，请证明这个旧 AwwO 账号也属于你。', 'Your ClawHunt account is confirmed. Before linking, prove that the existing AwwO account is yours too.')}</p></div>
     <form className="saas-card" onSubmit={async event => {
@@ -270,27 +274,6 @@ function Notice({ text, retry = false }: { text: string; retry?: boolean }) {
   if (!retry) return <BootSurface text={text} canvas={Boolean(new URLSearchParams(window.location.search).get('canvas'))} />;
   return <main className="saas-notice"><PreferenceControls /><strong>AwwO</strong><p role={retry ? 'alert' : 'status'}>{text}</p>{retry && <button onClick={() => window.location.reload()}>{t('重新连接', 'Reconnect')}</button>}</main>;
 }
-const LOGIN_PREVIEW_DOCUMENT = {
-  nodes: [
-    { id: 'plan', x: 0, y: 150, w: 300, h: 190 },
-    { id: 'build', x: 420, y: 0, w: 300, h: 190 },
-    { id: 'api', x: 420, y: 300, w: 300, h: 190 },
-    { id: 'review', x: 840, y: 150, w: 300, h: 190 },
-  ],
-  edges: [{ fromNode: 'plan', toNode: 'build' }, { fromNode: 'plan', toNode: 'api' }, { fromNode: 'build', toNode: 'review' }, { fromNode: 'api', toNode: 'review' }],
-};
-/** Decorative: shows what a workspace canvas looks like before the visitor has one. */
-function LoginPreview() {
-  const { t } = useSaaSPreferences();
-  return <div className="saas-login-preview">
-    <CanvasThumbnail document={LOGIN_PREVIEW_DOCUMENT} />
-    <ul>
-      <li>{t('多个 Agent 节点按依赖顺序协作', 'Agent nodes run in dependency order')}</li>
-      <li>{t('每个节点保留独立会话与交付物', 'Every node keeps its own session and output')}</li>
-      <li>{t('使用你自己的模型服务与密钥', 'Bring your own model service and key')}</li>
-    </ul>
-  </div>;
-}
 function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Identity) => void; invited: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const { options, optionsError, retryOptions } = useAuthOptions();
@@ -301,8 +284,14 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   // The local edition takes no new accounts (its person is its first administrator); an API that does not say takes them.
   const canRegister = options?.registration !== false;
   const register = registering && canRegister;
-  if (forgot && options?.localAuth === true) return <PasswordRecovery onBack={() => setForgot(false)} />;
-  return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
+  const recovering = forgot && options?.localAuth === true;
+  // The first page a visitor sees, and what a search result or bookmark shows: AwwO and what it does.
+  useDocumentTitle(recovering ? null : t('AwwO · 让 Agent 在同一张画布上协作', 'AwwO · Bring your agents together on one canvas'));
+  if (recovering) return <PasswordRecovery onBack={() => setForgot(false)} />;
+  // The Chinese headline in its phrases: 让 Agent on a line of its own, then 在同一张 and 画布上协作。, together where they
+  // fit and on lines of their own where not, so it never breaks inside a word (a phone broke it inside 同一张).
+  const headline = locale === 'zh' ? <><span className="saas-phrase">让 Agent</span>{' '}<span className="saas-phrase">在同一张</span><span className="saas-phrase">画布上协作。</span></> : 'Bring your agents together on one canvas.';
+  return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{headline}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LandingPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
     : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><a className="saas-sso-signup" href={clawHuntStartURL(location.search, { signup: true })}>{t('没有账号？注册 ClawHunt 账号', 'New here? Create a ClawHunt account')}</a><small>{t('还没开通 AwwO？注册或登录后会弹出邀请码输入框，输入后即可进入。', 'No access yet? After you sign up or sign in, a box asks for your invite code and you go straight in.')}</small></section>}
@@ -329,8 +318,8 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
         : <small>{t('本地版：初始账号和密码在数据目录的 admin-credentials.txt 中。忘记了改过的密码时，停止 AwwO 本地版，再运行 npm run local -- --reset-password，新密码会写进这个文件。', 'AwwO Local: the first account and password are in admin-credentials.txt in its data folder. If you forget a password you changed, stop AwwO Local and run npm run local -- --reset-password: the new one is written to that file.')}</small>)}
     </form>}
     {options.localAuth !== true && options.clawhuntSSO !== true && <section className="saas-card"><h2>{t('登录暂不可用', 'Sign-in unavailable')}</h2><p role="alert">{t('暂时没有可用的登录方式，请稍后重试。', 'No sign-in method is available right now. Please try again later.')}</p></section>}
-    </div>}<ProductionCases />
-    <footer className="saas-login-footer"><LicensesLink /></footer></main>;
+    </div>}<LandingStory where={!options ? null : !isLocalEdition(options) ? 'hosted' : inLocalWindow(options) ? 'window' : 'local'} /><ProductionCases />
+    <LandingFooter siteURL={options?.clawhuntSiteURL} licenses={<LicensesLink />} /></main>;
 }
 function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (name: string) => void }) {
   const { t } = useSaaSPreferences();
@@ -338,6 +327,9 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const requested = params.get('tenant');
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
+  // A canvas page is named by the canvas (CloudCanvas, ReadOnlyCanvas); the home by its workspace.
+  useDocumentTitle(canvasId && tenant?.status === 'active' ? null
+    : pageTitle(!tenant ? t('选择工作区', 'Choose a workspace') : tenant.status !== 'active' ? t('工作区已暂停', 'Workspace suspended') : tenant.name));
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
   // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options.
   const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy />;
@@ -411,6 +403,8 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
+  // Named by its canvas once it is read, and as 画布 while it loads or when it cannot open.
+  useDocumentTitle(pageTitle(record?.name || t('画布', 'Canvas')));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
   useEffect(() => {
@@ -467,6 +461,8 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     : `本机草稿保存失败：${message(error)}。请立即导出本地副本。`;
   const [record, setRecord] = useState<CanvasRecord | null>(null);
   const [error, setError] = useState('');
+  // Named by its canvas once it is read (draft recovery included), and as 画布 while it loads or when it cannot open.
+  useDocumentTitle(pageTitle(record?.name || t('画布', 'Canvas')));
   const [saveState, setSaveState] = useState('正在加载…');
   const [runtime, setRuntime] = useState<CloudRuntimeStatus | null>(null);
   const [runtimeChecking, setRuntimeChecking] = useState(false);

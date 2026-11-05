@@ -10,6 +10,7 @@ import { AccountSecurity, accountURL } from './PersonalAccount';
 import { InviteFriends } from './InviteFriends';
 import { PlansPage } from './PlansPage';
 import { PreferenceControls, useSaaSPreferences } from './preferences';
+import { pageTitle, useDocumentTitle } from './pageTitle';
 import { MainSiteLink } from './SaaSOnboarding';
 import { signOut } from './signOut';
 import type { SettingsSection } from './settingsFrame';
@@ -134,6 +135,12 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
 
 export default function SettingsCenter({ identity, section: asked, engines, onProfile }: { identity: Identity; section: SettingsSection; engines: ReactNode; onProfile?: (name: string) => void }) {
   const section = editionSection(identity, asked);
+  const { t } = useSaaSPreferences();
+  // The navigation's name for the section (with 我的 Agent listed), then 设置. 邀请好友 opens for an account the list
+  // leaves it out of (one not on ClawHunt), and keeps its name there too.
+  const item = navigation(identity, true).flatMap(group => group.items).find(entry => entry.id === section);
+  const name = item ? t(item.zh, item.en) : section === 'invites' ? t('邀请好友', 'Invite friends') : '';
+  useDocumentTitle(pageTitle(name, t('设置', 'Settings')));
   return <main className="saas-dashboard saas-personal saas-settings">
     <header>
       <a href="/" className="saas-logo">AwwO</a>

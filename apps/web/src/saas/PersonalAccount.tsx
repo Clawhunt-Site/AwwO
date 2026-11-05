@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, saasErrorMessage, type Identity } from "./api";
 import { PreferenceControls, useSaaSPreferences } from "./preferences";
+import { pageTitle, useDocumentTitle } from './pageTitle';
 import "./personal-account.css";
 import { GuideLauncher, MainSiteLink, TutorialLauncher } from "./SaaSOnboarding";
 import { SecretInput } from "./SecretInput";
@@ -52,6 +53,13 @@ export function accountURL(section: string) {
   query.set("account", section);
   query.delete("billing");
   return "/?" + query;
+}
+
+/** The settings centre's place while its chunk loads, or when it could not: named 设置 until a section names itself. */
+function SettingsFallback({ children }: { children: ReactNode }) {
+  const { t } = useSaaSPreferences();
+  useDocumentTitle(pageTitle(t("设置", "Settings")));
+  return <main className="saas-dashboard saas-personal">{children}</main>;
 }
 
 function AccountLayout({
@@ -152,9 +160,9 @@ export function PersonalEngineGate({
           <p role="status">{t("请稍候…", "Please wait…")}</p>
         </AccountLayout>
       : <ConnectionSettings catalog={catalog} onChange={setCatalog} onboarding={!hasUsableConnection} />;
-    const opening = <main className="saas-dashboard saas-personal"><p role="status">{t("正在打开设置…", "Opening settings…")}</p></main>;
+    const opening = <SettingsFallback><p role="status">{t("正在打开设置…", "Opening settings…")}</p></SettingsFallback>;
     return <SettingsFrame.Provider value={true}>
-      <LazyBoundary fallback={<main className="saas-dashboard saas-personal"><p role="alert">{t("设置没能加载，请刷新页面重试。", "Settings could not load. Reload the page to try again.")}</p><a href={home()}>{t("返回工作区", "Back to workspace")}</a></main>}>
+      <LazyBoundary fallback={<SettingsFallback><p role="alert">{t("设置没能加载，请刷新页面重试。", "Settings could not load. Reload the page to try again.")}</p><a href={home()}>{t("返回工作区", "Back to workspace")}</a></SettingsFallback>}>
         <Suspense fallback={opening}>
           <SettingsCenter identity={identity} section={section} engines={engines} onProfile={onProfile} />
         </Suspense>
@@ -685,6 +693,8 @@ export function PasswordRecovery({
   onBack: () => void;
 }) {
   const { t, locale } = useSaaSPreferences();
+  // A link from a reset email sets a new password; without one, this asks for that email.
+  useDocumentTitle(pageTitle(token ? t("重设密码", "Reset password") : t("找回密码", "Recover your account")));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState(false);

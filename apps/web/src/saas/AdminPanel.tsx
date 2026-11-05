@@ -3,6 +3,7 @@ import { api, saasErrorMessage, type Identity } from './api';
 import { adminPage, collectAdminExport, downloadJSON, type AdminKind, type AdminRow } from './adminData';
 import type { RouteName } from './routeUsage';
 import { useSaaSPreferences } from './preferences';
+import { pageTitle, useDocumentTitle } from './pageTitle';
 import { AdminRunSummary } from './AdminRunSummary';
 import { AdminPromptCache } from './AdminPromptCache';
 import { DeletionDecisionDialog, deletionStatusLabel, type DeletionOutcome } from './DeletionDecision';
@@ -16,6 +17,7 @@ type AdminTab = AdminKind | 'cache' | 'market';
 
 export function AdminPanel({ identity, controls }: { identity: Identity; controls?: ReactNode }) {
   const { t, locale } = useSaaSPreferences();
+  useDocumentTitle(pageTitle(t('平台管理', 'Platform administration')));
   const [tab, setTab] = useState<AdminTab>('tenants');
   // The market is the service's: any workspace's capabilities say whether this server has it.
   const market = useMarketSettings(identity.user.platformRole === 'admin' ? identity.tenants.find(item => item.status === 'active')?.id : null);

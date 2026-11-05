@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, SaaSApiError, type Identity } from './api';
 import { useSaaSPreferences } from './preferences';
+import { pageTitle, useDocumentTitle } from './pageTitle';
 
 type InvitePreview = { tenantId: string; tenantName: string; role: string; expiresAt: string; status: string };
 export function InviteAcceptance({ token, identity, controls }: { token: string; identity: Identity; controls: ReactNode }) {
   const { locale, t } = useSaaSPreferences();
+  useDocumentTitle(pageTitle(t('加入工作区', 'Join a workspace')));
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);

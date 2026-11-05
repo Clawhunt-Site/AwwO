@@ -5,7 +5,7 @@ import { AccountWorkspacePanel } from '../../account';
 import { saasErrorMessage, type Identity } from '../api';
 import { createSaaSAccountApi } from '../accountApi';
 import { clawHuntAccountURL } from '../clawhuntAuth';
-import { readExecutionRuntime, type ExecutionRuntime } from '../managedExecutionApi';
+import { EXECUTION_NO_MODEL, EXECUTION_SERVICE_NOT_READY, readExecutionRuntime, type ExecutionRuntime } from '../managedExecutionApi';
 import { accountURL } from '../PersonalAccount';
 import { useSaaSPreferences } from '../preferences';
 import { RouteUsageMeter } from '../RouteUsageMeter';
@@ -103,7 +103,11 @@ export function EngineSettings({ identity }: { identity: Identity }) {
       {error !== null && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
       {!runtime && error === null && tenant?.status === 'active' && <p role="status">{t('正在读取…', 'Loading…')}</p>}
       {runtime && <>
-        <p role="status">{runtime.ready ? t('服务可用。', 'The service is available.') : t('服务暂时不可用：', 'The service is unavailable right now: ') + (runtime.reason ? saasErrorMessage(runtime.reason, locale) : '')}</p>
+        <p role="status">{runtime.ready ? t('服务可用。', 'The service is available.')
+          // The API's two reasons in the reader's language (it writes them in English); another is shown as written.
+          : runtime.reason === EXECUTION_SERVICE_NOT_READY ? t('工作区执行服务暂时不可用，请稍后重新检查。', 'Workspace execution is temporarily unavailable. Check again later.')
+            : runtime.reason === EXECUTION_NO_MODEL ? t('这个工作区现在没有可用的模型。', 'No model is available to this workspace right now.')
+              : t('服务暂时不可用：', 'The service is unavailable right now: ') + (runtime.reason ? saasErrorMessage(runtime.reason, locale) : '')}</p>
         <ul className="saas-settings-models">{runtime.models.map(item => <li key={item.runtime + ':' + item.id}>
           <strong>{item.label || item.id}</strong>{item.requiresUpgrade && <span>{t('需升级套餐', 'Needs an upgrade')}</span>}
         </li>)}</ul>

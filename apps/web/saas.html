@@ -1,5 +1,17 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>AwwO · Agent Workspace</title><link rel="icon" type="image/svg+xml" href="/awwo-fold.svg"/>
+<!-- What a search result, a shared link's preview and a phone's home screen show (the image's source: scripts/share-images/).
+     One head serves every reader, so each text says it in Chinese, then in English. og:image is absolute, as link scrapers
+     need, at the hosted site (backend edition.go defaultCloudOrigin). -->
+<meta name="description" content="AwwO 让多个 Agent 在同一张画布上协作：写下目标，确认分工，按依赖运行，每个节点交付自己的成果。AwwO brings your agents together on one canvas: write down the goal, agree on the team, run in dependency order, and every node delivers its own work."/>
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef0ef"/><meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07161f"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/><meta name="apple-mobile-web-app-title" content="AwwO"/><meta name="application-name" content="AwwO"/>
+<meta property="og:type" content="website"/><meta property="og:site_name" content="AwwO"/><meta property="og:locale" content="zh_CN"/><meta property="og:locale:alternate" content="en_US"/>
+<meta property="og:title" content="AwwO · 让 Agent 在同一张画布上协作 · Bring your agents together on one canvas"/>
+<meta property="og:description" content="写下目标，确认分工，按依赖运行：一句话交给一支 Agent 团队，每个节点交付自己的成果。Write down the goal, agree on the team, run in dependency order: one sentence for a team of agents, every node delivering its own work."/>
+<meta property="og:image" content="https://awwo.clawhunt.store/og-awwo.jpg"/><meta property="og:image:type" content="image/jpeg"/><meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/>
+<meta property="og:image:alt" content="AwwO：让 Agent 在同一张画布上协作。四个节点的画布：规划、页面、接口、审核。AwwO: bring your agents together on one canvas. A canvas of four nodes: plan, page, API, review."/>
+<meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="AwwO · 让 Agent 在同一张画布上协作 · Bring your agents together on one canvas"/><meta name="twitter:image" content="https://awwo.clawhunt.store/og-awwo.jpg"/>
 <script>(function(){var d=document.documentElement,S={tide:'light',cloud:'light',paper:'light',blossom:'light',night:'dark',graphite:'dark',aurora:'dark',ember:'dark'},own=function(k){return Object.prototype.hasOwnProperty.call(S,k)},k=false,c=null,p=null,o=null;try{k=!!(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);c=localStorage.getItem('awwo.theme.v2');p=localStorage.getItem('awwo.theme.v1');o=localStorage.getItem('superclaw_theme')}catch(e){}if(c!=='auto'&&!own(c))c=own(p)?p:p===null&&(o==='light'||o==='dark')&&(o==='dark')!==k?(o==='dark'?'night':'tide'):'cloud';var t=c==='auto'?(k?'night':'tide'):c;d.dataset.awwoTheme=t;d.dataset.theme=S[t];d.style.colorScheme=S[t];try{var m=localStorage.getItem('awwo.ui-mode.v1');if(m==='simple'||m==='developer')d.dataset.uiMode=m;if(new URLSearchParams(location.search).get('canvas'))d.dataset.boot='canvas'}catch(e){}})();</script>
 <style>
 /* Paints before the app's bundle: the page background in the reader's appearance style (themes.css; the fallbacks

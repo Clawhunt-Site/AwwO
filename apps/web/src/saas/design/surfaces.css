@@ -211,7 +211,10 @@
 /* ── Account dialog ──────────────────────────────────────────────────────────────────────────── */
 /* As the main site's account page: white panels on salt paper, sentence-case labels, ink actions. The
    selectors repeat the older ones they replace (saas.css styles the dialog inside the account controls,
-   and in the dark), so these apply wherever the dialog opens. */
+   and in the dark), so these apply wherever the dialog opens. The panel's own rules also reach 设置 →
+   成员与工作区 (.saas-settings-members), which draws the same panel inside the settings centre: without them
+   it kept the shared panel's grey ground, tracked capitals and text padding, which squeezed its 重试 icon
+   button's arrow to 6 px. */
 .awwo-account-dialog, .saas-account-actions .awwo-account-dialog, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog {
   width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 40px);
   border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl);
@@ -231,78 +234,85 @@
 }
 .awwo-account-dialog .awwo-account-dialog-header .awwo-icon-button:not(:disabled):hover { background: var(--saas-soft); color: var(--saas-text); }
 .awwo-account-dialog-body { flex: 1 1 auto; min-height: 0; padding: 24px; background: color-mix(in srgb, var(--saas-bg) 72%, var(--saas-card)); }
-.awwo-account-dialog .account-workspace-panel { height: auto; padding: 0; overflow: visible; background: transparent; color: var(--saas-text); font-family: var(--saas-font); }
-:root .awwo-account-dialog .account-workspace-panel, :root[data-theme='dark'] .awwo-account-dialog .account-workspace-panel {
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel { height: auto; padding: 0; overflow: visible; background: transparent; color: var(--saas-text); font-family: var(--saas-font); }
+:root :is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel, :root[data-theme='dark'] :is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel {
   --account-accent: var(--saas-accent); --account-accent-soft: var(--saas-accent-soft);
 }
-.awwo-account-dialog .account-workspace-header { margin-bottom: 20px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-header { margin-bottom: 20px; }
 /* The shared phone rule caps every h1 at 10ch; this title is short and has its own width. */
-.awwo-account-dialog .account-workspace-header h1 { max-width: none; color: var(--saas-text); font: 690 var(--saas-text-3xl)/var(--saas-display-leading, 1.1) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
-.awwo-account-dialog .account-workspace-header p { margin-top: 8px; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.6; }
-.awwo-account-dialog .account-section-heading h2 { color: var(--saas-text); font: 650 17px/1.35 var(--saas-font); letter-spacing: 0; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-header h1 { max-width: none; color: var(--saas-text); font: 690 var(--saas-text-3xl)/var(--saas-display-leading, 1.1) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-header p { margin-top: 8px; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.6; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-section-heading h2 { color: var(--saas-text); font: 650 17px/1.35 var(--saas-font); letter-spacing: 0; }
 /* Labels say which account or workspace a panel belongs to: quiet, in sentence case. */
-.awwo-account-dialog :is(.account-eyebrow, .account-section-heading span) { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: 0; text-transform: none; }
-.awwo-account-dialog .account-section-heading { margin-bottom: 16px; color: var(--saas-subtle); }
-.awwo-account-dialog :is(.account-identity-card, .account-section) { border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card); box-shadow: none; }
-.awwo-account-dialog .account-identity-grid { gap: 14px; margin-bottom: 14px; }
-.awwo-account-dialog .account-identity-card { padding: 18px 20px; }
-.awwo-account-dialog .account-section { margin-bottom: 14px; padding: 22px 24px; }
-.awwo-account-dialog .account-avatar { border-radius: 50%; }
-.awwo-account-dialog .account-avatar-fallback { background: var(--saas-accent-soft); color: var(--saas-accent); font: 650 var(--saas-text-sm)/1 var(--saas-font); }
-.awwo-account-dialog :is(.account-identity-copy strong, .account-member-identity strong, .account-invite-result strong, .account-member-summary strong) { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 600; }
-.awwo-account-dialog :is(.account-identity-copy > span:last-child, .account-member-identity span, .account-member-summary span, .account-invite-result span) { color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.awwo-account-dialog .account-member-identity small { color: var(--saas-warning); font-size: 11px; }
-.awwo-account-dialog .account-status-badge { gap: 6px; padding: 4px 10px; border: 0; background: var(--saas-accent-soft); color: var(--saas-accent); font: 600 11px/1.3 var(--saas-font); }
-.awwo-account-dialog :is(.account-profile-grid label, .account-company-select, .account-invite-panel > label, .account-member-controls label, .account-member-add label) {
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-eyebrow, .account-section-heading span) { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: 0; text-transform: none; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-section-heading { margin-bottom: 16px; color: var(--saas-subtle); }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-identity-card, .account-section) { border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card); box-shadow: none; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-identity-grid { gap: 14px; margin-bottom: 14px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-identity-card { padding: 18px 20px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-section { margin-bottom: 14px; padding: 22px 24px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-avatar { border-radius: 50%; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-avatar-fallback { background: var(--saas-accent-soft); color: var(--saas-accent); font: 650 var(--saas-text-sm)/1 var(--saas-font); }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-identity-copy strong, .account-member-identity strong, .account-invite-result strong, .account-member-summary strong) { color: var(--saas-text); font-size: var(--saas-text-sm); font-weight: 600; }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-identity-copy > span:last-child, .account-member-identity span, .account-member-summary span, .account-invite-result span) { color: var(--saas-muted); font-size: var(--saas-text-xs); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-identity small { color: var(--saas-warning); font-size: 11px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-status-badge { gap: 6px; padding: 4px 10px; border: 0; background: var(--saas-accent-soft); color: var(--saas-accent); font: 600 11px/1.3 var(--saas-font); }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-profile-grid label, .account-company-select, .account-invite-panel > label, .account-member-controls label, .account-member-add label) {
   gap: 6px; color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font);
 }
 /* max-width: the header's own selects are capped (170px, 100px on phones), and this dialog opens inside the header. */
-.awwo-account-dialog .account-workspace-panel :is(input, select) {
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel :is(input, select) {
   max-width: none; min-height: 40px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--saas-radius-sm);
   background: var(--saas-field); color: var(--saas-text); font: 400 var(--saas-text-sm)/1.4 var(--saas-font);
   transition: border-color var(--saas-dur-1), box-shadow var(--saas-dur-1), background-color var(--saas-dur-1);
 }
-.awwo-account-dialog .account-workspace-panel :is(input, select):hover:not(:disabled) { border-color: var(--saas-border); }
-.awwo-account-dialog .account-company-select { max-width: 360px; }
-.awwo-account-dialog .account-workspace-panel :is(input, select):focus { outline: none; border-color: var(--saas-focus); background: var(--saas-card); box-shadow: var(--saas-focus-ring); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel :is(input, select):hover:not(:disabled) { border-color: var(--saas-border); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-company-select { max-width: 360px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel :is(input, select):focus { outline: none; border-color: var(--saas-focus); background: var(--saas-card); box-shadow: var(--saas-focus-ring); }
 /* Read-only values read as text under their label, not as a field to fill in. */
-.awwo-account-dialog .account-workspace-panel input[readonly] { padding-inline: 0; border-color: transparent; background: transparent; color: var(--saas-text); }
-.awwo-account-dialog .account-workspace-panel input[readonly]:hover { border-color: transparent; }
-.awwo-account-dialog .account-workspace-panel input[readonly]:focus { padding-inline: 0; border-color: transparent; background: transparent; box-shadow: none; outline: 2px solid var(--saas-focus); outline-offset: 4px; }
-.awwo-account-dialog :is(.account-company-scope > p, .account-inline-note, .account-permission-note, .account-empty-state, .account-workspace-state) { color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
-.awwo-account-dialog :is(.account-primary-button, .account-secondary-button) {
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel input[readonly] { padding-inline: 0; border-color: transparent; background: transparent; color: var(--saas-text); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel input[readonly]:hover { border-color: transparent; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-workspace-panel input[readonly]:focus { padding-inline: 0; border-color: transparent; background: transparent; box-shadow: none; outline: 2px solid var(--saas-focus); outline-offset: 4px; }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-company-scope > p, .account-inline-note, .account-permission-note, .account-empty-state, .account-workspace-state) { color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-primary-button, .account-secondary-button) {
   min-height: var(--saas-control); padding: 0 16px; gap: 7px; border-radius: var(--saas-radius-pill);
   font: 600 var(--saas-text-sm)/1.2 var(--saas-font); text-decoration: none;
 }
-.awwo-account-dialog .account-primary-button { border: 1px solid transparent; background: var(--saas-primary); color: var(--saas-on-primary); }
-.awwo-account-dialog .account-primary-button:not(:disabled):hover { border-color: transparent; background: var(--saas-primary-hover); color: var(--saas-on-primary); filter: none; }
-.awwo-account-dialog .account-primary-button:not(:disabled):active { background: var(--saas-primary-active); color: var(--saas-on-primary); }
-.awwo-account-dialog .account-secondary-button { border: 1px solid var(--saas-border-strong); background: var(--saas-card); color: var(--saas-text); }
-.awwo-account-dialog .account-secondary-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: color-mix(in srgb, var(--saas-text) 4%, var(--saas-card)); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-primary-button { border: 1px solid transparent; background: var(--saas-primary); color: var(--saas-on-primary); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-primary-button:not(:disabled):hover { border-color: transparent; background: var(--saas-primary-hover); color: var(--saas-on-primary); filter: none; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-primary-button:not(:disabled):active { background: var(--saas-primary-active); color: var(--saas-on-primary); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-secondary-button { border: 1px solid var(--saas-border-strong); background: var(--saas-card); color: var(--saas-text); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-secondary-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: color-mix(in srgb, var(--saas-text) 4%, var(--saas-card)); }
 /* An icon button is the icon: no text padding to squeeze it (it used to shrink to a dot). */
-.awwo-account-dialog .account-icon-button {
+:is(.awwo-account-dialog, .saas-settings-members) .account-icon-button {
   display: inline-grid; place-items: center; width: var(--saas-control); min-width: var(--saas-control); height: var(--saas-control); min-height: var(--saas-control); padding: 0;
   border: 1px solid var(--saas-border-strong); border-radius: 50%; background: var(--saas-card); color: var(--saas-muted);
 }
-.awwo-account-dialog .account-icon-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: var(--saas-soft); color: var(--saas-text); }
-.awwo-account-dialog :is(.account-icon-button, .awwo-icon-button, .account-primary-button, .account-secondary-button) svg { flex: none; }
-.awwo-account-dialog .account-notice { border-color: color-mix(in srgb, var(--saas-danger) 35%, transparent); border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-sm); }
-.awwo-account-dialog .account-member-list { gap: 0; border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); }
-.awwo-account-dialog .account-member-row { padding: 12px 14px; background: transparent; }
-.awwo-account-dialog .account-member-row + .account-member-row { border-top: 1px solid var(--saas-hairline); }
-.awwo-account-dialog .account-member-row .account-avatar { border-radius: 50%; }
-.awwo-account-dialog .account-list-pager { gap: 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.awwo-account-dialog .account-invite-panel { margin-top: 18px; padding-top: 18px; border-top-color: var(--saas-hairline); }
-.awwo-account-dialog .account-invite-heading { color: var(--saas-text); font-size: var(--saas-text-md); }
-.awwo-account-dialog .account-invite-friends-link { color: var(--saas-accent); font-size: var(--saas-text-sm); }
-.awwo-account-dialog .account-invite-heading svg { color: var(--saas-muted); }
-.awwo-account-dialog .account-invite-result { border-color: color-mix(in srgb, var(--saas-accent) 28%, transparent); border-radius: var(--saas-radius); background: var(--saas-accent-soft); }
-.awwo-account-dialog .account-invite-result code { color: var(--saas-text); font-family: var(--saas-font-mono); font-size: 11px; }
-.awwo-account-dialog .account-member-add { gap: 10px 12px; padding: 18px 0 4px; }
-.awwo-account-dialog .account-member-add > p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
-.awwo-account-dialog .account-invite-list h3 { margin: 0 0 4px; font-size: var(--saas-text-sm); font-weight: 650; }
-.awwo-account-dialog .account-invite-list > p { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
-.awwo-account-dialog .account-invite-row { border-top-color: var(--saas-hairline); font-size: var(--saas-text-sm); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-icon-button:not(:disabled):hover { border-color: color-mix(in srgb, var(--saas-border-strong) 70%, var(--saas-text)); background: var(--saas-soft); color: var(--saas-text); }
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-icon-button, .awwo-icon-button, .account-primary-button, .account-secondary-button) svg { flex: none; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-notice { border-color: color-mix(in srgb, var(--saas-danger) 35%, transparent); border-radius: var(--saas-radius-sm); background: var(--saas-danger-bg); color: var(--saas-danger); font-size: var(--saas-text-sm); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-list { gap: 0; border-color: var(--saas-hairline); border-radius: var(--saas-radius); background: var(--saas-card); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-row { padding: 12px 14px; background: transparent; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-row + .account-member-row { border-top: 1px solid var(--saas-hairline); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-row .account-avatar { border-radius: 50%; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-list-pager { gap: 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-panel { margin-top: 18px; padding-top: 18px; border-top-color: var(--saas-hairline); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-heading { color: var(--saas-text); font-size: var(--saas-text-md); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-friends-link { color: var(--saas-accent); font-size: var(--saas-text-sm); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-heading svg { color: var(--saas-muted); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-result { border-color: color-mix(in srgb, var(--saas-accent) 28%, transparent); border-radius: var(--saas-radius); background: var(--saas-accent-soft); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-result code { color: var(--saas-text); font-family: var(--saas-font-mono); font-size: 11px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-add { gap: 10px 12px; padding: 18px 0 4px; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-member-add > p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.6; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-list h3 { margin: 0 0 4px; font-size: var(--saas-text-sm); font-weight: 650; }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-list > p { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); }
+:is(.awwo-account-dialog, .saas-settings-members) .account-invite-row { border-top-color: var(--saas-hairline); font-size: var(--saas-text-sm); }
+/* In the settings centre the panel is a section of the page: the card around it steps back, so the panel's own
+   sections are the cards, as every other section's are, and its title reads as a heading under the page's
+   (the page already says 成员与工作区 in its own title). */
+.saas-personal .saas-card.saas-settings-members { gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.saas-personal .saas-settings-members .account-workspace-header { align-items: center; margin-bottom: 14px; }
+.saas-personal .saas-settings-members .account-workspace-header h1 { font-size: var(--saas-text-xl); }
+.saas-personal .saas-settings-members .account-workspace-header p { margin-top: 4px; font-size: var(--saas-text-sm); }
 @media (max-width: 480px) {
   /* max-width: the browser caps a modal dialog at 100% - 2em - 6px, which kept this phone width from applying. */
   .awwo-account-dialog, .saas-account-actions .awwo-account-dialog, :root[data-theme='dark'] .saas-account-actions .awwo-account-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
@@ -310,10 +320,10 @@
 }
 @media (max-width: 520px) {
   .awwo-account-dialog-body { padding: 14px 12px 20px; }
-  .awwo-account-dialog .account-workspace-header { margin-bottom: 14px; }
-  .awwo-account-dialog .account-section { padding: 16px 14px; }
-  .awwo-account-dialog .account-identity-card { padding: 14px; }
-  .awwo-account-dialog .account-workspace-header h1 { font-size: var(--saas-text-2xl); }
+  :is(.awwo-account-dialog, .saas-settings-members) .account-workspace-header { margin-bottom: 14px; }
+  :is(.awwo-account-dialog, .saas-settings-members) .account-section { padding: 16px 14px; }
+  :is(.awwo-account-dialog, .saas-settings-members) .account-identity-card { padding: 14px; }
+  :is(.awwo-account-dialog, .saas-settings-members) .account-workspace-header h1 { font-size: var(--saas-text-2xl); }
 }
 
 /* ── Admin pages ─────────────────────────────────────────────────────────────────────────────── */

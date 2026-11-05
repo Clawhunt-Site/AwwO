@@ -23,7 +23,14 @@
 .saas-login *, .saas-dashboard *, .saas-notice * { box-sizing: border-box; }
 ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 html { scrollbar-color: color-mix(in srgb, var(--saas-text) 20%, transparent) transparent; }
-.saas-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Out of sight, still read aloud and still a file picker's anchor. Each declaration is !important because a page's own
+   field rules outrank one class: under .saas-personal an input is width: 100% and min-height: 44px, and the absolutely
+   placed SKILL.md picker of 设置 → 技能 then reached 1440 px past its button, so the page scrolled sideways. */
+.saas-visually-hidden {
+  position: absolute !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important;
+  margin: -1px !important; padding: 0 !important; border: 0 !important;
+  overflow: hidden !important; clip-path: inset(50%) !important; white-space: nowrap !important;
+}
 
 /* Headings: Latin display text is narrowed and tightened; Chinese keeps natural spacing and a little
    more leading (the tracking and leading tokens change under :lang(zh), see tokens.css). */
@@ -52,6 +59,16 @@ html { scrollbar-color: color-mix(in srgb, var(--saas-text) 20%, transparent) tr
   color: var(--saas-muted);
 }
 .production-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
+
+/* A link no rule gives a colour of its own took the browser's default blue, and purple once visited: 返回登录 on a
+   ClawHunt sign-in that failed, 返回工作区 where the admin is refused or an invitation is gone, a settings section's
+   通用, 隐私政策 and 开源许可. It takes the theme's link colour instead. The whole selector is inside :where(), so
+   its specificity is zero: a component's own link colour (the skill library's licence link, the footer's, the
+   menus') and every link drawn as a button or chip, which carry a class, stay as they are. */
+:where(:is(.saas-login, .saas-dashboard, .saas-notice, .saas-native-dialog) a:not([class])) {
+  color: var(--saas-link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+:where(:is(.saas-login, .saas-dashboard, .saas-notice, .saas-native-dialog) a:not([class]):hover) { color: var(--saas-link-hover); }
 
 /* ── Controls ───────────────────────────────────────────────────────────────────────────────── */
 /* Every button on these pages starts as a quiet secondary control. Only the properties the older
@@ -392,6 +409,9 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   gap: 104px clamp(40px, 7vw, 120px);
   padding: max(72px, 10vh) max(36px, calc((100vw - 1200px) / 2)) 48px;
   background: var(--saas-bg);
+  /* The orb is wider than the card's column it is centred on: from 1080 to 1300 px it reached past the window's edge
+     (6 px at 1280), and the page scrolled sideways. clip, not hidden, so nothing on the page becomes a scroller. */
+  overflow-x: clip;
 }
 .saas-login::before {
   content: ''; grid-row: 1; grid-column: 1 / -1; align-self: stretch; z-index: 0;
@@ -418,11 +438,22 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
    below them): the brand on the left, whatever follows it (the card or the choices) on the right. */
 .saas-login > .saas-login-brand { grid-row: 1; grid-column: 1; }
 .saas-login > .saas-login-brand + * { grid-row: 1; grid-column: 2; }
-/* The license texts of the code this page runs: one quiet line after the cases, 48px below them as the page's
-   bottom padding is (the 104px row gap is the hero's). */
-.saas-login > .saas-login-footer { grid-column: 1 / -1; margin-top: -56px; font-size: var(--saas-text-sm); }
-.saas-login-footer a { display: inline-flex; align-items: center; min-height: 32px; color: var(--saas-muted); text-decoration: underline; text-underline-offset: 3px; }
-.saas-login-footer a:hover { color: var(--saas-text); }
+/* The page's end (Landing.tsx LandingFooter): the brand and who makes it, the main site, its privacy policy and the
+   license texts of the code this page runs, then the copyright line; 64px below the cases, on a hairline (the 104px
+   row gap is the hero's). */
+.saas-login > .saas-login-footer {
+  grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 32px;
+  margin-top: -40px; padding-top: 28px; border-top: 1px solid var(--saas-hairline); font-size: var(--saas-text-sm);
+}
+.saas-landing-footer-brand { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; }
+.saas-landing-footer-brand .saas-logo { font-size: 18px; }
+.saas-landing-footer-brand .saas-logo::before { width: 22px; height: 22px; }
+.saas-login .saas-landing-footer-brand p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.6; }
+.saas-login-footer nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 20px; }
+.saas-login-footer a { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; color: var(--saas-muted); text-decoration: none; }
+.saas-login-footer a:hover { color: var(--saas-text); text-decoration: underline; text-underline-offset: 3px; }
+/* muted, not subtle: subtle is 4.45:1 on 云白's ground at this size, under 4.5:1. */
+.saas-login-footer small { grid-column: 1 / -1; color: var(--saas-muted); font-size: var(--saas-text-xs); }
 .saas-login-brand { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; color: var(--saas-tank-ink, #eaf3f5); }
 .saas-login-brand > span, .saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-ink, #eaf3f5); }
 .saas-login .saas-login-brand .saas-main-site { color: var(--saas-tank-muted, #aec3ca); }
@@ -439,7 +470,6 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   border: 1px solid rgb(var(--saas-tank-line-rgb, 140 200 220) / 16%); border-radius: var(--saas-radius-xl);
   background: rgb(var(--saas-tank-glass-rgb, 9 30 45) / 62%); box-shadow: 0 18px 48px -16px rgb(0 0 0 / 62%); backdrop-filter: blur(10px);
 }
-.saas-login-preview .saas-canvas-thumb { height: 196px; border: 0; border-radius: var(--saas-radius); }
 .saas-login-preview ul { display: grid; gap: 8px; margin: 14px 8px 4px; padding: 0; list-style: none; font-size: var(--saas-text-sm); color: var(--saas-tank-muted, #aec3ca); }
 .saas-login-preview li { display: flex; align-items: center; gap: 10px; }
 .saas-login-preview li::before { content: ''; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: rgb(var(--saas-glow-1-rgb, 95 227 232)); box-shadow: 0 0 8px rgb(var(--saas-glow-1-rgb, 95 227 232)); }
@@ -459,6 +489,73 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login > .saas-preferences button:not(:disabled):active { background: rgb(255 255 255 / 14%); }
 /* On the dark tank, focus is the tank's own light colour (the paper teal would all but vanish there). */
 .saas-login > :is(.saas-preferences, .saas-login-brand) :focus-visible { outline-color: var(--saas-tank-focus, #6cc6c8); }
+/* A Chinese heading's phrases (the headline in SaaSApp Login, the story's in Landing.tsx): each stays whole on its line,
+   and breaks inside only on a screen narrower than the phrase. The headline's first, 让 Agent, is a line of its own, as
+   at every width before. */
+.saas-login :is(h1, h2) .saas-phrase { display: inline-block; }
+.saas-login-brand h1 .saas-phrase:first-child { display: block; }
+
+/* The welcome's canvas (Landing.tsx LandingPreview): four nodes at work on the tank's glass, laid out on a 100 × 196
+   grid the edges' SVG shares (x in percent of the width, y in pixels), so they meet at every width. The running node
+   breathes and the edge into it carries the work; both hold still under reduced motion. */
+.saas-landing-canvas {
+  position: relative; height: 196px; overflow: hidden; border-radius: var(--saas-radius);
+  background: radial-gradient(rgb(var(--saas-tank-line-rgb, 140 200 220) / 14%) 1px, transparent 1.4px) 0 0 / 18px 18px, rgb(var(--saas-tank-glass-rgb, 9 30 45) / 55%);
+  box-shadow: inset 0 0 0 1px rgb(var(--saas-tank-line-rgb, 140 200 220) / 10%);
+}
+.saas-landing-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.saas-landing-edges path { fill: none; stroke: rgb(var(--saas-tank-line-rgb, 140 200 220) / 42%); stroke-width: 1.5px; }
+.saas-landing-edges path.is-live { stroke: rgb(var(--saas-glow-1-rgb, 95 227 232) / 85%); stroke-dasharray: 5 5; animation: saas-landing-flow 900ms linear infinite; }
+.saas-landing-node {
+  position: absolute; width: 26%; height: 58px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 0 12px;
+  border: 1px solid rgb(var(--saas-tank-line-rgb, 140 200 220) / 22%); border-radius: 12px;
+  background: var(--saas-tank-card, #0c2230); box-shadow: 0 10px 22px -14px rgb(0 0 0 / 70%);
+}
+.saas-landing-node strong { overflow: hidden; color: var(--saas-tank-ink, #eaf3f5); font: 650 var(--saas-text-sm)/1.2 var(--saas-font); white-space: nowrap; text-overflow: ellipsis; }
+.saas-landing-node span { display: inline-flex; align-items: center; gap: 6px; overflow: hidden; color: var(--saas-tank-muted, #aec3ca); font: 500 11px/1 var(--saas-font); white-space: nowrap; }
+.saas-landing-node span::before { content: ''; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--saas-landing-dot); box-shadow: 0 0 8px var(--saas-landing-dot); }
+.saas-landing-node.is-done { --saas-landing-dot: var(--saas-success-dot, #2f9e6b); }
+.saas-landing-node.is-running { --saas-landing-dot: var(--saas-bio, #2bb3bb); border-color: color-mix(in srgb, var(--saas-bio, #2bb3bb) 70%, transparent); animation: saas-landing-breathe 2.4s ease-in-out infinite; }
+.saas-landing-node.is-waiting { --saas-landing-dot: color-mix(in srgb, var(--saas-tank-muted, #aec3ca) 70%, transparent); }
+@keyframes saas-landing-flow { to { stroke-dashoffset: -10; } }
+@keyframes saas-landing-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--saas-bio, #2bb3bb) 0%, transparent), 0 10px 22px -14px rgb(0 0 0 / 70%); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--saas-bio, #2bb3bb) 20%, transparent), 0 10px 22px -14px rgb(0 0 0 / 70%); }
+}
+@media (prefers-reduced-motion: reduce) { .saas-landing-edges path.is-live, .saas-landing-node.is-running { animation: none; } }
+
+/* How AwwO works and what it holds to (Landing.tsx LandingStory), on the paper between the welcome and the cases: a
+   heading as the cases' own, then cards that say one thing each. */
+.saas-login > .saas-landing { grid-column: 1 / -1; display: grid; gap: 84px; width: 100%; color: var(--saas-text); }
+.saas-landing-heading { max-width: 760px; margin-bottom: 28px; }
+.saas-login .saas-landing-heading h2 { max-width: none; margin: 12px 0 0; font-size: clamp(26px, 3vw, 38px); line-height: 1.2; }
+.saas-login .saas-landing-heading p { max-width: 680px; margin: 12px 0 0; font-size: var(--saas-text-md); line-height: 1.75; text-wrap: balance; }
+.saas-landing-steps, .saas-landing-promises { display: grid; gap: 20px; margin: 0; padding: 0; list-style: none; }
+.saas-landing-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.saas-landing-promises { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.saas-landing-steps > li, .saas-landing-promises > li {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 24px;
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card);
+}
+.saas-landing-step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.saas-landing-step-number { color: color-mix(in srgb, var(--saas-accent) 82%, var(--saas-text)); font: 690 34px/1 var(--saas-font-display); font-stretch: var(--saas-display-stretch); font-variant-numeric: tabular-nums; }
+.saas-landing-icon { display: inline-grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 12px; background: var(--saas-accent-soft); color: var(--saas-accent); }
+.saas-login .saas-landing h3 { margin: 0; font-size: var(--saas-text-lg); line-height: 1.35; }
+/* balance, here and in the heading's paragraph: a few lines come out even, with no word left alone on the last
+   (pretty still left one, 「执行。」 or "is."). */
+.saas-login .saas-landing li p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.7; text-wrap: balance; }
+.saas-landing-promises > li { padding: 22px; }
+@media (max-width: 1080px) { .saas-landing-promises { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Below 960 px the welcome's column is too narrow for a node's state (等待上游 and Waiting were cut at 800 px): the
+   preview keeps its points in words and drops the picture. */
+@media (max-width: 960px) { .saas-landing-canvas { display: none; } .saas-login-preview ul { margin-top: 4px; } }
+@media (max-width: 760px) {
+  .saas-login > .saas-landing { gap: 56px; }
+  .saas-landing-steps, .saas-landing-promises { grid-template-columns: 1fr; gap: 14px; }
+  .saas-landing-steps > li, .saas-landing-promises > li { padding: 20px; }
+  .saas-login > .saas-login-footer { grid-template-columns: 1fr; }
+  .saas-login-footer nav { justify-content: flex-start; }
+}
 
 /* ── Workspace home: one prompt, recent canvases, cases ─────────────────────────────────────── */
 /* The main site's AwwO welcome: the orb, the workspace as a lit pill, the condensed title, the composer
@@ -711,6 +808,8 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-login > .saas-login-footer { margin-top: 0; }
   .saas-login::after { display: none; }
   .saas-login-brand h1, .saas-login h1 { margin: 20px 0 10px; font-size: 34px; }
+  /* Its second line, 在同一张画布上协作。, is ten characters of one em: it keeps to one line down to a 320 px screen. */
+  :root:lang(zh) .saas-login-brand h1 { font-size: min(34px, calc(10vw - 5px)); }
   .saas-login-brand > p { font-size: var(--saas-text-md); }
   .saas-login-preview { display: none; }
   .saas-card { padding: 22px; }
