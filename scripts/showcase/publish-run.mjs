@@ -10,11 +10,10 @@
 // the run, what was checked in a browser before publishing, where it ran, the revisions that ran, whether thinking was
 // off, and the execution settings it had. All required except the model label.
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { redact, writeRecord, writeSummary } from './publish-common.mjs';
+import { agentGlb, ffmpeg, identifying, picture, recordIds, recordText, redact, summaryText, writeTogether } from './publish-common.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const [rawFile, notesFile] = process.argv.slice(2);
@@ -67,17 +66,28 @@ if (ranText !== canonicalCanvasText(createOfficialDocument(workflow)))
 // The files a run stored sit beside its record, in <case stem>-files (a retried run's record, <stem>-<stamp>-retry<n>.json,
 // shares the folder of the run it retried).
 const STORED = path.join(path.dirname(path.resolve(rawFile)), `${path.basename(rawFile).replace(/-\d{8}T\d{6}Z(?:-retry\d+)?\.json$/, '')}-files`);
-// The runtime the agents ran on: a canvas's nodes may each name one (a flagship's work in sandbox computers), and the
-// ledger names the one each model call ran on; the record names it only when they all agree. A media node is no agent:
-// what it names is its media provider's runtime (PALLWARD's pictures and 3D models beside its sandbox agents).
+// The runtimes the agents ran on: a canvas's nodes may each name one (a flagship's work in sandbox computers, a Blender
+// case's makers in the Blender workstation beside a site in a sandbox computer), and the ledger names the one each
+// model call ran on, which must be its node's (checked node by node below). The record names them in the canvas's
+// order. A media node is no agent: what it names is its media provider's runtime (PALLWARD's pictures and 3D models
+// beside its sandbox agents).
 const agentNodes = frozen.slice(0, workflow.nodes.length).filter(node => node.kind === 'session');
-const mediaKeys = new Set([...MEDIA_IDS.keys(), ...MEDIA_IDS.values()]);
-const ranOn = new Set(agentNodes.map(node => node.runtime || raw.runtime));
-const ledgerRuntimes = new Set(Object.entries(raw.invocations || {}).filter(([id]) => !mediaKeys.has(id))
-  .flatMap(([, value]) => (value?.items || []).map(item => item.runtime)).filter(Boolean));
-if (ranOn.size !== 1 || [...ledgerRuntimes].some(runtime => !ranOn.has(runtime)))
-  throw new Error(`${raw.caseId}: the agents ran on ${[...ranOn].join(', ')} and the ledger names ${[...ledgerRuntimes].join(', ')}; one runtime is published`);
-const runtime = [...ranOn][0];
+const ranOn = [...new Set(agentNodes.map(node => node.runtime || raw.runtime))];
+const runtime = ranOn.join(' + ');
+// A stored file's bytes, proven to be the artifact the record names: a record whose files share a name on disk (saved
+// before 2026-10-17 12:40) is fetched again first (refetch_files.py), which names each by its artifact id and records
+// its size and sha256.
+const storedBytes = (stored, label) => {
+  const bytes = fs.readFileSync(path.join(STORED, stored.file));
+  if ((raw.files || []).some(value => value !== stored && value.file === stored.file) || !/^[0-9a-f]{64}$/.test(stored.sha256 || '')
+    || crypto.createHash('sha256').update(bytes).digest('hex') !== stored.sha256 || bytes.length !== stored.size)
+    throw new Error(`${label}: the stored file ${stored.file} is not provably the artifact ${stored.id}; fetch the run's files again`);
+  return bytes;
+};
+// The agents' own files, by the `<node id>/<file name>` path the page names (filled as the nodes are read), and every
+// identifier of AwwO's the record holds, which no published file may name.
+const AGENT_FILES = [];
+const KNOWN_IDS = [...CANVAS_IDS.keys(), ...recordIds(raw)];
 const states = new Map((raw.graph.nodes || []).map(node => [node.nodeId, node]));
 const STATUS = new Set(['done', 'failed', 'blocked', 'cancelled', 'cached']);
 const seconds = (from, to) => from && to ? Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000)) : undefined;
@@ -109,7 +119,7 @@ const nodes = workflow.nodes.map((spec, index) => {
   const first = items[0], item = items.at(-1);
   const run = raw.runs[document.id];
   const contract = normalizeContract(document.contract);
-  let output, report, file;
+  let output, report, file, parsed;
   if (document.kind === 'assemble') {
     // Its one output is the page as a file, which the run stored as an artifact: the one its output names (a canvas run
     // again keeps the pages of earlier runs too).
@@ -117,33 +127,59 @@ const nodes = workflow.nodes.map((spec, index) => {
       const named = /^awwo-file:([A-Za-z0-9_-]+)$/.exec(JSON.parse(state.output || '{}').file || '')?.[1];
       const stored = (raw.files || []).find(value => value.nodeId === document.id && value.id === named);
       if (!stored) throw new Error(`${spec.id}: the run record has no stored file ${named} for the assembled page`);
-      // The bytes on disk must be that file's: a record whose files share a name on disk (saved before 2026-10-17 12:40)
-      // is fetched again first (refetch_files.py), which names each by its artifact id and records its size and sha256.
-      const bytes = fs.readFileSync(path.join(STORED, stored.file));
-      if ((raw.files || []).some(value => value !== stored && value.file === stored.file) || !/^[0-9a-f]{64}$/.test(stored.sha256 || '')
-        || crypto.createHash('sha256').update(bytes).digest('hex') !== stored.sha256 || bytes.length !== stored.size)
-        throw new Error(`${spec.id}: the stored file ${stored.file} is not provably the artifact ${named}; fetch the run's files again`);
-      file = { name: stored.name, bytes: bytes.length };
+      file = { name: stored.name, bytes: storedBytes(stored, spec.id).length };
     }
   } else if (state.state === 'done' && state.output) {
-    const parsed = parseContractOutput(contract, state.output);
+    parsed = parseContractOutput(contract, state.output);
     if (parsed.errors.length) throw new Error(`${spec.id}: ${parsed.errors.join('; ')}`);
     output = plain(redact(parsed.values.result));
     if (typeof parsed.values.report === 'string') report = plain(redact(parsed.values.report));
+  }
+  // Every model call the ledger names ran on its node's runtime.
+  const nodeRuntime = document.runtime || raw.runtime;
+  const elsewhere = items.map(entry => entry.runtime).filter(value => value && value !== nodeRuntime);
+  if (document.kind === 'session' && elsewhere.length)
+    throw new Error(`${spec.id} ran on ${nodeRuntime}, but the ledger names ${[...new Set(elsewhere)].join(', ')} for its calls`);
+  // An agent's own files (a Blender maker's GLBs and renders, OfficialWorkflowNode.files): each file output names the
+  // file the run stored (awwo-file:<artifact id>); the page loads it by `<node id>/<file name>`.
+  let made;
+  if (document.kind === 'session' && state.state === 'done' && spec.files?.length) {
+    if (!parsed) throw new Error(`${spec.id}: done with no output, so none of its files`);
+    made = spec.files.map(field => {
+      const reference = `${spec.id}/${field.label}`;
+      const named = /^awwo-file:([A-Za-z0-9_-]+)$/.exec(String(parsed.values[field.id] ?? '').trim())?.[1];
+      const stored = named && (raw.files || []).find(value => value.nodeId === document.id && value.id === named);
+      if (!stored) throw new Error(`${reference}: the run record has no stored file ${named} for ${spec.id}.${field.id}`);
+      // The file this very run made into this very output: a delivery may name a stored file of an earlier run (the API
+      // takes a reference it already holds), which is not what this run delivered. The case runner records each stored
+      // file's run and field (since 2026-11-05); a record without them is fetched again.
+      if (!state.runId || stored.runId !== state.runId || stored.fieldId !== field.id)
+        throw new Error(`${reference}: the stored file ${named} is ${stored.runId ? `run ${stored.runId}'s ${stored.fieldId}` : 'of no recorded run'}, not ${spec.id}'s ${field.id} of run ${state.runId}`);
+      AGENT_FILES.push({ reference, bytes: storedBytes(stored, reference) });
+      return reference;
+    });
   }
   const took = seconds(first?.admittedAt ?? run?.createdAt, item?.completedAt ?? run?.updatedAt);
   return { id: spec.id, title: spec.title, column: spec.column, row: spec.row, status: state.state,
     ...(document.kind === 'assemble' ? { kind: 'assemble' } : {}),
     ...(document.kind === 'assemble' && !(document.contract?.inputs ?? []).length ? { fromTemplate: true } : {}),
-    ...(document.runtime === 'sandbox' ? { sandbox: true } : {}),
+    ...(document.runtime === 'sandbox' ? { sandbox: true } : {}), ...(document.runtime === 'blender' ? { blender: true } : {}),
     ...(took !== undefined ? { seconds: took } : {}),
     outputType: spec.outputType ?? 'markdown', ...(output !== undefined ? { output } : {}), ...(report !== undefined ? { report } : {}),
-    ...(file ? { file } : {}), ...(items.length > 1 ? { calls: items.length } : {}),
+    ...(file ? { file } : {}), ...(made ? { files: made } : {}), ...(items.length > 1 ? { calls: items.length } : {}),
     ...(state.detail ? { detail: plain(redact(String(state.detail))) } : {}), ...(totalUsage(items) ? { tokens: totalUsage(items) } : {}) };
 });
 // A case's delivery is the last page its canvas makes (PALLWARD's second fix pass, after the first).
 const artifact = workflow.nodes.findLast(node => node.outputType === 'html');
 const artifactOutput = nodes.find(node => node.id === artifact?.id)?.output;
+// A page that names an agent's file needs that agent's own run in this canvas run: one cached from an earlier run (or
+// that did not finish) made no file this record proves, so the page would be published without it.
+for (const spec of workflow.nodes) for (const field of spec.files ?? []) {
+  const reference = `${spec.id}/${field.label}`;
+  if (artifactOutput?.includes(reference) && !AGENT_FILES.some(item => item.reference === reference))
+    throw new Error(`${reference}: the page names it, but ${spec.id} ended as ${nodes.find(node => node.id === spec.id)?.status} in this run, `
+      + `so no file of this run is there; run ${spec.id} again`);
+}
 // The day the case's page was delivered, which its dialog names: the end of its delivery node's run (a canvas that ran
 // again delivered on the day of its last run, PALLWARD's a day after its first), else the run's start.
 const deliveredAt = artifact ? raw.runs[frozen[workflow.nodes.indexOf(artifact)]?.id]?.updatedAt : undefined;
@@ -165,7 +201,7 @@ const media = mediaSpecs.map((spec, index) => {
   return { id: spec.id, title: spec.title, kind: spec.kind, status: state.state, ...(took !== undefined ? { seconds: took } : {}), files,
     ...(state.detail ? { detail: redact(String(state.detail)) } : {}) };
 });
-const catalog = raw.catalog?.runtimes?.find(entry => entry.id === runtime);
+const missingRuntimes = ranOn.filter(id => !raw.catalog?.runtimes?.find(entry => entry.id === id)?.available);
 // A canvas that ran again for what had not finished: the runs and how long they took, without the time between them.
 // The first run's span is in its own record, which the retries' record sits beside (<stem>-<stamp>.json).
 const retries = Array.isArray(raw.retries) ? raw.retries : [];
@@ -192,29 +228,46 @@ const record = {
   ...(artifactOutput ? { artifactNodeId: artifact.id, artifactSHA256: crypto.createHash('sha256').update(artifactOutput).digest('hex') } : {}),
   nodes, edges: workflow.edges, ...(media.length ? { media } : {}), note: notes.note, verification: notes.verification,
 };
-if (!catalog?.available) console.warn('warning: the raw record’s runtime catalog did not list the runtime as available');
+if (missingRuntimes.length) console.warn(`warning: the raw record’s runtime catalog did not list ${missingRuntimes.join(', ')} as available`);
 const target = path.join(ROOT, 'apps/web/src/saas/production-runs', `${raw.caseId}.ts`);
-writeRecord(target, record);
-writeSummary(path.join(path.dirname(target), 'summary.json'), record, Boolean(artifactOutput) && nodes.find(node => node.id === artifact.id)?.status === 'done');
-if (media.length) writeStaticMedia(path.join(path.dirname(target), `${raw.caseId}.media.json`));
+const CASE_MEDIA = path.join(ROOT, 'apps/web/showcase/media', raw.caseId);
+// Every file is made and checked before anything is written: a file the run cannot publish (a GLB that names a path,
+// say) leaves the case's record, summary and media as they were.
+const staged = media.length || AGENT_FILES.length ? stageStaticMedia() : undefined;
+// The new media files first (named by their bytes, so no page names them yet), then the manifest, the record and the
+// summary together (writeTogether puts them back if one fails), and only then the case's old files go.
+if (staged) writeMediaFiles(staged);
+const summaryFile = path.join(path.dirname(target), 'summary.json');
+writeTogether([
+  ...(staged ? [[path.join(path.dirname(target), `${raw.caseId}.media.json`), manifestText(staged)]] : []),
+  [target, recordText(record)],
+  [summaryFile, summaryText(summaryFile, record, Boolean(artifactOutput) && nodes.find(node => node.id === artifact.id)?.status === 'done')],
+]);
+if (staged) removeStaleMedia(staged, path.join(path.dirname(target), `${raw.caseId}.media.ts`));
 console.log(`${raw.caseId}: ${record.completed}/${record.total} done, ${record.seconds}s → ${path.relative(ROOT, target)}`);
 
 /**
- * The files the published page names, and a 3D model node's rendered preview picture (the case dialog shows it beside
- * the agents), published as static files in apps/web/showcase/media/<case>/, each named by the first 16 hex digits of
+ * The files the published page names (its media nodes' and its agents' own, a Blender maker's GLBs and renders), and a
+ * 3D model node's rendered preview picture (the case dialog shows it beside the agents), published as static files in
+ * apps/web/showcase/media/<case>/, each named by the first 16 hex digits of
  * its sha256 so a cached copy is never a stale one; production-runs/<case>.media.json maps each `<node id>/<file>` path
  * the page uses to its file. Pictures are re-encoded for the web as JPEG at most 2048 px wide (a preview picture as
  * WebP at most 512 px, keeping its transparency), clips as H.264 at most 1280 px wide without sound; a 3D model is the
  * GLB the run made with its geometry and textures byte for byte, its provider's marks taken out (neutralGlb). Only this
- * run's files stay in the case's folder.
+ * run's files stay in the case's folder. stageStaticMedia makes and checks them all, in memory; writeMediaFiles
+ * writes them.
  */
-function writeStaticMedia(manifestFile) {
+function stageStaticMedia() {
   const stored = STORED;
-  const caseDir = path.join(ROOT, 'apps/web/showcase/media', raw.caseId);
   const scratch = fs.mkdtempSync(path.join(path.dirname(path.resolve(rawFile)), '.media-'));
-  const manifest = {};
+  const manifest = {}, files = new Map();
+  const add = (reference, bytes, type, extension) => {
+    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    const fileName = `${sha256.slice(0, 16)}.${extension}`;
+    files.set(fileName, bytes);
+    manifest[reference] = { src: `/showcase/media/${raw.caseId}/${fileName}`, type, bytes: bytes.length, sha256 };
+  };
   try {
-    fs.mkdirSync(caseDir, { recursive: true });
     for (const item of media) for (const reference of item.files) {
       // A 3D model's rendered picture, and a picture the page does not name (PALLWARD's concepts, which its models were made
       // from), are shown only in the dialog's media strip: small.
@@ -237,25 +290,70 @@ function writeStaticMedia(manifestFile) {
         out = path.join(scratch, `${Object.keys(manifest).length}.jpg`); type = 'image/jpeg'; extension = 'jpg';
         ffmpeg(reference, ['-y', '-v', 'error', '-i', source, '-vf', "scale='min(2048,iw)':-2", '-q:v', '3', out]);
       }
-      const bytes = extension === 'glb' ? neutralGlb(fs.readFileSync(out), reference) : fs.readFileSync(out);
-      const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
-      const fileName = `${sha256.slice(0, 16)}.${extension}`;
-      fs.writeFileSync(path.join(caseDir, fileName), bytes);
-      manifest[reference] = { src: `/showcase/media/${raw.caseId}/${fileName}`, type, bytes: bytes.length, sha256 };
+      add(reference, extension === 'glb' ? neutralGlb(fs.readFileSync(out), reference) : fs.readFileSync(out), type, extension);
+    }
+    // The agents' own files the page names: a GLB as the run made it (its marks taken out, its textures encoded afresh),
+    // a picture as a JPEG at most 2048 px wide from its pixels alone. A file is what its bytes are, whatever its name says.
+    const encode = picture(scratch);
+    for (const { reference, bytes: made } of AGENT_FILES) {
+      if (!artifactOutput?.includes(reference)) continue;
+      const model = made.toString('latin1', 0, 4) === 'glTF';
+      if (model !== /\.glb$/i.test(reference)) throw new Error(`${reference}: its file is ${model ? 'a GLB' : 'not a GLB'}`);
+      if (model) add(reference, neutralGlb(agentGlb(made, reference, KNOWN_IDS, encode), reference), 'model/gltf-binary', 'glb');
+      else {
+        const bytes = encode(made, 'image/jpeg', reference, 2048);
+        // Blender writes the scene file's path into a JPEG's comment; the re-encoding must not carry it.
+        if (identifying(bytes.toString('latin1'), KNOWN_IDS, true)) throw new Error(`${reference}: the re-encoded picture still names a path or an identifier`);
+        add(reference, bytes, 'image/jpeg', 'jpg');
+      }
     }
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    // A scratch folder left behind is only warned of: it must not hide why the media failed (review round 8).
+    try {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    } catch (failure) {
+      console.warn(`could not remove ${scratch}: ${failure.message}`);
+    }
   }
-  const missing = media.flatMap(item => item.files).filter(reference => artifactOutput?.includes(reference) && !manifest[reference]);
+  const missing = [...media.flatMap(item => item.files), ...AGENT_FILES.map(item => item.reference)]
+    .filter(reference => artifactOutput?.includes(reference) && !manifest[reference]);
   if (missing.length) throw new Error(`not published: ${missing.join(', ')}`);
-  const keep = new Set(Object.values(manifest).map(file => path.basename(file.src)));
-  for (const name of fs.readdirSync(caseDir)) if (!keep.has(name)) fs.rmSync(path.join(caseDir, name));
-  const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)));
-  fs.writeFileSync(manifestFile, `${JSON.stringify(sorted, null, 1)}\n`);
-  // The inlined data: URLs these files replace (published before 2026-10-15).
-  fs.rmSync(path.join(path.dirname(manifestFile), `${raw.caseId}.media.ts`), { force: true });
+  return { manifest, files };
+}
+
+function writeMediaFiles({ manifest, files }) {
+  fs.mkdirSync(CASE_MEDIA, { recursive: true });
+  // A file already there under its name (named by its bytes) is left as it is when it holds them; any other is written
+  // whole beside it and renamed into place, so a file a page names is never cut short (review round 6).
+  for (const [fileName, bytes] of files) {
+    const target = path.join(CASE_MEDIA, fileName), temp = `${target}.${process.pid}.new`;
+    if (fs.existsSync(target) && fs.readFileSync(target).equals(bytes)) continue;
+    try {
+      fs.writeFileSync(temp, bytes);
+      fs.renameSync(temp, target);
+    } catch (error) {
+      try {
+        fs.rmSync(temp, { force: true });
+      } catch (failure) {
+        throw new Error(`${error.message}; and ${temp} was left behind (${failure.message})`, { cause: error });
+      }
+      throw error;
+    }
+  }
   const total = Object.values(manifest).reduce((sum, file) => sum + file.bytes, 0);
-  console.log(`${raw.caseId}: ${Object.keys(manifest).length} media file(s), ${Math.round(total / 1024)} KB → ${path.relative(ROOT, caseDir)}`);
+  console.log(`${raw.caseId}: ${Object.keys(manifest).length} media file(s), ${Math.round(total / 1024)} KB → ${path.relative(ROOT, CASE_MEDIA)}`);
+}
+
+/** production-runs/<case>.media.json: each `<node id>/<file>` path the page uses, and its published file. */
+function manifestText({ manifest }) {
+  return `${JSON.stringify(Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b))), null, 1)}\n`;
+}
+
+/** The case's files this publish no longer names, and the inlined data: URLs its files replace (published before
+ * 2026-10-15). */
+function removeStaleMedia({ files }, inlined) {
+  for (const name of fs.readdirSync(CASE_MEDIA)) if (!files.has(name)) fs.rmSync(path.join(CASE_MEDIA, name));
+  fs.rmSync(inlined, { force: true });
 }
 
 /**
@@ -293,9 +391,4 @@ function neutralGlb(bytes, reference) {
   head.write('glTF', 0, 'latin1'); head.writeUInt32LE(2, 4); head.writeUInt32LE(20 + json.length + rest.length, 8);
   head.writeUInt32LE(json.length, 12); head.write('JSON', 16, 'latin1');
   return Buffer.concat([head, json, rest]);
-}
-
-function ffmpeg(reference, args) {
-  const done = spawnSync('ffmpeg', args, { encoding: 'utf8' });
-  if (done.status !== 0) throw new Error(`ffmpeg ${reference}: ${done.stderr}`);
 }
