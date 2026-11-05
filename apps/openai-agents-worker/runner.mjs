@@ -141,6 +141,8 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
 
   let toolPending = false;
   let toolSequence = 0;
+  // workspace_view where this worker turns it on and its sandbox makes pictures (the AgentCore trial's does not).
+  const viewable = Boolean(config.workspace?.view && typeof sandbox?.view === 'function');
   child.on('message', (event) => {
     if (event?.type === 'bedrock_fact') {
       // A Bedrock call's fallback to its model's other profile, or its failure by AWS error type: for this worker's log
@@ -150,7 +152,9 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
       return;
     }
     if (event?.type === 'workspace_call') {
-      if (!sandbox || cancellation || terminalEvent || !validWorkspaceCall(event) || toolPending || event.sequence !== toolSequence + 1) { stop('cancelled'); return; }
+      // A view only where it is offered (the task process offers it only then).
+      if (!sandbox || cancellation || terminalEvent || !validWorkspaceCall(event) || toolPending || event.sequence !== toolSequence + 1
+        || (event.name === 'workspace_view' && !viewable)) { stop('cancelled'); return; }
       toolSequence = event.sequence;
       toolPending = true;
       dispatchWorkspaceTool(sandbox, event.name, event.args).then(result => {
@@ -230,13 +234,15 @@ export async function startIsolatedRun({ config, request, onEvent, onExit, onDia
     type: 'run',
     acceptedAtNs,
     request,
-    ...(request.workspace ? { workspaceAbilities: { ...workspaceAbilities(config.workspace), ...(blenderAbilities ? { blender: blenderAbilities } : {}) } } : {}),
+    ...(request.workspace ? { workspaceAbilities: { ...workspaceAbilities({ ...config.workspace, view: viewable || undefined }), ...(sandbox?.paths ? { paths: sandbox.paths } : {}), ...(blenderAbilities ? { blender: blenderAbilities } : {}) } } : {}),
     modelConfig: {
       provider: modelConfig.provider, model: modelConfig.model, baseURL: modelConfig.baseURL,
       // A Bedrock key travels only inside its auth record, never as an OpenAI SDK key.
       apiKey: modelConfig.provider === 'bedrock' ? '' : modelConfig.apiKey,
       contextWindow: modelConfig.contextWindow, maxTokens: modelConfig.maxTokens, protocol: modelConfig.protocol,
       disableThinking: modelConfig.disableThinking === true,
+      // The model takes images (a Bedrock catalog entry's input), for a workspace's workspace_view.
+      ...(Array.isArray(modelConfig.input) && modelConfig.input.includes('image') ? { vision: true } : {}),
       ...(modelConfig.provider === 'bedrock' ? { region: modelConfig.region, bedrockAuth: auth, ...(modelConfig.promptCache === true ? { promptCache: true } : {}),
         ...(modelConfig.fallbackModel ? { fallbackModel: modelConfig.fallbackModel } : {}) } : {}),
     },

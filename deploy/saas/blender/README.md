@@ -63,7 +63,9 @@ As a workspace (`--network=none`, read-only root, uid 1000, `--cap-drop=ALL`, `n
 `device=<n>[,<n>…]`), `--cpus` 8 (`CPUS`, 1–32), 8 GiB of memory (`MEMORY_MB`, 2,048–32,768), 1 GiB tmpfs `/workspace`
 and `/tmp`, 1,024 processes, 8,192 open files, commands up to 600 s (`COMMAND_TIMEOUT_MS`), each Blender call up to
 `BLENDER_CALL_SECONDS` (10–290, default 280). No web: a workstation with `AWWO_WORKSPACE_EGRESS_*` set does not start.
-The containers may run on another host's Docker daemon (`DOCKER_CONTEXT`), such as a GPU host's.
+The containers may run on another host's Docker daemon (`DOCKER_CONTEXT`), such as a GPU host's. With `VIEW=on`, a run
+on a model that takes images (a Bedrock catalog Claude model) can look at its renders: `workspace_view` shows it a
+picture of an image file, made by the image's own Pillow (`apps/openai-agents-worker/workspace-view.ts`).
 
 ## Security
 

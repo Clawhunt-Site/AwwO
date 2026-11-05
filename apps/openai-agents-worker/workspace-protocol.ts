@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { BLENDER_MEMORY_MB, loadWorkspaceBlender, type BlenderAbilities, type WorkspaceBlender } from './workspace-blender.ts';
-import { loadWorkspaceEgress, parseWorkspaceTools, WORKSPACE_MEMORY_MB, type WorkspaceEgress, type WorkspaceTool } from './workspace-sandbox.ts';
+import { loadWorkspaceEgress, parseWorkspaceTools, WORKSPACE_MEMORY_MB, type WorkspaceEgress, type WorkspacePaths, type WorkspaceTool } from './workspace-sandbox.ts';
 
 export const WORKSPACE_BODY_BYTES = 16 * 1024 * 1024;
 export const WORKSPACE_FILE_BYTES = 2 * 1024 * 1024;
 export const WORKSPACE_DEFAULT_MODEL_CALLS = 32;
 export const WORKSPACE_MAX_MODEL_CALLS = 64;
-export const WORKSPACE_TOOL_NAMES = ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_exec', 'workspace_publish', 'workspace_archive'] as const;
+// workspace_view is offered only where the worker turns it on, to a model that takes images (workspace-view.ts).
+export const WORKSPACE_TOOL_NAMES = ['workspace_list', 'workspace_read', 'workspace_write', 'workspace_exec', 'workspace_publish', 'workspace_archive', 'workspace_view'] as const;
 export type WorkspaceToolName = typeof WORKSPACE_TOOL_NAMES[number];
 export type OutputField = { id: string; type: 'text' | 'markdown' | 'html' | 'file' | 'number' | 'boolean'; required: boolean };
 export type WorkspaceFile = { name: string; content: string; encoding: 'base64'; sha256: string; sourceNodeId?: string; fieldId?: string };
@@ -30,10 +31,14 @@ export interface WorkspaceConfig {
   dockerContext?: string;
   /** A Blender workstation (AWWO_OPENAI_AGENTS_WORKSPACE_BLENDER=on, workspace-blender.ts). */
   blender?: WorkspaceBlender;
+  /** workspace_view for a model that takes images (AWWO_OPENAI_AGENTS_WORKSPACE_VIEW=on, workspace-view.ts). */
+  view?: true;
 }
 /** What the task process tells its agent about the workspace; a workstation's Blender part is read from its container. */
-export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean; blender?: BlenderAbilities }
-export const workspaceAbilities = (config: Partial<WorkspaceConfig>): WorkspaceAbilities => ({ tools: [...(config.tools ?? [])], web: !!config.egress });
+/** paths: where the sandbox's commands run and find the inputs, when it says (WorkspaceSandbox.paths). */
+export interface WorkspaceAbilities { tools: WorkspaceTool[]; web: boolean; blender?: BlenderAbilities; view?: true; paths?: WorkspacePaths }
+export const workspaceAbilities = (config: Partial<WorkspaceConfig>): WorkspaceAbilities => ({ tools: [...(config.tools ?? [])], web: !!config.egress,
+  ...(config.view ? { view: true as const } : {}) });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const FIELD_TYPES = new Set(['text', 'markdown', 'html', 'file', 'number', 'boolean']);
 const RESERVED = new Set(['__proto__', 'constructor', 'prototype', '__workspace_snapshot']);
@@ -68,8 +73,10 @@ export function loadWorkspaceConfig(env: Record<string, string | undefined>): Wo
     throw new Error(`AWWO_OPENAI_AGENTS_WORKSPACE_MEMORY_MB must be ${bounds.min}-${bounds.max}`);
   const dockerContext = env.AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT || undefined;
   if (dockerContext !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(dockerContext)) throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_DOCKER_CONTEXT must be a Docker context name');
+  const view = env.AWWO_OPENAI_AGENTS_WORKSPACE_VIEW || 'off';
+  if (view !== 'on' && view !== 'off') throw new Error('AWWO_OPENAI_AGENTS_WORKSPACE_VIEW must be on or off');
   return Object.freeze({ image, dockerExecutable, callbackURL, maxModelCalls: Number(rawCalls), tools, commandTimeoutMs, ...(egress ? { egress } : {}),
-    ...(memoryMB !== undefined ? { memoryMB } : {}), ...(dockerContext ? { dockerContext } : {}), ...(blender ? { blender } : {}) });
+    ...(memoryMB !== undefined ? { memoryMB } : {}), ...(dockerContext ? { dockerContext } : {}), ...(blender ? { blender } : {}), ...(view === 'on' ? { view: true as const } : {}) });
 }
 function validFile(value: unknown): value is WorkspaceFile {
   if (!object(value) || typeof value.name !== 'string' || !value.name || value.name.length > 200

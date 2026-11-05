@@ -13,7 +13,7 @@ import { BLENDER_KEEP_ALIVE, BLENDER_MCP_OUTPUT_BYTES, BLENDER_RESULT_CHARS, BLE
 import { loadWorkspaceConfig } from './workspace-protocol.ts';
 import { COMMAND_HELPER, createWorkspaceSandbox, WORKSPACE_FILE_HELPER, workspaceDockerArgs, type WorkspaceDockerRunner } from './workspace-sandbox.ts';
 import { dispatchWorkspaceTool, validWorkspaceCall } from './workspace-rpc.ts';
-import { executeWorkspaceAgent } from './workspace-runtime.ts';
+import { executeWorkspaceAgent, inputsInstruction } from './workspace-runtime.ts';
 
 const image = 'awwo-blender@sha256:' + 'b'.repeat(64);
 const blender = { cpus: 8, callSeconds: 280, gpus: 'device=0' };
@@ -259,6 +259,12 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
   const steps = [
     { name: 'execute_blender_code', arguments: { code: "result = {'objects': 3}" } },
     // Arguments that do not fit come back to the model as an error to correct; they never reach Blender.
+  // The Docker workspace says where its commands run and find the inputs; a sandbox that does not (the AgentCore
+  // trial's, whose commands run elsewhere) has its agent told the workspace tools' path alone.
+  assert.deepEqual(sandbox.paths, { workspace: '/workspace', inputs: '/inputs' });
+  assert.equal(inputsInstruction(), 'The workspace tools name an input inputs/<name>, which is read-only.');
+  assert.equal(inputsInstruction(sandbox.paths),
+    'The workspace tools name an input inputs/<name>; commands and code (in /workspace) open it at /inputs/<name>, which is read-only.');
     { name: 'search_api_docs', arguments: { query: 'bmesh', limit: 3 } },
     { name: 'workspace_publish', arguments: { field: 'page', path: 'out/index.html' } },
   ];
@@ -286,7 +292,7 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
   await executeWorkspaceAgent({ request: { prompt: 'Model a ring and show it', messages: [], workspace: { version: 1, id: 'a'.repeat(64), maxModelCalls: 8,
     callbackURL: `${base}/api/internal/workspace-calls`, callbackToken: 'test-callback-credential-never-in-model-state', inputs: [], outputFields: [{ id: 'page', type: 'html', required: true }] } },
   modelConfig: { model: 'fixture', apiKey: 'k', baseURL: `${base}/v1`, protocol: 'chat_completions', contextWindow: 65_536, maxTokens: 4096 }, signal: new AbortController().signal,
-  abilities: { tools: [], web: false, blender: abilities }, emit: async event => { events.push(event); },
+  abilities: { tools: [], web: false, blender: abilities, paths: { workspace: '/workspace', inputs: '/inputs' } }, emit: async event => { events.push(event); },
   broker: async (name, args) => {
     brokered.push({ name, args });
     if (name === 'blender_call') return { text: '{"status": "ok", "result": {"objects": 3}}', isError: false, restarted: false };
@@ -311,6 +317,8 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
 async function python(code: string, payload: unknown): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('python3', ['-I', '-S', '-c', code], { stdio: ['pipe', 'pipe', 'pipe'] });
+  // Blender and commands run in /workspace: an input is at /inputs/<name> for them (a trial lost five calls to inputs/).
+  assert.ok(system.includes('commands and code (in /workspace) open it at /inputs/<name>'));
     const out: Buffer[] = [], err: Buffer[] = [];
     child.stdout.on('data', chunk => out.push(chunk)); child.stderr.on('data', chunk => err.push(chunk));
     child.on('error', reject);

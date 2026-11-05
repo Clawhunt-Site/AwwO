@@ -333,6 +333,19 @@ test('the prompt cache reaches only the Claude models it names, through the runn
   assert.equal('promptCache' in (await runOnce(off, 'bedrock.claude-opus-5-5')), false);
 });
 
+test('the runner tells a child its model takes images only for a catalog model whose input lists them', { timeout: 15_000 }, async () => {
+  const c = withCatalog({ AWWO_BEDROCK_API_KEY: BEDROCK_KEY });
+  const taskURL = new URL('./bedrock-ipc-fixture.mjs', import.meta.url);
+  const runOnce = async (model) => {
+    const events = [];
+    const handle = await startIsolatedRun({ config: c, request: request({ model }), onEvent: event => events.push(event) }, { taskURL, bedrockAuth: async key => ({ bearerToken: key }) });
+    await handle.done;
+    return JSON.parse(events.at(-1).text);
+  };
+  assert.equal((await runOnce('bedrock.claude-opus-5-5')).vision, true);
+  assert.equal('vision' in (await runOnce('bedrock.glm-5')), false);
+});
+
 test('the runner hands a Claude child its model\'s other profile, and logs the child\'s content-free facts', { timeout: 15_000 }, async () => {
   const c = withCatalog({ AWWO_BEDROCK_API_KEY: BEDROCK_KEY });
   const taskURL = new URL('./bedrock-ipc-fixture.mjs', import.meta.url);

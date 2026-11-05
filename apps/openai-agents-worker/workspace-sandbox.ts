@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import { BLENDER_BRIDGE_WAIT, BLENDER_KEEP_ALIVE, BLENDER_MCP_CALL, BLENDER_MCP_OUTPUT_BYTES, BLENDER_MEMORY_MB, BLENDER_SNAPSHOT_LEAVE_OUT, BLENDER_TMPFS_BYTES,
   blenderArguments, blenderBridge, blenderCallResult, blenderDockerOptions, blenderGpu, blenderTools, type BlenderAbilities, type BlenderCallResult,
   type WorkspaceBlender } from './workspace-blender.ts';
+import { VIEW_BOUNDS, VIEW_FORMATS, verifiedView, type UnreadableView, type WorkspaceView } from './workspace-view.ts';
 
 /**
  * The web, for a workspace: the container still has no network interface but loopback. The egress proxy
@@ -68,16 +69,25 @@ export interface WorkspaceFile extends WorkspaceSnapshot {
 export interface WorkspaceRead extends Omit<WorkspaceFile, 'encoding'> { encoding: 'utf8' | 'base64' }
 export interface WorkspaceEntry { path: string; type: 'file' | 'directory'; byteLength: number }
 export interface WorkspaceExecResult { exitCode: number; stdout: string; stderr: string; truncated: boolean }
+/** A sandbox's commands' working directory, which is the project workspace, and where they find the inputs. */
+export interface WorkspacePaths { readonly workspace: string; readonly inputs: string }
+export const DOCKER_WORKSPACE_PATHS: WorkspacePaths = Object.freeze({ workspace: '/workspace', inputs: '/inputs' });
 export interface WorkspaceSandbox {
   list(path?: string): Promise<WorkspaceEntry[]>;
   read(path: string): Promise<WorkspaceRead>;
   write(path: string, content: string, encoding?: 'utf8' | 'base64'): Promise<WorkspaceRead>;
   exec(command: string, options?: { timeoutMs?: number }): Promise<WorkspaceExecResult>;
   publish(path: string): Promise<WorkspaceRead>;
+  /** A picture of an image file for the agent to look at (workspace-view.ts), or why there is none; a sandbox without
+   *  it (the AgentCore trial's) is offered no workspace_view. */
+  view?(path: string): Promise<WorkspaceView | UnreadableView>;
   archive(options?: { snapshot?: boolean }): Promise<WorkspaceFile>;
   close(): Promise<void>;
   /** Values commands can read (the run's proxy password) that a worker never shows in what it relays. */
   readonly secrets?: readonly string[];
+  /** Where commands and code run and find the inputs, when the sandbox says (the Docker workspace's: /workspace and
+   *  /inputs); the agent is told them. */
+  readonly paths?: WorkspacePaths;
   /** A Blender workstation's: what its agent is offered and told, and one call of an offered tool. */
   readonly blender?: {
     abilities(): Promise<BlenderAbilities>;
@@ -229,6 +239,8 @@ SKIP = {'.git', 'node_modules', '__pycache__', '.venv', '.pytest_cache', '.mypy_
 # outgrow a snapshot and failed runs after their last answer. A snapshot leaves them out (they are fetched again); one
 # made before this keeps every other file when restored.
 HOME_CACHES = {'.npm', '.cache', '.local', '.node-gyp'}
+# Pillow, for a view: the image's own Debian package, which -S leaves off the path (the workspace is never on it).
+PILLOW = '/usr/lib/python3/dist-packages'
 payload = json.load(sys.stdin)
 FILE_LIMIT = payload['fileLimit']
 ARCHIVE_LIMIT = payload['archiveLimit']
@@ -281,7 +293,8 @@ def parent(path, write=False, root=False):
         os.close(fd)
         raise
 
-def file_bytes(path):
+def file_bytes(path, limit=None):
+    limit = limit or FILE_LIMIT
     fd, name = parent(path)
     try: f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     finally: os.close(fd)
@@ -289,11 +302,70 @@ def file_bytes(path):
         info = os.fstat(f)
         if not stat.S_ISREG(info.st_mode): raise ValueError('Only regular files can be read')
         if info.st_nlink != 1: raise ValueError('Hard linked files cannot be published')
-        if info.st_size > FILE_LIMIT: raise ValueError('Workspace file exceeds size limit')
-        with os.fdopen(f, 'rb', closefd=False) as stream: data = stream.read(FILE_LIMIT + 1)
-        if len(data) > FILE_LIMIT: raise ValueError('Workspace file exceeds size limit')
+        if info.st_size > limit: raise ValueError('Workspace file exceeds size limit')
+        with os.fdopen(f, 'rb', closefd=False) as stream: data = stream.read(limit + 1)
+        if len(data) > limit: raise ValueError('Workspace file exceeds size limit')
         return data
     finally: os.close(f)
+
+# Orientation tags that need turning (EXIF 0x0112), as Image.transpose methods' names.
+TURNS = {2: 'FLIP_LEFT_RIGHT', 3: 'ROTATE_180', 4: 'FLIP_TOP_BOTTOM', 5: 'TRANSPOSE', 6: 'ROTATE_270', 7: 'TRANSVERSE', 8: 'ROTATE_90'}
+
+def view(path, bounds):
+    # A picture of an image file for the model to look at (workspace-view.ts): the first frame, upright, transparent areas
+    # on a grey checkerboard, scaled down to the bounds, as a JPEG. A file it cannot read answers why in a closed word.
+    data = file_bytes(path, bounds['sourceBytes'])
+    source = {'path': path, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+    sys.path.append(PILLOW)
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    try:
+        image = Image.open(io.BytesIO(data), formats=bounds['formats'])
+        # A camera's multi-picture JPEG is read as a JPEG.
+        kind, frames = 'JPEG' if image.format == 'MPO' else image.format, getattr(image, 'n_frames', 1)
+        width, height = image.size
+        if width * height > bounds['sourcePixels']: return dict(source, unreadable='size')
+        orientation = image.getexif().get(0x0112)
+        turn = TURNS.get(orientation)
+        swaps = turn in ('TRANSPOSE', 'ROTATE_270', 'TRANSVERSE', 'ROTATE_90')
+        scale = min(1.0, bounds['edge'] / max(width, height), (bounds['pixels'] / (width * height)) ** 0.5)
+        size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        if kind == 'JPEG': image.draft(None, size)
+        # Pillow's TIFF loader turns its image upright itself as it loads it (_tile_orientation, Pillow 9.4): the picture
+        # is made the way it comes out, and turned no further.
+        if turn and kind == 'TIFF' and getattr(image, '_tile_orientation', None) == orientation:
+            image.load()
+            size, turn = ((size[1], size[0]) if swaps else size), None
+        if image.mode.startswith('I;16'): image = image.convert('I')
+        if image.mode in ('I', 'F'):
+            low, high = image.getextrema()
+            factor = 255.0 / (high - low) if high > low else 0.0
+            image = image.point(lambda value: value * factor - low * factor).convert('L')
+        alpha = image.mode in ('RGBA', 'LA', 'PA', 'RGBa', 'La') or 'transparency' in image.info
+        # Scaled premultiplied, so that no colour bleeds from transparent pixels.
+        if alpha: image = (image if image.mode == 'RGBA' else image.convert('RGBA')).convert('RGBa')
+        elif image.mode != 'RGB': image = image.convert('RGB')
+        if image.size != size: image = image.resize(size, Image.Resampling.LANCZOS, reducing_gap=3.0)
+        if alpha: image = image.convert('RGBA')
+        if turn: image = image.transpose(getattr(Image.Transpose, turn))
+        if alpha:
+            board = Image.new('RGBA', image.size, (204, 204, 204, 255))
+            dark = Image.new('RGBA', (16, 16), (153, 153, 153, 255))
+            for y in range(0, image.size[1], 16):
+                for x in range(16 * (y // 16 % 2), image.size[0], 32): board.paste(dark, (x, y))
+            board.alpha_composite(image)
+            image = board.convert('RGB')
+        for quality in (85, 70, 55):
+            output = io.BytesIO()
+            image.save(output, 'JPEG', quality=quality, optimize=True)
+            if output.tell() <= bounds['bytes']: break
+        else: return dict(source, unreadable='size')
+    except MemoryError: return dict(source, unreadable='size')
+    except Exception: return dict(source, unreadable='format')
+    picture = output.getvalue()
+    upright = (height, width) if swaps else (width, height)
+    return dict(source, format=kind, width=upright[0], height=upright[1], frames=frames, alpha=alpha,
+                view={'width': image.size[0], 'height': image.size[1], 'content': base64.b64encode(picture).decode(), 'byteLength': len(picture), 'sha256': hashlib.sha256(picture).hexdigest()})
 
 def write_bytes(path, data):
     if len(data) > FILE_LIMIT: raise ValueError('Workspace file exceeds size limit')
@@ -371,6 +443,8 @@ elif action == 'list':
     finally: os.close(fd)
 elif action in ('read', 'publish'):
     result = file_result(payload['path'], file_bytes(payload['path']))
+elif action == 'view':
+    result = view(payload['path'], payload['bounds'])
 elif action == 'write':
     data = base64.b64decode(payload['content'], validate=True)
     write_bytes(payload['path'], data)
@@ -704,11 +778,17 @@ export async function createWorkspaceSandbox(config: WorkspaceSandboxConfig,
       } catch (error) { await close(); throw error; }
     }),
     publish: path => serialized(async () => verified(await invoke('publish', { path: validateWorkspacePath(path) }), path, fileLimit)),
+    view: path => serialized(async () => {
+      const value = verifiedView(await invoke('view', { path: validateWorkspacePath(path), bounds: { ...VIEW_BOUNDS, formats: VIEW_FORMATS } }), path);
+      if (!value) throw new Error('Invalid workspace view response');
+      return value;
+    }),
     // A workstation's snapshot (not the project ZIP an agent publishes) leaves its outputs and binaries out.
     archive: (archiveOptions = {}) => serialized(async () => verified(await invoke('archive', config.blender && archiveOptions.snapshot ? { snapshotLeaveOut: BLENDER_SNAPSHOT_LEAVE_OUT } : {}),
       'workspace.zip', archiveLimit, true) as WorkspaceFile),
     close,
     secrets: egressPassword ? [egressPassword] : [],
+    paths: DOCKER_WORKSPACE_PATHS,
     ...(blender ? { blender } : {}),
   };
 }

@@ -10,6 +10,7 @@ process.on('message', message => {
     credentialFields: auth?.credentials ? Object.keys(auth.credentials).sort() : [],
     ...(config.promptCache !== undefined ? { promptCache: config.promptCache } : {}),
     ...(config.fallbackModel !== undefined ? { fallbackModel: config.fallbackModel } : {}),
+    ...(config.vision !== undefined ? { vision: config.vision } : {}),
   };
   // A model with a second profile reports a fallback to it, as the bridge would, for the parent's log.
   if (config.fallbackModel) process.send({ type: 'bedrock_fact', fact: { event: 'fallback', from: config.model, to: config.fallbackModel, after: 'ServiceUnavailableException' } });

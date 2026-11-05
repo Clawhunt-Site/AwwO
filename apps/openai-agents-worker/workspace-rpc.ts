@@ -40,6 +40,10 @@ export async function dispatchWorkspaceTool(sandbox: WorkspaceSandbox, name: Wor
     case 'workspace_write': return sandbox.write(String(args.path), String(args.content));
     case 'workspace_exec': return sandbox.exec(String(args.command));
     case 'workspace_publish': return sandbox.publish(String(args.path));
+    case 'workspace_view': {
+      if (!sandbox.view) throw new Error('Unknown workspace operation');
+      return sandbox.view(String(args.path));
+    }
     case 'workspace_archive': return sandbox.archive();
     case 'snapshot': return sandbox.archive({ snapshot: true });
     // A workstation's Blender tool: the sandbox checks the tool and its arguments against what it offered.

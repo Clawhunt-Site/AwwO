@@ -7,7 +7,7 @@ type Request = Parameters<Model['getStreamedResponse']>[0];
 type Item = Exclude<Request['input'], string>[number];
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? '');
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const WORKSPACE_TOOL = /^workspace_(list|read|write|exec|publish|archive)$/;
+const WORKSPACE_TOOL = /^workspace_(list|read|write|exec|publish|archive|view)$/;
 const BLENDER_TOOLS: ReadonlySet<string> = new Set(BLENDER_TOOL_NAMES);
 /** Whether a completed call of the tool may become a receipt: the workspace's own tools, and a workstation's Blender
  *  tools (workspace-blender.ts), whose answers are text of up to 64 KiB. */
@@ -179,7 +179,9 @@ function receiptSummary(item: Extract<Item, { type: 'function_call' }>, result: 
       if (excerptBytes === 0) summary.commandOmitted = true;
     }
   }
-  if (record(receipt)) for (const key of ['written', 'published', 'path', 'bytes', 'byteLength', 'sha256', 'deliveryRoomBytes', 'exitCode', 'truncated', 'error']) {
+  // A view's receipt keeps what it showed; its picture leaves with it (workspace-view.ts).
+  if (record(receipt)) for (const key of ['written', 'published', 'path', 'bytes', 'byteLength', 'sha256', 'deliveryRoomBytes', 'exitCode', 'truncated', 'error',
+    'viewed', 'view', 'width', 'height', 'shownWidth', 'shownHeight']) {
     if (typeof receipt[key] === 'string' || typeof receipt[key] === 'number' || typeof receipt[key] === 'boolean') summary[key] = receipt[key];
   }
   // Keep explicit excerpts and the actual exit status; never infer success.
