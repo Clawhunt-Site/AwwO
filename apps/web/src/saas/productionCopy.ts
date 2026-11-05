@@ -43,7 +43,9 @@ export function createProductionCopyDocument(workflow: OfficialWorkflow, record:
   // case run's own files, which the copy does not have, so its delivery is not pinned either: it is made on the first run.
   // So is a page that names them through a module it pastes (a 3D model's GLB, loaded by its path in the module's code).
   const fed = new Set((workflow.media ?? []).flatMap(item => item.feeds ?? []));
-  const files = (record.media ?? []).flatMap(item => item.files);
+  // So is a page that names an agent's own files (a Blender maker's GLBs and renders): the agent is made afresh too (it
+  // hands files on), and its files with it.
+  const files = [...(record.media ?? []).flatMap(item => item.files), ...record.nodes.flatMap(node => node.files ?? [])];
   // createOfficialDocument mints one node per workflow node, in the workflow's order, then the media nodes.
   const nodes = document.nodes.map((node, index): CanvasNode => {
     const spec = workflow.nodes[index];

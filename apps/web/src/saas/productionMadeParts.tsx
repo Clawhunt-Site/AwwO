@@ -41,9 +41,20 @@ export function NodeOutput({ node }: { node: ProductionRunNode }) {
   return <><div className="production-made-markdown">{renderRecordMarkdown(node.output || '')}</div>{report}{extras}</>;
 }
 
-/** Where a node worked: the sandbox computer's files, commands and checks, and how many model calls that took. */
+/** Where a node worked: the sandbox computer's files, commands and checks (or the Blender workstation's), and how many
+ * model calls that took. */
 export function NodeWork({ node }: { node: ProductionRunNode }) {
   if (node.kind === 'assemble') return <p className="production-made-work">{node.fromTemplate ? 'Written with no model' : 'Assembled with no model'}</p>;
-  if (!node.sandbox) return null;
-  return <p className="production-made-work">{`Worked in its own sandbox computer${node.calls ? ` · ${node.calls} model calls` : ''}${node.tokens?.output ? ` · ${node.tokens.output.toLocaleString()} output tokens` : ''}`}</p>;
+  if (!node.sandbox && !node.blender) return null;
+  return <p className="production-made-work">{`${node.blender ? 'Worked in the Blender workstation' : 'Worked in its own sandbox computer'}${node.calls ? ` · ${node.calls} model calls` : ''}${node.tokens?.output ? ` · ${node.tokens.output.toLocaleString()} output tokens` : ''}`}</p>;
+}
+
+/** The files an agent made and handed on (a Blender maker's renders and GLBs): a picture the page shows, small; any
+ * other by its name. */
+export function NodeFiles({ node, files }: { node: ProductionRunNode; files: Readonly<Record<string, string>> | undefined }) {
+  if (!node.files?.length) return null;
+  return <ul className="production-made-files" aria-label="The files it handed on">{node.files.map(reference => {
+    const name = reference.slice(reference.indexOf('/') + 1), url = /\.(?:jpe?g|png|webp)$/i.test(name) ? files?.[reference] : undefined;
+    return <li key={reference}>{url ? <img src={url} alt="" /> : <i aria-hidden="true" />}<span>{name}</span></li>;
+  })}</ul>;
 }

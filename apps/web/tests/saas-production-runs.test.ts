@@ -19,19 +19,25 @@ it('publishes exactly the generated files a media case’s page names as static 
   for (const record of RECORDS.filter(value => value.canvas !== 'recorded')) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     const files = MEDIA[`../src/saas/production-runs/${record.caseId}.media.json`];
-    if (!workflow?.media?.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
-    expect(record.media?.map(item => [item.id, item.title, item.kind]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title, item.kind]));
+    // An agent's own files (a Blender maker's GLBs and renders) are the ones its node declares, by `<node id>/<file name>`.
+    for (const node of record.nodes) if (node.files) expect(node.files, `${record.caseId} ${node.id}`).toEqual(
+      (workflow?.nodes.find(spec => spec.id === node.id)?.files ?? []).map(file => `${node.id}/${file.label}`));
+    const made = record.nodes.flatMap(node => node.files ?? []);
+    if (!workflow?.media?.length && !made.length) { expect(record.media, record.caseId).toBeUndefined(); expect(files, record.caseId).toBeUndefined(); continue; }
+    if (!workflow) throw new Error(`${record.caseId}: no workflow`);
+    if (workflow.media?.length) expect(record.media?.map(item => [item.id, item.title, item.kind]), record.caseId).toEqual(workflow.media.map(item => [item.id, item.title, item.kind]));
+    else expect(record.media, record.caseId).toBeUndefined();
     const page = record.nodes.find(node => node.id === record.artifactNodeId)?.output ?? '';
     // What the page names, and what the dialog shows beside the agents: a 3D model's preview picture, and the picture of an
     // image node the page does not name (PALLWARD's concepts).
     const strip = (item: NonNullable<ProductionRunRecord['media']>[number], file: string) =>
       (item.kind === 'model3d' && /\.(?:png|jpe?g|webp)$/i.test(file)) || (item.kind === 'image' && file === item.files[0] && !page.includes(file));
-    const published = record.media!.flatMap(item => item.files.filter(file => page.includes(file) || strip(item, file)));
+    const published = [...(record.media ?? []).flatMap(item => item.files.filter(file => page.includes(file) || strip(item, file))), ...made.filter(file => page.includes(file))];
     expect(Object.keys(files ?? {}).sort(), record.caseId).toEqual(published.sort());
     const folder = path.join(WEB, 'showcase', 'media', record.caseId);
     for (const [reference, file] of Object.entries(files ?? {})) {
-      const item = record.media!.find(value => value.files.includes(reference))!, kind = item.kind;
-      const type = kind === 'video' ? 'video/mp4' : /\.glb$/i.test(reference) ? 'model/gltf-binary' : strip(item, reference) ? 'image/webp' : 'image/jpeg';
+      const item = record.media?.find(value => value.files.includes(reference));
+      const type = item?.kind === 'video' ? 'video/mp4' : /\.glb$/i.test(reference) ? 'model/gltf-binary' : item && strip(item, reference) ? 'image/webp' : 'image/jpeg';
       expect(file.type, reference).toBe(type);
       // Served beside the case footage, named by its content.
       expect(file.src, reference).toBe(`/showcase/media/${record.caseId}/${file.sha256.slice(0, 16)}.${{ 'video/mp4': 'mp4', 'model/gltf-binary': 'glb', 'image/webp': 'webp', 'image/jpeg': 'jpg' }[type]}`);
@@ -129,7 +135,9 @@ it('loads a media case’s files as data: URLs from the site, all or none: a fil
   }) as typeof fetch;
   await expect(loadProductionMedia(record.caseId, late(serve().fetchFile), 50, handed, Infinity)).rejects.toThrow('production_media_unavailable');
   expect(Object.keys(await loadProductionMedia(record.caseId, late(serve().fetchFile), 50, handed, total / 5)).sort()).toEqual(Object.keys(manifest).sort());
-  expect(await loadProductionMedia('no-such-case', whole.fetchFile)).toEqual({});
+  // A case that asks for its files and has no manifest is a publication that did not finish: it fails as a missing file
+  // does, so its dialog offers to try again rather than show a page without the files it names.
+  await expect(loadProductionMedia('no-such-case', whole.fetchFile)).rejects.toThrow('production_media_unavailable');
 });
 
 it('publishes a record for real cases only, and summarises each one exactly', () => {

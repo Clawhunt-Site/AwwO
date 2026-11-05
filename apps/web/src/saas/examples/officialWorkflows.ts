@@ -38,15 +38,54 @@ export interface OfficialWorkflowNode {
   /** A sandbox agent's file output (`file`) beside its result, labelled so: what it hands to the agent after it (a file
    *  wire, `port: 'file'`), e.g. a project folder packed as one file. */
   readonly handoff?: string;
+  /** Files a sandbox or Blender agent delivers beside its result (a GLB, a render), each its own `file` output with the
+   *  file's own name as its label (`ring.glb`), at most 8 (the API's limit). A page loads one by `<this node's id>/<label>`:
+   *  the canvas's previews find a file by that name, and the homepage by the node's id and that name. A wire takes one
+   *  by `port: <its id>`, into an input of its own on the target. */
+  readonly files?: ReadonlyArray<{ readonly id: string; readonly label: string }>;
 }
-/** A wire of a case canvas: from the source's result, or from its `file` output (a file input on the target) or its
- *  `report` output. */
+/** A wire of a case canvas: from the source's result, or from its `file` output (a file input on the target), its
+ *  `report` output, or one of its `files` (by that file's id, a file input of its own on the target). */
 export interface OfficialWorkflowEdge {
   readonly from: string;
   readonly to: string;
   readonly label: string;
-  readonly port?: 'file' | 'report';
+  readonly port?: string;
 }
+/** A node's own files (OfficialWorkflowNode.files): each id names an output of its own, so not result, report or file
+ *  (its other outputs), none twice and none the workspace runtime refuses (at most 64 characters, not constructor or
+ *  prototype: workspace-protocol.ts), at most 8; each label is the file's name, which the canvas's previews find the
+ *  file by, so no two files of a canvas share one, and none is named as a media node's files are (image-1.jpg, a 3D
+ *  model's preview-1.png). */
+const RESERVED_OUTPUTS = new Set(['result', 'report', 'file', 'constructor', 'prototype']);
+const FILE_ID = /^[a-z][a-z0-9_]{0,63}$/;
+const FILE_NAME = /^[a-z0-9][a-z0-9_-]*\.[a-z0-9]+$/;
+const MEDIA_FILE_NAME = /^(?:image|video|model|audio|preview)-\d+\./;
+function checkFiles(item: OfficialWorkflow): void {
+  const names = new Set<string>();
+  // As the previews find a file: by its name's last part, in lower case (pickCanvasFile).
+  const handoffs = new Set(item.nodes.flatMap(spec => (spec.handoff ? [spec.handoff.split('/').pop()!.toLowerCase()] : [])));
+  for (const spec of item.nodes) {
+    const files = spec.files ?? [];
+    // A handoff is one more file output, and the server takes at most 8 from a node.
+    if (files.length + (spec.handoff ? 1 : 0) > 8) throw new Error(`Invalid official workflow files: ${spec.id} has more than 8, its handoff counted`);
+    const ids = new Set<string>();
+    for (const file of files) {
+      if (!FILE_ID.test(file.id) || RESERVED_OUTPUTS.has(file.id) || ids.has(file.id)) throw new Error(`Invalid official workflow file: ${spec.id}.${file.id}`);
+      if (!FILE_NAME.test(file.label) || MEDIA_FILE_NAME.test(file.label) || names.has(file.label) || handoffs.has(file.label))
+        throw new Error(`Invalid official workflow file name: ${spec.id} ${file.label}`);
+      ids.add(file.id);
+      names.add(file.label);
+    }
+  }
+}
+/** A wire that carries a file: from a `handoff` or one of the source's `files` (a wire from the result, named or not, or
+ *  from the report carries text). */
+const fileWire = (edge: OfficialWorkflowEdge) => edge.port !== undefined && edge.port !== 'report' && edge.port !== 'result';
+/** The target's input a wire fills: `from_<source>`, or for one of the source's `files`, `from_<source>_<file id>`, so
+ *  that two files of one source are two inputs (one source per input port, as the server's DAG check requires). */
+const wireInput = (edge: OfficialWorkflowEdge) =>
+  fileWire(edge) && edge.port !== 'file' ? `from_${edge.from}_${edge.port}` : `from_${edge.from}`;
 /** The canvas behind a homepage production case (productionWorkflows.ts), which createOfficialDocument
  * compiles into the canvas a member copies. */
 export interface OfficialWorkflow {
@@ -81,7 +120,7 @@ const MEDIA_MODEL_PAGE_R186 = ' A 3D model node hands over a GLB model and a ren
 const MEDIA_ANIMATED_MODEL_PAGE_R186 = ' An animated model’s clips are in its GLB, named as its input lists them: play them with THREE.AnimationMixer on the loaded scene (gltf.animations); a later file of the same node carries clips only, for the same skeleton, so apply them to model-1.glb’s scene by bone name.';
 /** The page rule of a workflow on three.js r186: the import map AwwO supplies, and nothing else from outside. With
  * `fonts`, the brand fonts AwwO supplies are named too. */
-const HTML_R186 = (pictures: boolean, fonts: boolean) => `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data. For 3D use three.js r186, which AwwO supplies with no network, through exactly this import map: ${THREE_MODULES_IMPORT_MAP}, importing 'three' and 'three/addons/…' in one module script; never paste a library’s source. ${fonts ? `${PREVIEW_FONT_RULE} ` : ''}No other external scripts, fonts, ${pictures ? 'images (the media nodes’ files excepted)' : 'images'} or network requests. Interactions must update real state.`;
+const HTML_R186 = (pictures: boolean, fonts: boolean, files = false) => `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data. For 3D use three.js r186, which AwwO supplies with no network, through exactly this import map: ${THREE_MODULES_IMPORT_MAP}, importing 'three' and 'three/addons/…' in one module script; never paste a library’s source. ${fonts ? `${PREVIEW_FONT_RULE} ` : ''}No other external scripts, fonts, ${pictures ? 'images (the media nodes’ files excepted)' : files ? 'images (the canvas’s files your task names excepted)' : 'images'} or network requests. Interactions must update real state.`;
 /** Every agent's persona ends with this. */
 const EVIDENCE = 'This is an official reference workflow awaiting execution. Use actual inputs; never present a demo, plan or static check as successful execution. List unverified items when execution or capabilities are unavailable. Do not deploy, send messages or connect production data.';
 
@@ -91,6 +130,7 @@ const EVIDENCE = 'This is an official reference workflow awaiting execution. Use
  * Each incoming edge has a distinct contract field so fan-in is valid on the SaaS DAG runner.
  * Runtime and model selection are left to the workspace's existing initialization policy. */
 export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
+  checkFiles(item);
   // The case's media nodes, made first so the pages they feed can name their inputs after them.
   const media = (item.media ?? []).map(spec => ({ spec, node: officialMediaNode(spec) }));
   const nodes = item.nodes.map((spec): SessionNode | AssembleNode => {
@@ -102,17 +142,22 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const inputs: ContractField[] = [{
       id: 'brief', label: 'Task and boundaries', type: 'markdown', required: true,
       value: `${item.brief}\n\n${spec.task}`,
-    }, ...incoming.map((edge): ContractField => edge.port === 'file'
-      ? { id: `from_${edge.from}`, label: edge.label, type: 'file', required: true, value: '', help: 'Supplied by the actual upstream file.' }
-      : { id: `from_${edge.from}`, label: edge.label, type: 'markdown', required: true, value: '', help: 'Supplied by the actual upstream output.' }), ...pictures.map((picture): ContractField => ({
+    }, ...incoming.map((edge): ContractField => fileWire(edge)
+      ? { id: wireInput(edge), label: edge.label, type: 'file', required: true, value: '', help: 'Supplied by the actual upstream file.' }
+      : { id: wireInput(edge), label: edge.label, type: 'markdown', required: true, value: '', help: 'Supplied by the actual upstream output.' }), ...pictures.map((picture): ContractField => ({
       id: `media_${picture.id}`, label: `${picture.title} (generated files)`,
       type: 'markdown', required: true, value: '',
       help: 'Supplied by the canvas’s media node once it generates: the files’ relative paths, or a note that none was made.',
     }))];
+    // One input per wire (a source and one of its files is `from_<source>_<file id>`, which another source's name could
+    // repeat): the server allows one source per input port.
+    if (new Set(inputs.map(field => field.id)).size !== inputs.length) throw new Error(`Invalid official workflow inputs: two wires into ${spec.id} fill one input`);
     const outputType = spec.outputType ?? 'markdown';
     const modern = item.stack === 'r186';
+    // A page whose upstream agents deliver files of their own (OfficialWorkflowNode.files), which it shows by their paths.
+    const files = item.nodes.some(other => other.files?.length && incoming.some(edge => edge.from === other.id));
     const html = outputType === 'html'
-      ? modern ? HTML_R186(pictures.length > 0, item.fonts === true)
+      ? modern ? HTML_R186(pictures.length > 0, item.fonts === true, files)
         : `\nDeliver a complete self-contained HTML document (html, head, body). Inline CSS, JavaScript, graphics and sample data; the only external script allowed is AwwO’s built-in three.js r128 (https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js) — no other external scripts, module imports, fonts, ${pictures.length ? 'external images (the files the media nodes hand you excepted)' : 'images'} or network requests. Interactions must update real state.` : '';
     const models = pictures.some(picture => picture.kind === 'model3d');
     const animated = pictures.some(picture => picture.kind === 'model3d' && typeof picture.params?.motion === 'string' && picture.params.motion !== 'none');
@@ -125,7 +170,10 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
       persona: `${spec.task}\n\nAcceptance:\n${spec.acceptance.map(check => `- ${check}`).join('\n')}\n\n${EVIDENCE}${html}${shows}`,
       contract: { version: 1, inputs, outputs: [{ id: 'result', label: spec.output, type: outputType, required: true, value: '',
         help: spec.acceptance.join('\n') }, ...(spec.report ? [{ id: 'report', label: spec.report, type: 'markdown' as const, required: true, value: '' }] : []),
-        ...(spec.handoff ? [{ id: 'file', label: spec.handoff, type: 'file' as const, required: true, value: '' }] : [])] },
+        ...(spec.handoff ? [{ id: 'file', label: spec.handoff, type: 'file' as const, required: true, value: '' }] : []),
+        // Labelled with the path the case's page loads it by, `<spec id>/<file name>`, which the previews find it by
+        // whatever its node's id and whatever name the agent stored it under (pickCanvasFile, review rounds 4 to 8).
+        ...(spec.files ?? []).map(file => ({ id: file.id, label: `${spec.id}/${file.label}`, type: 'file' as const, required: true, value: '' }))] },
     };
   });
   const byId = new Map(item.nodes.map((spec, index) => [spec.id, nodes[index]]));
@@ -133,10 +181,14 @@ export function createOfficialDocument(item: OfficialWorkflow): CanvasDocument {
     const source = byId.get(link.from);
     const target = byId.get(link.to);
     if (!source || !target) throw new Error(`Invalid official workflow edge: ${link.from} -> ${link.to}`);
+    // A port names an output its source has: its report, its file (a handoff, an assemble node's page) or one of its files.
+    if (link.port !== undefined && !source.contract?.outputs.some(field => field.id === link.port)) throw new Error(`Invalid official workflow port: ${link.from}.${link.port}`);
+    // An assemble node takes its sources' text, one input each (officialAssembleNode): never one of their files.
+    if (target.kind === 'assemble' && wireInput(link) !== `from_${link.from}`) throw new Error(`Invalid official workflow port: ${link.from}.${link.port} into ${link.to}, which takes text`);
     const from = { nodeId: source.id, portId: `out:${link.port ?? 'result'}` };
-    const to = { nodeId: target.id, portId: `in:from_${link.from}` };
+    const to = { nodeId: target.id, portId: `in:${wireInput(link)}` };
     return { id: edgeId(from, to), fromNode: from.nodeId, fromPort: from.portId,
-      toNode: to.nodeId, toPort: to.portId, dataType: link.port === 'file' ? 'file' as const : 'text' as const };
+      toNode: to.nodeId, toPort: to.portId, dataType: fileWire(link) ? 'file' as const : 'text' as const };
   });
   // Each media node's result into the pages that show it: a soft wire (ports.ts isSoftMediaFeed), which a picture that
   // was not made never holds back. The wire keeps its source's type.

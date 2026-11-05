@@ -8,6 +8,8 @@ import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { showcasePage } from '../src/saas/examples/showcaseDocument';
+import { NodeFiles, NodeWork } from '../src/saas/productionMadeParts';
+import type { ProductionRunNode } from '../src/saas/productionRuns';
 
 // The site serves a media case's files beside its footage (showcase/media/); the dialog fetches them when it opens.
 const WEB = path.resolve(__dirname, '..');
@@ -111,3 +113,19 @@ it('shows no page while a media case’s file cannot be loaded, and runs it once
   const frame = await screen.findByTitle(`${item.title}: the result an AwwO run delivered`, undefined, { timeout: 20000 });
   expect(frame.getAttribute('srcdoc')).not.toMatch(/\bred\/image-1\.jpg/);
 }, 30000);
+
+// A Blender case's makers hand on files of their own (blenderWorkflows.ts): the dialog says where they worked and shows
+// the pictures among those files beside what they delivered, a GLB by its name.
+it('says a maker worked in the Blender workstation and shows the files it handed on', () => {
+  const node: ProductionRunNode = { id: 'ring', title: 'Ring maker', column: 0, row: 0, status: 'done', outputType: 'markdown', output: 'Notes',
+    blender: true, calls: 22, files: ['ring/ring.glb', 'ring/ring.jpg'] };
+  render(<><NodeWork node={node} /><NodeFiles node={node} files={{ 'ring/ring.jpg': 'data:image/jpeg;base64,AA==', 'ring/ring.glb': 'data:model/gltf-binary;base64,AA==' }} /></>);
+  expect(screen.getByText('Worked in the Blender workstation · 22 model calls')).toBeVisible();
+  const list = screen.getByRole('list', { name: 'The files it handed on' });
+  expect(within(list).getAllByRole('listitem').map(item => item.textContent)).toEqual(['ring.glb', 'ring.jpg']);
+  // Only the picture is drawn; the GLB, which no img can show, keeps its place by name.
+  expect([...list.querySelectorAll('img')].map(image => image.getAttribute('src'))).toEqual(['data:image/jpeg;base64,AA==']);
+  cleanup();
+  render(<NodeFiles node={{ ...node, files: undefined }} files={{}} />);
+  expect(screen.queryByRole('list')).toBeNull();
+});

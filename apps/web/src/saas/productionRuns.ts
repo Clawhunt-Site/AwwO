@@ -32,6 +32,11 @@ export interface ProductionRunNode {
   readonly fromTemplate?: true;
   /** The node worked in its own sandbox computer: real files, commands and checks. */
   readonly sandbox?: true;
+  /** The node worked in the Blender workstation (a live Blender beside its sandbox computer's files and commands). */
+  readonly blender?: true;
+  /** The files it made and handed on (a Blender maker's GLBs and renders), by the `<node id>/<file name>` path the page
+   * names; those the page names are published with the case's media files. */
+  readonly files?: ReadonlyArray<string>;
   /** How many model calls the node made, when more than one. */
   readonly calls?: number;
   /** A second, Markdown output beside the result: what the node reports for those downstream. */
@@ -108,8 +113,9 @@ export interface ProductionRunRecord {
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
-  /** The canvas's wires, as the workflow declares them: `port` when a wire carries a file or a report. */
-  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string; readonly port?: 'file' | 'report' }>;
+  /** The canvas's wires, as the workflow declares them: `port` when a wire carries a file or a report ('file', 'report',
+   * or one of its source's own files by its id: a Blender maker's GLB, OfficialWorkflowNode.files). */
+  readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly label: string; readonly port?: string }>;
   /** The canvas's image, video and 3D model nodes (not agents, so not in `nodes`): what each generated in this run.
    * Their files are published as static files (production-runs/<case>.media.json lists them), keyed by the
    * `<node id>/<file>` paths the page names. */
@@ -166,11 +172,13 @@ export interface ProductionMediaFile {
   readonly original?: { readonly src: string; readonly bytes: number; readonly sha256: string };
 }
 
-/** A media case's files by the `<node id>/<file>` path its page names (production-runs/<case>.media.json). */
+/** A media case's files by the `<node id>/<file>` path its page names (production-runs/<case>.media.json). Only a case
+ * whose record has media or agent files asks for it, so a case without one is a publication that did not finish: it
+ * fails, as a file that cannot be fetched does, rather than show its page without the files it names. */
 const MEDIA = import.meta.glob<{ default: Readonly<Record<string, ProductionMediaFile>> }>('./production-runs/*.media.json');
 export function loadProductionMediaManifest(id: string): Promise<Readonly<Record<string, ProductionMediaFile>>> {
   const load = MEDIA[`./production-runs/${id}.media.json`];
-  return load ? load().then(module => module.default) : Promise.resolve({});
+  return load ? load().then(module => module.default) : Promise.reject(new Error('production_media_unavailable'));
 }
 
 function asDataUrl(blob: Blob): Promise<string> {

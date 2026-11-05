@@ -7,7 +7,7 @@ import { showcasePage } from './examples/showcaseDocument';
 import { PRODUCTION_WORKFLOWS } from './productionWorkflows';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import type { ProductionCase } from './productionCatalog';
-import { NodeOutput, NodeWork, StatusChip } from './productionMadeParts';
+import { NodeFiles, NodeOutput, NodeWork, StatusChip } from './productionMadeParts';
 import './production-made.css';
 
 // A recorded-canvas case (a film) has its own dialog, which loads with the first such case opened.
@@ -103,7 +103,7 @@ export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { 
   const [media, setMedia] = useState<{ id: string; files?: Readonly<Record<string, string>> } | undefined>(undefined);
   const [mediaAttempt, setMediaAttempt] = useState(0);
   // A film's dialog streams its files from their URLs instead (ProductionFilm.tsx): nothing is fetched whole here.
-  const hasMedia = Boolean(record?.media?.length) && record?.canvas !== 'recorded';
+  const hasMedia = Boolean(record?.media?.length || record?.nodes.some(value => value.files?.length)) && record?.canvas !== 'recorded';
   useEffect(() => {
     if (!hasMedia) return;
     let live = true;
@@ -164,10 +164,10 @@ export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { 
           {spec && <p className="production-made-task">{spec.task.split('\n')[0]}</p>}
           <NodeWork node={node} />
           {spec && <p className="production-made-handoff"><ArrowDown size={13} aria-hidden="true" />{spec.output}</p>}
-          {inputs.length > 0 && <div className="production-made-links"><span>RECEIVED</span>{inputs.map(edge => <button type="button" key={edge.from + edge.to} onClick={() => setSelected(edge.from)}>{title(edge.from)} · {edge.label}</button>)}</div>}
-          {outputs.length > 0 && <div className="production-made-links"><span>HANDED TO</span>{outputs.map(edge => <button type="button" key={edge.from + edge.to} onClick={() => setSelected(edge.to)}>{title(edge.to)}</button>)}</div>}
+          {inputs.length > 0 && <div className="production-made-links"><span>RECEIVED</span>{inputs.map(edge => <button type="button" key={`${edge.from}:${edge.port ?? ''}`} onClick={() => setSelected(edge.from)}>{title(edge.from)} · {edge.label}</button>)}</div>}
+          {outputs.length > 0 && <div className="production-made-links"><span>HANDED TO</span>{[...new Set(outputs.map(edge => edge.to))].map(to => <button type="button" key={to} onClick={() => setSelected(to)}>{title(to)}</button>)}</div>}
           {spec && spec.acceptance.length > 0 && <p className="production-made-acceptance"><b>Acceptance</b>{spec.acceptance.join('; ')}</p>}
-          <div className="production-made-output"><span>What this agent actually delivered</span><NodeOutput node={node} /></div>
+          <div className="production-made-output"><span>What this agent actually delivered</span><NodeOutput node={node} /><NodeFiles node={node} files={files} /></div>
         </article>
       </div>
       <div className="production-made-result">

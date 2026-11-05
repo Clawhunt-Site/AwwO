@@ -44,16 +44,21 @@ const basename = (path: string) => path.split('/').pop()!.toLowerCase();
 
 /** The canvas file a page's relative URL names: by file name, and among several of that name the one whose node id
  * is the URL's folder (`<node id>/image-1.png`, as a canvas run tells downstream nodes), since every image node calls
- * its first picture image-1.png. `nameOf` is the name a file goes by: the Results studio knows a stored file's real
- * name once it has read it. */
+ * its first picture image-1.png; else a node's stored output whose label is the very path asked for, folder and all (a
+ * case canvas labels its file outputs `<spec id>/<file>`, OfficialWorkflowNode.files, whatever the agent named the
+ * file; a label is the canvas author's, unlike an archive member's path or a stored file's name, which never take
+ * this place). `nameOf` is the name a file goes by: the Results studio knows a stored file's real name once it has
+ * read it. */
 export function pickCanvasFile(entries: ReadonlyArray<StudioEntry>, path: string, self?: string,
   nameOf: (entry: StudioEntry) => string = entry => entry.name): StudioEntry | undefined {
   const parts = path.split(/[?#]/)[0].split('/').filter(part => part && part !== '.');
+  const whole = parts.join('/').toLowerCase();
   const wanted = (parts.pop() ?? '').toLowerCase();
   const folder = parts.pop();
   const candidates = entries.filter(entry => entry.id !== self && entry.source.type !== 'inline' && entry.source.type !== 'missing'
     && (basename(nameOf(entry)) === wanted || basename(entry.label) === wanted));
-  return (folder && candidates.find(entry => entry.nodeId === folder)) || candidates[0];
+  return (folder && candidates.find(entry => entry.nodeId === folder))
+    || (folder && candidates.find(entry => entry.source.type === 'stored' && entry.label.toLowerCase() === whole)) || candidates[0];
 }
 
 /** Relative URLs of a page resolved against the canvas's other files (pickCanvasFile). */
