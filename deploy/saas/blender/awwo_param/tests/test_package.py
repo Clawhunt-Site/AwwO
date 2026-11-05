@@ -16,7 +16,7 @@ FAMILIES = ('minimal', 'voronoi', 'attractors', 'icecrack', 'spirals', 'reciproc
 
 class PackageTest(unittest.TestCase):
     def test_version_and_families(self):
-        self.assertEqual(awwo_param.__version__, '0.2.0')
+        self.assertEqual(awwo_param.__version__, '0.3.0')
         for name in FAMILIES:
             self.assertTrue(hasattr(awwo_param, name), name)
             self.assertRegex(awwo_param.__doc__, rf'\b{name}\b')

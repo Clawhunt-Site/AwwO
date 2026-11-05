@@ -7,6 +7,9 @@ documented maximum raise ValueError. help(awwo_param.<module>.<function>) gives 
 minimal -- minimal surfaces (极小曲面)
   tpms(kind, size, cells, resolution, level, shape)  gyroid, schwarz_p, schwarz_d, neovius, lidinoid, iwp... meshed by
                                                      marching cubes, clipped to a 'box', 'sphere' or 'cylinder'
+  sheet(kind, size, cells, thickness, resolution, shape, inner, wrap)   the lattice as one closed solid with walls
+                                                     `thickness` thick, in a box, sphere, cylinder or a ring's band
+                                                     (wrap=True: cells round the band), for jewellery
   parametric(kind, resolution)                       enneper, catenoid, helicoid, scherk, henneberg, catalan,
                                                      richmond, bour as quads
   evaluate(kind, points, size, cells)                the TPMS implicit function at points
@@ -47,5 +50,5 @@ obj.rotation_euler = (math.radians(90), 0, 0)."""
 from . import attractors, icecrack, minimal, reciprocal, slime, spirals, voronoi
 from .geometry import Curves, Mesh
 
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 __all__ = ['Curves', 'Mesh', 'attractors', 'icecrack', 'minimal', 'reciprocal', 'slime', 'spirals', 'voronoi']
