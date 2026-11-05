@@ -4,10 +4,11 @@ with `docker exec -i --user 1000:1000 <container> python3 -I -S /opt/awwo/blende
 stdin: one JSON object, {"op": "list"} or {"op": "call", "name": <tool>, "arguments": {...}, "timeoutSeconds": n}.
 It starts the MCP server (blmcp, stdio), speaks MCP to it (initialize, notifications/initialized, then tools/list or
 tools/call), stops it, and prints one JSON line: {"ok": true, "instructions", "tools", "gpu"} for a list, {"ok": true,
-"content", "isError"} for a call, or {"ok": false, "error"} when the server or Blender failed; each with "before" and
-"after", the Blender running when the request came and when it was answered, and "restarted". A call that outlives its
-time is stopped and Blender is started again by the supervisor (an endless loop in agent code would otherwise hold the
-bridge for good); "restarted": true says the scene is gone."""
+"content", "isError"} for a call, or {"ok": false, "error"} when the server or Blender failed ("timeout", "too large"
+for an answer over LINE_LIMIT, or what went wrong); each with "before" and "after", the Blender running when the
+request came and when it was answered, and "restarted". A call that outlives its time is stopped and Blender is
+started again by the supervisor (an endless loop in agent code would otherwise hold the bridge for good); "restarted":
+true says the scene is gone."""
 import json
 import os
 import selectors
@@ -93,6 +94,11 @@ def restart_blender():
         return False
 
 
+class TooLarge(Exception):
+    """An answer longer than LINE_LIMIT, which is not read. The code it answers ran, and the scene keeps what it did
+    (Blender handed the whole answer on before the server's line grew too long)."""
+
+
 class Server:
     def __init__(self, deadline):
         self.deadline = deadline
@@ -125,7 +131,7 @@ class Server:
                 raise EOFError()
             self.buffer += chunk
             if len(self.buffer) > LINE_LIMIT:
-                raise ValueError('answer too large')
+                raise TooLarge()
 
     def request(self, request_id, method, params=None):
         self.send({'jsonrpc': '2.0', 'id': request_id, 'method': method, **({'params': params} if params is not None else {})})
@@ -179,6 +185,8 @@ def main():
     except TimeoutError:
         stopped = restart_blender()
         out = {'ok': False, 'error': 'timeout'}
+    except TooLarge:
+        out = {'ok': False, 'error': 'too large'}
     except (EOFError, ValueError, RuntimeError, OSError) as error:
         out = {'ok': False, 'error': type(error).__name__ + ': ' + str(error)[:500]}
     finally:

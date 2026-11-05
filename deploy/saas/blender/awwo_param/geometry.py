@@ -21,11 +21,16 @@ def _scale3(s):
     return float(sx), float(sy), float(sz)
 
 
-@dataclass
+@dataclass(repr=False)
 class Mesh:
     """vertices: [(x, y, z)]; faces: [(i, j, k, ...)] triangles, quads or n-gons indexing vertices."""
     vertices: list = field(default_factory=list)
     faces: list = field(default_factory=list)
+
+    def __repr__(self):
+        """Its counts, not its lists: a mesh printed, or a method of it named but not called, is one short line (a
+        lattice printed whole, 270,000 vertices, once made a Blender call's answer too large to read)."""
+        return f'Mesh({len(self.vertices):,} vertices, {len(self.faces):,} faces)'
 
     @staticmethod
     def merged(*meshes):
@@ -92,11 +97,15 @@ def merged(*meshes):
     return Mesh(vertices, faces)
 
 
-@dataclass
+@dataclass(repr=False)
 class Curves:
     """polylines: [[(x, y, z), ...]]; closed[i] says whether polyline i joins its last point back to its first."""
     polylines: list = field(default_factory=list)
     closed: list = field(default_factory=list)
+
+    def __repr__(self):
+        """Its counts, not its points (Mesh.__repr__)."""
+        return f'Curves({len(self.polylines):,} polylines, {self.point_count():,} points)'
 
     @staticmethod
     def merged(*curves):

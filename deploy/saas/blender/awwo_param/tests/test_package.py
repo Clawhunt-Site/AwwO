@@ -93,6 +93,18 @@ class GeometryTest(unittest.TestCase):
         self.assertEqual(Curves.merged(c, c).summary()['polylines'], 4)
         json.dumps(c.scaled(2).summary())
 
+    def test_a_mesh_or_curves_prints_as_its_counts(self):
+        # A local trial (2026-11-05) put str(lattice.bounds), a method it did not call, into a Blender call's result:
+        # the method printed its mesh, 270,000 vertices and all, and the answer was too large to read.
+        m = merged(self.unit_box(), self.unit_box().translated(2, 0, 0))
+        self.assertEqual(repr(m), 'Mesh(16 vertices, 12 faces)')
+        self.assertIn('Mesh(16 vertices, 12 faces)', str(m.bounds))
+        big = Mesh([(0.0, 0.0, 0.0)] * 1_000_000, [(0, 0, 0)] * 2_000_000)
+        self.assertEqual(str(big), 'Mesh(1,000,000 vertices, 2,000,000 faces)')
+        c = Curves([[(0, 0, 0), (3, 4, 0)], [(0, 0, 0), (1, 0, 0), (1, 1, 0)]], [False, True])
+        self.assertEqual(repr(c), 'Curves(2 polylines, 5 points)')
+        self.assertEqual(m, merged(self.unit_box(), self.unit_box().translated(2, 0, 0)), 'still compared by value')
+
     def test_extrude_flat_closes_a_frame(self):
         # A square ring: outer 0..3 and hole 1..2, as four trapezoids.
         verts = [(0, 0, 0), (3, 0, 0), (3, 3, 0), (0, 3, 0), (1, 1, 0), (2, 1, 0), (2, 2, 0), (1, 2, 0)]

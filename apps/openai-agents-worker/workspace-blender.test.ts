@@ -125,6 +125,18 @@ test('an answer is text cut to size, and a failed call says what happened in clo
   assert.ok(!big.text.includes('AAAA'));
   const timedOut = blenderCallResult({ ok: false, error: 'timeout', restarted: true });
   assert.ok(timedOut.isError && timedOut.restarted && /ran out of time/.test(timedOut.text) && timedOut.text.startsWith(BLENDER_SCENE_LOST.during));
+  // An answer too large to read (a local trial's code returned a lattice printed whole) says so, and that the scene
+  // keeps what the code did, rather than that the server could not answer.
+  const tooLarge = blenderCallResult({ ok: false, error: 'too large', restarted: false });
+  assert.ok(tooLarge.isError && !tooLarge.restarted && /too large to read/.test(tooLarge.text) && /scene keeps what it did/.test(tooLarge.text));
+  assert.ok(!/could not answer/.test(tooLarge.text));
+  // Blender stopped after it sent the answer, or before the call: the scene is gone, and the answer does not say it is
+  // kept (review round 10).
+  for (const [value, lost] of [[{ ok: false, error: 'too large', restarted: true }, false], [{ ok: false, error: 'too large', restarted: false }, true]] as const) {
+    const gone = blenderCallResult(value, lost);
+    assert.ok(gone.isError && gone.restarted && /too large to read/.test(gone.text) && !/scene keeps/.test(gone.text), gone.text);
+    assert.ok(gone.text.startsWith(value.restarted ? BLENDER_SCENE_LOST.during : BLENDER_SCENE_LOST.before));
+  }
   // A call during which Blender stopped (the code exited or crashed it) says first that the scene is gone, so that a
   // shortened copy of the answer still says it; so does a call that found Blender started again since the last one.
   const crashed = blenderCallResult({ ok: true, content: [{ type: 'text', text: 'Socket error communicating with Blender' }], isError: true, restarted: true });
@@ -247,6 +259,12 @@ test('a workspace that is not a workstation has no Blender, and its commands and
   };
   const sandbox = await createWorkspaceSandbox({ dockerExecutable: '/usr/bin/docker', image }, { workspaceId: 'a', runId: 'b' }, undefined, runner);
   assert.equal(sandbox.blender, undefined);
+  // The Docker workspace says where its commands run and find the inputs; a sandbox that does not (the AgentCore
+  // trial's, whose commands run elsewhere) has its agent told the workspace tools' path alone.
+  assert.deepEqual(sandbox.paths, { workspace: '/workspace', inputs: '/inputs' });
+  assert.equal(inputsInstruction(), 'The workspace tools name an input inputs/<name>, which is read-only.');
+  assert.equal(inputsInstruction(sandbox.paths),
+    'The workspace tools name an input inputs/<name>; commands and code (in /workspace) open it at /inputs/<name>, which is read-only.');
   await sandbox.exec('ls');
   assert.equal(JSON.parse(inputs.at(-1)!).keepAlive, undefined);
   await assert.rejects(dispatchWorkspaceTool(sandbox, 'blender_call', { tool: 'execute_blender_code', arguments: { code: '' } }), /Unknown workspace operation/);
@@ -259,12 +277,6 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
   const steps = [
     { name: 'execute_blender_code', arguments: { code: "result = {'objects': 3}" } },
     // Arguments that do not fit come back to the model as an error to correct; they never reach Blender.
-  // The Docker workspace says where its commands run and find the inputs; a sandbox that does not (the AgentCore
-  // trial's, whose commands run elsewhere) has its agent told the workspace tools' path alone.
-  assert.deepEqual(sandbox.paths, { workspace: '/workspace', inputs: '/inputs' });
-  assert.equal(inputsInstruction(), 'The workspace tools name an input inputs/<name>, which is read-only.');
-  assert.equal(inputsInstruction(sandbox.paths),
-    'The workspace tools name an input inputs/<name>; commands and code (in /workspace) open it at /inputs/<name>, which is read-only.');
     { name: 'search_api_docs', arguments: { query: 'bmesh', limit: 3 } },
     { name: 'workspace_publish', arguments: { field: 'page', path: 'out/index.html' } },
   ];
@@ -305,6 +317,8 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
   assert.deepEqual((offered.find(tool => tool.name === 'execute_blender_code')!.parameters as { required: string[] }).required, ['code']);
   const system = String((requests[0].messages as { role: string; content: unknown }[]).find(item => item.role === 'system')?.content);
   assert.ok(system.includes('Blender workstation') && system.includes(listing.instructions));
+  // Blender and commands run in /workspace: an input is at /inputs/<name> for them (a trial lost five calls to inputs/).
+  assert.ok(system.includes('commands and code (in /workspace) open it at /inputs/<name>'));
   assert.deepEqual(brokered.map(item => item.name), ['blender_call', 'workspace_publish', 'snapshot']);
   assert.deepEqual(brokered[0].args, { tool: 'execute_blender_code', arguments: { code: "result = {'objects': 3}" } });
   const toolReplies = (requests[2].messages as { role: string; content: unknown }[]).filter(item => item.role === 'tool').map(item => String(item.content));
@@ -317,8 +331,6 @@ test('a workstation agent is offered the Blender tools, and its calls reach Blen
 async function python(code: string, payload: unknown): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('python3', ['-I', '-S', '-c', code], { stdio: ['pipe', 'pipe', 'pipe'] });
-  // Blender and commands run in /workspace: an input is at /inputs/<name> for them (a trial lost five calls to inputs/).
-  assert.ok(system.includes('commands and code (in /workspace) open it at /inputs/<name>'));
     const out: Buffer[] = [], err: Buffer[] = [];
     child.stdout.on('data', chunk => out.push(chunk)); child.stderr.on('data', chunk => err.push(chunk));
     child.on('error', reject);

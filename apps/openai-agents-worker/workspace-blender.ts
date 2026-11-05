@@ -166,7 +166,10 @@ export function blenderCallResult(value: unknown, lost = false): BlenderCallResu
   if (!value.ok) {
     const text = value.error === 'timeout'
       ? 'The Blender call ran out of time. Split long work (a heavy render, a large loop) into shorter calls.'
-      : 'The Blender MCP server could not answer this call. Check the arguments, then try again; if it fails again, rebuild the scene from your script.';
+      : value.error === 'too large'
+        // Its code ran, and the scene keeps what it did, unless Blender stopped (then the note above says the scene is gone).
+        ? `The answer to this Blender call was too large to read${during || lost ? '' : ', though its code ran and the scene keeps what it did'}. Return less from your code: counts, sizes and short summaries, never a mesh, a long list or an object printed whole.`
+        : 'The Blender MCP server could not answer this call. Check the arguments, then try again; if it fails again, rebuild the scene from your script.';
     return { isError: true, restarted: during || lost, text: noted(text) };
   }
   if (!Array.isArray(value.content)) throw new Error('Invalid Blender call result');
