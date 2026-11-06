@@ -35,8 +35,9 @@ export interface CanvasMultiplayerHost {
   /** The surface registers itself (and null when it goes). */
   connect(surface: CanvasMultiplayerSurface | null): void;
   presence(update: CanvasPresenceUpdate): void;
-  /** Drawn inside the board over the cards, in world coordinates: others' rings, claims and pointers. The scale is
-   *  the board's zoom, so names and pointers keep their size on screen. */
+  /** Drawn inside the board over the cards, in world coordinates: others' rings, claims and pointers. `nodes` are the
+   *  cards the board draws, at their drawn boxes (never a member inside a converged icon); the scale is the board's
+   *  zoom, so names and pointers keep their size on screen. */
   boardLayer?: (nodes: ReadonlyArray<CanvasNode>, scale: number) => ReactNode;
   /** The nodes others' runs hold now: the page changes them no more than it changes its own running nodes. */
   busyNodes?: () => ReadonlySet<string>;

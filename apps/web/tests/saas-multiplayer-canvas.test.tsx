@@ -231,3 +231,77 @@ describe('a canvas page with 多人同屏', () => {
     expect(view.writes.some(w => w.method === 'PATCH')).toBe(false);
   }, 30000);
 });
+
+// The canvas converged into one icon (收敛成一个图标, this person's own view) with the real host and live stream: no one's
+// ring or name crosses the icon's face, AwwO's own Agent during a run included, and the cards wear their marks again in
+// their own places once they are drawn (canvas-selection-converge-multiplayer.test.tsx pins the board's side).
+describe('a converged canvas with 多人同屏', () => {
+  const idle = { selection: [], focus: null, cursor: null, status: null };
+  const converge = () => fireEvent.keyDown(document, { key: 'g', code: 'KeyG', ctrlKey: true, bubbles: true, cancelable: true });
+  const board = () => document.querySelector<HTMLElement>('.awwo-multiplayer-board')!;
+  /** AwwO's own Agent running a (canvas_live.go liveAwwoAgents), a member with b selected and a pointer on the board,
+   *  and an outside Agent holding b by a claim. */
+  async function othersArrive(view: ReturnType<typeof openLive>) {
+    const you = new URL(view.streamUrls[0], 'http://localhost').searchParams.get('client')!;
+    const self = { id: you, kind: 'human', port: 'web', name: 'Owner', color: '#2563eb', userId: identity.user.id, state: idle, since: '' };
+    const runner = { id: 'run_example0001', kind: 'awwo', port: 'awwo', name: 'Plan', color: '#10b981', state: { ...idle, selection: ['a'], focus: 'a', status: 'running' }, since: '' };
+    const member = { id: 'other-page-1', kind: 'human', port: 'web', name: 'Member', color: '#f59e0b', userId: 'user-other', state: { ...idle, selection: ['b'], cursor: { x: 200, y: 40 } }, since: '' };
+    const agent = { id: 't_00000000000000aa', kind: 'agent', port: 'mcp', name: 'Claude Code', color: '#7c3aed', userId: identity.user.id, state: { ...idle, focus: 'b', status: '正在写' }, since: '' };
+    const claims = [{ nodeId: 'b', participantId: agent.id, holderKind: 'agent', name: 'Claude Code', note: '', expiresAt: new Date(Date.now() + 600_000).toISOString() }];
+    await act(async () => view.streams[0].push({ event: 'hello', data: { you: self, version: 3, participants: [self, runner, member, agent], claims, messages: [] } }));
+    expect(await screen.findByRole('button', { name: /同屏 · 4 人在线/ })).toBeTruthy();
+    await waitFor(() => expect(board().querySelector('.awwo-multiplayer-cursor[data-participant="other-page-1"]')).not.toBeNull());
+  }
+  const cardsMarked = async () => {
+    await waitFor(() => expect(board().querySelector('[data-node="a"] .awwo-multiplayer-tag')).toHaveTextContent('AwwO Agent'));
+    expect(board().querySelector<HTMLElement>('[data-node="a"]')!.style.transform).toBe('translate(0px, 0px)');
+    expect(board().querySelector('[data-node="b"] .awwo-multiplayer-tag')).toHaveTextContent('Member');
+    expect(board().querySelector('[data-node="b"] .awwo-multiplayer-claim')).toHaveTextContent('Claude Code 正在处理');
+  };
+  const nothingOverTheIcon = () => {
+    expect(board().querySelectorAll('.awwo-multiplayer-mark')).toHaveLength(0);
+    expect(board().textContent).not.toContain('AwwO Agent');
+    // The member's pointer is still where their hand is.
+    expect(board().querySelector('.awwo-multiplayer-cursor[data-participant="other-page-1"]')).not.toBeNull();
+  };
+
+  it('puts no one’s ring or name over a canvas converged before the others came, and marks the cards once they are drawn', async () => {
+    const view = openLive();
+    await screen.findByTestId('canvas-tile-a');
+    await waitFor(() => expect(view.streams).toHaveLength(1));
+    converge();
+    await screen.findByTestId('converged-icon-canvas');
+    await othersArrive(view);
+    nothingOverTheIcon();
+    converge();
+    await waitFor(() => expect(screen.queryByTestId('converged-icon-canvas')).toBeNull());
+    await cardsMarked();
+  }, 30000);
+
+  it('takes the others’ marks off the cards as the canvas converges, and puts none over the icon', async () => {
+    const view = openLive();
+    await screen.findByTestId('canvas-tile-a');
+    await waitFor(() => expect(view.streams).toHaveLength(1));
+    await othersArrive(view);
+    await cardsMarked();
+    converge();
+    await screen.findByTestId('converged-icon-canvas');
+    // Gone in the very render that draws the icon: not a frame of a mark over its face.
+    nothingOverTheIcon();
+  }, 30000);
+
+  it('draws a component again with its marks when the 同屏 panel names it, from a converged canvas', async () => {
+    const view = openLive();
+    await screen.findByTestId('canvas-tile-a');
+    await waitFor(() => expect(view.streams).toHaveLength(1));
+    converge();
+    await screen.findByTestId('converged-icon-canvas');
+    await othersArrive(view);
+    nothingOverTheIcon();
+    fireEvent.click(screen.getByRole('button', { name: /同屏 · 4 人在线/ }));
+    // The member's selection, the agent's focus and its claim each name b with a chip that shows it.
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Build' }))[0]);
+    await waitFor(() => expect(screen.queryByTestId('converged-icon-canvas')).toBeNull());
+    await cardsMarked();
+  }, 30000);
+});

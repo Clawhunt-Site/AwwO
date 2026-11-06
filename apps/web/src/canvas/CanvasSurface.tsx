@@ -5237,8 +5237,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
             live={running || recovering}
           />
         ))}
-        {/* 多人同屏: others' rings, claims and pointers, over the cards and never in the way of a press. */}
-        {stageMeasured && multiplayer?.boardLayer?.(convergedView.wireNodes, view.scale)}
+        {/* 多人同屏: others' rings, claims and pointers, over the cards and never in the way of a press. It marks the cards
+            the board draws (shownNodes), as the collaboration flow does: a member inside a converged icon has no place on
+            this board (the wires' stand-in for it is the icon's middle, its face), so none of its marks is drawn there;
+            the 同屏 panel still says who is on it, and naming it there draws its cards with their marks. */}
+        {stageMeasured && multiplayer?.boardLayer?.(shownNodes, view.scale)}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 

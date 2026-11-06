@@ -930,6 +930,20 @@ describe('the layer on the board', () => {
     expect(container.querySelector('[data-node="n2"]')).toBeNull();
     expect(container.querySelectorAll('.awwo-multiplayer-ring')).toHaveLength(1);
   });
+
+  it('marks nothing of a node it is not given, and names a participant by the nodes it is given alone', () => {
+    // n8 and n9 are not given (members inside a converged icon, say): Ada is on n9 and has n8 selected before n1 and n2.
+    const ada: LiveParticipant = { ...ADA, state: state({ focus: 'n9', selection: ['n8', 'n1', 'n2'] }) };
+    const runner: LiveParticipant = { ...RUNNER, state: state({ selection: ['n9'], focus: 'n9', status: 'running' }) };
+    const { container } = layer({ participants: [SELF, ada, runner], claims: [{ ...CLAIMS[0], nodeId: 'n9' }],
+      flashes: [{ nodeId: 'n8', color: '#10b981', until: NOW + 1000 }] });
+    expect([...container.querySelectorAll<HTMLElement>('.awwo-multiplayer-mark')].map(item => item.dataset.node)).toEqual(['n1', 'n2']);
+    // Named on both nodes given: her marks on nodes not given do not count toward the three named.
+    expect([...container.querySelectorAll(`.awwo-multiplayer-tag[data-participant="${ADA.id}"]`)].map(nodeOf)).toEqual(['n1', 'n2']);
+    expect(container.textContent).not.toContain('AwwO Agent');
+    expect(container.querySelector('.awwo-multiplayer-claim')).toBeNull();
+    expect(container.querySelector('.awwo-multiplayer-flash')).toBeNull();
+  });
 });
 
 describe('a change in one line', () => {

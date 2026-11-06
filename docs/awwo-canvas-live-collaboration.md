@@ -18,12 +18,13 @@ Several people and several agents work on the same canvas at the same time, as i
 - Everyone sees who else is there, people and Agents, which nodes each one has selected or is working on, and where
   each person's pointer is.
 - An agent takes a node before it works on it (a claim), so several agents divide the canvas instead of writing over
-  each other, and people see on each node which agent holds it.
+  each other, and people see on each node which agent holds it (on each card the board draws; the 同屏 panel lists
+  every claim).
 - Participants come in through different ports (端口):
   - **网页 / Web**: a workspace member in the AwwO canvas, signed in as today.
   - **MCP**: an agent tool (Claude Code, Codex, Cursor, any MCP client) on AwwO's MCP endpoint with a canvas agent token.
   - **API**: any program using the same HTTP endpoints with a canvas agent token.
-  - **AwwO**: AwwO's own node Agents while they run, shown on the nodes they run.
+  - **AwwO**: AwwO's own node Agents while they run, shown on the nodes they run (the cards the board draws).
 
 ## Prior art and the choice
 
@@ -344,6 +345,12 @@ claude mcp add --transport http awwo-canvas https://<AwwO host>/api/v1/mcp --hea
   connection lines for Claude Code, Codex and Cursor, see and revoke the canvas's tokens.
 - **On the board**: a ring in each participant's colour around the nodes they have selected, with their name; a claim's
   badge on its node; each person's pointer with their name; a short glow on a node another participant just changed.
+  These mark the cards the board draws: a component inside a converged icon (收敛成一个图标, one person's own way of
+  looking) wears none of them, so none of them crosses the icon's face. The 同屏 panel still says who is on it and who
+  holds it (the people bar, who is here), and naming it there draws its cards again with every mark in place. The icon
+  shows the runs this page started or found running when it opened (its working face, its arcs, its rows); a run
+  another page starts later shows in the people bar's AwwO Agents and the 同屏 panel, not yet on the icon. Pointers are
+  drawn wherever people's hands are, over an icon too.
 - **Saving**: a page sends only what it changed (`PATCH`), at autosave's pace. 已同步 means the server holds every edit
   of this page.
 
