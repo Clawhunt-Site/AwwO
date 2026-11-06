@@ -10,7 +10,7 @@ narration, and quiet sound effects under the narration.
 | Section | Videos | Narration | What they show |
 | --- | --- | --- | --- |
 | Start here (`start`) | 6, about 2 min each | Chinese | One sentence and the canvas assistant writes code, makes a poster, builds a site, writes a plan with a team; then a node opened and changed with the assistant, and the settings centre |
-| Inside the flagship cases (`flagship`) | 6 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
+| Inside the flagship cases (`flagship`) | 7 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
 | Build a case, step by step (`build`) | 17 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result |
 
 The two how-tos added on 2026-10-25 were recorded as the first four were (2026-10-17): on the live AwwO, in the workspace
@@ -97,7 +97,7 @@ again, four draft renders of the two how-tos of 2026-10-25). Then went 23 that o
 longer plays them. Last went the six how-tos' versions from before their title cards were renumbered (103 MB), once
 AwwO Local played the renumbered ones on both platforms (Windows from 0.1.3, Mac from 0.10.1, both 2026-10-26): Windows
 0.1.2 and macOS 0.10.0 installs, and a rollback to a release from before the renumbering, no longer play those six.
-The folder holds the catalog's 29 (1.91 GB). Each is staged once on the host, outside every release, under
+The folder holds the catalog's 30 (2.00 GB). Each is staged once on the host, outside every release, under
 `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).

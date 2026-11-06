@@ -106,6 +106,12 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     changes: [{ on: '2026-10-24', text: {
       en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the 48 nodes its first run still makes, 43 of them media nodes.',
       zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 48 个节点，其中 43 个是媒体节点。' } }] },
+  { id: 'gyroid-jewellery', section: 'flagship', caseId: 'gyroid-jewellery', voice: 'en', recordedOn: '2026-11-06',
+    title: { en: 'GYROID: minimal-surface jewellery built by four agents', zh: 'GYROID：四个 Agent 做出的极小曲面首饰' },
+    summary: { en: 'Open the case, read how each piece grew in the Blender workstation from its agent’s own notes on every look at a render, turn the pieces in the delivered site, and copy the canvas as a draft.',
+      zh: '打开案例，从每个 Agent 自己写的看图记录里，读每件首饰在 Blender 工作站里是怎么一步步做出来的；在交付的网站里亲手转动首饰，再把画布复制成草稿。' },
+    seconds: 434, src: '/showcase/staged/academy/568af40e68310be4.mp4', bytes: 89365369, sha256: '568af40e68310be4fa5ceb6f70b1832ba45978e5f0b39c207b098b8a34fe5489',
+    poster: null },
   { id: 'the-long-chord', section: 'flagship', caseId: 'the-long-chord', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'THE LONG CHORD: a space opera made on one canvas', zh: 'THE LONG CHORD：一张画布做出的太空歌剧电影' },
     summary: { en: 'Watch the film in the case, see how its lip sync was measured and its reels were cut, then copy its canvas as a draft.',
