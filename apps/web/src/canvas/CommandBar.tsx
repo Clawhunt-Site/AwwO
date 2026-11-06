@@ -1,6 +1,6 @@
 // CommandBar — ONE overlay in two modes, sharing the same list + keyboard machinery.
 //
-//   commands (⌘P): every canvas action, each row showing its keybinding, plus one focus row per
+//   commands (⌘P): every canvas action, each with its keybinding if it has one, plus one focus row per
 //                  tile so "focus tile by name" is just typing the name.
 //   search   (⌘K): fuzzy over node titles, personas, form field labels/values, and any transcript
 //                  text ALREADY LOADED in the session store.
@@ -16,9 +16,10 @@
 //  - A COMMAND THAT CANNOT RUN IS NOT OFFERED. Rows are built only for the actions the host
 //    actually supplied, 运行 and 停止 swap by real run state, and a row with nothing to act on
 //    (delete with an empty selection) renders disabled rather than as a dead click.
-//  - Keybinding labels are HINTS the host can override (`keyHints`): the real bindings live in
-//    the host's key handler, and this bar must not become a second source of truth that drifts
-//    into displaying a shortcut that does nothing.
+//  - Keybinding labels come only from the host (`keyHints`): the real bindings live in the host's
+//    key handler, and this bar must not become a second source of truth that drifts into
+//    displaying a shortcut that does nothing. A row whose action has no key shows none. (Its own
+//    defaults did drift: ⌘↵, ⌘., ⇧F and single letters that nothing bound, Mac glyphs on Windows.)
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -47,27 +48,6 @@ export type CanvasCommandId =
   | 'run-selection'
   | 'rerun-node'
   | 'converge-toggle';
-
-/** Default keybinding HINTS. The host owns the real bindings and can override any of these. */
-export const DEFAULT_KEY_HINTS: Record<CanvasCommandId, string> = {
-  'add-session-llm': 'L',
-  'add-session-coding': 'C',
-  'add-session-image': 'I',
-  'add-form': 'F',
-  run: '⌘↵',
-  stop: '⌘.',
-  fit: '⇧F',
-  timeline: 'T',
-  minimap: 'M',
-  'waypoint-save': '⌘1–9',
-  'waypoint-recall': '1–9',
-  delete: '⌫',
-  undo: '⌘Z',
-  redo: '⌘⇧Z',
-  'run-selection': '⌘⇧↵',
-  'rerun-node': 'R',
-  'converge-toggle': '⌘G',
-};
 
 /** Every action the bar can offer. An omitted action's row is simply not rendered. */
 export interface CanvasCommandActions {
@@ -292,7 +272,7 @@ export function buildCommandRows(
   keyHints: Partial<Record<CanvasCommandId, string>> = {},
   locale: UiLocale = 'zh',
 ): CommandRow[] {
-  const key = (id: CanvasCommandId) => keyHints[id] ?? DEFAULT_KEY_HINTS[id];
+  const key = (id: CanvasCommandId) => keyHints[id];
   const text = (key: Parameters<typeof canvasText>[1], values?: Record<string, string | number>) => canvasText(locale, key, values);
   const kindLabel = (kind: AgentKind) => text(kind === 'coding' ? 'node.coding' : kind === 'image' ? 'node.image' : kind === 'video' ? 'node.video' : kind === 'model3d' ? 'node.model3d' : kind === 'audio' ? 'node.audio' : 'node.llm');
   const rows: CommandRow[] = [];

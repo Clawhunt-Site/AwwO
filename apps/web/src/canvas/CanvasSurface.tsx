@@ -93,7 +93,7 @@ import { beginReviewRound, prepareReviewTurn } from './reviewJournal';
 import { RunTimeline, timelineRuns, type RunView } from './RunTimeline';
 import { Minimap } from './Minimap';
 import { CommandBar, type CommandBarMode, type CanvasCommandActions } from './CommandBar';
-import { useCanvasKeys, keyHintMap, isTypingTarget } from './useCanvasKeys';
+import { useCanvasKeys, keyHintMap, isTypingTarget, formatChord } from './useCanvasKeys';
 import {
   CANVAS_STORAGE_KEY,
   createFormNode,
@@ -3286,7 +3286,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       else setSelection([]);
     },
   }, !showingResults);
-  const convergeKeyHint = keyBindings.find(binding => binding.action === 'converge-toggle')?.hint ?? '⌘G';
+  const convergeKeyHint = keyBindings.find(binding => binding.action === 'converge-toggle')?.hint ?? formatChord('G', { mod: true });
   // Whether they work now, for the assistant panel's hand-back, which counts the navigation keys among them (below).
   const canvasKeysOn = useRef(true);
   canvasKeysOn.current = !showingResults;

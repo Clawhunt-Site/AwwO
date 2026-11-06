@@ -65,7 +65,7 @@ export function ShortcutSettings() {
       <table className="saas-settings-keys">
         <tbody>
           <tr><td>{t('发送', 'Send')}</td><td><kbd>Enter</kbd></td></tr>
-          <tr><td>{t('换行', 'New line')}</td><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td></tr>
+          <tr><td>{t('换行', 'New line')}</td><td><kbd>Shift+Enter</kbd></td></tr>
         </tbody>
       </table>
     </SettingsCard>

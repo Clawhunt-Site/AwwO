@@ -1280,6 +1280,8 @@
   max-width: 46%;
 }
 .canvas-cmdbar-row-keys {
+  /* A chord is one key to press: Ctrl+Shift+1–9 never breaks after its dash. */
+  white-space: nowrap;
   font-family: 'SFMono-Regular', 'SF Mono', Consolas, monospace;
   font-size: 10px;
   color: var(--muted);

@@ -10,6 +10,7 @@ import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { buildCommandRows } from '../src/canvas/CommandBar';
+import { canvasKeyBindings, keyHintMap } from '../src/canvas/useCanvasKeys';
 import { CANVAS_STORAGE_KEY, createFormNode, createSessionNode, sanitizeDocument, type CanvasDocument, type CanvasEdge } from '../src/canvas/canvasDoc';
 import { CONVERGED_GROUPS_KEY } from '../src/canvas/convergedGroups';
 import { resetAllSessions } from '../src/canvas/sessions';
@@ -83,9 +84,10 @@ beforeEach(() => {
 describe('the palette', () => {
   it('offers the same toggle, greyed out when the canvas cannot converge', () => {
     const toggleConverged = vi.fn();
-    const row = (actions: Parameters<typeof buildCommandRows>[0]) => buildCommandRows(actions, { running: false, timelineOpen: false, minimapOpen: false, selectionCount: 0 })
-      .find(item => item.id === 'converge-toggle');
-    expect(row({ toggleConverged, converged: false, canConverge: true })).toMatchObject({ label: '收敛成一个图标', disabled: false, keys: '⌘G' });
+    // The host's hints, as the canvas passes them (off a Mac: jsdom's platform is no Mac).
+    const row = (actions: Parameters<typeof buildCommandRows>[0]) => buildCommandRows(actions, { running: false, timelineOpen: false, minimapOpen: false, selectionCount: 0 },
+      keyHintMap(canvasKeyBindings(false))).find(item => item.id === 'converge-toggle');
+    expect(row({ toggleConverged, converged: false, canConverge: true })).toMatchObject({ label: '收敛成一个图标', disabled: false, keys: 'Ctrl+G' });
     expect(row({ toggleConverged, converged: false, canConverge: false })?.disabled).toBe(true);
     expect(row({ toggleConverged, converged: true, canConverge: false })).toMatchObject({ label: '展开全部组件', disabled: false });
     expect(row({})).toBeUndefined();
@@ -130,8 +132,11 @@ describe('a converged group on the board', () => {
     await waitFor(() => expect(mounted()).toEqual(['a', 'b', 'c', 'd']));
     const toggle = document.querySelector('[data-converge-toggle]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    // Its key as this platform writes it (jsdom's platform is no Mac): Ctrl+G, never CtrlG.
+    expect(toggle.title).toContain('（Ctrl+G）');
     fireEvent.click(toggle);
     await waitFor(() => expect(mounted()).toEqual([]));
+    expect(toggle.title).toBe('把组件按原位展开（Ctrl+G）');
     const icon = screen.getByTestId('converged-icon-canvas');
     expect(icon.getAttribute('role')).toBe('button');
     expect(icon.getAttribute('aria-label')).toContain('整个画布，已收敛 4 个组件');
@@ -274,6 +279,9 @@ describe('a converged group on the board', () => {
     fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
     expect(screen.getByTestId('cmdbar-row-converge-toggle')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByTestId('cmdbar-row-converge-toggle').textContent).toContain('至少需要 2 个组件');
+    // The palette draws the canvas's own keys (keyHintMap), also for a row it names otherwise: fit is the canvas's fit-all.
+    expect(screen.getByTestId('cmdbar-row-converge-toggle').querySelector('kbd')?.textContent).toBe('Ctrl+G');
+    expect(screen.getByTestId('cmdbar-row-fit').querySelector('kbd')?.textContent).toBe('Ctrl+0');
   });
 
   it('never draws a canvas kept converged as an icon of one component, beside a form', async () => {

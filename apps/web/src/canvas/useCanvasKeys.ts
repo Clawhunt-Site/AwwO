@@ -7,11 +7,12 @@
 // Two rules govern everything here:
 //  1. A key never fires while the operator is TYPING. Tiles contain live composers and the
 //     inspector is a form; stealing Delete or Escape from a textarea would destroy work.
-//  2. The bindings are DECLARED, not just handled — `CANVAS_KEYS` is exported so the command
-//     palette shows the same truth the listener enforces (a palette that lies about a shortcut
-//     is worse than one that shows none).
+//  2. The bindings are DECLARED, not just handled — `canvasKeyBindings` is exported so the
+//     command palette and the settings show the same truth the listener enforces (a palette that
+//     lies about a shortcut is worse than one that shows none).
 
 import { useEffect, useMemo, useRef } from 'react';
+import type { CanvasCommandId } from './CommandBar';
 
 export type CanvasKeyAction =
   | 'focus-toggle'
@@ -30,7 +31,7 @@ export type CanvasKeyAction =
 
 export interface CanvasKeyBinding {
   action: CanvasKeyAction;
-  /** Human-readable hint shown in the palette (mac glyphs when on mac). */
+  /** Human-readable hint shown in the palette and the settings, as this platform writes it (formatChord). */
   hint: string;
   label: string;
 }
@@ -38,22 +39,34 @@ export interface CanvasKeyBinding {
 const isMacPlatform = (): boolean =>
   typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent || '');
 
-/** Binding table. `mod` renders as ⌘ on mac and Ctrl elsewhere. */
+/**
+ * A chord with Ctrl/⌘ (`mod`) and Shift as the platform writes it: on a Mac the glyphs with nothing between them
+ * (⌘⇧Z, in the order this table has always shown), elsewhere the key names joined by + (Ctrl+Shift+Z), as the app
+ * writes Shift+Enter. On a Mac the listener takes Ctrl as well as ⌘, so a Mac taken for another platform still reads
+ * keys that work (the other way round, ⌘ would name the Windows key, which Windows keeps for itself).
+ */
+export function formatChord(key: string, { mod = false, shift = false }: { mod?: boolean; shift?: boolean } = {},
+  mac = isMacPlatform()): string {
+  if (mac) return `${mod ? '⌘' : ''}${shift ? '⇧' : ''}${key}`;
+  return [mod ? 'Ctrl' : '', shift ? 'Shift' : '', key].filter(Boolean).join('+');
+}
+
+/** Binding table, each hint as this platform writes it (formatChord). */
 export function canvasKeyBindings(mac = isMacPlatform()): CanvasKeyBinding[] {
-  const mod = mac ? '⌘' : 'Ctrl';
+  const mod = (key: string, shift = false) => formatChord(key, { mod: true, shift }, mac);
   return [
-    { action: 'focus-toggle', hint: `${mod}E`, label: '聚焦 / 退出聚焦' },
-    { action: 'cycle-next', hint: `${mod}]`, label: '下一个节点' },
-    { action: 'cycle-prev', hint: `${mod}[`, label: '上一个节点' },
-    { action: 'palette', hint: `${mod}P`, label: '命令面板' },
-    { action: 'search', hint: `${mod}K`, label: '搜索画布' },
-    { action: 'fit-all', hint: `${mod}0`, label: '适应全部' },
-    { action: 'converge-toggle', hint: `${mod}G`, label: '收敛成一个图标 / 展开全部组件' },
+    { action: 'focus-toggle', hint: mod('E'), label: '聚焦 / 退出聚焦' },
+    { action: 'cycle-next', hint: mod(']'), label: '下一个节点' },
+    { action: 'cycle-prev', hint: mod('['), label: '上一个节点' },
+    { action: 'palette', hint: mod('P'), label: '命令面板' },
+    { action: 'search', hint: mod('K'), label: '搜索画布' },
+    { action: 'fit-all', hint: mod('0'), label: '适应全部' },
+    { action: 'converge-toggle', hint: mod('G'), label: '收敛成一个图标 / 展开全部组件' },
     { action: 'delete-selection', hint: 'Delete', label: '删除所选' },
-    { action: 'undo', hint: `${mod}Z`, label: '撤销' },
-    { action: 'redo', hint: `${mod}⇧Z`, label: '重做' },
-    { action: 'save-waypoint', hint: `${mod}⇧1-9`, label: '保存路标' },
-    { action: 'recall-waypoint', hint: `${mod}1-9`, label: '回到路标' },
+    { action: 'undo', hint: mod('Z'), label: '撤销' },
+    { action: 'redo', hint: mod('Z', true), label: '重做' },
+    { action: 'save-waypoint', hint: mod('1–9', true), label: '保存路标' },
+    { action: 'recall-waypoint', hint: mod('1–9'), label: '回到路标' },
     { action: 'escape', hint: 'Esc', label: '退出聚焦 / 关闭浮层' },
   ];
 }
@@ -195,9 +208,24 @@ export function useCanvasKeys(handlers: CanvasKeyHandlers, enabled = true): Canv
   return useMemo(() => canvasKeyBindings(), []);
 }
 
-/** Palette hint map: action → printable shortcut, for CommandBar's keyHints. */
+/** The command palette's ids for the actions this table names otherwise (a type-only import: no runtime cycle). */
+const PALETTE_IDS: Partial<Record<CanvasKeyAction, CanvasCommandId>> = {
+  'fit-all': 'fit',
+  'delete-selection': 'delete',
+  'save-waypoint': 'waypoint-save',
+  'recall-waypoint': 'waypoint-recall',
+};
+
+/**
+ * Palette hint map: action → printable shortcut, for CommandBar's keyHints, also under the palette's id where it
+ * names the action otherwise. The palette shows no key of its own, so a row whose action has none here shows none.
+ */
 export function keyHintMap(bindings: ReadonlyArray<CanvasKeyBinding>): Record<string, string> {
   const map: Record<string, string> = {};
-  for (const b of bindings) map[b.action] = b.hint;
+  for (const b of bindings) {
+    map[b.action] = b.hint;
+    const id = PALETTE_IDS[b.action];
+    if (id) map[id] = b.hint;
+  }
   return map;
 }
