@@ -2017,9 +2017,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     }
     // Draft consumption is part of durable acceptance, not a generic composer edit (which
     // is correctly blocked once running). Save only after the journal succeeds, so neither
-    // storage failure can discard a request that has not been accepted or dispatched.
+    // storage failure can discard a request that has not been accepted or dispatched. AwwO's
+    // own page repair was never the draft: what a person left unsent there stays.
     const acceptedThreadId = acceptedManualNode?.kind === 'session' ? activeThreadId(acceptedManualNode) : undefined;
-    const consumeDraft = acceptedManualNode?.kind === 'session' && submittedThread
+    const consumeDraft = !automaticRepair && acceptedManualNode?.kind === 'session' && submittedThread
       && getNodeThreads(acceptedManualNode).find(thread => thread.id === acceptedThreadId)?.draft === submittedThread.draft;
     const acceptedDocument = consumeDraft ? { ...prepared, nodes: prepared.nodes.map(node =>
       node.id === acceptedManualNode.id && node.kind === 'session'
