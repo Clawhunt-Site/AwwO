@@ -136,7 +136,7 @@ import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserv
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, deliverablesShown, DRAWER_BESIDE_MIN_WIDTH, FOCUSED_SESSION_MIN_SIZE, nodeDepths, openContentOf, openFrameFor, presentationNodes,
   type OpenContent } from './nodePresentation';
-import { boundsOfBoxes, boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, visibleBoxIds, type ViewportState } from './viewport';
+import { boundsOfBoxes, boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, screenToWorld, visibleBoxIds, type ViewportState } from './viewport';
 import { RAIL_MODEL_KEY, isDesktopStage, readRailCollapsed, useDesktopStage, writeRailCollapsed } from './railState';
 import { paperclipApiBase } from '../paperclipBridge';
 import { gatewayApiBase } from '../chatAutomations';
@@ -150,6 +150,7 @@ import {
   NOTHING_CONVERGED, saveConvergedState, type ConvergedState, type ConvergedView,
 } from './convergedGroups';
 import { ConvergedIcon } from './ConvergedIcon';
+import type { CanvasMultiplayerHost, CanvasMultiplayerRebase } from './multiplayer/host';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
 import { DisplayLinks, DisplayTile, type DisplayChoice } from './DisplayTile';
@@ -362,6 +363,9 @@ export function touchesBusyNodes(prev: Pick<CanvasDocument, 'nodes' | 'edges'>, 
 export interface CanvasSurfaceProps {
   /** View the cloud snapshot without editing, persistence, planning, or run recovery. */
   readOnly?: boolean;
+  /** 多人同屏: the host's live connection (multiplayer/host.ts): others' changes come in through it, this page's
+   *  selection, open node and pointer go out, and others' rings, claims and pointers are drawn over the board. */
+  multiplayer?: CanvasMultiplayerHost;
   workspaceName?: string;
   workspaceCaption?: string;
   /** Storage destination shown in the footer; the host owns cloud sync status. */
@@ -497,7 +501,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -1060,6 +1064,46 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // Live, for a focus that re-fits a node while it is being configured (focusNode reads it).
   const inspectorRef = useRef<string | null>(null);
   inspectorRef.current = inspectorId;
+
+  // ---- 多人同屏 (multiplayer/host.ts) ----------------------------------------------------------
+  // Others' changes come in as a rebase the host works out: applied to the document and carried over every undo and redo
+  // step (so an undo never takes back someone else's edit), as no step of its own and with no output made stale here:
+  // whatever their edit made stale came with it. What is gone is no longer selected, open or configured.
+  const multiplayerRef = useRef(multiplayer);
+  multiplayerRef.current = multiplayer;
+  const multiplayerRebase = useCallback((rebase: CanvasMultiplayerRebase) => {
+    const prev = docRef.current;
+    const next = rebase.working(prev);
+    // Undo and redo steps take others' changes only: this page's own saved edit stays theirs to take back.
+    const carried = new globalThis.Map<CanvasDocument, CanvasDocument>();
+    const carry = (step: CanvasDocument) => {
+      let out = carried.get(step);
+      if (!out) { out = rebase.history(step); carried.set(step, out); }
+      return out;
+    };
+    undoStack.current = undoStack.current.map(carry);
+    redoStack.current = redoStack.current.map(carry);
+    if (planUndoEntry.current) planUndoEntry.current = carried.get(planUndoEntry.current) ?? planUndoEntry.current;
+    if (next === prev) return;
+    // A converged icon stays an icon for others' edits of its members' content; nodes or wires coming or going draw
+    // the cards again, as another tab's document does.
+    showAdopted(prev, next, true);
+    docRef.current = next;
+    setDoc(next);
+    const kept = new Set(next.nodes.map(node => node.id));
+    setSelection(previous => previous.some(id => !kept.has(id)) ? previous.filter(id => kept.has(id)) : previous);
+    setFocusedId(previous => previous && !kept.has(previous) ? null : previous);
+    setInspectorId(previous => previous && !kept.has(previous) ? null : previous);
+  }, [showAdopted]);
+  useEffect(() => {
+    if (!multiplayer || readOnly) return;
+    multiplayer.connect({ rebase: multiplayerRebase, ready: () => !setupRequest.current && !outdatedObserver.current,
+      focus: nodeId => focusNodeRef.current(nodeId), document: () => docRef.current });
+    return () => multiplayer.connect(null);
+  }, [multiplayer, multiplayerRebase, readOnly]);
+  // This page's selection and open node, for everyone else on the canvas; its pointer goes from the board below.
+  useEffect(() => { multiplayer?.presence({ selection }); }, [multiplayer, selection]);
+  useEffect(() => { multiplayer?.presence({ focus: focusedId }); }, [multiplayer, focusedId]);
   // An opened node takes as much of the stage as its content can use (openFrameFor), less the Configure panel's room
   // while that floats beside it. Its frame and the camera that shows it come from one measurement of the stage
   // (openPlacement), so the card drawn is the card the camera framed, even before the stage's own measurement arrives;
@@ -1582,7 +1626,20 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return busy;
   }, [laneList, readOnly]);
   const laneOfNode = useCallback((nodeId: string) => RUN_LANES.find(lane => laneJournal(lane)?.scope.includes(nodeId)), [laneJournal]);
-  laneGuard.current = { busy: busyNodeIds, active: anyLaneActive, exclusive: exclusiveLaneActive };
+  laneGuard.current = {
+    busy: (exceptLane?: number) => {
+      const busy = busyNodeIds(exceptLane);
+      // 多人同屏: the nodes others' runs hold are changed here no more than this page's own running ones. A node of one
+      // of this page's own lanes is its own run's (AwwO shows those as running too), which its lane may still write.
+      const remote = multiplayerRef.current?.busyNodes?.();
+      if (remote?.size) {
+        const mine = busyNodeIds();
+        for (const id of remote) if (!mine.has(id)) busy.add(id);
+      }
+      return busy;
+    },
+    active: anyLaneActive, exclusive: exclusiveLaneActive,
+  };
   laneGuardLaneActive.current = laneActive;
   // A collaboration runs alone, so at most one lane holds one.
   const collaborationJournal = RUN_LANES.map(lane => laneList[lane].journal.current).find(item => item?.collaboration) ?? null;
@@ -5044,7 +5101,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
     {/* Under the 成果 view the board is out of reach (the shortcuts pause too) but stays as it was. */}
-    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={(focusedId ? focusNarrow : narrowFocusWidth(size.w)) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef} {...nodeViewRoot}>
+    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={(focusedId ? focusNarrow : narrowFocusWidth(size.w)) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef}
+      // 多人同屏: this person's pointer, in world coordinates, for the others on the canvas (the host paces it).
+      onPointerMove={multiplayer ? event => {
+        const rect = rootRef.current?.getBoundingClientRect();
+        if (!rect || event.pointerType === 'touch') return;
+        const world = screenToWorld(viewRef.current, event.clientX - rect.left, event.clientY - rect.top);
+        multiplayer.presence({ cursor: { x: Math.round(world.x), y: Math.round(world.y) } });
+      } : undefined}
+      onPointerLeave={multiplayer ? () => multiplayer.presence({ cursor: null }) : undefined}
+      {...nodeViewRoot}>
       <CanvasViewport
         view={view}
         onViewChange={moveCamera}
@@ -5171,6 +5237,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             live={running || recovering}
           />
         ))}
+        {/* 多人同屏: others' rings, claims and pointers, over the cards and never in the way of a press. */}
+        {stageMeasured && multiplayer?.boardLayer?.(convergedView.wireNodes, view.scale)}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 

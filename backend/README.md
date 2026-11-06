@@ -292,10 +292,13 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - Self-learning they turned off stays off, and the learning cycles' changes they took back stay taken back, without
     their name (`learning_off_by`, `undone_by` become NULL, migration 055). The memory notes they wrote, changed or
     pinned keep their plain-text `created_by` / `updated_by`, and so stay people's: no learning cycle changes them.
+  - The changes they made to canvases stay in the canvases' change logs without their name (`canvas_changes.actor_id`
+    becomes NULL, migration 056); their canvas agent tokens, their claims and their live messages go with their account
+    (below).
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),
-  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), its canvases' evolution switches and logs (migration 053), its learning cycles and their changes, the canvases its notes for the whole workspace came from and the hashes of the notes of AwwO's that its people deleted (migration 055), usage ledger, and everyone's memberships and invitations.
+  the outcome records its canvas runs left (migration 050) and their memory distillations (migration 051), its learning settings (migration 052), its canvases' evolution switches and logs (migration 053), its learning cycles and their changes, the canvases its notes for the whole workspace came from and the hashes of the notes of AwwO's that its people deleted (migration 055), its canvases' change logs, claims, live messages and canvas agent tokens (migration 056), usage ledger, and everyone's memberships and invitations.
   - Its audit rows stay, without the workspace.
   - Its check-ins go too. A person's check-in streak counts their days in every workspace, so a member who checked in
     there loses those days from their streak.
@@ -320,6 +323,8 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - its plan mirror and plan watches;
   - its upgrade interest;
   - the thumbs it gave runs' results (`run_ratings`, migration 047);
+  - the canvas agent tokens it made, the claims it held and the live messages it wrote, its tokens' with them
+    (`canvas_agent_tokens`, `canvas_claims`, `canvas_live_messages`, migration 056);
   - its check-ins. In a workspace that stays, a check-in the person made today takes its bonus away from that
     workspace for the rest of the day, and another member may check in again.
 

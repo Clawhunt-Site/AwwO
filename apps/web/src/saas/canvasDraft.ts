@@ -91,6 +91,23 @@ export function isKnownSyncedCache(storage: ScopedStorage, document: CanvasDocum
   catch { return false; }
 }
 
+/** 多人同屏: where this device's copy of the canvas held nothing the server lacked, by its content (each person's camera
+ *  and clock aside): changes never carry those, so the server's document never matches a page's copy whole. */
+export const CANVAS_LIVE_CLEAN_KEY = 'awwo.cloud.live-clean.v1';
+function liveContentHash(document: CanvasDocument): string {
+  return canvasDocumentHash({ ...document, view: null, updatedAt: 0 });
+}
+export function rememberLiveClean(storage: ScopedStorage, version: number, document: CanvasDocument): void {
+  try { storage.setItem(CANVAS_LIVE_CLEAN_KEY, JSON.stringify({ version, hash: liveContentHash(document) })); }
+  catch (error) { if (!isCanvasStorageQuotaError(error)) throw error; }
+}
+export function isLiveCleanCache(storage: ScopedStorage, document: CanvasDocument): boolean {
+  try {
+    const marker = JSON.parse(storage.getItem(CANVAS_LIVE_CLEAN_KEY) || '{}');
+    return typeof marker.hash === 'string' && marker.hash === liveContentHash(document);
+  } catch { return false; }
+}
+
 /** A document's identity as the server stores it (object key order aside); `canonical` when the caller has it already. */
 export function canvasDocumentHash(document: unknown, canonical = canonicalCanvasDocumentJSON(document)): string { return bytesHash(canonical); }
 

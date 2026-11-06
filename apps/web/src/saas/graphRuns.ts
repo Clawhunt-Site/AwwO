@@ -1,5 +1,5 @@
 import { api, tenantPath, SaaSApiError } from './api';
-import { currentSaaSCanvas, flushSaaSCanvas, canvasKnowledgeRevisionIds } from './canvasBridge';
+import { catchUpSaaSCanvas, currentSaaSCanvas, flushSaaSCanvas, canvasKnowledgeRevisionIds } from './canvasBridge';
 import type { CanvasDocument } from '../canvas/canvasDoc';
 import { runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { activeThreadId } from '../canvas/nodeThreads';
@@ -243,14 +243,25 @@ export async function submitCloudGraph(operationId: string, scope: readonly stri
   const requestedCollaboration = collaboration ? { ...collaboration } : undefined;
   if (requestedCollaboration && !validGraphCollaboration({ ...requestedCollaboration, maxModelCalls: 2 * requestedScope.length * requestedCollaboration.rounds + 1,
     phase: 'proposal', round: 0, turns: [] }, requestedScope)) throw new GraphNotSubmittedError('Invalid collaboration policy or selection');
-  let documentVersion: number | void;
-  try { documentVersion = await flushSaaSCanvas(); }
-  catch (error) { throw new GraphNotSubmittedError(error instanceof Error ? error.message : 'Canvas saving failed'); }
-  if (captured !== currentSaaSCanvas()) throw new GraphNotSubmittedError('The active workspace changed before submission');
-  if (!Number.isInteger(documentVersion) || Number(documentVersion) < 1) throw new GraphNotSubmittedError('The saved canvas version is unavailable');
-  return api<GraphRunSnapshot>(graphPath(captured.tenant.id, captured.canvasId), {
-    method: 'POST', body: JSON.stringify({ operationId, scope: requestedScope, documentVersion, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}), ...(requestedCollaboration ? { collaboration: requestedCollaboration } : {}) }),
-  });
+  // 多人同屏: someone else's change between this page's save and the run's start makes the server refuse the start as
+  // made on an older version; the page then takes the changes it missed, saves again and asks again (the operation id
+  // keeps it one run), twice at most.
+  for (let attempt = 0; ; attempt += 1) {
+    let documentVersion: number | void;
+    try { documentVersion = await flushSaaSCanvas(); }
+    catch (error) { throw new GraphNotSubmittedError(error instanceof Error ? error.message : 'Canvas saving failed'); }
+    if (captured !== currentSaaSCanvas()) throw new GraphNotSubmittedError('The active workspace changed before submission');
+    if (!Number.isInteger(documentVersion) || Number(documentVersion) < 1) throw new GraphNotSubmittedError('The saved canvas version is unavailable');
+    try {
+      return await api<GraphRunSnapshot>(graphPath(captured.tenant.id, captured.canvasId), {
+        method: 'POST', body: JSON.stringify({ operationId, scope: requestedScope, documentVersion, ...(knowledgeRevisionIds.length ? { knowledgeRevisionIds } : {}), ...(requestedCollaboration ? { collaboration: requestedCollaboration } : {}) }),
+      });
+    } catch (error) {
+      if (attempt < 2 && error instanceof SaaSApiError && error.status === 409 && error.code === 'version_conflict'
+          && captured === currentSaaSCanvas() && await catchUpSaaSCanvas().catch(() => false)) continue;
+      throw error;
+    }
+  }
 }
 
 /** One read of the journal's cloud graph, merged into it. An observer that reads it again and again (the canvas's poll,

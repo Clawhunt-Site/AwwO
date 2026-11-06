@@ -84,7 +84,8 @@
 | GET /canvases | limit?, cursor?, view? | 当前租户画布，`{items,nextCursor,snapshot}`；`view=summary` 时每项以 `outline` 代替 `document` |
 | POST /canvases | name, document | 创建画布，201 |
 | GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt |
-| PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409 |
+| PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409（AWWO-LAW-026，多人同屏之前的页面用它）；每次保存都记进画布的变更记录（label `save`），正在看这张画布的页面和 Agent 收到它 |
+| PATCH /canvases/{id} | baseVersion, changeId, clientId, ops, label? | 多人同屏的保存：只发改了的字段，按到达服务端的先后合进最新的画布（见下文「多人同屏」） |
 | POST /canvases/{id}/initialize | documentVersion, scope? | 根据已保存文档准备节点 Agent / Session，200 返回完整 canonical 画布；不执行模型 |
 | DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE。context 超过 120000 个 UTF-16 码元（中文一字一个，与 worker 的传输上限同一计法）、连同请求超过 128000 个码元、或超过所选模型的保守预算时返回 413 `context_limit`（模型预算按 worker 在 `/health` 公布的 `proseBytesPerToken` 估算 token 计：中文、普通文字和代码按该模型实测的每 token 字节数，数字、长串（base64、URL、压缩代码）、标点和符号（中文和全角的除外）、超过 32 个的连续空白和其他文字仍按一字节一 token；没公布的模型仍按字节），`error.details.contextRoom` 为同一请求的 context 最多可占的字节数（按该 context 自身每估算 token 的字节数换算；为因长度被省略的个性化设置留出空间，创建 run 时的长度与预算检查也为因长度被省略的节点上限留出，读取节点上限之前的码元检查不留；只因输入超过 `AWWO_PLANNER_MAX_INPUT_BYTES` 而没用上运营方规划模型时（该模型当天的工作区与部署次数都还有余，先于长度检查；且工作区可以使用它：DeepSeek 规划模型须在工作区的模型清单里），取能换用该模型的长度与默认模型长度中较大者；0 表示请求本身、它附带的文件或选中的资料已占满，再短的 context 也放不下）；页面据此发送更短的画布视图，不创建 run、不计次（首次规划时创建的规划会话照常保留）。服务端在 context 之后、个性化设置和请求之前加一段 `Node limits`（2026-10-22 起，`planning_limits.go`）：工作区可用的每个模型单次回答最多的输出 token 数（含思考；取 openai-agents 与 Pi 两个 worker 在 `/health` 公布的 `maxOutputTokens`，两个都提供该模型时取较小者，因为绑定工作区 Agent 的节点沿用该 Agent 的运行时；提供该模型却没公布上限、或公布的不是整数的 worker 按规划指令自己的假定算 16000，这一段随之写明；至多写 100 个模型，其余的只写它们中最小的上限，作为其余每个模型该取的上限）、未选模型的节点所用的工作区默认模型（`"default"`，取 openai-agents 的）和单次运行的时限；页面读到画布的模型目录和读者的选择之后（`AssistantExecutionHost.componentModelRead`），另起一行写明规划新增、未用 `set_model` 的 Agent 节点将使用的模型（读者为画布助手选的模型，DeepSeek 也写；这些节点用工作区默认模型时写 `"default"`；读到之前，例如从首页转来的请求，以及没有模型目录的桌面版，不写），这些节点随后使用规划所依据的那个模型（`assistantModel.ts` `planComponentModel`）：规划帧的 `newNodeModel` 取自其 run 所依据的、保存的请求的 context，续接的规划、或另一个标签页发起的规划也一样，而不是读者之后改选的；`"default"` 让它们留在默认模型；请求没写（本次发布之前保存的，或在上述读取之前发出的），或写的模型现在用不了（不再提供、没有就绪的运行时，或工作区套餐不再包含）时，用规划完成时读者的选择；只有用户能选的模型（DeepSeek）只在规划完成时读者仍选着它才用，因为隐私条款只在选了 DeepSeek 时才把请求发给它。这些只在请求通过权限检查后才读取 worker；它在请求哈希之后加入，上限变了以后的重试仍是同一规划；完整的一段会让请求超出提示长度上限、或仅因它而超出运营方规划模型的输入上限（`AWWO_PLANNER_MAX_INPUT_BYTES`）时，改用简短的一段（默认模型的上限，也按它自己的 id 写出；上限比它低的模型，至多 12 个、从小到大；其余模型中最小的上限，作为其余每个模型该取的上限；没有默认模型时只写所有模型中最小的上限，作为每个模型该取的上限），连这段也放不下时不加；两个 worker 都一个上限也没公布时也不加。规划指令据此把每个节点的交付控制在其模型上限的一半以内（代码六分之一，只拼接现成部分的节点三分之二），更大的任务按章节、模块或批次拆成并行的部分节点，每部分写明范围和它在用户总量里的份额，并保持在规划的操作数上限内；前端节点自身的代码超过其模型上限的六分之一时，拆成代码模块节点和一个只拼接的组装节点 |
@@ -338,6 +339,36 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 **作者收益**：每次 charged 调用的份额是价格 ×（1 − `AWWO_MARKET_FEE_BPS`/10000），在调用方计费期结束并过 `AWWO_MARKET_HOLD_DAYS` 后，先向 ClawHunt 再读一次调用方的套餐（读不到时等待，保留期后 30 天仍读不到按已有记录），再按该期已付点数（减去上期结转）覆盖本期花费的比例确定（不超过 1，赠送点数部分不产生收益，退款后为 0）。不自动转账：每个日历月（UTC）结束后，每位作者当月确定、还没进账单的收益（加上一张账单留下的不足一分的部分）汇总成一张月度账单（`review`），取整到分，不足一分的不出账单；没绑定 ClawHunt 的作者没有账单，收益累积到绑定后。平台管理员批准后（`AWWO_MARKET_PAYOUTS=on` 时才能批准，需要 ClawHunt 客户端，不需要市场开着），账单经 ClawHunt 的 `POST /api/awwo/sso/earnings`（账单 id 由作者和月份算出，为幂等号）转入作者的 ClawHunt 钱包；没批准的账单从不转账。
 
 **画布保存**：网页每次保存画布带 `X-Awwo-Canvas-Features: market`。没带这个请求头、又会删掉或改动已存市场节点的保存返回 409 `canvas_reload_required`（市场之前的旧页面会丢掉它不认识的节点）。
+
+## 多人同屏（多人与多个 Agent 同时在一张画布上）
+
+设计与线上格式见 [awwo-canvas-live-collaboration.md](awwo-canvas-live-collaboration.md)（2026-11-06，migration 056，schema 56）。下列路径都在
+`/tenants/{tenantId}/canvases/{id}` 之下；读：任意角色的成员或画布 Agent 令牌；写：member 以上或 `edit` 令牌。令牌以
+`Authorization: Bearer awwo_ct_…` 发送，只到达它所属的那一张画布（别的画布、别的工作区 404），带 `Origin` 头的请求 403
+（网页不能用令牌），权限取令牌范围与创建人当前角色中较低的那个（AWWO-LAW-029）。
+
+| 方法与路径 | 请求 | 响应与规则 |
+| --- | --- | --- |
+| PATCH（画布本身） | `{baseVersion, changeId, clientId, ops, label?}` | 至多 500 个 op（`set` / `del` / `order`，路径见设计文档），按到达服务端的先后合进最新画布，同一字段后到者为准，只改 op 指到的路径（AWWO-LAW-027）。`{version, results, changes}`：`results[i]` 为 `ok`、`gone`（记录已被删）、`claimed`（Agent 改别人认领的节点）、`node_running`（别人启动的运行中的节点，位置、尺寸、抽屉和结果字段除外）、`forbidden`（Agent 不能改的字段）；`changes` 为 baseVersion 之后的全部变更（含本次），变更记录已不包含时改为 `{reset: true, document}`。同一 `changeId` 再发只回答、不再应用（`duplicate: true`）；不改变任何内容的变更不增加版本。整篇保存的规则照旧：保留的任务要求与技能、校验、8 MiB、400 个节点、2000 条连线；路径或值无效 400 `invalid_op`，baseVersion 比画布新 409 `version_ahead`，超出节点或连线上限 409 `canvas_limit`。审计 `canvas.changed`（令牌为 `canvas.agent_changed`）|
+| GET /changes?after=v | | `{version, changes}`；变更记录不够（保留最近 24 小时、至少最近 50 条、至多 2000 条）或相差超过 300 条时 `{version, reset: true, document}` |
+| GET /live/events?after=v&client=c | | SSE：`hello {you, version, participants, claims, messages}`、`changes`（每个版本一条）、`reset {version}`、`presence {participant}` 或 `{left}`、`claims {claims}`、`message {message}`、`bye {reason}`（`revoked` / `access` / `deleted` / `restart`）；每 15 秒 `: ping` 并重新核验会话或令牌；API 停止时立即 `bye: restart`。一人每张画布至多 8 条流，一个令牌 4 条，一张画布 64 位参与者 |
+| POST /live/presence | `{clientId, state}` | 204；state 只含要改的部分：`selection`（节点 id 列表）、`focus`、`cursor`（世界坐标，只对人）、`status`（至多 140 字）；每位参与者每秒至多 10 次，多的丢弃。只读成员也可以（只在内存，不写库）|
+| POST /live/claims | `{clientId, nodeIds, ttlSeconds?, note?}` | 认领 1–50 个节点 15–600 秒（默认 120），别人持有的列入 `refused`；`{claims, refused, missing}`。Agent 写一个节点时自动认领 60 秒；人不受认领限制 |
+| DELETE /live/claims | `{clientId, nodeIds?}` | 放开自己的认领（不写 nodeIds 为全部）；`{claims}` |
+| GET /live/messages?before=id | | 实时消息，新的在前，每页 50 条；每张画布保留最近 200 条 |
+| POST /live/messages | `{clientId, text, nodeId?}` | member 以上或 edit 令牌；1–2000 字；`{message}` |
+| GET /agent-tokens | | member 以上（会话）；`{items}`，不含密钥 |
+| POST /agent-tokens | `{name, days?, scope?}` | member 以上（会话，按 IP 限速）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
+| DELETE /agent-tokens/{tokenId} | | 创建人或工作区 admin/owner；204，令牌的流立刻 `bye: revoked`，其认领放开 |
+
+令牌随创建人离开工作区或降为只读成员、修改或重置密码而失效（与本机版连接密钥相同）。`POST /initialize` 也记它的变更（label
+`setup`）；可选的 `clientId` 写进这条变更。
+
+MCP：`POST /api/v1/mcp`（Streamable HTTP，JSON 应答，令牌放在 Bearer 头），工具 `canvas_overview`、`canvas_read_node`、`canvas_wait`、
+`canvas_add_node`、`canvas_update_node`、`canvas_delete_node`、`canvas_connect`、`canvas_disconnect`、`canvas_claim`、`canvas_release`、
+`canvas_set_status`、`canvas_say`、`canvas_messages`、`canvas_apply`；每个工具都走上表的同一套处理，规则完全相同。Agent 只能改
+标题、设定、位置尺寸、表单字段、装配模板、剪辑时间线和结果（结果存为 `source: "manual"`、`by` 写明 Agent），不能改绑定、会话、
+技能、团队、任务要求、契约、模型、运行时、思考强度，也不能运行节点或花额度。`GET` / `DELETE /api/v1/mcp` 405。
 
 ## 本机版连接（云端中转）
 

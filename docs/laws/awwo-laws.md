@@ -16,7 +16,7 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 | AWWO-LAW-006 | Runs | Run events are committed before they are streamed |
 | AWWO-LAW-007 | Runs | A reconnect replays from the database and never re-runs the model |
 | AWWO-LAW-008 | Runs | Quota and plan admission is atomic with the run insert |
-| AWWO-LAW-009 | Canvas | Canvas saves are compare-and-swap on the version read |
+| AWWO-LAW-009 | Canvas | Canvas saves are compare-and-swap on the version read (retired 2026-11-06: AWWO-LAW-026, -027) |
 | AWWO-LAW-010 | Models | Untrusted content reaches models only as quoted user-message data |
 | AWWO-LAW-011 | Workers | Workers expose no tool outside the fixed allowlist |
 | AWWO-LAW-012 | Workers | Workers connect only to their configured endpoints |
@@ -33,6 +33,10 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 | AWWO-LAW-023 | Source | Source files use LF line endings |
 | AWWO-LAW-024 | Source | Source files contain no hidden Unicode or control characters |
 | AWWO-LAW-025 | Process | While CI is paused, pushes carry their passed local gates |
+| AWWO-LAW-026 | Canvas | A whole-document canvas save is compare-and-swap on the version read |
+| AWWO-LAW-027 | Canvas | A canvas change changes only the paths its ops name, in the server's order |
+| AWWO-LAW-028 | Canvas | Every write of a canvas document is logged under its version before it is streamed |
+| AWWO-LAW-029 | Tenancy | A canvas agent token reaches only its own canvas, and never more than its maker may |
 
 ## Tenancy
 
@@ -66,6 +70,18 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 - **Evidence.** `backend/internal/app/invitations.go` (`lockTenantRow`, `mutationRole`);
   `backend/internal/app/authorization_test.go` (`TestPostgresMutationRechecksAuthorizationAfterBodyWait`,
   `TestPostgresBodylessMutationRechecksAuthorization`).
+
+### AWWO-LAW-029: A canvas agent token reaches only its own canvas, and never more than its maker may
+
+- **Law.** A request with a canvas agent token MUST reach only the one canvas of one workspace the token was made for,
+  with at most the lower of the token's scope and its maker's current role, and only while the token is unrevoked and
+  unexpired; it MUST be refused when it comes from a web page (an `Origin` header).
+- **Why.** An agent outside AwwO (Claude Code, Codex, any MCP client) works with a pasted secret: if it reached
+  further than its canvas, or outlived its maker's access, a leaked or misused token would open the maker's whole
+  account; a page that could use one would turn a pasted token into a cross-site write.
+- **Evidence.** `backend/internal/app/canvas_access.go` (`canvasAccess`, `admitCanvasToken`, `canvasWriteRole`);
+  `backend/internal/app/canvas_live_test.go` (`TestPostgresCanvasAgentTokensActWithinTheirRules`,
+  `TestPostgresCanvasLiveStreamCarriesEverything`).
 
 ## Runs
 
@@ -140,6 +156,47 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
   `backend/internal/app/node_setup_test.go` (`TestPostgresInitializeConcurrentCASAndAtomicFailure`);
   `apps/web/tests/saas-drafts.test.tsx` ("reload_after_409 retains the local draft, blocks the editor and never
   overwrites the newer cloud version").
+- Retired: 2026-11-06, at the owner's request for many people and agents working on one canvas at once
+  (多人同屏, docs/awwo-canvas-live-collaboration.md): a canvas change now merges into the newer document field by
+  field. Replaced by AWWO-LAW-026 (the whole-document save keeps its compare-and-swap) and AWWO-LAW-027 (what a
+  change may and may not overwrite).
+
+### AWWO-LAW-026: A whole-document canvas save is compare-and-swap on the version read
+
+- **Law.** A whole-document canvas save (`PUT`) MUST succeed only for the version it was based on; a stale version
+  is refused with 409 and never overwrites or merges into the newer document.
+- **Why.** A page from before 多人同屏 sends its whole document: applied over a newer one it would take back everyone
+  else's edits since its version. On a 409 the browser keeps the refused edit as a draft the user can restore or
+  export.
+- **Evidence.** `backend/internal/app/app_test.go` (`TestPostgresTenancyAuthenticationAndCAS`);
+  `backend/internal/app/canvas_live_test.go` (`TestPostgresCanvasChangesMergeWritersInServerOrder`);
+  `backend/internal/app/node_setup_test.go` (`TestPostgresInitializeConcurrentCASAndAtomicFailure`);
+  `apps/web/tests/saas-drafts.test.tsx` ("reload_after_409 retains the local draft, blocks the editor and never
+  overwrites the newer cloud version").
+
+### AWWO-LAW-027: A canvas change changes only the paths its ops name, in the server's order
+
+- **Law.** A canvas change (`PATCH`) MUST be applied to the newest document in the order changes reach the server,
+  and MUST change only the paths its ops name, the wires of the nodes it deletes, and what the save rules of every
+  document keep (preserved task frames and skills).
+- **Why.** Several people and agents edit one canvas at once: each one's edit of one field must neither be lost to
+  nor take back another's edit of a different field, and two edits of one field must end the same way for
+  everyone (the later one at the server).
+- **Evidence.** `backend/internal/app/canvas_changes_test.go` (`TestCanvasChangeVectorsApply`,
+  `TestCanvasDiffAppliedGivesTheTarget`, `TestCanvasApplyLeavesTheOtherRecordsAlone`);
+  `backend/internal/app/canvas_live_test.go` (`TestPostgresCanvasChangesMergeWritersInServerOrder`,
+  `TestPostgresCanvasChangeKeepsTheSaveRules`, `TestPostgresCanvasChangeFencesRunningNodes`);
+  `apps/web/tests/saas-multiplayer-changes.test.ts`; `apps/canvas-change-vectors.json`.
+
+### AWWO-LAW-028: Every write of a canvas document is logged under its version before it is streamed
+
+- **Law.** Every committed write of a canvas document (a change, a whole-document save, node setup) MUST be in the
+  canvas's change log under its new version, in the same transaction, before any live stream sends it.
+- **Why.** A page or an agent catches up by the changes after the version it holds; a write missing from the log
+  would leave its copy silently different from the canvas, and a stream that sent an uncommitted write could show a
+  change that never happened.
+- **Evidence.** `backend/internal/app/canvas_live_test.go` (`TestPostgresCanvasChangesMergeWritersInServerOrder`,
+  `TestPostgresCanvasLiveStreamCarriesEverything`).
 
 ## Models and workers
 

@@ -121,9 +121,14 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 		"references to users and tenants": {fmt.Sprintf(foreignKeysSQL, "c.confrelid IN ('users'::regclass,'tenants'::regclass)"), []string{
 			"account_deletion_requests user_id users n", "agents tenant_id tenants a", "artifacts tenant_id tenants a",
 			"audit_events actor_id users a", "audit_events tenant_id tenants a", "auth_sessions user_id users c",
+			// A canvas's agent tokens, claims and live messages go with the person who made them; its change log keeps the
+			// changes without a name for who made them (migration 056).
+			"canvas_agent_tokens created_by users c",
 			// A canvas's evolution keeps no name for who turned its switches on or recorded a change (migration 053).
-			"canvas_auto_evolution apply_by users n", "canvas_auto_evolution rerun_by users n", "canvas_evolution_log actor_id users n",
-			"canvas_experiences tenant_id tenants c", "canvas_lessons tenant_id tenants c", "canvases tenant_id tenants a",
+			"canvas_auto_evolution apply_by users n", "canvas_auto_evolution rerun_by users n",
+			"canvas_changes actor_id users n", "canvas_claims user_id users c", "canvas_evolution_log actor_id users n",
+			"canvas_experiences tenant_id tenants c", "canvas_lessons tenant_id tenants c",
+			"canvas_live_messages user_id users c", "canvases tenant_id tenants a",
 			"computer_responses tenant_id tenants a", "edit_jobs tenant_id tenants c", "external_identities user_id users c",
 			"graph_operation_cancellations actor_id users a", "graph_runs actor_id users a",
 			"knowledge_documents tenant_id tenants a", "knowledge_events tenant_id tenants a",

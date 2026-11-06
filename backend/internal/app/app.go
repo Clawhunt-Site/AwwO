@@ -108,6 +108,9 @@ type App struct {
 	relayLimits       relayLimits
 	// cloudModelCache holds the hosted models' limits of the local edition's AwwO 云端 connections (cloud_connections.go).
 	cloudModelCache cloudModelCache
+	// multiplayer is the live state of the canvases people and agents have open: the streams to wake, who is on each
+	// canvas and the canvas agent tokens' limits (canvas_live_hub.go).
+	multiplayer canvasMultiplayer
 }
 type rateEntry struct {
 	start time.Time
@@ -260,6 +263,8 @@ func (a *App) Start(ctx context.Context) error {
 }
 func (a *App) Close() {
 	defer a.closeObservability()
+	// Every live canvas stream ends now (bye: restart), so none holds the server's shutdown.
+	a.multiplayer.shutdown()
 	if a.leaseCancel != nil {
 		a.leaseCancel()
 	}
@@ -373,8 +378,24 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/plan", a.tenant(a.planCanvas, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/assistant/route", a.tenant(a.assistantRoute, 2))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/initialize", a.tenant(a.initializeCanvas, 2))
-	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.getCanvas, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}", a.canvasAccess(a.getCanvas, 1))
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.updateCanvas, 2))
+	// 多人同屏 (docs/awwo-canvas-live-collaboration.md): changes, the live stream, presence, claims, live messages and the
+	// canvas agent tokens; a person by their session, an agent by its token (canvas_access.go).
+	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/canvases/{id}", a.canvasAccess(a.patchCanvas, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/changes", a.canvasAccess(a.canvasChanges, 1))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/live/events", a.canvasAccess(a.canvasLiveEvents, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/presence", a.canvasAccess(a.canvasLivePresence, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/claims", a.canvasAccess(a.canvasLiveClaim, 2))
+	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}/live/claims", a.canvasAccess(a.canvasLiveRelease, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/live/messages", a.canvasAccess(a.canvasLiveMessages, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/messages", a.canvasAccess(a.canvasLiveSay, 2))
+	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/agent-tokens", a.tenant(a.listCanvasAgentTokens, 2))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/agent-tokens", a.tenant(a.authRate(a.createCanvasAgentToken), 2))
+	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}/agent-tokens/{tokenId}", a.tenant(a.revokeCanvasAgentToken, 2))
+	m.HandleFunc("POST /api/v1/mcp", a.canvasMCP)
+	m.HandleFunc("GET /api/v1/mcp", a.canvasMCPGet)
+	m.HandleFunc("DELETE /api/v1/mcp", a.canvasMCPGet)
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}", a.tenant(a.deleteCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/artifacts", a.tenant(a.listArtifacts, 1))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/uploads", a.tenant(a.uploadCanvasFile, 2))

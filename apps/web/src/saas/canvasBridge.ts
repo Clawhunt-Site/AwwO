@@ -54,7 +54,17 @@ export async function confirmSaaSPlanningCancellation(signal: AbortSignal): Prom
 const scopeListeners = new Set<() => void>();
 export function configureSaaSCanvas(scope: CanvasScope): void { active = scope; for (const listener of scopeListeners) listener(); }
 export function configureSaaSCanvasSave(save: (() => Promise<number | void>) | null): void { saveCanvas = save; }
-export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; for (const listener of scopeListeners) listener(); }
+// 多人同屏: reads the changes others made since this page's version (GET …/changes), so a request the server refused
+// as made on an older version (a canvas run's start) can be made again on the newest.
+let catchUpCanvas: (() => Promise<void>) | null = null;
+export function configureSaaSCanvasCatchUp(catchUp: (() => Promise<void>) | null): void { catchUpCanvas = catchUp; }
+/** False where there is nothing to catch up with (no live canvas). */
+export async function catchUpSaaSCanvas(): Promise<boolean> {
+  if (!catchUpCanvas) return false;
+  await catchUpCanvas();
+  return true;
+}
+export function clearSaaSCanvas(): void { active = null; knowledgeSelection = null; saveCanvas = null; initializeCanvas = null; catchUpCanvas = null; for (const listener of scopeListeners) listener(); }
 /** Capture a tenant/canvas scope once; an in-flight operation must not follow a workspace switch. */
 export function currentSaaSCanvas(): CanvasScope | null { return active; }
 /** For useSyncExternalStore with currentSaaSCanvas: told when a canvas opens or closes. */

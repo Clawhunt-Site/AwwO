@@ -1,0 +1,215 @@
+{
+  "about": "Cases of the canvas change engine (docs/awwo-canvas-live-collaboration.md), run by backend/internal/app/canvas_changes_test.go and apps/web/tests/saas-multiplayer-changes.test.ts. apply: the ops applied in order to before give after; applied[i] says whether ops[i] acted (false: its record was not there); error names an op that is refused. diff: the ops that turn a into b, exactly (values compared as JSON values).",
+  "apply": [
+    {
+      "name": "a node field set",
+      "before": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "A", "x": 0}], "edges": []},
+      "ops": [{"op": "set", "path": ["nodes", "n1", "title"], "value": "B"}],
+      "after": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "B", "x": 0}], "edges": []},
+      "applied": [true]
+    },
+    {
+      "name": "a field set on a node that is gone does nothing",
+      "before": {"version": 2, "nodes": [], "edges": []},
+      "ops": [{"op": "set", "path": ["nodes", "n9", "title"], "value": "B"}],
+      "after": {"version": 2, "nodes": [], "edges": []},
+      "applied": [false]
+    },
+    {
+      "name": "a new node is appended and an existing one replaced",
+      "before": {"version": 2, "nodes": [{"id": "n1", "kind": "form", "title": "F", "fields": []}], "edges": []},
+      "ops": [
+        {"op": "set", "path": ["nodes", "n2"], "value": {"id": "n2", "kind": "session", "title": "S"}},
+        {"op": "set", "path": ["nodes", "n1"], "value": {"id": "n1", "kind": "form", "title": "F2", "fields": []}}
+      ],
+      "after": {"version": 2, "nodes": [{"id": "n1", "kind": "form", "title": "F2", "fields": []}, {"id": "n2", "kind": "session", "title": "S"}], "edges": []},
+      "applied": [true, true]
+    },
+    {
+      "name": "a field deleted, a missing field deleted, a record deleted twice",
+      "before": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "A", "preview": "p"}, {"id": "n2", "kind": "session", "title": "B"}], "edges": []},
+      "ops": [
+        {"op": "del", "path": ["nodes", "n1", "preview"]},
+        {"op": "del", "path": ["nodes", "n1", "nothing"]},
+        {"op": "del", "path": ["nodes", "n2"]},
+        {"op": "del", "path": ["nodes", "n2"]}
+      ],
+      "after": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "A"}], "edges": []},
+      "applied": [true, true, true, false]
+    },
+    {
+      "name": "a conversation's field, a new conversation, a conversation deleted",
+      "before": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "threads": [{"id": "t1", "draft": "", "title": "会话"}, {"id": "t2", "draft": "x"}]}], "edges": []},
+      "ops": [
+        {"op": "set", "path": ["nodes", "n1", "threads", "t1", "draft"], "value": "你好"},
+        {"op": "set", "path": ["nodes", "n1", "threads", "t3"], "value": {"id": "t3", "draft": ""}},
+        {"op": "del", "path": ["nodes", "n1", "threads", "t2"]},
+        {"op": "set", "path": ["nodes", "n1", "threads", "t9", "draft"], "value": "lost"}
+      ],
+      "after": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "threads": [{"id": "t1", "draft": "你好", "title": "会话"}, {"id": "t3", "draft": ""}]}], "edges": []},
+      "applied": [true, true, true, false]
+    },
+    {
+      "name": "a form field set inside a form",
+      "before": {"version": 2, "nodes": [{"id": "f", "kind": "form", "fields": [{"id": "a", "label": "L", "value": ""}]}], "edges": []},
+      "ops": [{"op": "set", "path": ["nodes", "f", "fields", "a", "value"], "value": "42"}],
+      "after": {"version": 2, "nodes": [{"id": "f", "kind": "form", "fields": [{"id": "a", "label": "L", "value": "42"}]}], "edges": []},
+      "applied": [true]
+    },
+    {
+      "name": "wires are set and deleted whole",
+      "before": {"version": 2, "nodes": [], "edges": [{"id": "e1", "fromNode": "a", "fromPort": "result", "toNode": "b", "toPort": "context", "dataType": "text"}]},
+      "ops": [
+        {"op": "del", "path": ["edges", "e1"]},
+        {"op": "set", "path": ["edges", "e2"], "value": {"id": "e2", "fromNode": "b", "fromPort": "result", "toNode": "a", "toPort": "context", "dataType": "text"}}
+      ],
+      "after": {"version": 2, "nodes": [], "edges": [{"id": "e2", "fromNode": "b", "fromPort": "result", "toNode": "a", "toPort": "context", "dataType": "text"}]},
+      "applied": [true, true]
+    },
+    {
+      "name": "a waypoint by its slot, a missing collection made",
+      "before": {"version": 2, "nodes": []},
+      "ops": [{"op": "set", "path": ["waypoints", "3"], "value": {"slot": 3, "view": {"x": 1, "y": 2, "scale": 1}}}],
+      "after": {"version": 2, "nodes": [], "waypoints": [{"slot": 3, "view": {"x": 1, "y": 2, "scale": 1}}]},
+      "applied": [true]
+    },
+    {
+      "name": "order puts the listed records first and keeps the rest",
+      "before": {"version": 2, "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]},
+      "ops": [{"op": "order", "path": ["nodes"], "ids": ["c", "x", "a", "c"]}],
+      "after": {"version": 2, "nodes": [{"id": "c"}, {"id": "a"}, {"id": "b"}, {"id": "d"}]},
+      "applied": [true]
+    },
+    {
+      "name": "a document key set and deleted",
+      "before": {"version": 2, "nodes": [], "execution": {"mode": "review"}},
+      "ops": [{"op": "del", "path": ["doc", "execution"]}, {"op": "set", "path": ["doc", "displays2"], "value": [1, 2]}],
+      "after": {"version": 2, "nodes": [], "displays2": [1, 2]},
+      "applied": [true, true]
+    },
+    {
+      "name": "a null value is a value",
+      "before": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "binding": {"companyId": "c", "agentId": "a", "agentName": "x"}}]},
+      "ops": [{"op": "set", "path": ["nodes", "n1", "binding"], "value": null}],
+      "after": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "binding": null}]},
+      "applied": [true]
+    },
+    {
+      "name": "the first of two records with one id is the one changed",
+      "before": {"version": 2, "nodes": [{"id": "n1", "title": "first"}, {"id": "n1", "title": "second"}]},
+      "ops": [{"op": "set", "path": ["nodes", "n1", "title"], "value": "changed"}],
+      "after": {"version": 2, "nodes": [{"id": "n1", "title": "changed"}, {"id": "n1", "title": "second"}]},
+      "applied": [true]
+    },
+    {
+      "name": "a record set must carry the path's id",
+      "before": {"version": 2, "nodes": []},
+      "ops": [{"op": "set", "path": ["nodes", "n1"], "value": {"id": "n2"}}],
+      "error": 0
+    },
+    {
+      "name": "the version, the clock and the camera are not changed",
+      "before": {"version": 2, "nodes": []},
+      "ops": [{"op": "set", "path": ["doc", "view"], "value": {"x": 0, "y": 0, "scale": 1}}],
+      "error": 0
+    },
+    {
+      "name": "wires have no fields of their own",
+      "before": {"version": 2, "edges": [{"id": "e1", "toPort": "context"}]},
+      "ops": [{"op": "set", "path": ["edges", "e1", "toPort"], "value": "reference"}],
+      "error": 0
+    },
+    {
+      "name": "an unknown op",
+      "before": {"version": 2, "nodes": []},
+      "ops": [{"op": "move", "path": ["nodes", "n1"]}],
+      "error": 0
+    }
+  ],
+  "diff": [
+    {
+      "name": "nothing changed",
+      "a": {"version": 2, "updatedAt": 1, "nodes": [{"id": "n1", "x": 1}], "edges": [], "view": {"x": 0, "y": 0, "scale": 1}},
+      "b": {"version": 2, "updatedAt": 2, "nodes": [{"id": "n1", "x": 1}], "edges": [], "view": {"x": 5, "y": 5, "scale": 2}},
+      "ops": []
+    },
+    {
+      "name": "fields of a node, key by key",
+      "a": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "A", "x": 1, "y": 2, "preview": "p"}]},
+      "b": {"version": 2, "nodes": [{"id": "n1", "kind": "session", "title": "B", "x": 1, "y": 3, "persona": "new"}]},
+      "ops": [
+        {"op": "set", "path": ["nodes", "n1", "persona"], "value": "new"},
+        {"op": "del", "path": ["nodes", "n1", "preview"]},
+        {"op": "set", "path": ["nodes", "n1", "title"], "value": "B"},
+        {"op": "set", "path": ["nodes", "n1", "y"], "value": 3}
+      ]
+    },
+    {
+      "name": "a node removed, a node added, and the order kept",
+      "a": {"version": 2, "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}]},
+      "b": {"version": 2, "nodes": [{"id": "a"}, {"id": "c"}, {"id": "d", "title": "D"}]},
+      "ops": [
+        {"op": "del", "path": ["nodes", "b"]},
+        {"op": "set", "path": ["nodes", "d"], "value": {"id": "d", "title": "D"}}
+      ]
+    },
+    {
+      "name": "a changed order",
+      "a": {"version": 2, "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}]},
+      "b": {"version": 2, "nodes": [{"id": "c"}, {"id": "a"}, {"id": "b"}]},
+      "ops": [{"op": "order", "path": ["nodes"], "ids": ["c", "a", "b"]}]
+    },
+    {
+      "name": "a new node in the middle is an add and an order",
+      "a": {"version": 2, "nodes": [{"id": "a"}, {"id": "b"}]},
+      "b": {"version": 2, "nodes": [{"id": "a"}, {"id": "n"}, {"id": "b"}]},
+      "ops": [
+        {"op": "set", "path": ["nodes", "n"], "value": {"id": "n"}},
+        {"op": "order", "path": ["nodes"], "ids": ["a", "n", "b"]}
+      ]
+    },
+    {
+      "name": "conversations by id, one level deeper",
+      "a": {"version": 2, "nodes": [{"id": "n1", "threads": [{"id": "t1", "draft": "", "preview": "x"}, {"id": "t2", "draft": ""}]}]},
+      "b": {"version": 2, "nodes": [{"id": "n1", "threads": [{"id": "t1", "draft": "hi", "preview": "x"}, {"id": "t3", "draft": ""}]}]},
+      "ops": [
+        {"op": "del", "path": ["nodes", "n1", "threads", "t2"]},
+        {"op": "set", "path": ["nodes", "n1", "threads", "t1", "draft"], "value": "hi"},
+        {"op": "set", "path": ["nodes", "n1", "threads", "t3"], "value": {"id": "t3", "draft": ""}}
+      ]
+    },
+    {
+      "name": "threads that are not records are compared whole",
+      "a": {"version": 2, "nodes": [{"id": "n1", "threads": "broken"}]},
+      "b": {"version": 2, "nodes": [{"id": "n1", "threads": [{"id": "t1"}]}]},
+      "ops": [{"op": "set", "path": ["nodes", "n1", "threads"], "value": [{"id": "t1"}]}]
+    },
+    {
+      "name": "a wire changed is set whole",
+      "a": {"version": 2, "edges": [{"id": "e1", "toPort": "context", "fromNode": "a"}]},
+      "b": {"version": 2, "edges": [{"id": "e1", "toPort": "reference", "fromNode": "a"}]},
+      "ops": [{"op": "set", "path": ["edges", "e1"], "value": {"id": "e1", "toPort": "reference", "fromNode": "a"}}]
+    },
+    {
+      "name": "waypoints by slot, document keys by name",
+      "a": {"version": 2, "waypoints": [{"slot": 1, "view": {"x": 0, "y": 0, "scale": 1}}], "execution": {"mode": "review", "maxRounds": 2}},
+      "b": {"version": 2, "waypoints": [{"slot": 1, "view": {"x": 0, "y": 0, "scale": 1}}, {"slot": 2, "view": {"x": 9, "y": 9, "scale": 1}}]},
+      "ops": [
+        {"op": "set", "path": ["waypoints", "2"], "value": {"slot": 2, "view": {"x": 9, "y": 9, "scale": 1}}},
+        {"op": "del", "path": ["doc", "execution"]}
+      ]
+    },
+    {
+      "name": "numbers by value, objects regardless of key order",
+      "a": {"version": 2, "nodes": [{"id": "n1", "x": 1.0, "lastOutput": {"text": "t", "at": 5, "source": "run"}}]},
+      "b": {"version": 2, "nodes": [{"id": "n1", "x": 1, "lastOutput": {"source": "run", "at": 5, "text": "t"}}]},
+      "ops": []
+    },
+    {
+      "name": "a collection missing on one side",
+      "a": {"version": 2},
+      "b": {"version": 2, "edges": [{"id": "e1"}]},
+      "ops": [{"op": "set", "path": ["edges", "e1"], "value": {"id": "e1"}}]
+    }
+  ]
+}

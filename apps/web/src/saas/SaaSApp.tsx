@@ -7,10 +7,13 @@ import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, sa
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey, canvasStore, canvasStoragePrefix, canvasStoreUsable, openCanvasStorage, openCanvasStorageInMemory, setLegacyCachePreservation } from '../canvas/canvasStorage';
 import { sweepLegacyCanvasStorage } from './canvasStoreSweep';
-import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, preserveLegacyCanvasCache, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, canonicalCanvasDocumentJSON, canvasDocumentHash, restorableCanvasDraftBase, type CanvasDraft, type CanvasDraftSending, type SavedCanvasDraft } from './canvasDraft';
+import { CANVAS_DRAFT_PREFIX, persistCanvasDraft, preserveLegacyCanvasCache, readCanvasDrafts, removeCanvasDraft, acknowledgeCanvasDraft, isCanvasStorageQuotaError, rememberCanvasBaseline, rememberKeptCanvasDrafts, unreviewedCanvasDrafts, isKnownSyncedCache, isLiveCleanCache, rememberLiveClean, canonicalCanvasDocumentJSON, canvasDocumentHash, restorableCanvasDraftBase, type CanvasDraft, type CanvasDraftSending, type SavedCanvasDraft } from './canvasDraft';
 import { AUTOSAVE_QUIET_MS, autosavePace } from './autosavePace';
 import { CanvasSurface, type CanvasEvolutionResult, type CanvasResultsOptions, type InitialPlanRequest } from '../canvas/CanvasSurface';
 import { CanvasRunReceipt } from './CanvasRunReceipt';
+import { MultiplayerHeader, useCanvasMultiplayer } from './useCanvasMultiplayer';
+import { readableConfirmed, rebaseFor, sameCanvasContent } from './canvasSync';
+import { readMultiplayer } from './capabilitiesApi';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { MAX_RUN_LANES, laneStorage, loadLaneJournals, withLaneOwnership } from '../canvas/runLanes';
@@ -503,6 +506,13 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const saving = useRef(false);
   const failed = useRef(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
+  // 多人同屏 (useCanvasMultiplayer.tsx): the canvas's live connection, saving by changes, others' edits coming in, where
+  // the server offers it (its capabilities, read as the canvas opens).
+  const [multiplayerOn, setMultiplayerOn] = useState(false);
+  const multiplayer = useCanvasMultiplayer({ tenantId: tenant.id, canvasId, userId: identity.user.id, enabled: Boolean(record) && !recovery && multiplayerOn,
+    current, storage: scopedStorage, busy: () => saving.current, confirmed: lessonCanvasSaved });
+  const multiplayerRef = useRef(multiplayer);
+  multiplayerRef.current = multiplayer;
   const localDocumentSaveFailed = useCallback((document: CanvasDocument) => {
     pending.current = document;
     failed.current = true;
@@ -563,9 +573,13 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     // Its failure disables execution until an explicit status check confirms readiness.
     Promise.all([opened, api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { signal: controller.signal }),
       api<unknown>(tenantPath(tenant.id, '/runtime'), { signal: controller.signal })
-        .then(readCloudRuntimeStatus).catch(unavailableRuntimeStatus)])
-      .then(async ([mode, value, health]) => {
+        .then(readCloudRuntimeStatus).catch(unavailableRuntimeStatus),
+      // 多人同屏: whether this server takes changes (and streams them), known before this page saves anything.
+      readMultiplayer(tenant.id, controller.signal)])
+      .then(async ([mode, value, health, live]) => {
         if (mode === null || controller.signal.aborted) return;
+        multiplayerRef.current.saves.current = live;
+        setMultiplayerOn(live);
         configureSaaSCanvas({ tenant, canvasId });
         let hasJournal = false;
         const settle = () => {
@@ -573,8 +587,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           // A draft holding exactly the cloud's document has nothing left to send: its page's last save was stored after
           // the page closed.
           if (alone.current && saved.some(each => each.draft)) {
+            // 多人同屏: a draft that differs from the cloud's document only by its camera (each person's own) holds nothing.
             const cloud = canonicalCanvasDocumentJSON(value.document);
-            const synced = saved.filter(each => each.draft && canonicalCanvasDocumentJSON(each.draft.document) === cloud);
+            const synced = saved.filter(each => each.draft && (live ? sameCanvasContent(each.draft.document, value.document) : canonicalCanvasDocumentJSON(each.draft.document) === cloud));
             for (const each of synced) removeCanvasDraft(storage, each);
             if (synced.length) saved = readCanvasDrafts(storage);
           }
@@ -589,7 +604,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           if (!unreviewedCanvasDrafts(storage, saved).length && cached) {
             let document: CanvasDocument | null = null;
             try { const parsed = JSON.parse(cached); if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = sanitizeDocument(parsed); } catch { /* Preserve the raw payload below. */ }
-            if (!document || (!isKnownSyncedCache(storage, document) && canonicalCanvasDocumentJSON(document) !== canonicalCanvasDocumentJSON(value.document)) || (hasJournal && baseVersion !== value.version)) {
+            if (!document || (!isKnownSyncedCache(storage, document) && (live ? !isLiveCleanCache(storage, document) && !sameCanvasContent(document, value.document) : canonicalCanvasDocumentJSON(document) !== canonicalCanvasDocumentJSON(value.document))) || (hasJournal && baseVersion !== value.version)) {
               if (document && baseVersion > 0) persistCanvasDraft(storage, writerId, baseVersion, document);
               else storage.setItem(`${CANVAS_DRAFT_PREFIX}${writerId}`, JSON.stringify({ unrecognizedCache: cached, baseVersion }));
               saved = readCanvasDrafts(storage);
@@ -598,9 +613,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           setLocalDraftCount(saved.length);
           if (unreviewedCanvasDrafts(storage, saved).length) { setManualRecovery(false); setRecovery(saved); setSaveState('存在未同步草稿'); }
           else {
-            if (!hasJournal) storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(sanitizeDocument(value.document)));
+            // The cloud's document opens, with this person's own camera where this device kept one (多人同屏: a change
+            // never carries a camera, so the cloud's is someone's old one).
+            let camera: CanvasDocument['view'] = null;
+            try { camera = live && cached ? sanitizeDocument(JSON.parse(cached)).view : null; } catch { /* the cloud's then */ }
+            const opening = sanitizeDocument(value.document);
+            if (!hasJournal) storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(camera ? { ...opening, view: camera } : opening));
             storage.setItem('awwo.cloud.version', String(value.version));
             rememberCanvasBaseline(storage, value.version, value.document);
+            if (live && !hasJournal) rememberLiveClean(storage, value.version, opening);
             setRecovery(null); setSaveState('已同步');
           }
         };
@@ -714,16 +735,20 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           retrying = false;
           const pendingDocument = pending.current;
           const pendingCanonical = canonicalCanvasDocumentJSON(pendingDocument);
+          const live = multiplayerRef.current;
           // An editor may re-publish the same snapshot while its previous PUT is in flight.
           // Once that PUT is acknowledged, the newer draft has no unsent change; do not
           // advance the cloud version again or discard a genuinely different pending edit.
-          if (!restoredSource.current && pendingCanonical === canonicalCanvasDocumentJSON(current.current!.document)) {
+          // 多人同屏: nothing unsent is what a change would carry (a camera move carries nothing).
+          if (!restoredSource.current && (live.saves.current ? live.sendable(pendingDocument).length === 0
+            : pendingCanonical === canonicalCanvasDocumentJSON(current.current!.document))) {
             try {
               const redundant = draft.current;
               if (redundant) acknowledgeCanvasDraft(storage, redundant, current.current!.version);
               pending.current = null;
               draft.current = null;
-              if (!disposed) setSaveState('已同步');
+              if (live.saves.current && !live.holding()) rememberLiveClean(storage, current.current!.version, sanitizeDocument(pendingDocument));
+              if (!disposed) setSaveState(live.saves.current && live.holding() ? '等待同步…' : '已同步');
             } catch (error) {
               failed.current = true;
               if (!disposed) { setSaveState('未同步'); setError(localDraftFailure(error)); }
@@ -738,14 +763,27 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           setSaveState('正在保存…');
           let serverConfirmed = false;
           try {
-            const saved: CanvasRecord | null = await api<CanvasRecord | null>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
+            // 多人同屏: the change this page has not sent goes as ops (PATCH), merged into the newest canvas; the answer
+            // moves this page's copy of the server's document and the canvas (useCanvasMultiplayer). An API from before it
+            // answers 405, and the page saves whole documents from then on.
+            let viaChanges = live.saves.current;
+            if (viaChanges) {
+              try { await live.save(document); }
+              catch (error) {
+                if (!(error instanceof SaaSApiError && error.status === 405)) throw error;
+                viaChanges = false;
+              }
+            }
+            const saved: CanvasRecord | null = viaChanges ? current.current
+              : await api<CanvasRecord | null>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}`), { method: 'PUT', body: JSON.stringify({ name: current.current!.name, document, version: current.current!.version }) });
             // A reply without the saved canvas confirms nothing: the edit stays unsynced.
             if (!saved || !Number.isSafeInteger(saved.version)) throw new SaaSApiError(502, 'empty_reply', t('服务器没有返回保存结果', 'The server did not return the saved canvas'));
             serverConfirmed = true;
             // Release this page's confirmed revision before writing a full baseline.
             // Other writers' drafts remain untouched: Storage cannot atomically compare/delete them.
             acknowledgeCanvasDraft(storage, sent, saved.version);
-            rememberCanvasBaseline(storage, saved.version, saved.document);
+            // (A change's baseline is written once the changes calm down: useCanvasMultiplayer.)
+            if (!viaChanges) rememberCanvasBaseline(storage, saved.version, saved.document);
             if (restoredSource.current) { removeCanvasDraft(storage, restoredSource.current); restoredSource.current = null; }
             if (!disposed) { try { setLocalDraftCount(readCanvasDrafts(storage).length); } catch { /* Draft count is decorative; save acknowledgement remains authoritative. */ } }
             if (draft.current?.revision === sent.revision) draft.current = null;
@@ -753,7 +791,10 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             // The save is no longer out once this page's drafts build on it (a failure above leaves the record standing).
             current.current = saved; busyRetries = 0; sending.current = null; lessonCanvasSaved(saved.document);
             storage.setItem('awwo.cloud.version', String(Math.max(saved.version, Number(storage.getItem('awwo.cloud.version')) || 0)));
-            if (!disposed) setSaveState(failed.current ? '未同步' : pending.current ? '等待同步…' : '已同步');
+            // 多人同屏: an edit held back for its node's hold (someone's run, an agent's claim) is not on the server yet.
+            const holding = viaChanges && live.holding();
+            if (viaChanges && !holding && !pending.current && live.unsent(document).length === 0) rememberLiveClean(storage, saved.version, sanitizeDocument(document));
+            if (!disposed) setSaveState(failed.current ? '未同步' : pending.current || holding ? '等待同步…' : '已同步');
           } catch (error) {
             // The API had no free save slot: the same edit goes again shortly, a few times, before it counts as failed.
             if (!serverConfirmed && error instanceof SaaSApiError && error.status === 503 && error.code === 'canvas_save_busy' && busyRetries < 3) {
@@ -782,7 +823,11 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             }
           }
         }
-      } finally { saving.current = false; }
+      } finally {
+        saving.current = false;
+        // 多人同屏: others' changes that came while the save was out go in now.
+        multiplayerRef.current.settle();
+      }
       if (failed.current) throw new Error('画布未同步，请先解决保存错误再运行。');
     };
     const observe = (event: Event) => {
@@ -791,7 +836,14 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       try {
         const raw = storage.getItem(CANVAS_STORAGE_KEY) || '{}'; size = raw.length;
         const document: CanvasDocument = JSON.parse(raw);
-        if (!pending.current && !draft.current && canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document)) return;
+        // 多人同屏: what a change would carry decides (a camera move carries nothing); a whole save compares documents.
+        const live = multiplayerRef.current;
+        if (!pending.current && !draft.current && (live.saves.current ? live.sendable(document).length === 0
+          : canonicalCanvasDocumentJSON(document) === canonicalCanvasDocumentJSON(current.current!.document))) {
+          // 多人同屏: a copy holding everything the server holds, and nothing it lacks, is clean by its content.
+          if (live.saves.current && !live.holding()) rememberLiveClean(storage, current.current!.version, sanitizeDocument(document));
+          return;
+        }
         pending.current = document;
         draft.current = persistCanvasDraft(storage, writerId, current.current!.version, pending.current!, sending.current);
       } catch (error) {
@@ -799,7 +851,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       }
       setSaveState('等待同步…'); later(pace.wrote(size));
     };
-    const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current) { event.preventDefault(); event.returnValue = ''; } };
+    const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current || multiplayerRef.current.holding()) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('awwo:canvas-cache-write', observe); window.addEventListener('beforeunload', leave);
     configureSaaSCanvasSave(async () => { await flush(); return current.current?.version; });
     const initialize = async (scope?: readonly string[], signal?: AbortSignal) => {
@@ -807,37 +859,51 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       await flush();
       if (disposed || signal?.aborted || currentSaaSCanvas() !== captured || !current.current) throw new Error('画布初始化已取消。');
       const before = current.current;
-      const cacheBefore = canonicalCanvasDocumentJSON(JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}'));
-      if (cacheBefore !== canonicalCanvasDocumentJSON(before.document)) throw new Error('画布已在另一页面更新，请重新加载后核对。');
+      // 多人同屏: the cache holds this person's own camera, which no change carries: the canvas itself is compared.
+      const liveSetup = multiplayerRef.current.saves.current;
+      const cacheBeforeDocument = JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}');
+      const cacheBefore = canonicalCanvasDocumentJSON(cacheBeforeDocument);
+      // Live, this tab's own canvas (the surface's document): the device's cache and version are shared with this person's
+      // other live tabs, which write them as they take changes, and the cache waits while node setup runs.
+      const workingBefore = liveSetup ? multiplayerRef.current.working() ?? sanitizeDocument(cacheBeforeDocument) : null;
+      if (liveSetup ? multiplayerRef.current.sendable(workingBefore!).length > 0 : cacheBefore !== canonicalCanvasDocumentJSON(before.document)) throw new Error('画布已在另一页面更新，请重新加载后核对。');
       saving.current = true;
       clearTimeout(timer);
       setSaveState('正在准备节点…');
       try {
         // Share autosave's queue. An uncertain POST must never be followed by a stale PUT.
         const saved = await api<CanvasRecord>(tenantPath(tenant.id, `/canvases/${encodeURIComponent(canvasId)}/initialize`), {
-          method: 'POST', body: JSON.stringify({ documentVersion: before.version, ...(scope ? { scope: [...scope] } : {}) }),
+          method: 'POST', body: JSON.stringify({ documentVersion: before.version, ...(scope ? { scope: [...scope] } : {}), ...(liveSetup ? { clientId: multiplayerRef.current.clientId } : {}) }),
           signal: AbortSignal.any([setupAbort.signal, AbortSignal.timeout(30000), ...(signal ? [signal] : [])]),
         });
         if (disposed || signal?.aborted || currentSaaSCanvas() !== captured) throw new Error('画布初始化已取消。');
-        if (pending.current || draft.current || current.current !== before
-            || Number(storage.getItem('awwo.cloud.version')) !== before.version
-            || canonicalCanvasDocumentJSON(JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}')) !== cacheBefore) {
+        const cacheNow = JSON.parse(storage.getItem(CANVAS_STORAGE_KEY) || '{}');
+        const workingNow = liveSetup ? multiplayerRef.current.working() ?? workingBefore! : null;
+        if (liveSetup ? (current.current !== before || !sameCanvasContent(workingNow, workingBefore))
+          : (pending.current || draft.current || current.current !== before
+            || Number(storage.getItem('awwo.cloud.version')) !== before.version || canonicalCanvasDocumentJSON(cacheNow) !== cacheBefore)) {
           throw new Error('初始化期间画布已变化，本机草稿已保留，请重新加载后核对。');
         }
         const payload = saved.document as Partial<CanvasDocument> | null;
         if (saved.id !== before.id || saved.tenantId !== tenant.id || !Number.isSafeInteger(saved.version) || saved.version < before.version
             || payload?.version !== 2 || !Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) throw new Error('初始化响应与当前画布不一致。');
         const document = sanitizeDocument(saved.document);
-        current.current = { ...saved, document }; lessonCanvasSaved(document);
+        // Live, the page's copy of the server's document is the server's own (changes apply to it exactly), and this
+        // person keeps their camera.
+        current.current = liveSetup ? saved : { ...saved, document }; lessonCanvasSaved(document);
         rememberCanvasBaseline(storage, saved.version, document);
         storage.setItem('awwo.cloud.version', String(saved.version));
-        storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(document));
-        setSaveState('已同步');
-        return document;
+        // Live, the setup's change carried onto this tab's canvas: its camera, and an edit waiting for its node's hold, stay.
+        const shown = liveSetup ? rebaseFor({ before: before.document, after: saved.document }).working(workingNow!) : document;
+        storage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(shown));
+        setSaveState(liveSetup && multiplayerRef.current.holding() ? '等待同步…' : '已同步');
+        return shown;
       } catch (error) {
         // A definitive 4xx rejection did not commit. Lost responses, version conflicts and
         // late edits instead require reconciliation, preserving the editor's independent draft.
-        const rejected = error instanceof SaaSApiError && ((error.status >= 400 && error.status < 500 && error.code !== 'version_conflict')
+        // 多人同屏: a version conflict is someone else's change since this page's save; nothing was committed, and the
+        // setup is asked again once the page has taken that change (initializeOnNewest below).
+        const rejected = error instanceof SaaSApiError && ((error.status >= 400 && error.status < 500 && (error.code !== 'version_conflict' || liveSetup))
           || (error.status === 503 && ['runtime_unavailable', 'database_unavailable'].includes(error.code)));
         if (!rejected) {
           failed.current = true;
@@ -849,10 +915,27 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           if (!disposed) { setSaveState('需要重新连接'); setError('节点准备结果尚未确认。草稿已保留，请重新加载后核对云端版本，避免重复创建。'); }
         } else if (!disposed) setSaveState('已同步');
         throw error;
-      } finally { saving.current = false; }
+      } finally {
+        saving.current = false;
+        multiplayerRef.current.settle();
+      }
+    };
+    // 多人同屏: a setup refused for someone else's change since this page's save goes again once that change is in
+    // (twice at most); the canvas takes the change first, and the next attempt saves and asks on the newest version.
+    const initializeOnNewest = async (scope?: readonly string[], signal?: AbortSignal) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try { return await initialize(scope, signal); }
+        catch (error) {
+          if (attempt >= 2 || disposed || signal?.aborted || !multiplayerRef.current.saves.current
+              || !(error instanceof SaaSApiError && error.status === 409 && error.code === 'version_conflict')) throw error;
+          await multiplayerRef.current.catchUp();
+          // The canvas writes the change it took to this device before the next attempt reads it.
+          await new Promise(resolve => setTimeout(resolve, 120));
+        }
+      }
     };
     configureSaaSCanvasInitialize((scope, signal) => {
-      const next = initializationQueue.then(() => initialize(scope, signal));
+      const next = initializationQueue.then(() => initializeOnNewest(scope, signal));
       initializationQueue = next.catch(() => {});
       return next;
     });
@@ -954,7 +1037,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
-    <CanvasSurface storageMode="cloud" personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
+    <CanvasSurface storageMode="cloud" multiplayer={multiplayer.host} personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       taskDraft={knowledgeTaskDraft} evolution={lessonEvolutions.evolution} onEvolutionSettled={evolutionTaken}
       autoRun={evolutionDriver.autoRun} onAutoRunSettled={evolutionDriver.autoRunSettled}
@@ -971,7 +1054,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
           : { title: event.failed ? t('画布运行结束，有节点未完成', 'Canvas run ended with unfinished nodes') : t('画布运行已完成', 'Canvas run finished'), body: record.name, failed: event.failed });
       }}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone={syncTone} status={<>{syncTone === 'synced' ? <Check size={12} aria-hidden="true" /> : <Save size={12} aria-hidden="true" />}<span>{({ '正在加载…': t('正在加载…', 'Loading…'), '存在未同步草稿': t('存在未同步草稿', 'Unsynced draft found'), '已同步': t('已同步', 'Synced'), '正在保存…': t('正在保存…', 'Saving…'), '等待同步…': t('等待同步…', 'Waiting to sync…'), '未同步': t('未同步', 'Not synced'), '已恢复草稿，等待同步…': t('已恢复草稿，等待同步…', 'Draft restored, waiting to sync…') }[saveState] || saveState)}</span></>} />}
-      headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />}{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
+      headerActions={<div className="saas-canvas-doc-actions"><MultiplayerHeader multiplayer={multiplayer} tenantId={tenant.id} canvasId={canvasId} canWrite={tenant.role !== 'reader'}
+        nodeTitle={id => readableConfirmed(current.current?.document).nodes.find(node => node.id === id)?.title} onFocusNode={multiplayer.focusNode} />
+        <UiModeSwitch variant="pill" />{uiMode === 'developer' && <GraphRunPanel tenantId={tenant.id} canvasId={canvasId} />}{localDraftCount > 0 && <button type="button" className="saas-local-drafts-action" aria-label={`${t('查看本机草稿', 'View local drafts')} (${localDraftCount})`} disabled={saveState !== '已同步'} onClick={() => {
         if (pending.current || saving.current || failed.current || !scopedStorage.current) return;
         const saved = readCanvasDrafts(scopedStorage.current);
         setLocalDraftCount(saved.length);

@@ -47,7 +47,9 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   headers.set('Accept', 'application/json');
   headers.set(MODEL_MARKS_HEADER, 'userChosen');
   if (init.body) headers.set('Content-Type', 'application/json');
-  if ((init.method || 'GET').toUpperCase() === 'PUT' && CANVAS_DOCUMENT_PATH.test(path)) headers.set(CANVAS_FEATURES_HEADER, CANVAS_FEATURES);
+  const method = (init.method || 'GET').toUpperCase();
+  // A change (PATCH, 多人同屏) says the same as a whole-document save.
+  if ((method === 'PUT' || method === 'PATCH') && CANVAS_DOCUMENT_PATH.test(path)) headers.set(CANVAS_FEATURES_HEADER, CANVAS_FEATURES);
   const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include', headers });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {

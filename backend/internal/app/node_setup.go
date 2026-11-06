@@ -59,6 +59,8 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DocumentVersion int64           `json:"documentVersion"`
 		Scope           json.RawMessage `json:"scope"`
+		// ClientID names the page that asked, in the change the setup logs (optional; pages from before 多人同屏 send none).
+		ClientID string `json:"clientId"`
 	}
 	if !a.decode(w, r, &body) {
 		return
@@ -66,6 +68,9 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	if body.DocumentVersion < 1 {
 		fail(w, 400, "invalid_input", "Current documentVersion is required")
 		return
+	}
+	if !liveClientIDOK(r, body.ClientID) || a.multiplayer.heldByOther(r.PathValue("tenantId"), r.PathValue("id"), canvasActorOf(r, body.ClientID)) {
+		body.ClientID = ""
 	}
 	var scope []string
 	if len(body.Scope) != 0 {
@@ -125,7 +130,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	catalog := runtimeCatalog{}
-	changed := false
+	changed, released := false, false
 	for i, original := range nodes {
 		if !selected[i] {
 			continue
@@ -225,6 +230,11 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
+		// Node setup is the canvas's next change, logged for the pages and agents that have it open.
+		if released, e = recordDocumentWrite(r.Context(), tx, tid, cid, version+1, raw, document, canvasActorOf(r, body.ClientID), "setup"); e != nil {
+			a.dbError(w, e)
+			return
+		}
 		if e = audit(r.Context(), tx, currentUser(r).ID, tid, "canvas.initialized", cid); e != nil {
 			a.dbError(w, e)
 			return
@@ -238,6 +248,12 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	if changed {
+		a.multiplayer.changed(tid, cid)
+	}
+	if released {
+		a.multiplayer.claimsChanged(tid, cid)
 	}
 	writeJSON(w, 200, v)
 }

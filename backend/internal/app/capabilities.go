@@ -37,6 +37,9 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 			"limits": map[string]any{"maxSeconds": 1200, "maxFiles": maxEditFiles, "maxTimelineBytes": maxEditTimelineBytes}},
 		// The Agent market (market.go).
 		"market": a.marketCapability(),
+		// 多人同屏 (docs/awwo-canvas-live-collaboration.md): a page saves by changes (PATCH) and opens the canvas's live
+		// stream only where this says so; a page reading a server older than it keeps whole-document saves.
+		"multiplayer": map[string]any{"enabled": true, "maxChangeOps": maxCanvasChangeOps},
 	})
 }
 

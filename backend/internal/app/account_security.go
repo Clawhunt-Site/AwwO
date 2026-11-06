@@ -77,8 +77,14 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	// So do the account's AwwO 本地版 keys: a session taken over could have made one (relay.go).
+	// So do the account's AwwO 本地版 keys: a session taken over could have made one (relay.go); and its canvas agent
+	// tokens, for the same reason (canvas_agent_tokens.go).
 	if _, e = tx.Exec(r.Context(), revokeRelayKeysSQL, uid, ""); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	revoked, e := revokeCanvasAgentTokens(r.Context(), tx, uid, "")
+	if e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -90,6 +96,7 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	a.multiplayer.tokensRevoked(revoked)
 	a.sessionCookie(w, "", -1)
 	w.WriteHeader(204)
 }
@@ -235,6 +242,11 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	revoked, e := revokeCanvasAgentTokens(r.Context(), tx, uid, "")
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
 	if e = audit(r.Context(), tx, uid, "", "auth.password_reset", uid); e != nil {
 		a.dbError(w, e)
 		return
@@ -243,6 +255,7 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	a.multiplayer.tokensRevoked(revoked)
 	a.sessionCookie(w, "", -1)
 	w.WriteHeader(204)
 }

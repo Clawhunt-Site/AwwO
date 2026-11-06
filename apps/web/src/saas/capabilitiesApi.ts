@@ -14,6 +14,24 @@ export interface WorkspaceCapabilities {
   /** The Agent market (docs/awwo-agent-market.md): the platform's fee in basis points, the highest price an author may set
    *  (credits per call), and the days a period's earnings wait before they are settled. Absent from a server older than it. */
   market?: { enabled: boolean; payouts: boolean; feeBps: number; maxPrice: number; holdDays: number };
+  /** 多人同屏 (docs/awwo-canvas-live-collaboration.md): changes, the live stream and canvas agent tokens. Absent from a
+   *  server older than it, whose canvases the page then saves whole. */
+  multiplayer?: { enabled: boolean; maxChangeOps: number };
+}
+
+/** Whether this server takes canvas changes and streams them (多人同屏): false for any answer that does not say so. */
+export async function readMultiplayer(tenantId: string, signal?: AbortSignal): Promise<boolean> {
+  // Asked again twice on a failure: the answer is kept for the whole opening (a page that settles on whole-document
+  // saves next to pages saving changes meets version conflicts).
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const value = await api<unknown>(tenantPath(tenantId, '/capabilities'), { signal });
+      return object(value) && object(value.multiplayer) && value.multiplayer.enabled === true;
+    } catch {
+      if (attempt >= 2 || signal?.aborted) return false;
+      await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+    }
+  }
 }
 
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);

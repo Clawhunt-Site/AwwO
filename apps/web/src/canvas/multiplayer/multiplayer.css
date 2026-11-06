@@ -1,0 +1,600 @@
+/* 多人同屏 / Multiplayer (docs/awwo-canvas-live-collaboration.md): the canvas header's people bar, the 同屏 panel and
+   the layer on the board (MultiplayerBar.tsx, MultiplayerPanel.tsx, AgentInvite.tsx, MultiplayerBoardLayer.tsx).
+
+   Every rule sits under an .awwo-multiplayer-* class. Colours are the hosted app's theme tokens (saas/design/tokens.css
+   and themes.css), so each of the eight styles, light and dark, dresses it; outside the hosted app they fall back to
+   the canvas root's own tokens (canvas.css). A participant's colour arrives inline as --mp-color, with --mp-ink, the
+   dark or light label colour that reads on it (labelColorFor). A name written in a participant's colour on the panel is
+   that colour mixed toward the theme's ink, which keeps its hue and reads on the panel in light and dark styles alike.
+
+   Buttons in the panel are written as `.awwo-multiplayer-panel .awwo-multiplayer-…`, a step above the workspace's
+   own `.awwo-workspace button` resets. */
+
+.awwo-multiplayer-bar,
+.awwo-multiplayer-panel,
+.awwo-multiplayer-board {
+  --mp-surface: var(--saas-raised, var(--panel, #ffffff));
+  --mp-card: var(--saas-card, var(--card, #ffffff));
+  --mp-field: var(--saas-field, var(--soft, #f5fbfc));
+  --mp-text: var(--saas-text, var(--text, #0e1c2c));
+  --mp-muted: var(--saas-muted, var(--muted, #4f6477));
+  --mp-subtle: var(--saas-subtle, var(--faint, #7c8c9c));
+  --mp-line: var(--saas-border, var(--line, #cfe6e8));
+  --mp-hairline: var(--saas-hairline, var(--line, #cfe6e8));
+  --mp-focus: var(--saas-focus, var(--blue, #3f7ff5));
+  --mp-link: var(--saas-link, var(--blue, #3f7ff5));
+  --mp-accent-soft: var(--saas-accent-soft, color-mix(in srgb, var(--mp-focus) 14%, transparent));
+  --mp-ok: var(--saas-success-dot, var(--ok, #16a34a));
+  --mp-wait: var(--saas-warning-dot, var(--amber, #f59e0b));
+  --mp-warning-text: var(--saas-warning, var(--warn, #b45309));
+  --mp-warning-bg: var(--saas-warning-bg, color-mix(in srgb, var(--mp-wait) 12%, transparent));
+  --mp-danger: var(--saas-danger, var(--err, #dc2626));
+  --mp-danger-bg: var(--saas-danger-bg, color-mix(in srgb, var(--mp-danger) 8%, transparent));
+  --mp-primary: var(--saas-primary, var(--strong, #0e1c2c));
+  --mp-primary-hover: var(--saas-primary-hover, var(--mp-primary));
+  --mp-on-primary: var(--saas-on-primary, var(--strong-text, #ffffff));
+  --mp-font: var(--saas-font, inherit);
+  --mp-mono: var(--saas-font-mono, ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace);
+  --mp-shadow: var(--saas-shadow-xl, 0 28px 80px -24px rgb(11 34 48 / 42%));
+  --mp-focus-ring: var(--saas-focus-ring, 0 0 0 3px color-mix(in srgb, var(--mp-focus) 18%, transparent));
+}
+
+/* ── The people bar ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+.awwo-multiplayer-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 7px 0 11px;
+  border: 1px solid var(--mp-hairline);
+  border-radius: 999px;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  cursor: pointer;
+  transition: background-color 140ms, border-color 140ms;
+}
+.awwo-multiplayer-bar:hover { background: color-mix(in srgb, var(--mp-text) 5%, var(--mp-card)); }
+.awwo-multiplayer-bar[aria-expanded='true'] { border-color: var(--mp-line); background: color-mix(in srgb, var(--mp-text) 8%, var(--mp-card)); }
+.awwo-multiplayer-bar:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+
+.awwo-multiplayer-stack { display: inline-flex; align-items: center; }
+.awwo-multiplayer-stack > * + * { margin-left: -6px; }
+/* The first (this page's own) on top, so each avatar's Agent mark stays in sight. */
+.awwo-multiplayer-stack > :nth-child(1) { z-index: 6; }
+.awwo-multiplayer-stack > :nth-child(2) { z-index: 5; }
+.awwo-multiplayer-stack > :nth-child(3) { z-index: 4; }
+.awwo-multiplayer-stack > :nth-child(4) { z-index: 3; }
+.awwo-multiplayer-stack > :nth-child(5) { z-index: 2; }
+.awwo-multiplayer-stack > :nth-child(6) { z-index: 1; }
+
+.awwo-multiplayer-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--mp-color, #7c8c9c);
+  color: var(--mp-ink, #ffffff);
+  box-shadow: 0 0 0 2px var(--mp-card);
+  font: 700 11px/1 var(--mp-font);
+  letter-spacing: 0;
+  user-select: none;
+}
+.awwo-multiplayer-avatar--sm { width: 22px; height: 22px; font-size: 10px; }
+/* This page's own: a second ring in the theme's ink. */
+.awwo-multiplayer-avatar[data-self] { box-shadow: 0 0 0 2px var(--mp-card), 0 0 0 3.5px var(--mp-text); }
+.awwo-multiplayer-agent-mark {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--mp-text);
+  color: var(--mp-card);
+  box-shadow: 0 0 0 1.5px var(--mp-card);
+}
+.awwo-multiplayer-more {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--mp-field);
+  color: var(--mp-muted);
+  box-shadow: 0 0 0 2px var(--mp-card);
+  font: 700 11px/1 var(--mp-font);
+}
+
+.awwo-multiplayer-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mp-subtle);
+}
+.awwo-multiplayer-dot[data-status='live'] { background: var(--mp-ok); }
+.awwo-multiplayer-dot[data-status='connecting'] { background: var(--mp-wait); animation: awwo-multiplayer-pulse 1.2s ease-in-out infinite; }
+@keyframes awwo-multiplayer-pulse { 50% { opacity: 0.35; } }
+
+/* ── The 同屏 panel ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+.awwo-multiplayer-panel {
+  position: fixed;
+  z-index: 45;
+  top: var(--awwo-multiplayer-top, 64px);
+  right: 12px;
+  bottom: 12px;
+  width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--mp-hairline);
+  border-radius: var(--saas-radius-xl, 20px);
+  background: var(--mp-surface);
+  color: var(--mp-text);
+  box-shadow: var(--mp-shadow);
+  font: 400 13px/1.5 var(--mp-font);
+  text-align: left;
+}
+.awwo-multiplayer-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 52px;
+  padding: 8px 10px 8px 16px;
+  border-bottom: 1px solid var(--mp-hairline);
+}
+.awwo-multiplayer-panel-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.awwo-multiplayer-panel-head h2 { margin: 0; color: var(--mp-text); font: 650 15px/1.3 var(--mp-font); }
+.awwo-multiplayer-panel-head h2:focus { outline: none; }
+.awwo-multiplayer-panel-head h2:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; border-radius: 4px; }
+.awwo-multiplayer-panel-count { display: inline-flex; align-items: center; gap: 6px; color: var(--mp-muted); font-size: 12px; white-space: nowrap; }
+.awwo-multiplayer-panel .awwo-multiplayer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mp-muted);
+  cursor: pointer;
+}
+.awwo-multiplayer-panel .awwo-multiplayer-close:hover { background: color-mix(in srgb, var(--mp-text) 7%, transparent); color: var(--mp-text); }
+.awwo-multiplayer-panel-status { flex-shrink: 0; margin: 0; padding: 8px 16px; background: var(--mp-warning-bg); color: var(--mp-warning-text); font-size: 12px; }
+.awwo-multiplayer-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: 2px 16px 16px;
+}
+.awwo-multiplayer-section { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--mp-hairline); }
+.awwo-multiplayer-section:last-child { border-bottom: 0; }
+.awwo-multiplayer-section-title { margin: 0; color: var(--mp-muted); font: 600 12px/1.4 var(--mp-font); }
+.awwo-multiplayer-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.awwo-multiplayer-hint { margin: 0; color: var(--mp-subtle); font-size: 12px; line-height: 1.5; }
+.awwo-multiplayer-panel > .awwo-multiplayer-panel-body > .awwo-multiplayer-hint { padding: 12px 0 0; }
+.awwo-multiplayer-error { margin: 0; color: var(--mp-danger); font-size: 12px; line-height: 1.5; }
+.awwo-multiplayer-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* A name in its owner's colour, mixed toward the ink so it reads on the panel. */
+.awwo-multiplayer-who { display: inline-flex; align-items: center; gap: 3px; min-width: 0; font-weight: 650; }
+.awwo-multiplayer-who[data-colored] { color: color-mix(in srgb, var(--mp-color) 45%, var(--mp-text)); }
+.awwo-multiplayer-inline-mark { display: inline-flex; flex: 0 0 auto; color: var(--mp-muted); }
+
+/* Who is here. */
+.awwo-multiplayer-person { display: flex; align-items: flex-start; gap: 10px; }
+.awwo-multiplayer-person > .awwo-multiplayer-avatar { margin-top: 1px; box-shadow: none; }
+.awwo-multiplayer-person > .awwo-multiplayer-avatar[data-self] { box-shadow: 0 0 0 2px var(--mp-surface), 0 0 0 3.5px var(--mp-text); }
+.awwo-multiplayer-person-main { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.awwo-multiplayer-person-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.awwo-multiplayer-person-name { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-multiplayer-port,
+.awwo-multiplayer-reader {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--mp-field);
+  color: var(--mp-muted);
+  font: 600 11px/1.5 var(--mp-font);
+  white-space: nowrap;
+}
+.awwo-multiplayer-reader { background: transparent; box-shadow: inset 0 0 0 1px var(--mp-line); }
+.awwo-multiplayer-person-status { margin: 0; color: var(--mp-muted); font-size: 12px; overflow-wrap: anywhere; }
+.awwo-multiplayer-person-nodes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; color: var(--mp-muted); font-size: 12px; }
+.awwo-multiplayer-more-nodes { color: var(--mp-muted); font-size: 12px; }
+
+.awwo-multiplayer-panel .awwo-multiplayer-node-chip {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--mp-line);
+  border-radius: 999px;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  font: 500 12px/20px var(--mp-font);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.awwo-multiplayer-panel button.awwo-multiplayer-node-chip:hover { border-color: var(--mp-focus); color: var(--mp-link); }
+.awwo-multiplayer-panel .awwo-multiplayer-node-chip.is-missing { border-style: dashed; color: var(--mp-muted); cursor: default; }
+
+/* Claims. */
+.awwo-multiplayer-claim-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 12px; background: var(--mp-field); }
+.awwo-multiplayer-claim-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.awwo-multiplayer-claim-left { flex: 0 0 auto; color: var(--mp-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.awwo-multiplayer-claim-holder { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.awwo-multiplayer-claim-holder > .awwo-multiplayer-small-button { margin-left: auto; }
+.awwo-multiplayer-claim-note { margin: 0; color: var(--mp-muted); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Messages, the newest at the bottom by the box. The log scrolls (and takes the keyboard's focus to scroll); the list in
+   it stays a list. */
+.awwo-multiplayer-message-log {
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 6px;
+}
+.awwo-multiplayer-message-log:focus { outline: none; }
+.awwo-multiplayer-message-log:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+.awwo-multiplayer-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.awwo-multiplayer-message { display: flex; flex-direction: column; gap: 2px; }
+.awwo-multiplayer-message-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.awwo-multiplayer-time { margin-left: auto; color: var(--mp-muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.awwo-multiplayer-message-text { margin: 0; color: var(--mp-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.awwo-multiplayer-composer { display: flex; flex-direction: column; gap: 6px; }
+.awwo-multiplayer-about {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 3px 2px 9px;
+  border-radius: 999px;
+  background: var(--mp-accent-soft);
+  color: var(--mp-text);
+  font-size: 12px;
+}
+.awwo-multiplayer-about > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awwo-multiplayer-panel .awwo-multiplayer-about > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mp-muted);
+  cursor: pointer;
+}
+.awwo-multiplayer-panel .awwo-multiplayer-about > button:hover { background: color-mix(in srgb, var(--mp-text) 9%, transparent); color: var(--mp-text); }
+.awwo-multiplayer-panel .awwo-multiplayer-input,
+.awwo-multiplayer-panel .awwo-multiplayer-field {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--mp-field);
+  color: var(--mp-text);
+  font: 400 13px/1.5 var(--mp-font);
+  outline: none;
+  transition: border-color 140ms, background-color 140ms;
+}
+.awwo-multiplayer-panel .awwo-multiplayer-input { min-height: 60px; max-height: 160px; padding: 8px 10px; resize: vertical; }
+.awwo-multiplayer-panel .awwo-multiplayer-field { min-height: 34px; padding: 6px 10px; border-radius: 10px; }
+.awwo-multiplayer-panel :is(.awwo-multiplayer-input, .awwo-multiplayer-field):focus {
+  border-color: var(--mp-focus);
+  background: var(--mp-card);
+  box-shadow: var(--mp-focus-ring);
+}
+.awwo-multiplayer-panel .awwo-multiplayer-input::placeholder { color: var(--mp-subtle); }
+.awwo-multiplayer-composer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.awwo-multiplayer-count { color: var(--mp-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.awwo-multiplayer-panel .awwo-multiplayer-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mp-primary);
+  color: var(--mp-on-primary);
+  font: 600 12px/1 var(--mp-font);
+  cursor: pointer;
+}
+.awwo-multiplayer-panel .awwo-multiplayer-primary:hover:not(:disabled) { background: var(--mp-primary-hover); }
+.awwo-multiplayer-panel .awwo-multiplayer-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.awwo-multiplayer-panel .awwo-multiplayer-small-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--mp-line);
+  border-radius: 999px;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  font: 600 12px/1 var(--mp-font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.awwo-multiplayer-panel .awwo-multiplayer-small-button:hover:not(:disabled) { background: color-mix(in srgb, var(--mp-text) 6%, var(--mp-card)); }
+.awwo-multiplayer-panel .awwo-multiplayer-small-button:disabled { opacity: 0.55; cursor: not-allowed; }
+.awwo-multiplayer-panel .awwo-multiplayer-small-button.is-danger { color: var(--mp-danger); }
+.awwo-multiplayer-panel .awwo-multiplayer-small-button.is-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--mp-danger) 40%, var(--mp-line));
+  background: var(--mp-danger-bg);
+}
+.awwo-multiplayer-panel :is(.awwo-multiplayer-primary, .awwo-multiplayer-small-button, .awwo-multiplayer-close, .awwo-multiplayer-node-chip, .awwo-multiplayer-disclosure,
+  .awwo-multiplayer-activity-line):focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+
+/* Recent changes, the newest first. */
+.awwo-multiplayer-activity-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.awwo-multiplayer-activity-item { position: relative; display: flex; align-items: baseline; gap: 8px; padding-left: 12px; }
+.awwo-multiplayer-activity-item::before {
+  content: '';
+  position: absolute;
+  top: 0.6em;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mp-subtle);
+}
+.awwo-multiplayer-activity-item[data-colored]::before { background: var(--mp-color); }
+.awwo-multiplayer-activity-line { flex: 1; min-width: 0; margin: 0; color: var(--mp-text); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.awwo-multiplayer-panel button.awwo-multiplayer-activity-line {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--mp-text);
+  font: 400 12px/1.45 var(--mp-font);
+  text-align: left;
+  cursor: pointer;
+}
+.awwo-multiplayer-panel button.awwo-multiplayer-activity-line:hover { color: var(--mp-link); text-decoration: underline; text-underline-offset: 2px; }
+
+/* 邀请 Agent. */
+.awwo-multiplayer-panel .awwo-multiplayer-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--mp-text);
+  font: 600 13px/1.4 var(--mp-font);
+  text-align: left;
+  cursor: pointer;
+}
+.awwo-multiplayer-chevron { margin-left: auto; color: var(--mp-muted); transition: transform 140ms; }
+.awwo-multiplayer-invite[data-open] .awwo-multiplayer-chevron { transform: rotate(180deg); }
+.awwo-multiplayer-invite-body,
+.awwo-multiplayer-invite-form { display: flex; flex-direction: column; gap: 6px; }
+.awwo-multiplayer-label { margin: 4px 0 0; color: var(--mp-muted); font: 500 12px/1.4 var(--mp-font); }
+.awwo-multiplayer-scope { min-width: 0; margin: 0; padding: 0; border: 0; }
+.awwo-multiplayer-scope > legend { margin-bottom: 4px; padding: 0; }
+.awwo-multiplayer-scope-options { display: flex; }
+.awwo-multiplayer-scope-option {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--mp-line);
+  background: var(--mp-card);
+  color: var(--mp-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.awwo-multiplayer-scope-option:first-child { border-radius: 10px 0 0 10px; }
+.awwo-multiplayer-scope-option:last-child { border-left: 0; border-radius: 0 10px 10px 0; }
+.awwo-multiplayer-scope-option[data-checked] { background: var(--mp-accent-soft); color: var(--mp-link); }
+.awwo-multiplayer-scope-option:focus-within { outline: 2px solid var(--mp-focus); outline-offset: 1px; }
+.awwo-multiplayer-scope-option input { margin: 0; accent-color: var(--mp-link); }
+
+.awwo-multiplayer-secret {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--mp-wait) 45%, var(--mp-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--mp-wait) 7%, var(--mp-card));
+}
+/* It takes the focus as it replaces the form it was made from. */
+.awwo-multiplayer-secret:focus { outline: none; }
+.awwo-multiplayer-secret:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+.awwo-multiplayer-secret-title { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.awwo-multiplayer-secret-warning { margin: 0; color: var(--mp-warning-text); font-size: 12px; line-height: 1.5; }
+.awwo-multiplayer-copy { display: flex; flex-direction: column; gap: 4px; }
+.awwo-multiplayer-copy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.awwo-multiplayer-copy-label { min-width: 0; color: var(--mp-muted); font-size: 12px; font-weight: 600; }
+.awwo-multiplayer-code {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--mp-field);
+  color: var(--mp-text);
+  font: 400 12px/1.5 var(--mp-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.awwo-multiplayer-code:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 1px; }
+
+.awwo-multiplayer-tokens { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.awwo-multiplayer-token { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 12px; background: var(--mp-field); }
+/* A token takes the focus after it is revoked (its confirmation goes away with the focus in it). */
+.awwo-multiplayer-token:focus { outline: none; }
+.awwo-multiplayer-token:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 1px; }
+.awwo-multiplayer-token-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.awwo-multiplayer-token-head > .awwo-multiplayer-small-button { margin-left: auto; }
+.awwo-multiplayer-token-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.awwo-multiplayer-token:is([data-state='revoked'], [data-state='expired']) .awwo-multiplayer-token-name { color: var(--mp-muted); text-decoration: line-through; }
+.awwo-multiplayer-token-prefix { color: var(--mp-muted); font: 400 12px/1.4 var(--mp-mono); overflow-wrap: anywhere; }
+.awwo-multiplayer-token-meta { margin: 0; color: var(--mp-muted); font-size: 11px; line-height: 1.5; }
+.awwo-multiplayer-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--mp-danger-bg); }
+.awwo-multiplayer-confirm > p { margin: 0; color: var(--mp-text); font-size: 12px; line-height: 1.5; }
+.awwo-multiplayer-confirm-actions { display: flex; gap: 6px; }
+
+@media (max-width: 600px) {
+  .awwo-multiplayer-panel { right: 8px; bottom: 8px; left: 8px; width: auto; }
+}
+
+/* ── On the board, in world coordinates ───────────────────────────────────────────────────────────────────────── */
+
+/* One box at the world's origin that takes no pointer events, above the cards and the marquee. --mp-inv is 1/zoom:
+   names, badges and pointers are drawn at their screen size by scaling with it about their anchor. */
+.awwo-multiplayer-board {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 7;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  --mp-inv: 1;
+  --mp-node-radius: 16px;
+}
+.awwo-multiplayer-board * { pointer-events: none; }
+.awwo-multiplayer-mark { position: absolute; top: 0; left: 0; box-sizing: border-box; }
+.awwo-multiplayer-ring {
+  --mp-gap: calc((4px + 4px * var(--mp-ring, 0)) * var(--mp-inv));
+  position: absolute;
+  inset: calc(-1 * var(--mp-gap));
+  box-sizing: border-box;
+  border: calc(2px * var(--mp-inv)) solid var(--mp-color);
+  border-radius: calc(var(--mp-node-radius) + var(--mp-gap));
+}
+.awwo-multiplayer-tags,
+.awwo-multiplayer-claim {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: calc((6px + 4px * var(--mp-rings, 0)) * var(--mp-inv));
+  scale: var(--mp-inv);
+  white-space: nowrap;
+}
+.awwo-multiplayer-tags { left: calc(-4px * var(--mp-inv)); display: flex; gap: 4px; transform-origin: 0 100%; }
+.awwo-multiplayer-tag {
+  display: inline-block;
+  max-width: 180px;
+  padding: 2px 7px;
+  overflow: hidden;
+  border-radius: 6px 6px 6px 2px;
+  background: var(--mp-color);
+  color: var(--mp-ink);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+  font: 600 11px/1.4 var(--mp-font);
+  text-overflow: ellipsis;
+}
+.awwo-multiplayer-claim {
+  right: calc(-4px * var(--mp-inv));
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  background: var(--mp-color);
+  color: var(--mp-ink);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+  font: 600 11px/1.4 var(--mp-font);
+  transform-origin: 100% 100%;
+}
+.awwo-multiplayer-claim > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.awwo-multiplayer-flash {
+  position: absolute;
+  inset: calc(-2px * var(--mp-inv));
+  border-radius: calc(var(--mp-node-radius) + 2px * var(--mp-inv));
+  box-shadow: 0 0 0 calc(2px * var(--mp-inv)) var(--mp-color),
+    0 0 calc(22px * var(--mp-inv)) calc(4px * var(--mp-inv)) color-mix(in srgb, var(--mp-color) 55%, transparent);
+  opacity: 0;
+  animation: awwo-multiplayer-flash 1400ms ease-out;
+}
+@keyframes awwo-multiplayer-flash {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* The place eases between a person's updates (5 a second); the drawing inside keeps its size on screen. */
+.awwo-multiplayer-cursor { position: absolute; top: 0; left: 0; transition: transform 200ms linear; }
+.awwo-multiplayer-cursor-body { display: flex; align-items: flex-start; scale: var(--mp-inv); transform-origin: 0 0; }
+.awwo-multiplayer-pointer { display: block; flex: 0 0 auto; filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 30%)); }
+.awwo-multiplayer-pointer path { fill: var(--mp-color); stroke: var(--mp-ink); stroke-width: 1.2; stroke-linejoin: round; }
+.awwo-multiplayer-cursor-name {
+  max-width: 160px;
+  margin: 14px 0 0 -4px;
+  padding: 2px 7px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--mp-color);
+  color: var(--mp-ink);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+  font: 600 11px/1.4 var(--mp-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .awwo-multiplayer-dot[data-status='connecting'] { animation: none; }
+  .awwo-multiplayer-cursor { transition: none; }
+  /* A still glow, gone when it runs out. */
+  .awwo-multiplayer-flash { animation: none; opacity: 0.7; }
+  .awwo-multiplayer-chevron { transition: none; }
+}

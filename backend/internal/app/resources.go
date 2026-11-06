@@ -191,9 +191,14 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 	} else {
 		_, e = tx.Exec(r.Context(), "UPDATE memberships SET role=$3 WHERE tenant_id=$1 AND user_id=$2", tid, id, role)
 	}
-	// A member who leaves the workspace, or may only read it now, loses their AwwO 本地版 keys for it (relay.go).
+	// A member who leaves the workspace, or may only read it now, loses their AwwO 本地版 keys for it (relay.go), and their
+	// canvas agent tokens there (canvas_agent_tokens.go).
+	var revoked []revokedCanvasToken
 	if e == nil && (role == "" || role == "reader") {
 		_, e = tx.Exec(r.Context(), revokeRelayKeysSQL, id, tid)
+		if e == nil {
+			revoked, e = revokeCanvasAgentTokens(r.Context(), tx, id, tid)
+		}
 	}
 	if e != nil {
 		a.dbError(w, e)
@@ -207,6 +212,7 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 		a.dbError(w, e)
 		return
 	}
+	a.multiplayer.tokensRevoked(revoked)
 	w.WriteHeader(204)
 }
 
@@ -391,6 +397,12 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// The save is the canvas's next change, logged for the pages and agents that have it open (canvas_change_write.go).
+	released, e := recordDocumentWrite(r.Context(), tx, tid, id, version+1, savedDocument, b.Document, canvasActorOf(r, ""), "save")
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
 	if e = audit(r.Context(), tx, currentUser(r).ID, tid, "canvas.updated", id); e != nil {
 		a.dbError(w, e)
 		return
@@ -400,6 +412,10 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
+	}
+	a.multiplayer.changed(tid, id)
+	if released {
+		a.multiplayer.claimsChanged(tid, id)
 	}
 	writeJSON(w, 200, v)
 }
