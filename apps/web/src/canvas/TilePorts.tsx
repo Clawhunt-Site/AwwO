@@ -59,6 +59,9 @@ export interface WiringApi {
   wireCount: (nodeId: string, portId: string, side: PortSide) => number;
   /** Disarm the click-click flow — wire this to the viewport's background pointer-down. */
   clearPending: () => void;
+  /** End any wiring at once, as a cancelled pointer does: the drag (no connect, no preview left behind) and the armed
+   *  port. For a change that takes the port's card away mid-gesture (converging it into an icon). */
+  cancelWiring: () => void;
   onPortPointerDown: (nodeId: string, port: PortSpec, e: React.PointerEvent) => void;
   onPortClick: (nodeId: string, port: PortSpec, e: React.MouseEvent) => void;
 }
@@ -95,6 +98,7 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
   useEffect(() => () => wireTeardownRef.current?.(), []);
 
   const clearPending = useCallback(() => setPendingPort(null), []);
+  const cancelWiring = useCallback(() => { wireTeardownRef.current?.(); setWireDrag(null); setPendingPort(null); }, []);
 
   /** Resolve the SOURCE port's real dataType and report the edge. Never guesses a type. */
   const emit = useCallback((from: PortRef, to: PortRef) => {
@@ -209,9 +213,10 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
     interactive,
     wireCount,
     clearPending,
+    cancelWiring,
     onPortPointerDown,
     onPortClick,
-  }), [pendingPort, wireDrag, interactive, wireCount, clearPending, onPortPointerDown, onPortClick]);
+  }), [pendingPort, wireDrag, interactive, wireCount, clearPending, cancelWiring, onPortPointerDown, onPortClick]);
 }
 
 const TYPE_LABEL: Record<DataType, CanvasTextKey> = {

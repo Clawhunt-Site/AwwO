@@ -645,6 +645,25 @@ export const SessionTile = memo(function SessionTile({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // The gesture under way (a move or a resize), ended with the tile: a card that leaves the board mid-drag (converged
+  // into an icon, say) never goes on moving or resizing its node from listeners left on the window.
+  const gestureEnds = useRef(new Set<() => void>());
+  useEffect(() => () => { for (const end of [...gestureEnds.current]) end(); }, []);
+  /** Listens on the window for one gesture until it ends (its pointer is lifted or cancelled, or the tile goes). */
+  const listenForGesture = useCallback((move: (event: PointerEvent) => void, up: () => void) => {
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      gestureEnds.current.delete(end);
+    };
+    const finish = () => { up(); end(); };
+    gestureEnds.current.add(end);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  }, []);
+
   // Drag-to-move. Window listeners (so the drag survives the pointer leaving the tile) and the
   // new position reported in WORLD coords (screen delta / live scale).
   const onPointerDown = useCallback(
@@ -675,17 +694,9 @@ export const SessionTile = memo(function SessionTile({
         const s = scaleRef.current || 1;
         onMove(nodeId, ox + (pe.clientX - px) / s, oy + (pe.clientY - py) / s);
       };
-      const up = () => {
-        if (!dragged && !additive) onSelect?.(nodeId, 'only');
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
+      listenForGesture(move, () => { if (!dragged && !additive) onSelect?.(nodeId, 'only'); });
     },
-    [nodeId, node.x, node.y, onMove, onSelect],
+    [nodeId, node.x, node.y, onMove, onSelect, listenForGesture],
   );
 
   const onResizePointerDown = useCallback(
@@ -705,16 +716,9 @@ export const SessionTile = memo(function SessionTile({
           Math.max(MIN_TILE_H, oh + (pe.clientY - py) / s),
         );
       };
-      const up = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
+      listenForGesture(move, () => {});
     },
-    [nodeId, frame.w, frame.h, onResizeNode],
+    [nodeId, frame.w, frame.h, onResizeNode, listenForGesture],
   );
 
   // Resizing a CARD (not an opened node) is a view preference: it works for readers and while the canvas runs.
@@ -731,16 +735,9 @@ export const SessionTile = memo(function SessionTile({
         const s = scaleRef.current || 1;
         onResizeCard(nodeId, ow + (pe.clientX - px) / s, oh + (pe.clientY - py) / s);
       };
-      const up = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
+      listenForGesture(move, () => {});
     },
-    [nodeId, frame.w, frame.h, onResizeCard],
+    [nodeId, frame.w, frame.h, onResizeCard, listenForGesture],
   );
 
   // Restore THIS node's own stored thread, once, as soon as the tile is showing a transcript at

@@ -15,7 +15,7 @@ function media(kind: 'image' | 'video' | 'model3d' | 'audio', over: Partial<Sess
 }
 function wiring(wires: Record<string, number> = {}): WiringApi {
   return { pendingPort: null, wireDrag: null, interactive: true, wireCount: (_node, port) => wires[port] ?? 0,
-    clearPending: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
+    clearPending: vi.fn(), cancelWiring: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
 }
 const imageModel: MediaComposerInfo = { kind: 'image', references: 1, referenceModels: ['图片 · 高清'] };
 

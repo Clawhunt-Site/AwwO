@@ -48,6 +48,7 @@ const SHORTCUT_EN: Record<CanvasKeyAction, string> = {
   'focus-toggle': 'Focus / leave focus', 'cycle-next': 'Next node', 'cycle-prev': 'Previous node', palette: 'Command palette',
   search: 'Search the canvas', 'fit-all': 'Fit all', 'delete-selection': 'Delete selection', undo: 'Undo', redo: 'Redo',
   'save-waypoint': 'Save a waypoint', 'recall-waypoint': 'Go to a waypoint', escape: 'Leave focus / close a panel',
+  'converge-toggle': 'Converge into one icon / show all components',
 };
 export function ShortcutSettings() {
   const { t } = useSaaSPreferences();

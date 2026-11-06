@@ -25,7 +25,8 @@ export type CanvasKeyAction =
   | 'save-waypoint'
   | 'recall-waypoint'
   | 'undo'
-  | 'redo';
+  | 'redo'
+  | 'converge-toggle';
 
 export interface CanvasKeyBinding {
   action: CanvasKeyAction;
@@ -47,6 +48,7 @@ export function canvasKeyBindings(mac = isMacPlatform()): CanvasKeyBinding[] {
     { action: 'palette', hint: `${mod}P`, label: '命令面板' },
     { action: 'search', hint: `${mod}K`, label: '搜索画布' },
     { action: 'fit-all', hint: `${mod}0`, label: '适应全部' },
+    { action: 'converge-toggle', hint: `${mod}G`, label: '收敛成一个图标 / 展开全部组件' },
     { action: 'delete-selection', hint: 'Delete', label: '删除所选' },
     { action: 'undo', hint: `${mod}Z`, label: '撤销' },
     { action: 'redo', hint: `${mod}⇧Z`, label: '重做' },
@@ -68,6 +70,8 @@ export interface CanvasKeyHandlers {
   onEscape?: () => void;
   onSaveWaypoint?: (slot: number) => void;
   onRecallWaypoint?: (slot: number) => void;
+  /** ⌘G: the whole canvas drawn as one live icon, or as its cards again. */
+  onConvergeToggle?: () => void;
 }
 
 /** Is the event aimed at something the operator is typing into? */
@@ -172,6 +176,13 @@ export function useCanvasKeys(handlers: CanvasKeyHandlers, enabled = true): Canv
           if (!h.onCycle) return;
           e.preventDefault();
           h.onCycle(-1);
+          break;
+        case 'g':
+          // The browser's find-next on this page, as design tools take it; never while typing (checked above). Held
+          // down, it toggles once: a key repeat would flap the board between the icon and the cards.
+          if (!h.onConvergeToggle || e.shiftKey) return;
+          e.preventDefault();
+          if (!e.repeat) h.onConvergeToggle();
           break;
         default:
           break;

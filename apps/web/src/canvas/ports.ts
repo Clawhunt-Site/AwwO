@@ -238,7 +238,9 @@ export function reconcileEdges(
     const inSpec = portSpec(toNode, 'input', e.toPort);
     if (!outSpec || !inSpec) continue;
     if (!canFeed(fromNode, outSpec, inSpec)) continue;
-    out.push({ ...e, dataType: outSpec.dataType });
+    // A wire whose type is unchanged keeps its own object: an edit then makes new objects only for what it changes
+    // (drawn wires are memoised on them, and a converged icon tells what an edit reached by them).
+    out.push(e.dataType === outSpec.dataType ? e : { ...e, dataType: outSpec.dataType });
   }
   return out;
 }

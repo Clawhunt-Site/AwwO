@@ -1,0 +1,183 @@
+/* The converged icon (ConvergedIcon.tsx): components drawn as one live AwwO orb on a dark collar that carries a ring of
+   its members. It wears the card skin (canvas-tile awwo-node is-<state>) for its plate, state ring, breathing, ripples
+   and the skins' reduced-motion rules; here only its shape and its own parts.
+
+   Units. The root is a fixed 160-unit world box; --cv-k scales its drawing up about its centre when the board is zoomed
+   far out (never under 40 px on screen); --cv-px is how many of its own units make one screen pixel, so its rows, focus
+   ring and badge keep their on-screen sizes. Never use a card child's class (.canvas-tile-title, .canvas-tile-dot) in
+   it, or card rules leak in. */
+
+/* The round reset, above every skin's card rule: the hosted skin nests its cards in html:root .saas-canvas-shell
+   (saas/design/canvas.css), the iOS skin sets 18 px corners at .awwo-workspace .canvas-root and again for its dark
+   theme (ios-theme.css), the base at .canvas-root. tests/canvas-selection-converge-styles.test.ts pins the order. */
+.canvas-root .canvas-tile.awwo-node.awwo-converged,
+.awwo-workspace .canvas-root .canvas-tile.awwo-node.awwo-converged,
+:root[data-theme='dark'] .awwo-workspace .canvas-root .canvas-tile.awwo-node.awwo-converged,
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-converged {
+  /* Every part inside is absolutely placed against the padding box, so the card's padding is left as it is (an opened
+     tile's chrome stays one rule: tests/canvas-drawer-threshold.test.ts). */
+  display: block;
+  border-radius: 50%;
+  overflow: visible;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  scale: var(--cv-k, 1);
+  font-size: 26.67px;
+  line-height: 1;
+}
+.canvas-root .canvas-tile.awwo-node.awwo-converged:active { cursor: pointer; }
+.canvas-root .awwo-converged:focus-visible {
+  outline: calc(3px * var(--cv-px, 1)) solid var(--saas-focus, var(--blue, #3f7ff5));
+  outline-offset: calc(6px * var(--cv-px, 1));
+}
+
+/* What the skins have no rule for: queued and stopped plates (not while selected, whose look is the skin's accent). */
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-converged.is-waiting:not(.canvas-tile--selected) {
+  border-color: color-mix(in srgb, var(--saas-signal) 45%, var(--saas-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-signal) 10%, transparent), var(--awwo-node-shadow);
+}
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-converged.is-cancelled:not(.canvas-tile--selected) { border-color: var(--saas-border-strong); }
+/* On a dark board the collar nearly matches the board: the plate keeps a faint ring of the orb's own colour (not while
+   selected, whose border is the skin's accent). */
+html:root[data-theme='dark'] .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-converged:is(.is-idle, .is-cached):not(.canvas-tile--selected) {
+  border-color: rgb(var(--saas-orb-ring-rgb, 169 155 255) / 35%);
+}
+
+.awwo-converged-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+/* The dark band the arcs ride on: each theme's orb edge, so every arc colour keeps 3:1 on it on every preset
+   (tests/canvas-selection-converge-contrast.test.ts measures each). */
+.awwo-converged-collar { fill: none; stroke: var(--saas-orb-edge, #0a1c33); stroke-width: 11; }
+/* A component with no result yet: a thin, quiet track in the orb's highlight, still 3.4:1 on every collar. */
+.awwo-converged-arc { fill: none; stroke-width: 7; stroke-linecap: butt; stroke: rgb(var(--saas-orb-hi-rgb, 236 253 255) / 40%); }
+.awwo-converged-arc.is-idle { stroke-width: 3; }
+.awwo-converged-arc.is-done { stroke: var(--saas-success-dot, var(--ok, #2f9e6b)); }
+/* A result reused or kept from an earlier run: done's colour at full strength (a faded one loses contrast on the collar),
+   told apart from this run's results by a thinner stroke. */
+.awwo-converged-arc:is(.is-cached, .is-delivered) { stroke: var(--saas-success-dot, var(--ok, #2f9e6b)); stroke-width: 4; }
+.awwo-converged-arc.is-running { stroke: var(--saas-signal, var(--agent-running, var(--amber, #2bb3bb))); }
+/* Waiting: the live colour at full strength too, dashed (it is not work yet, so it never breathes). */
+.awwo-converged-arc.is-waiting { stroke: var(--saas-signal, var(--agent-running, var(--amber, #2bb3bb))); stroke-dasharray: 3 2.4; }
+/* Shape as well as colour: a failure is keylined so it reads on the light presets' collars; what never ran or was
+   stopped is thin. */
+.awwo-converged-keyline { fill: none; stroke: rgb(var(--saas-orb-hi-rgb, 236 253 255) / 92%); stroke-width: 10; stroke-linecap: butt; }
+/* On a dark style's collar the red itself reads (6.7:1 and up) and a light keyline would halve it (under 2.1:1): there
+   the keyline is the red, so a failure is a thicker red arc (tests/canvas-selection-converge-contrast.test.ts). */
+html:root[data-theme='dark'] .awwo-converged-keyline { stroke: var(--saas-danger, var(--err, #c8382f)); }
+.awwo-converged-arc.is-failed { stroke: var(--saas-danger, var(--err, #c8382f)); }
+.awwo-converged-arc.is-blocked { stroke: var(--saas-warning-dot, var(--warn, #c98a1e)); stroke-width: 4; }
+/* Stopped: brighter than the idle track and dotted, so the two never read as one. */
+.awwo-converged-arc.is-cancelled { stroke: rgb(var(--saas-orb-hi-rgb, 236 253 255) / 60%); stroke-width: 4; stroke-dasharray: 1 1.6; }
+
+/* The AwwO orb, as the workspace home and the assistant's welcome draw it (saas/design/system.css .saas-home-orb). */
+.awwo-converged-orb {
+  position: absolute;
+  inset: 16.67%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  color: #fff;
+  background:
+    radial-gradient(circle at 33% 25%, rgb(255 255 255 / 95%) 0 2.5%, rgb(255 255 255 / 0%) 13%),
+    radial-gradient(circle at 50% 57%, rgb(var(--saas-orb-hi-rgb, 236 253 255) / 95%) 0 4%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 75%) 12%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 32%) 34%, transparent 58%),
+    radial-gradient(circle at 50% 50%, var(--saas-orb-core, #12385a) 0 46%, var(--saas-orb-edge, #0a1c33) 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -.15em -.25em .45em rgb(0 0 0 / 38%);
+}
+.awwo-converged-orb::after {
+  content: '';
+  position: absolute;
+  inset: 41% -12%;
+  border-radius: 50%;
+  border: 1px solid rgb(var(--saas-orb-ring-rgb, 169 155 255) / 55%);
+  rotate: -10deg;
+  pointer-events: none;
+}
+.awwo-converged-orb svg { width: 1.3em; height: 1.3em; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.awwo-converged-orb svg rect { fill: currentColor; stroke: none; }
+.awwo-converged-orb svg.is-reused { opacity: .7; }
+.awwo-converged-count { font-weight: 700; font-size: 1.2em; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.awwo-converged-queue { width: .36em; height: .36em; border-radius: 50%; background: currentColor; }
+.canvas-root .awwo-converged .awwo-converged-orb .awwo-working-dots.awwo-converged-dots { gap: .24em; color: #fff; }
+.canvas-root .awwo-converged .awwo-converged-orb .awwo-converged-dots i { width: .28em; height: .28em; }
+.awwo-converged-tally {
+  margin-top: calc(3px * var(--cv-px, 1));
+  font: 600 calc(12px * var(--cv-px, 1)) / 1 var(--saas-font, inherit);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One count on the collar at 45° (the failed count, else the blocked count), cut out of it by the board's colour. */
+.awwo-converged-badge {
+  position: absolute;
+  left: 80.67%;
+  top: 19.33%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: max(18px, calc(16px * var(--cv-px, 1)));
+  height: max(18px, calc(16px * var(--cv-px, 1)));
+  padding: 0 calc(4px * var(--cv-px, 1));
+  border-radius: 999px;
+  font: 700 max(11px, calc(10px * var(--cv-px, 1))) / 1 var(--saas-font, inherit);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 max(2px, calc(2px * var(--cv-px, 1))) var(--saas-canvas, var(--canvas, #e5e8e7));
+}
+.awwo-converged-badge.is-failed { background: var(--saas-danger, var(--err, #c8382f)); color: #fff; }
+/* Never white on amber (1.6-3.2:1): the text ink on light themes, the board's colour on dark ones. */
+.awwo-converged-badge.is-blocked { background: var(--saas-warning-dot, var(--warn, #c98a1e)); color: var(--saas-text, var(--ink, #0b2230)); }
+html:root[data-theme='dark'] .awwo-converged-badge:is(.is-failed, .is-blocked) { color: var(--saas-canvas, #10151a); }
+
+/* Its name and line, under it, at 13 and 12 px on screen whatever the zoom. */
+.awwo-converged-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  margin-top: calc(8px * var(--cv-px, 1));
+  display: grid;
+  justify-items: center;
+  gap: calc(2px * var(--cv-px, 1));
+  /* Its own width, not the icon box's: placed at left 50%, a shrink-to-fit width would stop at the box's edge. */
+  width: max-content;
+  max-width: calc(280px * var(--cv-px, 1));
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.3;
+  pointer-events: none;
+  font-family: var(--saas-font, inherit);
+}
+.awwo-converged-label > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.awwo-converged-name { font-weight: 650; font-size: calc(13px * var(--cv-px, 1)); color: var(--saas-text, var(--ink, #0b2230)); }
+.awwo-converged-state, .awwo-converged-now { font-size: calc(12px * var(--cv-px, 1)); color: var(--saas-muted, var(--muted, #4b5d65)); font-variant-numeric: tabular-nums; }
+/* The counts' inks, drawn on the board (not a card): each style's red and amber taken a fifth toward its text ink, so
+   12 px words keep 4.5:1 on every style's board (the red alone is 4.19:1 on 潮汐's). */
+.awwo-converged-state .is-failed { color: color-mix(in srgb, var(--saas-danger, var(--err, #c8382f)) 80%, var(--saas-text, var(--ink, #0b2230))); }
+.awwo-converged-state .is-blocked { color: color-mix(in srgb, var(--saas-warning, var(--warn, #b45309)) 80%, var(--saas-text, var(--ink, #0b2230))); }
+.awwo-converged-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Only live work loops: the running arcs breathe in width with the card's running ring, never in colour, so they keep
+   their contrast at every moment; in one phase (the delay is set on the live layer at mount, and its arcs take it). */
+@keyframes awwo-converged-breathe { 0%, 100% { stroke-width: 7; } 50% { stroke-width: 10; } }
+@keyframes awwo-converged-pop { from { scale: .6; } to { scale: 1; } }
+/* No arrival animation: an icon mounted again (the board's stage measured again, a canvas converged again) would replay
+   it with nothing having happened; the camera's glide is the answer to converging. */
+@media (prefers-reduced-motion: no-preference) {
+  .awwo-converged.is-running .awwo-converged-live .awwo-converged-arc { animation: awwo-converged-breathe 2.2s var(--saas-ease-in-out, ease-in-out) infinite; animation-delay: inherit; }
+  .awwo-converged[data-tier='M'].is-running .awwo-converged-live .awwo-converged-arc { animation-timing-function: steps(6, jump-none); }
+  .awwo-converged-arc { transition: stroke .2s var(--saas-ease, ease); }
+  .awwo-converged-badge.is-new { animation: awwo-converged-pop .2s var(--saas-ease-spring, cubic-bezier(.34, 1.56, .64, 1)); }
+}
+/* Some skins only shorten durations under reduce; nothing of the icon moves then, and its still look carries the state. */
+@media (prefers-reduced-motion: reduce) {
+  .canvas-root .awwo-converged, .canvas-root .awwo-converged * { animation: none !important; transition: none !important; }
+}
+/* One ink for every state, above every state rule (a media query adds no specificity, and SVG keeps its own strokes in
+   forced colours): widths, dashes and dots tell the states apart. */
+@media (forced-colors: active) {
+  .awwo-converged-arc, .awwo-converged-keyline { stroke: CanvasText !important; }
+  .awwo-converged-arc.is-running { stroke: Highlight !important; }
+  .awwo-converged-collar { stroke: Canvas !important; }
+  .awwo-converged-orb { forced-color-adjust: none; }
+  .awwo-converged-badge { forced-color-adjust: none; background: Mark !important; color: MarkText !important; box-shadow: 0 0 0 2px Canvas !important; }
+}

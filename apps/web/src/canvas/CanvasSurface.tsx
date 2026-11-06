@@ -36,7 +36,7 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent } from 'react';
-import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay } from 'lucide-react';
+import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay, Orbit } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
@@ -145,6 +145,11 @@ import './node-view-styles.css';
 import { nodeViewRootProps, useNodeViewPreference } from './nodeViewStyle';
 import { useSimpleCanvas } from './uiMode';
 import { CARD_PREVIEW_DEFAULT, clampCard, loadCardFrames, saveCardFrames, showsPreview, type CardFrames } from './cardFrames';
+import {
+  CANVAS_GROUP_ID, CONVERGED_ICON_WORLD, convergeView, countSteps, drawnGroups, editReachesHidden, expandForNode, loadConvergedState, MIN_GROUP_MEMBERS,
+  NOTHING_CONVERGED, saveConvergedState, type ConvergedState, type ConvergedView,
+} from './convergedGroups';
+import { ConvergedIcon } from './ConvergedIcon';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
 import { DisplayLinks, DisplayTile, type DisplayChoice } from './DisplayTile';
@@ -152,6 +157,9 @@ import { clampDisplaySize, createDisplayNode, displayBounds, MAX_DISPLAYS, place
 import { displayText } from './displayCopy';
 /** A document with no 预览展示 windows (displayNodes.ts): one shared empty list, so memoised readers see no change. */
 const NO_DISPLAYS: ReadonlyArray<DisplayNode> = [];
+/** An icon whose members are not all loaded yet: one shared empty list, so the memoised icon sees no change. */
+const NO_MEMBERS: ReadonlyArray<CanvasNode> = [];
+const NO_DEPTHS: ReadonlyMap<string, number> = new globalThis.Map();
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
 /** Cap on remembered steps. Documents are small, but an unbounded stack is a leak. */
@@ -160,6 +168,8 @@ const HISTORY_LIMIT = 60;
 const FOCUS_FIT_PADDING = { x: 28, top: 24, bottom: 82 } as const;
 /** How long opening or closing a node glides the camera. */
 const CAMERA_GLIDE_MS = 260;
+/** How long the converged icons' status region keeps what it said, before it is emptied. */
+const ANNOUNCEMENT_KEPT_MS = 8000;
 /** The inspector overlay (cloud canvases, forms): inset from the stage, width cap, and the clear space
  *  a node opened for configuration keeps beside it. Below the 760 px breakpoint it spans the stage. */
 const INSPECTOR_OVERLAY = { inset: 12, width: 360, gap: 16 } as const;
@@ -269,9 +279,10 @@ function isFittedCamera(view: ViewportState, fitted: ViewportState | null): bool
 }
 
 /** Compact summaries remain readable at overview scale without the full-workbench fit floor. Displays (preview
- *  windows beside the graph) are part of the board, so a fit shows them too. */
+ *  windows beside the graph) and converged icons are part of the board, so a fit shows them too (`displays`: any boxes
+ *  drawn beside the cards). */
 function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h: number }, cardFrames?: CardFrames,
-  displays: ReadonlyArray<DisplayNode> = NO_DISPLAYS): ViewportState {
+  displays: ReadonlyArray<{ x: number; y: number; w: number; h: number }> = NO_DISPLAYS): ViewportState {
   const cards = presentationNodes(nodes, null, undefined, cardFrames);
   const bounds = displays.length ? boundsOfBoxes([...cards, ...displays]) : boundsOfNodes(cards);
   const maxScale = Math.max(.06, Math.min(1.05,
@@ -513,6 +524,52 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [cardFrames, setCardFrames] = useState<CardFrames>(() => loadCardFrames());
   const cardFramesRef = useRef(cardFrames);
   cardFramesRef.current = cardFrames;
+  // Components drawn converged into one live icon (收敛; a view preference too, never the document): convergedGroups.ts.
+  const [converged, setConverged] = useState<ConvergedState>(() => loadConvergedState());
+  const convergedNowRef = useRef(converged);
+  convergedNowRef.current = converged;
+  // The board as drawn with converged icons (set below, once it is worked out): fits frame what is drawn, and an edit
+  // that reaches a member inside an icon draws the cards again (patchDoc).
+  const convergedViewRef = useRef<ConvergedView | null>(null);
+  const [selectedIconId, setSelectedIconId] = useState<string | null>(null);
+  // The camera before the canvas converged, to return to when it is drawn as cards again.
+  const convergeReturn = useRef<ViewportState | null>(null);
+  // The board's one polite status region for converged icons: converging and expanding, a member failing while the rest
+  // still run, and why Delete, undo or redo does nothing while converged. Changes only; the run note keeps speaking for
+  // the run.
+  const [announcement, setAnnouncement] = useState({ text: '', nonce: 0 });
+  // Said, then let go after a while, so reading the page later never meets a stale "…the others keep running".
+  const announcementTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const announce = useCallback((text: string) => {
+    setAnnouncement(previous => ({ text, nonce: previous.nonce + 1 }));
+    clearTimeout(announcementTimer.current);
+    announcementTimer.current = setTimeout(() => setAnnouncement(previous => previous.text ? { text: '', nonce: previous.nonce } : previous), ANNOUNCEMENT_KEPT_MS);
+  }, []);
+  useEffect(() => () => clearTimeout(announcementTimer.current), []);
+  const tLatest = useRef(t);
+  tLatest.current = t;
+  // Gives a focus the icon took with it to the toggle (set below, once refocusInCommit exists): never to the page.
+  const refocusToggle = useRef<() => void>(() => {});
+  // Draws converged components as cards again without the toggle (a node opened from anywhere, an edit or a plan that
+  // reaches one, the assistant's undo, the icon dissolving), and says so. The camera stays where that change puts it.
+  const showConverged = useCallback((next: ConvergedState, said: string) => {
+    if (next === convergedNowRef.current) return;
+    convergedNowRef.current = next;
+    setConverged(next);
+    if (!next.canvas) convergeReturn.current = null;
+    setSelectedIconId(null);
+    refocusToggle.current();
+    announce(said);
+  }, [announce]);
+  // Another tab's document taken in while components are inside an icon (at a run's start, or a run's end there): a
+  // change to the canvas itself draws the cards again, as an edit on this page does. `structureOnly` keeps the icon for
+  // a document that only brings another tab's run outputs, told apart by which nodes and wires there are.
+  const showAdopted = useCallback((from: CanvasDocument, to: CanvasDocument, structureOnly = false) => {
+    if (!convergedViewRef.current?.hidden.size && !convergedNowRef.current.canvas) return;
+    const shape = (doc: CanvasDocument) => `${doc.nodes.map(node => node.id).join('\u0001')}\u0002${doc.edges.map(edge => edge.id).join('\u0001')}`;
+    if (structureOnly && shape(from) === shape(to)) return;
+    showConverged(NOTHING_CONVERGED, tLatest.current('converge.announce.shownForChange'));
+  }, [showConverged]);
   const canInitialize = storageMode === 'cloud' && Boolean(cloudScope);
   const runUnavailableReason = storageMode === 'cloud' ? executionUnavailableReason?.trim() || '' : '';
   const [palette, setPalette] = useState<Awaited<ReturnType<typeof readModelPalette>> | null>(null);
@@ -712,6 +769,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         if (!opts?.silent) setHandoffNote(surfaceNotice(t, 'node_busy_edit'));
         return;
       }
+      // Nothing changes inside a converged icon unseen: an edit that reaches what the board does not draw (a node added
+      // to a converged canvas, a member changed or removed, a wire of one) draws the cards again first. Machine writes
+      // (silent: a run's output, the camera) leave the icon as it is; the icon shows a run.
+      const drawn = convergedViewRef.current;
+      if (!opts?.silent && drawn && editReachesHidden(prev, next, drawn.hidden, convergedNowRef.current.canvas)) {
+        showConverged(NOTHING_CONVERGED, tLatest.current('converge.announce.shownForChange'));
+      }
 
       if (!opts?.silent) {
         const label = opts?.label ?? 'edit';
@@ -729,7 +793,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       setDoc(committed);
       if (!opts?.silent) syncHistory();
     },
-    [syncHistory],
+    [syncHistory, showConverged],
   );
   // When each node's effort last changed in this page, whatever changed it (an edit, an undo, a plan, a recovery), for a
   // change of the canvas's evolution claimed before that (CanvasEvolution.since), which then leaves the node as it is.
@@ -918,10 +982,15 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const unsavedCamera = useRef<ViewportState | null>(doc.view ? null : view);
   // The operator's camera waiting out the save debounce (see the viewport persistence below).
   const pendingCameraSave = useRef<{ timer: ReturnType<typeof setTimeout>; camera: ViewportState; save: () => void } | null>(null);
-  /** The overview of these nodes on this stage, fitted in the part right of a sidebar that floats over its left edge. */
+  /** The overview of these nodes on this stage, fitted in the part right of a sidebar that floats over its left edge.
+   *  Converged members are framed by their icon, not by the cards they would be. */
   const overviewCamera = useCallback((fitNodes: ReadonlyArray<CanvasNode>, box: StageBox) => {
     const cover = box.cover ?? 0;
-    return shiftView(fitNodeOverview(fitNodes, { w: box.w - cover, h: box.h }, cardFramesRef.current, docRef.current.displays), cover);
+    const drawn = convergedViewRef.current;
+    const displays = docRef.current.displays ?? NO_DISPLAYS;
+    const shown = drawn?.hidden.size ? fitNodes.filter(node => !drawn.hidden.has(node.id)) : fitNodes;
+    const beside = drawn?.icons.length ? [...displays, ...drawn.icons] : displays;
+    return shiftView(fitNodeOverview(shown, { w: box.w - cover, h: box.h }, cardFramesRef.current, beside), cover);
   }, []);
   // The canvas's first fit, put off while a node opened before the stage's first size arrived is open (the opening
   // fit below): closing that node lands on the overview instead of the camera the canvas started with.
@@ -1034,6 +1103,57 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     return stable;
   }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact, focusHeld]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
+  // The board as drawn with converged groups: their members' cards give way to one icon each, and the wires that cross
+  // a group's edge end on its icon (convergedGroups.ts). renderNodes stays the geometry every card is drawn from.
+  const nodeIdsKey = nodes.map(node => node.id).join('\u0001');
+  // The components the icon counts and rings: forms are inputs, not steps (two of them are no canvas to converge).
+  const stepCount = useMemo(() => countSteps(nodes), [nodes]);
+  const groupsDrawn = useMemo(() => drawnGroups(converged, nodeIdsKey ? nodeIdsKey.split('\u0001') : [], stepCount), [converged, nodeIdsKey, stepCount]);
+  const convergedView = useMemo(() => convergeView(renderNodes, edges, groupsDrawn, { w: CONVERGED_ICON_WORLD, h: CONVERGED_ICON_WORLD }),
+    [renderNodes, edges, groupsDrawn]);
+  convergedViewRef.current = convergedView;
+  // Whether a member is inside an icon now: undo and redo wait until the cards are drawn (they would change one unseen).
+  const membersHidden = convergedView.hidden.size > 0;
+  // The cards the board draws: every node but the members inside an icon (the same objects as renderNodes).
+  const shownNodes = useMemo(() => convergedView.hidden.size ? renderNodes.filter(node => !convergedView.hidden.has(node.id)) : renderNodes,
+    [renderNodes, convergedView]);
+  // Nothing acts on a node the board does not draw: a member converged into an icon leaves the selection, so Delete,
+  // 运行选区, arranging and the review bar never reach it unseen. Before paint, so they are never drawn for a frame; and
+  // only over the selection this render saw: one set since (a node being opened) is the next render's to check.
+  useLayoutEffect(() => {
+    if (!convergedView.hidden.size || !selection.some(id => convergedView.hidden.has(id))) return;
+    setSelection(previous => previous === selection ? previous.filter(id => !convergedView.hidden.has(id)) : previous);
+  }, [convergedView, selection]);
+  // A converged canvas with fewer than two components is not converged, as a group of one dissolves: the toggle never
+  // stays pressed over cards, and what is added later is not put away. An icon that was drawn and went (another tab left
+  // fewer than two) is said, and the focus it took goes to the toggle; a preference kept from before, on a canvas that
+  // has fewer than two components by the time it opens, is let go without a word, as nothing was converged. Before paint,
+  // so the toggle is never drawn pressed for a frame. (The surface mounts with its document: the SaaS app once the
+  // canvas's record is in, the local edition from the local copy.)
+  const canvasIconDrawn = convergedView.icons.some(icon => icon.id === CANVAS_GROUP_ID);
+  const canvasIconWasDrawn = useRef(false);
+  useLayoutEffect(() => {
+    const was = canvasIconWasDrawn.current;
+    canvasIconWasDrawn.current = canvasIconDrawn;
+    if (canvasIconDrawn || !converged.canvas) return;
+    const next = { ...convergedNowRef.current, canvas: false };
+    if (was) showConverged(next, t('converge.announce.expanded', { title: t('converge.wholeCanvas') }));
+    else { convergedNowRef.current = next; setConverged(next); setSelectedIconId(null); }
+  }, [canvasIconDrawn, converged.canvas, showConverged, t]);
+  // A 预览展示 window showing a converged member links to its member's icon.
+  const linkBoxes = useMemo<ReadonlyMap<string, { x: number; y: number; w: number; h: number }>>(() => {
+    if (!convergedView.icons.length) return renderNodeById;
+    const boxes = new globalThis.Map<string, { x: number; y: number; w: number; h: number }>(renderNodeById);
+    for (const icon of convergedView.icons) for (const id of icon.members) boxes.set(id, { x: icon.x, y: icon.y, w: icon.w, h: icon.h });
+    return boxes;
+  }, [renderNodeById, convergedView]);
+  // An opened node never stays inside an icon: every way of opening one (a double-click, the Bot list, search, the
+  // timeline, results, next steps, Configure) goes through focusNode, which draws its group's cards again first.
+  const expandGroupOfNode = useCallback((nodeId: string) => {
+    const state = convergedNowRef.current;
+    showConverged(expandForNode(state, nodeId), state.canvas
+      ? tLatest.current('converge.announce.expanded', { title: tLatest.current('converge.wholeCanvas') }) : tLatest.current('converge.announce.shown'));
+  }, [showConverged]);
   // Focus pushes the pre-focus viewport so a second press returns exactly where you were.
   const focusReturn = useRef<ViewportState | null>(null);
 
@@ -1149,6 +1269,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   const [focusRequest, setFocusRequest] = useState<{ selector: string } | null>(null);
   useLayoutEffect(() => { if (focusRequest) moveLostFocus(focusRequest.selector); }, [focusRequest, moveLostFocus]);
   const refocusInCommit = useCallback((selector: string) => setFocusRequest({ selector }), []);
+  refocusToggle.current = () => refocusInCommit('[data-converge-toggle]');
 
   /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
@@ -1231,6 +1352,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // it, so an empty one means nothing is open, whatever render this callback came from.
       if (focusReturn.current === null) focusReturn.current = current;
       if (focusedId !== nodeId) setInspectorId(current => current === nodeId ? current : null);
+      expandGroupOfNode(nodeId);
       setFocusedId(nodeId);
       setSelection([nodeId]);
       // Placing the node already open again (Configure, 查看交付物, a 接下来 step) keeps its delivery's room and a frame
@@ -1243,7 +1365,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         ...(kept?.resized ? { resized: true } : {}) } : null);
       if (placement) glideTo(placement.view, placement.anchor);
     },
-    [focusedId, openPlacement, glideTo, changeStageView],
+    [focusedId, openPlacement, glideTo, changeStageView, expandGroupOfNode],
   );
   // The latest focusNode, for a focus deferred to the next frame (an older one judges a stale render).
   const focusNodeRef = useRef(focusNode);
@@ -1278,6 +1400,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   }, [focusedId, size.w, size.h, railsVersion, configuringFocused, focusedContent, bindingLocked, openPlacement, glideTo]);
 
   const arrangeNodes = useCallback(() => {
+    // Arranging moves every card: not while cards are drawn as icons (they would move unseen).
+    if (convergedViewRef.current?.icons.length) return;
     if (!canEditStructure(false, [])) return;
     const arranged = arrangeNodePositions(docRef.current.nodes, docRef.current.edges);
     patchDoc(previous => ({ ...previous, nodes: arranged }), { label: 'arrange:nodes' });
@@ -1333,7 +1457,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
 
   const cycle = useCallback(
     (dir: 1 | -1) => {
-      const order = orderNodes(nodes);
+      // Through the cards the board draws: a member inside an icon is not stepped onto (nor selected unseen).
+      const order = orderNodes(convergedView.hidden.size ? nodes.filter(node => !convergedView.hidden.has(node.id)) : nodes);
       const nextId = nextIn(order, selection[0] ?? focusedId ?? null, dir);
       if (!nextId) return;
       if (focusedId) focusNode(nextId);
@@ -1345,7 +1470,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }
       }
     },
-    [nodes, renderNodes, selection, focusedId, focusNode, moveCamera],
+    [nodes, renderNodes, selection, focusedId, focusNode, moveCamera, convergedView],
   );
 
   // ---- waypoints ----------------------------------------------------------------------------
@@ -1603,6 +1728,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             || JSON.stringify(loadDocumentWithStatus().doc) !== JSON.stringify(current.doc)) { retry(); return; }
         if (!observerIsActive()) return;
         if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
+        // Another tab's run ended here: its outputs play out in an icon, a change it made to the canvas is drawn as cards.
+        showAdopted(docRef.current, current.doc, true);
         docRef.current = current.doc; setDoc(current.doc);
         lastSaved.current = savedDocument(current.doc); lastSavedRaw.current = canvasStorage().getItem(CANVAS_STORAGE_KEY);
         pendingRecoveryDocument.current = null;
@@ -1886,6 +2013,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (persistedCanvas.status === 'ok'
         && persistedRevision !== canvasPlanRevision(sanitizeDocument(docRef.current))
         && persistedRevision !== lastSaved.current?.planRevision()) {
+      // The note asks the reader to look at what changed before running: the cards are drawn for that.
+      showAdopted(docRef.current, persistedCanvas.doc);
       docRef.current = persistedCanvas.doc; setDoc(persistedCanvas.doc);
       // Another tab's document: what this page's undo knew about the plan no longer describes it.
       planStep.current?.reset();
@@ -2862,12 +2991,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // state, and the sessions store exists exactly for that.
   const visibleIds = useMemo(() => {
     const ids = new Set(stageMeasured ? visibleBoxIds(renderNodes, view, size) : []);
+    // A converged member is drawn inside its icon, not as a card (opening one expands its group first: focusNode).
+    for (const id of convergedView.hidden) ids.delete(id);
     // A focused or inspected node is always mounted, even if the operator has panned it off
     // screen — the inspector keeps describing a tile that is still "yours".
     if (focusedId) ids.add(focusedId);
     if (inspectorId) ids.add(inspectorId);
     return ids;
-  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured]);
+  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured, convergedView]);
   // Stable tile callbacks: SessionTile is memoised, and an inline arrow recreated on every
   // render would defeat it — every keystroke in one tile's composer would re-render the
   // rest of the canvas.
@@ -2969,6 +3100,103 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     const timer = setTimeout(() => saveCardFrames(cardFrames, new Set(docRef.current.nodes.map(node => node.id))), 300);
     return () => clearTimeout(timer);
   }, [cardFrames]);
+  // 收敛: the whole canvas drawn as one live icon, and back. A way of looking, so it works for readers, while the canvas
+  // runs and in the simple view; not while a node is open (its card is what is being read), and not for one component.
+  // Selecting anything else lets the icon go.
+  useEffect(() => { if (selection.length || selectedEdgeId || selectedDisplayId) setSelectedIconId(null); }, [selection, selectedEdgeId, selectedDisplayId]);
+  // Ends a wiring gesture (set once the wiring exists, below).
+  const cancelWiringRef = useRef<() => void>(() => {});
+  const setCanvasConverged = useCallback((on: boolean) => {
+    if (on === convergedNowRef.current.canvas) return;
+    // An open or configured node is what is being read: it is never put away under an icon. Asked by the keys (the
+    // toggle and the palette row are greyed out then, with the reason), it says why nothing happens.
+    if (on && (countSteps(docRef.current.nodes) < MIN_GROUP_MEMBERS || focusedRef.current || inspectorRef.current)) {
+      announce(t(countSteps(docRef.current.nodes) < MIN_GROUP_MEMBERS ? 'converge.needsTwo' : 'converge.closeOpen'));
+      return;
+    }
+    // A wire being drawn from a card that goes into the icon ends here, as a cancelled pointer ends it.
+    if (on) cancelWiringRef.current();
+    // A camera the person moved to just before, still waiting out its save, is theirs: saved now, before the glide
+    // (whose cameras are the app's own and never saved) would drop it.
+    const pendingSave = pendingCameraSave.current;
+    if (pendingSave) { clearTimeout(pendingSave.timer); pendingCameraSave.current = null; pendingSave.save(); }
+    setSelection([]);
+    setSelectedEdgeId(null);
+    setSelectedDisplayId(null);
+    setSelectedIconId(null);
+    // Showing all components shows the groups kept from before too.
+    setConverged(previous => on ? { ...previous, canvas: true } : NOTHING_CONVERGED);
+    // A card or the icon that held the focus is gone: the focus goes to the toggle, never to the page.
+    refocusInCommit('[data-converge-toggle]');
+    announce(on ? t('converge.announce.converged', { count: countSteps(docRef.current.nodes) })
+      : t('converge.announce.expanded', { title: t('converge.wholeCanvas') }));
+    const box = viewportSize(false);
+    // The icon sits on the middle of the cards (convergeView): the camera glides around that point both ways, so the
+    // icon grows where the cards were and the cards spread from it.
+    const boxes = renderNodesRef.current;
+    const middle = {
+      x: boxes.reduce((sum, node) => sum + node.x + node.w / 2, 0) / Math.max(1, boxes.length),
+      y: boxes.reduce((sum, node) => sum + node.y + node.h / 2, 0) / Math.max(1, boxes.length),
+    };
+    if (!box) return;
+    const cover = box.cover ?? 0;
+    // Both cameras are the app's own, placed for the icon or back from it, so neither is saved into the document
+    // (unsavedCamera): converging changes nothing of the canvas, its camera included, until the person moves it.
+    if (on) {
+      convergeReturn.current = glideTarget.current ?? viewRef.current;
+      // Centred in the board's free part (right of a floating assistant) at 75 %, where it reads at 120 px, a little
+      // above the middle so the rows under it are in view too.
+      const scale = .75;
+      const target = { scale, x: cover + (box.w - cover) / 2 - middle.x * scale, y: box.h / 2 - middle.y * scale - 24 };
+      unsavedCamera.current = target;
+      glideTo(target, middle);
+      return;
+    }
+    // Back to the camera it was converged from; converged before this page was opened, to the overview of the cards.
+    const back = convergeReturn.current
+      ?? shiftView(fitNodeOverview(docRef.current.nodes, { w: box.w - cover, h: box.h }, cardFramesRef.current, docRef.current.displays ?? NO_DISPLAYS), cover);
+    if (!convergeReturn.current) lastAutoView.current = back;
+    convergeReturn.current = null;
+    unsavedCamera.current = back;
+    glideTo(back, middle);
+  }, [viewportSize, glideTo, announce, t, refocusInCommit]);
+  const expandIcon = useCallback((id: string) => {
+    if (id === CANVAS_GROUP_ID) { setCanvasConverged(false); return; }
+    setConverged(previous => ({ ...previous, groups: previous.groups.filter(group => group.id !== id) }));
+    setSelectedIconId(current => current === id ? null : current);
+    refocusInCommit('[data-converge-toggle]');
+  }, [setCanvasConverged, refocusInCommit]);
+  const selectIcon = useCallback((id: string) => {
+    setSelection([]);
+    setSelectedEdgeId(null);
+    setSelectedDisplayId(null);
+    setSelectedIconId(id);
+  }, []);
+  // Each icon's members in ring order, the run's own order (step in the graph, then top to bottom, then left to right),
+  // and its name: the whole canvas, a stage, or its first member and how many more.
+  // Worked out only while an icon is drawn: a card's drag changes the nodes on every frame.
+  const hasIcons = convergedView.icons.length > 0;
+  const graphDepths = useMemo(() => hasIcons ? nodeDepths(nodes, edges.filter(edge => edge.kind !== 'feedback')) : NO_DEPTHS,
+    [hasIcons, nodes, edges]);
+  const iconMembers = useMemo(() => {
+    if (!hasIcons) return new globalThis.Map<string, CanvasNode[]>();
+    const byId = new globalThis.Map(nodes.map(node => [node.id, node]));
+    return new globalThis.Map(convergedView.icons.map(icon => [icon.id, icon.members.flatMap(id => byId.get(id) ?? [])
+      .sort((a, b) => (graphDepths.get(a.id) ?? 0) - (graphDepths.get(b.id) ?? 0) || a.y - b.y || a.x - b.x)]));
+  }, [hasIcons, nodes, convergedView, graphDepths]);
+  // A group is named by its first component and how many more (forms are inputs, not components).
+  const iconTitle = (id: string, members: ReadonlyArray<CanvasNode>) => {
+    if (id === CANVAS_GROUP_ID) return t('converge.wholeCanvas');
+    const components = members.filter(node => node.kind !== 'form');
+    return t('converge.more', { first: components[0]?.title.trim() || '—', count: Math.max(0, components.length - 1) });
+  };
+  // Converged groups are kept as cards are sized: per person and browser, pruned to the nodes on the canvas when saved.
+  // A member deleted meanwhile is simply not drawn (convergeView skips it), and comes back converged if the deletion
+  // is undone before the next save.
+  useEffect(() => {
+    const timer = setTimeout(() => saveConvergedState(converged, new Set(docRef.current.nodes.map(node => node.id))), 300);
+    return () => clearTimeout(timer);
+  }, [converged]);
   // The results studio (成果工作台), over the board: one node's deliverables or the whole canvas's.
   const [studio, setStudio] = useState<{ nodeId?: string; entryId?: string } | null>(null);
   const openStudio = useCallback((nodeId?: string, entryId?: string) => setStudio({ nodeId, entryId }), []);
@@ -3007,9 +3235,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // would be shown a graph that no longer matches the timeline describing the run. Omitting
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
   const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || exclusiveNow || initializing || simple ? undefined : onConnect, rootRef, view });
+  cancelWiringRef.current = wiring.cancelWiring;
   const marquee = useMarquee({
     enabled: selectionTool,
-    nodes: renderNodes,
+    // Only cards the board draws: a member inside an icon is never selected (and so never deleted or run) unseen.
+    nodes: shownNodes,
     rootRef,
     view,
     onSelect: (ids, additive) =>
@@ -3026,13 +3256,22 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     onDeleteSelection: readOnly || running || initializing ? undefined : () => {
       // A selected display (never selected together with nodes) goes the way a selected node does.
       if (!selection.length && selectedDisplayRef.current) deleteDisplay(selectedDisplayRef.current);
+      // A converged icon is a way of looking, never deleted: Delete says how to reach its components instead.
+      else if (!selection.length && selectedIconId) announce(t('converge.deleteHint'));
       else deleteNodes(selection);
     },
+    onConvergeToggle: () => setCanvasConverged(!converged.canvas),
     // Undo/redo are locked during a run for the same reason every other structural edit is: the
     // run executes a SNAPSHOT, so rewinding the graph under it would show the operator a document
     // that does not match the timeline describing what is executing.
     onUndo: readOnly || running || initializing || !history.undo ? undefined : undo,
     onRedo: readOnly || running || initializing || !history.redo ? undefined : redo,
+    // While components are inside an icon, a step back or forward would change them unseen (the last edit is rarely
+    // what one expects ⌘Z to take back from a way of looking): the keys say to expand first, as Delete on the icon does.
+    ...(membersHidden ? {
+      onUndo: readOnly || running || initializing || !history.undo ? undefined : () => announce(t('converge.undoHint')),
+      onRedo: readOnly || running || initializing || !history.redo ? undefined : () => announce(t('converge.redoHint')),
+    } : {}),
     onSaveWaypoint: readOnly ? undefined : saveWaypoint,
     onRecallWaypoint: recallWaypoint,
     onEscape: () => {
@@ -3042,9 +3281,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       else if (selectionTool) setSelectionTool(false);
       else if (inspectorId) { if (!inspectorCloseLocked.current) setInspectorId(null); }
       else if (focusedId) unfocus();
+      // A selected converged icon is let go first; Escape never expands it.
+      else if (selectedIconId) setSelectedIconId(null);
       else setSelection([]);
     },
   }, !showingResults);
+  const convergeKeyHint = keyBindings.find(binding => binding.action === 'converge-toggle')?.hint ?? '⌘G';
   // Whether they work now, for the assistant panel's hand-back, which counts the navigation keys among them (below).
   const canvasKeysOn = useRef(true);
   canvasKeysOn.current = !showingResults;
@@ -3063,11 +3305,25 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   );
 
   const canEdit = !exclusiveNow && canEditStructure(false, []);
+  // 收敛 is a way of looking, so readers are offered it as well.
+  // What holds undo, redo and arranging besides an icon (a reader, a run, nothing to step to): their "expand first"
+  // titles are given only where expanding would let them work.
+  const undoBlocked = readOnly || running || initializing || !history.undo;
+  const redoBlocked = readOnly || running || initializing || !history.redo;
+  const arrangeBlocked = readOnly || exclusiveNow || initializing || bindingLocked || !nodes.length;
+  const convergeAction = {
+    toggleConverged: () => setCanvasConverged(!converged.canvas),
+    converged: converged.canvas,
+    canConverge: stepCount >= MIN_GROUP_MEMBERS && !focusedId && !inspectorId,
+    convergeHint: stepCount < MIN_GROUP_MEMBERS ? t('converge.needsTwo') : focusedId || inspectorId ? t('converge.closeOpen') : undefined,
+  };
   const commandActions: CanvasCommandActions = useMemo(
     () => readOnly ? ({
       fitAll, toggleTimeline: focusedId ? undefined : () => setTimelineOpen(o => !o),
       toggleMinimap: focusedId ? undefined : () => setMinimapOpen(o => !o), recallWaypoint: () => recallWaypoint(1),
+      ...convergeAction,
     }) : ({
+      ...convergeAction,
       addSession: (kind) => addAtViewCenter(kind),
       canEdit,
       run: runUnavailableReason ? undefined : runWholeCanvas,
@@ -3088,10 +3344,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       },
       undo,
       redo,
-      canUndo: canEdit && history.undo > 0,
-      canRedo: canEdit && history.redo > 0,
+      // Not while components are inside an icon (see the keys above): then the rows say to expand first, not that there
+      // is nothing to undo.
+      canUndo: canEdit && history.undo > 0 && !membersHidden,
+      canRedo: canEdit && history.redo > 0 && !membersHidden,
+      undoHeld: canEdit && history.undo > 0 && membersHidden,
+      redoHeld: canEdit && history.redo > 0 && membersHidden,
     }),
-    [readOnly, addAtViewCenter, canEdit, startRun, runWholeCanvas, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason, focusedId],
+    // The last four are what convergeAction reads (it is rebuilt every render).
+    [readOnly, addAtViewCenter, canEdit, startRun, runWholeCanvas, stopRun, fitAll, saveWaypoint, recallWaypoint, deleteNodes, selection, undo, redo, history.undo, history.redo, runUnavailableReason, focusedId,
+      membersHidden, t, setCanvasConverged, converged.canvas, stepCount, inspectorId],
   );
 
   const addAgent = useCallback((kind: AgentTemplateId) => addAtViewCenter(kind), [addAtViewCenter]);
@@ -3154,7 +3416,9 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // would silently destroy a redo the user was about to reach for.
     // While a node is open the camera is the node's; save the operator's, so leaving the canvas from an
     // open node reopens where they were.
-    const kept = focusedRef.current && focusReturn.current ? focusReturn.current : view;
+    // A glide in flight is judged by where it lands, as autoFit's flush judges it: a glide cut short (the tab hidden, its
+    // frames stopped) never saves a frame on the way, and the app's own camera (converging, say) is never saved at all.
+    const kept = focusedRef.current && focusReturn.current ? focusReturn.current : glideTarget.current ?? view;
     // A newer camera replaces one still waiting, so a glide or a gesture never saves an in-between frame.
     if (pendingCameraSave.current) { clearTimeout(pendingCameraSave.current.timer); pendingCameraSave.current = null; }
     // Still the app's own camera, a click's wobble included: nothing of the operator's to save (see unsavedCamera).
@@ -3936,6 +4200,10 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     && lastPlanRevision !== null && planRevision === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:')) && canEditStructure();
   assistantLatest.current = { planBlocker, sendPlanningMessage, canUndoPlan, undo };
+  // After the assistant took its plan back while components were inside an icon: the cards are drawn again to show it.
+  const showPlanUndone = () => {
+    if (convergedViewRef.current?.hidden.size || convergedNowRef.current.canvas) showConverged(NOTHING_CONVERGED, t('converge.announce.shownForChange'));
+  };
   // The plan reply whose change was undone in this page (its stored reply still says applied). It stays undone
   // through later edits; only a redo of the plan's own document (kept on the redo stack) has the change again.
   const [undonePlan, setUndonePlan] = useState<{ reply: string; planDoc: CanvasDocument } | null>(null);
@@ -4285,6 +4553,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     onUndo: () => {
       // undo() can still decline (a node began talking since this render); only an undo that happened is said.
       if (!canUndoPlan || !undo()) return;
+      // The assistant's 撤销 names what it takes back: the cards are drawn again to show it gone (the keys wait instead).
+      showPlanUndone();
       appendPlanningMessage(`undo-${Date.now()}`, surfaceNotice(t, 'plan_undone'));
       // The undo can move the conversation, and the button with it: from the welcome (a plan that had removed every node
       // has them back) to the side panel, or from the side panel (the first plan undone) to the welcome, which comes up
@@ -4323,6 +4593,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       // happened is reported as one.
       const latest = assistantLatest.current!;
       const undone = planOnCanvas && latest.canUndoPlan && latest.undo();
+      if (undone) showPlanUndone();
       setPlanning(previous => ({ draft: previous.draft.trim() === shown ? '' : previous.draft, messages: [...previous.messages,
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
         userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
@@ -4786,6 +5057,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           setSelection([]);
           setSelectedEdgeId(null);
           setSelectedDisplayId(null);
+          setSelectedIconId(null);
           return undefined;
         }}
         onBackgroundDoubleClick={readOnly || exclusiveNow || initializing || simple ? undefined : (world) => addNode('llm', world)}
@@ -4802,11 +5074,13 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }
       >
         {/* What the board holds appears with its tiles, once the stage has measured itself: wires never float without them. */}
-        {stageMeasured && <WirePlane nodes={renderNodes} edges={edges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
+        {stageMeasured && <WirePlane nodes={convergedView.wireNodes} edges={convergedView.wireEdges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
-          preview={wiring.wireDrag} onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}
-        {stageMeasured && <CollaborationFlow nodes={renderNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
-        {stageMeasured && <DisplayLinks displays={displays} boxes={renderNodeById} />}
+          // A wire is never previewed from a card the board does not draw (its anchor would be the icon's).
+          preview={wiring.wireDrag && !convergedView.hidden.has(wiring.wireDrag.from.nodeId) ? wiring.wireDrag : null}
+          onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}
+        {stageMeasured && <CollaborationFlow nodes={shownNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
+        {stageMeasured && <DisplayLinks displays={displays} boxes={linkBoxes} />}
         {displays.map(display => visibleDisplayIds.has(display.id) && (
           <DisplayTile
             key={display.id}
@@ -4880,6 +5154,23 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
           />
           )
         ))}
+        {/* Icons are never culled off screen, as cards are: there are few, and one panned away still says a member's failure. */}
+        {stageMeasured && convergedView.icons.map(icon => (
+          <ConvergedIcon
+            key={icon.id}
+            icon={icon}
+            members={iconMembers.get(icon.id) ?? NO_MEMBERS}
+            runs={runs}
+            depths={graphDepths}
+            title={iconTitle(icon.id, iconMembers.get(icon.id) ?? NO_MEMBERS)}
+            scale={view.scale}
+            selected={selectedIconId === icon.id}
+            onSelect={selectIcon}
+            onExpand={expandIcon}
+            onAnnounce={announce}
+            live={running || recovering}
+          />
+        ))}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
@@ -4906,19 +5197,28 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         <button aria-label={viewText.zoomIn} title={viewText.zoomIn} onClick={() => zoomBy(1.2)}><Plus size={16} /></button>
         <span className="awwo-tool-separator" />
         <button aria-label={viewText.fitAll} title={viewText.fitAll} disabled={!nodes.length} onClick={fitAll}><Maximize2 size={16} /></button>
+        {/* 收敛: the whole canvas as one live icon (both views, readers too: a way of looking, never an edit). */}
+        <button type="button" className="awwo-converge-tool" aria-pressed={converged.canvas} data-converge-toggle=""
+          aria-label={t('converge.canvas')}
+          title={converged.canvas ? t('converge.expandAllTitle', { key: convergeKeyHint }) : stepCount < MIN_GROUP_MEMBERS ? t('converge.needsTwo')
+            : focusedId || inspectorId ? t('converge.closeOpen') : t('converge.canvasTitle', { key: convergeKeyHint })}
+          disabled={!converged.canvas && (stepCount < MIN_GROUP_MEMBERS || Boolean(focusedId) || Boolean(inspectorId))}
+          onClick={() => setCanvasConverged(!converged.canvas)}><Orbit size={16} /></button>
         <button className="awwo-display-tool" aria-label={displayText(locale, 'display.showCanvas')} title={displayText(locale, 'display.showCanvas')}
           disabled={!nodes.length || (readOnly && !displays.some(display => display.source.type === 'canvas'))} onClick={showCanvasDisplay}><MonitorPlay size={16} /></button>
-        {!simple && <><button aria-label={viewText.arrange} title={viewText.arrangeTitle} disabled={readOnly || exclusiveNow || initializing || bindingLocked || !nodes.length} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
+        {/* "Expand first" only where the icon is all that holds them: not for a reader, during a run or with nothing to do. */}
+        {!simple && <><button aria-label={viewText.arrange} title={convergedView.icons.length && !arrangeBlocked ? t('converge.arrangeExpanded') : viewText.arrangeTitle}
+          disabled={arrangeBlocked || convergedView.icons.length > 0} onClick={arrangeNodes}><LayoutGrid size={16} /></button>
         <button className="awwo-minimap-toggle" aria-label={viewText.showMinimap} title={focusedId ? t('surface.minimapWhileOpen') : viewText.showMinimap} aria-pressed={minimapOpen} disabled={Boolean(focusedId)} onClick={() => setMinimapOpen(o => !o)}><Map size={16} /></button>
         <span className="awwo-tool-separator" />
-        <button aria-label={viewText.undo} title={viewText.undo} disabled={readOnly || running || initializing || !history.undo} onClick={undo}><Undo2 size={16} /></button>
-        <button aria-label={viewText.redo} title={viewText.redo} disabled={readOnly || running || initializing || !history.redo} onClick={redo}><Redo2 size={16} /></button>
+        <button aria-label={viewText.undo} title={membersHidden && !undoBlocked ? t('converge.undoExpanded') : viewText.undo} disabled={undoBlocked || membersHidden} onClick={undo}><Undo2 size={16} /></button>
+        <button aria-label={viewText.redo} title={membersHidden && !redoBlocked ? t('converge.redoExpanded') : viewText.redo} disabled={redoBlocked || membersHidden} onClick={redo}><Redo2 size={16} /></button>
         {selection.length > 0 && <><span className="awwo-tool-separator" /><button aria-label={viewText.runSelection} title={runUnavailableReason || viewText.runSelection} disabled={readOnly || exclusiveNow || Boolean(runUnavailableReason)} onClick={runFromSelection}><Play size={15} /></button></>}</>}
       </div>}
 
       {minimapOpen && !simple && nodes.length > 0 ? (
         <Minimap
-          boxes={displays.length ? [...renderNodes, ...displays] : renderNodes}
+          boxes={displays.length || convergedView.icons.length ? [...shownNodes, ...convergedView.icons, ...displays] : renderNodes}
           view={view}
           size={size}
           onCenter={(wx, wy) => moveCamera(focusWorld(viewRef.current, wx, wy, sizeRef.current))}
@@ -4977,6 +5277,12 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         initialEntryId={studio.entryId} assetEntries={canvasEntries}
         title={studio.nodeId ? t('studio.titleNode', { title: nodes.find(node => node.id === studio.nodeId)?.title || '—' }) : t('studio.titleCanvas', { title: workspaceName || 'AwwO' })}
         onClose={() => setStudio(null)} onOpenNode={id => { setStudio(null); changeStageView('canvas'); focusNode(id); }} /> : null}
+    </div>
+    {/* Converged icons speak here, once per change; the same words twice still differ (a no-break space), so they are said.
+        A polite live region, not role=status: the board's own status notes keep that role to themselves. Outside the
+        board, which turns inert (and silent to assistive technology) under the 成果 view, while its run goes on. */}
+    <div className="awwo-converged-sr" aria-live="polite" aria-atomic="true" data-testid="converged-announcer">
+      {announcement.text ? `${announcement.text}${announcement.nonce % 2 ? ' ' : ''}` : ''}
     </div>
     {/* Outside the board, which turns inert under the 成果 view, where its run button asks this too. */}
     {rerunChoice && <RerunConfirm choice={rerunChoice} changed={rerunChoice.changed} titleOf={titleOf} withCost={withCost}

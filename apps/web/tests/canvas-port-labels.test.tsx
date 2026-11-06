@@ -14,7 +14,7 @@ function node(): SessionNode {
 }
 function wiring(): WiringApi {
   return { pendingPort: null, wireDrag: null, interactive: true, wireCount: () => 0,
-    clearPending: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
+    clearPending: vi.fn(), cancelWiring: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
 }
 
 describe('contract port labels', () => {

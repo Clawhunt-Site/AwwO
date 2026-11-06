@@ -115,6 +115,8 @@ const workingNodes = (nodes: ReadonlyArray<CanvasNode>, host: Host) => nodes.fil
 /** A node has a result as the results view counts one (stepDelivery): an output that is not blank and is not a failed
  * run's capture. Read on every render, so a large output is searched for its first visible character, never copied. */
 const delivered = (node: CanvasNode) => Boolean(node.kind !== 'form' && node.lastOutput && !node.lastOutput.partial && /\S/.test(node.lastOutput.text));
+/** Whether a node has a result as the results view counts one (a converged icon counts its members so). */
+export const hasDeliveredResult = delivered;
 
 /** The fewest calls a run of these Agents makes: one per Agent, one per member of an Agent's team. */
 function callsOf(agents: ReadonlyArray<SessionNode>): number {

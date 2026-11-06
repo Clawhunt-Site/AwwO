@@ -45,7 +45,8 @@ export type CanvasCommandId =
   | 'undo'
   | 'redo'
   | 'run-selection'
-  | 'rerun-node';
+  | 'rerun-node'
+  | 'converge-toggle';
 
 /** Default keybinding HINTS. The host owns the real bindings and can override any of these. */
 export const DEFAULT_KEY_HINTS: Record<CanvasCommandId, string> = {
@@ -65,6 +66,7 @@ export const DEFAULT_KEY_HINTS: Record<CanvasCommandId, string> = {
   redo: '⌘⇧Z',
   'run-selection': '⌘⇧↵',
   'rerun-node': 'R',
+  'converge-toggle': '⌘G',
 };
 
 /** Every action the bar can offer. An omitted action's row is simply not rendered. */
@@ -85,11 +87,21 @@ export interface CanvasCommandActions {
   runSelection?: () => void;
   /** Re-run exactly one node, reusing every upstream's stored output. */
   rerunNode?: () => void;
+  /** The whole canvas drawn as one live icon (收敛), or as its cards again; `converged` says which it is now, and
+   *  `canConverge` false greys the row out (fewer than 2 components, or a node open). */
+  toggleConverged?: () => void;
+  converged?: boolean;
+  canConverge?: boolean;
+  /** Why the canvas cannot converge now, shown under the greyed-out row. */
+  convergeHint?: string;
   /** Present but inert when there is nothing to step back to — see the delete row's note. */
   undo?: () => void;
   redo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  /** There is a step to take, but components are inside an icon: the row says to expand first. */
+  undoHeld?: boolean;
+  redoHeld?: boolean;
 }
 
 export interface CommandRow {
@@ -324,6 +336,16 @@ export function buildCommandRows(
       run: actions.toggleMinimap,
     });
   }
+  if (actions.toggleConverged) {
+    rows.push({
+      id: 'converge-toggle',
+      label: text(actions.converged ? 'converge.expandAll' : 'converge.canvas'),
+      keys: key('converge-toggle'),
+      disabled: !actions.converged && actions.canConverge === false,
+      hint: !actions.converged && actions.canConverge === false ? actions.convergeHint : undefined,
+      run: actions.toggleConverged,
+    });
+  }
   if (actions.saveWaypoint) {
     rows.push({ id: 'waypoint-save', label: text('command.saveWaypoint'), keys: key('waypoint-save'), disabled: ctx.running || actions.canEdit === false, run: actions.saveWaypoint });
   }
@@ -379,7 +401,7 @@ export function buildCommandRows(
       label: text('command.undo'),
       keys: key('undo'),
       disabled: ctx.running || actions.canEdit === false || actions.canUndo === false,
-      hint: ctx.running ? text('command.running') : actions.canUndo === false ? text('command.noUndo') : undefined,
+      hint: ctx.running ? text('command.running') : actions.undoHeld ? text('converge.undoExpanded') : actions.canUndo === false ? text('command.noUndo') : undefined,
       run: actions.undo,
     });
   }
@@ -389,7 +411,7 @@ export function buildCommandRows(
       label: text('command.redo'),
       keys: key('redo'),
       disabled: ctx.running || actions.canEdit === false || actions.canRedo === false,
-      hint: ctx.running ? text('command.running') : actions.canRedo === false ? text('command.noRedo') : undefined,
+      hint: ctx.running ? text('command.running') : actions.redoHeld ? text('converge.redoExpanded') : actions.canRedo === false ? text('command.noRedo') : undefined,
       run: actions.redo,
     });
   }
