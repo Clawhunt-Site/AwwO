@@ -1,17 +1,20 @@
-// One live icon for components drawn converged (收敛): the AwwO orb on a dark collar that carries a ring of its members.
-// Each member is one arc of the ring, in pipeline order, in its own run state (one arc per state when there are too many
-// to tell apart); the orb's glyph and the card skin's ring say what the group is doing now, and the rows under it name
-// it and count it. It wears the card's own skin (canvas-tile awwo-node is-<state>, as a 预览展示 window does), so every
-// theme and both editions draw its states as they draw a card's.
+// One live icon for components drawn converged (收敛): the group as one bot avatar. The AwwO orb is its head, with a face
+// whose expression is what the group is doing (avatarFace.ts), on a dark collar that carries a ring of its members. Each
+// member is one arc of the ring, in pipeline order, in its own run state (one arc per state when there are too many to
+// tell apart); the face and the card skin's ring say what the group is doing now, and the rows under it name it and count
+// it. It wears the card's own skin (canvas-tile awwo-node is-<state>, as a 预览展示 window does), so every theme and both
+// editions draw its states as they draw a card's.
 //
-// Honest by construction (groupStatus.ts): only live work loops; the ring counts real results and never fills on
-// arrival; done means every member has a result; a failure or a block shows the moment it happens while the rest run.
+// Honest by construction (groupStatus.ts): only live work loops (the running arcs breathe, and a working face looks about
+// and blinks); the ring counts real results and never fills on arrival; done means every member has a result; a failure
+// or a block shows the moment it happens while the rest run.
 // Its box is a fixed world size (CONVERGED_ICON_WORLD); its drawing scales up about its centre when the board is zoomed
 // far out (convergedIconScale), and its rows keep 13 / 12 px on screen.
 import {
   memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent,
   type PointerEvent,
 } from 'react';
+import { AVATAR_EXPRESSION, AVATAR_FACES, type FacePart } from './avatarFace';
 import type { CanvasNode } from './canvasDoc';
 import { CANVAS_GROUP_ID, CONVERGED_ICON_WORLD, convergedIconScale, type ConvergedIconBox } from './convergedGroups';
 import { groupStatus, memberLiveState, type GroupState, type GroupStatus, type MemberLiveState } from './groupStatus';
@@ -23,7 +26,7 @@ import type { RunView } from './RunTimeline';
 import { getSnapshot, subscribe } from './sessions';
 import { runBadgeText } from './SessionTile';
 import { failureReason, recoveryDetailMessage } from './surfaceMessages';
-import { WorkingDots, WorkingTimer } from './WorkingIndicator';
+import { WorkingTimer } from './WorkingIndicator';
 import type { UiLocale } from '../locale';
 import './converged-icon.css';
 
@@ -32,13 +35,15 @@ export const RING_TICKS_MAX = 48;
 const TICK_MIN_PX = 3.5;
 /** The ring's radius over the drawing's half-width (viewBox -60…60, ring at 52). */
 const RING_SHARE = 52 / 60;
-/** The on-screen size from which the icon shows its third row and the counts in the orb. */
+/** The on-screen size from which the icon shows its third row (what runs now). */
 const TIER_L_PX = 96;
 const ARC_ORDER: ReadonlyArray<MemberLiveState> = ['done', 'delivered', 'cached', 'running', 'waiting', 'failed', 'blocked', 'cancelled', 'idle'];
 /** A failure, a block or work in progress is never drawn thinner than this share of the ring. */
 const MIN_SHARE: Partial<Record<MemberLiveState, number>> = { failed: .025, blocked: .025, running: .025 };
 /** Loops share one phase: every icon breathes together, and one culled and mounted again carries on. */
 const BREATH_MS = 2200;
+/** A working face looks about and blinks once in two breaths, in one phase for every icon as well. */
+const FACE_MS = 2 * BREATH_MS;
 const FAILURE_COALESCE_MS = 1500;
 
 export interface RingSegment { state: MemberLiveState; from: number; to: number }
@@ -107,17 +112,22 @@ function useMemberStreams(steps: ReadonlyArray<CanvasNode>): ReadonlyArray<{ str
 
 const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
-function Glyph({ status, tier }: { status: GroupStatus; tier: 'M' | 'L' }) {
-  switch (status.state) {
-    case 'running': return <WorkingDots className="awwo-converged-dots" />;
-    case 'waiting': return <span className="awwo-converged-queue" aria-hidden="true" />;
-    case 'done': return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
-    case 'failed': return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>;
-    case 'blocked': return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 12h11" /></svg>;
-    case 'cancelled': return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="8" height="8" rx="1.5" /></svg>;
-    case 'cached': return <svg className="is-reused" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
-    default: return tier === 'L' ? <span className="awwo-converged-count" aria-hidden="true">{status.counts.total}</span> : null;
-  }
+const drawPart = (part: FacePart, key: number) => part.shape === 'ellipse'
+  ? <ellipse key={key} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} />
+  : <path key={key} d={part.d} />;
+
+/** The head's face: the group's state as an expression (avatarFace.ts), decoration only: the label and the rows say it
+ *  in words. Its eyes are one group, which a working face moves (converged-icon.css) in the shared phase: the delay is
+ *  the eyes' own, so the face's one-shot hop or shake starts from its beginning. */
+function AvatarFace({ state, phase }: { state: GroupState; phase: number }) {
+  const expression = AVATAR_EXPRESSION[state];
+  const parts = AVATAR_FACES[expression];
+  return (
+    <svg className="awwo-converged-face" viewBox="0 0 100 100" data-expression={expression} aria-hidden="true">
+      <g className="awwo-converged-eyes" style={{ animationDelay: `${phase}ms` }}>{parts.filter(part => part.kind === 'eye').map(drawPart)}</g>
+      {parts.filter(part => part.kind !== 'eye').map(drawPart)}
+    </svg>
+  );
 }
 
 type Tone = 'failed' | 'blocked';
@@ -242,7 +252,13 @@ function ConvergedIconImpl({ icon, members, runs, depths, title, scale, selected
     memberLiveState(runs[node.id], streams[index]?.streaming, hasDeliveredResult(node), live)), diameter), [steps, runs, streams, diameter, live]);
   const settledMark = useSettledMark(status.state);
   useAnnouncements(status, icon.id, title, steps, onAnnounce, t, locale);
-  const phase = useMemo(() => -(Date.now() % BREATH_MS), []);
+  // Taken when a run starts, as the loops do (they start with is-running), so an icon converged before its run is in step
+  // with every other one.
+  const runningNow = status.state === 'running';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const phase = useMemo(() => -(Date.now() % BREATH_MS), [runningNow]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const facePhase = useMemo(() => -(Date.now() % FACE_MS), [runningNow]);
   const active = status.activeId ? steps.find(node => node.id === status.activeId) : undefined;
   const activeRun = active ? runs[active.id] : undefined;
   const waitingText = status.state === 'waiting' ? waitingReason(activeRun, t) : '';
@@ -319,9 +335,9 @@ function ConvergedIconImpl({ icon, members, runs, depths, title, scale, selected
           {running.map((segment, index) => <path key={index} className="awwo-converged-arc is-running" d={arcPath(52, segment.from, segment.to)} />)}
         </svg>
       ) : null}
+      {/* The head: its face says what the group is doing; the counts are the rows' to give, under it. */}
       <span className="awwo-converged-orb" aria-hidden="true">
-        <Glyph status={status} tier={tier} />
-        {tier === 'L' && status.counts.inRun ? <span className="awwo-converged-tally">{status.counts.done}/{status.counts.inRun}</span> : null}
+        <AvatarFace state={status.state} phase={facePhase} />
       </span>
       {badge ? <span key={badgeKey} className={`awwo-converged-badge is-${badge.kind}${badgeKey !== firstBadgeKey.current ? ' is-new' : ''}`} aria-hidden="true">
         {badge.count > 99 ? '99+' : badge.count}</span> : null}

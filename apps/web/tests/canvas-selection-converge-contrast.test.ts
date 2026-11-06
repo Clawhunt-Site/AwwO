@@ -58,6 +58,15 @@ describe('which token paints each part of the icon', () => {
     expect(declarations('.awwo-converged-state, .awwo-converged-now')).toMatch(/color:\s*var\(--saas-muted\b/);
     expect(declarations('.awwo-converged-state .is-failed')).toMatch(/color:\s*color-mix\(in srgb, var\(--saas-danger\b[^;]*\) 80%, var\(--saas-text\b/);
     expect(declarations('.awwo-converged-state .is-blocked')).toMatch(/color:\s*color-mix\(in srgb, var\(--saas-warning\b[^;]*\) 80%, var\(--saas-text\b/);
+    // The head: its face in the orb's white, on the core and edge, with the glow under the chin (below the mouth).
+    const head = declarations('.awwo-converged-orb');
+    expect(head).toMatch(/color:\s*#fff;/);
+    // The specular spot, where canvas-selection-converge-avatar.test.tsx keeps every face part clear of it (gone by 11%).
+    expect(head).toMatch(/radial-gradient\(circle at 27% 19%, rgb\(255 255 255 \/ 70%\) 0 2%, rgb\(255 255 255 \/ 0%\) 11%\)/);
+    expect(head).toMatch(/radial-gradient\(circle at 50% 42%, var\(--saas-orb-core\b[^)]*\) 0 48%, var\(--saas-orb-edge\b[^)]*\) 78%\)/);
+    expect(head).toMatch(/radial-gradient\(120% 70% at 50% 108%, rgb\(var\(--saas-glow-1-rgb[^)]*\) \/ 55%\) 0 22%, rgb\(var\(--saas-glow-2-rgb[^)]*\) \/ 18%\) 40%, transparent 62%\)/);
+    expect(declarations('.awwo-converged-face ellipse')).toMatch(/fill:\s*currentColor/);
+    expect(declarations('.awwo-converged-face path')).toMatch(/stroke:\s*currentColor/);
     // And those tokens are the presets' own colours.
     for (const [token, own] of [['--saas-signal', '--agent-running'], ['--saas-danger', '--danger-bg'], ['--saas-warning', '--warn'],
       ['--saas-text', '--text-primary'], ['--saas-muted', '--text-secondary']]) {
@@ -95,6 +104,13 @@ describe('the icon on each of the eight styles', () => {
     const blockedInk = scheme === 'light' ? v['--text-primary'] : board;
     expect(contrast(failedInk, v['--danger-bg']), `${id} failed badge digit`).toBeGreaterThanOrEqual(4.5);
     expect(contrast(blockedInk, v['--saas-warning-dot']), `${id} blocked badge digit`).toBeGreaterThanOrEqual(4.5);
+    // The face, white on the head: on its core and its edge, and where the rim light comes nearest the mouth. The mouth
+    // ends above 72% of the head (canvas-selection-converge-avatar.test.tsx), past the light's 40% stop (80%), so the
+    // light there is under that stop's 18% of glow-2 (and the 55% of glow-1 is lower still, at 92% and down).
+    for (const [part, colour, least] of [['core', v['--saas-orb-core'], 10], ['edge', v['--saas-orb-edge'], 10],
+      ['rim light by the mouth', mix(fromTriplet(v['--saas-glow-2-rgb']), v['--saas-orb-core'], 0.18), 4.5]] as Array<[string, string, number]>) {
+      expect(contrast('#ffffff', colour), `${id} the face on the head's ${part} ${colour}`).toBeGreaterThanOrEqual(least);
+    }
     // The rows under it, on the board.
     const counted = (ink: string) => mix(ink, v['--text-primary'], 0.8);
     for (const [part, colour] of [['name', v['--text-primary']], ['state line', v['--text-secondary']], ['failed count', counted(v['--danger-bg'])],
