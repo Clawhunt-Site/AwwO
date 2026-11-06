@@ -19,15 +19,8 @@ const record: ProductionRunRecord = {
   },
   "source": {
     "api": "37a7ea5dcd2f059cc72c1492402dc6317d3a7be2",
-    "worker": "99255a62f89d3e01a4258f0e64d3130ee80f8857",
+    "worker": "560ef0aeca5e22325fa6e0c715df2fc53ab05f0a",
     "runs": [
-      {
-        "api": "37a7ea5dcd2f059cc72c1492402dc6317d3a7be2",
-        "worker": "560ef0aeca5e22325fa6e0c715df2fc53ab05f0a",
-        "nodes": [
-          "site"
-        ]
-      },
       {
         "api": "37a7ea5dcd2f059cc72c1492402dc6317d3a7be2",
         "worker": "99255a62f89d3e01a4258f0e64d3130ee80f8857",
@@ -35,6 +28,13 @@ const record: ProductionRunRecord = {
           "ring",
           "pieces",
           "photo"
+        ]
+      },
+      {
+        "api": "37a7ea5dcd2f059cc72c1492402dc6317d3a7be2",
+        "worker": "560ef0aeca5e22325fa6e0c715df2fc53ab05f0a",
+        "nodes": [
+          "site"
         ]
       }
     ]
