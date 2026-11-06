@@ -62,6 +62,23 @@ export function createOfficialCopyDocument(item: OfficialWorkflow, model: Offici
 
 /** A production case's recorded run, whose deliveries the copy carries (productionCopy.ts). */
 export type OfficialCopyRecording = { capturedOn: string; completed: number; total: number; model: string };
+
+/** The agents a copy makes afresh because they hand files on (a Blender maker's GLBs and renders), with the page that
+ *  shows those files: productionCopy.ts pins neither, their deliveries being files of the case's workspace. */
+function madeAgain(workflow: OfficialWorkflow): ReadonlySet<string> {
+  const makers = workflow.nodes.filter(node => node.files?.length);
+  return new Set(makers.length ? [...makers, ...workflow.nodes.filter(node => node.outputType === 'html')].map(node => node.id) : []);
+}
+
+/** Where a case's agents keep working once a model is chosen (createOfficialCopyDocument): an agent of the sandbox
+ *  computer or the Blender workstation stays there, on the chosen model where that computer offers it, else on the
+ *  computer's own model. */
+function computerNote(chosen: OfficialCopyModel, sandboxed: boolean, blendered: boolean): string {
+  if (!blendered) return chosen.sandbox ? 'Its agents keep working in their sandbox computers, on this model.'
+    : 'This model does not run in a sandbox computer, so its agents keep working there on the sandbox’s own model.';
+  const blender = `Its agents in the Blender workstation keep working there, ${chosen.blender ? 'on this model' : 'on the workstation’s own model, as it does not offer this one'}`;
+  return sandboxed ? `${blender}, and those in sandbox computers stay there, ${chosen.sandbox ? 'on this model' : 'on the sandbox’s own model, as it does not offer this one'}.` : `${blender}.`;
+}
 /** A recorded-canvas case (a film, recordedCanvas.ts): its canvas is stored beside its record, so the dialog knows it by
  * its title and how many nodes, and how many of them generate media, its copy holds; `sandboxed` when its agents work in
  * sandbox computers (a film written as code). */
@@ -102,6 +119,11 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
   const recorded = 'recorded' in item ? item.recorded : null;
   const workflow = 'recorded' in item ? null : item;
   const sandboxed = workflow?.nodes.some(node => node.sandbox) === true || recorded?.sandboxed === true;
+  const blendered = workflow?.nodes.some(node => node.blender) === true;
+  // A case whose every agent is made afresh (GYROID's makers hand on files, and its site shows them) carries no
+  // recording into its copy.
+  const remade = workflow ? madeAgain(workflow) : new Set<string>();
+  const carriesNone = workflow !== null && remade.size > 0 && workflow.nodes.every(node => node.assemble || remade.has(node.id));
   const locked = busy || checking;
   const invalidChoice = selection !== '' && (!chosen || loading || catalogError);
   const close = () => { if (!busy && !checking && !submitting.current) onClose(); };
@@ -133,8 +155,10 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         ? `Keep all ${recorded.nodes} nodes and their wires with the texts and settings the real run${recording ? ` on ${recording.capturedOn}` : ''} used: every agent’s task, the assembly’s template and the edit. Nothing is pre-filled: its first run writes every module, the page and the timeline again, and the edit renders the film and its sound from that page. Optionally choose one execution model for its agents.`
         : recorded
         ? `Keep all ${recorded.nodes} nodes and their wires with the texts and settings the real run${recording ? ` on ${recording.capturedOn}` : ''} used: every picture, clip, voice and score cue with its words, the editors’ briefs and the edits. Nothing is pre-filled: the film’s deliveries are files, which a copy does not carry, so its first run makes all ${recorded.media} pictures, clips and sounds again before any editor runs, and that takes a paid plan’s media allowance. New clips speak their lines at other moments and run to other lengths: the sync sheets in the editors’ briefs and the edits’ own timelines were measured on the case run’s clips and films, so measure and edit them again before cutting. Optionally choose one execution model for the editor agents.`
+        : workflow && recording && carriesNone
+        ? `Keep all ${workflow.nodes.length} nodes, dependencies and deliverable requirements, with the tasks the real run on ${recording.capturedOn} used. Nothing is pre-filled: its agents hand on files of their own (models, renders, photographs), which a copy does not carry, so its first run makes them again${blendered ? ' in the Blender workstation' : ''}, and the page that shows them. Optionally choose one execution model for every new node.`
         : workflow && recording
-        ? `Keep all ${workflow.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${workflow.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}${workflow.nodes.some(node => node.assemble?.file || node.assemble?.fileOnly) ? '; the assembly makes its file again on the first run, with no model' : ''}${workflow.nodes.some(node => node.handoff) ? '; the turns that hand their project on as a file run again on the first run, and so make the team session again' : ''}. Optionally choose one execution model for every new node.`
+        ? `Keep all ${workflow.nodes.length} nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on ${recording.capturedOn} (${recording.completed}/${recording.total} nodes, marked “case recording”)${workflow.media?.length ? '; the media nodes, and the steps that use the files they made, make theirs again on the first run' : ''}${workflow.nodes.some(node => node.assemble?.file || node.assemble?.fileOnly) ? '; the assembly makes its file again on the first run, with no model' : ''}${workflow.nodes.some(node => node.handoff) ? '; the turns that hand their project on as a file run again on the first run, and so make the team session again' : ''}${remade.size ? '; the agents that hand on files of their own, and the page that shows them, make theirs again on the first run' : ''}. Optionally choose one execution model for every new node.`
         : `Keep all ${workflow?.nodes.length ?? 0} nodes, dependencies and deliverable requirements. Optionally choose one execution model for every new node.`}</p>
       <label className="official-copy-model" htmlFor={`${id}-model`}>Execution model
         <select id={`${id}-model`} autoFocus value={selection} disabled={locked} onChange={event => { setSelection(event.target.value); setSubmitError(null); }}>
@@ -144,9 +168,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         </select>
       </label>
       {chosen && <div className="official-copy-selection"><strong>{recorded ? recorded.media ? 'Applies to the editor agents' : 'Applies to its agents' : 'Applies to every new node'}</strong><span>{chosen.label}</span>
-        {sandboxed && <small>{chosen.sandbox
-          ? 'Its agents keep working in their sandbox computers, on this model.'
-          : 'This model does not run in a sandbox computer, so its agents keep working there on the sandbox’s own model.'}</small>}</div>}
+        {(sandboxed || blendered) && <small>{computerNote(chosen, sandboxed, blendered)}</small>}</div>}
       <div className="official-copy-catalog" aria-live="polite">
         {loading ? <p role="status">Loading models for this workspace…</p>
           : catalogError ? <p role="alert">Could not load the model catalog. Refresh it, or copy an unconfigured draft.</p>
@@ -154,7 +176,7 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         <button type="button" className="saas-link" disabled={locked || loading} onClick={() => { setSubmitError(null); setRevision(value => value + 1); }}>Refresh model catalog</button>
       </div>
       <p className="official-copy-note">This only creates a canvas; it does not initialize nodes or run models. Check the configuration in your canvas before starting a run.
-        {recording && !recorded && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}</p>
+        {recording && !recorded && !carriesNone && ` The case recordings were made by ${recording.model}, not run in your workspace; running the graph replaces them with your own results.`}</p>
       {displayedError && <p className="saas-error" role="alert">{displayedError}</p>}
       <footer><button type="button" disabled={busy || checking} onClick={close}>Cancel</button><button type="submit" className="saas-primary" disabled={locked || invalidChoice}>
         {busy ? 'Creating…' : checking ? 'Checking model…' : selection ? 'Copy with model' : 'Create draft'}

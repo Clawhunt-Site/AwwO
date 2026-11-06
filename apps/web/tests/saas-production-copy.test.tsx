@@ -470,6 +470,46 @@ it('copies a film written as code with its agents in their sandbox computers, on
   }
 });
 
+it('copies GYROID with nothing pre-filled, says so, and keeps its makers in the Blender workstation and its site in a sandbox computer', async () => {
+  // Its makers hand on files of their own and its site shows them, so its copy carries no recording (productionCopy.ts):
+  // the dialog says what the first run makes again, and claims no recorded delivery.
+  for (const [offered, model] of [[true, 'shared-model'], [false, '']] as const) {
+    const posts: { url: string; body: any }[] = [];
+    const computers = offered ? [{ id: 'sandbox', name: 'Sandbox computer', available: true, configured: true, tools: [] }, { id: 'blender', name: 'Blender workstation', available: true, configured: true, tools: [] }] : [];
+    const runtime = { available: true, configured: true, plannerAvailable: true,
+      runtimes: [{ id: 'openai-agents', name: 'OpenAI Agents', available: true, configured: true, tools: [] }, ...computers],
+      models: [{ id: 'shared-model', label: 'Catalog model', runtime: 'openai-agents' },
+        ...(offered ? [{ id: 'shared-model', name: 'Sandbox model', runtime: 'sandbox' }, { id: 'shared-model', name: 'Workstation model', runtime: 'blender' }] : [])] };
+    vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/runtime')) return json(runtime);
+      if (url.endsWith('/canvases') && init.method === 'POST') { const body = JSON.parse(init.body as string); posts.push({ url, body }); return json({ id: 'new-copy', document: body.document }, 201); }
+      if (url.includes('/canvases?')) return json({ items: [], nextCursor: null });
+      if (url.includes('/showcase/')) return new Response('', { status: 404 });
+      throw new Error(`Unexpected endpoint: ${url}`);
+    }));
+    const onOpen = vi.fn();
+    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+    const setup = await openCopy('GYROID');
+    expect(within(setup).getByText(/^Keep all 4 nodes, dependencies and deliverable requirements, with the tasks the real run on 2026-11-05 used\. Nothing is pre-filled: its agents hand on files of their own \(models, renders, photographs\), which a copy does not carry, so its first run makes them again in the Blender workstation, and the page that shows them\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
+    expect(within(setup).queryByText(/case recording|The case recordings were made by/)).toBeNull();
+    await within(setup).findByRole('option', { name: 'Catalog model' });
+    fireEvent.change(within(setup).getByRole('combobox', { name: 'Execution model' }), { target: { value: JSON.stringify(['openai-agents', 'shared-model']) } });
+    expect(within(setup).getByText(offered
+      ? 'Its agents in the Blender workstation keep working there, on this model, and those in sandbox computers stay there, on this model.'
+      : 'Its agents in the Blender workstation keep working there, on the workstation’s own model, as it does not offer this one, and those in sandbox computers stay there, on the sandbox’s own model, as it does not offer this one.')).toBeVisible();
+    fireEvent.click(within(setup).getByRole('button', { name: 'Copy with model' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledExactlyOnceWith('new-copy'));
+    const sent = posts[0].body.document;
+    // The makers stay in the Blender workstation and the site in its sandbox computer, on the chosen model only where
+    // that computer offers it; nothing is pre-filled.
+    const where = Object.fromEntries(PRODUCTION_WORKFLOWS['gyroid-jewellery'].nodes.map((spec, index) => [spec.id, [sent.nodes[index].runtime, sent.nodes[index].model]]));
+    expect(where).toEqual({ ring: ['blender', model], pieces: ['blender', model], photo: ['blender', model], site: ['sandbox', model] });
+    expect(sent.nodes.every((node: any) => !node.lastOutput)).toBe(true);
+    cleanup();
+  }
+});
+
 it('creates nothing from a film case whose stored canvas is not the one its record pins', async () => {
   const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
   const record = (await actual(FILM))!;
