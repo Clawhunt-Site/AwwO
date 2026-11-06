@@ -6,6 +6,7 @@ import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAge
 import { paletteRunsTeams } from './nodeTeam';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
+import { canvasLocale } from '../saas/canvasErrors';
 import { useLocalEdition } from '../saas/edition';
 import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
@@ -127,9 +128,10 @@ import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, pageRepair
 import { withCanvasRunOwnership } from './runOwnership';
 import { useCanvasI18n } from './i18n';
 import { surfaceNotice, stopUnconfirmedMessage, planFailureMessage, plannerConnectionMessage, surfaceViewMessages, preflightIssueMessage, recoveryDetailMessage, refusedNodeMessage, failureReason } from './surfaceMessages';
-import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation } from './sessions';
+import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns, patchPresentation, appendTurn as appendSessionTurn,
+  removeTurns as removeSessionTurns } from './sessions';
 import { forgetNode, restoreHistory } from './sessionTransport';
-import { projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
+import { forgetConversationPresentation, projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
   updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
 import { arrangeNodePositions, deliverablesShown, DRAWER_BESIDE_MIN_WIDTH, FOCUSED_SESSION_MIN_SIZE, nodeDepths, openContentOf, openFrameFor, presentationNodes,
@@ -281,6 +283,14 @@ function fitNodeOverview(nodes: ReadonlyArray<CanvasNode>, size: { w: number; h:
 function hasStreamingConversation(nodes: ReadonlyArray<CanvasNode>): boolean {
   return nodes.some(node => node.kind === 'session' && getNodeThreads(node)
     .some(thread => getSessionSnapshot(sessionStoreKey(node, thread.id)).streaming));
+}
+
+/** A lane's badges without these nodes' badges: the very same map when it shows none of them, so a lane that lost
+ *  nothing keeps its identity (a page repair refused before it ran gives its node's badge back only to a lane nothing
+ *  has changed since it started: endRefusedRepair). */
+function withoutBadges(badges: Record<string, RunView>, ids: ReadonlySet<string>): Record<string, RunView> {
+  return Object.keys(badges).some(id => ids.has(id))
+    ? Object.fromEntries(Object.entries(badges).filter(([id]) => !ids.has(id))) : badges;
 }
 
 /** A saved document's canonical text without its camera and save time: what a run's recovery has to preserve. */
@@ -1399,6 +1409,14 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   laneRecoveringRef.current = laneRecovering;
   // Lanes never share a node, so their badges merge without conflict; a lane that starts takes its nodes' badges.
   const runs = useMemo(() => Object.assign({}, ...laneRuns) as Record<string, RunView>, [laneRuns]);
+  const settledRuns = useRef(runs);
+  settledRuns.current = runs;
+  // The lanes seen running after recovery settled: when their work ends, the host hears of it (the run-end effect). A
+  // page repair the service refused before it ran takes its lane back out: it was no run (endRefusedRepair).
+  const watchedLanes = useRef(new Set<number>());
+  // Badges a page repair the service refused before it ran gave back to their node (endRefusedRepair): the host heard of
+  // them when their own run ended, so they are no news when other work ends (the run-end effect).
+  const givenBackBadges = useRef(new WeakSet<RunView>());
   const running = laneRunning.some(Boolean);
   const recovering = laneRecovering.some(Boolean);
   const recoveringRef = useRef(recovering);
@@ -1812,7 +1830,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     // A lane that starts takes its nodes' badges from earlier runs in other lanes; its own earlier badges go.
     const setRuns = (value: Record<string, RunView> | ((previous: Record<string, RunView>) => Record<string, RunView>)) => {
       if (typeof value !== 'function' && !Object.keys(value).length) {
-        setLaneRuns(previous => previous.map((item, index) => index === lane ? {} : Object.fromEntries(Object.entries(item).filter(([id]) => !executingIds.has(id)))));
+        setLaneRuns(previous => previous.map((item, index) => index === lane ? {} : withoutBadges(item, executingIds)));
         return;
       }
       setLaneOwnRuns(value);
@@ -1981,11 +1999,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (reviewPolicy) pending.review = { round: 0, maxRounds: reviewPolicy.maxRounds, outcome: 'running', turns: [] };
     if (collaboration) pending.collaboration = { ...collaboration, maxModelCalls: 2 * executing.size * collaboration.rounds + 1, phase: 'proposal', round: 0, turns: [] };
     const cloud = currentSaaSCanvas();
+    // This canvas's (lane) storage as the run is accepted: canvasStorage() resolves whichever canvas is open when it is
+    // called, and a refused page repair (endRefusedRepair) must clear this canvas's journal and write its deferral here.
+    const acceptedStorage = canvasStorage();
     if (cloud && !manualMessage) pending.serverGraph = { tenantId: cloud.tenant.id, canvasId: cloud.canvasId };
     // Collaboration admission needs the exact saved upstream candidates, including selected peers.
     // The shared execution lock prevents consuming them while the server is accepting the run.
     const prepared = collaboration ? runDocument : prepareRunDocument(runDocument, [...executing], Boolean(manualMessage));
     const acceptedManualNode = manualMessage ? runNodes.find(node => executing.has(node.id)) : undefined;
+    // AwwO's own page repair (pageRepair.ts, by its first line), not a person's message.
+    const automaticRepair = isPageRepairMessage(manualMessage);
     if (!saveLocalDocument(prepared)) { setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return; }
     if (!saveRunJournal(pending)) {
       // No dispatch happened: preserve the previous published results on a quota failure.
@@ -2010,12 +2033,41 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
     if (pending.serverGraph) startedJournals.current.add(pending.id);
     runAbort.current = ac;
     if (consumeDraft) onAccepted?.();
+    // A run's start takes the canvas's last run off show: this lane's earlier badges, its nodes' badges in other lanes,
+    // the summary, a stop, the round and the start. A page repair runs from its start as any run (its Stop, the lane's
+    // watch, the locks running brings), but takes only its own node's badges then, and the rest once the service has
+    // admitted it, or answered anything but a definite refusal (takeLastRun, below): one the service refuses before it
+    // runs (endRefusedRepair) leaves the rest as it was, newer changes included, and gives its node back the badge it had.
+    const earlierBadge = automaticRepair && acceptedManualNode ? settledRuns.current[acceptedManualNode.id] : undefined;
+    let tookLastRun = !automaticRepair;
+    const takeLastRun = () => {
+      if (tookLastRun || runAbort.current !== ac || currentSaaSCanvas() !== cloud) return;
+      tookLastRun = true;
+      setStopped(false);
+      setRunSummary(null);
+      // This lane's earlier badges go; the repair's own stays (its other lanes' copies went at its start).
+      setLaneRuns(previous => previous.map((item, index) => index === lane
+        ? Object.fromEntries(Object.entries(item).filter(([id]) => executingIds.has(id))) : item));
+      setReviewRound(0);
+      setRunStartedAt(pending.startedAt);
+    };
+    // The lane that showed the node's badge (lanes merge in order: the last one holding it), as this start leaves it.
+    let heldIn: { lane: number; map: Record<string, RunView> } | null = null;
     setRunning(true);
-    setStopped(false);
-    setRunSummary(null);
-    setRuns({});
-    setReviewRound(0);
-    setRunStartedAt(Date.now());
+    if (automaticRepair) setLaneRuns(previous => {
+      const next = previous.map(item => withoutBadges(item, executingIds));
+      for (let index = previous.length - 1; index >= 0; index -= 1) {
+        if (Object.hasOwn(previous[index], acceptedManualNode!.id)) { heldIn = { lane: index, map: next[index] }; break; }
+      }
+      return next;
+    });
+    else {
+      setStopped(false);
+      setRunSummary(null);
+      setRuns({});
+      setReviewRound(0);
+      setRunStartedAt(Date.now());
+    }
     setNow(Date.now());
     // A component running on its own shows its progress on its card, so the timeline (which would cover the board other
     // components keep working on) opens only for a run of several steps, and never on the chat-first surface.
@@ -2082,7 +2134,11 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
             ? updateThreadIssueId(n, threadId ?? activeThreadId(n), issueId) : n)),
         }), { silent: true, serverIdentity: true, lane });
       },
-      onRunAccepted: (nodeId, identity) => updateJournal(nodeId, identity),
+      onRunAccepted: (nodeId, identity) => {
+        updateJournal(nodeId, identity);
+        // The service admitted the page repair: it takes the canvas's last run off show now.
+        takeLastRun();
+      },
       onCancelFailure: (_nodeId, detail) => setHandoffNote(stopUnconfirmedMessage(t, detail)),
     });
     const exec = async (node: SessionNode, message: string) => {
@@ -2115,16 +2171,67 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         }
         setRuns(prev => ({ ...prev, [nodeId]: { ...status, startedAt: prev[nodeId]?.startedAt ?? stamp, ...(status.state !== 'waiting' && status.state !== 'running' ? { endedAt: stamp } : {}) } }));
     };
+    // A page repair the service refused before it ran (today's calls used up, every run slot busy, the page sent back
+    // already: page_repair_chained) was no repair, and nothing failed. Its run ends here, in one step with no await,
+    // before anything is marked, published, kept or summed up: no 'failed' reaches the journal, the node or another tab,
+    // the tail below never runs, the canvas's last run is still on show (takeLastRun never ran) with the node's own badge
+    // given back (earlierBadge), and the host hears of no run (watchedLanes). Its delivery may go back later
+    // (pageRepair.ts deferPageRepair), in this canvas's own storage, where repairPage recorded it; its request leaves the
+    // node's chat and the display cache, and one quiet line says why in its place. A person's own refused message keeps
+    // its failure: their words and the next steps it offers (nextSteps.ts) live in it.
+    const endRefusedRepair = (node: SessionNode, code: string, copy: string) => {
+      const retryAfter = pageRepairRetryAfter(code, Date.now());
+      if (retryAfter !== null) deferPageRepair(acceptedStorage, pageRepairMessageKey(node.id, manualMessage), retryAfter);
+      clearRunJournal(acceptedStorage, pending.id);
+      const operationId = pending.nodes[node.id]?.operationId;
+      const key = sessionStoreKey(node);
+      if (operationId) {
+        forgetConversationPresentation(node, operationId, storage);
+        removeSessionTurns(key, turn => turn.recoveryOperationId === operationId);
+      }
+      // page_repair_chained's words say what was refused; the others say only why (today's calls used up, the run slots
+      // busy), so the line first says that the page's automatic repair did not run, and, where it can go back later
+      // (deferred above), that it will, in the language the bridge has just put those words in (canvasLocale). A line
+      // the chat ends with already (the same repair sent again later and refused again) is not said twice.
+      const zh = canvasLocale() === 'zh';
+      const lead = code === 'page_repair_chained' ? '' : zh ? '页面的自动修复没有运行。' : 'The page’s automatic repair did not run. ';
+      const later = retryAfter === null ? '' : zh ? '页面之后再出错时，AwwO 会再送回一次。' : ' When the page fails again later, AwwO sends it back once more.';
+      const said = copy.trim() ? `${lead}${copy}${later}` : '';
+      const turns = getSessionSnapshot(key).turns;
+      const last = turns[turns.length - 1];
+      if (said.trim() && !(last?.notice && last.text === said)) appendSessionTurn(key, { role: 'system', tone: 'info', text: said, notice: true });
+      if (currentSaaSCanvas() !== cloud) return;
+      journal.current = null; runAbort.current = null;
+      // The rest of the canvas's last run never left (this start took only the node's own badges): the node gets back
+      // the badge it had, in the lane that showed it, unless something since cleared the running one in its place (an
+      // edit upstream of it) or changed what that other lane shows (a run's start in it, or one taking badges from it, or
+      // an edit clearing some: withoutBadges keeps a lane that lost nothing as it was).
+      if (earlierBadge) givenBackBadges.current.add(earlierBadge);
+      setLaneRuns(previous => {
+        if (previous[lane]?.[node.id]?.state !== 'running') return previous;
+        const held = heldIn as { lane: number; map: Record<string, RunView> } | null;
+        const back = earlierBadge && held && (held.lane === lane || previous[held.lane] === held.map) ? held.lane : null;
+        return previous.map((item, index) => {
+          const own = index === lane ? Object.fromEntries(Object.entries(item).filter(([id]) => id !== node.id)) : item;
+          return index === back ? { ...own, [node.id]: earlierBadge! } : own;
+        });
+      });
+      watchedLanes.current.delete(lane);
+      setRunning(false);
+    };
     const executeManual = async () => {
       const node = runNodes.find(n => executing.has(n.id));
       if (!node || node.kind !== 'session') throw new Error('Conversation node is unavailable');
       onStatus(node.id, { state: 'running' });
       const result = await exec(node, manualMessage!);
+      if (result.refusedCode && automaticRepair) {
+        endRefusedRepair(node, result.refusedCode, result.detail);
+        return null;
+      }
+      // Anything but a definite refusal: it ran, or may have (its answer was lost, and recovery finds out), so it takes
+      // the canvas's last run off show, if its admission did not already.
+      takeLastRun();
       onStatus(node.id, { state: result.unconfirmed ? 'running' : result.ok ? 'done' : result.cancelled ? 'cancelled' : 'failed', output: result.output, detail: result.detail });
-      // A page repair the service refused before it ran (today's calls used up, every run slot busy) was no repair: its
-      // delivery may go back again later (pageRepair.ts), in this canvas's own storage, where repairPage recorded it.
-      const retryAfter = result.refusedCode && isPageRepairMessage(manualMessage) ? pageRepairRetryAfter(result.refusedCode, Date.now()) : null;
-      if (retryAfter !== null) deferPageRepair(baseCanvasStorage(), pageRepairMessageKey(node.id, manualMessage), retryAfter);
       return journalSummary(journal.current!);
     };
     const options = {
@@ -2161,6 +2268,8 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
         return { ...node, issueId: live.issueId, threads: live.threads };
       },
     }) : await runGraph(options);
+    // A request refused before admission was no run (endRefusedRepair): nothing to recover, publish or sum up.
+    if (!summary) return;
     if (summary.review && journal.current?.review) {
       journal.current = { ...journal.current, review: { ...journal.current.review, outcome: summary.review.outcome } };
       if (!saveRunJournal(journal.current)) setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
@@ -2653,7 +2762,7 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
       if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
         || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame) || JSON.stringify(current.skills ?? []) !== JSON.stringify(next.skills ?? []))) {
         const affected = new Set(downstreamClosure([next.id]));
-        setAllRuns(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !affected.has(id))));
+        setAllRuns(previous => withoutBadges(previous, affected));
         setRunSummary(null);
       }
       setHandoffNote('');
@@ -3109,19 +3218,16 @@ export function CanvasSurface({ readOnly = false, workspaceName, workspaceCaptio
   // The host hears when a run or a plan this page was watching ends (设置 → 任务提醒), with whether any node failed.
   const workSettled = useRef(onWorkSettled);
   workSettled.current = onWorkSettled;
-  const settledRuns = useRef(runs);
-  settledRuns.current = runs;
-  // A run counts as watched once it is seen running after recovery has settled: a journal-restored run that recovery
-  // finds already over ends without a word. A canvas run this page started is named at its end either way (another
-  // lane's recovery may last the whole run).
-  const watchingRun = useRef(false);
+  // A lane's run counts as watched once it is seen running after recovery has settled (watchedLanes): a journal-restored
+  // run that recovery finds already over ends without a word. A canvas run this page started is named at its end either
+  // way (another lane's recovery may last the whole run).
   useEffect(() => {
-    if (running && !recovering) watchingRun.current = true;
+    if (!recovering) laneRunning.forEach((on, lane) => { if (on) watchedLanes.current.add(lane); });
     if (running) return;
     const graphIds = endedGraphs.current.splice(0);
-    if (watchingRun.current || graphIds.length) workSettled.current?.({ kind: 'run', failed: Object.values(settledRuns.current).some(run => run.state === 'failed' || run.state === 'blocked'), ...(graphIds.length ? { graphIds } : {}) });
-    watchingRun.current = false;
-  }, [running, recovering, namedGraphs]);
+    if (watchedLanes.current.size || graphIds.length) workSettled.current?.({ kind: 'run', failed: Object.values(settledRuns.current).some(run => (run.state === 'failed' || run.state === 'blocked') && !givenBackBadges.current.has(run)), ...(graphIds.length ? { graphIds } : {}) });
+    watchedLanes.current.clear();
+  }, [running, recovering, laneRunning, namedGraphs]);
   // A plan that ends says whether it failed (its error is set in the same update); one the reader stopped says nothing.
   const wasPlanning = useRef(false);
   const planStopped = useRef(false);

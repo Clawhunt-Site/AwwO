@@ -70,13 +70,26 @@ describe('run configuration notices', () => {
     const view = render(<RunControls {...p} />);
     fireEvent.click(screen.getByRole('button', { name: '关闭运行提示' }));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // Another run: the canvas clears the summary as it starts, and its end brings a summary of its own (here the same
+    // counts): that one shows.
+    view.rerender(<RunControls {...p} summary={null} running runs={{ a: { state: 'running' } }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('运行中 · 0/1');
+    view.rerender(<RunControls {...p} summary={{ ...completed }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('运行完成');
+    view.rerender(<RunControls {...p} summary={{ ...completed }} stopped />);
+    expect(screen.getByRole('status')).toHaveTextContent('已停止');
+    fireEvent.click(screen.getByRole('button', { name: '关闭运行提示' }));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('keeps a summary put away while something runs and ends with no summary of its own', () => {
+    // A page repair the service refuses before it runs: the canvas runs a moment and keeps the last summary.
+    const p = props({ nodes: [node('a', true)], summary: completed });
+    const view = render(<RunControls {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: '关闭运行提示' }));
     view.rerender(<RunControls {...p} running runs={{ a: { state: 'running' } }} />);
     expect(screen.getByRole('status')).toHaveTextContent('运行中 · 0/1');
     view.rerender(<RunControls {...p} />);
-    expect(screen.getByRole('status')).toHaveTextContent('运行完成');
-    view.rerender(<RunControls {...p} stopped />);
-    expect(screen.getByRole('status')).toHaveTextContent('已停止');
-    fireEvent.click(screen.getByRole('button', { name: '关闭运行提示' }));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 

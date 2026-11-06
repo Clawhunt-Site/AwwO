@@ -196,7 +196,8 @@ function mediaPreview(raw: string, locale: UiLocale): string | null {
 function livePreview(turns: ReadonlyArray<Turn>, outputs: ReadonlyArray<Pick<ContractField, 'id'>> = [], displayLocale?: UiLocale, mediaLocale?: UiLocale): string {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const raw = turns[i].text;
-    if (!raw) continue;
+    // A page's own notice (sessions.ts Turn.notice) is no line of the conversation: the preview keeps the conversation's.
+    if (!raw || turns[i].notice) continue;
     const media = turns[i].role === 'agent' && mediaLocale ? mediaPreview(raw, displayLocale || mediaLocale) : null;
     if (media) return media;
     if (displayLocale) {
@@ -832,14 +833,21 @@ export const SessionTile = memo(function SessionTile({
   // before the effect clears it.
   const [justSettled, setJustSettled] = useState<'done' | 'failed' | null>(null);
   const previousDot = useRef(dot);
+  // The badge the card showed when it last rested: one that comes back as it was (a page repair the service refused
+  // before it ran gives its node its earlier badge back, CanvasSurface endRefusedRepair) settles nothing.
+  const runNow = useRef(run);
+  runNow.current = run;
+  const restingRun = useRef(dot === 'running' ? null : run);
   useEffect(() => {
     const before = previousDot.current;
     previousDot.current = dot;
-    if (before !== 'running' || (dot !== 'done' && dot !== 'failed')) { setJustSettled(null); return; }
+    const returned = runNow.current !== null && runNow.current === restingRun.current;
+    if (before !== 'running' || (dot !== 'done' && dot !== 'failed') || returned) { setJustSettled(null); return; }
     setJustSettled(dot);
     const timer = setTimeout(() => setJustSettled(null), 1000);
     return () => clearTimeout(timer);
   }, [dot]);
+  useEffect(() => { if (dot !== 'running') restingRun.current = run; }, [dot, run]);
   const settledMark = justSettled === dot ? justSettled : null;
   const preview = useMemo(() => {
     if (node.kind === 'form') {

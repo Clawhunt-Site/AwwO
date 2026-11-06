@@ -142,8 +142,10 @@ export function RunControls({
     if (running || !issueKey) {
       setRefused(false); setExpandedProblem(null); setDismissedProblem(null);
     }
-    if (running) setDismissedSummary(null);
   }, [running, issueKey]);
+  // A note put away stays away until another summary takes its place (a run's start clears the summary, and its end
+  // brings its own): a page repair the service refuses before it runs brings none, and leaves the note away.
+  useEffect(() => { setDismissedSummary(null); }, [summary]);
 
   const start = () => {
     if (readOnly || runUnavailableReason) return;

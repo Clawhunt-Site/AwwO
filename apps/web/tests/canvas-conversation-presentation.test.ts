@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
-import { beginConversationPresentation, nativeConversationOperation, projectConversationTurns, serverConversationPresentation, updateConversationPresentation } from '../src/canvas/conversationPresentation';
+import { beginConversationPresentation, forgetConversationPresentation, nativeConversationOperation, projectConversationTurns, serverConversationPresentation, updateConversationPresentation } from '../src/canvas/conversationPresentation';
 import type { NodeContract } from '../src/canvas/nodeContracts';
 import type { Turn, TurnPresentation } from '../src/canvas/sessions';
 
@@ -324,5 +324,20 @@ describe('native operation metadata', () => {
     const duplicate = metadata();
     duplicate.sections[0].rows.push({ ...duplicate.sections[0].rows[0] });
     expect(nativeConversationOperation(duplicate)).toBeUndefined();
+  });
+});
+
+describe('forgetting a refused request', () => {
+  it('drops that operation’s display record and keeps every other one', () => {
+    const { current, cache } = saved(node(), store(), 'operation-1', 'run-1');
+    expect(beginConversationPresentation(current, 'operation-2', 'AwwO page repair · field "page"\n…', presentation(), cache)).toBe(true);
+    expect(forgetConversationPresentation(current, 'operation-2', cache)).toBe(true);
+    for (const value of cache.values.values()) expect(value).not.toContain('AwwO page repair');
+    const kept: Turn = { id: 1, role: 'user', text: rawInput, recoveryOperationId: 'operation-1' };
+    expect(projectConversationTurns(current, [kept], cache)[0].presentation).toMatchObject({ displayText: '改成抽屉' });
+    // An operation with no record leaves the cache as it is.
+    const writes = cache.setItem.mock.calls.length;
+    expect(forgetConversationPresentation(current, 'operation-unknown', cache)).toBe(true);
+    expect(cache.setItem.mock.calls.length).toBe(writes);
   });
 });

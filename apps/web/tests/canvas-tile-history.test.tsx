@@ -205,3 +205,16 @@ describe('SessionTile compact contract preview', () => {
     expect(screen.getByTestId('canvas-tile-s1').querySelector('.awwo-compact-summary')?.textContent).toBe(expected);
   });
 });
+
+describe('a page’s own notice', () => {
+  it('is never the node’s preview: the conversation’s last line stays it', async () => {
+    const onPreview = vi.fn();
+    render(<SessionTile node={bound()} scale={1} focused={false} gatewayBase="" onPreview={onPreview} />);
+    sessions.appendTurn('s1', { role: 'agent', text: '上一次的回答' });
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith('s1', '上一次的回答', 'default'));
+    sessions.appendTurn('s1', { role: 'system', tone: 'info', text: 'AwwO 已经把这个组件的页面自动送回修复过，不会再自动送回。', notice: true });
+    await waitFor(() => expect(sessions.getSnapshot('s1').turns).toHaveLength(2));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onPreview.mock.calls.every(([, text]) => text === '上一次的回答')).toBe(true);
+  });
+});

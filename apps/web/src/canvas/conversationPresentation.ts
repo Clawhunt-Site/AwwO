@@ -120,6 +120,16 @@ export function beginConversationPresentation(
   } catch { return false; }
 }
 
+/** A request the service refused before anything ran leaves no display record behind: its execution text (a page
+ *  repair's holds the whole page) would only push other turns' records out of the cache. */
+export function forgetConversationPresentation(node: SessionNode, operationId: string, store?: Store): boolean {
+  const resolved = store ?? browserStorage();
+  const records = read(node, resolved);
+  if (!records) return false;
+  if (!records.some(record => record.operationId === operationId)) return true;
+  return write(node, records.filter(record => record.operationId !== operationId), resolved);
+}
+
 export function updateConversationPresentation(
   node: SessionNode, operationId: string,
   patch: { issueId?: string | null; runId?: string | null; outputText?: string; outputState?: TurnPresentation['outputState']; outputContract?: TurnPresentation['outputContract'] },

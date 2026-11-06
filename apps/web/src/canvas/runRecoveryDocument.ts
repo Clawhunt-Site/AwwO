@@ -5,7 +5,7 @@ import type { CanvasDocument, CanvasEdge, CanvasNode, NodeOutput, SessionNode } 
 import { invalidateOutputs } from './invalidateOutputs';
 import { followupDeliveryContract, supersededGraphNodes } from './followupDelivery';
 import { parseMediaOutput } from './mediaOutput';
-import { pageRepairDelivery } from './pageRepair';
+import { isPageRepairMessage, pageRepairDelivery } from './pageRepair';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
 import { reconcileEdges } from './ports';
@@ -73,6 +73,14 @@ function manualRecord(node: SessionNode, journal: CanvasRunJournal): DurableManu
   };
 }
 
+/** AwwO's own page repair request (pageRepair.ts) that no run answered: refused before it ran, never sent, or stopped
+ *  first. It holds nothing a person wrote and no reply, so nothing of it is kept (a person's own message that no run
+ *  answered is kept: its words have no other copy). Recovery, which cannot tell a refusal from a request never sent,
+ *  still shows it as it ended, beside the node's failure, until the page is loaded again. */
+function unrunPageRepair(message: string | undefined, runId: string | null | undefined, reply: string | undefined, state: string): boolean {
+  return isPageRepairMessage(message) && !runId && !reply?.trim() && ['failed', 'cancelled', 'blocked'].includes(state);
+}
+
 function sameManualIdentity(left: DurableManualTurn, right: DurableManualTurn): boolean {
   return Boolean((left.operationId && left.operationId === right.operationId)
     || (left.runId && left.runId === right.runId));
@@ -100,6 +108,9 @@ function readManualRecords(node: SessionNode, storage: Pick<Storage, 'getItem'>)
         || typeof record.userText !== 'string' || typeof record.agentText !== 'string'
         || !['done', 'failed', 'cancelled'].includes(String(record.state))
         || !Number.isFinite(record.startedAt)) return null;
+      // Earlier releases kept a refused page repair's whole request: it is neither shown nor counted, and the thread's
+      // next write leaves it out.
+      if (unrunPageRepair(record.userText, record.runId as string | null, record.agentText, String(record.state))) continue;
       records.push(record as unknown as DurableManualTurn);
     }
     return records;
@@ -154,6 +165,9 @@ export function persistRecoveredManualConversation(
   storage: RecoveryStorage = canvasStorage(),
   nativeHistory?: NativeManualHistoryProof | null,
 ): boolean {
+  // A page repair no run answered keeps nothing, and that is no failure to keep it (a false return holds the run open).
+  const item = journal.nodes[node.id];
+  if (journal.manual && item && unrunPageRepair(journal.manualMessage, item.runId, item.output, item.state)) return true;
   const key = manualRecoveryKey(node);
   const record = manualRecord(node, journal);
   if (!key || !record) return !journal.manual;

@@ -73,6 +73,9 @@ export interface Turn {
   createdAt?: number;
   /** Durable backend run identity for per-member collaboration records. */
   runId?: string;
+  /** Said by this page about the conversation, not part of it (a page repair the service refused before it ran):
+   *  never the node's preview, and never saved. */
+  notice?: true;
 }
 
 /**
@@ -197,6 +200,15 @@ export function patchTurn(nodeId: string, turnId: number, text: string, tone?: T
     const turns = session.turns.slice();
     turns[idx] = { ...turn, text, tone };
     return { ...session, turns };
+  });
+}
+
+/** Remove the turns `remove` selects (a request the service refused before anything ran takes its own turns back).
+ *  Every other turn keeps its object and id, so the chat does not remount; nothing selected, nothing changes. */
+export function removeTurns(nodeId: string, remove: (turn: Turn) => boolean): void {
+  update(nodeId, (session) => {
+    const turns = session.turns.filter((turn) => !remove(turn));
+    return turns.length === session.turns.length ? null : { ...session, turns };
   });
 }
 

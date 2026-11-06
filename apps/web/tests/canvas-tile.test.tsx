@@ -166,6 +166,27 @@ describe('SessionTile compact header actions', () => {
     }
   });
 
+  it('does not mark a card whose badge comes back as it was, once what ran is no run', () => {
+    // A page repair the service refused before it ran: the card shows it running a moment, then its earlier badge.
+    const earlier = { state: 'done' as const };
+    const tile = (run: { state: 'running' | 'done' }) => <StrictMode><SessionTile node={node()} scale={1} run={run} /></StrictMode>;
+    const classes = () => screen.getByTestId('canvas-tile-s1').className.split(/\s+/);
+    const view = render(tile(earlier));
+    view.rerender(tile({ state: 'running' }));
+    view.rerender(tile(earlier));
+    expect(classes()).toContain('is-done');
+    expect(classes()).not.toContain('is-just-done');
+    // A result a run brings, even one like it, is marked; given back in its turn after a run that was none, it is not.
+    const brought = { state: 'done' as const };
+    view.rerender(tile({ state: 'running' }));
+    view.rerender(tile(brought));
+    expect(classes()).toContain('is-just-done');
+    view.rerender(tile({ state: 'running' }));
+    view.rerender(tile(brought));
+    expect(classes()).toContain('is-done');
+    expect(classes()).not.toContain('is-just-done');
+  });
+
   it('says which automatic retry a cloud node is waiting for', () => {
     render(<SessionTile node={node()} scale={1} run={{ state: 'waiting', detail: 'retrying', attempts: 1, retryLimit: 2 }} />);
     expect(screen.getByTestId('canvas-tile-run-s1')).toHaveTextContent('自动重试中（第 1 次，共 2 次）');

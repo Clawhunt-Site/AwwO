@@ -391,3 +391,28 @@ describe('sendMessage', () => {
     expect(sessions.getSnapshot(node.id).streaming).toBe(false);
   });
 });
+
+describe('removeTurns', () => {
+  it('takes back only the turns it selects, keeps every other turn as it was, and notifies once', () => {
+    sessions.reset('remove-1');
+    const before = sessions.appendTurn('remove-1', { role: 'agent', text: '上一次的回答' });
+    sessions.appendTurn('remove-1', { role: 'user', text: 'AwwO page repair · field "page"\n…', recoveryOperationId: 'op' });
+    sessions.appendTurn('remove-1', { role: 'agent', text: '出错：…', tone: 'error', recoveryOperationId: 'op' });
+    const after = sessions.appendTurn('remove-1', { role: 'agent', text: '后来的回答' });
+    const kept = sessions.getSnapshot('remove-1').turns.filter(turn => turn.recoveryOperationId !== 'op');
+    const heard = vi.fn();
+    const unsubscribe = sessions.subscribe('remove-1', heard);
+    sessions.removeTurns('remove-1', turn => turn.recoveryOperationId === 'op');
+    const turns = sessions.getSnapshot('remove-1').turns;
+    expect(turns.map(turn => turn.id)).toEqual([before, after]);
+    expect(turns[0]).toBe(kept[0]);
+    expect(turns[1]).toBe(kept[1]);
+    expect(heard).toHaveBeenCalledTimes(1);
+    // Nothing selected: the same snapshot, no notification.
+    const snapshot = sessions.getSnapshot('remove-1');
+    sessions.removeTurns('remove-1', turn => turn.recoveryOperationId === 'op');
+    expect(sessions.getSnapshot('remove-1')).toBe(snapshot);
+    expect(heard).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+});
