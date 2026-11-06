@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { withComputer, withModelChoice, withSandbox } from '../src/canvas/InspectorPanel';
 import { automaticGroups, groupModels, sandboxGroups } from '../src/canvas/modelPalette';
-import { automaticEntries, automaticEntry, BLENDER_RUNTIME, choosesRuntime, computerRuntime, withAutomaticRuntime } from '../src/canvas/nodeRuntime';
+import { automaticEntries, automaticEntry, BLENDER_RUNTIME, choosesRuntime, computerRuntime, pickedModelEntry, withAutomaticRuntime } from '../src/canvas/nodeRuntime';
 import { nodeTeamRuntimeLabel } from '../src/canvas/nodeTeam';
 import { NODE_RUNTIMES, runtimeDefinitions, type SaaSRuntimeStatus } from '../src/saas/runtimeCatalog';
 import { readRunExecutionMetadata, workspaceToolLabel } from '../src/saas/workspaceActivity';
@@ -72,6 +72,26 @@ describe('Blender workstation runtime', () => {
     expect(withModelChoice(on, { runtime: '', model: '', effort: '' })).toMatchObject({ runtime: 'blender', model: '', effort: '' });
     expect(withModelChoice(node({ runtime: 'sandbox', model: 'm' }), { runtime: '', model: '', effort: '' }).runtime).toBe('sandbox');
     expect(withModelChoice(plain, { runtime: 'pi', model: 'qwen3.8-27b-p6', effort: '' }).runtime).toBe('pi');
+  });
+
+  it('keeps a workstation node there when a model is picked under its composer', () => {
+    const entries = groupModels(status, 'en').flatMap(group => group.models);
+    const key = (runtime: string, model: string) => JSON.stringify([runtime, model]);
+    const station = node({ runtime: BLENDER_RUNTIME, model: 'bedrock.claude-opus-5-5' });
+    // The workstation's own entry, and the workstation's entry for a model picked from another runtime's list.
+    expect(pickedModelEntry(station, key('blender', 'bedrock.claude-opus-5-5'), entries)?.key).toBe(key('blender', 'bedrock.claude-opus-5-5'));
+    expect(pickedModelEntry(station, key('openai-agents', 'bedrock.claude-opus-5-5'), entries)?.key).toBe(key('blender', 'bedrock.claude-opus-5-5'));
+    // A model the workstation does not offer, or offers but cannot run now, moves nothing; nor does an unknown pick.
+    expect(pickedModelEntry(station, key('pi', 'qwen3.8-27b-p6'), entries)).toBeUndefined();
+    const down = entries.map(entry => entry.runtime === 'blender' ? { ...entry, available: false } : entry);
+    expect(pickedModelEntry(station, key('openai-agents', 'bedrock.claude-opus-5-5'), down)).toBeUndefined();
+    expect(pickedModelEntry(station, key('blender', 'missing'), entries)).toBeUndefined();
+    // A node in no computer takes the entry picked, never the workstation's.
+    const plain = node({ runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5' });
+    expect(pickedModelEntry(plain, key('pi', 'qwen3.8-27b-p6'), entries)?.runtime).toBe('pi');
+    expect(pickedModelEntry(plain, key('blender', 'bedrock.claude-opus-5-5'), entries)).toBeUndefined();
+    expect(pickedModelEntry(node({ runtime: '' }), key('blender', 'bedrock.claude-opus-5-5'), entries)).toBeUndefined();
+    expect(pickedModelEntry(plain, key('openai-agents', 'bedrock.claude-opus-5-5'), down.map(entry => ({ ...entry, available: false })))).toBeUndefined();
   });
 
   it('is treated as the sandbox is by the market and by case copies', () => {

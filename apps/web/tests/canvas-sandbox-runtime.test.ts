@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { withSandbox } from '../src/canvas/InspectorPanel';
 import { automaticGroups, groupModels, sandboxGroups } from '../src/canvas/modelPalette';
-import { automaticEntries, automaticEntry, choosesRuntime, withAutomaticRuntime } from '../src/canvas/nodeRuntime';
+import { automaticEntries, automaticEntry, choosesRuntime, pickedModelEntry, withAutomaticRuntime } from '../src/canvas/nodeRuntime';
 import { runtimeDefinitions, type SaaSRuntimeStatus } from '../src/saas/runtimeCatalog';
 
 const status: SaaSRuntimeStatus = {
@@ -39,6 +39,17 @@ describe('sandbox computer runtime', () => {
     expect(withAutomaticRuntime(sandboxNode, entries, () => [])).toBe(sandboxNode);
     // A sandbox-only model is not a reason to put a plain node into a sandbox.
     expect(automaticEntry('sandbox-only', [{ runtime: 'sandbox', model: 'sandbox-only', available: true }])).toBeUndefined();
+  });
+
+  it('keeps a sandbox node there when a model is picked under its composer', () => {
+    const entries = groupModels(status, 'en').flatMap(group => group.models);
+    const key = (runtime: string, model: string) => JSON.stringify([runtime, model]);
+    const sandboxNode = node({ runtime: 'sandbox', model: 'bedrock.claude-opus-5-5' });
+    expect(pickedModelEntry(sandboxNode, key('openai-agents', 'bedrock.claude-opus-5-5'), entries)?.runtime).toBe('sandbox');
+    // Qwen runs on Pi only: picked for a sandbox node, it moves nothing.
+    expect(pickedModelEntry(sandboxNode, key('pi', 'qwen3.8-27b-p6'), entries)).toBeUndefined();
+    expect(pickedModelEntry(node({ runtime: 'openai-agents' }), key('sandbox', 'bedrock.claude-opus-5-5'), entries)).toBeUndefined();
+    expect(pickedModelEntry(node({ runtime: 'openai-agents' }), key('pi', 'qwen3.8-27b-p6'), entries)?.runtime).toBe('pi');
   });
 
   it('offers its models through the sandbox switch, and the switch keeps or replaces the model', () => {

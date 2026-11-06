@@ -38,6 +38,19 @@ export function automaticEntry<T extends RuntimeEntry>(model: string, entries: R
   return best;
 }
 
+/** The entry a node takes for the model picked under its composer (the entry keyed `key`); none when the pick does not
+ *  apply. A node in a computer of its own (its sandbox, its Blender workstation) stays there, as its settings, the
+ *  canvas assistant and a case copy keep it: it takes that computer's ready entry for the model, and none when the
+ *  computer does not offer it. A node in none takes the ready entry picked, never a computer's: only its settings'
+ *  switch moves a node into one. */
+export function pickedModelEntry<T extends RuntimeEntry & { key: string }>(node: Pick<SessionNode, 'runtime'>, key: string,
+  entries: ReadonlyArray<T>): T | undefined {
+  const picked = entries.find(entry => entry.key === key);
+  if (!picked) return undefined;
+  if (computerRuntime(node.runtime)) return entries.find(entry => entry.runtime === node.runtime && entry.model === picked.model && entry.available);
+  return picked.available && !computerRuntime(picked.runtime) ? picked : undefined;
+}
+
 /** One entry per model, where its first entry stood: the automatic one, or, when no runtime offering it is ready, its
  *  first entry (so a model the workspace lists but cannot run now still shows as unavailable). */
 export function automaticEntries<T extends RuntimeEntry>(entries: ReadonlyArray<T>): T[] {

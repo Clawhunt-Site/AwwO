@@ -62,7 +62,7 @@ import { applyCanvasPlan, canvasPlanRevision, onlyAddedNodes, PLAN_NOTES_SHOWN, 
 import { componentModelEntry, planComponentModel, withAssistantModel } from './assistantModel';
 import { DEFAULT_NEW_NODE_MODEL } from './planNewNodeModel';
 import { describePlanChanges } from './planChanges';
-import { automaticEntries, withAutomaticRuntimes } from './nodeRuntime';
+import { automaticEntries, BLENDER_RUNTIME, pickedModelEntry, SANDBOX_RUNTIME, withAutomaticRuntimes } from './nodeRuntime';
 import { planModelsOf } from './userChosenModels';
 import { loadLastPlanDuration, loadPlanningConversation, savePlanningConversation, saveLastPlanDuration, requestCanvasPlan, readPlannerStatus,
   readCanvasPlanRecovery, cancelCanvasPlanRecovery, planningTurns, planSeedRequest, type PlanProgress, type PlanningMessage } from './canvasPlanning';
@@ -5340,11 +5340,18 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // The models a node's own chat can switch to, in its composer: the workspace's chat models for an agent, the
   // media catalogue's models of its kind for an image, video or 3D node. Stable arrays, so cards stay memoised.
   // Each chat model is offered once, on the runtime AwwO runs it on (nodeRuntime.ts): the reader picks a model, never a
-  // runtime.
-  const chatModelChoices = useMemo<NodeModelChoice[]>(() => automaticEntries(currentModelCatalogue ?? []).map(model => ({
-    key: model.key, label: model.displayName || model.label, available: model.available, reason: model.reason, model: model.model,
-    group: palette?.groups.find(group => group.id === model.providerGroup)?.label,
-  })), [currentModelCatalogue, palette?.groups]);
+  // runtime. An agent in a computer of its own (its sandbox, its Blender workstation) stays there, so its composer offers
+  // the models that computer runs, as its settings do (InspectorPanel), and a pick keeps it there (changeNodeModel).
+  const { chatModelChoices, computerModelChoices } = useMemo(() => {
+    const catalogue = currentModelCatalogue ?? [];
+    const choice = (model: ModelPaletteSelection): NodeModelChoice => ({
+      key: model.key, label: model.displayName || model.label, available: model.available, reason: model.reason, model: model.model,
+      group: palette?.groups.find(group => group.id === model.providerGroup)?.label,
+    });
+    const on = (runtime: string) => catalogue.filter(model => model.runtime === runtime).map(choice);
+    return { chatModelChoices: automaticEntries(catalogue).map(choice),
+      computerModelChoices: { sandbox: on(SANDBOX_RUNTIME), blender: on(BLENDER_RUNTIME) } };
+  }, [currentModelCatalogue, palette?.groups]);
   const mediaModelChoices = useMemo<Record<MediaKind, NodeModelChoice[]>>(() => {
     const catalogue = mediaCatalogueOf(mediaState);
     const of = (kind: MediaKind) => mediaModelsOf(catalogue, kind).map(model => ({ key: model.id, label: mediaModelLabel(model, locale), group: mediaGroupLabel(locale), available: true, references: model.references, subjectReferences: model.subjectReferences, audioReferences: model.audioReferences }));
@@ -5363,14 +5370,20 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       saveInspector({ ...rest, model: key });
       return;
     }
-    const choice = paletteRef.current?.models.find(model => model.key === key && model.available);
-    if (!choice) return;
+    // A node in its sandbox or its Blender workstation takes the model there, and nothing when that computer does not
+    // offer it; any other node never moves into one (nodeRuntime.ts pickedModelEntry). A pick from a list drawn before
+    // the node moved that comes to what it runs already changes nothing: its effort stays and its chat does not fork.
+    const choice = pickedModelEntry(live, key, paletteRef.current?.models ?? []);
+    if (!choice || (choice.runtime === live.runtime && choice.model === live.model)) return;
     saveInspector({ ...live, runtime: choice.runtime, model: choice.model, effort: choice.effort ?? '' });
   }, [saveInspector]);
   const tileModelChoices = (node: CanvasNode): ReadonlyArray<NodeModelChoice> | undefined => {
     if (node.kind !== 'session' || readOnly || !canInitialize) return undefined;
     const media = mediaKindOf(node.agentKind);
-    return media ? mediaModelChoices[media] : chatModelChoices;
+    if (media) return mediaModelChoices[media];
+    if (node.runtime === BLENDER_RUNTIME) return computerModelChoices.blender;
+    if (node.runtime === SANDBOX_RUNTIME) return computerModelChoices.sandbox;
+    return chatModelChoices;
   };
   const nodeOfId = useCallback((id: string) => docRef.current.nodes.find(node => node.id === id), []);
   const market = useCanvasMarket({ settings: canInitialize ? marketSettings : null, tenantId: cloudScope?.tenant.id ?? null, readOnly,
