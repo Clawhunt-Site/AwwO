@@ -103,7 +103,12 @@ html:root[data-theme='dark'] .awwo-converged-keyline { stroke: var(--saas-danger
   height: max(18px, calc(16px * var(--cv-px, 1)));
   padding: 0 calc(4px * var(--cv-px, 1));
   border-radius: 999px;
-  font: 700 max(11px, calc(10px * var(--cv-px, 1))) / 1 var(--saas-font, inherit);
+  /* Longhands: in the font shorthand a missing family token (the index.html entry loads no tokens.css) would void the
+     size and weight too, and the count would take the icon's 26.67-unit type. */
+  font-weight: 700;
+  font-size: max(11px, calc(10px * var(--cv-px, 1)));
+  line-height: 1;
+  font-family: var(--saas-font, inherit);
   font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 max(2px, calc(2px * var(--cv-px, 1))) var(--saas-canvas, var(--canvas, #e5e8e7));
 }

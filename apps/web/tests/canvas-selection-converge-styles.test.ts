@@ -80,6 +80,20 @@ describe('the converged icon under reduced motion', () => {
   });
 });
 
+describe('the converged icon\'s count badge', () => {
+  it('sets its type in longhands, so a missing family token (the index.html entry loads no tokens.css) voids nothing else', () => {
+    // In the font shorthand, var(--saas-font, inherit) with no token voids the whole declaration: the count took the
+    // icon's 26.67-unit, regular type. As longhands only the family falls back.
+    const badge = /\n\.awwo-converged-badge \{([^}]*)\}/.exec(ICON.replace(/\/\*[\s\S]*?\*\//g, ''));
+    expect(badge).toBeTruthy();
+    expect(badge![1]).not.toMatch(/(^|[\s;])font:/);
+    expect(badge![1]).toMatch(/font-weight: 700;/);
+    expect(badge![1]).toMatch(/font-size: max\(11px, calc\(10px \* var\(--cv-px, 1\)\)\);/);
+    expect(badge![1]).toMatch(/line-height: 1;/);
+    expect(badge![1]).toMatch(/font-family: var\(--saas-font, inherit\);/);
+  });
+});
+
 describe('the converged icon in forced colours', () => {
   it('paints every arc, the collar and the badge in system colours above every state rule', () => {
     const forced = /@media \(forced-colors: active\)\s*\{([\s\S]*?)\n\}/.exec(ICON);
