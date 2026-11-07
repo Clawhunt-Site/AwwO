@@ -44,10 +44,13 @@ type promoView struct {
 }
 
 // checkinOffered reports whether a workspace may check in now: the promotion offers check-ins, the workspace is active,
-// its stored allowances are the free plan's it raises, its owner has no paid plan (whose allowances are the account's)
-// and no platform administrator owns it (whose workspaces have no free allowance to raise).
+// its stored allowances are the free plan's it raises, its owner has no paid plan (whose allowances are the account's),
+// no platform administrator owns it (whose workspaces have no free allowance to raise) and the free plan has not ended
+// (free_plan.go): such a workspace then runs nothing until its owner subscribes, so a check-in would only record a bonus
+// it can never use, wherever a promotion runs on past that moment.
 func (a *App) checkinOffered(ctx context.Context, q querier, tid, status string, daily int, raw []byte) (bool, error) {
-	if !a.cfg.Promo.checkins(time.Now()) || status != "active" || !a.cfg.promoParticipant(daily, readRouteLimits(raw)) {
+	now := time.Now()
+	if !a.cfg.Promo.checkins(now) || status != "active" || !a.cfg.promoParticipant(daily, readRouteLimits(raw)) {
 		return false, nil
 	}
 	plan, e := ownerPlan(ctx, q, tid, false)
@@ -55,7 +58,7 @@ func (a *App) checkinOffered(ctx context.Context, q querier, tid, status string,
 		return false, e
 	}
 	operator, e := operatorWorkspace(ctx, q, tid)
-	return !operator, e
+	return !operator && !a.cfg.freePlanEnded(now), e
 }
 
 // checkinToday is today's UTC date on the database's clock, read once per request so that every statement of a request

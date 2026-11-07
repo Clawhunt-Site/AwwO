@@ -453,3 +453,31 @@ func TestPostgresTheFreePlanEndAsksNoModelForAClosedWorkspace(t *testing.T) {
 	makeAdmin(t, h, uid)
 	closed("")
 }
+
+// A promotion that runs on past the free plan's end offers a workspace the end has closed no check-in: the bonus could
+// raise nothing it may still run. (The hosted site ends both at one moment; another site may not.)
+func TestPostgresNoCheckinOnceTheFreePlanHasEnded(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	promoHarness(t, h)
+	c, tid, _ := h.register(t, "free-plan-checkin@example.test")
+	setLimits(t, h, tid, 30, `{"media":1}`)
+	h.a.cfg.FreePlanUntil = time.Now().Add(time.Hour)
+	if u := h.request(t, c, "GET", "/tenants/"+tid+"/route-usage", nil, 200); u["checkin"] == nil {
+		t.Fatal("no check-in offered before the end", u)
+	}
+	h.a.cfg.FreePlanUntil = time.Now().Add(-time.Second)
+	u := h.request(t, c, "GET", "/tenants/"+tid+"/route-usage", nil, 200)
+	if u["checkin"] != nil {
+		t.Fatal("a check-in offered after the end", u)
+	}
+	if view, _ := u["freePlan"].(map[string]any); view == nil || view["ended"] != true {
+		t.Fatal("the meter after the end", u)
+	}
+	if got := h.request(t, c, "POST", "/tenants/"+tid+"/checkin", map[string]any{}, 409); errorCode(got) != "checkin_unavailable" {
+		t.Fatal("a check-in after the end", got)
+	}
+	var n int
+	if e := h.db.QueryRow(context.Background(), "SELECT count(*) FROM workspace_checkins WHERE tenant_id=$1", tid).Scan(&n); e != nil || n != 0 {
+		t.Fatal("a check-in recorded after the end", n, e)
+	}
+}
