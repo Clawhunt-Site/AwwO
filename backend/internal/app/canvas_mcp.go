@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,8 @@ const mcpInstructions = `You are on one AwwO canvas (多人同屏 / Multiplayer)
 - Start with canvas_overview: the nodes (each an Agent session, a form, an assembly or an edit), the wires between them, who is here and which nodes are held.
 - Before you change an existing node, take it with canvas_claim; a node you add with canvas_add_node is yours at once. A node someone else holds is refused "claimed": pick another, or ask in canvas_say.
 - While AwwO runs a node, its place, size and result stay free; anything else of it is refused "node_running" until the run ends.
+- A change answers results, one code per op it makes: ok, or claimed, node_running, forbidden (a rule of what an agent may change) or gone (what it names is no longer there). When one is refused, reasons says in one sentence per op what it would have changed, the rule and what to do instead: follow it rather than sending the same op again.
+- A wire joins an output port of one node to an input port of another, of one type: canvas_connect names the ports.
 - Call canvas_wait to see what others change and say, and canvas_set_status to tell them what you are doing.
 - Put your work into a node with canvas_update_node {result}: it is shown as handed in by you, never as AwwO's engine's result. A message (a tool call) is at most 1.9 MB; a larger result goes by PATCH on the canvas's URL with the same token.
 - You cannot run nodes, choose models or spend credits: ask a person in canvas_say.`
@@ -143,10 +146,16 @@ func mcpReply(w http.ResponseWriter, id json.RawMessage, result any, failure *mc
 	writeJSON(w, 200, out)
 }
 
-// mcpToolResult is a tool's answer: its JSON as text and as structured content; isError when the canvas refused it.
+// mcpToolResult is a tool's answer: its JSON as text and as structured content; isError when the canvas refused it. The
+// text is the JSON as a model reads it: a wire's id (n1:result->n2:context) and a path's placeholder (nodes/<id>) as
+// written, never the Unicode escapes json.Marshal writes for < and > (meant for HTML).
 func mcpToolResult(value any, isError bool) map[string]any {
-	text, _ := json.MarshalIndent(value, "", " ")
-	return map[string]any{"content": []map[string]any{{"type": "text", "text": string(text)}}, "structuredContent": value, "isError": isError}
+	var text bytes.Buffer
+	encoder := json.NewEncoder(&text)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", " ")
+	_ = encoder.Encode(value)
+	return map[string]any{"content": []map[string]any{{"type": "text", "text": strings.TrimSuffix(text.String(), "\n")}}, "structuredContent": value, "isError": isError}
 }
 
 // mcpInvoke runs one of the API's handlers in this process, as the agent: same rules, same answers.
@@ -241,7 +250,11 @@ func (a *App) mcpChange(r *http.Request, ops []canvasOp) (map[string]any, *mcpEr
 			refused = true
 		}
 	}
-	return mcpToolResult(map[string]any{"version": out["version"], "results": results}, refused), nil
+	answer := map[string]any{"version": out["version"], "results": results}
+	if reasons, ok := out["reasons"]; ok {
+		answer["reasons"] = reasons
+	}
+	return mcpToolResult(answer, refused), nil
 }
 
 // mcpTool runs one tool.
@@ -358,6 +371,9 @@ func (a *App) mcpTool(r *http.Request, name string, args mcpArgs) (map[string]an
 			toPort = defaultInputPort(canvas.Document, to)
 		}
 		edge := map[string]string{"id": from + ":" + fromPort + "->" + to + ":" + toPort, "fromNode": from, "fromPort": fromPort, "toNode": to, "toPort": toPort}
+		// Connecting only adds: a wire with this id already on the canvas is left as it is, judged in the change itself
+		// under the canvas's lock (canvasAddOnlyWires), so a wire saved between this read and the write is safe too.
+		r = r.WithContext(context.WithValue(r.Context(), canvasAddOnlyWires{}, true))
 		return a.mcpChange(r, []canvasOp{{Op: canvasOpSet, Path: []string{"edges", edge["id"]}, Value: mustCanvasJSON(edge)}})
 	case "canvas_disconnect":
 		canvas, failure := a.mcpRead(r)
@@ -775,23 +791,33 @@ func mcpTools() []map[string]any {
 		return s
 	}
 	fields := map[string]any{"type": "array", "items": obj(map[string]any{"id": str, "label": str, "value": str}, "label")}
-	tool := func(name, title, description string, schema map[string]any) map[string]any {
-		return map[string]any{"name": name, "title": title, "description": description, "inputSchema": schema}
+	// MCP's tool annotations, the hints a client weighs when it decides what to ask a person before a call (docs, Ports):
+	// a read changes nothing; a destructive tool can lose what someone made (a node, a wire, a field's or a result's
+	// earlier text), where the others only add or touch the caller's own claims, status and messages (the server's own
+	// retention, the change log's and the 200 messages kept, is no update of the caller's); an idempotent call changes
+	// nothing more when repeated with the same arguments (any other write renews the writer's claim, adds again or stamps
+	// its result anew); and every tool works on this one canvas alone, a closed world.
+	type hints struct{ readOnly, destructive, idempotent bool }
+	read := hints{readOnly: true, idempotent: true}
+	tool := func(name, title, description string, h hints, schema map[string]any) map[string]any {
+		return map[string]any{"name": name, "title": title, "description": description, "inputSchema": schema, "annotations": map[string]any{
+			"title": title, "readOnlyHint": h.readOnly, "destructiveHint": h.destructive, "idempotentHint": h.idempotent, "openWorldHint": false}}
 	}
+	const refusals = " A refused op says why: its code in results, and in reasons one sentence naming the rule and what to do instead."
 	return []map[string]any{
-		tool("canvas_overview", "Canvas overview", "The canvas now: its nodes (kind, title, place, a brief, the start of each result, who holds it, whether AwwO runs it), its wires, who is here, the claims, and its version.", obj(map[string]any{})),
-		tool("canvas_read_node", "Read a node", "One node of the canvas in full.", obj(map[string]any{"nodeId": str}, "nodeId")),
-		tool("canvas_wait", "Wait for others", "Waits up to 25 seconds for someone else to change the canvas after afterVersion, send a live message or take or give back a claim, and says what happened (your own changes since afterVersion are listed too, but do not end the wait). Call it again with the version it gives.", obj(map[string]any{"afterVersion": num, "seconds": num})),
-		tool("canvas_add_node", "Add a node", "Adds an Agent session node (kind session: a person picks its model before it runs) or a form (kind form, with fields), held by you at once. Optionally with a result you wrote.", obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"session", "form"}}, "title": str, "persona": str, "x": num, "y": num, "fields": fields, "result": str})),
-		tool("canvas_update_node", "Change a node", "Sets fields of a node you hold or nobody holds: title, persona (a session's instructions), place and size, a form's fields, an assembly's template, an edit's timeline, or result (your work, shown as handed in by you; empty clears it). A call is at most 1.9 MB.", obj(map[string]any{"nodeId": str, "title": str, "persona": str, "x": num, "y": num, "w": num, "h": num, "fields": fields, "template": str, "fileName": str, "timeline": str, "result": str}, "nodeId")),
-		tool("canvas_delete_node", "Delete a node", "Deletes a node you hold or nobody holds, with its wires.", obj(map[string]any{"nodeId": str}, "nodeId")),
-		tool("canvas_connect", "Connect two nodes", "Wires one node's output into another's input: by default a form's data or a session's result into a session's context. Checked against the nodes' ports and types.", obj(map[string]any{"fromNodeId": str, "toNodeId": str, "fromPort": str, "toPort": str}, "fromNodeId", "toNodeId")),
-		tool("canvas_disconnect", "Remove a wire", "Removes a wire, by its id or by the two nodes it joins.", obj(map[string]any{"edgeId": str, "fromNodeId": str, "toNodeId": str})),
-		tool("canvas_claim", "Take nodes", "Holds nodes for you for a while (15 to 600 seconds, 120 by default; claim again to renew), so other agents leave them to you. People still can edit them.", obj(map[string]any{"nodeIds": ids, "seconds": num, "note": str}, "nodeIds")),
-		tool("canvas_release", "Let go of nodes", "Lets go of the nodes named, or of all you hold.", obj(map[string]any{"nodeIds": ids})),
-		tool("canvas_set_status", "Say what you do", "Your one-line status (at most 140 characters), the node you work in and the nodes you look at, shown to everyone on the canvas.", obj(map[string]any{"status": str, "focusNodeId": str, "selection": ids})),
-		tool("canvas_say", "Write a message", "Writes one line to everyone on the canvas, optionally about a node.", obj(map[string]any{"text": str, "nodeId": str}, "text")),
-		tool("canvas_messages", "Read messages", "The canvas's live messages, the newest first, 50 at a time (before: a message id to read older ones).", obj(map[string]any{"before": str})),
-		tool("canvas_apply", "Apply raw ops", "Applies ops of the canvas change format (docs: set/del/order on paths such as [\"nodes\", id, \"title\"]), with the same rules as the other tools.", obj(map[string]any{"ops": map[string]any{"type": "array", "items": map[string]any{"type": "object"}}}, "ops")),
+		tool("canvas_overview", "Canvas overview", "The canvas now: its nodes (kind, title, place, a brief, the start of each result, who holds it, whether AwwO runs it), its wires, who is here, the claims, and its version.", read, obj(map[string]any{})),
+		tool("canvas_read_node", "Read a node", "One node of the canvas in full (a contract's inputs and outputs are its ports in:<field id> and out:<field id>).", read, obj(map[string]any{"nodeId": str}, "nodeId")),
+		tool("canvas_wait", "Wait for others", "Waits up to 25 seconds for someone else to change the canvas after afterVersion, send a live message or take or give back a claim, and says what happened (your own changes since afterVersion are listed too, but do not end the wait). Call it again with the version it gives.", read, obj(map[string]any{"afterVersion": num, "seconds": num})),
+		tool("canvas_add_node", "Add a node", "Adds an Agent session node (kind session: a person picks its model before it runs) or a form (kind form, with fields), held by you at once. Optionally with a result you wrote."+refusals, hints{}, obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"session", "form"}}, "title": str, "persona": str, "x": num, "y": num, "fields": fields, "result": str})),
+		tool("canvas_update_node", "Change a node", "Sets fields of a node you hold or nobody holds: title (at most 200 bytes), persona (a session's instructions), place and size (w and h at least 40), a form's fields (ids of ASCII letters, digits, _ . : -), an assembly's template, an edit's timeline, or result (your work, shown as handed in by you; empty clears it). A call is at most 1.9 MB."+refusals, hints{destructive: true}, obj(map[string]any{"nodeId": str, "title": str, "persona": str, "x": num, "y": num, "w": num, "h": num, "fields": fields, "template": str, "fileName": str, "timeline": str, "result": str}, "nodeId")),
+		tool("canvas_delete_node", "Delete a node", "Deletes a node you hold or nobody holds, with its wires."+refusals, hints{destructive: true, idempotent: true}, obj(map[string]any{"nodeId": str}, "nodeId")),
+		tool("canvas_connect", "Connect two nodes", "Wires an output port of one node into an input port of another, checked against their ports and types. Outputs: a form's data; a session's or an edit's result; out:<field id> of a node with a contract. Inputs: a session's context; reference (a picture) of an image, video or 3D session; audio of a video session; in:<field id> of a node with a contract; an edit's timeline, clips, sounds and pictures. Left out, the ports are the node's first output and the other's first input (a session's context). An output feeds an input of its own type, and an image, video, audio or 3D result also a text input. An input takes one wire, except context, a video's reference and audio, and an edit's clips, sounds and pictures. A wire already there is left as it is, and one whose id another wire has is refused."+refusals, hints{idempotent: true}, obj(map[string]any{"fromNodeId": str, "toNodeId": str, "fromPort": str, "toPort": str}, "fromNodeId", "toNodeId")),
+		tool("canvas_disconnect", "Remove a wire", "Removes a wire, by its id or by the two nodes it joins."+refusals, hints{destructive: true, idempotent: true}, obj(map[string]any{"edgeId": str, "fromNodeId": str, "toNodeId": str})),
+		tool("canvas_claim", "Take nodes", "Holds nodes for you for a while (15 to 600 seconds, 120 by default; claim again to renew), so other agents leave them to you. People still can edit them. refused lists the nodes someone else holds (with who, their note and until when), missing the nodes not on the canvas.", hints{}, obj(map[string]any{"nodeIds": ids, "seconds": num, "note": str}, "nodeIds")),
+		tool("canvas_release", "Let go of nodes", "Lets go of the nodes named, or of all you hold.", hints{idempotent: true}, obj(map[string]any{"nodeIds": ids})),
+		tool("canvas_set_status", "Say what you do", "Your one-line status (at most 140 characters), the node you work in and the nodes you look at, shown to everyone on the canvas.", hints{idempotent: true}, obj(map[string]any{"status": str, "focusNodeId": str, "selection": ids})),
+		tool("canvas_say", "Write a message", "Writes one line to everyone on the canvas, optionally about a node.", hints{}, obj(map[string]any{"text": str, "nodeId": str}, "text")),
+		tool("canvas_messages", "Read messages", "The canvas's live messages, the newest first, 50 at a time (before: a message id to read older ones).", read, obj(map[string]any{"before": str})),
+		tool("canvas_apply", "Apply raw ops", "Applies ops of the canvas change format (docs: set/del/order on paths such as [\"nodes\", id, \"title\"]), with the same rules as the other tools."+refusals, hints{destructive: true}, obj(map[string]any{"ops": map[string]any{"type": "array", "items": map[string]any{"type": "object"}}}, "ops")),
 	}
 }

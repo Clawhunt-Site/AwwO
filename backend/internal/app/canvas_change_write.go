@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -296,7 +297,7 @@ func (a *App) patchCanvas(w http.ResponseWriter, r *http.Request) {
 			}
 			var results []string
 			_ = json.Unmarshal(answered, &results)
-			a.answerCanvasChange(w, r, tx, tid, cid, b.BaseVersion, version, saved, results, true)
+			a.answerCanvasChange(w, r, tx, tid, cid, b.BaseVersion, version, saved, results, canvasResultReasons(b.Ops, results), true)
 			return
 		}
 		if !noRows(err) {
@@ -339,7 +340,7 @@ func (a *App) patchCanvas(w http.ResponseWriter, r *http.Request) {
 		a.settleEvolutionBySave(ctx, tx, tid, cid, actor.UserID)
 		saved = applied.document
 	}
-	a.answerCanvasChange(w, r, tx, tid, cid, b.BaseVersion, version, saved, applied.results, false)
+	a.answerCanvasChange(w, r, tx, tid, cid, b.BaseVersion, version, saved, applied.results, applied.reasons, false)
 	if len(applied.effective) > 0 {
 		a.multiplayer.changed(tid, cid)
 	}
@@ -359,9 +360,9 @@ func canvasChangeRequestHash(ops []canvasOp, label string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// answerCanvasChange commits and answers a change: its version, each op's result, and every change after the sender's
-// base (or the document, when the log no longer reaches back).
-func (a *App) answerCanvasChange(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid, cid string, base, version int64, document []byte, results []string, duplicate bool) {
+// answerCanvasChange commits and answers a change: its version, each op's result (with reasons, one per op, when one was
+// refused), and every change after the sender's base (or the document, when the log no longer reaches back).
+func (a *App) answerCanvasChange(w http.ResponseWriter, r *http.Request, tx pgx.Tx, tid, cid string, base, version int64, document []byte, results, reasons []string, duplicate bool) {
 	ctx := r.Context()
 	changes, reset, err := canvasChangesAfter(ctx, tx, tid, cid, base, version)
 	if err != nil {
@@ -373,6 +374,9 @@ func (a *App) answerCanvasChange(w http.ResponseWriter, r *http.Request, tx pgx.
 		return
 	}
 	out := map[string]any{"version": version, "results": results}
+	if canvasChangeRefused(results) {
+		out["reasons"] = reasons
+	}
 	if duplicate {
 		out["duplicate"] = true
 	}
@@ -393,19 +397,52 @@ type canvasChangeRefusal struct {
 
 func (e canvasChangeRefusal) Error() string { return e.message }
 
+// canvasAddOnlyWires marks, in a request's context, a change that may only add wires (MCP's canvas_connect): a set on a
+// wire id the canvas already has never replaces that wire, judged under the canvas row's lock (addOnlyWire). Pages name
+// wires as the tool does (from:port->to:port), so the wire there may be a person's or the planner's feedback wire of the
+// same ports, which a set would make a data wire, or, as node ids and ports may hold ":", another wire whose ends spell
+// the same id. Only this process sets the mark, never a request.
+type canvasAddOnlyWires struct{}
+
+// addOnlyWire answers an add-only wire op whose id the canvas has: done already when the wire there is a data wire
+// joining the same ports, else refused; the wire there is left as it is either way.
+func addOnlyWire(op canvasOp, existing any) (string, string) {
+	var want, have graphEdge
+	_ = json.Unmarshal(op.Value, &want)
+	_ = json.Unmarshal(mustCanvasJSON(existing), &have)
+	kind := "data"
+	if len(have.Kind) != 0 && string(have.Kind) != `"data"` {
+		kind = "non-data"
+		var named string
+		if json.Unmarshal(have.Kind, &named) == nil && named != "" {
+			kind = named
+		}
+	}
+	sameEnds := have.FromNode == want.FromNode && have.FromPort == want.FromPort && have.ToNode == want.ToNode && have.ToPort == want.ToPort
+	switch {
+	case sameEnds && kind == "data":
+		return "ok", ""
+	case sameEnds:
+		return "forbidden", canvasOpTarget(op) + ": a " + reasonBit(kind) + " wire joins these ports already, and connecting only adds; it is left as it is"
+	}
+	return "forbidden", canvasOpTarget(op) + ": another wire on the canvas has this id, and connecting only adds; canvas_apply can add this one under an id of its own"
+}
+
 // appliedCanvasChange is a change worked out on the current document: the document after it, its effective ops (empty
-// when it changes nothing), each op's result, and whether it took a claim.
+// when it changes nothing), each op's result and the reason of each refused one ("" for one done), and whether it took
+// a claim.
 type appliedCanvasChange struct {
 	document  []byte
 	effective []canvasOp
 	results   []string
+	reasons   []string
 	claimed   bool
 }
 
 // applyCanvasChange applies ops to the saved document under the fence of running nodes, the claims (an agent's), the
 // rules for agents and the rules every save keeps. tx holds the canvas row.
 func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string, saved []byte, ops []canvasOp, actor canvasActor) (appliedCanvasChange, error) {
-	out := appliedCanvasChange{results: make([]string, len(ops))}
+	out := appliedCanvasChange{results: make([]string, len(ops)), reasons: make([]string, len(ops))}
 	before, err := decodeCanvasDocument(saved)
 	if err != nil {
 		return out, canvasChangeRefusal{409, "canvas_unreadable", "The saved canvas cannot be read as a document; reload it"}
@@ -427,11 +464,13 @@ func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string,
 	}
 	nodesBefore, edgesBefore := len(collectionOf(before, "nodes")), len(collectionOf(before, "edges"))
 	claimFor := map[string]bool{}
+	held := map[int]string{} // the ops refused "claimed", each with the node someone else holds
+	addOnly, _ := ctx.Value(canvasAddOnlyWires{}).(bool)
 	for i, op := range ops {
 		if actor.Kind == "agent" {
-			next, refusal := agentOp(op, work, actor)
+			next, refusal, why := agentOp(op, work, actor)
 			if refusal != "" {
-				out.results[i] = refusal
+				out.results[i], out.reasons[i] = refusal, why
 				continue
 			}
 			op = next
@@ -441,12 +480,12 @@ func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string,
 		for _, node := range targets {
 			// The person who started a node's run may still change it (their page fences it); nobody else, no agent.
 			if starters, running := busy[node]; running && !(actor.Kind == "human" && starters[actor.UserID]) && !freeDuringRun(op, work) {
-				result = "node_running"
+				result, out.reasons[i] = "node_running", runningReason(op, node)
 				break
 			}
 			if actor.Kind == "agent" {
-				if held, ok := claims[node]; ok && held.participant != actor.participantID() {
-					result = "claimed"
+				if claim, ok := claims[node]; ok && claim.participant != actor.participantID() {
+					result, held[i] = "claimed", node
 					break
 				}
 			}
@@ -455,13 +494,19 @@ func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string,
 			out.results[i] = result
 			continue
 		}
+		if addOnly && op.Op == canvasOpSet && len(op.Path) == 2 && op.Path[0] == "edges" {
+			if j := findRecord(collectionOf(work, "edges"), "id", op.Path[1]); j >= 0 {
+				out.results[i], out.reasons[i] = addOnlyWire(op, collectionOf(work, "edges")[j])
+				continue
+			}
+		}
 		done, err := applyCanvasOp(work, op)
 		if err != nil {
 			return out, canvasChangeRefusal{400, "invalid_op", fmt.Sprintf("op %d: %v", i, err)}
 		}
 		out.results[i] = "ok"
 		if !done {
-			out.results[i] = "gone"
+			out.results[i], out.reasons[i] = "gone", goneReason(op, work)
 			continue
 		}
 		if actor.Kind == "agent" {
@@ -507,6 +552,16 @@ func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string,
 			return out, err
 		}
 		out.claimed = taken
+	}
+	if len(held) > 0 {
+		// Who holds them, by name as everyone on the canvas sees the claims (read only when an op was refused for one).
+		holders, err := listCanvasClaims(ctx, tx, tid, cid)
+		if err != nil {
+			return out, err
+		}
+		for i, node := range held {
+			out.reasons[i] = claimedReason(ops[i], node, holders)
+		}
 	}
 	return out, nil
 }
@@ -781,19 +836,22 @@ var agentNodeFields = map[string]map[string]bool{
 }
 
 // agentOp checks an agent's op, giving it as it is applied (an agent's result stamped as a manual one, a new node built
-// from what an agent may set), or the result that refuses it.
-func agentOp(op canvasOp, doc map[string]any, actor canvasActor) (canvasOp, string) {
+// from what an agent may set), or the result that refuses it with its reason: what it would change, the rule, and what
+// to do instead (canvas_change_reasons.go).
+func agentOp(op canvasOp, doc map[string]any, actor canvasActor) (canvasOp, string, string) {
 	p := op.Path
+	refuse := func(why string) (canvasOp, string, string) { return op, "forbidden", canvasOpTarget(op) + ": " + why }
+	const notOneRecord = "order takes a list, not one record, and the one list an agent puts in order is the nodes (path nodes)"
 	if len(p) == 0 {
-		return op, "forbidden"
+		return refuse("an op names a path")
 	}
 	switch p[0] {
 	case "nodes":
 		if len(p) == 1 {
 			if op.Op == canvasOpOrder {
-				return op, ""
+				return op, "", ""
 			}
-			return op, "forbidden"
+			return refuse("an agent adds, changes and deletes nodes one by one, each by its own path (nodes/<id>)")
 		}
 		index := findRecord(collectionOf(doc, "nodes"), "id", p[1])
 		var node map[string]any
@@ -802,71 +860,97 @@ func agentOp(op canvasOp, doc map[string]any, actor canvasActor) (canvasOp, stri
 		}
 		kind, _ := node["kind"].(string)
 		if len(p) == 2 {
-			if op.Op == canvasOpDel {
-				return op, ""
+			switch {
+			case op.Op == canvasOpDel:
+				return op, "", ""
+			case op.Op == canvasOpOrder:
+				return refuse(notOneRecord)
+			case op.Op != canvasOpSet:
+				return refuse("an op is set, del or order")
+			case index >= 0:
+				return refuse("it is on the canvas already, and an agent changes a node that is there field by field (nodes/<id>/<field>)")
 			}
-			if op.Op != canvasOpSet || index >= 0 {
-				return op, "forbidden" // an existing node is changed field by field
+			value, why := agentNewNode(p[1], op.Value, actor)
+			if why != "" {
+				return refuse(why)
 			}
-			value, ok := agentNewNode(p[1], op.Value, actor)
-			if !ok {
-				return op, "forbidden"
-			}
-			return canvasOp{Op: canvasOpSet, Path: p, Value: value}, ""
+			return canvasOp{Op: canvasOpSet, Path: p, Value: value}, "", ""
 		}
 		if index < 0 {
-			return op, "" // its node is gone: applying it does nothing
+			return op, "", "" // its node is gone: applying it does nothing
 		}
 		if len(p) == 3 {
 			kinds, allowed := agentNodeFields[p[2]]
-			if !allowed || (kinds != nil && !kinds[kind]) || op.Op == canvasOpOrder {
-				return op, "forbidden"
-			}
-			if op.Op == canvasOpDel {
+			switch {
+			case !allowed:
+				return refuse("it is not open to agents: " + agentFieldsRule)
+			case kinds != nil && !kinds[kind]:
+				owners := []string{}
+				for owner := range kinds {
+					owners = append(owners, owner)
+				}
+				sort.Strings(owners)
+				return refuse(fmt.Sprintf("%s has no %s (only %s does)", kindPhrase(kind), reasonBit(p[2]), kindPhrase(owners[0])))
+			case op.Op == canvasOpOrder && p[2] == "fields":
+				return refuse("an agent does not reorder a form's fields: set fields whole, in the order wanted")
+			case op.Op == canvasOpOrder:
+				return refuse(notOneRecord)
+			case op.Op == canvasOpDel:
 				if p[2] == "lastOutput" || p[2] == "fileName" {
-					return op, ""
+					return op, "", ""
 				}
-				return op, "forbidden"
+				return refuse("an agent deletes only a node's lastOutput (its result) and fileName: set it to a new value instead")
 			}
-			value, ok := agentFieldValue(p[2], op.Value, actor)
-			if !ok {
-				return op, "forbidden"
+			value, why := agentFieldValue(p[2], op.Value, actor)
+			if why != "" {
+				return refuse(why)
 			}
-			return canvasOp{Op: canvasOpSet, Path: p, Value: value}, ""
+			return canvasOp{Op: canvasOpSet, Path: p, Value: value}, "", ""
 		}
-		if p[2] == "fields" && kind == "form" && op.Op != canvasOpOrder {
-			if len(p) == 4 {
-				if op.Op == canvasOpDel {
-					return op, ""
-				}
-				field, ok := agentFormField(p[3], op.Value)
-				if !ok {
-					return op, "forbidden"
-				}
-				return canvasOp{Op: canvasOpSet, Path: p, Value: field}, ""
+		switch {
+		case p[2] == "threads":
+			return refuse("an agent does not change a node's conversations")
+		case p[2] != "fields":
+			return refuse("it is not open to agents: " + agentFieldsRule)
+		case kind != "form":
+			return refuse(kindPhrase(kind) + " has no fields (only a form does)")
+		case op.Op == canvasOpOrder:
+			return refuse(notOneRecord)
+		case len(p) == 4 && op.Op == canvasOpDel:
+			return op, "", ""
+		case len(p) == 4:
+			field, why := agentFormField(p[3], op.Value)
+			if why != "" {
+				return refuse(why)
 			}
-			if (p[4] == "label" || p[4] == "value") && op.Op == canvasOpSet {
-				var s string
-				if json.Unmarshal(op.Value, &s) == nil && len(s) <= 20000 {
-					return op, ""
-				}
-			}
+			return canvasOp{Op: canvasOpSet, Path: p, Value: field}, "", ""
+		case p[4] != "label" && p[4] != "value":
+			return refuse("an agent sets a field's label and value (its id stays)")
+		case op.Op != canvasOpSet:
+			return refuse("an agent sets a field's label or value, or deletes the whole field (nodes/<id>/fields/<field id>)")
 		}
-		return op, "forbidden"
+		var s string
+		if json.Unmarshal(op.Value, &s) != nil || len(s) > 20000 {
+			return refuse("a field's label or value is text of at most 20,000 bytes")
+		}
+		return op, "", ""
 	case "edges":
-		if len(p) != 2 {
-			return op, "forbidden"
+		switch {
+		case len(p) != 2:
+			return refuse("an agent adds and removes wires one by one (edges/<id>) and does not reorder them")
+		case op.Op == canvasOpDel:
+			return op, "", ""
 		}
-		if op.Op == canvasOpDel {
-			return op, ""
+		value, why := agentEdge(p[1], op.Value, doc)
+		if why != "" && op.Op == canvasOpOrder {
+			return refuse(notOneRecord)
 		}
-		value, ok := agentEdge(p[1], op.Value, doc)
-		if !ok {
-			return op, "forbidden"
+		if why != "" {
+			return refuse(why)
 		}
-		return canvasOp{Op: canvasOpSet, Path: p, Value: value}, ""
+		return canvasOp{Op: canvasOpSet, Path: p, Value: value}, "", ""
 	}
-	return op, "forbidden"
+	return refuse("an agent changes nodes and wires only, not the canvas's own settings, displays or saved views")
 }
 
 func finiteNumber(raw json.RawMessage, bound float64) (float64, bool) {
@@ -877,34 +961,60 @@ func finiteNumber(raw json.RawMessage, bound float64) (float64, bool) {
 	return f, true
 }
 
-// agentFieldValue checks one field an agent sets, giving the value to store.
-func agentFieldValue(key string, raw json.RawMessage, actor canvasActor) (json.RawMessage, bool) {
+// agentFieldValue checks one field an agent sets, giving the value to store, or the rule the value breaks.
+func agentFieldValue(key string, raw json.RawMessage, actor canvasActor) (json.RawMessage, string) {
+	text := func(limit int, name, rule string) (json.RawMessage, string) {
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return nil, name + " is text (a JSON string)"
+		}
+		if len(s) > limit {
+			return nil, rule
+		}
+		return raw, ""
+	}
 	switch key {
 	case "title":
-		var s string
-		return raw, json.Unmarshal(raw, &s) == nil && len(s) <= 200
+		return text(200, "a title", "a title is text of at most 200 bytes (UTF-8: about 66 Chinese characters); shorten it")
 	case "persona":
-		var s string
-		return raw, json.Unmarshal(raw, &s) == nil && len(s) <= 32000
-	case "template", "timeline":
-		var s string
-		return raw, json.Unmarshal(raw, &s) == nil && len(s) <= 1<<20
+		return text(32000, "a persona", "a persona is text of at most 32,000 bytes; shorten it")
+	case "template":
+		return text(1<<20, "a template", "a template is text of at most 1 MiB")
+	case "timeline":
+		return text(1<<20, "a timeline", "a timeline is text of at most 1 MiB")
 	case "fileName":
 		var s string
-		return raw, json.Unmarshal(raw, &s) == nil && len(s) <= 200 && !strings.ContainsAny(s, `/\`)
+		if json.Unmarshal(raw, &s) != nil || len(s) > 200 || strings.ContainsAny(s, `/\`) {
+			return nil, `a file name is text of at most 200 bytes, without / or \`
+		}
+		return raw, ""
 	case "x", "y":
-		_, ok := finiteNumber(raw, 1e7)
-		return raw, ok
+		if _, ok := finiteNumber(raw, 1e7); !ok {
+			return nil, "x and y are numbers from -10,000,000 to 10,000,000"
+		}
+		return raw, ""
 	case "w", "h":
 		f, ok := finiteNumber(raw, 1e5)
-		return raw, ok && f >= 40
+		if !ok {
+			return nil, "w and h are numbers from 40 to 100,000"
+		}
+		if f < 40 {
+			return nil, "w and h are at least 40 (no node is drawn smaller); give 40 or more"
+		}
+		return raw, ""
 	case "deliverablesOpen":
 		var b bool
-		return raw, json.Unmarshal(raw, &b) == nil
+		if json.Unmarshal(raw, &b) != nil {
+			return nil, "deliverablesOpen is true or false"
+		}
+		return raw, ""
 	case "fields":
 		var list []json.RawMessage
-		if json.Unmarshal(raw, &list) != nil || len(list) > 100 {
-			return nil, false
+		if json.Unmarshal(raw, &list) != nil {
+			return nil, "fields is a list of fields {id, label, value}"
+		}
+		if len(list) > 100 {
+			return nil, "fields set whole are at most 100"
 		}
 		clean := make([]json.RawMessage, 0, len(list))
 		seen := map[string]bool{}
@@ -912,54 +1022,72 @@ func agentFieldValue(key string, raw json.RawMessage, actor canvasActor) (json.R
 			var f struct {
 				ID string `json:"id"`
 			}
-			if json.Unmarshal(item, &f) != nil || seen[f.ID] {
-				return nil, false
+			if json.Unmarshal(item, &f) != nil {
+				return nil, "each field is an object {id, label, value}"
+			}
+			if seen[f.ID] {
+				return nil, "two fields have the id " + reasonBit(f.ID) + "; give each field an id of its own"
 			}
 			seen[f.ID] = true
-			field, ok := agentFormField(f.ID, item)
-			if !ok {
-				return nil, false
+			field, why := agentFormField(f.ID, item)
+			if why != "" {
+				return nil, why
 			}
 			clean = append(clean, field)
 		}
 		out, _ := json.Marshal(clean)
-		return out, true
+		return out, ""
 	case "lastOutput":
 		var o struct {
 			Text string `json:"text"`
 		}
-		if json.Unmarshal(raw, &o) != nil || o.Text == "" || len(o.Text) > 4<<20 {
-			return nil, false
+		if json.Unmarshal(raw, &o) != nil || o.Text == "" {
+			return nil, "a result is {text} with some text; to clear one, delete lastOutput (an empty result in canvas_update_node)"
+		}
+		if len(o.Text) > 4<<20 {
+			return nil, "a result's text is at most 4 MiB"
 		}
 		// An agent's result is never shown as AwwO's engine's: it is kept as one handed in, at the time it came.
 		out, _ := json.Marshal(map[string]any{"text": o.Text, "at": time.Now().UnixMilli(), "source": "manual", "by": map[string]string{"kind": "agent", "name": actor.Name}})
-		return out, true
+		return out, ""
 	}
-	return nil, false
+	return nil, "it is not open to agents: " + agentFieldsRule
 }
 
-func agentFormField(id string, raw json.RawMessage) (json.RawMessage, bool) {
+// agentFormField checks a form field an agent sets under the id its path names, giving it or the rule it breaks.
+func agentFormField(id string, raw json.RawMessage) (json.RawMessage, string) {
 	var f struct {
 		ID    string `json:"id"`
 		Label string `json:"label"`
 		Value string `json:"value"`
 	}
-	if json.Unmarshal(raw, &f) != nil || f.ID != id || !canvasNodeIDPattern.MatchString(f.ID) || len(f.Label) > 200 || len(f.Value) > 20000 {
-		return nil, false
+	switch {
+	case json.Unmarshal(raw, &f) != nil:
+		return nil, "a field is an object {id, label, value} of text"
+	case f.ID != id:
+		return nil, "a field set here carries the id its path names (" + reasonBit(id) + ")"
+	case f.ID == "":
+		return nil, "a field needs an id of 1 to 80 ASCII letters, digits, _ . : or -"
+	case !canvasNodeIDPattern.MatchString(f.ID):
+		return nil, "a field's id is 1 to 80 ASCII letters, digits, _ . : or -, which " + strconv.Quote(reasonBit(f.ID)) + " is not; rename the field"
+	case len(f.Label) > 200:
+		return nil, "a field's label is text of at most 200 bytes"
+	case len(f.Value) > 20000:
+		return nil, "a field's value is text of at most 20,000 bytes"
 	}
 	out, _ := json.Marshal(f)
-	return out, true
+	return out, ""
 }
 
 // agentNewNode builds a new node an agent adds from what it may set: a session node with nothing chosen yet (a person
-// picks its runtime and model), or a form.
-func agentNewNode(id string, raw json.RawMessage, actor canvasActor) (json.RawMessage, bool) {
+// picks its runtime and model), or a form; or it gives the rule the node breaks.
+func agentNewNode(id string, raw json.RawMessage, actor canvasActor) (json.RawMessage, string) {
 	if !canvasNodeIDPattern.MatchString(id) {
-		return nil, false
+		return nil, "a new node's id is 1 to 80 ASCII letters, digits, _ . : or -"
 	}
 	var given map[string]json.RawMessage
 	if json.Unmarshal(raw, &given) != nil {
-		return nil, false
+		return nil, "a new node is an object {id, kind, title, ...}"
 	}
 	var kind string
 	_ = json.Unmarshal(given["kind"], &kind)
@@ -971,30 +1099,40 @@ func agentNewNode(id string, raw json.RawMessage, actor canvasActor) (json.RawMe
 		node["title"], node["w"], node["h"] = "Agent", 340, 260
 	case "form":
 		node["title"], node["fields"], node["w"], node["h"] = "需求表单", []any{}, 300, 200
+	case "":
+		return nil, "a new node names its kind: an agent adds session and form nodes"
 	default:
-		return nil, false
+		return nil, "an agent adds session and form nodes only, not " + kindPhrase(kind)
 	}
 	node["x"], node["y"] = 0, 0
-	for key, value := range given {
+	keys := make([]string, 0, len(given))
+	for key := range given {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys) // the first key a node is refused for is the same every time
+	for _, key := range keys {
 		if key == "id" || key == "kind" {
 			continue
 		}
 		kinds, allowed := agentNodeFields[key]
 		if !allowed || (kinds != nil && !kinds[kind]) {
-			return nil, false
+			return nil, "it cannot carry " + reasonBit(key) + ": " + agentNewNodeRule(kind)
 		}
-		checked, ok := agentFieldValue(key, value, actor)
-		if !ok {
-			return nil, false
+		checked, why := agentFieldValue(key, given[key], actor)
+		if why != "" {
+			return nil, why
 		}
 		var decoded any
 		if json.Unmarshal(checked, &decoded) != nil {
-			return nil, false
+			return nil, "its " + key + " cannot be read"
 		}
 		node[key] = decoded
 	}
 	out, err := json.Marshal(node)
-	return out, err == nil
+	if err != nil {
+		return nil, "it cannot be written"
+	}
+	return out, ""
 }
 
 // The inputs that take many wires (ports.ts portsFor: multi): a session's context, a video's references and voices, an
@@ -1012,38 +1150,63 @@ func multiInput(node graphNode, port string) bool {
 }
 
 // agentEdge checks a wire an agent adds against its nodes' ports and types, as a canvas run does (graph_contracts.go),
-// giving it with its data type the source port's own.
-func agentEdge(id string, raw json.RawMessage, doc map[string]any) (json.RawMessage, bool) {
+// giving it with its data type the source port's own, or the rule it breaks.
+func agentEdge(id string, raw json.RawMessage, doc map[string]any) (json.RawMessage, string) {
 	var e graphEdge
-	if json.Unmarshal(raw, &e) != nil || e.ID != id || len(e.Kind) != 0 && string(e.Kind) != `"data"` {
-		return nil, false
+	switch {
+	case json.Unmarshal(raw, &e) != nil:
+		return nil, "a wire is an object {id, fromNode, fromPort, toNode, toPort}"
+	case e.ID != id:
+		return nil, "a wire set here carries the id its path names (" + reasonBit(id) + ")"
+	case len(e.Kind) != 0 && string(e.Kind) != `"data"`:
+		return nil, "an agent adds data wires only"
 	}
 	nodes := collectionOf(doc, "nodes")
-	read := func(nodeID string) (graphNode, bool) {
+	read := func(nodeID, end string) (graphNode, string) {
 		i := findRecord(nodes, "id", nodeID)
+		if i < 0 && nodeID == "" {
+			return graphNode{}, "the wire names no node at its " + end + " (" + map[string]string{"start": "fromNode", "end": "toNode"}[end] + ")"
+		}
 		if i < 0 {
-			return graphNode{}, false
+			return graphNode{}, "node " + reasonBit(nodeID) + " is not on the canvas (a wire joins two nodes that are); read the canvas again"
 		}
 		var n graphNode
-		return n, json.Unmarshal(mustCanvasJSON(nodes[i]), &n) == nil
+		if json.Unmarshal(mustCanvasJSON(nodes[i]), &n) != nil {
+			return graphNode{}, "node " + reasonBit(nodeID) + " cannot be read as a node, so no wire joins it"
+		}
+		return n, ""
 	}
-	src, sok := read(e.FromNode)
-	dst, dok := read(e.ToNode)
-	if !sok || !dok || e.FromNode == e.ToNode {
-		return nil, false
+	src, why := read(e.FromNode, "start")
+	if why != "" {
+		return nil, why
+	}
+	dst, why := read(e.ToNode, "end")
+	if why != "" {
+		return nil, why
+	}
+	if e.FromNode == e.ToNode {
+		return nil, "a wire joins two different nodes, and this one would lead from node " + reasonBit(e.FromNode) + " back into itself"
 	}
 	st, sp := nodePort(src, e.FromPort, false)
 	dt, dp := nodePort(dst, e.ToPort, true)
-	if !sp || !dp || !edgeTypesFit(src, e.FromPort, st, dt) {
-		return nil, false
+	switch {
+	case !sp:
+		return nil, portReason(src, e.FromPort, false)
+	case !dp:
+		return nil, portReason(dst, e.ToPort, true)
+	case !edgeTypesFit(src, e.FromPort, st, dt):
+		return nil, fmt.Sprintf("node %s's %s gives %s and node %s's %s takes %s; join an output and an input of one type "+
+			"(an image, video, audio or 3D result may also go into a text input)", reasonBit(e.FromNode), reasonBit(e.FromPort), reasonBit(st), reasonBit(e.ToNode), reasonBit(e.ToPort), reasonBit(dt))
 	}
 	if !multiInput(dst, e.ToPort) {
 		for _, other := range collectionOf(doc, "edges") {
 			if edge, ok := other.(map[string]any); ok && edge["toNode"] == e.ToNode && edge["toPort"] == e.ToPort && edge["id"] != id {
-				return nil, false // a single input already has its wire
+				wired, _ := edge["id"].(string)
+				return nil, fmt.Sprintf("node %s's %s takes one wire and has one already (%s); wire another input or, if that wire may go, remove it first",
+					reasonBit(e.ToNode), reasonBit(e.ToPort), reasonBit(wired))
 			}
 		}
 	}
 	out, _ := json.Marshal(map[string]string{"id": id, "fromNode": e.FromNode, "fromPort": e.FromPort, "toNode": e.ToNode, "toPort": e.ToPort, "dataType": st})
-	return out, true
+	return out, ""
 }

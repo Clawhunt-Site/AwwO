@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // 多人同屏 against PostgreSQL (docs/awwo-canvas-live-collaboration.md): changes from several writers, the save rules, the
@@ -715,6 +716,377 @@ func TestPostgresCanvasMCPLetsAnAgentWorkOnTheCanvas(t *testing.T) {
 	stopped := lt.mcp(t, token, map[string]any{"id": 31, "method": "tools/call", "params": map[string]any{"name": "canvas_wait", "arguments": map[string]any{"seconds": 10}}}, 200)
 	if result := stopped["result"].(map[string]any); time.Since(began) > 3*time.Second || result["structuredContent"].(map[string]any)["restart"] != true {
 		t.Fatalf("a wait when the API stops: %v after %v", stopped, time.Since(began))
+	}
+}
+
+// Each tool carries MCP's annotations, every hint sent rather than left to a client's default (a client takes a tool
+// it is told nothing of as destructive and open-world), and the descriptions say where a refusal's reason is and which
+// ports a wire joins.
+func TestPostgresCanvasMCPToolsCarryTheirHints(t *testing.T) {
+	lt := newLiveTeam(t)
+	token, _ := lt.token(t, lt.owner, "Codex", "edit")
+	started := lt.mcp(t, token, map[string]any{"id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18"}}, 200)
+	instructions := started["result"].(map[string]any)["instructions"].(string)
+	for _, want := range []string{"results, one code per op", "reasons says", "forbidden (a rule of what an agent may change)", "gone (what it names", "canvas_connect names the ports"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("the instructions lack %q: %s", want, instructions)
+		}
+	}
+	// readOnly, destructive, idempotent.
+	want := map[string][3]bool{
+		"canvas_overview": {true, false, true}, "canvas_read_node": {true, false, true}, "canvas_wait": {true, false, true}, "canvas_messages": {true, false, true},
+		"canvas_add_node": {false, false, false}, "canvas_update_node": {false, true, false}, "canvas_delete_node": {false, true, true},
+		"canvas_connect": {false, false, true}, "canvas_disconnect": {false, true, true}, "canvas_claim": {false, false, false},
+		"canvas_release": {false, false, true}, "canvas_set_status": {false, false, true}, "canvas_say": {false, false, false},
+		"canvas_apply": {false, true, false},
+	}
+	tools := lt.mcp(t, token, map[string]any{"id": 2, "method": "tools/list"}, 200)["result"].(map[string]any)["tools"].([]any)
+	if len(tools) != len(want) {
+		t.Fatalf("%d tools, %d expected", len(tools), len(want))
+	}
+	descriptions := map[string]string{}
+	for _, item := range tools {
+		tool := item.(map[string]any)
+		name := tool["name"].(string)
+		hints, known := want[name]
+		annotations, _ := tool["annotations"].(map[string]any)
+		if !known || annotations == nil {
+			t.Fatalf("%s: no hints expected or sent: %v", name, tool)
+		}
+		for _, key := range []string{"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"} {
+			if _, sent := annotations[key].(bool); !sent {
+				t.Fatalf("%s: %s is not sent: %v", name, key, annotations)
+			}
+		}
+		got := [3]bool{annotations["readOnlyHint"] == true, annotations["destructiveHint"] == true, annotations["idempotentHint"] == true}
+		if got != hints || annotations["openWorldHint"] != false || annotations["title"] != tool["title"] || tool["title"] == "" {
+			t.Fatalf("%s: annotations %v, want readOnly/destructive/idempotent %v, a closed world and its title", name, annotations, hints)
+		}
+		descriptions[name] = tool["description"].(string)
+	}
+	// The tools that change the canvas by ops say where a refused op's reason is; the others make no ops.
+	for name, description := range descriptions {
+		changes := !want[name][0] && name != "canvas_claim" && name != "canvas_release" && name != "canvas_set_status" && name != "canvas_say"
+		if changes != strings.Contains(description, "in reasons one sentence") {
+			t.Fatalf("%s: reasons in its description is %v: %s", name, !changes, description)
+		}
+	}
+	for _, port := range []string{"a form's data", "result", "context", "reference", "audio of a video session", "in:<field id>", "out:<field id>", "timeline, clips, sounds and pictures"} {
+		if !strings.Contains(descriptions["canvas_connect"], port) {
+			t.Fatalf("canvas_connect does not name %q: %s", port, descriptions["canvas_connect"])
+		}
+	}
+}
+
+// Every op the canvas refuses an agent says why beside its code, which stays as it was: what the op would have changed,
+// the rule, and what to do instead.
+func TestPostgresCanvasMCPRefusalsSayWhy(t *testing.T) {
+	lt := newLiveTeam(t)
+	ctx := context.Background()
+	// A person's image session and a node with a contract of one text input.
+	_, version := lt.document(t)
+	lt.patch(t, lt.owner, version, []map[string]any{
+		set([]string{"nodes", "img1"}, map[string]any{"id": "img1", "kind": "session", "agentKind": "image", "title": "Picture", "x": 0, "y": 400, "w": 340, "h": 260}),
+		set([]string{"nodes", "c1"}, map[string]any{"id": "c1", "kind": "session", "agentKind": "llm", "title": "Writer", "x": 400, "y": 400, "w": 340, "h": 260,
+			"contract": map[string]any{"version": 1, "inputs": []any{map[string]any{"id": "brief", "label": "Brief", "type": "text"}}, "outputs": []any{}}}),
+	}, 200)
+	token, _ := lt.token(t, lt.owner, "Claude Code", "edit")
+	call := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		return mcpStructured(t, lt.mcp(t, token, map[string]any{"id": 1, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args}}, 200))
+	}
+	// expect checks a tool's answer: its codes, and a reason for each refused op (none for an op done) holding each part
+	// asked for that op (a part marked ^ begins it).
+	expect := func(name string, args map[string]any, codes string, parts ...[]string) map[string]any {
+		t.Helper()
+		out := call(name, args)
+		results, _ := out["results"].([]any)
+		if fmt.Sprint(results) != codes {
+			t.Fatalf("%s %v: results %v, want %s (%v)", name, args, results, codes, out)
+		}
+		reasons, _ := out["reasons"].([]any)
+		if codes == "[ok]" {
+			if _, sent := out["reasons"]; sent {
+				t.Fatalf("%s: reasons for a change done whole: %v", name, out)
+			}
+			return out
+		}
+		if len(reasons) != len(results) {
+			t.Fatalf("%s: reasons %v for results %v", name, reasons, results)
+		}
+		for i, result := range results {
+			reason, _ := reasons[i].(string)
+			if (result == "ok") != (reason == "") {
+				t.Fatalf("%s op %d (%v): reason %q", name, i, result, reason)
+			}
+			if i < len(parts) {
+				for _, part := range parts[i] {
+					if found := strings.Contains(reason, part); strings.HasPrefix(part, "^") && !strings.HasPrefix(reason, part[1:]) || !strings.HasPrefix(part, "^") && !found {
+						t.Fatalf("%s op %d: reason %q lacks %q", name, i, reason, part)
+					}
+				}
+			}
+		}
+		return out
+	}
+	// A title over 200 bytes (66 Chinese characters fit, 67 do not); w and h under 40, beside a change that is done.
+	expect("canvas_update_node", map[string]any{"nodeId": "n1", "title": strings.Repeat("规", 67)}, "[forbidden]", []string{"node n1's title: ", "at most 200 bytes", "shorten it"})
+	expect("canvas_update_node", map[string]any{"nodeId": "n1", "title": strings.Repeat("规", 66), "w": 39}, "[ok forbidden]", nil, []string{"node n1's w: ", "at least 40"})
+	// A form field id outside [A-Za-z0-9_.:-]{1,80}; a field the node's kind lacks; one no agent sets; a kind no agent adds.
+	expect("canvas_update_node", map[string]any{"nodeId": "f1", "fields": []any{map[string]any{"id": "goal one", "label": "Goal"}}}, "[forbidden]",
+		[]string{"node f1's fields: ", "1 to 80 ASCII letters, digits, _ . : or -", `which "goal one" is not`, "rename the field"})
+	expect("canvas_update_node", map[string]any{"nodeId": "f1", "fields": []any{map[string]any{"id": "目标", "label": "Goal"}}}, "[forbidden]", []string{`ASCII letters, digits, _ . : or -, which "目标" is not`})
+	// A value that is no text is told so (not to shorten it); an order of a form's fields, which agents do not reorder;
+	// a set on the node list itself.
+	expect("canvas_apply", map[string]any{"ops": []any{set([]string{"nodes", "n1", "title"}, 5)}}, "[forbidden]", []string{"node n1's title: a title is text (a JSON string)"})
+	expect("canvas_apply", map[string]any{"ops": []any{map[string]any{"op": "order", "path": []string{"nodes", "f1", "fields"}, "ids": []string{"q"}}}}, "[forbidden]",
+		[]string{"node f1's fields: an agent does not reorder a form's fields"})
+	expect("canvas_apply", map[string]any{"ops": []any{map[string]any{"op": "order", "path": []string{"nodes", "f1", "fields", "q"}, "ids": []string{"q"}}}}, "[forbidden]",
+		[]string{"field q of node f1: order takes a list, not one record, and the one list an agent puts in order is the nodes (path nodes)"})
+	expect("canvas_apply", map[string]any{"ops": []any{set([]string{"nodes"}, []any{})}}, "[forbidden]", []string{"^the nodes: an agent adds, changes and deletes nodes one by one"})
+	expect("canvas_update_node", map[string]any{"nodeId": "f1", "persona": "Be brief"}, "[forbidden]", []string{"node f1's persona: a form has no persona (only a session does)"})
+	expect("canvas_apply", map[string]any{"ops": []any{set([]string{"nodes", "n1", "model"}, "gpt-x")}}, "[forbidden]", []string{"node n1's model: it is not open to agents", "a session's persona", "a person chooses the rest"})
+	expect("canvas_add_node", map[string]any{"kind": "edit", "title": "Cut"}, "[forbidden]", []string{"session and form nodes only, not an edit node"})
+	expect("canvas_apply", map[string]any{"ops": []any{set([]string{"nodes", "agent-x"}, map[string]any{"id": "agent-x", "kind": "session", "model": "gpt-x"})}}, "[forbidden]",
+		[]string{"node agent-x: it cannot carry model", "a person chooses its runtime and model"})
+	// Ports: one a node lacks (an input of a form, which has none), types that do not fit, a single input already wired,
+	// a wire into its own node.
+	expect("canvas_connect", map[string]any{"fromNodeId": "f1", "toNodeId": "n2", "fromPort": "answers"}, "[forbidden]", []string{"wire f1:answers->n2:context: node f1 has no output answers (its outputs: data; name one of them)"})
+	expect("canvas_connect", map[string]any{"fromNodeId": "n2", "toNodeId": "c1", "toPort": "context"}, "[forbidden]", []string{"node c1 has no input context (its inputs: in:brief"})
+	expect("canvas_connect", map[string]any{"fromNodeId": "n1", "toNodeId": "f1"}, "[forbidden]", []string{"node f1 has no input context (a form has no inputs)"})
+	expect("canvas_connect", map[string]any{"fromNodeId": "f1", "toNodeId": "img1", "toPort": "reference"}, "[forbidden]", []string{"node f1's data gives text and node img1's reference takes image", "join an output and an input of one type"})
+	wired := expect("canvas_connect", map[string]any{"fromNodeId": "f1", "toNodeId": "c1"}, "[ok]")
+	if again := expect("canvas_connect", map[string]any{"fromNodeId": "f1", "toNodeId": "c1"}, "[ok]"); again["version"] != wired["version"] {
+		t.Fatalf("connecting the same wire again changed the canvas: %v then %v", wired, again)
+	}
+	expect("canvas_connect", map[string]any{"fromNodeId": "n1", "toNodeId": "c1"}, "[forbidden]", []string{"node c1's in:brief takes one wire and has one already (f1:data->c1:in:brief)", "wire another input or, if that wire may go, remove it first"})
+	expect("canvas_connect", map[string]any{"fromNodeId": "n1", "toNodeId": "n1"}, "[forbidden]", []string{"a wire joins two different nodes", "back into itself"})
+	// What is no longer there: a node to wire from, a node to delete, a field of a node deleted earlier in the change.
+	expect("canvas_connect", map[string]any{"fromNodeId": "ghost", "toNodeId": "n2"}, "[forbidden]", []string{"node ghost is not on the canvas", "read the canvas again"})
+	expect("canvas_delete_node", map[string]any{"nodeId": "ghost"}, "[gone]", []string{"node ghost: it is not on the canvas, so there is nothing to delete"})
+	scratch := expect("canvas_add_node", map[string]any{"kind": "form", "title": "Scratch"}, "[ok]")["nodeId"].(string)
+	expect("canvas_apply", map[string]any{"ops": []any{del([]string{"nodes", scratch}), set([]string{"nodes", scratch, "title"}, "Late")}}, "[ok gone]", nil,
+		[]string{"node " + scratch + "'s title: node " + scratch + " is not on the canvas (deleted meanwhile, or never there)"})
+	// Someone else's claim, named as the claims name it.
+	codex, _ := lt.token(t, lt.owner, "Codex", "edit")
+	lt.bearer(t, codex, "POST", lt.prefix+"/live/claims", map[string]any{"nodeIds": []string{"n2"}, "ttlSeconds": 300}, 200, "")
+	expect("canvas_update_node", map[string]any{"nodeId": "n2", "title": "Mine now"}, "[claimed]", []string{"node n2's title: Codex (an agent) holds node n2 until ", " UTC; pick another node, or ask them in a message"})
+	// A node AwwO runs: its place stays free, its instructions and its wires wait for the run's end.
+	var ownerID string
+	if err := lt.h.db.QueryRow(ctx, "SELECT id FROM users WHERE email='live-owner@example.test'").Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lt.h.db.Exec(ctx, `INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status)
+		VALUES('graph-why',$1,$2,$3,'op-why','hash',1,'{}','["img1"]','running')`, lt.tid, lt.cid, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	expect("canvas_update_node", map[string]any{"nodeId": "img1", "persona": "Brighter", "x": 20}, "[node_running ok]",
+		[]string{"node img1's persona: node img1 is in a run of AwwO (running or queued)", "try again once it has ended"})
+	expect("canvas_connect", map[string]any{"fromNodeId": "f1", "toNodeId": "img1"}, "[node_running]", []string{"wire f1:data->img1:context: it leads into node img1, which is in a run of AwwO"})
+	// Connecting only adds: a wire already there is left as it is, here a person's feedback wire with the id a
+	// connection of those ports makes, which setting it again would have turned into a data wire.
+	_, version = lt.document(t)
+	feedback := map[string]any{"id": "n2:result->n1:context", "fromNode": "n2", "fromPort": "result", "toNode": "n1", "toPort": "context", "dataType": "text", "kind": "feedback"}
+	lt.patch(t, lt.owner, version, []map[string]any{set([]string{"edges", "n2:result->n1:context"}, feedback)}, 200)
+	expect("canvas_connect", map[string]any{"fromNodeId": "n2", "toNodeId": "n1"}, "[forbidden]",
+		[]string{"^wire n2:result->n1:context: a feedback wire joins these ports already, and connecting only adds; it is left as it is"})
+	// Another wire whose ends spell the same id (node ids and ports may hold ":") is not taken for this one, nor
+	// replaced by it.
+	_, version = lt.document(t)
+	lt.patch(t, lt.owner, version, []map[string]any{
+		set([]string{"nodes", "p"}, map[string]any{"id": "p", "kind": "session", "agentKind": "llm", "title": "Source", "x": 0, "y": 800, "w": 340, "h": 260,
+			"contract": map[string]any{"version": 1, "inputs": []any{}, "outputs": []any{map[string]any{"id": "result", "label": "Result", "type": "text"}}}}),
+		set([]string{"nodes", "p:out"}, map[string]any{"id": "p:out", "kind": "session", "agentKind": "llm", "title": "Other", "x": 400, "y": 800, "w": 340, "h": 260}),
+		set([]string{"edges", "p:out:result->n1:context"}, map[string]any{"id": "p:out:result->n1:context", "fromNode": "p", "fromPort": "out:result", "toNode": "n1", "toPort": "context", "dataType": "text"}),
+	}, 200)
+	expect("canvas_connect", map[string]any{"fromNodeId": "p:out", "toNodeId": "n1"}, "[forbidden]",
+		[]string{"^wire p:out:result->n1:context: another wire on the canvas has this id, and connecting only adds; canvas_apply can add this one under an id of its own"})
+	clashed, _ := lt.document(t)
+	for _, e := range clashed["edges"].([]any) {
+		if e.(map[string]any)["id"] == "p:out:result->n1:context" && e.(map[string]any)["fromNode"] != "p" {
+			t.Fatalf("the other wire after the refused connection: %v", e)
+		}
+	}
+	wires, _ := lt.document(t)
+	kinds := []any{}
+	for _, e := range wires["edges"].([]any) {
+		if e.(map[string]any)["id"] == "n2:result->n1:context" {
+			kinds = append(kinds, e.(map[string]any)["kind"])
+		}
+	}
+	if fmt.Sprint(kinds) != "[feedback]" {
+		t.Fatalf("the feedback wire after a connection of its ports: %v", kinds)
+	}
+	// The text content carries the reasons too, a wire's id as written (not HTML-escaped for a model to read).
+	reply := lt.mcp(t, token, map[string]any{"id": 9, "method": "tools/call", "params": map[string]any{"name": "canvas_connect", "arguments": map[string]any{"fromNodeId": "n1", "toNodeId": "c1"}}}, 200)
+	if text := reply["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string); !strings.Contains(text, `"reasons"`) ||
+		!strings.Contains(text, "wire n1:result->c1:in:brief: node c1's in:brief takes one wire") || strings.Contains(text, "\\"+"u003e") {
+		t.Fatalf("the text content: %s", text)
+	}
+	// Over HTTP the same, beside results, only when an op is refused; a change sent again under its id is answered with
+	// what its codes meant (the particular rule is not kept).
+	_, version = lt.document(t)
+	body := map[string]any{"baseVersion": version, "changeId": "why-change-0001", "ops": []map[string]any{set([]string{"nodes", "f1", "title"}, "Brief v2"), set([]string{"nodes", "f1", "persona"}, "x")}}
+	first := lt.bearer(t, token, "PATCH", lt.prefix, body, 200, "")
+	again := lt.bearer(t, token, "PATCH", lt.prefix, body, 200, "")
+	if fmt.Sprint(first["results"]) != "[ok forbidden]" || fmt.Sprint(first["reasons"]) != "[ node f1's persona: a form has no persona (only a session does)]" {
+		t.Fatalf("a change's answer over HTTP: %v", first)
+	}
+	if reasons, _ := again["reasons"].([]any); again["duplicate"] != true || fmt.Sprint(again["results"]) != "[ok forbidden]" || len(reasons) != 2 || reasons[0] != "" ||
+		reasons[1] != "node f1's persona: when this change was first sent, a rule of what an agent may change refused it" {
+		t.Fatalf("a change sent again: %v", again)
+	}
+	if done := lt.bearer(t, token, "PATCH", lt.prefix, map[string]any{"baseVersion": version, "ops": []map[string]any{set([]string{"nodes", "f1", "title"}, "Brief v3")}}, 200, ""); fmt.Sprint(done["results"]) != "[ok]" || done["reasons"] != nil {
+		t.Fatalf("a change done whole: %v", done)
+	}
+	// A person's op is told why too (here a node someone deleted).
+	if out := lt.patch(t, lt.owner, version, []map[string]any{set([]string{"nodes", "ghost", "title"}, "x")}, 200); fmt.Sprint(out["results"]) != "[gone]" ||
+		fmt.Sprint(out["reasons"]) != "[node ghost's title: node ghost is not on the canvas (deleted meanwhile, or never there); read the canvas again]" {
+		t.Fatalf("a person's op on a node gone: %v", out)
+	}
+}
+
+// The sentences that say what an agent may set name every field the rules let it set, and a new node's names none it
+// cannot carry; a refusal's list of a node's ports is the port rules' own.
+func TestCanvasAgentReasonsFollowTheRules(t *testing.T) {
+	// names says whether a sentence names a field as a word of its own (an "h" inside "the" is none).
+	names := func(sentence, key string) bool {
+		for _, word := range strings.FieldsFunc(sentence, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+			if word == key {
+				return true
+			}
+		}
+		return false
+	}
+	clauses := strings.FieldsFunc(agentFieldsRule, func(r rune) bool { return r == ',' || r == ';' })
+	for key, kinds := range agentNodeFields {
+		if !names(agentFieldsRule, key) {
+			t.Fatalf("agentFieldsRule does not name %s", key)
+		}
+		// A field of one kind of node is named in the clause of that kind ("a session's persona").
+		for owner := range kinds {
+			paired := false
+			for _, clause := range clauses {
+				paired = paired || strings.Contains(clause, kindPhrase(owner)+"'s ") && names(clause, key)
+			}
+			if !paired {
+				t.Fatalf("agentFieldsRule does not give %s its %s", kindPhrase(owner), key)
+			}
+		}
+		for _, kind := range []string{"session", "form"} {
+			if carries := kinds == nil || kinds[kind]; carries != names(agentNewNodeRule(kind), key) {
+				t.Fatalf("the new %s rule and %s: carries %v, named %v", kind, key, carries, !carries)
+			}
+		}
+	}
+	contract := &graphContract{Version: 1, Inputs: []graphField{{ID: "brief", Type: "text"}}, Outputs: []graphField{{ID: "page", Type: "html"}}}
+	ports := []string{"data", "result", "context", "reference", "audio", "timeline", "clips", "sounds", "pictures", "in:brief", "out:page"}
+	for _, n := range []graphNode{{ID: "f", Kind: "form"}, {ID: "e", Kind: "edit"}, {ID: "s", Kind: "session", AgentKind: "llm"}, {ID: "i", Kind: "session", AgentKind: "image"},
+		{ID: "v", Kind: "session", AgentKind: mediaKindVideo}, {ID: "m", Kind: "session", AgentKind: mediaKindModel3D}, {ID: "a", Kind: "session", AgentKind: mediaKindAudio},
+		{ID: "c", Kind: "session", Contract: contract}, {ID: "x", Kind: "assemble", Contract: contract}} {
+		for _, input := range []bool{true, false} {
+			names, _ := nodePortNames(n, input)
+			for _, port := range ports {
+				_, has := nodePort(n, port, input)
+				if listed := strings.Contains(" "+strings.Join(names, " ")+" ", " "+port+" "); has != listed {
+					t.Fatalf("node %s (%s %s), input %v: port %s is a port %v, listed %v (%v)", n.ID, n.Kind, n.AgentKind, input, port, has, listed, names)
+				}
+			}
+		}
+	}
+	// A contract of many fields: twelve names, each whole as a wire names it, and a pointer to the rest; a name no
+	// wire's id can hold is left out. Read in one pass over the side asked for: tens of thousands of fields on the other
+	// side cost nothing (a pass over each side for each name took minutes).
+	many := &graphContract{Version: 1}
+	for i := 0; i < 40000; i++ {
+		many.Inputs = append(many.Inputs, graphField{ID: fmt.Sprintf("input-%05d-%s", i, strings.Repeat("a", 68)), Type: "text"})
+		many.Outputs = append(many.Outputs, graphField{ID: fmt.Sprintf("output-%05d", i), Type: "text"})
+	}
+	began := time.Now()
+	reason := portReason(graphNode{ID: "big", Kind: "session", Contract: many}, "out:nope", false)
+	if took := time.Since(began); took > 2*time.Second {
+		t.Fatalf("a refusal on a node of 40,000 fields took %v", took)
+	}
+	if !strings.Contains(reason, "its outputs: out:output-00000, ") || !strings.Contains(reason, "out:output-00011 and more (read the node to see them all); name one of them") ||
+		strings.Contains(reason, "out:output-00012") {
+		t.Fatalf("the outputs of a node of many fields: %s", reason)
+	}
+	if reason := portReason(graphNode{ID: "big", Kind: "session", Contract: many}, "in:nope", true); !strings.Contains(reason, "in:input-00000-"+strings.Repeat("a", 68)+", ") {
+		t.Fatalf("a field id of 80 characters is named whole: %s", reason)
+	}
+	long := &graphContract{Version: 1, Inputs: []graphField{{ID: strings.Repeat("x", 200), Type: "text"}, {ID: "brief", Type: "text"}}}
+	if reason := portReason(graphNode{ID: "c", Kind: "session", Contract: long}, "in:nope", true); !strings.Contains(reason, "its inputs: in:brief and more (read the node") || strings.Contains(reason, "xxxx") {
+		t.Fatalf("a port too long for a wire's id: %s", reason)
+	}
+	if reason := portReason(graphNode{ID: "c", Kind: "session", Contract: &graphContract{Version: 1}}, "in:nope", true); !strings.Contains(reason, "(its contract has no inputs)") {
+		t.Fatalf("a contract with no inputs: %s", reason)
+	}
+	// A part of a reason is read no further than its 80 characters, so a string a document holds at any length (an id,
+	// a contract field's type) costs a refusal nothing more, and a cut never splits a character.
+	huge := strings.Repeat("规", 4<<20)
+	began = time.Now()
+	for i := 0; i < 500; i++ {
+		_ = reasonBit(huge)
+	}
+	if took := time.Since(began); took > 2*time.Second || reasonBit(huge) != strings.Repeat("规", 80)+"…" || reasonBit("short") != "short" {
+		t.Fatalf("reasonBit: %v for 500 cuts, %q", took, reasonBit(huge)[:12])
+	}
+	typed := map[string]any{"nodes": []any{map[string]any{"id": "f", "kind": "form"}, map[string]any{"id": "c", "kind": "session",
+		"contract": map[string]any{"version": 1, "inputs": []any{map[string]any{"id": "b", "type": strings.Repeat("t", 1<<20)}}, "outputs": []any{}}}}}
+	_, why := agentEdge("f:data->c:in:b", mustCanvasJSON(map[string]string{"id": "f:data->c:in:b", "fromNode": "f", "fromPort": "data", "toNode": "c", "toPort": "in:b"}), typed)
+	if len(why) > 600 || !strings.Contains(why, "node c's in:b takes "+strings.Repeat("t", 80)+"…;") {
+		t.Fatalf("a type of a megabyte in a reason (%d bytes): %.300s", len(why), why)
+	}
+}
+
+// canvas_connect's change only adds wires, under the canvas row's lock: a wire saved between the tool's read of the
+// canvas and its write is not replaced. A change without that mark (a page's, canvas_apply's, an agent's over HTTP) sets
+// a wire as it did.
+func TestPostgresCanvasConnectNeverReplacesAWire(t *testing.T) {
+	lt := newLiveTeam(t)
+	ctx := context.Background()
+	_, version := lt.document(t)
+	lt.patch(t, lt.owner, version, []map[string]any{set([]string{"edges", "n2:result->n1:context"},
+		map[string]any{"id": "n2:result->n1:context", "fromNode": "n2", "fromPort": "result", "toNode": "n1", "toPort": "context", "dataType": "text", "kind": "feedback"})}, 200)
+	_, tokenID := lt.token(t, lt.owner, "Codex", "edit")
+	var ownerID string
+	if err := lt.h.db.QueryRow(ctx, "SELECT id FROM users WHERE email='live-owner@example.test'").Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	actor := canvasActor{Kind: "agent", UserID: ownerID, TokenID: tokenID, ClientID: "t_" + tokenID, Name: "Codex", Port: "mcp"}
+	wire := canvasOp{Op: canvasOpSet, Path: []string{"edges", "n2:result->n1:context"},
+		Value: mustCanvasJSON(map[string]string{"id": "n2:result->n1:context", "fromNode": "n2", "fromPort": "result", "toNode": "n1", "toPort": "context"})}
+	apply := func(ctx context.Context) appliedCanvasChange {
+		t.Helper()
+		tx, err := lt.h.db.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		var saved []byte
+		if err := tx.QueryRow(ctx, "SELECT document FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", lt.tid, lt.cid).Scan(&saved); err != nil {
+			t.Fatal(err)
+		}
+		applied, err := lt.h.a.applyCanvasChange(ctx, tx, lt.tid, lt.cid, saved, []canvasOp{wire}, actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return applied
+	}
+	addOnly := context.WithValue(ctx, canvasAddOnlyWires{}, true)
+	if got := apply(addOnly); fmt.Sprint(got.results) != "[forbidden]" || len(got.effective) != 0 ||
+		got.reasons[0] != "wire n2:result->n1:context: a feedback wire joins these ports already, and connecting only adds; it is left as it is" {
+		t.Fatalf("an add-only change over a feedback wire: %v %q %v", got.results, got.reasons, got.effective)
+	}
+	if got := apply(ctx); fmt.Sprint(got.results) != "[ok]" || len(got.effective) == 0 {
+		t.Fatalf("an unmarked set over a wire: %v %v", got.results, got.effective)
+	}
+	// The same data wire already there: done, nothing changed.
+	_, version = lt.document(t)
+	lt.patch(t, lt.owner, version, []map[string]any{set([]string{"edges", "n2:result->n1:context"},
+		map[string]any{"id": "n2:result->n1:context", "fromNode": "n2", "fromPort": "result", "toNode": "n1", "toPort": "context", "dataType": "text"})}, 200)
+	if got := apply(addOnly); fmt.Sprint(got.results) != "[ok]" || len(got.effective) != 0 || got.reasons[0] != "" {
+		t.Fatalf("an add-only change over the same data wire: %v %q %v", got.results, got.reasons, got.effective)
 	}
 }
 

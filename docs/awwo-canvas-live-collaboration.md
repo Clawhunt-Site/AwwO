@@ -222,7 +222,7 @@ an edit token):
 
 | Method and path | Body | Answer |
 | --- | --- | --- |
-| `PATCH` (the canvas itself) | `{baseVersion, changeId, clientId, ops, label?}` | `{version, results, changes}`: `results[i]` is `ok`, `gone`, `claimed`, `node_running` or `forbidden` for `ops[i]`; `changes` holds every change after `baseVersion`; or `{version, results, reset: true, document}` when the log no longer reaches back |
+| `PATCH` (the canvas itself) | `{baseVersion, changeId, clientId, ops, label?}` | `{version, results, reasons?, changes}`: `results[i]` is `ok`, `gone`, `claimed`, `node_running` or `forbidden` for `ops[i]`; when any op is refused, `reasons[i]` says in one sentence why (`""` for an op done; see Ports); `changes` holds every change after `baseVersion`; or `{version, results, reasons?, reset: true, document}` when the log no longer reaches back |
 | `GET /changes?after=v` | | `{version, changes}`, or `{version, reset: true, document}` |
 | `GET /live/events?after=v&client=c` | | the live stream |
 | `POST /live/presence` | `{clientId, state}` | 204 |
@@ -300,6 +300,12 @@ cookie. A `scope: read` token only watches.
 - Write a node's `lastOutput`: the server keeps it as `source: "manual"`, at the time it came, with `by` naming the
   agent, so it is never shown as AwwO's engine's result.
 - Add and remove wires, checked against the nodes' ports and types (graph_contracts.go `nodePort`, `edgeTypesFit`).
+- Each value is checked (`agentFieldValue`): a title is text of at most 200 bytes (UTF-8, so about 66 Chinese
+  characters), a persona 32,000 bytes, a template or a timeline 1 MiB, a file name 200 bytes without `/` or `\`; `x` and
+  `y` lie within ±10,000,000, `w` and `h` from 40 to 100,000; a form's fields set whole are at most 100 (one added at
+  its own path is not counted), each with an id of 1 to 80 of `[A-Za-z0-9_.:-]` (ASCII only) of its own, a label of at most 200 bytes and a value of at most 20,000 (set alone,
+  at its own path `nodes/<id>/fields/<field id>/label`, a label may take up to 20,000 bytes); a result's text is 1 byte
+  to 4 MiB.
 
 After every change, for everyone, the server keeps each wire as a page reads it and a canvas run checks it
 (`reconcileCanvasWires`): its type is its source port's where the port rules know both ends and the types fit, and a
@@ -314,21 +320,61 @@ An agent's write takes the nodes it wrote for 60 s, or renews its own claim, nev
 ### Ports
 
 - **HTTP**: the endpoints above with `Authorization: Bearer <token>`.
-- **MCP**: `POST /api/v1/mcp` (Streamable HTTP with JSON answers; the token as a bearer header). Its tools:
+- **MCP**: `POST /api/v1/mcp` (Streamable HTTP with JSON answers; the token as a bearer header). Its tools, with their
+  annotations (R read-only, D destructive, I idempotent; none reaches beyond the canvas, `openWorldHint: false`):
 
-| Tool | What it does |
-| --- | --- |
-| `canvas_overview` | the canvas: nodes (id, kind, title, place, a short brief, the start of its result), wires, participants, claims |
-| `canvas_read_node` | one node in full |
-| `canvas_wait` | waits up to 25 s for someone else's change, message or claim after a version, and says what happened (the agent's own changes are listed but do not end the wait) |
-| `canvas_add_node` | adds a session or form node, claimed for the caller |
-| `canvas_update_node` | sets the fields an agent may set |
-| `canvas_delete_node` | deletes a node |
-| `canvas_connect`, `canvas_disconnect` | adds or removes a wire (ports worked out when not given) |
-| `canvas_claim`, `canvas_release` | takes or lets go of nodes |
-| `canvas_set_status` | the caller's one-line status and focus |
-| `canvas_say`, `canvas_messages` | writes and reads the live messages |
-| `canvas_apply` | raw ops, for programs that build their own |
+| Tool | What it does | Hints |
+| --- | --- | --- |
+| `canvas_overview` | the canvas: nodes (id, kind, title, place, a short brief, the start of its result), wires, participants, claims | R I |
+| `canvas_read_node` | one node in full | R I |
+| `canvas_wait` | waits up to 25 s for someone else's change, message or claim after a version, and says what happened (the agent's own changes are listed but do not end the wait) | R I |
+| `canvas_add_node` | adds a session or form node, claimed for the caller | |
+| `canvas_update_node` | sets the fields an agent may set | D |
+| `canvas_delete_node` | deletes a node | D I |
+| `canvas_connect`, `canvas_disconnect` | adds or removes a wire (ports worked out when not given; a wire already there is left as it is) | I; D I |
+| `canvas_claim`, `canvas_release` | takes or lets go of nodes | none; I |
+| `canvas_set_status` | the caller's one-line status and focus | I |
+| `canvas_say`, `canvas_messages` | writes and reads the live messages | none; R I |
+| `canvas_apply` | raw ops, for programs that build their own | D |
+
+Clients such as Codex weigh the annotations when they decide what to ask a person before a call, so each tool sends all
+four (and its title), never leaving one to a client's default: a tool a client is told nothing of counts as destructive
+and open-world. A read changes nothing on the canvas (it shows the agent as present). The destructive tools can lose
+what someone made: a node, a wire, a field's or a result's earlier text; the others only add, or change the caller's own
+claims, status and messages. (The server's own retention is not counted: every write prunes the canvas's change log,
+and a message the oldest beyond the 200 kept, whoever sends it.) `canvas_connect` only adds, judged in its change
+under the canvas's lock (`canvasAddOnlyWires`). Where a wire with the id its ports make is on the canvas already, a
+data wire joining the same ports counts as done (`ok`, nothing changed). A feedback wire of those ports, or another wire
+whose ends spell the same id (node ids and ports may hold `:`), refuses it (`forbidden`, with its reason), and the wire
+there is left as it is. Pages name wires the same way, and setting the wire again used to turn a person's or the
+planner's feedback wire into a data wire. A call is idempotent where repeating it with the same arguments changes
+nothing more: the reads, connecting, deleting a node, removing a wire, letting go and the status. Any other write renews
+the writer's claim, adds again or stamps its result anew.
+
+On 2026-11-07 the real clients were run against a local API with these hints. Codex 0.162.1, with no tools approval
+mode set for the server and no approval prompts possible (`codex exec`), ran the reads and `canvas_add_node` and
+refused `canvas_update_node` and `canvas_delete_node` as needing approval; without annotations it had refused every
+tool. Claude Code 2.1.317 asked permission for every tool, read-only or not, in its default permission mode: there, the
+tools its line allows decide.
+
+A refused op says why. `results[i]` keeps its code as before. When any op of a change is refused, the answer (the tool's
+and `PATCH`'s alike, for people's ops too) also carries `reasons`: one sentence per op (`""` for an op done) that names
+what the op would have changed, the rule and what to do instead, for example `node f1's persona: a form has no persona
+(only a session does)` or `wire n1:result->c1:in:brief: node c1's in:brief takes one wire and has one already
+(f1:data->c1:in:brief); wire another input or, if that wire may go, remove it first`. The reason for a claim names its
+holder and when it ends; the reason for a port lists the node's own ports (at most 12, whole, and says when there are
+more). Both real clients quoted the reasons and followed them; Codex then removed a person's wire to make room on a
+single input, which is why that reason asks whether the wire may go. Only the sender is told, and nothing keeps the
+sentences, so a change sent again under its id is answered with what its codes meant then. The MCP instructions and
+every tool that makes ops say where to look, and a tool's text content is its JSON as written (a wire's `->` and a
+path's `<id>` are not escaped for HTML).
+
+A wire joins an output port to an input port (`nodePort`). Outputs: a form's `data`, a session's or an edit's `result`,
+`out:<field id>` of a node with a contract. Inputs: a session's `context`; `reference` (a picture) of an image, video or
+3D session; `audio` of a video session; `in:<field id>` of a node with a contract; an edit's `timeline`, `clips`,
+`sounds` and `pictures`. An output feeds an input of its own type, and an image, video, audio or 3D result also a text
+input. An input takes one wire, except `context`, a video's `reference` and `audio`, and an edit's `clips`, `sounds`
+and `pictures`. `canvas_connect`'s description names them.
 
 Connecting Claude Code and Codex (the 邀请 Agent panel shows these lines with the token filled in):
 
@@ -356,8 +402,10 @@ codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_appro
 
 Both CLIs ask before a server's tools, and a headless run can answer no prompt. `claude -p` is denied every canvas tool
 ("Claude requested permissions to use mcp__awwo-canvas__canvas_overview, but you haven't granted it yet"), and
-`codex exec` answers "MCP tool call requires approval, but approval policy is never". The `claude -p` and `codex exec`
-lines are therefore the unattended runs. They allow the canvas's tools on their own command line, never in a config file:
+`codex exec` answers "MCP tool call requires approval, but approval policy is never" for each tool its annotations do
+not let it run by itself: since the tools carry annotations (above), the destructive ones (changing or deleting a node,
+removing a wire, raw ops), while the reads and the tools that only add run without the allowance. The `claude -p` and
+`codex exec` lines are therefore the unattended runs. They allow the canvas's tools on their own command line, never in a config file:
 - an interactive session still asks first;
 - a `[mcp_servers.awwo_canvas]` table added before stays as it is (a second one would stop Codex from loading the file);
 - an edit token's allowance covers every tool of the canvas, deleting nodes included, and the run acts on what others
@@ -415,7 +463,8 @@ UPDATE canvas_agent_tokens t SET revoked_at=clock_timestamp() WHERE revoked_at I
 - Shared cases (`apps/canvas-change-vectors.json`) run by the Go and the web tests; `apply(a, diff(a, b)) == b` over
   random documents in both.
 - Go: changes against PostgreSQL (concurrent writers, the fence, claims, the save rules, limits, the log and its reset,
-  resends), the stream (resume, re-checks, revocation, shutdown), tokens, the MCP endpoint.
+  resends), the stream (resume, re-checks, revocation, shutdown), tokens, the MCP endpoint (its tools' annotations, and
+  the reason of every kind of refusal).
 - Web: rebasing confirmed and working documents, undo over others' edits, the save path, the panel and the board.
 - Locally: several agents (HTTP and MCP) and two browsers on one canvas at once; every copy equal to the server's
   document at the end; recorded on video.
