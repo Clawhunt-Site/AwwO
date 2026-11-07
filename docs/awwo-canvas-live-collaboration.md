@@ -330,11 +330,48 @@ An agent's write takes the nodes it wrote for 60 s, or renews its own claim, nev
 | `canvas_say`, `canvas_messages` | writes and reads the live messages |
 | `canvas_apply` | raw ops, for programs that build their own |
 
-Connecting Claude Code:
+Connecting Claude Code and Codex (the 邀请 Agent panel shows these lines with the token filled in):
 
 ```
 claude mcp add --transport http awwo-canvas https://<AwwO host>/api/v1/mcp --header "Authorization: Bearer <token>"
 ```
+
+```
+# ~/.codex/config.toml
+[mcp_servers.awwo_canvas]
+url = "https://<AwwO host>/api/v1/mcp"
+bearer_token_env_var = "AWWO_CANVAS_TOKEN"
+```
+
+Unattended (in the same folder as the `claude mcp add`):
+
+```
+claude -p "<task>" --allowedTools mcp__awwo-canvas
+```
+
+```
+export AWWO_CANVAS_TOKEN="<token>"
+codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"' "<task>"
+```
+
+Both CLIs ask before a server's tools, and a headless run can answer no prompt. `claude -p` is denied every canvas tool
+("Claude requested permissions to use mcp__awwo-canvas__canvas_overview, but you haven't granted it yet"), and
+`codex exec` answers "MCP tool call requires approval, but approval policy is never". The `claude -p` and `codex exec`
+lines are therefore the unattended runs. They allow the canvas's tools on their own command line, never in a config file:
+- an interactive session still asks first;
+- a `[mcp_servers.awwo_canvas]` table added before stays as it is (a second one would stop Codex from loading the file);
+- an edit token's allowance covers every tool of the canvas, deleting nodes included, and the run acts on what others
+  write on the canvas (the panel says to run it in a folder with nothing private); a read token's run can only look.
+
+Details of the lines:
+- The task comes before `--allowedTools`, which takes a list and would swallow a task placed after it.
+- `claude -p` finds the server only in the folder where `claude mcp add` ran, its default (local) scope.
+- `codex exec` refuses to start outside a Git repository or a trusted folder without `--skip-git-repo-check`, and a canvas
+  task needs no repository.
+- The lines are written for bash or zsh, as the export line is.
+
+Checked on 2026-11-07 with the real CLIs, Claude Code 2.1.317 and Codex 0.162.1, on a local stack: the panel's lines as
+shown made their calls, and the same runs without their allowance were refused as quoted above.
 
 ## The canvas page
 

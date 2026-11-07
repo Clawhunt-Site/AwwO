@@ -619,11 +619,20 @@ describe('邀请 Agent', () => {
     const secret = await screen.findByRole('group', { name: '「Claude Code」的令牌' });
     const blocks = [...secret.querySelectorAll('pre')].map(block => block.textContent ?? '');
     expect(blocks[0]).toBe(TOKEN);
+    expect(blocks).toHaveLength(8);
     expect(blocks[1]).toBe(`claude mcp add --transport http awwo-canvas ${MCP_URL} --header "Authorization: Bearer ${TOKEN}"`);
     expect(blocks[2]).toBe(`[mcp_servers.awwo_canvas]\nurl = "${MCP_URL}"\nbearer_token_env_var = "AWWO_CANVAS_TOKEN"`);
     expect(blocks[3]).toBe(`export AWWO_CANVAS_TOKEN="${TOKEN}"`);
-    expect(JSON.parse(blocks[4])).toEqual({ mcpServers: { 'awwo-canvas': { url: MCP_URL, headers: { Authorization: `Bearer ${TOKEN}` } } } });
-    expect(blocks[5]).toBe(`curl -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/tenants/tenant-one/canvases/canvas-one/changes?after=0"`);
+    // Unattended, a CLI can answer no prompt: its own run allows the canvas's tools, never its config file.
+    expect(blocks[4]).toBe('claude -p "<task>" --allowedTools mcp__awwo-canvas');
+    expect(blocks[5]).toBe(`codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"' "<task>"`);
+    const labels = [...secret.querySelectorAll('.awwo-multiplayer-copy-label')].map(label => label.textContent);
+    expect(labels.slice(4, 6)).toEqual(['Claude Code · 无人值守（claude -p）', 'Codex · 无人值守（codex exec）']);
+    // What the two unattended lines allow, right under them: an edit token's runs may change and delete.
+    const unattended = within(secret).getByText('把 <task> 换成要 Agent 做的事；claude -p 要在运行过 claude mcp add 的文件夹里启动。这两条无人值守命令不经询问就使用这张画布的全部工具，包括删除节点，也会照画布上别人写的内容去做，所以请在没有私密文件的文件夹里运行。交互使用时，Claude Code 和 Codex 用画布工具前仍会先问你。随时可以在下面撤销令牌。');
+    expect(unattended.previousElementSibling?.querySelector('pre')?.textContent).toBe(blocks[5]);
+    expect(JSON.parse(blocks[6])).toEqual({ mcpServers: { 'awwo-canvas': { url: MCP_URL, headers: { Authorization: `Bearer ${TOKEN}` } } } });
+    expect(blocks[7]).toBe(`curl -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/tenants/tenant-one/canvases/canvas-one/changes?after=0"`);
     // The secret is in the shown lines only: never a title or a label.
     for (const element of document.body.querySelectorAll('*')) {
       for (const attribute of element.getAttributeNames()) expect(element.getAttribute(attribute) ?? '').not.toContain(TOKEN);
@@ -801,11 +810,51 @@ describe('邀请 Agent', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t create the token: A canvas holds at most 10 live Agent tokens. Revoke one first.');
   });
 
+  it('shows the unattended lines and what they allow, in English', async () => {
+    english(<AgentInvite {...inviteProps({ defaultOpen: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create a token' }));
+    const secret = await screen.findByRole('group', { name: 'Token for “Claude Code”' });
+    expect(within(secret).getByText('Claude Code · unattended (claude -p)')).toBeInTheDocument();
+    expect(within(secret).getByText('Codex · unattended (codex exec)')).toBeInTheDocument();
+    const hint = within(secret).getByText('Put what the Agent should do in place of <task>, and start claude -p in the folder where you ran claude mcp add. These two unattended runs use all of this canvas’s tools without asking, deleting nodes included, and act on what others write on the canvas, so run them in a folder with nothing private. Used interactively, Claude Code and Codex still ask before using a canvas tool. You can revoke the token below at any time.');
+    expect(hint.previousElementSibling?.querySelector('pre')?.textContent).toBe(`codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"' "<task>"`);
+  });
+
+  it('tells a read-only token’s maker that its unattended runs can only look', async () => {
+    const onCreate = vi.fn(async () => ({ token: TOKEN, item: tokenItem({ id: 'tok-0002', name: 'Watcher', scope: 'read' as const }) }));
+    const { unmount } = render(<AgentInvite {...inviteProps({ defaultOpen: true, onCreate })} />);
+    fireEvent.change(screen.getByLabelText('Agent 名称'), { target: { value: 'Watcher' } });
+    fireEvent.click(screen.getByRole('radio', { name: '只读' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成令牌' }));
+    const secret = await screen.findByRole('group', { name: '「Watcher」的令牌' });
+    expect(within(secret).getByText('把 <task> 换成要 Agent 做的事；claude -p 要在运行过 claude mcp add 的文件夹里启动。这两条无人值守命令不经询问就使用这张画布的工具；这个令牌只读，它们只能看，改不了任何东西。随时可以在下面撤销令牌。')).toBeInTheDocument();
+    expect(secret).not.toHaveTextContent('包括删除节点');
+    unmount();
+    english(<AgentInvite {...inviteProps({ defaultOpen: true, onCreate })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create a token' }));
+    const english_ = await screen.findByRole('group', { name: 'Token for “Watcher”' });
+    expect(within(english_).getByText('Put what the Agent should do in place of <task>, and start claude -p in the folder where you ran claude mcp add. These two unattended runs use this canvas’s tools without asking; the token is read only, so they can look but change nothing. You can revoke the token below at any time.')).toBeInTheDocument();
+  });
+
   it('builds the connection lines from the API’s own base and ids', () => {
     const lines = connectionSnippets({ token: TOKEN, mcpUrl: MCP_URL, apiBase: `${API_BASE}/`, tenantId: 'tenant one', canvasId: 'canvas/1' });
     expect(lines.http).toBe(`curl -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/tenants/tenant%20one/canvases/canvas%2F1/changes?after=0"`);
     expect(lines.claude).toContain(MCP_URL);
     expect(lines.codex).toContain(`url = "${MCP_URL}"`);
+    // One table, each line a TOML key with a basic string: what Codex 0.162's --strict-config took.
+    const [table, ...keys] = lines.codex.split('\n');
+    expect(table).toBe('[mcp_servers.awwo_canvas]');
+    expect(Object.fromEntries(keys.map(line => { const [key, value] = line.split(' = '); return [key, JSON.parse(value)]; })))
+      .toEqual({ url: MCP_URL, bearer_token_env_var: 'AWWO_CANVAS_TOKEN' });
+    // The approval rides on the unattended run alone, never into config.toml: an interactive Codex still asks, and a
+    // table pasted before stays as it is (a second [mcp_servers.awwo_canvas] would break the whole file).
+    expect(lines.codex).not.toContain('approval');
+    // The lines' words, for these lines' whole-word quoting (no word mixes quoted and bare parts).
+    const words = (line: string) => [...line.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3]);
+    expect(words(lines.codexUnattended)).toEqual(['codex', 'exec', '--skip-git-repo-check', '-c', 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"', '<task>']);
+    // The task before --allowedTools: it takes a list, which would swallow a task after it.
+    expect(words(lines.claudeUnattended)).toEqual(['claude', '-p', '<task>', '--allowedTools', 'mcp__awwo-canvas']);
+    for (const line of [lines.codex, lines.claudeUnattended, lines.codexUnattended]) expect(line).not.toContain(TOKEN);
   });
 });
 

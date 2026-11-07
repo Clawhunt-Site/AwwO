@@ -51,19 +51,30 @@ export const DEFAULT_AGENT_NAME = 'Claude Code';
 /** The longest name the server keeps for a token. */
 export const AGENT_NAME_MAX = 60;
 
-export interface ConnectionSnippets { claude: string; codex: string; codexEnv: string; cursor: string; http: string }
+export interface ConnectionSnippets {
+  claude: string; claudeUnattended: string; codex: string; codexEnv: string; codexUnattended: string; cursor: string; http: string;
+}
 
-/** The lines that connect an agent to this canvas with a token: Claude Code's command, Codex's config and the shell
- *  line that gives it the token, Cursor's .cursor/mcp.json, and an HTTP read of the canvas's changes. */
+/** The lines that connect an agent to this canvas with a token: Claude Code's command, Codex's config and the shell line
+ *  that gives it the token, each CLI's unattended run, Cursor's .cursor/mcp.json, and an HTTP read of the canvas's
+ *  changes. Both CLIs ask before a server's tools, and a headless run can answer no prompt (checked on 2026-11-07 with
+ *  Claude Code 2.1.317, whose `claude -p` without the canvas's tools allowed did not use them, and Codex 0.162.1, whose
+ *  `codex exec` answered "MCP tool call requires approval, but approval policy is never"). So the unattended lines allow
+ *  the canvas's tools on their own command line, never in a config file: an interactive session still asks, and a config
+ *  table pasted before stays as it is (a second [mcp_servers.awwo_canvas] table would break Codex's whole config.toml). */
 export function connectionSnippets({ token, mcpUrl, apiBase, tenantId, canvasId }: {
   token: string; mcpUrl: string; apiBase: string; tenantId: string; canvasId: string;
 }): ConnectionSnippets {
   const changes = `${apiBase.replace(/\/+$/, '')}/tenants/${encodeURIComponent(tenantId)}/canvases/${encodeURIComponent(canvasId)}/changes?after=0`;
   return {
     claude: `claude mcp add --transport http awwo-canvas ${mcpUrl} --header "Authorization: Bearer ${token}"`,
+    // The task before --allowedTools: it takes a list, which would swallow a task put after it.
+    claudeUnattended: 'claude -p "<task>" --allowedTools mcp__awwo-canvas',
     // A TOML basic string takes JSON's escapes.
     codex: `[mcp_servers.awwo_canvas]\nurl = ${JSON.stringify(mcpUrl)}\nbearer_token_env_var = "AWWO_CANVAS_TOKEN"`,
     codexEnv: `export AWWO_CANVAS_TOKEN="${token}"`,
+    // A canvas task needs no Git repository, and outside one (or a trusted folder) codex exec refuses to start without it.
+    codexUnattended: `codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"' "<task>"`,
     cursor: JSON.stringify({ mcpServers: { 'awwo-canvas': { url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
     http: `curl -H "Authorization: Bearer ${token}" "${changes}"`,
   };
@@ -190,6 +201,9 @@ function TokenSecret({ created, lines, secretRef, doneRef, onDone }: {
     <CopyBlock label={t('invite.forClaude')} value={lines.claude} />
     <CopyBlock label={t('invite.forCodex')} value={lines.codex} />
     <CopyBlock label={t('invite.forCodexEnv')} value={lines.codexEnv} />
+    <CopyBlock label={t('invite.forClaudeUnattended')} value={lines.claudeUnattended} />
+    <CopyBlock label={t('invite.forCodexUnattended')} value={lines.codexUnattended} />
+    <p className="awwo-multiplayer-hint">{t(created.item.scope === 'read' ? 'invite.unattendedHintRead' : 'invite.unattendedHint')}</p>
     <CopyBlock label={t('invite.forCursor')} value={lines.cursor} />
     <CopyBlock label={t('invite.forHttp')} value={lines.http} />
     <button type="button" ref={doneRef} className="awwo-multiplayer-primary" onClick={onDone}>{t('invite.done')}</button>
