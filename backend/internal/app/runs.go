@@ -475,6 +475,10 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Once the free plan has ended a free workspace starts no run, before anything is reserved (free_plan.go).
+	if !a.freePlanAdmits(w, r, tx, tid, plan) {
+		return
+	}
 	// Admission shares the tenant lock with graph creation. A Session reserved
 	// by a collaboration cannot accept an interleaved manual turn between phases.
 	var reserved bool
@@ -540,7 +544,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		// composer becomes the generation's reference where the node's model takes one (freezeMediaPrompt); every
 		// other file line is dropped from what is generated, so a message of files alone has no words, which the
 		// model's prompt bounds refuse before anything is paid (a 3D model built from a picture needs none).
-		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, canvasID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan})
+		a.createMediaRun(w, r, tx, tid, b, hash, document, nodeID, canvasID, model, entitlement, readRouteLimits(routes), plan != nil, workspaceLimits{active, concurrent, today, daily, needsPlan, a.cfg.FreePlanUntil})
 		return
 	}
 	// A page's automatic repairs, whichever browser asks: at most one of each kind in a row (page_repair.go), the rest
@@ -823,7 +827,7 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		snapshot.History, snapshot.HistoryAvailable = &history, available
 	}
 	if plan != nil {
-		own := workspaceLimits{active, concurrent, today, daily, needsPlan}
+		own := workspaceLimits{active, concurrent, today, daily, needsPlan, a.cfg.FreePlanUntil}
 		if operatorPlanner {
 			own.today = 0 // the daily calls never hold the operator's planner call (planner_model.go)
 		}
@@ -836,6 +840,9 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 			return
 		case errors.Is(e, errPlanRequired):
 			fail(w, 402, "plan_required", "This workspace needs its owner's paid plan")
+			return
+		case errors.Is(e, errFreePlanEnded):
+			failFreePlanEnded(w)
 			return
 		case e != nil:
 			a.dbError(w, e)

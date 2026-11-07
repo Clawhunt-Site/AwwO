@@ -475,6 +475,8 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 			switch e = own.admit(ctx, tx, tid); {
 			case errors.Is(e, errPlanRequired):
 				return none, &mediaRefusal{402, "plan_required", "This workspace needs its owner's paid plan"}
+			case errors.Is(e, errFreePlanEnded):
+				return none, &mediaRefusal{402, "free_plan_ended", freePlanEndedMessage}
 			case errors.Is(e, errInvocationQuota):
 				return none, &mediaRefusal{429, "quota_exceeded", "Workspace run quota exceeded"}
 			case e != nil:

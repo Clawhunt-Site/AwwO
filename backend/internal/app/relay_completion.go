@@ -274,8 +274,9 @@ type relayGate struct {
 }
 
 // openRelayGate locks a relayed call's workspace and refuses the call outright when its key is no longer live or its
-// member no longer one, the workspace is suspended, its entitlement leaves the model out, it needs a plan it lacks, a
-// plan-only model's gate is closed, or its owner's plan would pay for a model this site cannot price.
+// member no longer one, the workspace is suspended, its entitlement leaves the model out, it needs a plan it lacks, the
+// free plan has ended for it, a plan-only model's gate is closed, or its owner's plan would pay for a model this site
+// cannot price.
 func (a *App) openRelayGate(ctx context.Context, tx pgx.Tx, caller relayCaller, facts *invocationFacts) (relayGate, error) {
 	var g relayGate
 	var status string
@@ -302,6 +303,10 @@ func (a *App) openRelayGate(ctx context.Context, tx pgx.Tx, caller relayCaller, 
 		return g, errModelNotAllowed
 	}
 	if e = requiresPlan(ctx, tx, caller.tenantID, needsPlan, g.plan); e != nil {
+		return g, e
+	}
+	// A relayed call belongs to no run, so each one is a new admission that the free plan's end closes (free_plan.go).
+	if e = freePlanClosed(ctx, tx, caller.tenantID, a.cfg.FreePlanUntil, g.plan); e != nil {
 		return g, e
 	}
 	if a.cfg.planOnlyModel(facts.Model) {
@@ -389,8 +394,9 @@ func relayBusy(w http.ResponseWriter) {
 }
 
 // relayRefusal answers a call whose admission was refused: its plan, allowance and route codes (admissionRefusal) as 429,
-// a plan the workspace needs as 402, an unpriced model as 503, the entitlement as 403, no place freed in time as busy. A
-// refusal that trying again will not change soon says so (x-should-retry, which OpenAI's clients read).
+// a plan the workspace needs and the free plan's end as 402, an unpriced model as 503, the entitlement as 403, no place
+// freed in time as busy. A refusal that trying again will not change soon says so (x-should-retry, which OpenAI's
+// clients read).
 func relayRefusal(w http.ResponseWriter, e error) {
 	code := admissionRefusal(e)
 	if code != "" || errors.Is(e, errModelNotAllowed) || errors.Is(e, errRelayRevoked) {
@@ -399,6 +405,8 @@ func relayRefusal(w http.ResponseWriter, e error) {
 	switch {
 	case code == "plan_required":
 		fail(w, 402, code, "This workspace's owner needs a plan for it")
+	case code == "free_plan_ended":
+		fail(w, 402, code, freePlanEndedMessage)
 	case code == "model_unpriced":
 		fail(w, 503, code, "This model cannot be charged yet")
 	case code != "":

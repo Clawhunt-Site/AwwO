@@ -88,6 +88,9 @@ type Config struct {
 	FreeModelTotalPerDay int
 	// Promo is a free-allowance promotion with its daily check-ins (promo.go, AWWO_PROMO_*); the zero value runs none.
 	Promo promotion
+	// FreePlanUntil is when the free plan ends (free_plan.go, AWWO_FREE_PLAN_UNTIL): from then on a free workspace runs
+	// nothing until its owner subscribes. Zero: the free plan never ends.
+	FreePlanUntil time.Time
 	// First ClawHunt sign-ins (clawhunt_signup.go): accounts a client address may create per UTC day (0: no limit),
 	// and whether a new account needs the issuer to report its email verified. Existing accounts are never held.
 	NewAccountsPerIPPerDay int
@@ -262,6 +265,9 @@ func ConfigFromEnv() (Config, error) {
 	if err := c.promoSettingsFromEnv(); err != nil {
 		return c, err
 	}
+	if err := c.freePlanSettingFromEnv(); err != nil {
+		return c, err
+	}
 	if err := c.signupSettingsFromEnv(); err != nil {
 		return c, err
 	}
@@ -320,6 +326,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.validatePromoSettings(); err != nil {
+		return err
+	}
+	if err := c.validateFreePlan(); err != nil {
 		return err
 	}
 	if err := c.validateSignupSettings(); err != nil {

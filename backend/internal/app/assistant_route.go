@@ -438,24 +438,34 @@ func (a *App) modelRoute(ctx context.Context, tid string, entitlement modelEntit
 
 var errRouteFallback = errors.New("fallback")
 
-// routeNeedsPlan says whether the workspace exists only under its owner's paid plan while that plan does not allow it
-// now (plans.go). Such a workspace runs nothing, so no model is called to route its messages.
-func (a *App) routeNeedsPlan(ctx context.Context, tid string) (bool, error) {
+// routeClosed says why the workspace runs nothing now, so that no model is called for it (to route its messages, or to
+// learn from its runs): plan_required while it exists only under its owner's paid plan and that plan does not allow it
+// (plans.go), free_plan_ended once the free plan's end closes it (free_plan.go); "" when it runs.
+func (a *App) routeClosed(ctx context.Context, tid string) (string, error) {
 	var needsPlan bool
-	if err := a.db.QueryRow(ctx, "SELECT requires_plan FROM tenants WHERE id=$1", tid).Scan(&needsPlan); err != nil || !needsPlan {
-		return false, err
+	if err := a.db.QueryRow(ctx, "SELECT requires_plan FROM tenants WHERE id=$1", tid).Scan(&needsPlan); err != nil {
+		return "", err
+	}
+	if !needsPlan && !a.cfg.freePlanEnded(time.Now()) {
+		return "", nil
 	}
 	plan, err := ownerPlan(ctx, a.db, tid, false)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	switch err := requiresPlan(ctx, a.db, tid, true, plan); {
+	switch err := requiresPlan(ctx, a.db, tid, needsPlan, plan); {
 	case errors.Is(err, errPlanRequired):
-		return true, nil
+		return "plan_required", nil
 	case err != nil:
-		return false, err
+		return "", err
 	}
-	return false, nil
+	switch err := freePlanClosed(ctx, a.db, tid, a.cfg.FreePlanUntil, plan); {
+	case errors.Is(err, errFreePlanEnded):
+		return "free_plan_ended", nil
+	case err != nil:
+		return "", err
+	}
+	return "", nil
 }
 
 func (a *App) assistantRoute(w http.ResponseWriter, r *http.Request) {
@@ -494,11 +504,12 @@ func (a *App) assistantRoute(w http.ResponseWriter, r *http.Request) {
 	result := assistantRouteResult{Route: routePlan, Basis: "fallback"}
 	started := time.Now()
 	err := errRouteFallback
-	if needsPlan, gateErr := a.routeNeedsPlan(r.Context(), tid); gateErr != nil {
+	if closed, gateErr := a.routeClosed(r.Context(), tid); gateErr != nil {
 		err = routeError("router_plan_unavailable")
-	} else if needsPlan {
-		// The planner then refuses the message itself, saying the workspace needs its owner's plan.
-		err = routeError("router_plan_required")
+	} else if closed != "" {
+		// The planner then refuses the message itself, saying the workspace needs its owner's plan
+		// (router_plan_required, router_free_plan_ended).
+		err = routeError("router_" + closed)
 	} else if release, refused := a.routeLimiter.acquire(currentUser(r).ID, started); refused != "" {
 		err = routeError(refused)
 	} else {
@@ -519,7 +530,7 @@ func (a *App) assistantRoute(w http.ResponseWriter, r *http.Request) {
 	var refusal routeError
 	switch {
 	case errors.As(err, &refusal) && (refusal == "router_busy" || refusal == "user_in_flight" || refusal == "user_budget" || refusal == "router_worker_busy" ||
-		refusal == "router_plan_required"):
+		refusal == "router_plan_required" || refusal == "router_free_plan_ended"):
 		// A bound doing its job: routine under load, not a fault.
 		a.log.Info("assistant routing fell back to planning", "tenant", tid, "code", err.Error())
 	case err != nil:

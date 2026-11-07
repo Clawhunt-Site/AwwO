@@ -223,14 +223,20 @@ func runCallsRunning(ctx context.Context, q querier, tid, rid string) (int, erro
 }
 
 // workspaceLimits are a workspace's own allowances, read where a run is admitted: what applies when the owner's plan
-// lapses between the first read and the locked one.
+// lapses between the first read and the locked one. freeUntil is the free plan's end (free_plan.go) for a new run's
+// admission, which then falls back to the free plan; zero for a step of a run admitted already, which finishes as it
+// would have.
 type workspaceLimits struct {
 	active, concurrent, today, daily int
 	needsPlan                        bool
+	freeUntil                        time.Time
 }
 
 func (l workspaceLimits) admit(ctx context.Context, q querier, tid string) error {
 	if err := requiresPlan(ctx, q, tid, l.needsPlan, nil); err != nil {
+		return err
+	}
+	if err := freePlanClosed(ctx, q, tid, l.freeUntil, nil); err != nil {
 		return err
 	}
 	if l.active >= l.concurrent || l.today >= l.daily {
@@ -598,13 +604,15 @@ func mediaCreditsFor(model, kind string, params map[string]any) int {
 }
 
 // admissionRefusal is the code of an allowance or plan refusal from reserveInvocation, which a run reports as
-// its own error instead of a generic failure; "" for any other error.
+// its own error instead of a generic failure, or from a relayed call's admission (relay_completion.go), which also
+// refuses one once the free plan has ended (free_plan_ended); "" for any other error.
 func admissionRefusal(err error) string {
 	if err == nil {
 		return ""
 	}
 	switch code := err.Error(); code {
-	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded", "free_capacity_exceeded", "credits_exhausted", "plan_required", "model_unpriced", "plan_busy":
+	case "quota_exceeded", "premium_quota_exceeded", "premium_capacity_exceeded", "free_capacity_exceeded", "credits_exhausted", "plan_required", "model_unpriced", "plan_busy",
+		"free_plan_ended":
 		return code
 	}
 	return ""

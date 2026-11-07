@@ -98,11 +98,18 @@ func (a *App) routeUsageWithStored(ctx context.Context, tid, uid string) (routeA
 // plan and this period's credits instead of routes. The credits are the account's, shared by everyone who
 // runs things in its workspaces; the renewal date and a pending cancellation are shown to the owner alone,
 // and a reader, who runs nothing, is not shown the plan. While a promotion raises the workspace (promo.go) it
-// reports the promotion's floors (promo) and, to a member who may run things, today's check-in (checkin).
+// reports the promotion's floors (promo) and, to a member who may run things, today's check-in (checkin). Where the
+// free plan ends (free_plan.go) a workspace the end holds reports when and whether it has (freePlan), to everyone.
 func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tid, uid := r.PathValue("tenantId"), currentUser(r).ID
 	daily, routes, interested, plan, stored, e := a.routeUsageWithStored(ctx, tid, uid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	// Read with the owner's plan, before a reader's view leaves it out: the end closes the workspace for everyone.
+	freePlan, e := a.freePlanView(ctx, a.db, tid, plan)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -118,6 +125,9 @@ func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"limited": routes != nil, "daily": daily, "interested": interested,
 		"resetsAt": time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)}
+	if freePlan != nil {
+		out["freePlan"] = freePlan
+	}
 	if routes != nil {
 		limits := readRouteLimits(stored.routes)
 		offered, e := a.checkinOffered(ctx, a.db, tid, stored.status, stored.daily, stored.routes)

@@ -1216,10 +1216,10 @@ func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (
 	// holds) is let go after memoryDistillRunTime rather than holding up the rest.
 	ctx, cancel := context.WithTimeout(ctx, memoryDistillRunTime)
 	defer cancel()
-	// A workspace that is suspended, or exists only under its owner's paid plan while that plan does not allow it, has
-	// the model asked nothing for it, as the canvas assistant's router asks nothing (routeNeedsPlan); nor one that does
-	// not learn from the run now (learning.go: turned off, or on again only after the run began): what queued the run is
-	// asked again before its record goes to the model.
+	// A workspace that is suspended, exists only under its owner's paid plan while that plan does not allow it, or that
+	// the free plan's end closed (free_plan.go), has the model asked nothing for it, as the canvas assistant's router
+	// asks nothing (routeClosed); nor one that does not learn from the run now (learning.go: turned off, or on again only
+	// after the run began): what queued the run is asked again before its record goes to the model.
 	since := a.cfg.SelfLearningSince
 	var status string
 	var learns bool
@@ -1234,10 +1234,10 @@ func (a *App) distillRunMemory(ctx context.Context, tid, canvasID, gid string) (
 	if !learns {
 		return "skipped", 0, "learning_off"
 	}
-	if needsPlan, err := a.routeNeedsPlan(ctx, tid); err != nil {
+	if closed, err := a.routeClosed(ctx, tid); err != nil {
 		return "queued", 0, "plan_unreadable"
-	} else if needsPlan {
-		return "skipped", 0, "plan_required"
+	} else if closed != "" {
+		return "skipped", 0, closed
 	}
 	briefing, pool, echoes, err := a.distillationBriefing(ctx, tid, canvasID, gid)
 	if err != nil {

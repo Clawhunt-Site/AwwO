@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,8 +21,10 @@ import (
 //
 // A run of a paid Agent holds its price at admission (market_agent_calls, status reserved), in the transaction that
 // admits it and under the owner's plan row, as a paid model call holds its reserve (creditsSpentSQL counts it while
-// the run is active). Only the workspace's owner or an administrator runs a paid Agent: its price goes to a third
-// party. The run's end settles it (marketChargedRun): charged when it completed, and when the caller stopped it, or
+// the run is active). Only the workspace's owner or an administrator runs an author's paid Agent: its price goes to a
+// third party. AwwO's own (official) Agents cost the official price from its start (AWWO_MARKET_OFFICIAL_PRICE,
+// market_config.go), which is the platform's: any member who may run nodes runs them, and no author earns from them.
+// The run's end settles it (marketChargedRun): charged when it completed, and when the caller stopped it, or
 // its node's own output contract refused it, after the Agent had written text the caller can read; released
 // otherwise. A canvas node whose run completed but which then fails its delivery checks keeps the charge, as the
 // checks are the node's own, unless storing its deliverable failed (marketDeliveryFailed).
@@ -111,9 +114,11 @@ var errMarketPlanRequired = errors.New("market_agent_plan_required")
 // to the Agent's author out of the owner's credits.
 var errMarketRoleRequired = errors.New("market_agent_role_required")
 
-// marketPaidRole checks that an actor of the given workspace role may run a paid Agent.
+// marketPaidRole checks that an actor of the given workspace role may run a paid Agent. An author's is the owner's or an
+// administrator's to run, as its price pays a third party out of the owner's credits; an official Agent's price is the
+// platform's, as a paid model call's is, so any member who may run nodes runs it.
 func marketPaidRole(use *marketRun, role string) error {
-	if use != nil && use.Price > 0 && roleLevel(role) < roleLevel("admin") {
+	if use != nil && use.Price > 0 && !use.Agent.Official && roleLevel(role) < roleLevel("admin") {
 		return errMarketRoleRequired
 	}
 	return nil
@@ -341,7 +346,8 @@ func (a *App) admitMarketRun(ctx context.Context, tx pgx.Tx, tid, sid, nodeID, a
 	if v.Kind != "llm" || sandboxRuntime(v.Model.Runtime) {
 		return nil, marketNotUsable("A market Agent runs on a text node")
 	}
-	use := &marketRun{Agent: m, Version: v, Price: v.Price}
+	// An official Agent costs the official price once it starts (market_config.go), its stored version's 0 before.
+	use := &marketRun{Agent: m, Version: v, Price: a.cfg.marketPriceAt(m, v, time.Now())}
 	if m.AuthorUserID != nil {
 		use.Insider = actor == *m.AuthorUserID
 		if !use.Insider {
@@ -350,10 +356,34 @@ func (a *App) admitMarketRun(ctx context.Context, tx pgx.Tx, tid, sid, nodeID, a
 			}
 		}
 	}
-	if use.Insider || m.Official {
+	if use.Insider {
 		use.Price = 0
 	}
+	// AwwO does not charge itself: in its own workspaces an official Agent takes no fee (officialFeeWaived).
+	if m.Official && use.Price > 0 {
+		waived, err := officialFeeWaived(ctx, tx, tid)
+		if err != nil {
+			return nil, err
+		}
+		if waived {
+			use.Price = 0
+		}
+	}
 	return use, nil
+}
+
+// officialFeeWaived reports whether a workspace takes AwwO's official Agents without their fee: one with no route limits,
+// which no plan can cover (entitledPlanSQL), or one a platform administrator owns, which the free plan's end leaves open
+// the same way (free_plan.go). Without this a priced official Agent could never run there, plan or not.
+func officialFeeWaived(ctx context.Context, q querier, tid string) (bool, error) {
+	var limited bool
+	if err := q.QueryRow(ctx, "SELECT route_limits IS NOT NULL FROM tenants WHERE id=$1", tid).Scan(&limited); err != nil {
+		return false, err
+	}
+	if !limited {
+		return true, nil
+	}
+	return operatorWorkspace(ctx, q, tid)
 }
 
 // savedMarketAgentReference reads the market Agent a saved node names, if any.
@@ -397,7 +427,9 @@ func relockMarketRun(ctx context.Context, tx pgx.Tx, use *marketRun, actor strin
 
 // reserveMarketCall records a market Agent's run as it is admitted, holding its price on the owner's plan. plan is
 // the owner's entitled plan read under its row lock (or nil): a paid Agent needs one, with credits left for its
-// price. A free or insider call holds nothing and is recorded all the same, for the ranking.
+// price. A call without a price or an insider's holds nothing and is recorded all the same, for the ranking. An
+// official Agent's price is the platform's whole (fee 10000 basis points): its call earns no author, so it is settled
+// none from the start, and the settlement job never reads its payer's plan again for it (market_settle.go).
 func (a *App) reserveMarketCall(ctx context.Context, tx pgx.Tx, tid, rid, actor string, use *marketRun, plan *activePlan) error {
 	if use == nil {
 		return nil
@@ -412,9 +444,13 @@ func (a *App) reserveMarketCall(ctx context.Context, tx pgx.Tx, tid, rid, actor 
 		}
 		billed, start, end = plan.UserID, plan.PeriodStart, plan.PeriodEnd
 	}
+	fee, settlement := a.cfg.MarketFeeBps, "open"
+	if use.Agent.Official {
+		fee, settlement = 10000, "none"
+	}
 	_, err := tx.Exec(ctx, `INSERT INTO market_agent_calls(id,agent_id,version,author_user_id,tenant_id,run_id,actor_id,billed_user_id,billed_period_start,billed_period_end,
-		price_credits,fee_bps,insider,status) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13,'reserved')`,
-		randomID(), use.Agent.ID, use.Version.Version, use.Agent.AuthorUserID, tid, rid, actor, billed, start, end, use.Price, a.cfg.MarketFeeBps, use.Insider)
+		price_credits,fee_bps,insider,status,settlement) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13,'reserved',$14)`,
+		randomID(), use.Agent.ID, use.Version.Version, use.Agent.AuthorUserID, tid, rid, actor, billed, start, end, use.Price, fee, use.Insider, settlement)
 	return err
 }
 
@@ -476,15 +512,16 @@ const marketKeptTextEnds = `'output_contract_invalid','output_limit','model_refu
 // marketSettleCallsSQL settles the held market calls of runs that have ended, as marketChargedRun says, and records
 // what the ranking reads: the outcome and its code, whether it counts for nothing (platform_fault: neither a completed
 // run with text nor one of marketAgentFaults, $1), how long the run took and what its model calls cost (settled before
-// this). settleMarketCall narrows it to one run; the settlement job runs it for every run whose own end did not
-// (reconcileMarketCalls).
+// this). Only a charged price an author earns from waits to be settled (open): not an insider's, and not an official
+// Agent's (no author: the platform's revenue). settleMarketCall narrows it to one run; the settlement job runs it for
+// every run whose own end did not (reconcileMarketCalls).
 const marketSettleCallsSQL = `UPDATE market_agent_calls c SET status=CASE WHEN ` + marketChargedRun + ` THEN 'charged' ELSE 'released' END,
 	outcome=r.status,outcome_code=left(r.error,200),
 	platform_fault=NOT ((r.status='completed' AND ` + marketWroteText + `) OR (r.status='failed' AND r.error=ANY($1))),
 	duration_ms=GREATEST(0,(EXTRACT(EPOCH FROM r.updated_at-r.created_at)*1000)::bigint),
 	model_credits=(SELECT sum(COALESCE(i.credit_charge,i.credit_reserve))::int FROM model_invocations i
 		WHERE i.tenant_id=r.tenant_id AND i.run_id=r.id AND i.credit_reserve IS NOT NULL),
-	settlement=CASE WHEN ` + marketChargedRun + ` AND c.price_credits>0 AND NOT c.insider THEN 'open' ELSE 'none' END,settled_at=clock_timestamp()
+	settlement=CASE WHEN ` + marketChargedRun + ` AND c.price_credits>0 AND NOT c.insider AND c.author_user_id IS NOT NULL THEN 'open' ELSE 'none' END,settled_at=clock_timestamp()
 	FROM runs r WHERE c.status='reserved' AND r.tenant_id=c.tenant_id AND r.id=c.run_id AND r.status NOT IN ('queued','running')`
 
 // marketStoppedCallSQL releases the held market call of a run ($1, $2) the API itself stopped, as an interruption's.

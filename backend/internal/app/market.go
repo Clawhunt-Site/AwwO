@@ -221,10 +221,18 @@ func (a *App) registerMarketRoutes(m *http.ServeMux) {
 	m.HandleFunc("PUT /api/v1/tenants/{tenantId}/runs/{id}/market-rating", a.tenant(a.rateMarketRun, 2))
 }
 
-// marketCapability is what /capabilities tells the web app about the market.
+// marketCapability is what /capabilities tells the web app about the market: with an official price, that price and
+// when it starts (market_config.go), so a page can say so before it does.
 func (a *App) marketCapability() map[string]any {
-	return map[string]any{"enabled": a.cfg.MarketEnabled, "payouts": a.cfg.MarketPayouts,
+	out := map[string]any{"enabled": a.cfg.MarketEnabled, "payouts": a.cfg.MarketPayouts,
 		"feeBps": a.cfg.MarketFeeBps, "maxPrice": a.cfg.MarketMaxPrice, "holdDays": a.cfg.MarketHoldDays}
+	if a.cfg.MarketOfficialPrice > 0 {
+		out["officialPrice"] = a.cfg.MarketOfficialPrice
+		if !a.cfg.MarketOfficialPriceFrom.IsZero() {
+			out["officialPriceFrom"] = a.cfg.MarketOfficialPriceFrom.UTC()
+		}
+	}
+	return out
 }
 
 // marketDraftInput is what an author sends for a draft.

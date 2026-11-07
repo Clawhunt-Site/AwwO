@@ -20,7 +20,8 @@ import (
 // Agent itself causes (platform_fault; marketAgentFaults, market_use.go) count for nothing; a completed call is a
 // success unless its caller rated it 👎; a call failed by the Agent itself is a failure. So that the ranking costs
 // what it shows, only calls at the listed version's price or above count (a free version's calls do not rank a paid
-// one), and at most marketDailyCount of one person's calls of one Agent a day. The score is the lower bound of the
+// one; an official Agent's version keeps its stored 0, so its calls count before its official price starts and after),
+// and at most marketDailyCount of one person's calls of one Agent a day. The score is the lower bound of the
 // Wilson interval of the success rate (95%), so few calls rank low, and an Agent ranks once it has marketRankRuns
 // counted calls from marketRankUsers people.
 
@@ -234,6 +235,8 @@ func (a *App) listMarketAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list := []marketListing{}
+	// An official Agent lists, and sorts, at what a call to it costs now (market_config.go).
+	now := time.Now()
 	for rows.Next() {
 		var l marketListing
 		if err = rows.Scan(&l.agent.ID, &l.agent.AuthorUserID, &l.agent.AuthorDisplay, &l.agent.Official, &l.agent.Status, &l.agent.ListedVersion,
@@ -243,6 +246,7 @@ func (a *App) listMarketAgents(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, err)
 			return
 		}
+		l.version.Price = a.cfg.marketPriceAt(l.agent, l.version, now)
 		list = append(list, l)
 	}
 	rows.Close()
@@ -359,6 +363,9 @@ func (a *App) getMarketAgent(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
+	// Any version of an official Agent costs the official price now (market_config.go), a pinned one too.
+	now := time.Now()
+	v.Price = a.cfg.marketPriceAt(m, v, now)
 	out := marketSummary(m, v, stats[m.ID])
 	full := author || admin
 	detail := marketVersionJSON(v, full)
@@ -373,6 +380,7 @@ func (a *App) getMarketAgent(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, err)
 			return
 		}
+		latest.Price = a.cfg.marketPriceAt(m, latest, now)
 		out["status"], out["listedVersion"] = m.Status, m.ListedVersion
 		out["latest"] = marketLatestJSON(latest)
 	}

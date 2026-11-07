@@ -9,7 +9,7 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 这次一起上线的范围：
 
 1. **市场**：发布、平台审核、上架、按真实运行结果排行，在画布节点上选用并调用。
-2. **按次收费**：作者给每次调用定价（点数，可以是 0），运行完成才扣；在 Agent 写出内容前就结束的、平台和服务商的故障都不扣。调用方拿到了 Agent 写的内容、运行却没算完成的情况照扣：Agent 已经写出内容后，调用方取消、节点自己的输出约定（调用方的配置）拒收、输出被截断、中途拒答或运行超时（业主 2026-10-29 选择照扣；这些结束不计入排行）。
+2. **按次收费**：作者给每次调用定价（点数，可以是 0：不收 Agent 费，只收模型费），运行完成才扣；在 Agent 写出内容前就结束的、平台和服务商的故障都不扣。调用方拿到了 Agent 写的内容、运行却没算完成的情况照扣：Agent 已经写出内容后，调用方取消、节点自己的输出约定（调用方的配置）拒收、输出被截断、中途拒答或运行超时（业主 2026-10-29 选择照扣；这些结束不计入排行）。
 3. **作者账本**：平台抽成（默认 25%），作者的份额只来自调用方买来的点数。
 4. **月度账单与转账（AwwO 一侧）**：不自动转账（业主 2026-10-29：「不要自动转账，按照次数累计解决，一个月一次统计完整的调用次数」）。每个日历月（UTC）结束后，把每位作者当月确定的收益汇总成一张账单（调用次数、点数、收益，按 Agent 分列），平台管理员核对、批准后才转进作者的 ClawHunt 钱包。钱包入账与让 AwwO 收益可提现是 ClawHunt 的另一次发布（业主 2026-10-29 选择「先上市场，提现单独再上」）；顺序是 AwwO 先上线月度账单，ClawHunt 再打开入账，AwwO 再打开转账，然后业主批准第一张账单。
 
@@ -20,7 +20,7 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 - **市场 Agent**（`market_agents`）：作者发布的一个 Agent，带多个版本。
 - **版本**（`market_agent_versions`）：一份不可修改的定义：介绍、隐藏的指令、最多 4 个冻结的技能、推荐模型、价格、示例。价格属于版本，改价就是发新版本，要重新审核。
 - **调用**（`market_agent_calls`）：一个节点用市场 Agent 跑的一次运行，一次运行一行。它既是计费记录，也是排行的数据来源。这张表不随工作区删除：作者的收益不能跟着调用方的工作区一起消失。
-- **官方 Agent**：AwwO 自带的免费 Agent（作者为空，`official=true`），来自网页已经内置的 39 个 wshobson/agents 角色（MIT），指令公开；同一份内置里的 8 个公司角色不收，它们是写给彼此委派的 Agent 团队的，不适合单个画布节点。
+- **官方 Agent**：AwwO 自带的 Agent（作者为空，`official=true`，种子版本的价格为 0），来自网页已经内置的 39 个 wshobson/agents 角色（MIT），指令公开；每次调用的价格由部署设置（`AWWO_MARKET_OFFICIAL_PRICE`，从 `AWWO_MARKET_OFFICIAL_PRICE_FROM` 起；不设则不收 Agent 费），收入归平台（见「计费」）；同一份内置里的 8 个公司角色不收，它们是写给彼此委派的 Agent 团队的，不适合单个画布节点。
 
 ## 数据（迁移 045）
 
@@ -51,7 +51,7 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 - **不计入**：insider 的调用（作者本人发起的，或在作者自己是所有者的工作区里的，见计费）、取消、画布节点运行完成后没通过节点自己的交付检查（检查是调用方的配置）、完成了却没写出文字的运行，以及「失败」里没列的一切失败：平台、worker 或服务商的故障（限流、凭据、服务不可用、调用卡住、执行中断、worker 报不出原因的失败 `runtime_failed`、事件流断开等）、额度与套餐拒绝、交付文件存储失败、调用方节点的输出约定拒收（`output_contract_invalid`），也包括输出被截断、模型拒答、超时：这些既可能是 Agent 的问题，也可能是调用方的任务太大或服务商的问题，分不清的就不算 Agent 的（`marketAgentFaults` 是白名单，不是黑名单：新出现的失败码默认不计）。
 - **成功**：运行完成并写出了文字，且调用方没有评 👎。
 - **失败**：运行以 Agent 自身的原因失败（目前只有只写出了推理过程、没有回答 `reasoning_only_output`），或调用方评了 👎。
-- **刷不动**：只计价格不低于当前上架版本价格的调用（免费版本时的调用不给之后的付费版本加分），每个调用人对每个 Agent 每天（UTC）最多计 3 次；👍/👎 只能给已计费（Agent 交出了文字）的调用，insider 的不算。
+- **刷不动**：只计价格不低于当前上架版本价格的调用（价格为 0 的版本时的调用不给之后的付费版本加分；官方 Agent 存的版本价格一直是 0，所以它们的调用在官方价格开始前后都照常计入），每个调用人对每个 Agent 每天（UTC）最多计 3 次；👍/👎 只能给已计费（Agent 交出了文字）的调用，insider 的不算。
 - **综合分**：成功率的 Wilson 下限（95%），样本少时分数自动压低。至少 10 次有效运行、3 个不同调用人才进排行，之前放在「新上架」。排行数字最多一分钟前，评价不触发重算。
 - 另外展示：调用次数、成功率、调用人数、👍/👎、平均耗时、平均模型花费（点数）。
 
@@ -70,15 +70,16 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 ## 计费
 
 - **扣谁**：和模型调用一样，扣工作区所有者的套餐点数（`billed_user_id` 与计费期）。
-- **谁能用付费 Agent**：只有工作区的所有者和管理员（admin 以上）：Agent 费是从所有者的点数里付给第三方的，普通成员不能替所有者花这笔钱，否则 403 `market_agent_role_required`（节点自己的运行在受理时查发起人，画布运行在受理和每个节点受理时查画布运行的发起人）。免费 Agent 成员照常能用。
+- **谁能用付费 Agent**：作者的付费 Agent 只有工作区的所有者和管理员（admin 以上）能用：Agent 费是从所有者的点数里付给第三方的，普通成员不能替所有者花这笔钱，否则 403 `market_agent_role_required`（节点自己的运行在受理时查发起人，画布运行在受理和每个节点受理时查画布运行的发起人）。官方 Agent 的价格是平台的收入，和付费模型的调用一样，工作区里能运行节点的成员都能用（业主 2026-11-07）。不收 Agent 费的 Agent（价格 0）成员照常能用。
 - **何时预扣**：节点运行被受理时（节点自己的运行在 `createRun`，画布运行的每个节点在 `admitGraphChild`），在套餐行锁之下检查点数够不够，插入一行 `reserved` 的调用。点数余额的计算（`creditsSpentSQL`）把 reserved 与 charged 的 Agent 费算进去，所以 Agent 费和模型费共用同一个余额，不会超支。
 - **何时结算**（`marketChargedRun`，运行结束的同一事务里，后台任务补结算用同一条语句）：完成为 charged；Agent 已经写出文字后，调用方取消、节点自己的输出约定拒收（`output_contract_invalid`）、输出被截断（`output_limit`）、模型中途拒答（`model_refused`）、运行超时（`run_timeout`）也是 charged（`marketKeptTextEnds`），因为运行的文字调用方照样能看到，而且这些结束调用方都能在拿到文字后故意造成（业主 2026-10-29 选择「照扣」）；这些结束都不计入排行。其余结束（写出文字前就结束的、只写出推理过程的、中断、平台和服务商的故障）为 released。画布节点不会在这几种失败后自己重跑，所以不会在调用方不知道时扣两次。只有调用方自己的取消（运行的取消、画布运行的取消）才算：工作区被平台停用时取消的（`tenant_suspended`）、Agent 被停用时取消的（`market_agent_suspended`）、API 自己停下的（重启或失去数据库锁时运行自己的执行以取消结束，`execution_stopped`）都退回，并且不算 Agent 的失败。取消（调用方的、画布运行的、停用的）在取消的同一事务里结算费用：预扣的点数当场计入或放回，不会在运行真正停下之前被再花一次，画布在那之后被删也带不走这笔结算。画布节点运行完成后又没通过节点自己的交付检查时照扣（检查是调用方的配置，运行的文字已经在调用方手里），只有交付文件存不下（平台的故障）时退回。重试的每次尝试各自一行。
-- **免费 Agent**（价格 0）不需要套餐。付费 Agent 要求工作区所有者有付费套餐，否则 402 `market_agent_plan_required`；点数不够 402 `credits_exhausted`。
+- **不收 Agent 费的 Agent**（价格 0，只收模型费）不需要套餐。付费 Agent（作者的或官方的）要求工作区所有者有付费套餐，否则 402 `market_agent_plan_required`；点数不够 402 `credits_exhausted`。
+- **官方 Agent 的价格**（业主 2026-11-07：官方 Agent 每次 5 点，从 2026-11-12 24:00 北京时间起，模型费另算）：`AWWO_MARKET_OFFICIAL_PRICE`（整数点，0 至 `AWWO_MARKET_MAX_PRICE`；不设或 0 不收 Agent 费）从 `AWWO_MARKET_OFFICIAL_PRICE_FROM`（RFC 3339，只能和大于 0 的价格一起设；不设则立即生效）起适用于所有官方 Agent 的调用，受理时按 API 的时钟判断（节点自己的运行在 `createRun`，画布运行在受理整图时冻结进节点快照，节点受理时按冻结的价格收）；节点锁定的版本不影响官方 Agent 的价格。AwwO 自己的工作区不收（没有 routeLimits 的工作区，或平台管理员所有的工作区：它们不能被套餐覆盖，收了就永远跑不了，见 `officialFeeWaived`）。之后的一切和付费 Agent 一样：要所有者的套餐、在套餐行锁下预扣、从同一余额扣、在退回的几种结束时退回。它是平台的收入：调用行一开始就记 `settlement='none'`、抽成 10000 个基点（作者为空），运行结束时也结算为 none，后台任务不为它确定收益、不再向 ClawHunt 读付款人的套餐、不进月度账单。种子版本的价格仍为 0（不改已审核的版本，没有迁移），所以排行照旧计入它们的调用；列表、详情与价格排序按当时的价格显示，能力接口带上价格与开始时刻（见「工作区内」）。
 - **自用**：作者本人发起的调用，以及在作者自己是所有者的工作区里的调用（模型费由作者自己的套餐付），不收 Agent 费、不产生收益、不进排行（insider）。作者只是成员的工作区照常付费：否则作者被加进别人的工作区，就能让那里免费用他的付费 Agent、绕开平台抽成。
 
 ## 作者收益与提现
 
-- 每次 charged 调用的作者份额 = 价格 × (1 − 平台抽成)，平台抽成默认 2500 个基点（25%），在受理时冻结进调用行。
+- 每次 charged 调用的作者份额 = 价格 × (1 − 平台抽成)，平台抽成默认 2500 个基点（25%），在受理时冻结进调用行。官方 Agent 的调用没有作者，价格全部归平台，不产生收益。
 - **只算买来的点数**：一个计费期里买来的点数先花，赠送的后花。调用方的计费期结束、再过保留期（默认 14 天）后，按该期“买来的点数里能用于本期的部分（已付点数 − 上期结转）÷ 本期总花费”的比例（不超过 1）确定每次调用的最终收益。本期花费没超过已付点数时作者拿全额；有一部分花的是赠送点数时按比例减少；退款或拒付后已付点数为 0，收益为 0。
 - **确定前再读一次套餐**：后台的套餐同步只读仍在生效的套餐，套餐取消后的退款和拒付它看不到。所以确定一个计费期的收益前，先按 ClawHunt subject 再向 ClawHunt 读一次调用方的套餐：ClawHunt 联系不上时这一期等下一轮；ClawHunt 拒绝或回答读不懂时也等，保留期过后再过 30 天仍读不到就按已有记录确定。仍然看不到的：调用方续费后对更早一期的退款（ClawHunt 只报当前期），以及确定之后的拒付，这部分要靠 ClawHunt 一侧（见下）。
 - 计费期的数字（已付点数、上期结转）在 `user_plans` 还有这一期时由后台任务另存一份（`market_period_facts`），`user_plans` 只保留当前期和上一期。两处都没有的计费期一直不确定，记日志等运营处理，也不挡后面的计费期。
@@ -104,6 +105,8 @@ AwwO 里除了选模型，还能从市场里挑表现好、执行效果高的 Ag
 | `AWWO_MARKET` | off | 打开整个市场（关闭时市场接口 404，节点里的市场引用在受理时被拒绝）。关掉只停新的使用：已经发生的调用照常结算、确定和出账单，作者的收益（`GET /market/earnings`）与管理员的月度账单（`GET /admin/market/payouts`）照常可读、可批准，网页的「我的 Agent」只在有收益时显示收益，平台管理显示「市场账单」 |
 | `AWWO_MARKET_FEE_BPS` | 2500 | 平台抽成，基点 |
 | `AWWO_MARKET_MAX_PRICE` | 500 | 单次调用的最高定价（点） |
+| `AWWO_MARKET_OFFICIAL_PRICE` | 0 | 官方 Agent 每次调用的价格（整数点，0 至 `AWWO_MARKET_MAX_PRICE`）；0 不收 Agent 费。收入归平台 |
+| `AWWO_MARKET_OFFICIAL_PRICE_FROM` | 不设 | 官方价格开始的时刻（RFC 3339）；只能和大于 0 的价格一起设，不设则价格立即生效 |
 | `AWWO_MARKET_HOLD_DAYS` | 14 | 计费期结束后的保留期 |
 | `AWWO_MARKET_PAYOUTS` | off | 允许平台管理员批准月度账单，批准即转入作者的 ClawHunt 钱包（需要 ClawHunt 客户端配置，不需要市场开着）。关着时账单照常生成、不能批准；没有批准的账单从不转账 |
 
@@ -149,12 +152,12 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 
 ### 工作区内
 
-- `GET /tenants/{t}/capabilities` 增加 `market:{enabled, payouts, feeBps, maxPrice, holdDays}`。
+- `GET /tenants/{t}/capabilities` 增加 `market:{enabled, payouts, feeBps, maxPrice, holdDays, officialPrice?, officialPriceFrom?}`：`officialPrice` 是设置的官方价格（没有价格时不返回），`officialPriceFrom` 是它开始的时刻（UTC 的 RFC 3339，没设时不返回）。
 - 运行（`GET /tenants/{t}/runs/{id}` 等）增加 `market:{agentId, version, price, status, insider, rating}`（只有用了市场 Agent 的运行才有）。`status` 是 reserved / charged / released：取消的运行也可能是 charged（见计费）。
-- `PUT /tenants/{t}/runs/{id}/market-rating` `{score: 1 | -1 | 0}`，member 以上；只有已计费的调用（Agent 交出了文字，免费 Agent 也一样，`status` 为 charged）才能评，否则 409 `market_rating_unavailable`；0 撤销评价。
+- `PUT /tenants/{t}/runs/{id}/market-rating` `{score: 1 | -1 | 0}`，member 以上；只有已计费的调用（Agent 交出了文字，不收 Agent 费的 Agent 也一样，`status` 为 charged）才能评，否则 409 `market_rating_unavailable`；0 撤销评价。
 - 画布 `PUT` 请求头 `X-Awwo-Canvas-Features: market`（新网页总是带）。
 
-错误码：`market_unavailable`（市场关闭）、`market_agent_not_found`、`market_agent_unavailable`（停用、下架后的新选用、版本不可用）、`market_agent_version_changed`（409，节点写的不是现在上架的版本，重新选用）、`market_agent_not_usable`（团队、媒体、沙箱节点，或 coding 节点）、`market_text_to_sandbox`（市场 Agent 的文字会流到沙箱或团队节点）、`market_rating_unavailable`（409，没计费的调用不能评）、`market_agent_model_unavailable`（锁定的模型调用方用不了）、`market_agent_role_required`（403，付费 Agent 只给所有者和管理员）、`market_agent_plan_required`（402）、`credits_exhausted`（402）、`canvas_reload_required`（409）、`market_review_changed`（409）、`market_payouts_off`（409，转账关闭时不能批准账单）、`market_statement_not_in_review`（409，账单已经批准过或不在待审核）、`market_statement_changed`（409，账单金额和批准时确认的不一样）、`market_draft_invalid`、`market_name_reserved`、`market_skill_unavailable`、`market_skill_license`、`market_hidden_text`、`market_price_invalid`。画布节点被拒时，节点的 detail 是同一个错误码。
+错误码：`market_unavailable`（市场关闭）、`market_agent_not_found`、`market_agent_unavailable`（停用、下架后的新选用、版本不可用）、`market_agent_version_changed`（409，节点写的不是现在上架的版本，重新选用）、`market_agent_not_usable`（团队、媒体、沙箱节点，或 coding 节点）、`market_text_to_sandbox`（市场 Agent 的文字会流到沙箱或团队节点）、`market_rating_unavailable`（409，没计费的调用不能评）、`market_agent_model_unavailable`（锁定的模型调用方用不了）、`market_agent_role_required`（403，作者的付费 Agent 只给所有者和管理员）、`market_agent_plan_required`（402）、`credits_exhausted`（402）、`canvas_reload_required`（409）、`market_review_changed`（409）、`market_payouts_off`（409，转账关闭时不能批准账单）、`market_statement_not_in_review`（409，账单已经批准过或不在待审核）、`market_statement_changed`（409，账单金额和批准时确认的不一样）、`market_draft_invalid`、`market_name_reserved`、`market_skill_unavailable`、`market_skill_license`、`market_hidden_text`、`market_price_invalid`。画布节点被拒时，节点的 detail 是同一个错误码。
 
 ## ClawHunt 一侧
 
@@ -172,6 +175,6 @@ summary：`{id, name, tagline, category, kind, official, author:{name}|null, pri
 - 提示词可能被诱导说出（见上）。第三方指令的说明段只是一层提醒，不是边界：真正的边界是市场 Agent 只能作为文字 Agent 运行，没有沙箱、文件、命令行和网络。
 - 确定之后的拒付、续费后对更早一期的退款，在 ClawHunt 一侧支持暂扣或冲回之前由平台承担（转账开关在这之前保持关闭）。
 - 计费偏离了「成功才扣」的字面：Agent 写出文字后，调用方取消、节点自己的输出约定拒收、截断、中途拒答、超时都照扣，是为了堵住「拿到内容后让运行失败来免单」的漏洞。截断和超时也可能是 Agent 自己写得太长，这时调用方为一份不完整的回答付了费（文字归他）；业主 2026-10-29 选择照扣，这些结束不计入排行。
-- 冷启动：早期付费用户少，作者收益会很小；官方免费 Agent 先把市场填起来。
-- 排行可以被刷：付费 Agent 刷单要花自己买来的点数，平台抽成后必亏；排行只计不同调用人、每人每天每个 Agent 最多 3 次、价格不低于上架价格的调用，insider 的不计。免费 Agent 的调用不花 Agent 费（只花模型费），刷起来只受这几条限制，它的排行因此更容易被抬高。
+- 冷启动：早期付费用户少，作者收益会很小；官方 Agent 先把市场填起来（官方价格开始后，用它们也要所有者的套餐）。
+- 排行可以被刷：付费 Agent 刷单要花自己买来的点数，平台抽成后必亏；排行只计不同调用人、每人每天每个 Agent 最多 3 次、价格不低于上架价格的调用，insider 的不计。不收 Agent 费的 Agent 的调用只花模型费，刷起来只受这几条限制，它的排行因此更容易被抬高。
 - 页面一旦运行（调用方点了「运行页面」），或下载后用浏览器打开、发布出去，就照它自己写的运行，可能把它显示的内容发到其他网站：静态预览是默认，运行由调用方决定。

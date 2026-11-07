@@ -1082,10 +1082,10 @@ func (a *App) tidyNotes(ctx context.Context, c *learningCycleRun) error {
 		c.reason = "few_notes"
 		return nil
 	}
-	if needsPlan, err := a.routeNeedsPlan(ctx, c.tid); err != nil {
+	if closed, err := a.routeClosed(ctx, c.tid); err != nil {
 		return err
-	} else if needsPlan {
-		c.reason = "plan_required"
+	} else if closed != "" {
+		c.reason = closed
 		return nil
 	}
 	ids, versions := []string{}, []int64{}

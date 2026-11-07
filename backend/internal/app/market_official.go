@@ -11,9 +11,10 @@ import (
 // AwwO's own Agents in the market: the 39 MIT-licensed roles of wshobson/agents that the web app already bundles
 // (market_official.json is apps/web/src/canvas/team-market-agents.wshobson.json byte for byte, which
 // TestMarketOfficialRolesAreTheWebAppsOwn checks; THIRD_PARTY_NOTICES.md and third_party/wshobson-agents carry the
-// licence). They are free, their instructions are public (as they are in the web app), and they are listed when the
-// market opens, so it does not open empty. The bundle's company roles are left out: they are written for a company of
-// Agents that delegate to each other, not for one canvas node.
+// licence). Their versions are seeded at price 0, and a call costs the official price from its start
+// (AWWO_MARKET_OFFICIAL_PRICE, market_config.go), the platform's and no author's; their instructions are public (as
+// they are in the web app), and they are listed when the market opens, so it does not open empty. The bundle's company
+// roles are left out: they are written for a company of Agents that delegate to each other, not for one canvas node.
 
 //go:embed market_official.json
 var marketOfficialFile []byte

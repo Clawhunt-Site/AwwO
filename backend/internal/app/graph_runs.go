@@ -143,6 +143,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Once the free plan has ended a free workspace's canvas run is refused as a whole, before anything of it is
+	// reserved or started (free_plan.go).
+	if !a.freePlanAdmitsOwner(w, r, tx, tid) {
+		return
+	}
 	var raw []byte
 	var version int64
 	e = tx.QueryRow(r.Context(), "SELECT document,version FROM canvases WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, cid).Scan(&raw, &version)
@@ -914,8 +919,10 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 	if owner == nil && active >= concurrent {
 		return errGraphCapacity
 	}
+	// A node is a step of a canvas run admitted already, which finishes as it would have when the free plan ends
+	// meanwhile: its own limits carry no free plan's end (free_plan.go).
 	if owner != nil {
-		if e = a.planRunSlot(ctx, tx, tid, workspaceLimits{active, concurrent, 0, 1, needsPlan}); errors.Is(e, errPlanBusy) || errors.Is(e, errInvocationQuota) {
+		if e = a.planRunSlot(ctx, tx, tid, workspaceLimits{active, concurrent, 0, 1, needsPlan, time.Time{}}); errors.Is(e, errPlanBusy) || errors.Is(e, errInvocationQuota) {
 			return errGraphCapacity
 		} else if e != nil {
 			return e
@@ -955,7 +962,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		if err != nil {
 			return err
 		}
-		return a.admitGraphMedia(ctx, tx, tid, gid, nid, sid, actor, graphChildOperationID(gid, nid, attempts), prompt, snap, entitlement, owner != nil, readRouteLimits(routes), workspaceLimits{active, concurrent, today, daily, needsPlan})
+		return a.admitGraphMedia(ctx, tx, tid, gid, nid, sid, actor, graphChildOperationID(gid, nid, attempts), prompt, snap, entitlement, owner != nil, readRouteLimits(routes), workspaceLimits{active, concurrent, today, daily, needsPlan, time.Time{}})
 	}
 	// This node's catalog was frozen when the graph was admitted, which can be long
 	// before this child is created — and a graph still queued has no child to
