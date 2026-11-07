@@ -53,6 +53,12 @@ export const AVATAR_FACES: Readonly<Record<AvatarExpression, readonly [FacePart,
   asleep: [stroke('M 28 44 Q 35 54 42 44', 4), stroke('M 58 44 Q 65 54 72 44', 4)],
 };
 
+/** The light at the chin, in the head's 100-unit box, as the head clips it (converged-icon.css): the head (r 50 about
+ *  50, 50) less the same circle 8 units higher, 8 deep at the chin and nothing at the eyes' line (y 46). Its outer arc is
+ *  drawn on r 52, past the head, so the head's clip draws the chin's edge however the SVG is rounded; its inner arc is
+ *  that higher circle's. The boot surface's head has it too (saas/BootSurface.tsx). */
+export const AVATAR_CRESCENT = 'M 0.7716 33.25 A 52 52 0 1 0 99.2284 33.25 A 50 50 0 1 1 0.7716 33.25 Z';
+
 /** The faces whose eyes look at the ring: at work (at the member the icon names now, a streaming reply or the frontier)
  *  and worried (at the first failure). The others look straight ahead. */
 export const AVATAR_LOOKS: Readonly<Record<AvatarExpression, boolean>> = {

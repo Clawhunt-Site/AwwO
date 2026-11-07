@@ -16,7 +16,7 @@ import {
   memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent,
   type PointerEvent,
 } from 'react';
-import { AVATAR_EXPRESSION, AVATAR_FACES, AVATAR_LOOKS, eyeGaze, type FacePart } from './avatarFace';
+import { AVATAR_CRESCENT, AVATAR_EXPRESSION, AVATAR_FACES, AVATAR_LOOKS, eyeGaze, type FacePart } from './avatarFace';
 import type { CanvasNode } from './canvasDoc';
 import { CANVAS_GROUP_ID, CONVERGED_ICON_WORLD, convergedIconScale, type ConvergedIconBox } from './convergedGroups';
 import { groupStatus, memberLiveState, type GroupState, type GroupStatus, type MemberLiveState } from './groupStatus';
@@ -50,10 +50,6 @@ const FAILURE_COALESCE_MS = 1500;
 /** How long the eyes are away from the work for a member that failed while the rest run, the glide there included
  *  (converged-icon.css's .45 s; with the glide back, about 1.4 s in all, about half a second at rest on the failure). */
 export const GLANCE_MS = 950;
-/** The light at the chin, as the head clips it (converged-icon.css): the head (r 50 about 50, 50) less the same circle
- *  8 units higher, 8 deep at the chin and nothing at the eyes' line (y 46). Its outer arc is drawn on r 52, past the head,
- *  so the head's clip draws the chin's edge however the SVG is rounded; its inner arc is that higher circle's. */
-const CRESCENT = 'M 0.7716 33.25 A 52 52 0 1 0 99.2284 33.25 A 50 50 0 1 1 0.7716 33.25 Z';
 
 export interface RingSegment { state: MemberLiveState; from: number; to: number }
 
@@ -379,7 +375,7 @@ function ConvergedIconImpl({ icon, members, runs, depths, title, scale, selected
           keeps it apart from the plate (converged-icon.css), and the face that says what the group is doing; the counts
           are the rows' to give, under it. */}
       <span className="awwo-converged-orb" aria-hidden="true">
-        <svg className="awwo-converged-crescent" viewBox="0 0 100 100" aria-hidden="true"><path d={CRESCENT} /></svg>
+        <svg className="awwo-converged-crescent" viewBox="0 0 100 100" aria-hidden="true"><path d={AVATAR_CRESCENT} /></svg>
         <span className="awwo-converged-rim" />
         <AvatarFace state={status.state} phase={facePhase} gaze={gaze} />
       </span>

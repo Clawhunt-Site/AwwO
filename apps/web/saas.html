@@ -13,12 +13,31 @@
 html{background:var(--bg-base,#eef0ef)}html[data-theme=dark]{background:var(--bg-base,#07161f)}body{margin:0}
 .awwo-boot{position:fixed;inset:0;display:grid;place-items:center;align-content:center;gap:18px;background:var(--bg-base,#eef0ef);color:var(--text-secondary,#4b5d65);font:500 13px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;z-index:1}
 html[data-theme=dark] .awwo-boot{background:var(--bg-base,#07161f);color:var(--text-secondary,#a3b5bc)}
-.awwo-boot-orb{width:76px;height:76px;border-radius:50%;background:radial-gradient(circle at 34% 30%,rgb(var(--saas-glow-1-rgb,95 227 232)) 0,var(--accent,#2b7ad8) 26%,var(--saas-orb-core,#0d2f57) 58%,var(--saas-orb-edge,#081a2e) 100%);box-shadow:0 0 0 1px color-mix(in srgb,var(--saas-bio,#2bb3bb) 18%,transparent),0 18px 46px -12px rgb(13 47 87/55%),0 0 46px color-mix(in srgb,var(--saas-bio,#2bb3bb) 28%,transparent);animation:awwo-boot-breathe 2.4s ease-in-out infinite}
-.awwo-boot-line{width:132px;height:3px;border-radius:3px;overflow:hidden;background:color-mix(in srgb,var(--text-primary,#0b2230) 9%,transparent)}
-html[data-theme=dark] .awwo-boot-line{background:color-mix(in srgb,var(--text-primary,#e7eef0) 10%,transparent)}
-.awwo-boot-line::after{content:"";display:block;width:40%;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--saas-bio,#2bb3bb),var(--accent,#2b7ad8));animation:awwo-boot-slide 1.15s cubic-bezier(.4,0,.2,1) infinite}
+/* The boot head (BootSurface.tsx draws the same): a converged canvas's icon at work, its flat head with a light at the
+   chin, the collar and the working eyes (ConvergedIcon), on a plate. One arc goes round the collar and the eyes follow
+   it, level at the top, down at the bottom, never up, and blink. Every move is a transform on a box, which the
+   compositor keeps smooth while the app's script loads; the script after the markup starts each loop at the page's
+   time zero, and again when the reader turns motion on, as BootSurface does, so one boot head taking another's place
+   carries on without a jump. */
+.awwo-boot-head{position:relative;width:96px;height:96px;flex:none}
+.awwo-boot-head>*,.awwo-boot-face>*,.awwo-boot-blink,.awwo-boot-blink>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.awwo-boot-plate{border-radius:50%;background:var(--bg-card,#fff);box-shadow:0 0 0 1px color-mix(in srgb,var(--text-primary,#0b2230) 9%,transparent),0 12px 30px -18px rgb(11 34 48/45%)}
+html[data-theme=dark] .awwo-boot-plate{background:var(--bg-card,#0c2230);box-shadow:0 0 0 1px rgb(var(--saas-orb-ring-rgb,169 155 255)/35%),0 12px 30px -18px rgb(0 0 0/70%)}
+.awwo-boot-ring,.awwo-boot-orbit{overflow:visible}
+.awwo-boot-collar{fill:none;stroke:var(--saas-orb-edge,#0a1c33);stroke-width:11}
+.awwo-boot-arc{fill:none;stroke:var(--saas-signal,#2bb3bb);stroke-width:7}
+html[data-theme=dark] .awwo-boot-arc{stroke:var(--saas-signal,#5fe3e8)}
+.awwo-boot-head>.awwo-boot-face{inset:16.67%;width:auto;height:auto;border-radius:50%;overflow:hidden;color:#fff;background:var(--saas-orb-core,#12385a)}
+.awwo-boot-crescent path{fill:color-mix(in srgb,rgb(var(--saas-glow-1-rgb,95 227 232)) 40%,var(--saas-orb-core,#12385a))}
+.awwo-boot-face>.awwo-boot-rim{display:none}
+html[data-theme=dark] .awwo-boot-face>.awwo-boot-rim{display:block;border-radius:50%;box-shadow:inset 0 0 0 2px color-mix(in srgb,rgb(var(--saas-orb-hi-rgb,236 253 255)) 60%,var(--bg-card,#0c2230))}
+html[data-theme=dark] .awwo-boot-face>.awwo-boot-crescent{inset:1px;width:calc(100% - 2px);height:calc(100% - 2px)}
+.awwo-boot-blink{transform-origin:50% 46%}
+.awwo-boot-blink rect{fill:currentColor}
 .awwo-boot-text{min-height:20px;margin:0}
-.awwo-boot.is-canvas,html[data-boot=canvas] .awwo-boot{display:block;padding:10px;box-sizing:border-box}
+/* A canvas loading: the boot surface is a block holding the canvas's frame, which a grid's centring would shrink to
+   nothing (block boxes take justify-items too). */
+.awwo-boot.is-canvas,html[data-boot=canvas] .awwo-boot{display:block;place-items:normal;align-content:normal;padding:10px;box-sizing:border-box}
 .awwo-boot-frame{display:none}
 .awwo-boot.is-canvas .awwo-boot-frame,html[data-boot=canvas] .awwo-boot-frame{display:grid;height:100%;grid-template-rows:56px 48px 1fr;border-radius:18px;overflow:hidden;background:var(--bg-card,#fff);box-shadow:0 1px 2px color-mix(in srgb,var(--text-primary,#0b2230) 5%,transparent)}
 html[data-theme=dark] .awwo-boot-frame{background:var(--bg-card,#0c2230)}
@@ -27,8 +46,20 @@ html[data-theme=dark] .awwo-boot-frame{background:var(--bg-card,#0c2230)}
 html[data-theme=dark] .awwo-boot-frame>i:last-child{background:radial-gradient(color-mix(in srgb,var(--text-primary,#e7eef0) 10%,transparent) 1px,transparent 1.4px) 0 0/22px 22px,var(--saas-canvas,#061019)}
 .awwo-boot.is-canvas .awwo-boot-center,html[data-boot=canvas] .awwo-boot-center{position:fixed;inset:0;display:grid;place-items:center;align-content:center;gap:16px;pointer-events:none}
 .awwo-boot-center{display:grid;place-items:center;gap:18px}
-@keyframes awwo-boot-breathe{0%,100%{transform:scale(1);filter:saturate(1)}50%{transform:scale(1.045);filter:saturate(1.2)}}
-@keyframes awwo-boot-slide{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
-@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}.awwo-boot-orb,.awwo-boot-line::after{animation:none}}
+/* One turn of the arc, and where its middle is for the eyes (0 = 12 o'clock): across 7 face units as the sine, down 6
+   at the bottom as a half-cosine; the blink once in two turns. Only while motion is welcome: else the arc rests at the
+   top and the eyes straight ahead. */
+@keyframes awwo-boot-orbit{to{transform:rotate(1turn)}}
+@keyframes awwo-boot-gx{0%{translate:0 0;animation-timing-function:cubic-bezier(.61,1,.88,1)}25%{translate:7% 0;animation-timing-function:cubic-bezier(.37,0,.63,1)}75%{translate:-7% 0;animation-timing-function:cubic-bezier(.12,0,.39,0)}100%{translate:0 0}}
+@keyframes awwo-boot-gy{0%,100%{transform:translateY(0);animation-timing-function:cubic-bezier(.37,0,.63,1)}50%{transform:translateY(6%);animation-timing-function:cubic-bezier(.37,0,.63,1)}}
+@keyframes awwo-boot-blink{0%,90%,100%{transform:scaleY(1)}94%{transform:scaleY(.12)}}
+@media (prefers-reduced-motion:no-preference){.awwo-boot-orbit{animation:awwo-boot-orbit 2.2s linear infinite}.awwo-boot-gaze{animation:awwo-boot-gx 2.2s linear infinite,awwo-boot-gy 2.2s linear infinite}.awwo-boot-blink{animation:awwo-boot-blink 4.4s linear infinite}}
+@media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
+/* Forced colours: the head in the text colour with eyes in the background's, the arc in the highlight; no plate's
+   shadow, no light at the chin and no rim (ConvergedIcon's own rules), each above every style's own rules (a dark
+   style's arc rule outranks a plain one). */
+@media (forced-colors:active){.awwo-boot-plate{box-shadow:none!important}.awwo-boot-collar{stroke:Canvas!important}.awwo-boot-arc{stroke:Highlight!important}.awwo-boot-head>.awwo-boot-face{forced-color-adjust:none;background:CanvasText!important;color:Canvas!important}.awwo-boot-face>:is(.awwo-boot-crescent,.awwo-boot-rim){display:none!important}}
 </style></head>
-<body><div id="root"><div class="awwo-boot" aria-busy="true" role="status" aria-label="AwwO"><div class="awwo-boot-frame" aria-hidden="true"><i></i><i></i><i></i></div><div class="awwo-boot-center"><div class="awwo-boot-orb" aria-hidden="true"></div><div class="awwo-boot-line" aria-hidden="true"></div></div></div></div><script type="module" src="/src/saas/main.tsx"></script></body></html>
+<body><div id="root"><div class="awwo-boot" aria-busy="true" role="status" aria-label="AwwO"><div class="awwo-boot-frame" aria-hidden="true"><i></i><i></i><i></i></div><div class="awwo-boot-center"><div class="awwo-boot-head" aria-hidden="true"><span class="awwo-boot-plate"></span><svg class="awwo-boot-ring" viewBox="-60 -60 120 120"><circle class="awwo-boot-collar" r="52"></circle></svg><svg class="awwo-boot-orbit" viewBox="-60 -60 120 120"><path class="awwo-boot-arc" d="M -36.77 -36.77 A 52 52 0 0 1 36.77 -36.77"></path></svg><span class="awwo-boot-face"><svg class="awwo-boot-crescent" viewBox="0 0 100 100"><path d="M 0.7716 33.25 A 52 52 0 1 0 99.2284 33.25 A 50 50 0 1 1 0.7716 33.25 Z"></path></svg><span class="awwo-boot-rim"></span><span class="awwo-boot-gaze"><span class="awwo-boot-blink"><svg viewBox="0 0 100 100"><rect x="30" y="41" width="10" height="10" rx="5"></rect><rect x="60" y="41" width="10" height="10" rx="5"></rect></svg></span></span></span></div><p class="awwo-boot-text"></p></div></div></div>
+<script>(function(){function L(){try{document.getAnimations().forEach(function(a){try{if(/^awwo-boot-/.test(a.animationName||''))a.startTime=0}catch(e){}})}catch(e){}}L();try{matchMedia('(prefers-reduced-motion: no-preference)').addEventListener('change',L)}catch(e){}})();</script>
+<script type="module" src="/src/saas/main.tsx"></script></body></html>
