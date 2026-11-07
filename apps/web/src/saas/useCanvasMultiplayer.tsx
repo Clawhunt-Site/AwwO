@@ -18,7 +18,7 @@ import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../canvas/
 import type { CanvasChange, CanvasChangeResponse, CanvasOp, LiveParticipant } from '../canvas/multiplayer/types';
 import { MultiplayerBar } from '../canvas/multiplayer/MultiplayerBar';
 import { MultiplayerPanel } from '../canvas/multiplayer/MultiplayerPanel';
-import { MultiplayerBoardLayer, type BoardFlash } from '../canvas/multiplayer/MultiplayerBoardLayer';
+import { boardBoxOf, MultiplayerBoardLayer, type BoardFlash } from '../canvas/multiplayer/MultiplayerBoardLayer';
 import { activityItem, actorParticipantId, type ActivityItem } from '../canvas/multiplayer/activity';
 import type { AgentTokenItem } from '../canvas/multiplayer/types';
 import { useSaaSPreferences } from './preferences';
@@ -360,13 +360,14 @@ function useNow(active: boolean, every = 500): number {
   return now;
 }
 
-function MultiplayerBoard({ live, nodes, flashes, scale }: { live: CanvasLive; nodes: ReadonlyArray<CanvasNode>; flashes: ValueStore<readonly BoardFlash[]>; scale: number }) {
+function MultiplayerBoard({ live, nodes, flashes, scale }: { live: CanvasLive; nodes: ReadonlyArray<CanvasNode & { round?: boolean }>; flashes: ValueStore<readonly BoardFlash[]>; scale: number }) {
   const snapshot = useLiveSnapshot(live);
   const glows = useSyncExternalStore(flashes.subscribe, flashes.get, flashes.get);
   const glowing = glows.some(f => f.until > Date.now());
   // Claims end with no event: the board's clock moves while any is drawn, so one past its end goes.
   const now = useNow(glowing || snapshot.claims.length > 0, glowing ? 200 : 1000);
-  const boxes = useMemo(() => nodes.map(node => ({ id: node.id, x: node.x, y: node.y, w: node.w, h: node.h })), [nodes]);
+  // An icon of the icon view comes round: its marks ring its plate.
+  const boxes = useMemo(() => nodes.map(boardBoxOf), [nodes]);
   return <MultiplayerBoardLayer participants={snapshot.participants} selfId={live.clientId} claims={snapshot.claims} nodes={boxes} flashes={glows} now={now} scale={scale} />;
 }
 

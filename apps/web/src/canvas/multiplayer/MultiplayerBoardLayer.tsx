@@ -10,12 +10,17 @@
 // the layer is hidden from assistive technology.
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Bot } from 'lucide-react';
+import type { CanvasNode } from '../canvasDoc';
 import type { LiveClaim, LiveParticipant } from './types';
 import { participantColorStyle } from './MultiplayerBar';
 import { mt, useMultiplayerText } from './multiplayerText';
 import './multiplayer.css';
 
-export interface BoardNodeBox { id: string; x: number; y: number; w: number; h: number }
+/** A node's box as the board draws it; `round` for a component drawn as its icon (图标视图): its marks ring the plate. */
+export interface BoardNodeBox { id: string; x: number; y: number; w: number; h: number; round?: boolean }
+/** The box of a node the board hands a host (host.ts boardLayer): where it is drawn, and round for an icon's plate. */
+export const boardBoxOf = (node: Pick<CanvasNode, 'id' | 'x' | 'y' | 'w' | 'h'> & { round?: boolean }): BoardNodeBox =>
+  ({ id: node.id, x: node.x, y: node.y, w: node.w, h: node.h, ...(node.round ? { round: true } : {}) });
 /** A node another participant just changed: it glows in their colour until `until` (ms since the epoch). */
 export interface BoardFlash { nodeId: string; color: string; until: number }
 
@@ -70,7 +75,8 @@ function ringsByNode(participants: readonly LiveParticipant[], selfId: string, b
 
 const sameRing = (a: Ring, b: Ring) => a.id === b.id && a.kind === b.kind && a.name === b.name && a.color === b.color && a.tagged === b.tagged;
 const sameRings = (a: readonly Ring[], b: readonly Ring[]) => a === b || (a.length === b.length && a.every((ring, index) => sameRing(ring, b[index])));
-const sameBox = (a: BoardNodeBox, b: BoardNodeBox) => a === b || (a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+const sameBox = (a: BoardNodeBox, b: BoardNodeBox) => a === b || (a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+  && Boolean(a.round) === Boolean(b.round));
 
 /** A node's first claim that still holds now. */
 function claimsByNode(claims: readonly LiveClaim[], boxes: ReadonlyMap<string, BoardNodeBox>, now: number): Map<string, LiveClaim> {
@@ -99,8 +105,10 @@ interface NodeMarkProps { box: BoardNodeBox; rings: readonly Ring[]; claim: Live
 const NodeMark = memo(function NodeMark({ box, rings, claim, claimColor, flash }: NodeMarkProps) {
   const { locale } = useMultiplayerText();
   const tagged = rings.filter(ring => ring.tagged);
-  // --mp-rings lifts the names and the claim's badge clear of the outermost ring.
-  return <div className="awwo-multiplayer-mark" data-node={box.id}
+  // --mp-rings lifts the names and the claim's badge clear of the outermost ring. Round (an icon): the rings follow its
+  // plate, and the names and the badge are centred over it, the badge above the names (data-tagged says they are there).
+  return <div className="awwo-multiplayer-mark" data-node={box.id} data-round={box.round ? '' : undefined}
+    data-tagged={tagged.length > 0 ? '' : undefined}
     style={{ transform: `translate(${finite(box.x)}px, ${finite(box.y)}px)`, width: Math.max(0, finite(box.w)), height: Math.max(0, finite(box.h)),
       '--mp-rings': rings.length } as CSSProperties}>
     {/* Keyed by its end, so a newer change on the same node glows again from the start. */}

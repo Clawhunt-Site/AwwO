@@ -87,7 +87,7 @@ export function arcMiddle(segments: ReadonlyArray<RingSegment>, states: Readonly
   return segment ? (segment.from + segment.to) / 2 : null;
 }
 
-function arcPath(r: number, from: number, to: number): string {
+export function arcPath(r: number, from: number, to: number): string {
   const point = (share: number) => {
     const angle = share * 2 * Math.PI;
     return `${(r * Math.sin(angle)).toFixed(2)} ${(-r * Math.cos(angle)).toFixed(2)}`;
@@ -103,7 +103,7 @@ function streamKeys(node: CanvasNode): string[] {
 
 /** The members' streaming flags and start times, as one string: re-read when a member's session changes, re-rendered
  *  only when one starts or stops streaming (a streamed token changes neither). */
-function useMemberStreams(steps: ReadonlyArray<CanvasNode>): ReadonlyArray<{ streaming: boolean; since?: number }> {
+export function useMemberStreams(steps: ReadonlyArray<CanvasNode>): ReadonlyArray<{ streaming: boolean; since?: number }> {
   const groupsKey = steps.map(node => streamKeys(node).join('\u0002')).join('\u0001');
   // Split once per change of members: read() runs on every streamed token of every member.
   const keyGroups = useMemo(() => groupsKey ? groupsKey.split('\u0001').map(group => group.split('\u0002').filter(Boolean)) : [], [groupsKey]);
@@ -136,7 +136,7 @@ function subscribeReducedMotion(notify: () => void): () => void {
   return () => query?.removeEventListener?.('change', notify);
 }
 
-const drawPart = (part: FacePart, key: number) => part.shape === 'capsule'
+export const drawPart = (part: FacePart, key: number) => part.shape === 'capsule'
   ? <rect key={key} x={part.cx - part.w / 2} y={part.cy - part.h / 2} width={part.w} height={part.h} rx={Math.min(part.w, part.h) / 2} />
   : part.shape === 'fill' ? <path key={key} className="is-fill" d={part.d} />
     : <path key={key} d={part.d} strokeWidth={part.width} />;

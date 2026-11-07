@@ -18,7 +18,7 @@
 
 import { useId } from 'react';
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
-import { edgeBezierPath, portAnchorWorld } from './ports';
+import { edgeBezierPath, laneTopOf, portAnchorWorld, type WireGeometry } from './ports';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 import type { RunNodeStatus } from './runGraph';
 import type { WireDrag } from './TilePorts';
@@ -31,7 +31,8 @@ const STATE_TEXT: Record<WireState, CanvasTextKey> = {
 };
 
 export interface WirePlaneProps {
-  nodes: ReadonlyArray<CanvasNode>;
+  /** The nodes as the wires see them: a card's box, a converged member's band, an icon's round band (nodeIcons.ts). */
+  nodes: ReadonlyArray<CanvasNode & WireGeometry>;
   edges: ReadonlyArray<CanvasEdge>;
   /** The in-flight drag-to-wire gesture (from `useWiring`), or null. */
   preview?: WireDrag | null;
@@ -68,7 +69,7 @@ export function WirePlane({ nodes, edges, preview = null, onDisconnect, runs = {
         const b = portAnchorWorld(to, e.toPort);
         if (!a || !b) return null; // unresolvable endpoint → draw nothing, invent nothing
         const feedback = e.kind === 'feedback';
-        const d = wirePath(a, b, feedback, Math.min(from.y, to.y));
+        const d = wirePath(a, b, feedback, Math.min(laneTopOf(from), laneTopOf(to)));
         const state = wireState({ kind: e.kind, from: runs[e.fromNode], to: runs[e.toNode], running, round });
         const markerId = `${markerPrefix}-wire-arrow-${index}`;
         const selected = selectedEdgeId === e.id;

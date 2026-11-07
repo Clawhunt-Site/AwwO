@@ -35,8 +35,8 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * a superseded run's trailing callbacks can never repaint the current run's badges;
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent } from 'react';
-import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay, Orbit } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent, type FocusEvent as ReactFocusEvent } from 'react';
+import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay, Orbit, Bot } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
 import { CanvasAssistant, type AssistantNextSteps, type UnifiedAssistant } from './CanvasAssistant';
@@ -151,6 +151,8 @@ import {
   NOTHING_CONVERGED, saveConvergedState, type ConvergedState, type ConvergedView,
 } from './convergedGroups';
 import { ConvergedIcon } from './ConvergedIcon';
+import { loadIconView, nodeIconBox, saveIconView, withIconGeometry } from './nodeIcons';
+import { NodeIconTile } from './NodeIconTile';
 import type { CanvasMultiplayerHost, CanvasMultiplayerRebase } from './multiplayer/host';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
@@ -162,6 +164,15 @@ const NO_DISPLAYS: ReadonlyArray<DisplayNode> = [];
 /** An icon whose members are not all loaded yet: one shared empty list, so the memoised icon sees no change. */
 const NO_MEMBERS: ReadonlyArray<CanvasNode> = [];
 const NO_DEPTHS: ReadonlyMap<string, number> = new globalThis.Map();
+/** Whether the keyboard's focus is lost: on the page itself, on a control gone or hidden, or on one greyed out while it
+ *  had it (the browser takes that to the page a moment later). */
+function focusIsLost(): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  return !active || active === document.body || !active.isConnected || Boolean(active.closest('[hidden]')) || active.matches(':disabled');
+}
+/** A card's first control, for the focus taken into a card opened from its icon that has no close button (a form): never
+ *  one of its ports. */
+const CARD_CONTROLS = 'button:not(:disabled):not(.canvas-port), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]';
 /** How long patches sharing a label keep collapsing into one undo step (one drag = one step). */
 const COALESCE_MS = 900;
 /** Cap on remembered steps. Documents are small, but an unbounded stack is a leak. */
@@ -539,6 +550,20 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   const [selectedIconId, setSelectedIconId] = useState<string | null>(null);
   // The camera before the canvas converged, to return to when it is drawn as cards again.
   const convergeReturn = useRef<ViewportState | null>(null);
+  // Every component drawn as its own live icon, wired as the cards are (图标视图; a view preference too, never the
+  // document): nodeIcons.ts and NodeIconTile.tsx.
+  const [iconView, setIconView] = useState<boolean>(() => loadIconView());
+  const iconViewRef = useRef(iconView);
+  iconViewRef.current = iconView;
+  // The icon the keyboard's focus goes to in the commit that draws it (a cycle moved the selection on from the one the
+  // focus was on; the next icon after the focused one went, drawn from off screen first); the toggle if it is not drawn.
+  const [iconFocusRequest, setIconFocusRequest] = useState<{ id: string } | null>(null);
+  // The icon that has the focus (its button or a port of it), until the focus is taken elsewhere on the page: it stays
+  // mounted while the camera moves it off screen, and when it goes (deleted here or by someone else, an undo, a plan)
+  // the focus goes on to the next icon. A blur to nothing (a press on the board) lets it go too.
+  const [keyIcon, setKeyIcon] = useState<string | null>(null);
+  const keyIconRef = useRef(keyIcon);
+  keyIconRef.current = keyIcon;
   // The board's one polite status region for converged icons: converging and expanding, a member failing while the rest
   // still run, and why Delete, undo or redo does nothing while converged. Changes only; the run note keeps speaking for
   // the run.
@@ -1185,13 +1210,24 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     if (was) showConverged(next, t('converge.announce.expanded', { title: t('converge.wholeCanvas') }));
     else { convergedNowRef.current = next; setConverged(next); setSelectedIconId(null); }
   }, [canvasIconDrawn, converged.canvas, showConverged, t]);
-  // A 预览展示 window showing a converged member links to its member's icon.
+  // The components drawn as icons in the icon view: every one the board draws, but the open or configured node (its card
+  // is what is being read). Group icons stay group icons, and their members are not drawn (so a canvas converged whole
+  // has none).
+  const iconIdsKey = iconView
+    ? shownNodes.filter(node => node.id !== focusedId && node.id !== inspectorId).map(node => node.id).join('\u0001') : '';
+  const iconIds = useMemo<ReadonlySet<string>>(() => new Set(iconIdsKey ? iconIdsKey.split('\u0001') : []), [iconIdsKey]);
+  // The board as the icon view draws it (nodeIcons.ts): the wires and each icon's ports meet its round band; the marks, the
+  // marquee, the minimap, the collaboration flow and display links its plate. The very arrays while nothing is an icon.
+  const iconWireNodes = useMemo(() => withIconGeometry(convergedView.wireNodes, iconIds, 'wire'), [convergedView.wireNodes, iconIds]);
+  const shownBoxes = useMemo(() => withIconGeometry(shownNodes, iconIds, 'plate'), [shownNodes, iconIds]);
+  // A 预览展示 window showing a converged member links to its member's icon; in the icon view, to the component's icon.
   const linkBoxes = useMemo<ReadonlyMap<string, { x: number; y: number; w: number; h: number }>>(() => {
-    if (!convergedView.icons.length) return renderNodeById;
+    if (!convergedView.icons.length && !iconIds.size) return renderNodeById;
     const boxes = new globalThis.Map<string, { x: number; y: number; w: number; h: number }>(renderNodeById);
     for (const icon of convergedView.icons) for (const id of icon.members) boxes.set(id, { x: icon.x, y: icon.y, w: icon.w, h: icon.h });
+    for (const node of shownBoxes) if (iconIds.has(node.id)) boxes.set(node.id, { x: node.x, y: node.y, w: node.w, h: node.h });
     return boxes;
-  }, [renderNodeById, convergedView]);
+  }, [renderNodeById, convergedView, iconIds, shownBoxes]);
   // An opened node never stays inside an icon: every way of opening one (a double-click, the Bot list, search, the
   // timeline, results, next steps, Configure) goes through focusNode, which draws its group's cards again first.
   const expandGroupOfNode = useCallback((nodeId: string) => {
@@ -1301,8 +1337,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   // After a control that had focus goes away (it unmounted, its view closed, or a part of the page around it was hidden,
   // as the assistant's panel is when it steps aside), focus moves to `selector`.
   const moveLostFocus = useCallback((selector: string) => {
-    const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected && !active.closest('[hidden]')) return;
+    if (!focusIsLost()) return;
     rootRef.current?.closest('.awwo-workspace')?.querySelector<HTMLElement>(selector)?.focus();
   }, []);
   // At the next frame, by which React has drawn a change made in a click or a key press. A change made after awaiting
@@ -1315,6 +1350,99 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   useLayoutEffect(() => { if (focusRequest) moveLostFocus(focusRequest.selector); }, [focusRequest, moveLostFocus]);
   const refocusInCommit = useCallback((selector: string) => setFocusRequest({ selector }), []);
   refocusToggle.current = () => refocusInCommit('[data-converge-toggle]');
+  // The icon view draws an opened component as its card and a closed one as its icon again, so the focus that was in the
+  // one goes to the other: the opened card's close button (or its first control), the icon's button. Without scrolling:
+  // the board is moved by its camera, never by a scroll. Matched by attribute value, so no id is read as a selector.
+  // When a pointer last went down on the board: a focus that comes with a press is the press's, and never moves the camera.
+  const lastBoardPress = useRef(0);
+  const noteBoardPress = useCallback(() => { lastBoardPress.current = Date.now(); }, []);
+  const trackIconFocus = useCallback((event: ReactFocusEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    const id = target.closest?.<HTMLElement>('[data-node-icon]')?.dataset.nodeIcon ?? null;
+    keyIconRef.current = id;
+    setKeyIcon(id);
+    // The keyboard's focus on a part of an icon the stage does not show whole, less what a floating assistant covers (its
+    // button, or a port past the stage's edge; the board's one stop entered by Tab, the next icon after a deletion): the
+    // camera goes to the icon, in the part of the stage left, as ⌘[ ] does.
+    const root = rootRef.current;
+    if (!id || !root || Date.now() - lastBoardPress.current < 600) return;
+    const stage = root.getBoundingClientRect();
+    const box = viewportSize();
+    const part = target.getBoundingClientRect();
+    if (!stage.width || !box) return;
+    const left = stage.left + (box.cover ?? 0);
+    if (part.left >= left && part.right <= stage.right && part.top >= stage.top && part.bottom <= stage.bottom) return;
+    const node = docRef.current.nodes.find(candidate => candidate.id === id);
+    if (!node) return;
+    const plate = nodeIconBox(node);
+    const cover = box.cover ?? 0;
+    moveCamera(shiftView(focusWorld(viewRef.current, plate.x + plate.w / 2, plate.y + plate.h / 2, { w: box.w - cover, h: box.h }), cover));
+  }, [moveCamera, viewportSize]);
+  // The focus left the board, or went to nothing while its control is still there (a press on the board's background):
+  // no icon has it any more. Not when the page itself lost the focus (another tab or app, which gives it back to the same
+  // control), nor for the icon's own removal (the board gives the focus on then).
+  const releaseIconFocus = useCallback((event: ReactFocusEvent<HTMLElement>) => {
+    const was = (event.target as HTMLElement).closest?.<HTMLElement>('[data-node-icon]')?.dataset.nodeIcon ?? null;
+    if (!was) return;
+    const letGo = () => { if (keyIconRef.current === was) { keyIconRef.current = null; setKeyIcon(null); } };
+    const next = event.relatedTarget as Node | null;
+    if (next) { if (!event.currentTarget.contains(next)) letGo(); return; }
+    const target = event.target as Node;
+    setTimeout(() => { if (target.isConnected && document.hasFocus()) letGo(); }, 0);
+  }, []);
+  const focusNodePart = useCallback((nodeId: string, part: 'icon' | 'card', unlessHeld = true) => {
+    if (unlessHeld && !focusIsLost()) return false;
+    const root = rootRef.current;
+    if (!root) return false;
+    const target = part === 'icon'
+      ? [...root.querySelectorAll<HTMLElement>('[data-node-icon]')].find(element => element.dataset.nodeIcon === nodeId)
+        ?.querySelector<HTMLElement>('.awwo-node-icon-hit')
+      : (() => {
+        const card = [...root.querySelectorAll<HTMLElement>('.canvas-tile[data-node-id]')].find(element => element.dataset.nodeId === nodeId);
+        return card?.querySelector<HTMLElement>('[data-collapse-node]:not(:disabled)') ?? card?.querySelector<HTMLElement>(CARD_CONTROLS);
+      })();
+    if (!target) return false;
+    target.focus({ preventScroll: true });
+    return true;
+  }, []);
+  useLayoutEffect(() => {
+    if (iconFocusRequest && !focusNodePart(iconFocusRequest.id, 'icon', false)) moveLostFocus('[data-icon-view-toggle]');
+  }, [iconFocusRequest, focusNodePart, moveLostFocus]);
+  const iconFocus = useRef({ focusedId, iconIds });
+  useLayoutEffect(() => {
+    const before = iconFocus.current;
+    iconFocus.current = { focusedId, iconIds };
+    if (focusedId && focusedId !== before.focusedId && before.iconIds.has(focusedId)) focusNodePart(focusedId, 'card');
+    else if (before.focusedId && before.focusedId !== focusedId && iconIds.has(before.focusedId)) {
+      // Its icon is off the board when the camera went back at once (reduced motion): the toggle, never the page.
+      if (focusIsLost() && !focusNodePart(before.focusedId, 'icon', false)) moveLostFocus('[data-icon-view-toggle]');
+    }
+  }, [focusedId, iconIds, focusNodePart, moveLostFocus]);
+  // The icon with the focus gone from the board (its component deleted, here or by someone else, an undo, a plan; not
+  // opened, which the card takes): the focus goes on to the next icon in reading order on the stage (so another's
+  // deletion never moves this reader's camera), else the next one drawn, else the next at all (drawn first, then focused),
+  // else the toggle; never the page.
+  const iconOrder = useRef<ReadonlyArray<string>>([]);
+  useLayoutEffect(() => {
+    const before = iconOrder.current;
+    iconOrder.current = orderNodes(shownBoxes.filter(node => iconIds.has(node.id))).map(node => node.id);
+    const lost = keyIconRef.current;
+    if (!lost || iconIds.has(lost) || lost === focusedId) return;
+    keyIconRef.current = null;
+    setKeyIcon(null);
+    if (!focusIsLost()) return;
+    const at = before.indexOf(lost);
+    const after = [...before.slice(at + 1), ...before.slice(0, Math.max(0, at))].filter(id => iconIds.has(id));
+    if (!after.length) { moveLostFocus('[data-icon-view-toggle]'); return; }
+    const box = viewportSize();
+    const cover = box?.cover ?? 0;
+    const plates = shownBoxes.filter(node => after.includes(node.id));
+    const onStage = box ? visibleBoxIds(plates, shiftView(viewRef.current, -cover), { w: box.w - cover, h: box.h }, 0) : new Set<string>();
+    if ([...after.filter(id => onStage.has(id)), ...after].some(id => focusNodePart(id, 'icon', false))) return;
+    keyIconRef.current = after[0];
+    setKeyIcon(after[0]);
+    setIconFocusRequest({ id: after[0] });
+  }, [iconIds, shownBoxes, focusedId, focusNodePart, moveLostFocus, viewportSize]);
 
   /** Where a node opens on this stage, from the camera `current`: the frame its content can use (openFrameFor) and the
    *  camera that shows it whole, opened where it is — never re-centred. Null when nothing is laid out to fit into.
@@ -1488,7 +1616,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   // memoised tiles are not all re-rendered for it.
   const toggleFocus = useCallback(
     (nodeId?: string) => {
-      const target = nodeId ?? selectionRef.current[0] ?? null;
+      const focusedIcon = keyIconRef.current && selectionRef.current.includes(keyIconRef.current) ? keyIconRef.current : null;
+      const target = nodeId ?? focusedIcon ?? selectionRef.current[0] ?? null;
       const open = focusedRef.current;
       if (open && (!nodeId || nodeId === open)) {
         unfocus();
@@ -1504,7 +1633,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     (dir: 1 | -1) => {
       // Through the cards the board draws: a member inside an icon is not stepped onto (nor selected unseen).
       const order = orderNodes(convergedView.hidden.size ? nodes.filter(node => !convergedView.hidden.has(node.id)) : nodes);
-      const nextId = nextIn(order, selection[0] ?? focusedId ?? null, dir);
+      const from = keyIconRef.current && selection.includes(keyIconRef.current) ? keyIconRef.current : selection[0];
+      const nextId = nextIn(order, from ?? focusedId ?? null, dir);
       if (!nextId) return;
       if (focusedId) focusNode(nextId);
       else {
@@ -1513,9 +1643,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         if (n && sizeRef.current.w) {
           moveCamera(focusWorld(viewRef.current, n.x + n.w / 2, n.y + n.h / 2, sizeRef.current));
         }
+        // The keyboard's focus on an icon goes on with the selection to the next icon.
+        if (iconIds.has(nextId) && (document.activeElement as HTMLElement | null)?.closest?.('[data-node-icon]')) setIconFocusRequest({ id: nextId });
       }
     },
-    [nodes, renderNodes, selection, focusedId, focusNode, moveCamera, convergedView],
+    [nodes, renderNodes, selection, focusedId, focusNode, moveCamera, convergedView, iconIds],
   );
 
   // ---- waypoints ----------------------------------------------------------------------------
@@ -3058,8 +3190,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     // screen — the inspector keeps describing a tile that is still "yours".
     if (focusedId) ids.add(focusedId);
     if (inspectorId) ids.add(inspectorId);
+    // So is the icon with the keyboard's focus, which the camera may move off screen (⌘[ ], a pan).
+    if (keyIcon && iconIds.has(keyIcon)) ids.add(keyIcon);
     return ids;
-  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured, convergedView]);
+  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured, convergedView, keyIcon, iconIds]);
   // Stable tile callbacks: SessionTile is memoised, and an inline arrow recreated on every
   // render would defeat it — every keystroke in one tile's composer would re-render the
   // rest of the canvas.
@@ -3258,6 +3392,21 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     const timer = setTimeout(() => saveConvergedState(converged, new Set(docRef.current.nodes.map(node => node.id))), 300);
     return () => clearTimeout(timer);
   }, [converged]);
+  // 图标视图: every component drawn as its own live icon, wired as the cards are, and back. A way of looking as 收敛 is (for
+  // readers, while the canvas runs, in the simple view), kept per person, browser and canvas; not while the whole canvas
+  // is one icon (the toggle is greyed out then, with the reason). A wire being drawn ends, as its port moves.
+  const toggleIconView = useCallback(() => {
+    cancelWiringRef.current();
+    const next = !iconViewRef.current;
+    iconViewRef.current = next;
+    setIconView(next);
+    refocusInCommit('[data-icon-view-toggle]');
+    announce(tLatest.current(next ? 'nodeIcon.announce.on' : 'nodeIcon.announce.off'));
+  }, [announce, refocusInCommit]);
+  useEffect(() => {
+    const timer = setTimeout(() => saveIconView(iconView), 300);
+    return () => clearTimeout(timer);
+  }, [iconView]);
   // The results studio (成果工作台), over the board: one node's deliverables or the whole canvas's.
   const [studio, setStudio] = useState<{ nodeId?: string; entryId?: string } | null>(null);
   const openStudio = useCallback((nodeId?: string, entryId?: string) => setStudio({ nodeId, entryId }), []);
@@ -3299,8 +3448,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   cancelWiringRef.current = wiring.cancelWiring;
   const marquee = useMarquee({
     enabled: selectionTool,
-    // Only cards the board draws: a member inside an icon is never selected (and so never deleted or run) unseen.
-    nodes: shownNodes,
+    // Only cards the board draws: a member inside an icon is never selected (and so never deleted or run) unseen. In the
+    // icon view, each component's icon (its plate) is what a frame takes in.
+    nodes: shownBoxes,
     rootRef,
     view,
     onSelect: (ids, additive) =>
@@ -4912,6 +5062,19 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     setStageCover(previous => previous === cover ? previous : cover);
   }, []);
   useLayoutEffect(measureStageCover, [measureStageCover, size.w, size.h, railsVersion, panelShown, simple]);
+  // The one icon a Tab reaches (a roving stop: one per component would make the board a long list of stops): the first
+  // selected icon on screen, else the first on screen in reading order. ⌘[ and ⌘] step through the rest. On screen is
+  // the stage itself (culling keeps a margin round it) less what a floating assistant covers; with none there, any icon
+  // drawn (the camera then goes to it as it takes the focus).
+  const iconTabStop = useMemo(() => {
+    if (!iconIds.size) return null;
+    const mounted = shownBoxes.filter(node => iconIds.has(node.id) && visibleIds.has(node.id));
+    const onScreen = stageMeasured ? visibleBoxIds(mounted, shiftView(view, -stageCover), { w: size.w - stageCover, h: size.h }, 0)
+      : new Set(mounted.map(node => node.id));
+    const pool = onScreen.size ? mounted.filter(node => onScreen.has(node.id)) : mounted;
+    const ids = new Set(pool.map(node => node.id));
+    return selection.find(id => ids.has(id)) ?? orderNodes(pool)[0]?.id ?? null;
+  }, [iconIds, selection, visibleIds, shownBoxes, view, size, stageMeasured, stageCover]);
   // Tasks are read while the conversation is on screen: in the side panel, or in the welcome of an empty canvas,
   // which draws it (its tasks and the canvas's earlier ones) once there is one. A viewer's host reads nothing before.
   const tasksShown = panelShown || (!readOnly && !nodes.length && planning.messages.length > 0);
@@ -5120,7 +5283,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         timelineUnavailableReason={focusedId ? t('run.timelineWhileOpen') : undefined}
         style={{ position: 'static', maxWidth: 'none', flexWrap: 'nowrap' }} /></>}>
     {/* Under the 成果 view the board is out of reach (the shortcuts pause too) but stays as it was. */}
-    <div className="canvas-root" inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={(focusedId ? focusNarrow : narrowFocusWidth(size.w)) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef}
+    <div className="canvas-root" onFocus={trackIconFocus} onBlur={releaseIconFocus} onPointerDownCapture={noteBoardPress} inert={showingResults || undefined} data-read-only={readOnly || undefined} data-selection-tool={selectionTool || undefined} data-narrow-focus={(focusedId ? focusNarrow : narrowFocusWidth(size.w)) ? true : undefined} data-node-open={focusedId ? true : undefined} ref={rootRef}
       // 多人同屏: this person's pointer, in world coordinates, for the others on the canvas (the host paces it).
       onPointerMove={multiplayer ? event => {
         const rect = rootRef.current?.getBoundingClientRect();
@@ -5159,12 +5322,12 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         }
       >
         {/* What the board holds appears with its tiles, once the stage has measured itself: wires never float without them. */}
-        {stageMeasured && <WirePlane nodes={convergedView.wireNodes} edges={convergedView.wireEdges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
+        {stageMeasured && <WirePlane nodes={iconWireNodes} edges={convergedView.wireEdges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
           // A wire is never previewed from a card the board does not draw (its anchor would be the icon's).
           preview={wiring.wireDrag && !convergedView.hidden.has(wiring.wireDrag.from.nodeId) ? wiring.wireDrag : null}
           onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}
-        {stageMeasured && <CollaborationFlow nodes={shownNodes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
+        {stageMeasured && <CollaborationFlow nodes={shownBoxes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
         {stageMeasured && <DisplayLinks displays={displays} boxes={linkBoxes} />}
         {displays.map(display => visibleDisplayIds.has(display.id) && (
           <DisplayTile
@@ -5185,7 +5348,27 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
           />
         ))}
         {nodes.map((node) => (
-          visibleIds.has(node.id) && (
+          visibleIds.has(node.id) && (iconIds.has(node.id) ? (
+          // 图标视图: the component as its live icon, with the card's own locks on its moves and its ports.
+          <NodeIconTile
+            key={node.id}
+            node={node}
+            drawn={renderNodeById.get(node.id) ?? node}
+            run={runs[node.id] ?? null}
+            live={running || recovering}
+            scale={view.scale}
+            selected={selection.includes(node.id)}
+            soleSelected={selection.length === 1 && selection[0] === node.id}
+            tabbable={iconTabStop === node.id}
+            readOnly={readOnly}
+            interactionLocked={busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked}
+            wiring={wiring}
+            modelChoices={tileModelChoices(node)}
+            onMove={readOnly || exclusiveNow || initializing ? undefined : moveNode}
+            onSelect={selectNode}
+            onToggleFocus={toggleFocus}
+          />
+          ) : (
           <SessionTile
             key={node.id}
             node={node}
@@ -5237,7 +5420,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
             onStopNode={!readOnly && soloRunning.has(node.id) ? stopNode : undefined}
             wiring={wiring}
           />
-          )
+          ))
         ))}
         {/* Icons are never culled off screen, as cards are: there are few, and one panned away still says a member's failure. */}
         {stageMeasured && convergedView.icons.map(icon => (
@@ -5259,8 +5442,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         {/* 多人同屏: others' rings, claims and pointers, over the cards and never in the way of a press. It marks the cards
             the board draws (shownNodes), as the collaboration flow does: a member inside a converged icon has no place on
             this board (the wires' stand-in for it is the icon's middle, its face), so none of its marks is drawn there;
-            the 同屏 panel still says who is on it, and naming it there draws its cards with their marks. */}
-        {stageMeasured && multiplayer?.boardLayer?.(shownNodes, view.scale)}
+            the 同屏 panel still says who is on it, and naming it there draws its cards with their marks. In the icon view
+            a component's marks ring its icon (its round plate). */}
+        {stageMeasured && multiplayer?.boardLayer?.(shownBoxes, view.scale)}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
 
@@ -5299,6 +5483,12 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
             : focusedId || inspectorId ? t('converge.closeOpen') : t('converge.canvasTitle', { key: convergeKeyHint })}
           disabled={!converged.canvas && (stepCount < MIN_GROUP_MEMBERS || Boolean(focusedId) || Boolean(inspectorId))}
           onClick={() => setCanvasConverged(!converged.canvas)}><Orbit size={16} /></button>
+        {/* 图标视图: every component as its own live icon, wired as the cards are (a way of looking too). */}
+        <button type="button" className="awwo-icon-view-tool" aria-pressed={iconView} data-icon-view-toggle=""
+          aria-label={t('nodeIcon.toggle')}
+          title={converged.canvas ? t('nodeIcon.toggleConverged') : iconView ? t('nodeIcon.toggleTitleOn') : t('nodeIcon.toggleTitle')}
+          disabled={converged.canvas}
+          onClick={toggleIconView}><Bot size={16} /></button>
         <button className="awwo-display-tool" aria-label={displayText(locale, 'display.showCanvas')} title={displayText(locale, 'display.showCanvas')}
           disabled={!nodes.length || (readOnly && !displays.some(display => display.source.type === 'canvas'))} onClick={showCanvasDisplay}><MonitorPlay size={16} /></button>
         {/* "Expand first" only where the icon is all that holds them: not for a reader, during a run or with nothing to do. */}
@@ -5313,7 +5503,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
 
       {minimapOpen && !simple && nodes.length > 0 ? (
         <Minimap
-          boxes={displays.length || convergedView.icons.length ? [...shownNodes, ...convergedView.icons, ...displays] : renderNodes}
+          boxes={displays.length || convergedView.icons.length ? [...shownBoxes, ...convergedView.icons, ...displays] : shownBoxes}
           view={view}
           size={size}
           onCenter={(wx, wy) => moveCamera(focusWorld(viewRef.current, wx, wy, sizeRef.current))}

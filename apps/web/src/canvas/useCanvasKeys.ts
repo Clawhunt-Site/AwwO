@@ -125,7 +125,9 @@ export function useCanvasKeys(handlers: CanvasKeyHandlers, enabled = true): Canv
       if (!mod) {
         if ((e.key === 'Delete' || e.key === 'Backspace') && h.onDeleteSelection) {
           e.preventDefault();
-          h.onDeleteSelection();
+          // Held down, it deletes once: its repeats would go on to whatever the focus and the selection went to next (the
+          // next icon, in the icon view).
+          if (!e.repeat) h.onDeleteSelection();
         }
         return;
       }

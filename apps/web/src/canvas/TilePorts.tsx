@@ -234,6 +234,9 @@ export interface TilePortsProps {
   /** The canvas view's scale. A port guide is text to read, so it keeps its on-screen size at any zoom (the handles,
    *  part of the graph, zoom with it). Omitted → 1. */
   scale?: number;
+  /** False: the handles are not Tab stops (an icon's that is not the board's one stop among the icons; the keyboard
+   *  reaches them after that icon's button). Omitted → they are, as a card's are. */
+  tabbable?: boolean;
 }
 
 type Translate = ReturnType<typeof useCanvasI18n>['t'];
@@ -288,7 +291,7 @@ export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, p
  * The node's typed port handles, positioned on the tile from the SAME anchor math the wires use
  * (`portAnchorWorld` minus the node origin) so a handle can never sit off the line that leaves it.
  */
-export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
+export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: TilePortsProps) {
   const { t, locale } = useCanvasI18n();
   const interactive = wiring?.interactive ?? false;
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null);
@@ -348,6 +351,7 @@ export function TilePorts({ node, wiring, media, scale = 1 }: TilePortsProps) {
             data-port-side={p.side}
             data-data-type={p.dataType}
             disabled={!interactive}
+            tabIndex={tabbable ? undefined : -1}
             onMouseEnter={() => setExpandedLabel(portKey)}
             onMouseLeave={(event) => {
               if (document.activeElement !== event.currentTarget) setExpandedLabel(null);

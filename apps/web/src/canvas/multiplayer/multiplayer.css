@@ -579,6 +579,13 @@
   transform-origin: 100% 100%;
 }
 .awwo-multiplayer-claim > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A component drawn as its icon (图标视图) is round: its rings and glow follow the plate, and the names and a claim's
+   badge are centred over it, the badge above the names (side by side they would overlap over a plate this small; a
+   name row is 20 px with its gap). */
+.awwo-multiplayer-mark[data-round] { --mp-node-radius: 50%; }
+.awwo-multiplayer-mark[data-round] .awwo-multiplayer-tags,
+.awwo-multiplayer-mark[data-round] .awwo-multiplayer-claim { left: 50%; right: auto; translate: -50% 0; transform-origin: 50% 100%; }
+.awwo-multiplayer-mark[data-round][data-tagged] .awwo-multiplayer-claim { margin-bottom: calc((30px + 4px * var(--mp-rings, 0)) * var(--mp-inv)); }
 .awwo-multiplayer-flash {
   position: absolute;
   inset: calc(-2px * var(--mp-inv));

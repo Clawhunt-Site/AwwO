@@ -76,6 +76,9 @@ const RECOVERY_DETAIL_KEYS = {
   cancelled: 'session.cancelled',
   'Graph cancelled': 'session.cancelled',
   'Upstream did not complete': 'surface.upstreamIncomplete',
+  // A local run's own words for the same (runGraph.ts), said in the reader's language too.
+  上游未完成: 'surface.upstreamIncomplete',
+  已取消: 'tile.cancelled',
   'Missing cached upstream output': 'surface.cachedOutputMissing',
   'Cached upstream output holds no deliverable': 'surface.cachedOutputEmpty',
   timed_out: 'session.timedOut',

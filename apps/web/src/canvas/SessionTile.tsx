@@ -250,7 +250,7 @@ function firstMeaningfulLine(value: string): string {
   return text.replace(/\*\*([^*]+)\*\*/g, '$1').trim();
 }
 
-function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale, media = false): string {
+export function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField, 'id'>>, locale: UiLocale, media = false): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
   const generated = media ? mediaPreview(trimmed, locale) : null;
@@ -278,7 +278,22 @@ function publishedPreview(raw: string, outputs: ReadonlyArray<Pick<ContractField
   return htmlPreviewSummary(trimmed, locale) || firstMeaningfulLine(trimmed);
 }
 
-function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
+/** A session's line at rest on its compact card (and on its icon, NodeIconTile): what it published (and whether that was
+ *  partial or a case's), that the conversation chosen holds none but an earlier one does, else what its conversation last
+ *  said, else that it has nothing yet. `turns` are the conversation's (the sessions store). */
+export function compactSessionPreview(node: SessionNode, turns: ReadonlyArray<Turn>, locale: UiLocale, t: CanvasTranslate): string {
+  const outputs = node.contract?.outputs ?? [];
+  const media = Boolean(mediaKindOf(node.agentKind));
+  if (node.lastOutput) {
+    const lead = node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : node.lastOutput.source === 'case' ? `${t('tile.caseOutput')} · ` : '';
+    return `${lead}${publishedPreview(node.lastOutput.text, outputs, locale, media) || t('tile.deliveryUpdated')}`;
+  }
+  if (activeNodeThread(node)?.lastOutput) return t('tile.historicalAvailable');
+  const preview = livePreview(turns, node.contract?.outputs, locale, media ? locale : undefined) || htmlPreviewSummary(node.preview, locale) || node.preview;
+  return publishedPreview(preview, outputs, locale, media) || t('tile.noDeliverables');
+}
+
+export function glyphOf(node: CanvasNode, locale: UiLocale): { glyph: string; kindClass: string; label: string } {
   if (node.kind === 'form') return { glyph: TILE_COPY.formGlyph, kindClass: 'form', label: canvasText(locale, 'tile.form') };
   if (node.kind === 'assemble') return { glyph: '⧉', kindClass: 'assemble', label: canvasText(locale, 'tile.assemble') };
   if (node.kind === 'edit') return { glyph: '✂', kindClass: 'edit', label: canvasText(locale, 'tile.edit') };
@@ -858,12 +873,7 @@ export const SessionTile = memo(function SessionTile({
     if (node.kind === 'edit') return editPreview(node, t);
     return livePreview(session.turns, node.contract?.outputs, locale, mediaKindOf(node.agentKind) ? locale : undefined) || htmlPreviewSummary(node.preview, locale) || node.preview;
   }, [node, session.turns, locale, t]);
-  const compactPreview = node.kind === 'session'
-    ? node.lastOutput
-      ? `${node.lastOutput.partial ? `${t('tile.partialOutput')} · ` : node.lastOutput.source === 'case' ? `${t('tile.caseOutput')} · ` : ''}${publishedPreview(node.lastOutput.text, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.deliveryUpdated')}`
-      : currentThread?.lastOutput ? t('tile.historicalAvailable')
-        : publishedPreview(preview, node.contract?.outputs ?? [], locale, Boolean(mediaKindOf(node.agentKind))) || t('tile.noDeliverables')
-    : preview;
+  const compactPreview = node.kind === 'session' ? compactSessionPreview(node, session.turns, locale, t) : preview;
 
   const bind =
     node.kind === 'session'
@@ -1265,7 +1275,7 @@ export const SessionTile = memo(function SessionTile({
           <button ref={deliverablesToggleRef} type="button" aria-label={t(deliverablesOpen ? 'tile.collapseDeliverables' : 'tile.expandDeliverables')} title={t('tile.deliverables')} aria-expanded={deliverablesOpen} onClick={toggleDeliverables}><PanelRight size={15} /><span>{t('tile.deliverables')}</span></button>
           {onOpenStudio && node.lastOutput ? <button type="button" aria-label={t('studio.open')} title={t('studio.open')} onClick={() => onOpenStudio(nodeId)}><SquareArrowOutUpRight size={15} /></button> : null}
           {!simple && <NodeViewStylePicker />}
-          {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
+          {onToggleFocus ? <button type="button" aria-label={t('tile.collapseNode')} title={t('tile.collapseNode')} data-collapse-node="" disabled={Boolean(configurationPanel) && interactionLocked} onClick={() => onToggleFocus(nodeId)}><X size={15} /></button> : null}
           <button ref={moreRef} type="button" aria-label={t('tile.moreActions')} title={t('tile.more')} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={16} /></button>
           {menuOpen ? <div className="awwo-node-menu" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenuOpen(false); } }}>
             {onToggleFocus ? <button type="button" onClick={() => { onToggleFocus(nodeId); setMenuOpen(false); }}><Maximize2 size={14} />{t('tile.focus')}</button> : null}
@@ -1432,8 +1442,9 @@ export const SessionTile = memo(function SessionTile({
                 </button>
               ) : null}
               {onToggleFocus ? (
-                <button type="button" className="canvas-tile-action" onClick={() => onToggleFocus(nodeId)}>
-                  <Maximize2 size={14} aria-hidden="true" />{t('tile.focus')}
+                // Open, it closes the card (and says so): the close button a focus given to the card goes to (CanvasSurface).
+                <button type="button" className="canvas-tile-action" data-collapse-node={focused ? '' : undefined} onClick={() => onToggleFocus(nodeId)}>
+                  {focused ? <><X size={14} aria-hidden="true" />{t('tile.collapseNode')}</> : <><Maximize2 size={14} aria-hidden="true" />{t('tile.focus')}</>}
                 </button>
               ) : null}
               {onDelete ? (

@@ -1,0 +1,109 @@
+/* The icon view's component icon (NodeIconTile.tsx; nodeIcons.ts has its geometry). Its head, collar, arcs, face and rows
+   wear the converged icon's own part classes (converged-icon.css, imported before this sheet), so the two icons are one
+   look on every style; this sheet holds only what a component's icon adds: its plate's reset, the arc going round while
+   it runs, the eyes that follow it, its ports, its token, its rows' hit and halo, and its motion and contrast rules.
+   It wears the card skin (canvas-tile awwo-node is-<state>) for its plate, never .awwo-converged (that is the group icon's,
+   with its own scale, tiers and motion). --cv-px (set on the root) is one screen pixel in its world units. Never a card
+   child's class here (.canvas-tile-title, .canvas-tile-dot): card rules would leak in. */
+
+/* The round reset, above every skin's card rule (the hosted skin's sits at html:root .saas-canvas-shell, the iOS skin's at
+   .awwo-workspace and again for its dark theme): one class more than each, so neither order nor chunking decides, and in
+   the hosted skin one more again, above its settle ripple (motion.css: a card's .is-just-* rule, :not() included, ties
+   with one more). Every part inside is absolutely placed, so the card's padding and border are left as they are. The
+   skin's animations on a card (its running breathe, its settle ripple: box-shadows that repaint) are off: the arc going
+   round is a running icon's cue, its static ring stays, and a settled one hops or shakes its head. The cursor is the
+   card's (canvas.css: move, grabbing while pressed). */
+.canvas-root .canvas-tile.awwo-node.awwo-node-icon.awwo-node-icon,
+.awwo-workspace .canvas-root .canvas-tile.awwo-node.awwo-node-icon.awwo-node-icon,
+:root[data-theme='dark'] .awwo-workspace .canvas-root .canvas-tile.awwo-node.awwo-node-icon.awwo-node-icon,
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-node-icon.awwo-node-icon.awwo-node-icon {
+  display: block;
+  border-radius: 50%;
+  overflow: visible;
+  touch-action: none;
+  user-select: none;
+  line-height: 1;
+  animation: none;
+}
+
+/* What the skins have no rule for, as for the group icon: queued and stopped plates; on a dark board a faint ring of the
+   orb's colour where the collar nearly matches the board (an icon at rest, reused, or holding an earlier result). */
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-node-icon.is-waiting:not(.canvas-tile--selected) {
+  border-color: color-mix(in srgb, var(--saas-signal) 45%, var(--saas-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--saas-signal) 10%, transparent), var(--awwo-node-shadow);
+}
+html:root .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-node-icon.is-cancelled:not(.canvas-tile--selected) { border-color: var(--saas-border-strong); }
+html:root[data-theme='dark'] .saas-canvas-shell .canvas-root .canvas-tile.awwo-node.awwo-node-icon:is(.is-idle, .is-cached, .is-delivered):not(.canvas-tile--selected) {
+  border-color: rgb(var(--saas-orb-ring-rgb, 169 155 255) / 35%);
+}
+
+/* The button over the plate: focus, keys and a screen reader's activation; the ports are its siblings. */
+.awwo-node-icon-hit { position: absolute; inset: 0; border-radius: 50%; }
+.awwo-node-icon-hit:focus { outline: none; }
+.awwo-node-icon-hit:focus-visible {
+  outline: calc(3px * var(--cv-px, 1)) solid var(--saas-focus, var(--blue, #3f7ff5));
+  outline-offset: calc(6px * var(--cv-px, 1));
+}
+
+/* A form's, an assemble node's or an edit node's token, in the head's white like the eyes. */
+.awwo-node-icon-token path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+/* The eyes' box, which their look moves (a share of the head: 7% across is 7 of its 100 face units). */
+.awwo-node-icon-gaze { position: absolute; inset: 0; display: block; }
+
+/* The ports, on the band the wires end on (the container sits there; TilePorts places each handle against it). A
+   contract's field names only beside the port pointed at or focused: beside every one they would stack on a small plate. */
+.awwo-node-icon-ports { position: absolute; left: 0; width: 100%; pointer-events: none; }
+.awwo-node-icon-ports .canvas-port { pointer-events: auto; }
+.awwo-node-icon .canvas-port:not(:hover):not(:focus-visible) .canvas-port-field-label { display: none; }
+
+/* The rows: the name is part of the icon (a press or a double-click on it is the icon's, never the board's), as wide as
+   the space between two icons in a row; a halo of the board's colour (the hosted skin's token, else the board's own
+   page colour, as in the local edition) keeps a wire under them from cutting the words, and is let past the rows' edges
+   (clipped, not hidden: the ellipsis stays). */
+.awwo-node-icon-label {
+  max-width: min(calc(280px * var(--cv-px, 1)), 320px);
+  text-shadow: 0 0 calc(3px * var(--cv-px, 1)) var(--saas-canvas, var(--page, #e9ecea)), 0 0 calc(2px * var(--cv-px, 1)) var(--saas-canvas, var(--page, #e9ecea));
+}
+.awwo-node-icon .awwo-node-icon-label > span { overflow: clip; overflow-clip-margin: calc(3px * var(--cv-px, 1)); }
+.awwo-node-icon-label .awwo-converged-name { pointer-events: auto; }
+
+/* Still by default: the full running ring under reduced motion, the arc going round otherwise. */
+.awwo-node-icon-still { display: none; }
+
+/* Only a running icon loops: its arc goes round the collar and its eyes follow it, level at the top, down at the bottom,
+   never up (the loading pages' head's path), in one phase set when the run starts; its eyes blink once in two turns.
+   Every move is a transform. A run that ends while watched hops (done) or shakes (failed) the face once. */
+@keyframes awwo-node-icon-orbit { to { transform: rotate(1turn); } }
+@keyframes awwo-node-icon-gx {
+  0% { translate: 0 0; animation-timing-function: cubic-bezier(.61, 1, .88, 1); }
+  25% { translate: 7% 0; animation-timing-function: cubic-bezier(.37, 0, .63, 1); }
+  75% { translate: -7% 0; animation-timing-function: cubic-bezier(.12, 0, .39, 0); }
+  100% { translate: 0 0; }
+}
+@keyframes awwo-node-icon-gy {
+  0%, 100% { transform: translateY(0); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }
+  50% { transform: translateY(6%); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .awwo-node-icon.is-running .awwo-node-icon-orbit { animation: awwo-node-icon-orbit 2.2s linear infinite; }
+  .awwo-node-icon.is-running .awwo-node-icon-gaze { animation: awwo-node-icon-gx 2.2s linear infinite, awwo-node-icon-gy 2.2s linear infinite; }
+  .awwo-node-icon.is-running .awwo-node-icon-eyes { animation: awwo-converged-blink 4.4s linear infinite; }
+  .awwo-node-icon-gaze { transition: translate .45s var(--saas-ease-in-out, ease-in-out); }
+  .awwo-node-icon.is-just-done .awwo-converged-orb { animation: awwo-converged-hop .9s var(--saas-ease-spring, cubic-bezier(.34, 1.56, .64, 1)); }
+  .awwo-node-icon.is-just-failed .awwo-converged-orb { animation: awwo-converged-shake .6s var(--saas-ease-in-out, ease-in-out); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .awwo-node-icon-orbit { display: none; }
+  .awwo-node-icon-still { display: inline; }
+  .canvas-root .awwo-node-icon, .canvas-root .awwo-node-icon * { animation: none !important; transition: none !important; }
+}
+
+/* Forced colours: the parts the group icon's rules reach are the same (head in the text colour, eyes and token in the
+   background's, a running arc in the highlight, no chin light or rim); a selected icon also keeps a highlight outline,
+   the skin's ring being a shadow forced colours drop, but not the one with the keyboard's focus, whose focus ring shows
+   instead (in a selected group, which one has the focus). */
+@media (forced-colors: active) {
+  .awwo-node-icon.canvas-tile--selected .awwo-node-icon-hit:not(:focus-visible) { outline: calc(3px * var(--cv-px, 1)) solid Highlight !important; outline-offset: calc(4px * var(--cv-px, 1)) !important; }
+  .awwo-node-icon-token path { stroke: Canvas !important; }
+  .awwo-node-icon-label { text-shadow: none !important; }
+}

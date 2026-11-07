@@ -115,9 +115,15 @@ function portSpec(node: CanvasNode, side: PortSide, portId: string): PortSpec | 
   return portsFor(node).find((p) => p.side === side && p.id === portId);
 }
 
+/** What a box handed to the wires may say besides its x, y, w and h (the icon view's bands, nodeIcons.ts): `round`, its
+ *  ports sit on the rim of the circle the box's width spans about its centre, not on its square sides; `laneTop`, the top
+ *  a feedback wire's lane keeps 52 units above, when it is not the box's own (a band sits inside its plate). */
+export interface WireGeometry { round?: boolean; laneTop?: number }
+
 /**
  * World-space anchor of a port on its node: inputs sit on the left edge, outputs on the right,
- * each side's ports distributed evenly down the box.
+ * each side's ports distributed evenly down the box. A round box (an icon's band) puts each on the rim instead, at the
+ * same height.
  *
  * Returns null when the node does not expose that port (e.g. 'reference' after an image
  * session was switched to LLM). Callers must skip drawing rather than fall back to a made-up
@@ -125,16 +131,23 @@ function portSpec(node: CanvasNode, side: PortSide, portId: string): PortSpec | 
  * `reconcileEdges` already removes such wires from the document, so a null here means the
  * caller is drawing from unreconciled state.
  */
-export function portAnchorWorld(node: CanvasNode, portId: string): { x: number; y: number } | null {
+export function portAnchorWorld(node: CanvasNode & WireGeometry, portId: string): { x: number; y: number } | null {
   const ports = portsFor(node);
   const spec = ports.find((p) => p.id === portId);
   if (!spec) return null;
   const sameSide = ports.filter((p) => p.side === spec.side);
   const index = sameSide.indexOf(spec);
-  const x = spec.side === 'input' ? node.x : node.x + node.w;
   const y = node.y + (node.h * (index + 1)) / (sameSide.length + 1);
+  // On a round box the side is the rim: in from the square's side by what the circle lacks at this height.
+  const r = node.w / 2;
+  const dy = y - (node.y + node.h / 2);
+  const inset = node.round ? r - Math.sqrt(Math.max(0, r * r - dy * dy)) : 0;
+  const x = spec.side === 'input' ? node.x + inset : node.x + node.w - inset;
   return { x, y };
 }
+
+/** The top a feedback wire's lane keeps clear of, for a node as the wires see it. */
+export const laneTopOf = (node: CanvasNode & WireGeometry) => node.laneTop ?? node.y;
 
 /** AABB of all nodes (for fit-to-content), via the shared viewport box math. */
 export function boundsOfNodes(nodes: ReadonlyArray<CanvasNode>): Bounds {

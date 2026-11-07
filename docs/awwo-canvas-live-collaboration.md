@@ -481,7 +481,9 @@ CHANGELOG entry "treg for a person's own Agent".
   holds it (the people bar, who is here), and naming it there draws its cards again with every mark in place. The icon
   shows the runs this page started or found running when it opened (its working face, its arcs, its rows); a run
   another page starts later shows in the people bar's AwwO Agents and the 同屏 panel, not yet on the icon. Pointers are
-  drawn wherever people's hands are, over an icon too.
+  drawn wherever people's hands are, over an icon too. In the icon view (图标视图, also one person's own way of looking:
+  every component drawn as its own live icon, wired as the cards are) a component's marks ring its round icon, with the
+  names and a claim's badge centred over it, the badge above the names; the host passes the icon's plate with `round`.
 - **Saving**: a page sends only what it changed (`PATCH`), at autosave's pace. 已同步 means the server holds every edit
   of this page.
 

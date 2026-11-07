@@ -358,11 +358,12 @@ describe('RunTimeline', () => {
     expect(rowA.getByText('1:05')).toBeTruthy();
     expect(rowA.getByText('claude_local · opus')).toBeTruthy();
     const rowB = within(screen.getByTestId('runline-b'));
-    // The reason replaces the generic chip — "被阻断" alone would hide WHY.
-    expect(rowB.getByText('上游未完成')).toBeTruthy();
+    // The reason replaces the generic chip — "被阻断" alone would hide WHY. The local engine's own words for it
+    // (runGraph.ts 上游未完成) are said in the reader's language (surfaceMessages.ts).
+    expect(rowB.getByText('上游节点未完成')).toBeTruthy();
     // A node that never started draws no bar and reports no elapsed time.
     expect(rowB.getByText('—')).toBeTruthy();
-    expect(rowB.getByText('上游未完成').getAttribute('title')).toBe('上游未完成');
+    expect(rowB.getByText('上游节点未完成').getAttribute('title')).toBe('上游节点未完成');
     // The graph may contain scratch or out-of-scope nodes. Missing run state is absence of
     // participation, not evidence that the node was queued.
     expect(screen.queryByTestId('runline-not-in-run')).toBeNull();
