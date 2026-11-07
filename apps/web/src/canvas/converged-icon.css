@@ -1,5 +1,5 @@
-/* The converged icon (ConvergedIcon.tsx): components drawn as one live AwwO orb on a dark collar that carries a ring of
-   its members. It wears the card skin (canvas-tile awwo-node is-<state>) for its plate, state ring, breathing, ripples
+/* The converged icon (ConvergedIcon.tsx): components drawn as one live head, a flat AwwO orb with two eyes, on a dark
+   collar that carries a ring of its members. It wears the card skin (canvas-tile awwo-node is-<state>) for its plate, state ring, breathing, ripples
    and the skins' reduced-motion rules; here only its shape and its own parts.
 
    Units. The root is a fixed 160-unit world box; --cv-k scales its drawing up about its centre when the board is zoomed
@@ -69,25 +69,56 @@ html:root[data-theme='dark'] .awwo-converged-keyline { stroke: var(--saas-danger
 /* Stopped: brighter than the idle track and dotted, so the two never read as one. */
 .awwo-converged-arc.is-cancelled { stroke: rgb(var(--saas-orb-hi-rgb, 236 253 255) / 60%); stroke-width: 4; stroke-dasharray: 1 1.6; }
 
-/* The head: the AwwO orb (saas/design/system.css .saas-home-orb) in each style's own colours, made a face. Its specular
-   spot is pulled up to the left, clear of the eyes, and its glow sits under the chin as a rim light, so the white face
-   reads on the core and the edge alone (10:1 and up on every style, and 4.5:1 where the rim light comes nearest the
-   mouth: tests/canvas-selection-converge-contrast.test.ts). */
+/* The head: flat, in each style's own orb core, with white eyes (10:1 and up on every style:
+   tests/canvas-selection-converge-contrast.test.ts) and nothing else but a light at the chin, today's orb glow drawn flat.
+   Its parts, bottom to top: the crescent, the rim (dark styles), the face; only the face hops or shakes. */
 .awwo-converged-orb {
   position: absolute;
   inset: 16.67%;
   border-radius: 50%;
+  overflow: hidden;
   color: #fff;
-  background:
-    radial-gradient(circle at 27% 19%, rgb(255 255 255 / 70%) 0 2%, rgb(255 255 255 / 0%) 11%),
-    radial-gradient(120% 70% at 50% 108%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 55%) 0 22%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 18%) 40%, transparent 62%),
-    radial-gradient(circle at 50% 42%, var(--saas-orb-core, #12385a) 0 48%, var(--saas-orb-edge, #0a1c33) 78%);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -.15em -.25em .45em rgb(0 0 0 / 38%);
+  background: var(--saas-orb-core, #12385a);
+  /* Inside the zoomed board Chrome draws the crescent's SVG at a rounded origin with its fractional size kept, while the
+     disc rounds each of its edges: the two edges can differ by about two thirds of a board pixel. So the head clips its
+     parts to its circle, and the crescent's outer arc runs past the head (ConvergedIcon's CRESCENT): the clip, not the
+     SVG, draws the chin's edge, with no hairline of the head under it and no step, at any zoom. */
 }
-/* Its face (avatarFace.ts), in the orb's white: filled eyes, stroked eyes, brows and mouth. */
+/* An SVG is a replaced element: its box is set by its size, not stretched by its insets. --cv-crescent-inset keeps it
+   inside the rim where there is one. */
+.awwo-converged-crescent {
+  position: absolute;
+  left: var(--cv-crescent-inset, 0px);
+  top: var(--cv-crescent-inset, 0px);
+  width: calc(100% - 2 * var(--cv-crescent-inset, 0px));
+  height: calc(100% - 2 * var(--cv-crescent-inset, 0px));
+  overflow: visible;
+  pointer-events: none;
+}
+.awwo-converged-crescent path { fill: color-mix(in srgb, rgb(var(--saas-glow-1-rgb, 95 227 232)) 40%, var(--saas-orb-core, #12385a)); }
+.awwo-converged-rim { display: none; }
+/* On a dark style the head is near the plate's own colour (1.3-1.6:1), so a light rim draws its edge: inset, so it never
+   fills the gap before the collar, and 2 px on screen at every zoom (1.5 px leaves no pixel wholly the rim's colour on
+   some lines of a plain monitor), in a colour that keeps 3:1 on the plate and on the head's own colour on every dark
+   style (contrast test; at the chin its inner side meets the crescent, decoration, not the head's edge). The crescent
+   starts 1 screen px inside the head's edge, so most of it shows inside the rim at the small size; its outer arc runs
+   on past that, under the whole rim (and, zoomed in, past the edge to the clip), so no hairline of the head's colour
+   shows between the two at any zoom. */
+html:root[data-theme='dark'] .awwo-converged-orb { --cv-crescent-inset: calc(1px * var(--cv-px, 1)); }
+html:root[data-theme='dark'] .awwo-converged-rim {
+  display: block;
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 calc(2px * var(--cv-px, 1)) color-mix(in srgb, rgb(var(--saas-orb-hi-rgb, 236 253 255)) 60%, var(--awwo-card, #0c2230));
+}
+/* Its face (avatarFace.ts), in the head's white: two eyes, as capsules, filled shapes or lines (their widths are their
+   own, on each line). */
 .awwo-converged-face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.awwo-converged-face ellipse { fill: currentColor; }
-.awwo-converged-face path { fill: none; stroke: currentColor; stroke-width: 4.6; stroke-linecap: round; stroke-linejoin: round; }
+.awwo-converged-face :is(rect, .is-fill) { fill: currentColor; }
+.awwo-converged-face .is-fill { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.awwo-converged-face path:not(.is-fill) { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
 .awwo-converged-eyes { transform-box: fill-box; transform-origin: center; }
 
 /* One count on the collar at 45° (the failed count, else the blocked count), cut out of it by the board's colour. */
@@ -147,11 +178,11 @@ html:root[data-theme='dark'] .awwo-converged-badge:is(.is-failed, .is-blocked) {
 
 /* Only live work loops: the running arcs breathe in width with the card's running ring, never in colour, so they keep
    their contrast at every moment; in one phase (the delay is set on the live layer when a run starts, and its arcs take
-   it). A working face looks from side to side and blinks, in a phase of its own two breaths long (set on its eyes when a
-   run starts); at the small size its look steps, as the arcs do. */
+   it). A working face blinks, in a phase of its own two breaths long (set on its eyes when a run starts). The eyes glide
+   to where they look when that changes (ConvergedIcon: the member named now, a failure seen happen); a run that ends done
+   or failed while watched puts them there at once, so its hop or shake starts from where they rest. */
 @keyframes awwo-converged-breathe { 0%, 100% { stroke-width: 7; } 50% { stroke-width: 10; } }
 @keyframes awwo-converged-pop { from { scale: .6; } to { scale: 1; } }
-@keyframes awwo-converged-look { 0%, 100% { translate: -2.5px 0; } 50% { translate: 2.5px 0; } }
 @keyframes awwo-converged-blink { 0%, 90%, 100% { scale: 1 1; } 94% { scale: 1 .12; } }
 /* Once, when a group settles while it is watched (the card skin's is-just-done / is-just-failed ripple): a hop, a shake. */
 @keyframes awwo-converged-hop { 0%, 100% { translate: 0 0; } 35% { translate: 0 -6px; } 60% { translate: 0 1px; } }
@@ -162,8 +193,9 @@ html:root[data-theme='dark'] .awwo-converged-badge:is(.is-failed, .is-blocked) {
   .awwo-converged.is-running .awwo-converged-live .awwo-converged-arc { animation: awwo-converged-breathe 2.2s var(--saas-ease-in-out, ease-in-out) infinite; animation-delay: inherit; }
   .awwo-converged[data-tier='M'].is-running .awwo-converged-live .awwo-converged-arc { animation-timing-function: steps(6, jump-none); }
   /* The eyes' phase is their own inline delay (an inline style outranks this rule's shorthand). */
-  .awwo-converged.is-running .awwo-converged-face .awwo-converged-eyes { animation: awwo-converged-look 4.4s var(--saas-ease-in-out, ease-in-out) infinite, awwo-converged-blink 4.4s linear infinite; }
-  .awwo-converged[data-tier='M'].is-running .awwo-converged-face .awwo-converged-eyes { animation-timing-function: steps(6, jump-none), linear; }
+  .awwo-converged.is-running .awwo-converged-face .awwo-converged-eyes { animation: awwo-converged-blink 4.4s linear infinite; }
+  .awwo-converged-gaze { transition: transform .45s var(--saas-ease-in-out, ease-in-out); }
+  .awwo-converged:is(.is-just-done, .is-just-failed) .awwo-converged-gaze { transition: none; }
   .awwo-converged.is-just-done .awwo-converged-face { animation: awwo-converged-hop .9s var(--saas-ease-spring, cubic-bezier(.34, 1.56, .64, 1)); }
   .awwo-converged.is-just-failed .awwo-converged-face { animation: awwo-converged-shake .6s var(--saas-ease-in-out, ease-in-out); }
   .awwo-converged-arc { transition: stroke .2s var(--saas-ease, ease); }
@@ -179,6 +211,10 @@ html:root[data-theme='dark'] .awwo-converged-badge:is(.is-failed, .is-blocked) {
   .awwo-converged-arc, .awwo-converged-keyline { stroke: CanvasText !important; }
   .awwo-converged-arc.is-running { stroke: Highlight !important; }
   .awwo-converged-collar { stroke: Canvas !important; }
-  .awwo-converged-orb { forced-color-adjust: none; }
+  /* The head in the text colour with eyes in the background's; no crescent (in the background's colour it merges with
+     the gap round the head or, drawn inside, reads as a grinning mouth on every face) and no rim (the head is the text
+     colour on the background already). */
+  .awwo-converged-orb { forced-color-adjust: none; background: CanvasText !important; color: Canvas !important; }
+  .awwo-converged-crescent, .awwo-converged-rim { display: none !important; }
   .awwo-converged-badge { forced-color-adjust: none; background: Mark !important; color: MarkText !important; box-shadow: 0 0 0 2px Canvas !important; }
 }

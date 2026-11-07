@@ -1,20 +1,22 @@
-// One live icon for components drawn converged (收敛): the group as one bot avatar. The AwwO orb is its head, with a face
-// whose expression is what the group is doing (avatarFace.ts), on a dark collar that carries a ring of its members. Each
-// member is one arc of the ring, in pipeline order, in its own run state (one arc per state when there are too many to
-// tell apart); the face and the card skin's ring say what the group is doing now, and the rows under it name it and count
-// it. It wears the card's own skin (canvas-tile awwo-node is-<state>, as a 预览展示 window does), so every theme and both
-// editions draw its states as they draw a card's.
+// One live icon for components drawn converged (收敛): the group as one bot avatar. Its head is flat, in the AwwO orb's
+// colour, with two eyes whose expression is what the group is doing (avatarFace.ts) and a light at the chin, on a dark
+// collar that carries a ring of its members. Each member is one arc of the ring, in pipeline order, in its own run state
+// (one arc per state when there are too many to tell apart); the eyes look at the arc of the member the icon names now;
+// the face and the card skin's ring say what the group is doing now, and the rows under it name it and count it. It wears
+// the card's own skin (canvas-tile awwo-node is-<state>, as a 预览展示 window does), so every theme and both editions draw
+// its states as they draw a card's.
 //
-// Honest by construction (groupStatus.ts): only live work loops (the running arcs breathe, and a working face looks about
-// and blinks); the ring counts real results and never fills on arrival; done means every member has a result; a failure
-// or a block shows the moment it happens while the rest run.
+// Honest by construction (groupStatus.ts): only live work loops (the running arcs breathe, and a working face blinks);
+// the eyes move only to what the state names, or to a failure seen happen while the rest run; the ring counts real
+// results and never fills on arrival; done means every member has a result; a failure or a block shows the moment it
+// happens while the rest run.
 // Its box is a fixed world size (CONVERGED_ICON_WORLD); its drawing scales up about its centre when the board is zoomed
 // far out (convergedIconScale), and its rows keep 13 / 12 px on screen.
 import {
   memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent,
   type PointerEvent,
 } from 'react';
-import { AVATAR_EXPRESSION, AVATAR_FACES, type FacePart } from './avatarFace';
+import { AVATAR_EXPRESSION, AVATAR_FACES, AVATAR_LOOKS, eyeGaze, type FacePart } from './avatarFace';
 import type { CanvasNode } from './canvasDoc';
 import { CANVAS_GROUP_ID, CONVERGED_ICON_WORLD, convergedIconScale, type ConvergedIconBox } from './convergedGroups';
 import { groupStatus, memberLiveState, type GroupState, type GroupStatus, type MemberLiveState } from './groupStatus';
@@ -42,9 +44,16 @@ const ARC_ORDER: ReadonlyArray<MemberLiveState> = ['done', 'delivered', 'cached'
 const MIN_SHARE: Partial<Record<MemberLiveState, number>> = { failed: .025, blocked: .025, running: .025 };
 /** Loops share one phase: every icon breathes together, and one culled and mounted again carries on. */
 const BREATH_MS = 2200;
-/** A working face looks about and blinks once in two breaths, in one phase for every icon as well. */
+/** A working face blinks once in two breaths, in one phase for every icon as well. */
 const FACE_MS = 2 * BREATH_MS;
 const FAILURE_COALESCE_MS = 1500;
+/** How long the eyes are away from the work for a member that failed while the rest run, the glide there included
+ *  (converged-icon.css's .45 s; with the glide back, about 1.4 s in all, about half a second at rest on the failure). */
+export const GLANCE_MS = 950;
+/** The light at the chin, as the head clips it (converged-icon.css): the head (r 50 about 50, 50) less the same circle
+ *  8 units higher, 8 deep at the chin and nothing at the eyes' line (y 46). Its outer arc is drawn on r 52, past the head,
+ *  so the head's clip draws the chin's edge however the SVG is rounded; its inner arc is that higher circle's. */
+const CRESCENT = 'M 0.7716 33.25 A 52 52 0 1 0 99.2284 33.25 A 50 50 0 1 1 0.7716 33.25 Z';
 
 export interface RingSegment { state: MemberLiveState; from: number; to: number }
 
@@ -68,6 +77,18 @@ export function ringSegments(states: ReadonlyArray<MemberLiveState>, diameterPx 
     at += floored(item) ? MIN_SHARE[item.state]! : free > 0 ? item.share * (1 - reserved) / free : 0;
     return { state: item.state, from, to: at };
   });
+}
+
+/** The middle of the arc drawn for member `index` (of the states ringSegments drew `segments` from), as a share of the
+ *  circle: its own arc while every member has one, else its state's family arc. Null when nothing is drawn for it. */
+export function arcMiddle(segments: ReadonlyArray<RingSegment>, states: ReadonlyArray<MemberLiveState>, index: number): number | null {
+  const state = states[index];
+  if (state === undefined) return null;
+  // Its own arc is the one at its index in its own state (one arc per member); on a ring of state families that would be
+  // another member's state, and the family's arc is the one.
+  const own = segments.length === states.length && segments[index]?.state === state;
+  const segment = own ? segments[index] : segments.find(item => item.state === state);
+  return segment ? (segment.from + segment.to) / 2 : null;
 }
 
 function arcPath(r: number, from: number, to: number): string {
@@ -110,22 +131,31 @@ function useMemberStreams(steps: ReadonlyArray<CanvasNode>): ReadonlyArray<{ str
     ? { streaming: true, since: Number(flag.slice(2)) || undefined } : { streaming: false }), [flags]);
 }
 
-const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.(REDUCED_MOTION).matches);
+/** Told when the reader turns reduced motion on or off. */
+function subscribeReducedMotion(notify: () => void): () => void {
+  const query = typeof window !== 'undefined' ? window.matchMedia?.(REDUCED_MOTION) : undefined;
+  query?.addEventListener?.('change', notify);
+  return () => query?.removeEventListener?.('change', notify);
+}
 
-const drawPart = (part: FacePart, key: number) => part.shape === 'ellipse'
-  ? <ellipse key={key} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} />
-  : <path key={key} d={part.d} />;
+const drawPart = (part: FacePart, key: number) => part.shape === 'capsule'
+  ? <rect key={key} x={part.cx - part.w / 2} y={part.cy - part.h / 2} width={part.w} height={part.h} rx={Math.min(part.w, part.h) / 2} />
+  : part.shape === 'fill' ? <path key={key} className="is-fill" d={part.d} />
+    : <path key={key} d={part.d} strokeWidth={part.width} />;
 
-/** The head's face: the group's state as an expression (avatarFace.ts), decoration only: the label and the rows say it
- *  in words. Its eyes are one group, which a working face moves (converged-icon.css) in the shared phase: the delay is
- *  the eyes' own, so the face's one-shot hop or shake starts from its beginning. */
-function AvatarFace({ state, phase }: { state: GroupState; phase: number }) {
+/** The head's face: the group's state as two eyes (avatarFace.ts), decoration only: the label and the rows say it in
+ *  words. The gaze group carries where they look (face units; converged-icon.css glides it); inside it the eyes are one
+ *  group, which a working face blinks in the shared phase: the delay is the eyes' own, so the face's one-shot hop or
+ *  shake starts from its beginning. */
+function AvatarFace({ state, phase, gaze }: { state: GroupState; phase: number; gaze: readonly [number, number] }) {
   const expression = AVATAR_EXPRESSION[state];
-  const parts = AVATAR_FACES[expression];
   return (
     <svg className="awwo-converged-face" viewBox="0 0 100 100" data-expression={expression} aria-hidden="true">
-      <g className="awwo-converged-eyes" style={{ animationDelay: `${phase}ms` }}>{parts.filter(part => part.kind === 'eye').map(drawPart)}</g>
-      {parts.filter(part => part.kind !== 'eye').map(drawPart)}
+      <g className="awwo-converged-gaze" style={{ transform: `translate(${gaze[0].toFixed(2)}px, ${gaze[1].toFixed(2)}px)` }}>
+        <g className="awwo-converged-eyes" style={{ animationDelay: `${phase}ms` }}>{AVATAR_FACES[expression].map(drawPart)}</g>
+      </g>
     </svg>
   );
 }
@@ -248,9 +278,19 @@ function ConvergedIconImpl({ icon, members, runs, depths, title, scale, selected
   const k = convergedIconScale(zoom);
   const diameter = CONVERGED_ICON_WORLD * zoom * k;
   const tier: 'M' | 'L' = diameter >= TIER_L_PX ? 'L' : 'M';
-  const segments = useMemo(() => ringSegments(steps.map((node, index) =>
-    memberLiveState(runs[node.id], streams[index]?.streaming, hasDeliveredResult(node), live)), diameter), [steps, runs, streams, diameter, live]);
+  const states = useMemo(() => steps.map((node, index) =>
+    memberLiveState(runs[node.id], streams[index]?.streaming, hasDeliveredResult(node), live)), [steps, runs, streams, live]);
+  const segments = useMemo(() => ringSegments(states, diameter), [states, diameter]);
   const settledMark = useSettledMark(status.state);
+  const stepIds = useMemo(() => steps.map(node => node.id), [steps]);
+  const glanceId = useFailureGlance(status, stepIds);
+  // Where the eyes look: for a moment at a member seen failing while the rest run; else, on a face that looks, at the
+  // member the icon names (while it runs, a streaming reply or the frontier; once it has failed, the first failure), at
+  // its own arc or its state's; else straight ahead.
+  const lookAt = glanceId ?? (AVATAR_LOOKS[AVATAR_EXPRESSION[status.state]] ? status.activeId : null);
+  const lookIndex = lookAt ? steps.findIndex(node => node.id === lookAt) : -1;
+  const lookShare = lookIndex < 0 ? null : arcMiddle(segments, states, lookIndex);
+  const gaze: readonly [number, number] = lookShare === null ? [0, 0] : eyeGaze(lookShare);
   useAnnouncements(status, icon.id, title, steps, onAnnounce, t, locale);
   // Taken when a run starts, as the loops do (they start with is-running), so an icon converged before its run is in step
   // with every other one.
@@ -335,9 +375,13 @@ function ConvergedIconImpl({ icon, members, runs, depths, title, scale, selected
           {running.map((segment, index) => <path key={index} className="awwo-converged-arc is-running" d={arcPath(52, segment.from, segment.to)} />)}
         </svg>
       ) : null}
-      {/* The head: its face says what the group is doing; the counts are the rows' to give, under it. */}
+      {/* The head: flat, with a light at the chin (still: only the face hops or shakes), on a dark style a light rim that
+          keeps it apart from the plate (converged-icon.css), and the face that says what the group is doing; the counts
+          are the rows' to give, under it. */}
       <span className="awwo-converged-orb" aria-hidden="true">
-        <AvatarFace state={status.state} phase={facePhase} />
+        <svg className="awwo-converged-crescent" viewBox="0 0 100 100" aria-hidden="true"><path d={CRESCENT} /></svg>
+        <span className="awwo-converged-rim" />
+        <AvatarFace state={status.state} phase={facePhase} gaze={gaze} />
       </span>
       {badge ? <span key={badgeKey} className={`awwo-converged-badge is-${badge.kind}${badgeKey !== firstBadgeKey.current ? ' is-new' : ''}`} aria-hidden="true">
         {badge.count > 99 ? '99+' : badge.count}</span> : null}
@@ -370,6 +414,42 @@ function useSettledMark(state: GroupState): 'done' | 'failed' | null {
     return () => clearTimeout(timer);
   }, [state]);
   return mark === state ? mark : null;
+}
+
+/** A member that fails while the group still runs draws the eyes to its arc for a moment (GLANCE_MS), then they go back
+ *  to the work: only for a failure seen happen (one the icon mounted with, found again, or a member that joined failed
+ *  is no news), while motion is welcome; a later failure takes the eyes from an earlier one, and of several at once the
+ *  first in pipeline order (the upstream one explains those below it). A change that brings no new failure (another
+ *  member retried, the members put in another order) leaves a glance as it is while its member is still failed. Null
+ *  otherwise, once the group stops running, and the moment the reader turns reduced motion on. */
+function useFailureGlance(status: GroupStatus, memberIds: ReadonlyArray<string>): string | null {
+  const [glance, setGlance] = useState<string | null>(null);
+  const running = status.state === 'running';
+  const reduce = useSyncExternalStore(subscribeReducedMotion, reducedMotion, () => false);
+  const failedKey = status.failedIds.join('\u0001');
+  const membersKey = memberIds.join('\u0001');
+  // Read inside the effect, which runs on a change of the failed members, of the members or of running only.
+  const latest = useRef({ failed: status.failedIds, members: memberIds });
+  latest.current = { failed: status.failedIds, members: memberIds };
+  const seen = useRef({ failed: new Set(status.failedIds) as ReadonlySet<string>, members: new Set(memberIds) as ReadonlySet<string> });
+  // The glance's own timer, apart from the effect's runs: a run that brings no new failure must not end it.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    const { failed, members } = latest.current;
+    const before = seen.current;
+    seen.current = { failed: new Set(failed), members: new Set(members) };
+    if (!running || reduce) { clearTimeout(timer.current); setGlance(null); return; }
+    const fresh = failed.filter(item => before.members.has(item) && !before.failed.has(item));
+    if (fresh.length) {
+      clearTimeout(timer.current);
+      setGlance(fresh[0]);
+      timer.current = setTimeout(() => setGlance(null), GLANCE_MS);
+      return;
+    }
+    setGlance(current => current && failed.includes(current) ? current : null);
+  }, [failedKey, membersKey, running, reduce]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return running && !reduce ? glance : null;
 }
 
 /** What the board's status region says for this icon: a member failing while the rest still run (a burst said once,

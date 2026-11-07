@@ -1,7 +1,8 @@
 // THE CONVERGED ICON ON EVERY STYLE. Its states are told by colour on its dark collar (and by shape: widths, dashes, the
 // keyline), so each of the eight presets' colours must read there: an arc at least 3:1 on the collar (WCAG non-text
-// contrast), a failed arc on its keyline and the keyline on the collar, the badge's digit 4.5:1 on its fill, and the words
-// under it 4.5:1 on the board. The values are read from themes.css, as saas-themes.test.tsx reads them; which token
+// contrast), a failed arc on its keyline and the keyline on the collar, the badge's digit 4.5:1 on its fill, the eyes 10:1
+// on the flat head and the head's edge 3:1 (the head on a light style's plate, the rim on a dark one's, on both sides),
+// and the words under it 4.5:1 on the board. The values are read from themes.css, as saas-themes.test.tsx reads them; which token
 // paints which part is read from the icon's own stylesheet, so a change of token is checked here too.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -58,18 +59,20 @@ describe('which token paints each part of the icon', () => {
     expect(declarations('.awwo-converged-state, .awwo-converged-now')).toMatch(/color:\s*var\(--saas-muted\b/);
     expect(declarations('.awwo-converged-state .is-failed')).toMatch(/color:\s*color-mix\(in srgb, var\(--saas-danger\b[^;]*\) 80%, var\(--saas-text\b/);
     expect(declarations('.awwo-converged-state .is-blocked')).toMatch(/color:\s*color-mix\(in srgb, var\(--saas-warning\b[^;]*\) 80%, var\(--saas-text\b/);
-    // The head: its face in the orb's white, on the core and edge, with the glow under the chin (below the mouth).
+    // The head: flat, the orb's core, its eyes in white; the chin light the glow over the core; on a dark style the rim the
+    // orb's highlight over the plate the head sits on.
     const head = declarations('.awwo-converged-orb');
     expect(head).toMatch(/color:\s*#fff;/);
-    // The specular spot, where canvas-selection-converge-avatar.test.tsx keeps every face part clear of it (gone by 11%).
-    expect(head).toMatch(/radial-gradient\(circle at 27% 19%, rgb\(255 255 255 \/ 70%\) 0 2%, rgb\(255 255 255 \/ 0%\) 11%\)/);
-    expect(head).toMatch(/radial-gradient\(circle at 50% 42%, var\(--saas-orb-core\b[^)]*\) 0 48%, var\(--saas-orb-edge\b[^)]*\) 78%\)/);
-    expect(head).toMatch(/radial-gradient\(120% 70% at 50% 108%, rgb\(var\(--saas-glow-1-rgb[^)]*\) \/ 55%\) 0 22%, rgb\(var\(--saas-glow-2-rgb[^)]*\) \/ 18%\) 40%, transparent 62%\)/);
-    expect(declarations('.awwo-converged-face ellipse')).toMatch(/fill:\s*currentColor/);
-    expect(declarations('.awwo-converged-face path')).toMatch(/stroke:\s*currentColor/);
-    // And those tokens are the presets' own colours.
+    expect(head).toMatch(/background:\s*var\(--saas-orb-core\b[^)]*\);/);
+    expect(head).not.toMatch(/gradient/);
+    expect(declarations('.awwo-converged-crescent path')).toMatch(/fill:\s*color-mix\(in srgb, rgb\(var\(--saas-glow-1-rgb[^)]*\)\) 40%, var\(--saas-orb-core\b/);
+    expect(declarations("html:root[data-theme='dark'] .awwo-converged-rim"))
+      .toMatch(/box-shadow:\s*inset 0 0 0 calc\(2px \* var\(--cv-px, 1\)\) color-mix\(in srgb, rgb\(var\(--saas-orb-hi-rgb[^)]*\)\) 60%, var\(--awwo-card\b/);
+    expect(declarations('.awwo-converged-face :is(rect, .is-fill)')).toMatch(/fill:\s*currentColor/);
+    expect(declarations('.awwo-converged-face path:not(.is-fill)')).toMatch(/stroke:\s*currentColor/);
+    // And those tokens are the presets' own colours: the plate a card's (--awwo-card is --saas-node, the style's card).
     for (const [token, own] of [['--saas-signal', '--agent-running'], ['--saas-danger', '--danger-bg'], ['--saas-warning', '--warn'],
-      ['--saas-text', '--text-primary'], ['--saas-muted', '--text-secondary']]) {
+      ['--saas-text', '--text-primary'], ['--saas-muted', '--text-secondary'], ['--saas-node', '--bg-card'], ['--awwo-card', '--saas-node']]) {
       expect(tokens).toMatch(new RegExp(`${token}:\\s*var\\(${own}\\);`));
     }
     expect(themes).toContain('--saas-canvas: color-mix(in srgb, var(--bg-base) 96%, var(--text-primary));');
@@ -104,12 +107,18 @@ describe('the icon on each of the eight styles', () => {
     const blockedInk = scheme === 'light' ? v['--text-primary'] : board;
     expect(contrast(failedInk, v['--danger-bg']), `${id} failed badge digit`).toBeGreaterThanOrEqual(4.5);
     expect(contrast(blockedInk, v['--saas-warning-dot']), `${id} blocked badge digit`).toBeGreaterThanOrEqual(4.5);
-    // The face, white on the head: on its core and its edge, and where the rim light comes nearest the mouth. The mouth
-    // ends above 72% of the head (canvas-selection-converge-avatar.test.tsx), past the light's 40% stop (80%), so the
-    // light there is under that stop's 18% of glow-2 (and the 55% of glow-1 is lower still, at 92% and down).
-    for (const [part, colour, least] of [['core', v['--saas-orb-core'], 10], ['edge', v['--saas-orb-edge'], 10],
-      ['rim light by the mouth', mix(fromTriplet(v['--saas-glow-2-rgb']), v['--saas-orb-core'], 0.18), 4.5]] as Array<[string, string, number]>) {
-      expect(contrast('#ffffff', colour), `${id} the face on the head's ${part} ${colour}`).toBeGreaterThanOrEqual(least);
+    // The eyes, white on the flat head (the chin light sits below them: canvas-selection-converge-avatar.test.tsx).
+    const core = v['--saas-orb-core'];
+    const card = v['--bg-card'];
+    expect(contrast('#ffffff', core), `${id} the eyes on the head ${core}`).toBeGreaterThanOrEqual(10);
+    // The head's edge (WCAG non-text contrast): on a light style the head on its plate; on a dark one, where the head is
+    // near the plate's own colour, the rim, on the plate and on the head's own colour (at the chin the rim's inner side
+    // meets the crescent instead: decoration, not the head's edge, so not measured here).
+    if (scheme === 'light') expect(contrast(core, card), `${id} the head ${core} on its plate ${card}`).toBeGreaterThanOrEqual(3);
+    else {
+      const rim = mix(hi, card, 0.6);
+      expect(contrast(rim, card), `${id} the rim ${rim} on the plate ${card}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(rim, core), `${id} the rim ${rim} on the head ${core}`).toBeGreaterThanOrEqual(3);
     }
     // The rows under it, on the board.
     const counted = (ink: string) => mix(ink, v['--text-primary'], 0.8);

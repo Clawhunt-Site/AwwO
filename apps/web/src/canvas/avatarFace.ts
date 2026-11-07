@@ -1,7 +1,8 @@
-// The converged icon's face (收敛成一个图标, the whole canvas drawn as one bot avatar): the AwwO orb is the head, and its
-// expression is the group's state, the one its words already say (groupStatus.ts), never more. Pure data, drawn by
-// ConvergedIcon.tsx on a 100-unit face in the orb's white ink: two eyes, brows for a worry, a mouth. The idea of a bot
-// whose face says what it is doing comes from OpenMausBot's mascots; the face and its shapes are AwwO's own.
+// The converged icon's face (收敛成一个图标, the whole canvas drawn as one bot avatar): a flat head with two eyes and
+// nothing else, whose expression is the group's state, the one its words already say (groupStatus.ts), never more. Pure
+// data, drawn by ConvergedIcon.tsx on a 100-unit face over the head, in the head's eye ink. The eyes look at the part of
+// the ring the icon names (eyeGaze), level or down, never up. The idea of a bot whose face says what it is doing comes from
+// OpenMausBot's mascots; the face and its shapes are AwwO's own.
 import type { GroupState } from './groupStatus';
 
 export type AvatarExpression = 'calm' | 'working' | 'thinking' | 'happy' | 'content' | 'worried' | 'blank' | 'asleep';
@@ -20,33 +21,47 @@ export const AVATAR_EXPRESSION: Readonly<Record<GroupState, AvatarExpression>> =
   cancelled: 'asleep',
 };
 
-/** One part of a face: an eye drawn as a filled oval, or an eye, a brow or the mouth drawn as a stroked line. */
+/** One eye: an upright capsule (a pill, filled), a line (stroked, `width` face units wide), or a filled shape. */
 export type FacePart =
-  | { kind: 'eye'; shape: 'ellipse'; cx: number; cy: number; rx: number; ry: number }
-  | { kind: 'eye' | 'brow' | 'mouth'; shape: 'path'; d: string };
+  | { shape: 'capsule'; cx: number; cy: number; w: number; h: number }
+  | { shape: 'stroke'; d: string; width: number }
+  | { shape: 'fill'; d: string };
 
-const eyes = (cy: number, rx: number, ry: number, dx = 0): FacePart[] => [35, 65].map(cx =>
-  ({ kind: 'eye', shape: 'ellipse', cx: cx + dx, cy, rx, ry }));
-const line = (kind: 'eye' | 'brow' | 'mouth', d: string): FacePart => ({ kind, shape: 'path', d });
+const capsule = (cx: number, cy: number, w: number, h: number): FacePart => ({ shape: 'capsule', cx, cy, w, h });
+const stroke = (d: string, width = 5): FacePart => ({ shape: 'stroke', d, width });
+const fill = (d: string): FacePart => ({ shape: 'fill', d });
 
-/** Each expression's parts. Eyes sit on one line near 45 (a working face's look and blink move them as one); the mouth
- *  stays between 60 and 70, above the orb's rim light; nothing reaches the specular spot at the upper left. Each face
- *  reads in a still frame too (under reduced motion, in a screenshot, at the small size): working is never calm. */
-export const AVATAR_FACES: Readonly<Record<AvatarExpression, ReadonlyArray<FacePart>>> = {
-  // At rest (before a run, or holding earlier or partial results): round open eyes, a small smile.
-  calm: [...eyes(45, 6, 8), line('mouth', 'M 42 63 Q 50 69 58 63')],
-  // At work: eyes narrowed and turned aside (they look about and blink while it runs), a short set mouth, no smile.
-  working: [...eyes(45, 6, 5.5, 3), line('mouth', 'M 45 65 H 55')],
-  // Queued or waiting for recovery or a retry: looking up, a slanted, pondering mouth.
-  thinking: [...eyes(39, 5.5, 7.5, 2), line('mouth', 'M 44 66 L 56 64')],
-  // Every member has a result: eyes shut in a smile, a wide smile.
-  happy: [line('eye', 'M 28.5 47 Q 35 38.5 41.5 47'), line('eye', 'M 58.5 47 Q 65 38.5 71.5 47'), line('mouth', 'M 37 60 Q 50 74 63 60')],
-  // All of it reused from an earlier run: the same, quieter.
-  content: [line('eye', 'M 29 46 Q 35 40.5 41 46'), line('eye', 'M 59 46 Q 65 40.5 71 46'), line('mouth', 'M 41 62 Q 50 69 59 62')],
-  // A member failed and nothing runs: smaller eyes, brows raised at the middle, a frown.
-  worried: [...eyes(47, 5.5, 7), line('brow', 'M 27 38 L 40 34'), line('brow', 'M 73 38 L 60 34'), line('mouth', 'M 41 69 Q 50 61 59 69')],
-  // Blocked: a blank stare and a flat mouth.
-  blank: [line('eye', 'M 29 46 H 41'), line('eye', 'M 59 46 H 71'), line('mouth', 'M 43 65 H 57')],
-  // Stopped: eyes shut, a small flat mouth.
-  asleep: [line('eye', 'M 29 45 Q 35 50 41 45'), line('eye', 'M 59 45 Q 65 50 71 45'), line('mouth', 'M 46 65 H 54')],
+/** Each expression's two eyes, centred near x 35 and 65 on one line near y 46 (a blink squashes them as one, the gaze
+ *  moves them as one). Each face reads in a still frame too (under reduced motion, in a screenshot): working is never
+ *  calm. Upright and level: never a pair leaning up and to one side. */
+export const AVATAR_FACES: Readonly<Record<AvatarExpression, readonly [FacePart, FacePart]>> = {
+  // At rest (before a run, or holding earlier or partial results): tall eyes, straight ahead, still.
+  calm: [capsule(35, 46, 10, 16), capsule(65, 46, 10, 16)],
+  // At work: round eyes, looking at the part of the ring at work, blinking.
+  working: [capsule(35, 46, 10, 10), capsule(65, 46, 10, 10)],
+  // Queued or waiting for recovery or a retry: one eye half shut, straight ahead (it is not work yet).
+  thinking: [capsule(35, 46, 9, 14), capsule(65, 49.5, 9, 7)],
+  // Every member has a result: eyes shut in a smile.
+  happy: [stroke('M 28 49 Q 35 38 42 49'), stroke('M 58 49 Q 65 38 72 49')],
+  // All of it reused from an earlier run: the same, quieter, still a curve at the small size.
+  content: [stroke('M 29 48 Q 35 41 41 48', 4), stroke('M 59 48 Q 65 41 71 48', 4)],
+  // A member failed and nothing runs or waits: eyes sloping down to the sides, looking at the first failure.
+  worried: [fill('M 40 41 L 30 47 L 30 50 A 5 5 0 0 0 40 50 Z'), fill('M 60 41 L 70 47 L 70 50 A 5 5 0 0 1 60 50 Z')],
+  // Blocked: a blank stare, straight ahead (flat eyes turned aside would read as a side-eye).
+  blank: [stroke('M 28 47 H 42'), stroke('M 58 47 H 72')],
+  // Stopped: eyes shut.
+  asleep: [stroke('M 28 44 Q 35 54 42 44', 4), stroke('M 58 44 Q 65 54 72 44', 4)],
 };
+
+/** The faces whose eyes look at the ring: at work (at the member the icon names now, a streaming reply or the frontier)
+ *  and worried (at the first failure). The others look straight ahead. */
+export const AVATAR_LOOKS: Readonly<Record<AvatarExpression, boolean>> = {
+  calm: false, working: true, thinking: false, happy: false, content: false, worried: true, blank: false, asleep: false,
+};
+
+/** Toward a point of the ring (a share of the circle, 0 = 12 o'clock, clockwise), in face units: up to 7 across and 6
+ *  down, never up (eyes raised and turned aside would be another mark's look). */
+export function eyeGaze(share: number): [number, number] {
+  const angle = share * 2 * Math.PI;
+  return [7 * Math.sin(angle), Math.max(0, -6 * Math.cos(angle))];
+}
