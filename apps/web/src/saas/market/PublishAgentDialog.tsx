@@ -133,11 +133,11 @@ function PublishView({ tenantId, settings, agentId: existing, initial, catalogue
       <small>{t('作者须知：不公开时只有你和平台管理员能看到指令；但模型被诱导时仍可能复述它，这一点无法完全防住。', 'For authors: unpublished instructions are seen only by you and platform administrators, but a model can still be led to repeat them, which cannot be fully prevented.')}</small>
       <SkillsField tenantId={tenantId} skills={form.skills} error={errors.skills} disabled={busy} onChange={skills => edit({ skills }, 'skills')} />
       <ModelField model={form.model} models={models.models} disabled={busy} onChange={model => edit({ model }, 'model')} />{fieldError('model')}
-      <label>{t(`每次调用的价格（点，0–${settings.maxPrice}，0 表示免费）`, `Price per call (credits, 0–${settings.maxPrice}; 0 is free)`)}
+      <label>{t(`每次调用的价格（点，0–${settings.maxPrice}，0 表示不收 Agent 费）`, `Price per call (credits, 0–${settings.maxPrice}; 0 is no Agent fee)`)}
         <input inputMode="numeric" value={form.price} aria-invalid={Boolean(errors.price)} disabled={busy} onChange={event => edit({ price: event.target.value }, 'price')} />{fieldError('price')}
         <small>{price > 0 ? t(`每次扣费的调用，你获得约 ${creditsText(share, locale)} 点（平台抽成 ${settings.feeBps / 100}%），只计调用方买来的点数。运行完成时扣费；Agent 写出内容后运行被调用方停止、被调用方节点自己的输出格式拒收、被截断、中途拒答或超时的，也照常扣费；其余没完成的不扣。付费 Agent 只有调用方工作区的所有者和管理员能运行。`,
           `For each charged call you get about ${creditsText(share, locale)} credits (the platform keeps ${settings.feeBps / 100}%), counting only credits the caller bought. A call is charged when its run completes, and also when, once the Agent has written, the caller stops it, the caller’s node’s own output format rejects it, or it is cut off, refused part way or times out; any other run that does not complete is not charged. Only the owner or an administrator of the caller’s workspace runs a paid Agent.`)
-          : t('免费 Agent 不需要套餐，任何人都能用。', 'A free Agent needs no plan; anyone can use it.')}</small></label>
+          : t('价格为 0：不收 Agent 费，调用方的模型照常计费。', 'At 0: no Agent fee; the caller’s model is billed as usual.')}</small></label>
       <ExamplesField examples={form.examples} error={errors.examples} disabled={busy} onChange={examples => edit({ examples }, 'examples')} />
       <label>{t('署名', 'Author name')}<input value={form.authorName} aria-invalid={Boolean(errors.authorName)} disabled={busy} onChange={event => { typedAuthor.current = true; edit({ authorName: event.target.value }, 'authorName'); }} />
         <small>{t('署名随版本一起审核，批准后才显示在市场上；不能用 AwwO、ClawHunt、阿呜的名字，也不能自称官方。', 'The author name is reviewed with the version and shows in the market once approved; it may not use the name of AwwO, ClawHunt or 阿呜, or claim to be official.')}

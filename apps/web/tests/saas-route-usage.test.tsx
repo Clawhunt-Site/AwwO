@@ -11,7 +11,8 @@ const usage = (routes: Record<string, { limit: number; used: number }>, daily = 
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const meter = () => render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" /></SaaSPreferencesProvider>);
+// The workspace's owner, unless a test says otherwise: only the owner's plan opens a workspace.
+const meter = (owner = true) => render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" owner={owner} /></SaaSPreferencesProvider>);
 const showing = (value: unknown) => vi.stubGlobal('fetch', vi.fn(async () => response(value)));
 const row = (name: string) => screen.getByText(name).parentElement!;
 const allOut = { gate: { limit: 3, used: 3 }, bedrock: { limit: 1, used: 1 }, media: { limit: 1, used: 1 } };
@@ -74,6 +75,84 @@ it('reads the numbers again as soon as a task says it ended', async () => {
   announceRouteUsageChanged();
   await settle();
   expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+// The home's account card carries the page's meter (home/HomeAccountCard.tsx): it hands up each answer for the card and
+// the trial banner, and null while it has none; its chips fill the card and its popover opens upward, over the rail.
+it('reports each answer it reads, and null while it has none', async () => {
+  const seen: unknown[] = [];
+  const fetch = vi.fn(async () => response(usage({ gate: { limit: 3, used: 1 } })));
+  vi.stubGlobal('fetch', fetch);
+  render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" variant="card" onUsage={value => seen.push(value)} /></SaaSPreferencesProvider>);
+  const chip = await screen.findByRole('button', { name: '今日额度 · 剩 18 次' });
+  expect(chip).toHaveClass('saas-route-usage-trigger', 'is-card');
+  expect(seen).toEqual([usage({ gate: { limit: 3, used: 1 } })]);
+  fetch.mockImplementation(async () => response(usage({ gate: { limit: 3, used: 1 } }, { limit: 30, used: 20 })));
+  React.act(() => { announceRouteUsageChanged(); });
+  await screen.findByRole('button', { name: '今日额度 · 剩 10 次' });
+  expect(seen).toHaveLength(2);
+  // A failed read after an answer keeps the answer; a first read that fails reports none.
+  fetch.mockImplementation(async () => response({ error: { message: 'down' } }, 503));
+  React.act(() => { announceRouteUsageChanged(); });
+  await settle();
+  expect(seen).toHaveLength(2);
+  cleanup();
+  render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" variant="card" onUsage={value => seen.push(value)} /></SaaSPreferencesProvider>);
+  await waitFor(() => expect(seen.at(-1)).toBeNull());
+});
+
+it('opens the card’s popover above its chip, and the top bar’s below it', async () => {
+  for (const variant of ['card', 'header'] as const) {
+    showing(usage({ gate: { limit: 3, used: 1 } }));
+    render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" variant={variant} /></SaaSPreferencesProvider>);
+    const chip = await screen.findByRole('button', { name: '今日额度 · 剩 18 次' });
+    vi.spyOn(chip, 'getBoundingClientRect').mockReturnValue({ top: 700, bottom: 736, left: 20, right: 240, width: 220, height: 36, x: 20, y: 700, toJSON: () => ({}) });
+    fireEvent.click(chip);
+    const popover = await screen.findByRole('dialog', { name: '今日免费额度' });
+    await waitFor(() => expect(popover.style.visibility).toBe('visible'));
+    if (variant === 'card') expect(parseFloat(popover.style.top)).toBeLessThan(700);
+    else expect(parseFloat(popover.style.top)).toBeGreaterThan(736);
+    cleanup();
+  }
+});
+
+it('says when the free trial ends, and once it has, that nothing runs until a plan', async () => {
+  const until = new Date(2026, 10, 13).toISOString();
+  showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: false } });
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
+  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续运行。')).toBeVisible();
+  expect(screen.getByRole('link', { name: '升级 Pro / Max' })).toBeVisible();
+  cleanup();
+  showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: true } });
+  meter();
+  const ended = await screen.findByRole('button', { name: '免费试用已结束' });
+  expect(ended).toHaveClass('is-out');
+  fireEvent.click(ended);
+  expect(await screen.findByText('免费试用已结束：订阅 Pro 或 Max 后就能继续规划和运行，画布和成果都还在。')).toBeVisible();
+  expect(screen.getByRole('link', { name: '订阅 Pro / Max' })).toHaveClass('saas-primary');
+  // Nothing is free past the end: no allowance rows, no "I want more calls".
+  expect(screen.queryByText('总次数')).toBeNull();
+  expect(screen.queryByRole('button', { name: '想要更多次数' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '免费试用已结束' })).toBeVisible();
+});
+
+it('tells anyone but the owner that the owner subscribes, offering them a plan of their own only', async () => {
+  const until = new Date(2026, 10, 13).toISOString();
+  showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: false } });
+  meter(false);
+  fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
+  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续运行。')).toBeVisible();
+  expect(screen.queryByRole('link', { name: '升级 Pro / Max' })).toBeNull();
+  expect(screen.getByRole('link', { name: '为我自己的账号订阅' })).not.toHaveClass('saas-primary');
+  cleanup();
+  showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: true } });
+  meter(false);
+  fireEvent.click(await screen.findByRole('button', { name: '免费试用已结束' }));
+  expect(await screen.findByText('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。')).toBeVisible();
+  expect(screen.queryByRole('link', { name: '订阅 Pro / Max' })).toBeNull();
+  expect(screen.getByRole('link', { name: '为我自己的账号订阅' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+  expect(screen.queryByText('总次数')).toBeNull();
 });
 
 it('counts down the daily total while every route still has room', async () => {

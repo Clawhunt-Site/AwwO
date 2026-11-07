@@ -104,7 +104,7 @@ export function validatePublish(form: PublishForm, maxPrice: number, t: MarketT)
   if (form.skills.length > MARKET_LIMITS.skills) errors.skills = t(`最多 ${MARKET_LIMITS.skills} 个技能。`, `At most ${MARKET_LIMITS.skills} skills.`);
   else if (form.skills.some(skill => !skill.ref)) errors.skills = t('有技能读不出它的来源，请移除后重新添加。', 'A skill’s source could not be read; remove it and add it again.');
   const price = form.price.trim();
-  if (!/^\d+$/.test(price) || Number(price) > maxPrice) errors.price = t(`价格是 0 到 ${maxPrice} 的整数点数（0 表示免费）。`, `The price is a whole number of credits from 0 to ${maxPrice} (0 is free).`);
+  if (!/^\d+$/.test(price) || Number(price) > maxPrice) errors.price = t(`价格是 0 到 ${maxPrice} 的整数点数（0 表示不收 Agent 费）。`, `The price is a whole number of credits from 0 to ${maxPrice} (0 is no Agent fee).`);
   if (form.examples.length > MARKET_LIMITS.examples) errors.examples = t(`最多 ${MARKET_LIMITS.examples} 个示例。`, `At most ${MARKET_LIMITS.examples} examples.`);
   else if (form.examples.some(example => characters(example.prompt.trim()) > MARKET_LIMITS.examplePrompt || characters(example.result.trim()) > MARKET_LIMITS.exampleResult)) {
     errors.examples = t(`示例的请求最多 ${MARKET_LIMITS.examplePrompt} 个字符，结果最多 ${MARKET_LIMITS.exampleResult} 个。`,

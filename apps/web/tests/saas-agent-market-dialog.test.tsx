@@ -58,8 +58,10 @@ describe('browsing the market', () => {
     const calls = server();
     render(<AgentMarket tenantId="team" target={{ kind: 'canvas' }} catalogue={catalogue} onUse={vi.fn()} onClose={vi.fn()} />);
     expect(await card('Writer')).toHaveTextContent('成功率 90%');
-    expect(screen.getByRole('button', { name: /^Writer/ })).toHaveTextContent('免费');
+    // A price of 0 is no Agent fee, never "free": the node's model is billed as usual (owner 2026-11-07).
+    expect(screen.getByRole('button', { name: /^Writer/ })).toHaveTextContent('只收模型费');
     expect(screen.getByRole('button', { name: /^Coder/ })).toHaveTextContent('每次 5 点');
+    expect(document.body).not.toHaveTextContent('免费');
     const fresh = screen.getByRole('heading', { name: '新上架' }).parentElement!;
     expect(within(fresh).getByRole('button', { name: /^Fresh/ })).toHaveTextContent('AwwO 官方');
     expect(within(fresh).queryByRole('button', { name: /^Writer/ })).toBeNull();

@@ -13,12 +13,15 @@ import { describe, expect, it } from 'vitest';
 const SRC = resolve(process.cwd(), 'src');
 const read = (file: string) => readFileSync(join(SRC, file), 'utf8');
 // The stylesheets with button rules for the pages and frames below (none of them nests rules, which the parser here
-// relies on). design/canvas.css nests, and none of its rules reaches a button inside the market.
-const PAGE_WIDE = ['saas/design/system.css', 'saas/saas.css', 'canvas/ios-theme.css', 'saas/canvas-library.css', 'canvas/awwo-workspace.css'];
+// relies on). design/canvas.css nests, and none of its rules reaches a button inside the market. home/home.css is the
+// workspace home's frame (2026-11-07), around its Agent 市场 section.
+const PAGE_WIDE = ['saas/design/system.css', 'saas/saas.css', 'canvas/ios-theme.css', 'saas/canvas-library.css', 'canvas/awwo-workspace.css', 'saas/home/home.css'];
 // The classes of the market's wrappers where it shows, read in Chrome on 2026-10-31: the workspace home's strip, the
-// market opened from it and from a canvas's bar; with the hosted shell's other page classes.
+// market opened from it and from a canvas's bar; with the hosted shell's other page classes. The home's frame since
+// 2026-11-07: its layout, content and section panel, and the Agent 市场 section's own class.
 const SCOPES = new Set([
   'saas-dashboard', 'saas-home', 'saas-home-section', 'saas-market-strip', 'awwo-knowledge-overlay', 'awwo-library', 'awwo-market',
+  'saas-home-layout', 'saas-home-content', 'saas-home-panel', 'saas-market-section',
   'awwo-library-body', 'has-editor', 'awwo-library-list-column', 'awwo-library-group', 'awwo-stage-canvas', 'awwo-stage', 'awwo-main',
   'awwo-workspace', 'is-simple', 'has-model-library', 'saas-canvas-shell',
   'saas-login', 'saas-notice', 'saas-card', 'saas-native-dialog', 'saas-error-banner',

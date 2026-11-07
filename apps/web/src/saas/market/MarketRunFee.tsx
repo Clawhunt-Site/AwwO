@@ -1,7 +1,8 @@
 // A run made with a market Agent, beside the run's outcome: the Agent's fee and where it stands (held at admission,
 // taken when the run completes or was stopped after the Agent had written, given back otherwise), and, on a run whose
-// call was charged (it gave the caller the Agent's text, a free Agent's too), the 👍 / 👎 its rating counts in the
-// Agent's ranking. Members and above rate; pressing the chosen one again takes the rating back.
+// call was charged (it gave the caller the Agent's text, also where the Agent takes no fee), the 👍 / 👎 its rating
+// counts in the Agent's ranking. Members and above rate; pressing the chosen one again takes the rating back. A price of
+// 0 is no Agent fee, never "free": the run's model is billed as any node's (owner 2026-11-07).
 import { useEffect, useState } from 'react';
 import { ThumbsDown, ThumbsUp } from 'lucide-react';
 import { api, saasErrorMessage, tenantPath } from '../api';
@@ -27,7 +28,7 @@ export function MarketRunFee({ tenantId, runId, market, completed, canRate }: { 
     <span>{market.insider ? t('作者本人或在作者自己的工作区里的调用：不收 Agent 费用，也不计入排行', 'A call by its author, or in a workspace its author owns: no Agent fee, and not counted in the ranking')
       : market.price > 0 ? t(`Agent 费用：每次 ${market.price} 点 · ${callStatusName(market.status, t)}`, `Agent fee: ${market.price} credits · ${callStatusName(market.status, t)}`)
         + (market.status === 'charged' && !completed ? t('（Agent 已经写出了内容，内容归你，所以照常计费）', ' (the Agent had written its text, which is yours, so it is charged)') : '')
-      : t('免费 Agent，不收 Agent 费用', 'A free Agent: no Agent fee')}</span>
+      : t('Agent 费用：不收（模型照常计费）', 'Agent fee: none (the model is billed as usual)')}</span>
     {market.status === 'charged' && canRate && !market.insider && <>
       <span>{t('这次的效果：', 'How it went:')}</span>
       <button type="button" aria-pressed={rating === 1} aria-label={t('好评', 'Thumbs up')} disabled={busy} onClick={() => void rate(1)}><ThumbsUp size={12} aria-hidden="true" /></button>

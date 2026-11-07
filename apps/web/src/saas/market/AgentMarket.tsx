@@ -12,8 +12,8 @@ import { browseMarketAgents, MARKET_CATEGORIES, MARKET_SORTS, readMarketAgent, t
 import { MarketAgentCard } from './MarketAgentCard';
 import { MarketAgentDetailView, type MarketTarget } from './MarketAgentDetail';
 import { marketModelDecision, type MarketModelDecision } from './marketModel';
-import { categoryName, sortName, useMarketI18n } from './marketText';
-import { rememberMarketAgent, useWorkspaceModels, useWorkspacePaidPlan } from './useMarket';
+import { categoryName, officialPriceNotice, sortName, useMarketI18n } from './marketText';
+import { rememberMarketAgent, useMarketSettings, useWorkspaceModels, useWorkspacePaidPlan } from './useMarket';
 import '../canvas-library.css';
 import './market.css';
 
@@ -109,6 +109,10 @@ function MarketBrowser({ tenantId, target, catalogue, initialAgentId, onUse, onD
   const subtitle = target.kind === 'node' ? t(`为「${target.title}」选一个 Agent：它带着自己的指令和技能，节点的任务要求、资料和对话照常是你的。`,
     `Choose an Agent for “${target.title}”: it brings its own instructions and skills, while the node’s task requirements, knowledge and conversation stay yours.`)
     : t('挑一个运行表现好的 Agent 用在画布上。排行只看真实运行：成功率越高、用的人越多越靠前。', 'Pick a well-performing Agent for your canvas. The ranking counts real runs only: a higher success rate and more people put an Agent higher.');
+  // Until the official Agents' price starts, when it starts and what it is (the server's market capability); from then
+  // on their cards and pages show it.
+  const market = useMarketSettings(tenantId);
+  const priceNotice = officialPriceNotice(market ?? undefined, Date.now(), locale, t);
   const cards = (list: MarketAgentSummary[]) => <ul className="awwo-market-cards">{list.map(agent => <li key={agent.id}>
     <MarketAgentCard agent={agent} selected={agent.id === selectedId} onSelect={next => setSelectedId(next.id)} /></li>)}</ul>;
 
@@ -116,6 +120,7 @@ function MarketBrowser({ tenantId, target, catalogue, initialAgentId, onUse, onD
     <header className="awwo-library-header">
       <div className="awwo-library-heading"><span className="awwo-library-mark"><Store size={20} aria-hidden="true" /></span><div>
         <h2>{t('Agent 市场', 'Agent market')}</h2><p>{subtitle}</p>
+        {priceNotice && <p className="awwo-market-official-note" role="note">{priceNotice}</p>}
       </div></div>
       <div className="awwo-library-actions">
         <button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)} aria-label={t('刷新 Agent 市场', 'Refresh the Agent market')}><RefreshCw size={16} aria-hidden="true" /></button>

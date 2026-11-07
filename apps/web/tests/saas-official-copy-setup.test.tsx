@@ -176,11 +176,10 @@ it('reads in English in the Chinese interface too, and refreshes a failed catalo
 
 it('creates and opens exactly one model-configured case copy through WorkspaceHome without planning or execution',async()=>{
   const {posts,fetcher}=server(),onOpen=vi.fn();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen}/></SaaSPreferencesProvider>);
-  // The first row shows three cases; the pixel platformer is one click away. The cases, their dialog and the copy
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases"/></SaaSPreferencesProvider>);
+  // The home's 制作案例 section shows every case, the pixel platformer among them. The cases, their dialog and the copy
   // dialog read in English in this Chinese interface.
-  fireEvent.click(await screen.findByRole('button',{name:/^See all \d+ cases$/}));
-  fireEvent.click(screen.getByRole('button',{name:'Pixel platformer'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Pixel platformer'}));
   fireEvent.click(await within(screen.getByRole('dialog',{name:'Pixel platformer'})).findByRole('button',{name:'Copy this canvas'},{timeout:20000}));
   const setupDialog=screen.getByRole('dialog',{name:'Copy example to my canvases'});expect(posts).toHaveLength(0);await choose();
   fireEvent.click(within(setupDialog).getByRole('button',{name:'Copy with model'}));

@@ -20,12 +20,19 @@ import { OfficialCopySetup, type OfficialCopyModel, type RecordedCopyItem } from
 import type { ProductionCase } from './productionCatalog';
 import { loadProductionRun, PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import { MarketHomeStrip } from './market/MarketHomeStrip';
+import { HomeExplore } from './home/HomeExplore';
+import { ToolAdvice } from './home/ToolAdvice';
+import type { HomeSection } from './home/homeSections';
 
-/** Recent canvases shown before the operator expands the full list: two rows of four at desktop width, four rows of two
- * on a tablet (owner 2026-10-13 17:20 +08: 首页默认多显示几张画布; it was one row of four). */
+/** Recent canvases shown on 首页 (the whole list is 我的画布): two rows of four at desktop width, four rows of two on a
+ * tablet (owner 2026-10-13 17:20 +08: 首页默认多显示几张画布; it was one row of four). */
 export const RECENT_CANVAS_COUNT = 8;
 
-type HomeProps = { identity: Identity; tenant: Tenant; onOpen: (canvasId: string) => void };
+/** `section`: the part of the home shown (home/HomeShell.tsx keeps it in the address), 首页 unless said; `onSection`
+ * moves to another, as 继续工作's 查看全部 and 探索's tiles do. */
+type HomeProps = { identity: Identity; tenant: Tenant; onOpen: (canvasId: string) => void; section?: HomeSection; onSection?: (section: HomeSection) => void };
+type SectionProps = HomeProps & { section: HomeSection; onSection: (section: HomeSection) => void };
+const stay = () => {};
 type RuntimeStatus = { available?: boolean; plannerAvailable?: boolean; reason?: string; models?: unknown[] };
 type Notice = { kind: 'case'; caseId: string } | { kind: 'restored' } | null;
 
@@ -39,30 +46,34 @@ function exampleTitle(prompt: string): string | undefined {
 const isExamplePrompt = (text: string) => exampleTitle(text.trim()) !== undefined;
 const prefersReducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The workspace landing page: a prompt box that starts a planned canvas (files of any type can go with it), the most
- * recently updated canvases, and the production cases to copy from. Readers, who cannot create canvases, get the list
- * and the cases only.
- * 「继续工作」 is the one list of the workspace's canvases here: the 最近的成果 gallery showed the same canvases again
+/** The workspace home's sections. 首页: a prompt box that starts a planned canvas (files of any type can go with it), the
+ * most recently updated canvases, and tiles to the catalogs; 我的画布: every canvas, by when it was last updated;
+ * 制作案例: the production cases to copy from, by kind; Agent 市场: the market's best Agents, by category. Readers, who
+ * cannot create canvases, get no prompt box, no copying and no market.
+ * 「继续工作」 is the one list of the workspace's canvases on 首页: the 最近的成果 gallery showed the same canvases again
  * by their results (owner 2026-10-13: 内容有点重叠保留一个就行了), and a canvas's results stay one click away in it.
  * It came back instead of 最近的成果 once that had been tried alone (owner 2026-10-13 15:28: 最近的成果这一栏既没有缩略图，
  * 也没有画布的预览结构……还不如保留那个工作中的画布更好): every canvas is here, each drawn by its own structure. */
-export function WorkspaceHome(props: HomeProps) {
-  return props.tenant.role === 'reader' || props.tenant.status !== 'active' ? <ReaderHome {...props} /> : <PromptHome {...props} />;
+export function WorkspaceHome({ section = 'overview', onSection = stay, ...props }: HomeProps) {
+  return props.tenant.role === 'reader' || props.tenant.status !== 'active' ? <ReaderHome {...props} section={section} onSection={onSection} />
+    : <PromptHome {...props} section={section} onSection={onSection} />;
 }
 
-function ReaderHome({ identity, tenant, onOpen }: HomeProps) {
+function ReaderHome({ identity, tenant, onOpen, section, onSection }: SectionProps) {
   const { t } = useSaaSPreferences();
+  if (section === 'canvases') return <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} grouped />;
+  if (section === 'cases') return <ProductionCases filters />;
   return <>
     <section className="saas-page-intro"><span className="saas-eyebrow">{t('工作区', 'WORKSPACE')}</span><h1>{tenant.name}</h1><p>{t('打开画布，查看团队的 Agent 分工、会话和运行结果。', 'Open a canvas to review your team’s Agents, conversations and results.')}</p></section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    <ProductionCases compact />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onViewAll={() => onSection('canvases')} />
+    <HomeExplore member={false} onSection={onSection} />
   </>;
 }
 
 /** A file that could not be uploaded, named with the reason; the canvas made for it is kept for the next send. */
 class HomeUploadError extends Error {}
 
-function PromptHome({ identity, tenant, onOpen }: HomeProps) {
+function PromptHome({ identity, tenant, onOpen, section, onSection }: SectionProps) {
   const { locale, t } = useSaaSPreferences();
   const { t: text } = useCanvasI18n();
   const scope = useMemo(() => ({ user: identity.user.id, tenant: tenant.id }), [identity.user.id, tenant.id]);
@@ -123,7 +134,8 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const fileCount = files.files.length;
   useEffect(() => { setError(null); }, [fileCount]);
   // The box grows with its request (CSS bounds it), so an example can be read in full before sending.
-  // A new width (a rotated phone, a resized window) rewraps the text, so it is measured again then too.
+  // A new width (a rotated phone, a resized window) rewraps the text, so it is measured again then too, and so is a box
+  // drawn again on coming back to 首页 from another section.
   useLayoutEffect(() => {
     const element = input.current;
     if (!element) return;
@@ -131,7 +143,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [draft]);
+  }, [draft, section]);
   useLayoutEffect(() => {
     const element = input.current;
     if (!focusRequest || !element) return;
@@ -284,6 +296,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
   const describedBy = [hintId, error !== null ? errorId : '', plannerIssue ? noteId : '', disclaimerId].filter(Boolean).join(' ');
 
   return <>
+    {section === 'overview' && <>
     <section className="saas-home-hero" aria-labelledby={titleId}>
       <span className="saas-home-orb" aria-hidden="true" />
       <p className="saas-home-workspace">{tenant.name}</p>
@@ -321,6 +334,7 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
       <small id={disclaimerId} className="saas-home-disclaimer" title={text('composer.disclaimerFull')}>
         <span aria-hidden="true">{text('composer.disclaimer')}</span><span className="sr-only">{text('composer.disclaimerFull')}</span>
       </small>
+      <ToolAdvice text={draft} scope={scope} />
       <div className="saas-home-quick-starts" role="group" aria-label={t('快速填写需求', 'Start with a prompt')}>
         {['product-site-trial', 'weekly-sales-report', 'competitor-research'].map(id => {
           const item = STARTER_CASES.find(candidate => candidate.id === id)!;
@@ -343,10 +357,14 @@ function PromptHome({ identity, tenant, onOpen }: HomeProps) {
     <section id={examplesId} className="saas-home-prompt-ideas" aria-label={t('案例灵感', 'Example ideas')} hidden={!examplesOpen}>
       {examplesOpen && <CaseGallery onPick={pick} disabled={busy} />}
     </section>
-    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} />
-    {/* The Agent market, for members who can put its Agents on canvases (a reader's home has no strip). */}
-    <MarketHomeStrip tenant={tenant} onOpen={onOpen} />
-    <ProductionCases compact onReuse={copyCase} onCopyRecorded={copyRecordedCase} />
+    <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} recentLimit={RECENT_CANVAS_COUNT} onViewAll={() => onSection('canvases')} />
+    <HomeExplore member onSection={onSection} />
+    </>}
+    {section === 'canvases' && <CanvasList userId={identity.user.id} tenant={tenant} onOpen={onOpen} grouped />}
+    {/* The cases copy through this page's own create, as a request does. */}
+    {section === 'cases' && <ProductionCases filters onReuse={copyCase} onCopyRecorded={copyRecordedCase} />}
+    {/* The Agent market, for members who can put its Agents on canvases (a reader's home has no market). */}
+    {section === 'market' && <MarketHomeStrip tenant={tenant} onOpen={onOpen} expanded />}
     {caseCopy && <OfficialCopySetup key={`${tenant.id}:${caseCopy.id}`} item={caseCopy} tenantId={tenant.id} busy={busy}
       recording={PRODUCTION_RUN_SUMMARY[caseCopy.id]}
       error={error !== null ? saasErrorMessage(error, 'en') : undefined} onClose={() => setCaseCopy(null)}

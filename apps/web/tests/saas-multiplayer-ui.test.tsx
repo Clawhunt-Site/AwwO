@@ -856,6 +856,58 @@ describe('邀请 Agent', () => {
     expect(words(lines.claudeUnattended)).toEqual(['claude', '-p', '<task>', '--allowedTools', 'mcp__awwo-canvas']);
     for (const line of [lines.codex, lines.claudeUnattended, lines.codexUnattended]) expect(line).not.toContain(TOKEN);
   });
+
+  it('offers treg’s lines, which name no key, in a disclosure of their own that stays closed until asked', async () => {
+    const writeText = vi.fn(async () => undefined);
+    clipboard(writeText);
+    render(<AgentInvite {...inviteProps({ defaultOpen: true })} />);
+    const toggle = screen.getByRole('button', { name: '加上 treg：让 Agent 查实时数据' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(document.body).not.toHaveTextContent('treg.to/mcp');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '')!;
+    expect(body).not.toBeNull();
+    const blocks = () => [...body.querySelectorAll('pre')].map(block => block.textContent ?? '');
+    expect(blocks()).toEqual([
+      'claude mcp add --transport http treg https://treg.to/mcp/',
+      'codex mcp add treg --url https://treg.to/mcp/',
+      // The entry to add inside .cursor/mcp.json's mcpServers, beside awwo-canvas: never a whole file that would replace it.
+      '"treg": { "url": "https://treg.to/mcp/" }',
+      '用 treg 查「<主题>」的最新资料，每条事实附上来源链接，再用 AwwO 画布工具写进「<节点>」。',
+    ]);
+    // No line names a key: treg's own sign-in asks the person, in their browser, which of their teams pays.
+    for (const line of blocks()) expect(line).not.toMatch(/token|bearer|authorization|header|x-treg|--oauth-client/i);
+    expect(within(body).getByText('treg 按次计费，记在你自己的 treg 团队账户上，调用前会先给出价格。AwwO 不收这笔钱，也不经手、不保存你的 treg 登录。发给 treg 的内容会离开 AwwO。')).toBeInTheDocument();
+    expect([...body.querySelectorAll('ol > li')].map(item => item.textContent)).toEqual([
+      '先在 treg.to 注册并建一个团队：调用的费用由这个团队付。',
+      '用下面的一行命令把 treg 加进同一个 Agent，按提示登录。',
+      '让 Agent 用 treg 查资料，再用画布工具把结果写进节点。',
+    ]);
+    const link = within(body).getByRole('link', { name: '在新标签页打开 treg.to（第三方网站）' });
+    expect(link).toHaveAttribute('href', 'https://treg.to/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect((link.getAttribute('rel') ?? '').split(/\s+/)).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+    fireEvent.click(within(body).getByRole('button', { name: '复制：Codex · 会马上打开浏览器登录（以后可用 codex mcp login treg）' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('codex mcp add treg --url https://treg.to/mcp/'));
+    // A token made meanwhile never reaches treg's lines, and treg's disclosure stays as it was.
+    fireEvent.click(screen.getByRole('button', { name: '生成令牌' }));
+    await screen.findByRole('group', { name: '「Claude Code」的令牌' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    for (const line of blocks()) expect(line).not.toContain(TOKEN);
+    fireEvent.click(toggle);
+    expect(document.body).not.toHaveTextContent('treg.to/mcp');
+  });
+
+  it('says what treg is and who pays for it, in English', () => {
+    english(<AgentInvite {...inviteProps({ defaultOpen: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add treg: live data for your Agent' }));
+    expect(screen.getByText('treg charges per call, to your own treg team, and shows the price before a call. AwwO takes no part of that money and never sees or keeps your treg sign-in. What you send to treg leaves AwwO.')).toBeInTheDocument();
+    expect(screen.getByText('Claude Code · then /mcp, pick treg and sign in')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open treg.to (a third-party site) in a new tab' })).toHaveAttribute('href', 'https://treg.to/');
+    // No Chinese in the English section.
+    expect(document.querySelector('.awwo-multiplayer-treg')?.textContent ?? '').not.toMatch(/[㐀-鿿]/);
+  });
 });
 
 describe('the layer on the board', () => {

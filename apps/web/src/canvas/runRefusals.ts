@@ -14,10 +14,12 @@ const copyOf = (code: string, locale: UiLocale) => runFailureText(code, locale);
 const PREMIUM = ['premium_quota_exceeded', 'premium_capacity_exceeded'];
 /** The workspace may not run the node today: its own run allowance is full (today's calls, or runs at once), the
  * service's free calls for today are (plans.go), or it may not make the generation or the edit (its or its plan's
- * generations or edits are used up, the plan's credits are, or the node needs a paid plan: media_runs.go, edits.go).
- * Running it again today is refused the same way. */
+ * generations or edits are used up, the plan's credits are, or the node needs a paid plan: media_runs.go, edits.go), or the
+ * free trial has ended and the workspace's owner has no paid plan (free_plan.go). Running it again today is refused the
+ * same way. */
 const QUOTA = ['quota_exceeded', 'free_capacity_exceeded', 'media_quota_exceeded', 'media_capacity_exceeded', 'model3d_quota_exceeded',
-  'model3d_capacity_exceeded', 'plan_media_quota_exceeded', 'model3d_motion_plan_required', 'credits_exhausted', 'edit_allowance'];
+  'model3d_capacity_exceeded', 'plan_media_quota_exceeded', 'model3d_motion_plan_required', 'credits_exhausted', 'edit_allowance',
+  'free_plan_ended'];
 
 /** A code's copies in both languages, read once: the card asks on every render while a node has failed. */
 const copies = new Map<string, string[]>();

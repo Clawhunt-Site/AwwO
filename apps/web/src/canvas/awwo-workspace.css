@@ -190,6 +190,9 @@
 .awwo-handoff-note > span { flex: 1; }
 .awwo-handoff-note > button { flex: none; border: 0; border-radius: 4px; padding: 2px 5px; background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; }
 .awwo-handoff-note > button:hover { background: #80808020; }
+/* The free trial has ended: the owner's way to the plans, beside the words. */
+.awwo-plan-ended-note > a { flex: none; color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.awwo-plan-ended-note > a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 3px; }
 :root[data-theme='dark'] .awwo-workspace .canvas-minimap { background: #2b3830; }
 /* Focus scrolls the field panel, never offsets the canvas coordinate system. */
 .awwo-workspace .canvas-root, .awwo-workspace .awwo-stage { overflow: clip; }

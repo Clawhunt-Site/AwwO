@@ -71,8 +71,10 @@ describe('a run’s Agent fee', () => {
     rerender(<MarketRunFee tenantId="team" runId="r" market={fee({ insider: true, price: 5 })} completed canRate />);
     expect(screen.getByRole('group')).toHaveTextContent('作者本人或在作者自己的工作区里的调用：不收 Agent 费用，也不计入排行');
     expect(screen.queryByRole('button', { name: '好评' })).toBeNull();
+    // No Agent fee is said as that, never as a "free" Agent: the run's model is billed as usual.
     rerender(<MarketRunFee tenantId="team" runId="r" market={fee({ price: 0 })} completed canRate />);
-    expect(screen.getByRole('group')).toHaveTextContent('免费 Agent');
+    expect(screen.getByRole('group')).toHaveTextContent('Agent 费用：不收（模型照常计费）');
+    expect(screen.getByRole('group')).not.toHaveTextContent('免费');
   });
 
   it('shows beside a node’s run in its conversation, even with the run’s details folded', async () => {

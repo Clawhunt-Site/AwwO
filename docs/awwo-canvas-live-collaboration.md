@@ -421,13 +421,58 @@ Details of the lines:
 Checked on 2026-11-07 with the real CLIs, Claude Code 2.1.317 and Codex 0.162.1, on a local stack: the panel's lines as
 shown made their calls, and the same runs without their allowance were refused as quoted above.
 
+### Live data for a connected Agent: treg
+
+AwwO's own Agents have no live web (AWWO-LAW-011, -012 and -016), so a canvas that needs today's data (web research,
+keywords and backlinks, social trends, company and market data) gets it from the person's own Agent. Under the canvas's
+tokens, 邀请 Agent has a disclosure of its own, 加上 treg：让 Agent 查实时数据, with the lines that add
+[treg](https://treg.to) to the same Claude Code, Codex or Cursor. treg is a third-party catalog of paid agent tools
+(Superdesign's); its MCP server is `https://treg.to/mcp/`:
+
+```
+claude mcp add --transport http treg https://treg.to/mcp/
+```
+
+```
+codex mcp add treg --url https://treg.to/mcp/
+```
+
+```
+"treg": { "url": "https://treg.to/mcp/" }
+```
+
+(Cursor's line is the entry to add inside `mcpServers` in `.cursor/mcp.json`, beside `awwo-canvas`: a whole file pasted
+over the canvas's would drop the canvas's connection, whose token is shown once.)
+
+The lines carry no key. treg signs the person in with OAuth in their browser and asks which of their treg teams pays,
+so its calls are billed by treg to the person's own team, and AwwO never sees, keeps or pays for a treg sign-in. AwwO
+only links to the hosted service: it runs none of treg's software and copies none of its text (treg's licence keeps
+hosting it for others to Superdesign). The panel says that what is sent to treg leaves AwwO, that public things only
+should go there, and that a treg call can cost money.
+
+How the lines behave (checked on 2026-11-07 with Claude Code 2.1.317 and Codex 0.162.1, no sign-in completed):
+- `claude mcp add` keeps the server as "Needs authentication" until `/mcp` → treg signs in.
+- `codex mcp add --url` writes `[mcp_servers.treg]` and starts the sign-in at once (`codex mcp login treg` later); treg
+  refuses an account that is in no team, so the person makes a team at treg.to first.
+- `https://treg.to/mcp/` answers a call without credentials with 401 and `WWW-Authenticate: Bearer … resource_metadata=`,
+  which is how both CLIs know to sign in.
+- No paid treg call happens unattended: treg marks its paid `call` destructive, so Codex asks before it and `codex exec`
+  (whose line approves the canvas's tools only) cannot approve it, and `claude -p` is allowed the canvas's tools only.
+  Codex may still run treg's free catalog lookups by itself, sending what it asks to treg; and a "don't ask again" for
+  treg saved in a folder's Claude Code settings carries over to `claude -p` there. treg's tool list itself was not seen
+  signed in.
+
+The home's composer recommends the same pairing when a request names a need for live data (`liveDataNeed`): see
+the CHANGELOG entry of the public beta release.
+
 ## The canvas page
 
 - **The people bar** in the canvas header: the participants' avatars in their colours (an Agent with an Agent mark),
   each with its port; a click opens the 同屏 panel.
 - **The 同屏 panel**: who is here (name, kind, port, status, what they have selected), the claims, the live messages and a
   box to write one, the latest changes (「Claude Code 添加了节点「后端接口」」), and 邀请 Agent: make a token, copy the
-  connection lines for Claude Code, Codex and Cursor, see and revoke the canvas's tokens.
+  connection lines for Claude Code, Codex and Cursor, see and revoke the canvas's tokens, and add treg to the same
+  Agent for live data (above).
 - **On the board**: a ring in each participant's colour around the nodes they have selected, with their name; a claim's
   badge on its node; each person's pointer with their name; a short glow on a node another participant just changed.
   These mark the cards the board draws: a component inside a converged icon (收敛成一个图标, one person's own way of

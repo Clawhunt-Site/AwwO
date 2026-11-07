@@ -137,7 +137,7 @@ export function RelaySettings({ identity }: { identity: Identity }) {
   const message = (cause: unknown) => cause instanceof UnreadableAnswer
     ? t('线上 AwwO 的回答无法识别，请稍后再试。', 'The online AwwO’s answer could not be read. Try again later.') : saasErrorMessage(cause, locale);
   return <>
-    <SettingsIntro title={t('本机版连接', 'AwwO Local connection')} intro={t('AwwO 本地版可以通过线上 AwwO 使用 Claude 等云端模型。在这里生成一个连接密钥，粘贴到本地版。每次调用都计入你选择的工作区，和在线上使用一样：用它的免费次数，或用套餐的点数。', 'AwwO Local can use cloud models such as Claude through the online AwwO. Make a connection key here and paste it into AwwO Local. Each call counts in the workspace you choose, as it would online: its free calls, or your plan’s credits.')} />
+    <SettingsIntro title={t('本机版连接', 'AwwO Local connection')} intro={t('AwwO 本地版可以通过线上 AwwO 使用 Claude 等云端模型。在这里生成一个连接密钥，粘贴到本地版。每次调用都计入你选择的工作区，和在线上使用一样：用套餐的点数，或免费试用期间的免费次数（试用结束后要有套餐）。', 'AwwO Local can use cloud models such as Claude through the online AwwO. Make a connection key here and paste it into AwwO Local. Each call counts in the workspace you choose, as it would online: its plan’s credits, or the free trial’s calls while the trial lasts (after it, a plan is needed).')} />
     <div className="saas-settings-stack">
       <SettingsCard title={t('生成连接密钥', 'Make a connection key')} description={t('密钥只显示一次，90 天后失效。每个账号最多同时有 5 个有效密钥。', 'A key is shown once and works for 90 days. An account holds at most five live keys.')}>
         {/* Keyed by the key, so a second key made meanwhile is drawn afresh, never as the first one's "Copied". */}

@@ -372,8 +372,8 @@ export function ConnectionSettings({
           <span className="saas-eyebrow">{t("AwwO 云端", "AWWO CLOUD")}</span>
           <h2>{t("使用线上 AwwO 的模型", "Use the online AwwO’s models")}</h2>
           <p>{t(
-            "在线上 AwwO 生成一个连接密钥，粘贴到这里。每次调用都计入密钥所属的线上工作区，和在线上使用一样：用它的免费次数，或用套餐的点数。",
-            "Make a connection key on the online AwwO and paste it here. Each call counts in the key’s online workspace, as it would online: its free calls, or your plan’s credits.")}</p>
+            "在线上 AwwO 生成一个连接密钥，粘贴到这里。每次调用都计入密钥所属的线上工作区，和在线上使用一样：用套餐的点数，或免费试用期间的免费次数（试用结束后要有套餐）。",
+            "Make a connection key on the online AwwO and paste it here. Each call counts in the key’s online workspace, as it would online: its plan’s credits, or the free trial’s calls while the trial lasts (after it, a plan is needed).")}</p>
           {keysURL && <a className="saas-primary saas-buy-link" href={keysURL} target="_blank" rel="noopener noreferrer">
             {t("前往线上 AwwO 生成密钥", "Make a key on the online AwwO")} ↗
           </a>}

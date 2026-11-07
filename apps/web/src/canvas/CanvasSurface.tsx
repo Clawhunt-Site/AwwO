@@ -6,7 +6,7 @@ import { createMarketplaceRoleNode, type TeamMarketAgent } from './teamMarketAge
 import { paletteRunsTeams } from './nodeTeam';
 import { createWorkspaceAgentNode, type WorkspaceAgent } from './workspaceAgents';
 import { saasErrorMessage } from '../saas/api';
-import { canvasLocale } from '../saas/canvasErrors';
+import { canvasLocale, isFreePlanEnded } from '../saas/canvasErrors';
 import { useLocalEdition } from '../saas/edition';
 import { canonicalCanvasDocumentJSON } from '../saas/canvasDraft';
 import { TeamRunDetails } from '../saas/TeamRunDetails';
@@ -49,6 +49,7 @@ import { isPremiumRefusal, isQuotaRefusal, modelSwitchHelps, refusalReason, upgr
 import { announceRouteUsageChanged, fetchRouteUsage, recordUpgradeInterest, type RouteAllowance } from '../saas/routeUsage';
 import { recordCanvasEvent, type CanvasUiEvent } from '../saas/uiEvents';
 import { assistantCostNote } from './assistantCost';
+import { liveDataNeed } from './liveDataNeed';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
   type RouteAssistant } from './assistantRouting';
 import { CanvasResults } from './CanvasResults';
@@ -2282,6 +2283,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
           // A refusal the service blamed on one node (a media node's saved model, type or settings, which it freezes
           // for the whole scope before the run starts) names that node: its copy alone would not.
           setHandoffNote(refusedNodeMessage(saasErrorMessage(error, locale), graphRefusedNodeId(error), runNodes, locale));
+          // The free trial ended while this page was open: the board's notice (with the plans for the owner) follows the
+          // alert once it is put away, without waiting for the next read of route-usage.
+          if (isFreePlanEnded(saasErrorMessage(error, locale))) setFreePlanEnded(true);
           runAbort.current = null; return;
         }
         if (currentSaaSCanvas() !== cloud) return;
@@ -3521,12 +3525,19 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   // The assistant's canvas changes on the operator's model are outside today's calls up to a daily number (the server's
   // route usage says how many are left); read again whenever a plan settles, so the composer's note stays true.
   const [plannerAllowance, setPlannerAllowance] = useState<RouteAllowance | null>(null);
+  // The free trial has ended for this hosted workspace (route-usage freePlan.ended): nothing runs until its owner subscribes.
+  const [freePlanEnded, setFreePlanEnded] = useState(false);
   const cloudTenantId = cloudScope?.tenant.id;
   useEffect(() => {
     if (!cloudTenantId || planningBusy) return;
     const controller = new AbortController();
     fetchRouteUsage(cloudTenantId, controller.signal)
-      .then(usage => { if (!controller.signal.aborted) setPlannerAllowance(usage.planner ?? null); })
+      .then(usage => {
+        // Once the free trial has ended nothing is free: the note keeps its general wording.
+        if (controller.signal.aborted) return;
+        setPlannerAllowance(usage.freePlan?.ended ? null : usage.planner ?? null);
+        setFreePlanEnded(usage.freePlan?.ended === true);
+      })
       .catch(() => { /* The note then keeps its general wording. */ });
     return () => controller.abort();
   }, [cloudTenantId, planningBusy]);
@@ -4306,8 +4317,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   const suggested: NextSteps | null = readOnly || initializing || bindingLocked ? null : canvasNextSteps({
     nodes, edges, runs, running, canRun: !runUnavailableReason, resultsAvailable: Boolean(results), upgradeAvailable: Boolean(cloudScope) && !localEdition,
     // A refusal's detail is the run error's own copy (canvasErrors), in whichever language the run was read in, or its
-    // code (runRefusals.ts).
-    isPremiumRefusal, isQuotaRefusal, upgradeHelps, modelSwitchHelps,
+    // code (runRefusals.ts). The end of the free trial stops every node alike until the owner subscribes, as a full
+    // allowance does, so it is one too: the plans lift it (upgradeHelps) and no other model would run (modelSwitchHelps).
+    isPremiumRefusal, isQuotaRefusal: (detail: string) => isQuotaRefusal(detail) || isFreePlanEnded(detail), upgradeHelps, modelSwitchHelps,
     // Only the hosted workspace puts a node's task requirements into its prompt, which is how a rework carries the
     // review's findings.
     reworkAvailable: Boolean(cloudScope),
@@ -4424,6 +4436,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     switch (situation.kind) {
       // In the refusal's own words where it has them (a generation, an edit, the plan's credits), which say what lifts it.
       case 'quota': {
+        if (isFreePlanEnded(runs[situation.nodeId]?.detail)) return t('assistant.nextLeadFreePlanEnded', { node: situation.nodeTitle });
         const refused = nodes.find(node => node.id === situation.nodeId);
         const reason = refusalReason(runs[situation.nodeId]?.detail, t, locale, Boolean(cloudScope && refused?.kind === 'session' && mediaKindOf(refused.agentKind)));
         return reason ? t('assistant.nextLeadRefused', { node: situation.nodeTitle, reason }) : t('assistant.nextLeadQuota', { node: situation.nodeTitle });
@@ -4446,6 +4459,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     }
   };
   const fillSteps = suggested?.steps.flatMap(step => step.kind === 'fill-inputs' ? [step] : []) ?? [];
+  // Live data the canvas's newest request names (liveDataNeed): AwwO's Agents have no live web, so the next steps say how
+  // the person's own Agent brings it (treg through 邀请 Agent), where no checklist's footnote is said.
+  const newestRequest = [...planning.messages].reverse().find(message => message.role === 'user');
+  const liveData = !readOnly && newestRequest ? liveDataNeed(newestRequest.request ?? newestRequest.content ?? '').length > 0 : false;
   const assistantNextSteps: AssistantNextSteps | undefined = suggested ? {
     lead: nextLead(suggested.situation, suggested.steps.some(step => step.kind === 'try-first')),
     // What a run still needs is a checklist with a step per node (and the assistant to fill it all in); every other
@@ -4459,6 +4476,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         ? t(suggested.situation.generations ? 'assistant.nextAfterInputsCost' : 'assistant.nextAfterInputsCalls',
           { calls: suggested.situation.calls, generations: suggested.situation.generations ?? 0 }) : t('assistant.nextAfterInputs'),
     } : {}),
+    ...(!fillSteps.length && liveData ? { footnote: t('assistant.nextLiveData') } : {}),
     ...(countsCalls ? { note: t('assistant.nextFree') } : {}),
   } : undefined;
   // A problem the assistant can help with marks its closed toggle; a canvas that merely has not run does not.
@@ -5080,7 +5098,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
       results={showingResults ? <CanvasResults nodes={nodes} edges={edges} execution={doc.execution} runs={runs} running={running} readOnly={readOnly}
         runUnavailableReason={runUnavailableReason} onRun={readOnly ? undefined : runWholeCanvas}
         notice={initializing ? { kind: 'status', text: locale === 'zh' ? '正在准备节点，首次运行会自动使用工作区默认配置…' : 'Preparing nodes with the workspace defaults…' }
-          : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') } : undefined}
+          : handoffNote ? { kind: 'alert', text: handoffNote, onDismiss: () => setHandoffNote('') }
+          : freePlanEnded ? { kind: 'status', text: t(cloudScope?.tenant.role === 'owner' ? 'canvas.freePlanEndedOwner' : 'canvas.freePlanEndedOther') } : undefined}
         onOpenNode={id => { focusNode(id); refocus('.awwo-view-switch button'); }}
         onBack={() => { changeStageView('canvas'); refocus('.awwo-view-switch button'); }} receipt={results?.receipt} modelNames={modelNames}
         studio={results?.studio} studioTitle={t('studio.heading')} /> : undefined}
@@ -5255,6 +5274,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
       {stageActivity && showsStageLine(stageActivity, { nodes: nodes.length, results: showingResults, note: initializing || Boolean(handoffNote) })
         && <StageActivity compact state={stageActivity} announce={!panelShown} />}
       {!initializing && handoffNote && <div className="awwo-handoff-note" role="alert"><span>{handoffNote}</span><button type="button" aria-label={locale === 'zh' ? '关闭提示' : 'Dismiss notice'} onClick={() => setHandoffNote('')}>×</button></div>}
+      {/* Behind a one-off note in the same place; the owner gets the plans (only the owner's plan opens the workspace). */}
+      {!initializing && !handoffNote && freePlanEnded && <div className="awwo-handoff-note awwo-plan-ended-note" role="status">
+        <span>{t(cloudScope?.tenant.role === 'owner' ? 'canvas.freePlanEndedOwner' : 'canvas.freePlanEndedOther')}</span>
+        {cloudScope?.tenant.role === 'owner' && <a href={accountURL('plans')}>{t('assistant.nextUpgrade')}</a>}
+      </div>}
       {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
           fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a
           deleted last node or an undone plan could only come back through a keyboard shortcut. */}

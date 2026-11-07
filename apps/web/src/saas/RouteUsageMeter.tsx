@@ -3,18 +3,33 @@ import { CalendarCheck, Gauge } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { saasErrorMessage } from './api';
 import { formatCredits, planName } from './billing';
+import { momentText } from './freePlan';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
-import { ROUTE_USAGE_CHANGED, canCheckIn, checkIn, fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type CheckinBonus, type CheckinState, type PromoView, type RouteName, type RouteUsage } from './routeUsage';
+import { ROUTE_USAGE_CHANGED, canCheckIn, checkIn, fetchRouteUsage, meterState, recordUpgradeInterest, routeOrder, routeUsedUp, type CheckinBonus, type CheckinState, type FreePlanView, type PromoView, type RouteName, type RouteUsage } from './routeUsage';
 import './route-usage.css';
 
 const REFRESH_MS = 120_000;
 
+/** Where the meter is drawn: the top bar of a page (its popover opens down), or the home's account card at the bottom of
+ *  its left rail (its popover opens up, over the rail). */
+export type MeterVariant = 'header' | 'card';
+type MeterProps = { tenantId: string; variant?: MeterVariant;
+  /** Each answer the meter reads, and null while it has none (its first read failed): the home's account card and trial
+   *  banner read the same answer, so a page asks one meter, not several. */
+  onUsage?: (usage: RouteUsage | null) => void;
+  /** The reader owns the workspace: a workspace opens by its owner's plan, so only its owner is asked to subscribe for it;
+   *  anyone else is told the owner does, and offered a plan of their own only as theirs. */
+  owner?: boolean };
+const variantClass = (variant: MeterVariant) => variant === 'card' ? ' is-card' : '';
+
 /** Today's free allowance of a route-limited workspace, and the "I want more calls" that tells the
  * operator who would pay; for a workspace on a paid plan, the owner's credits this period. A workspace with
  * neither shows nothing and stops asking. While a promotion offers check-ins, a chip beside the meter checks
- * the workspace in for today's bonus, and the meter's popover says what the promotion and the check-in give. */
-export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
+ * the workspace in for today's bonus, and the meter's popover says what the promotion and the check-in give.
+ * Once the deployment's free trial has ended (freePlan.ended), the chip says so: the day's numbers no longer let a free
+ * workspace run anything. */
+export function RouteUsageMeter({ tenantId, variant = 'header', onUsage, owner = false }: MeterProps) {
   const { t, locale } = useSaaSPreferences();
   const [usage, setUsage] = useState<RouteUsage | null>(null);
   const [open, setOpen] = useState(false);
@@ -26,15 +41,20 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
   const [checkError, setCheckError] = useState<unknown>(null);
   const anchor = useRef<HTMLButtonElement>(null);
   const reload = useRef<() => void>(() => {});
+  const report = useRef(onUsage);
+  report.current = onUsage;
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
+    let answered = false;
     reload.current = () => {
       fetchRouteUsage(tenantId, controller.signal).then(value => {
         if (controller.signal.aborted) return;
+        answered = true;
         setUsage(value);
+        report.current?.(value);
         if (!value.limited && !value.plan) window.clearInterval(timer);
-      }).catch(() => {});
+      }).catch(() => { if (!controller.signal.aborted && !answered) report.current?.(null); });
     };
     reload.current();
     timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') reload.current(); }, REFRESH_MS);
@@ -44,20 +64,21 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
     return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener(ROUTE_USAGE_CHANGED, changed); };
   }, [tenantId]);
   if (!usage) return null;
-  if (usage.plan) return <PaidMeter usage={usage} plan={usage.plan} open={open} setOpen={setOpen} reload={reload.current} />;
+  if (usage.plan) return <PaidMeter usage={usage} plan={usage.plan} open={open} setOpen={setOpen} reload={reload.current} variant={variant} />;
   if (!usage.limited) return null;
   const names: Record<RouteName, string> = { gate: t('Claude / GPT 等', 'Claude / GPT and others'), bedrock: t('Bedrock（Opus 5.5 等）', 'Bedrock (Opus 5.5 and others)'), media: t('图片 / 视频', 'Images / video') };
   const short: Record<RouteName, string> = { gate: 'Claude / GPT', bedrock: 'Bedrock', media: t('图片视频', 'images / video') };
   const state = meterState(usage);
   const left = state.left;
   const one = state.usedUp.length === 1 ? short[state.usedUp[0]] : null;
-  const label = {
+  const ended = usage.freePlan?.ended === true;
+  const label = ended ? t('免费试用已结束', 'Free trial ended') : {
     'daily-out': t('今日次数已用完', 'No calls left today'),
     'premium-out': t(`剩 ${left} 次 · 高级次数已用完`, `${left} left · premium used up`),
     partial: one ? t(`剩 ${left} 次 · ${one} 已用完`, `${left} left · ${one} used up`) : t(`剩 ${left} 次 · 部分高级次数已用完`, `${left} left · some premium used up`),
     ok: t(`今日额度 · 剩 ${left} 次`, `Today · ${left} calls left`),
   }[state.kind];
-  const warn = state.kind === 'daily-out' || state.kind === 'premium-out';
+  const warn = ended || state.kind === 'daily-out' || state.kind === 'premium-out';
   // A premium text route closed with 0 never offered a call: this workspace's free allowance does not include it.
   const premiumClosed = (['gate', 'bedrock'] as const).some(route => usage.routes?.[route]?.limit === 0);
   const interested = recorded || usage.interested;
@@ -80,12 +101,15 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
   const checkin = usage.checkin;
   return <>
     {/* The chip opens the meter's popover too, where the check-in's result or refusal is said. */}
-    {checkin && canCheckIn(checkin) && <button type="button" className="saas-checkin-trigger" disabled={checking} onClick={() => { setOpen(true); void check(); }}
+    {checkin && canCheckIn(checkin) && <button type="button" className={`saas-checkin-trigger${variantClass(variant)}`} disabled={checking} onClick={() => { setOpen(true); void check(); }}
       title={checkinOffer(checkin, locale)}><CalendarCheck size={16} aria-hidden="true" />{checking ? t('正在签到…', 'Checking in…') : t('签到领次数', 'Check in')}</button>}
-    <button ref={anchor} type="button" className={`saas-route-usage-trigger${warn ? ' is-out' : ''}`} aria-haspopup="dialog" aria-expanded={open}
+    <button ref={anchor} type="button" className={`saas-route-usage-trigger${variantClass(variant)}${warn ? ' is-out' : ''}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => { if (!open) reload.current(); setOpen(value => !value); }}><Gauge size={16} aria-hidden="true" />{label}</button>
-    <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t('今日免费额度', 'Today’s free allowance')} className="saas-route-usage" onClose={() => setOpen(false)}>
-      <h2>{t('今日免费额度', 'Today’s free allowance')}</h2>
+    <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={ended ? t('免费试用已结束', 'Free trial ended') : t('今日免费额度', 'Today’s free allowance')} className="saas-route-usage" placement={variant === 'card' ? 'top' : undefined} onClose={() => setOpen(false)}>
+      <h2>{ended ? t('免费试用已结束', 'Free trial ended') : t('今日免费额度', 'Today’s free allowance')}</h2>
+      {usage.freePlan && <FreePlanNote view={usage.freePlan} owner={owner} />}
+      {/* Past the trial's end nothing here is free any more: no allowance to show, only the way on. */}
+      {ended ? <EndedWay owner={owner} tenantId={tenantId} /> : <>
       <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>
       <CallsNote />
       {usage.promo && <PromoNote promo={usage.promo} />}
@@ -105,10 +129,11 @@ export function RouteUsageMeter({ tenantId }: { tenantId: string }) {
       {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro or Max now and keep using premium models on credits.')}</p>}
       {/* Paid plans are on sale, so upgrading is the way to more calls; a click still records the interest the
           admin panel lists, without waiting for it before the plans open. */}
-      <a className="saas-primary" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
-        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('升级 Pro / Max', 'Upgrade to Pro or Max')}</a>
+      <a className={owner ? 'saas-primary' : 'saas-route-usage-own'} href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
+        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('升级 Pro / Max', 'Upgrade to Pro or Max') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>
       <button type="button" className="saas-route-usage-ask" disabled={busy} onClick={ask}>{busy ? t('正在记录…', 'Recording…') : interested ? t('我还需要更多次数', 'I still need more calls') : t('想要更多次数', 'I want more calls')}</button>
       {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
+      </>}
     </Popover>
   </>;
 }
@@ -145,6 +170,27 @@ function checkinOffer(checkin: CheckinState, locale: 'zh' | 'en'): string {
   return locale === 'zh' ? `签到：今天再多 ${bonusText(checkin.bonus, locale)}` : `Check in for ${bonusText(checkin.bonus, locale)} today`;
 }
 
+/** When the free trial ends (the server's free plan end), or that it has: after it a free workspace runs nothing until
+ *  its owner subscribes, whatever the numbers below say. */
+function FreePlanNote({ view, owner }: { view: FreePlanView; owner: boolean }) {
+  const { t, locale } = useSaaSPreferences();
+  if (view.ended) return <p className="saas-route-usage-out">{owner
+    ? t('免费试用已结束：订阅 Pro 或 Max 后就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: subscribe to Pro or Max to plan and run again. Your canvases and results are all still here.')
+    : t('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. The canvases and results are all still here.')}</p>;
+  const end = momentText(view.until, locale, { end: true });
+  return end ? <p className="saas-route-usage-promo">{owner
+    ? t(`免费试用到 ${end} 结束，之后要订阅 Pro 或 Max 才能继续运行。`, `The free trial ends on ${end}; after that, running needs Pro or Max.`)
+    : t(`免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续运行。`, `The free trial ends on ${end}; after that, this workspace runs once its owner subscribes to Pro or Max.`)}</p> : null;
+}
+
+/** Past the free trial's end: the owner is asked to subscribe for the workspace; anyone else is offered a plan of their
+ *  own, said to be theirs (it opens their own workspaces, not this one). */
+function EndedWay({ owner, tenantId }: { owner: boolean; tenantId: string }) {
+  const { t } = useSaaSPreferences();
+  return <a className={owner ? 'saas-primary' : 'saas-route-usage-own'} href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
+    onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('订阅 Pro / Max', 'Subscribe to Pro or Max') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>;
+}
+
 /** A promotion's limited-time allowances and when they end, in the reader's own time. */
 function PromoNote({ promo }: { promo: PromoView }) {
   const { t, locale } = useSaaSPreferences();
@@ -175,7 +221,7 @@ function CheckinRow({ checkin, busy, announced, onCheckIn }: { checkin: CheckinS
 }
 
 /** The chip of a workspace on a paid plan: the owner's credits left this period and today's calls. */
-function PaidMeter({ usage, plan, open, setOpen, reload }: { usage: RouteUsage; plan: NonNullable<RouteUsage['plan']>; open: boolean; setOpen: Dispatch<SetStateAction<boolean>>; reload: () => void }) {
+function PaidMeter({ usage, plan, open, setOpen, reload, variant }: { usage: RouteUsage; plan: NonNullable<RouteUsage['plan']>; open: boolean; setOpen: Dispatch<SetStateAction<boolean>>; reload: () => void; variant: MeterVariant }) {
   const { t, locale } = useSaaSPreferences();
   const anchor = useRef<HTMLButtonElement>(null);
   const name = planName(plan.id);
@@ -189,9 +235,9 @@ function PaidMeter({ usage, plan, open, setOpen, reload }: { usage: RouteUsage; 
     : plan.cancelAtPeriodEnd ? t(`套餐将于 ${ends} 结束。`, `The plan ends on ${ends}.`)
       : t(`点数在 ${ends} 续费后重置。默认模型不扣点。`, `Credits reset once the plan renews on ${ends}. The default model spends no credits.`);
   return <>
-    <button ref={anchor} type="button" className={`saas-route-usage-trigger${dailyOut || empty ? ' is-out' : ''}`} aria-haspopup="dialog" aria-expanded={open}
+    <button ref={anchor} type="button" className={`saas-route-usage-trigger${variantClass(variant)}${dailyOut || empty ? ' is-out' : ''}`} aria-haspopup="dialog" aria-expanded={open}
       onClick={() => { if (!open) reload(); setOpen(value => !value); }}><Gauge size={16} aria-hidden="true" />{label}</button>
-    <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t(`${name} 套餐`, `${name} plan`)} className="saas-route-usage" onClose={() => setOpen(false)}>
+    <Popover containKeyboard open={open} anchorRef={anchor} ariaLabel={t(`${name} 套餐`, `${name} plan`)} className="saas-route-usage" placement={variant === 'card' ? 'top' : undefined} onClose={() => setOpen(false)}>
       <h2>{t(`${name} 套餐`, `${name} plan`)}</h2>
       <p>{period}</p>
       {(credits.gift ?? 0) > 0 && <p>{t('其中的赠送点数由 AwwO 赠送，不是支付金额：和付费点数一起用，付费的先扣，同样本期有效。',

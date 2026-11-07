@@ -13,7 +13,12 @@ export interface WorkspaceCapabilities {
   edit?: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFiles: number; maxTimelineBytes: number } };
   /** The Agent market (docs/awwo-agent-market.md): the platform's fee in basis points, the highest price an author may set
    *  (credits per call), and the days a period's earnings wait before they are settled. Absent from a server older than it. */
-  market?: { enabled: boolean; payouts: boolean; feeBps: number; maxPrice: number; holdDays: number };
+  market?: { enabled: boolean; payouts: boolean; feeBps: number; maxPrice: number; holdDays: number;
+    /** What a call to one of AwwO's official Agents costs (credits) once officialPriceFrom has come (at once without it);
+     *  0 or absent: official Agents take no Agent fee. Absent from a server older than it. */
+    officialPrice?: number;
+    /** When officialPrice starts (RFC 3339). Absent: it applies already. */
+    officialPriceFrom?: string };
   /** 多人同屏 (docs/awwo-canvas-live-collaboration.md): changes, the live stream and canvas agent tokens. Absent from a
    *  server older than it, whose canvases the page then saves whole. */
   multiplayer?: { enabled: boolean; maxChangeOps: number };

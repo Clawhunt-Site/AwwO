@@ -1,0 +1,168 @@
+/* The workspace home's frame (HomeShell.tsx): a left rail of its sections with the account card at its foot, beside the
+   section shown, under the trial banner. Theme tokens only; the text pairs on new surfaces are pinned for every theme in
+   tests/saas-themes.test.tsx. This sheet loads before design/system.css (SaaSApp imports it first), so a rule that meets
+   one of the page's rules outranks it rather than relying on the order: the page's buttons reach every button here, up to
+   :is(.saas-login, .saas-dashboard, .saas-notice) button:not(:disabled):hover (0,3,1). It has no button rule of a
+   wrapper of its own (tests/saas-market-card-styles.test.ts reads it with the page's sheets). */
+
+/* The home is wider than the other pages: the rail takes 280px of it. */
+.saas-dashboard.saas-home { padding-inline: max(24px, calc((100vw - 1440px) / 2)); }
+.saas-home-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 20px; }
+
+/* ── The rail: sticky under the sticky top bar (12px from the top, 64px tall), as tall as the window lets it. ── */
+.saas-home-rail {
+  position: sticky; top: 92px;
+  display: flex; flex-direction: column; gap: 16px;
+  height: calc(100dvh - 108px); padding: 12px; overflow-y: auto;
+  border-radius: var(--saas-radius-lg); background: var(--saas-sidebar); box-shadow: 0 0 0 1px var(--saas-hairline) inset;
+}
+.saas-home-nav ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.saas-home-nav button.saas-home-nav-item, .saas-home-nav button.saas-academy-launch {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin: 0; padding: 0 12px;
+  border: 0; border-radius: var(--saas-radius-sm); background: transparent; box-shadow: none;
+  color: var(--saas-muted); font: 600 var(--saas-text-md)/1.3 var(--saas-font); text-align: start; white-space: nowrap;
+}
+.saas-home-nav button.saas-home-nav-item:not(:disabled):hover, .saas-home-nav button.saas-academy-launch:not(:disabled):hover { background: var(--saas-soft); color: var(--saas-text); }
+/* The section shown: ink on a stronger wash, with a bar of the AwwO teal at its start; hovered, it stays so. */
+.saas-home-nav button.saas-home-nav-item[aria-current='page'], .saas-home-nav button.saas-home-nav-item[aria-current='page']:not(:disabled):hover {
+  background: var(--saas-soft-strong); box-shadow: inset 3px 0 0 var(--saas-bio); color: var(--saas-text);
+}
+.saas-home-nav svg { flex: none; }
+.saas-home-nav li.saas-home-nav-academy { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--saas-hairline); }
+.saas-home-nav li.saas-home-nav-academy:empty { display: none; }
+
+/* ── The account card, at the rail's foot ── */
+.saas-home-account {
+  display: grid; gap: 12px; margin-top: auto; padding: 14px;
+  border-radius: var(--saas-radius); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset, var(--saas-shadow-xs);
+}
+.saas-home-account-who { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.saas-home-account-avatar {
+  display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--saas-primary); color: var(--saas-on-primary); font: 700 var(--saas-text-sm)/1 var(--saas-font);
+}
+.saas-home-account-names { display: grid; min-width: 0; }
+.saas-home-account-names > strong { overflow: hidden; color: var(--saas-text); font: 650 var(--saas-text-md)/1.35 var(--saas-font); text-overflow: ellipsis; white-space: nowrap; }
+.saas-home-account-email { overflow: hidden; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.saas-home-account-role { padding: 2px 8px; border-radius: var(--saas-radius-pill); box-shadow: inset 0 0 0 1px var(--saas-border-strong); color: var(--saas-muted); font: 600 11px/1.5 var(--saas-font); white-space: nowrap; }
+.saas-home-account-plan { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--saas-hairline); }
+.saas-home-account-plan > p { margin: 0; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.5; }
+/* Badges: a paid plan in ink, a trial in the link colour, an ended trial in the warning chip's own pair. */
+.saas-home-account-badge { justify-self: start; padding: 2px 10px; border-radius: var(--saas-radius-pill); font: 700 var(--saas-text-xs)/1.6 var(--saas-font); }
+.saas-home-account-badge.is-paid { background: var(--saas-primary); color: var(--saas-on-primary); }
+.saas-home-account-badge.is-trial { box-shadow: inset 0 0 0 1px currentColor; color: var(--saas-link); }
+.saas-home-account-badge.is-ended { background: var(--saas-warning-bg); color: var(--saas-warning); }
+.saas-home-account-badge.is-free { box-shadow: inset 0 0 0 1px var(--saas-border-strong); color: var(--saas-muted); }
+/* What is left of the period's credits; the numbers are in the line above it. */
+.saas-home-account-bar { display: block; height: 6px; overflow: hidden; border-radius: var(--saas-radius-pill); background: var(--saas-soft-strong); }
+.saas-home-account-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--saas-bio); }
+.saas-home-account-bar.is-low > span { background: var(--saas-warning-dot); }
+.saas-home-account a.saas-home-account-action { width: 100%; min-height: 36px; margin-top: 4px; }
+.saas-home-account a.saas-home-account-action.is-quiet {
+  display: inline-flex; align-items: center; justify-content: center; border-radius: var(--saas-radius-pill);
+  box-shadow: inset 0 0 0 1px var(--saas-border-strong); color: var(--saas-text); font: 600 var(--saas-text-sm)/1.25 var(--saas-font); text-decoration: none;
+}
+.saas-home-account a.saas-home-account-action.is-quiet:hover { background: var(--saas-soft); }
+.saas-home-account-meter { display: grid; gap: 6px; }
+.saas-home-account-meter:empty { display: none; }
+.saas-home-account a.saas-home-account-link {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 28px;
+  color: var(--saas-link); font: 600 var(--saas-text-xs)/1.3 var(--saas-font); text-decoration: none;
+}
+.saas-home-account a.saas-home-account-link:hover { color: var(--saas-link-hover); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── The content: the trial banner over the section shown ── */
+.saas-home-content { min-width: 0; container: saas-home / inline-size; }
+.saas-home-panel { min-width: 0; }
+/* The sections start at the top of the content: the page's own margins were for one long column. */
+.saas-home-content .saas-home-hero { margin-top: 28px; }
+.saas-home-content .saas-page-intro { margin-top: 12px; }
+.saas-home-panel > .saas-home-section:first-child, .saas-home-panel > .production-cases:first-child { margin-top: 4px; }
+.saas-home-banner {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 20px; padding: 12px 12px 12px 16px;
+  border-radius: var(--saas-radius); background: color-mix(in srgb, var(--saas-bio) 10%, var(--saas-card));
+  box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-text);
+}
+.saas-home-banner > p { flex: 1 1 320px; margin: 0; color: var(--saas-text); font: 500 var(--saas-text-md)/1.6 var(--saas-font); }
+.saas-home-banner.is-ended { background: var(--saas-warning-bg); box-shadow: 0 0 0 1px color-mix(in srgb, var(--saas-warning-dot) 40%, transparent) inset; }
+.saas-home-banner a.saas-home-banner-action { flex: none; }
+.saas-home-banner a.saas-home-banner-action:not(.saas-primary) { color: var(--saas-link); font: 650 var(--saas-text-sm)/1.4 var(--saas-font); text-underline-offset: 3px; }
+.saas-home-content .saas-home-banner button.saas-home-banner-close {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; min-height: 32px; margin: 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; box-shadow: none; color: var(--saas-muted);
+}
+.saas-home-content .saas-home-banner button.saas-home-banner-close:not(:disabled):hover { background: var(--saas-soft-strong); color: var(--saas-text); }
+
+/* ── 首页: treg's advice under the composer (ToolAdvice.tsx) and the 探索 tiles (HomeExplore.tsx) ── */
+.saas-home-advice { width: 100%; margin-top: 14px; padding: 14px 16px; border-radius: var(--saas-radius); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset; text-align: start; }
+.saas-home-advice p { margin: 0 0 8px; color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.65; }
+.saas-home-advice p.saas-home-advice-title { display: flex; align-items: center; gap: 8px; color: var(--saas-text); font-weight: 650; }
+.saas-home-advice p.saas-home-advice-title svg { flex: none; color: var(--saas-link); }
+.saas-home-advice p.saas-home-advice-billing { color: var(--saas-text); }
+.saas-home-advice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.saas-home-advice .saas-home-advice-actions button { min-height: 32px; padding: 0 14px; font-size: var(--saas-text-xs); }
+.saas-home-advice-steps { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--saas-hairline); }
+.saas-home-advice-steps ol { margin: 0; padding-left: 20px; color: var(--saas-text); font-size: var(--saas-text-sm); line-height: 1.65; }
+.saas-home-advice-line { display: grid; gap: 4px; min-width: 0; }
+.saas-home-advice-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; }
+.saas-home-advice .saas-home-advice-line-head button { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 10px; font-size: var(--saas-text-xs); }
+.saas-home-advice-line pre { margin: 0; padding: 8px 10px; overflow-x: auto; border-radius: var(--saas-radius-xs); background: var(--saas-field); color: var(--saas-text); font: 500 12px/1.5 var(--saas-font-mono); white-space: pre; }
+.saas-home-advice-line pre:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 1px; }
+.saas-home-advice a.saas-home-advice-site { display: inline-flex; align-items: center; gap: 4px; justify-self: start; color: var(--saas-link); font-size: var(--saas-text-sm); font-weight: 600; }
+.saas-home-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.saas-home-explore button.saas-home-tile {
+  display: flex; align-items: center; gap: 14px; width: 100%; min-height: 84px; margin: 0; padding: 16px 18px;
+  border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: none;
+  color: var(--saas-text); font: inherit; text-align: start;
+}
+.saas-home-explore button.saas-home-tile:not(:disabled):hover { border-color: var(--saas-border); background: var(--saas-card); box-shadow: var(--saas-shadow-lg); }
+.saas-home-tile-icon { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--saas-radius); background: color-mix(in srgb, var(--saas-bio) 14%, var(--saas-card)); color: var(--saas-text); }
+.saas-home-tile-text { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.saas-home-tile-text > strong { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; color: var(--saas-text); font: 650 var(--saas-text-lg)/1.3 var(--saas-font); }
+.saas-home-tile-text > strong > .saas-library-count { color: var(--saas-muted); font: 500 var(--saas-text-sm)/1.3 var(--saas-font); }
+.saas-home-tile-text > span { color: var(--saas-muted); font-size: var(--saas-text-sm); line-height: 1.55; }
+.saas-home-tile-go { flex: none; color: var(--saas-muted); transition: translate var(--saas-dur-1) var(--saas-ease); }
+.saas-home-explore button.saas-home-tile:not(:disabled):hover .saas-home-tile-go { translate: 3px 0; color: var(--saas-text); }
+
+/* ── 我的画布: the canvases by when each was last updated (CanvasList.tsx grouped) ── */
+.saas-canvas-groups { display: grid; gap: 28px; }
+.saas-canvas-group-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; }
+.saas-canvas-groups .saas-canvas-group-head h3 { margin: 0; color: var(--saas-text); font: 650 var(--saas-text-lg)/1.3 var(--saas-font); letter-spacing: -.005em; }
+.saas-canvas-group-head .saas-library-count { color: var(--saas-muted); font-size: var(--saas-text-sm); }
+/* A card's name under its group's heading, drawn as the list's h3 names are. */
+.saas-canvas-groups .saas-canvas-card h4 {
+  margin: 0; color: var(--saas-text); font: 650 15px/1.4 var(--saas-font); letter-spacing: -.01em; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; text-wrap: pretty;
+}
+
+/* ── 制作案例 and Agent 市场 (ProductionCases.tsx filters, MarketHomeStrip.tsx expanded) ── */
+.saas-home-content .production-cases .production-kind-chips { margin-bottom: 20px; }
+.production-kind-count { font-variant-numeric: tabular-nums; font-weight: 500; }
+.saas-home-content .saas-market-section .saas-market-section-chips { margin-bottom: 16px; }
+/* When the official Agents' price starts (marketText.ts officialPriceNotice): on the banner's own tint. */
+.saas-market-section-note {
+  margin: 0 0 14px; padding: 9px 14px; border-radius: var(--saas-radius-sm); background: color-mix(in srgb, var(--saas-bio) 10%, var(--saas-card));
+  box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-text); font-size: var(--saas-text-sm); line-height: 1.55;
+}
+
+/* The content is narrower than the page by the rail: its grids follow its own width, not the window's. (Not where the
+   window's small-screen rules lay them out: one card a row.) */
+@container saas-home (min-width: 721px) and (max-width: 900px) { .saas-home-content .saas-canvas-list.is-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container saas-home (min-width: 521px) and (max-width: 960px) { .saas-home-content .production-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ── Small screens: the rail is one scrolling row of the same buttons over the content, and the account card a compact
+   block under it, still on screen first: it carries the way to pay. ── */
+@media (max-width: 860px) {
+  .saas-home-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 14px; }
+  .saas-home-rail { position: static; height: auto; gap: 10px; padding: 8px; overflow: visible; }
+  .saas-home-nav ul { display: flex; gap: 4px; padding: 3px; overflow-x: auto; scrollbar-width: none; }
+  .saas-home-nav ul::-webkit-scrollbar { display: none; }
+  .saas-home-nav li { flex: none; }
+  .saas-home-nav li.saas-home-nav-academy { margin: 0; padding: 0; border: 0; }
+  .saas-home-nav button.saas-home-nav-item, .saas-home-nav button.saas-academy-launch { width: auto; min-height: 38px; }
+  .saas-home-account { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px 16px; margin-top: 0; padding: 12px; }
+  .saas-home-account-plan { padding-top: 0; border-top: 0; }
+  .saas-home-account a.saas-home-account-link { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) { .saas-dashboard.saas-home { padding-inline: 20px; } }
+@media (prefers-reduced-motion: reduce) { .saas-home-tile-go { transition: none; } }

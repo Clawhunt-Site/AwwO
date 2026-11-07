@@ -9,6 +9,7 @@ import type { ModelPaletteSelection } from './modelPalette';
 import { marketChoice, type MarketNodeChoice } from './marketAgents';
 import { forgetMarketAgent, useMarketAgentInfo, useWorkspacePaidPlan } from '../saas/market/useMarket';
 import { marketModelDecision } from '../saas/market/marketModel';
+import { authorText, priceText } from '../saas/market/marketText';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
 import { accountURL } from '../saas/PersonalAccount';
 import './market-agent.css';
@@ -21,7 +22,8 @@ export function MarketAgentBox({ agentRef, disabled, catalogue, onApply, onPick,
 }) {
   const { locale } = useCanvasI18n();
   const text = (zh: string, en: string) => locale === 'zh' ? zh : en;
-  const price = (value: number) => value > 0 ? text(`每次 ${value} 点`, `${value} credits a call`) : text('免费', 'Free');
+  // The market's own words for a price and an author (marketText.ts): a price of 0 is no Agent fee, never "free".
+  const price = (value: number) => priceText(value, text);
   const info = useMarketAgentInfo(agentRef);
   const own = info.pinned ?? undefined;
   const listed = info.listed;
@@ -32,7 +34,7 @@ export function MarketAgentBox({ agentRef, disabled, catalogue, onApply, onPick,
   // A paid version needs the workspace owner's plan, as choosing it in the market does (its author is never charged).
   const paidUpdate = Boolean(newer && newer.price > 0 && !newer.status && !newer.latest);
   const plan = useWorkspacePaidPlan(currentSaaSCanvas()?.tenant.id, paidUpdate);
-  const author = shown ? shown.official ? text('AwwO 官方', 'AwwO official') : shown.author?.name || text('作者未署名', 'Unnamed author') : '—';
+  const author = shown ? authorText(shown, text) : '—';
   return <section className="canvas-inspector-hint awwo-market-box" role="group" aria-label={text('市场 Agent', 'Market Agent')}>
     <strong>{text('市场 Agent', 'Market Agent')}：{shown?.name ?? (info.failed ? text('读不到详情', 'Details unavailable') : text('正在读取…', 'Loading…'))}</strong>
     <dl>

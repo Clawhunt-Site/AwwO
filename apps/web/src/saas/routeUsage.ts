@@ -12,6 +12,8 @@ export type CheckinState = { available: boolean; checkedIn: boolean; taken?: boo
   today?: CheckinBonus; streak: number; endsAt: string };
 /** A promotion's floors while it raises this workspace's free allowances, and when it ends. */
 export type PromoView = { until: string; daily: number; routes?: Partial<Record<RouteName, number>> };
+/** When this free workspace's free plan ends (RFC 3339), and whether it has: the server's own clock says. */
+export type FreePlanView = { until: string; ended: boolean };
 /** GET /tenants/{id}/route-usage: today's allowances, counted with admission's own filters (the
  * deployment-wide ceilings, the media caps and the model allowlist are not shown, so admission can still refuse). `routes`
  * is present only for a route-limited workspace and lists only the routes it limits; a route it leaves
@@ -26,6 +28,10 @@ export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Par
   plan?: { id: PlanId; owner?: boolean; periodEnd?: string; cancelAtPeriodEnd?: boolean; credits: Credits };
   /** Set while a promotion raises this free workspace; the limits above already include it and today's check-in. */
   promo?: PromoView;
+  /** Set for a route-limited workspace whose owner has no paid plan, where the deployment ends its free plan
+   *  (AWWO_FREE_PLAN_UNTIL): from `until` on (ended), nothing in it that calls a model or makes media starts until its
+   *  owner subscribes (402 free_plan_ended). Absent where the free plan does not end, and from a server older than it. */
+  freePlan?: FreePlanView;
   /** Set for a member who may run things, while check-ins are offered to this workspace. */
   checkin?: CheckinState };
 

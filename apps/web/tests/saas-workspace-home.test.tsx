@@ -6,6 +6,7 @@ import type { CanvasRecord, Identity, Tenant } from '../src/saas/api';
 import { PLAN_HANDOFF_PREFIX, takePlanHandoff } from '../src/saas/planHandoff';
 import { readHomeDraft, saveHomeDraft } from '../src/saas/homePrompt';
 import { STARTER_CASES } from '../src/saas/starterCases';
+import type { HomeSection } from '../src/saas/home/homeSections';
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const identity: Identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [tenant] };
@@ -33,8 +34,9 @@ function server({ canvases = [], create, runtime = ready }: { canvases?: CanvasR
   vi.stubGlobal('fetch', fetcher);
   return { fetcher, posts };
 }
-const view = ({ role = 'owner', onOpen = vi.fn() }: { role?: string; onOpen?: (id: string) => void } = {}) =>
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={onOpen} /></SaaSPreferencesProvider>);
+const home = ({ role = 'owner', onOpen = vi.fn(), section, onSection }: { role?: string; onOpen?: (id: string) => void; section?: HomeSection; onSection?: (section: HomeSection) => void } = {}) =>
+  <SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={onOpen} section={section} onSection={onSection} /></SaaSPreferencesProvider>;
+const view = (options: Parameters<typeof home>[0] = {}) => render(home(options));
 const box = () => screen.getByRole('textbox', { name: '画布需求' });
 const openExamples = () => fireEvent.click(screen.getByRole('button', { name: '需要灵感？看看案例' }));
 
@@ -258,20 +260,28 @@ it('shows no planning warning when the engine and planner are ready', async () =
   expect(screen.queryByText(/规划暂不可用/)).toBeNull();
 });
 
-it('shows the 8 most recently updated canvases on the home, and the rest after 查看全部', async () => {
+it('shows the 8 most recently updated canvases on 首页, and its 查看全部 opens 我的画布 with every one', async () => {
   // Out of order on purpose: the list sorts by the last update, newest first.
   const canvases = Array.from({ length: 10 }, (_, index) => record(`c${index + 1}`, `画布 ${index + 1}`, `2026-10-${String(10 - index).padStart(2, '0')}T00:00:00Z`)).reverse();
   server({ canvases });
-  view();
+  const onSection = vi.fn();
+  const { rerender } = view({ onSection });
   const section = (await screen.findByRole('heading', { name: '继续工作' })).closest('section')!;
   await waitFor(() => expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(8));
   expect(within(section).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(
     ['画布 1', '画布 2', '画布 3', '画布 4', '画布 5', '画布 6', '画布 7', '画布 8']);
   expect(within(section).getByText('10 张画布')).toBeVisible();
-  fireEvent.click(within(section).getByRole('button', { name: '查看全部 10 张' }));
-  expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(10);
-  fireEvent.click(within(section).getByRole('button', { name: '收起' }));
+  // 查看全部 is no disclosure any more: the whole list is a section of its own.
+  const all = within(section).getByRole('button', { name: '查看全部 10 张' });
+  expect(all).not.toHaveAttribute('aria-expanded');
+  fireEvent.click(all);
+  expect(onSection).toHaveBeenCalledWith('canvases');
   expect(within(section).getAllByRole('heading', { level: 3 })).toHaveLength(8);
+  rerender(home({ onSection, section: 'canvases' }));
+  const mine = (await screen.findByRole('heading', { level: 2, name: '我的画布' })).closest('section')!;
+  await waitFor(() => expect(within(mine).getAllByRole('heading', { level: 4 })).toHaveLength(10));
+  expect(screen.queryByRole('textbox', { name: '画布需求' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '继续工作' })).toBeNull();
 });
 
 it('keeps an unsent request in this tab, and a page restored from the back/forward cache is usable again', async () => {

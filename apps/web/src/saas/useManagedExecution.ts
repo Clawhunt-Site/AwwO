@@ -97,7 +97,10 @@ const SEND_SETTLED_MS = 20000;
 // lost session, access, a body or plan check made before the lookup says nothing about the first send.
 const NEVER_STARTED = new Set(['quota_exceeded', 'plan_busy', 'computer_model_unsupported', 'context_limit', 'invalid_task_frame',
   'invalid_team', 'node_setup_required', 'computer_owner_required', 'model_unavailable', 'model_not_allowed', 'runtime_unavailable',
-  'personal_engine_required', 'effort_unsupported', 'invalid_node_setup', 'invalid_knowledge', 'knowledge_context_limit']);
+  'personal_engine_required', 'effort_unsupported', 'invalid_node_setup', 'invalid_knowledge', 'knowledge_context_limit',
+  // The free trial has ended for this workspace (free_plan.go): refused before anything is reserved or started, after
+  // the operation's own lookup, so a retry of a task admitted before the end still finds that task.
+  'free_plan_ended']);
 // Anything but a definite client error may have reached the service, so its outcome is unknown.
 const isUncertain = (error: unknown) => !(error instanceof SaaSApiError) || error.status >= 500 || [408, 409].includes(error.status);
 const PROMPT_BYTES = 32768;

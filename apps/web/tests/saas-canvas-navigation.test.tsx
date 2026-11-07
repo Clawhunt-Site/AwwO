@@ -49,7 +49,7 @@ afterEach(() => { cleanup(); bridge.clearSaaSCanvas(); vi.restoreAllMocks(); vi.
 it.each(['owner', 'reader'])('offers a direct current-workspace return for a loaded %s canvas', async role => {
   const fetcher = server({ role }); render(<SaaSApp />);
   await waitFor(() => expect(document.querySelector('.awwo-workspace')).not.toBeNull());
-  expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a&section=canvases');
   expect(backLink().closest('[inert]')).toBeNull();
   expect(fetcher.mock.calls.some(([, init]) => init?.method && init.method !== 'GET')).toBe(false);
 });
@@ -74,7 +74,7 @@ it('lets a signed-in owner without a personal key inspect, export and edit an ex
   expect(screen.getByRole('link', { name: '连接执行引擎' })).toHaveAttribute('href', '/?tenant=tenant-a&canvas=canvas-a&account=engines');
   expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
   expect(screen.getByRole('button', { name: '导出画布 JSON' })).toBeEnabled();
-  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a&section=canvases');
   expect(screen.getByText(/画布仍可编辑/)).toBeVisible();
   expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
   act(() => saveDocument({ ...cloudDocument, updatedAt: 2 }));
@@ -86,7 +86,7 @@ it('keeps the old canvas editable and execution closed when the runtime-status r
   const fetcher = server({ personal: true, runtimeRead: () => Promise.reject(new TypeError('offline')) });
   render(<SaaSApp />); await ready();
   expect(screen.getByRole('button', { name: '打开 Navigation fixture' })).toBeVisible();
-  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a&section=canvases');
   expect(screen.getByRole('button', { name: /运行图/ })).toBeDisabled();
   expect(screen.getByRole('button', { name: /运行图/ })).toHaveAttribute('title', '暂时无法确认执行引擎状态，请重新检查。');
   act(() => saveDocument({ ...cloudDocument, updatedAt: 2 }));
@@ -106,7 +106,7 @@ it.each(['owner', 'reader'])('keeps a return available while the %s canvas is lo
   let resolve!: (value: Response) => void;
   const fetcher = server({ role, canvasRead: () => new Promise(done => { resolve = done; }) }); render(<SaaSApp />);
   await screen.findByText('正在加载云端画布…');
-  expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(backLink()).toBeVisible(); expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a&section=canvases');
   await waitFor(() => expect(resolve).toBeTypeOf('function'));
   await act(async () => resolve(response({ error: { message: 'Fixture unavailable' } }, 503)));
   expect(await screen.findByRole('alert')).toHaveTextContent('Fixture unavailable');
@@ -119,7 +119,7 @@ it('can return from draft recovery without discarding or uploading the local dra
   const saved = readCanvasDrafts(canvasStorage());
   const fetcher = server(); render(<SaaSApp />);
   await screen.findByRole('heading', { name: '发现未同步的本机草稿' });
-  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a');
+  expect(backLink()).toHaveAttribute('href', '/?tenant=tenant-a&section=canvases');
   // Suppress jsdom's unsupported full navigation; the link must not mutate data on click.
   backLink().addEventListener('click', event => event.preventDefault(), { once: true }); fireEvent.click(backLink());
   expect(readCanvasDrafts(canvasStorage())).toEqual(saved);

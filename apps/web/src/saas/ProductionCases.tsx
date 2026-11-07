@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { agentCount, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, type ProductionCase } from './productionCatalog';
+import { agentCount, PRODUCTION_CASES, PRODUCTION_KIND_LABELS, type ProductionCase, type ProductionKind } from './productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from './productionRuns';
 import type { OfficialWorkflow } from './examples/officialWorkflows';
 import { LazyBoundary } from './LazyBoundary';
@@ -152,9 +152,24 @@ function CaseDialog({ item, onClose, onReuse, onCopyRecorded }: { item: Producti
   </dialog>;
 }
 
-export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { compact?: boolean; onReuse?: (workflow: OfficialWorkflow) => void;
+/** Each kind of case with how many the catalog has, in the catalog's kind order; a kind with none is left out. */
+const KIND_COUNTS = (Object.keys(PRODUCTION_KIND_LABELS) as ProductionKind[])
+  .map(kind => [kind, PRODUCTION_CASES.filter(item => item.kind === kind).length] as const).filter(([, count]) => count > 0);
+
+/** The workspace home's 制作案例 picks the cases of one kind. The chips read in English, as the cases do. */
+function KindChips({ kind, onKind, controls }: { kind: ProductionKind | null; onKind: (kind: ProductionKind | null) => void; controls: string }) {
+  return <div className="saas-case-chips production-kind-chips" role="group" aria-label="Case kinds">
+    <button type="button" aria-pressed={kind === null} aria-controls={controls} onClick={() => onKind(null)}>All <span className="production-kind-count">{PRODUCTION_CASES.length}</span></button>
+    {KIND_COUNTS.map(([value, count]) => <button key={value} type="button" aria-pressed={kind === value} aria-controls={controls} onClick={() => onKind(value)}>
+      {PRODUCTION_KIND_LABELS[value]} <span className="production-kind-count">{count}</span></button>)}
+  </div>;
+}
+
+/** `filters` (the workspace home's 制作案例) adds chips that show one kind of case. */
+export function ProductionCases({ compact = false, filters = false, onReuse, onCopyRecorded }: { compact?: boolean; filters?: boolean; onReuse?: (workflow: OfficialWorkflow) => void;
   onCopyRecorded?: (item: ProductionCase) => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [kind, setKind] = useState<ProductionKind | null>(null);
   const [open, setOpen] = useState<ProductionCase | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   /** A case opened from outside its card: the card to come back to once it closes. */
@@ -163,7 +178,8 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
   const wasOpen = useRef(false);
   const titleId = useId();
   const listId = useId();
-  const items = compact && !expanded ? PRODUCTION_CASES.slice(0, COMPACT_CASE_COUNT) : PRODUCTION_CASES;
+  const shown = compact && !expanded ? PRODUCTION_CASES.slice(0, COMPACT_CASE_COUNT) : PRODUCTION_CASES;
+  const items = filters && kind ? shown.filter(item => item.kind === kind) : shown;
   // Say every case ran only when every case has a published run.
   const ran = PRODUCTION_CASES.filter(item => PRODUCTION_RUN_SUMMARY[item.id]).length;
   const illustrated = PRODUCTION_CASES.some(item => !item.recording);
@@ -174,6 +190,7 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
     const item = PRODUCTION_CASES.find(value => value.id === id);
     if (!item) return false;
     if (compact) setExpanded(true);
+    setKind(null);
     trigger.current = null;
     revealed.current = item.id;
     setOpen(item);
@@ -208,6 +225,7 @@ export function ProductionCases({ compact = false, onReuse, onCopyRecorded }: { 
       {compact && <button type="button" className="production-toggle" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Show fewer' : `See all ${PRODUCTION_CASES.length} cases`}</button>}
     </div>
+    {filters && <KindChips kind={kind} onKind={setKind} controls={listId} />}
     <ul role="list" id={listId} className="production-grid">{items.map(item => <CaseCard key={item.id} item={item} active={!open} onOpen={(value, button) => { trigger.current = button; revealed.current = null; setOpen(value); }} />)}</ul>
     {open && <CaseDialog item={open} onClose={close} onReuse={onReuse} onCopyRecorded={onCopyRecorded} />}
   </section>;

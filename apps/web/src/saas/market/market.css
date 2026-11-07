@@ -1,5 +1,8 @@
 /* The Agent market (AgentMarket.tsx and the views beside it). The dialog builds on the skill library's frame
    (canvas-library.css); the home strip, the author console and the run fee use the hosted shell's tokens. */
+/* When the official Agents' price starts, under the dialog's subtitle: as small as the subtitle, in the ink colour, and
+   still shown on a narrow screen, where the frame hides the subtitle (it says what a call will cost). */
+.awwo-market .awwo-library-heading p.awwo-market-official-note { display: block; max-width: 760px; margin-top: 4px; color: var(--library-ink); font-size: 12px; }
 .awwo-market .awwo-market-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .awwo-market .awwo-market-chips button { min-height: 28px; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
 .awwo-market .awwo-market-chips button[aria-pressed='true'] { border-color: var(--library-accent); color: var(--library-accent); background: color-mix(in srgb, var(--library-accent) 10%, var(--library-surface)); }

@@ -167,6 +167,22 @@ const EN = {
   'invite.revoking': 'Revoking…',
   'invite.revokeFailed': 'Couldn’t revoke: {detail}',
   'invite.cancel': 'Cancel',
+  // treg in 邀请 Agent: lines with no credential that give the connected Agent treg's tools too.
+  'treg.toggle': 'Add treg: live data for your Agent',
+  'treg.intro': 'treg (treg.to, a third-party tool catalog by Superdesign) lets the Claude Code, Codex or Cursor you connect here search the web and read pages, look up keywords and backlinks, social trends, and company and market data, then write what it found onto this canvas. AwwO’s own Agents have no live web: your Agent brings it.',
+  'treg.billing': 'treg charges per call, to your own treg team, and shows the price before a call. AwwO takes no part of that money and never sees or keeps your treg sign-in. What you send to treg leaves AwwO.',
+  'treg.stepsLabel': 'How to add it',
+  'treg.step1': 'Sign up at treg.to and create a team: the team pays for the calls.',
+  'treg.step2': 'Add treg to the same Agent with a line below, and sign in when it asks.',
+  'treg.step3': 'Ask the Agent to look things up with treg, then write them onto the canvas with its canvas tools.',
+  'treg.forClaude': 'Claude Code · then /mcp, pick treg and sign in',
+  'treg.forCodex': 'Codex · it opens the sign-in at once (later: codex mcp login treg)',
+  'treg.forCursor': 'Cursor · add it inside mcpServers in .cursor/mcp.json, beside awwo-canvas',
+  'treg.forTask': 'A task to give it',
+  'treg.task': 'Use treg to research <topic>: keep the source link beside every fact, then write the findings into the node “<node>” with the AwwO canvas tools.',
+  'treg.caution': 'A paid treg call never happens unattended: Codex asks before one, and the unattended lines (claude -p, codex exec) cannot approve it unless you allow treg yourself, so set a spending cap in treg before you do. Codex may still look things up in treg’s free catalog by itself, which sends what it asks to treg. Send treg public things only: never a private link or a page behind a sign-in.',
+  'treg.site': 'Open treg.to',
+  'treg.siteLabel': 'Open treg.to (a third-party site) in a new tab',
 } as const;
 
 export type MultiplayerTextKey = keyof typeof EN;
@@ -323,6 +339,21 @@ const ZH: Record<MultiplayerTextKey, string> = {
   'invite.revoking': '正在撤销…',
   'invite.revokeFailed': '没能撤销：{detail}',
   'invite.cancel': '取消',
+  'treg.toggle': '加上 treg：让 Agent 查实时数据',
+  'treg.intro': 'treg（treg.to，Superdesign 出品的第三方工具目录）能让你接进来的 Claude Code、Codex 或 Cursor 联网搜索、读网页，查关键词与外链、社媒趋势、公司与市场数据，再把查到的写进这张画布。AwwO 自己的 Agent 不联网，实时资料交给你自己的 Agent。',
+  'treg.billing': 'treg 按次计费，记在你自己的 treg 团队账户上，调用前会先给出价格。AwwO 不收这笔钱，也不经手、不保存你的 treg 登录。发给 treg 的内容会离开 AwwO。',
+  'treg.stepsLabel': '怎么加上',
+  'treg.step1': '先在 treg.to 注册并建一个团队：调用的费用由这个团队付。',
+  'treg.step2': '用下面的一行命令把 treg 加进同一个 Agent，按提示登录。',
+  'treg.step3': '让 Agent 用 treg 查资料，再用画布工具把结果写进节点。',
+  'treg.forClaude': 'Claude Code · 加好后输入 /mcp，选 treg 登录',
+  'treg.forCodex': 'Codex · 会马上打开浏览器登录（以后可用 codex mcp login treg）',
+  'treg.forCursor': 'Cursor · 加进 .cursor/mcp.json 的 mcpServers 里，和 awwo-canvas 并列',
+  'treg.forTask': '可以这样交代',
+  'treg.task': '用 treg 查「<主题>」的最新资料，每条事实附上来源链接，再用 AwwO 画布工具写进「<节点>」。',
+  'treg.caution': 'treg 的付费调用不会在无人值守时自己发生：Codex 调用前会先问你，无人值守命令（claude -p、codex exec）也批不了，除非你自己放开，放开前请先在 treg 里设好花费上限。Codex 仍可能自己查 treg 的免费目录，查的内容会发给 treg。只把公开内容交给 treg：不要发私密链接或需要登录的页面。',
+  'treg.site': '打开 treg.to',
+  'treg.siteLabel': '在新标签页打开 treg.to（第三方网站）',
 };
 
 /** Both tables, for the parity check (tests/saas-multiplayer-ui.test.tsx). */

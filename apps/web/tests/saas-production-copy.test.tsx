@@ -340,7 +340,7 @@ async function openCopy(name = 'Pixel platformer') {
 
 it('copies a case from the workspace home with every agent’s recording, and says so in English before it does', async () => {
   const posts = server(), onOpen = vi.fn();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy();
   expect(setup).toHaveAttribute('lang', 'en');
   expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-13 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
@@ -357,7 +357,7 @@ it('copies a case from the workspace home with every agent’s recording, and sa
 it('says the same to an English member, with no note on the language the agents worked in', async () => {
   localStorage.setItem('superclaw_locale', 'en');
   server();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy();
   expect(within(setup).getByText(/with what every agent received and delivered in the real run on 2026-10-13 \(6\/6 nodes, marked “case recording”\)/)).toBeVisible();
   // A case compiled in English is copied as it is: nothing about a language follows the note on the recordings.
@@ -367,7 +367,7 @@ it('says the same to an English member, with no note on the language the agents 
 
 it('creates nothing when a case has no published recording, rather than an empty copy', async () => {
   const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy();
   load.mockResolvedValue(undefined);
   try {
@@ -379,7 +379,7 @@ it('creates nothing when a case has no published recording, rather than an empty
 
 it('creates nothing when the recording cannot be read, rather than an empty copy', async () => {
   const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy();
   load.mockRejectedValue(new Error('chunk failed'));
   try {
@@ -392,7 +392,7 @@ it('creates nothing when the recording cannot be read, rather than an empty copy
 
 it('copies the knowledge base from the workspace home like any case, with every agent’s recording', async () => {
   const posts = server(), onOpen = vi.fn();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy('Team knowledge-base SaaS');
   expect(within(setup).getByText(/^Keep all 7 nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on 2026-10-13 \(7\/7 nodes, marked “case recording”\)\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
   expect(within(setup).getByText(/^This only creates a canvas; .* The case recordings were made by Claude Opus 5\.5, not run in your workspace; running the graph replaces them with your own results\.$/)).toBeVisible();
@@ -420,7 +420,7 @@ it('stops the copy when a delivered node has no recording its canvas can hold, r
 it('copies a film case from the workspace home as the canvas that ran, with nothing pre-filled, and says what its first run makes again', async () => {
   const posts = server(), onOpen = vi.fn();
   const canvas = (await import('../src/saas/production-canvases/the-long-chord')).default;
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy(FILM_TITLE);
   expect(setup).toHaveAttribute('lang', 'en');
   expect(within(setup).getByText(/^Keep all 298 nodes and their wires with the texts and settings the real run on 2026-10-22 used: .* so its first run makes all 282 pictures, clips and sounds again before any editor runs, .* the sync sheets in the editors’ briefs and the edits’ own timelines were measured on the case run’s clips and films, so measure and edit them again before cutting\. Optionally choose one execution model for the editor agents\.$/)).toBeVisible();
@@ -450,7 +450,7 @@ it('copies a film written as code with its agents in their sandbox computers, on
       throw new Error(`Unexpected endpoint: ${url}`);
     }));
     const onOpen = vi.fn();
-    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
     const setup = await openCopy('AwwO Studio · Showreel');
     await within(setup).findByRole('option', { name: 'Catalog model' });
     fireEvent.change(within(setup).getByRole('combobox', { name: 'Execution model' }), { target: { value: JSON.stringify(['openai-agents', 'shared-model']) } });
@@ -489,7 +489,7 @@ it('copies GYROID with nothing pre-filled, says so, and keeps its makers in the 
       throw new Error(`Unexpected endpoint: ${url}`);
     }));
     const onOpen = vi.fn();
-    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+    render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
     const setup = await openCopy('GYROID');
     expect(within(setup).getByText(/^Keep all 4 nodes, dependencies and deliverable requirements, with the tasks the real run on 2026-11-05 used\. Nothing is pre-filled: its agents hand on files of their own \(models, renders, photographs\), which a copy does not carry, so its first run makes them again in the Blender workstation, and the page that shows them\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
     expect(within(setup).queryByText(/case recording|The case recordings were made by/)).toBeNull();
@@ -513,7 +513,7 @@ it('copies GYROID with nothing pre-filled, says so, and keeps its makers in the 
 it('creates nothing from a film case whose stored canvas is not the one its record pins', async () => {
   const posts = server(), onOpen = vi.fn(), load = vi.mocked(loadProductionRun), actual = load.getMockImplementation()!;
   const record = (await actual(FILM))!;
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={onOpen} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy(FILM_TITLE);
   load.mockResolvedValue({ ...record, canvasSHA256: '0'.repeat(64) });
   try {
@@ -526,7 +526,7 @@ it('creates nothing from a film case whose stored canvas is not the one its reco
 
 it('tells a media case’s copier which deliveries its first run makes again', async () => {
   server();
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} section="cases" /></SaaSPreferencesProvider>);
   const setup = await openCopy('Neon Circuit racer');
   expect(within(setup).getByText(/^Keep all 10 nodes, dependencies and deliverable requirements, with what every agent received and delivered in the real run on 2026-10-15 \(10\/10 nodes, marked “case recording”\); the media nodes, and the steps that use the files they made, make theirs again on the first run\. Optionally choose one execution model for every new node\.$/)).toBeVisible();
 });

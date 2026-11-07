@@ -42,6 +42,25 @@ it('shows both plans as coming soon while checkout is closed', async () => {
   expect(screen.getByText(/默认模型每天 1,000 次/)).toBeVisible();
 });
 
+// True during the free trial and after it (owner 2026-11-07: after the trial a workspace without a plan runs nothing):
+// the page knows no workspace, so it names no date, and Opus 5.5, open on the free plan for now, is not said to need one.
+it.each([
+  ['zh', '当前套餐', ['免费试用期间，每天有一定的调用次数', '具体数字见工作区里的「今日额度」', '免费试用结束后，规划和运行需要 Pro 或 Max，画布和成果都会保留。'], 'Get Pro', '立即开通 Pro'],
+  ['en', 'Current plan', ['during the free trial there is a daily number of calls', 'see Today’s allowance in a workspace for the numbers',
+    'Once the free trial ends, planning and runs need Pro or Max, and your canvases and results are kept.'], '立即开通 Pro', 'Get Pro'],
+] as const)('tells a free account (%s) what the free trial gives and that running needs a plan after it', async (locale, title, lines, absent, buy) => {
+  localStorage.setItem('superclaw_locale', locale);
+  serve(() => response(free));
+  page();
+  const current = await screen.findByRole('region', { name: title });
+  for (const line of lines) expect(current).toHaveTextContent(line);
+  expect(current).not.toHaveTextContent('Opus');
+  expect(current).not.toHaveTextContent(/不含|Not included/);
+  // The vouchers stay.
+  expect(screen.getByRole('button', { name: buy })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: absent })).toBeNull();
+});
+
 it('shows each plan as a voucher: its credits as the face value, its price on the stub, and the plan held stamped', async () => {
   serve(() => response(free));
   page();
@@ -222,7 +241,8 @@ it('accepts only https Stripe pages on the expected host', () => {
   expect(stripePage('javascript:alert(1)', 'checkout.stripe.com')).toBeNull();
 });
 
-const meter = () => render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" /></SaaSPreferencesProvider>);
+// The workspace's owner: only the owner is asked to buy for it (RouteUsageMeter's owner).
+const meter = () => render(<SaaSPreferencesProvider><RouteUsageMeter tenantId="t-a" owner /></SaaSPreferencesProvider>);
 const paid = (remaining: number, used = 12, owner = true) => ({ limited: false, interested: false, daily: { limit: 300, used }, plan: { id: 'pro', owner, ...(owner ? { periodEnd: '2026-11-05T00:00:00Z', cancelAtPeriodEnd: false } : {}), credits: { granted: 2000, spent: 2000 - remaining, remaining } } });
 
 it('shows a paid workspace’s credits in the chip and its popover', async () => {

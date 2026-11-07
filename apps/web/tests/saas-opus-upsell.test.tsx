@@ -107,6 +107,35 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     expect(within(invitation()!).getByRole('link', { name: '升级 Pro / Max' })).toBeInTheDocument();
   });
 
+  it('never offers free calls left once the workspace’s free trial is over, only the plans', async () => {
+    // The numbers may still show calls left: past the free plan's end the server runs nothing until the owner subscribes.
+    server({ ...free(), freePlan: { until: '2026-11-12T16:00:00Z', ended: true } }, [qwen, opusFree]);
+    view();
+    await waitFor(() => expect(invitation()).not.toBeNull());
+    const note = within(invitation()!);
+    expect(note.getByText('免费试用已结束：工作区所有者订阅 Pro / Max 后，就能按点数使用 Opus 5.5。')).toBeInTheDocument();
+    expect(invitation()).not.toHaveTextContent(/今天还能免费用|今天的免费次数/);
+    expect(note.queryByRole('button', { name: '换成 Opus 5.5' })).toBeNull();
+    expect(note.getByRole('link', { name: '升级 Pro / Max' })).toHaveAttribute('href', accountURL('plans'));
+  });
+
+  it('counts today’s free calls as before while the free trial runs', async () => {
+    server({ ...free(), freePlan: { until: '2026-11-12T16:00:00Z', ended: false } }, [qwen, opusFree]);
+    view();
+    await waitFor(() => expect(invitation()).not.toBeNull());
+    expect(within(invitation()!).getByText('今天还能免费用 15 次；升级 Pro / Max 用点数畅用，不受次数限制。')).toBeInTheDocument();
+    expect(within(invitation()!).getByRole('button', { name: '换成 Opus 5.5' })).toBeInTheDocument();
+  });
+
+  it('says the free trial is over in English too', async () => {
+    localStorage.setItem('superclaw_locale', 'en');
+    server({ ...free(), freePlan: { until: '2026-11-12T16:00:00Z', ended: true } }, [qwen, opusFree]);
+    view();
+    const note = await screen.findByText('The free trial has ended: once the workspace owner subscribes to Pro or Max, Opus 5.5 runs on credits.');
+    expect(note.closest('[role="note"]')).not.toHaveTextContent(/free calls? left|used up/);
+    expect(screen.queryByRole('button', { name: 'Switch to Opus 5.5' })).toBeNull();
+  });
+
   it('reads the allowance again when the menu opens', async () => {
     const calls = server(free());
     view();

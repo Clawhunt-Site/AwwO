@@ -1,5 +1,5 @@
 import { readInitialLocale, type UiLocale } from '../locale';
-import { SaaSApiError, freeCapacityMessages, isServiceCopy, quotaExceededMessages, runtimeUnavailableMessages, saasErrorMessage } from './api';
+import { SaaSApiError, freeCapacityMessages, freePlanEndedMessages, isServiceCopy, quotaExceededMessages, runtimeUnavailableMessages, saasErrorMessage } from './api';
 
 export function canvasLocale(): UiLocale {
   const language = document.documentElement.lang;
@@ -133,6 +133,9 @@ const runErrors: Record<string, [string, string]> = {
   // The workspace's own allowance (today's calls, or runs at once) without a plan. Run details showed the bare code;
   // a node read the API's copy. Both now read this one, which offers the plans first.
   quota_exceeded: quotaExceededMessages,
+  // The free trial is over for the workspace (free_plan_ended): only its owner's plan lifts it, so a node, a team member's
+  // turn and a direct task read the service's own words, which name the plans and keep what the workspace holds.
+  free_plan_ended: freePlanEndedMessages,
   // A paid plan's credits for the period are used up; the default model spends none.
   plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
   model_unpriced: ['这个模型还不能按点数计费，请把节点换成其他模型。', 'This model cannot be billed in credits yet. Switch the node to another model.'],
@@ -154,6 +157,15 @@ const runCopies = new Set(Object.values(runErrors).flat());
 /** Whether the text is a failure's copy, a run's (above) or the service's (api.ts), in either language: what a node's own
  *  Send records (canvasErrorMessage). */
 export const isRunFailureCopy = (text: string): boolean => runCopies.has(text) || isServiceCopy(text);
+
+/** Whether a failure is the end of the free trial (free_plan_ended): its code, as a cloud run's node or a task records it,
+ *  or its copy in either language, as a node's own Send records it (canvasErrorMessage). Nothing runs again until the
+ *  workspace's owner subscribes, so the canvas offers the plans for it and never another model (CanvasSurface's next
+ *  steps). */
+export function isFreePlanEnded(detail: string | undefined): boolean {
+  const text = detail?.trim() ?? '';
+  return text === 'free_plan_ended' || (text !== '' && freePlanEndedMessages.some(copy => text.includes(copy)));
+}
 
 /** The service's copy of a code (api.ts), or undefined when it has none. */
 function serviceText(code: string, locale: UiLocale): string | undefined {

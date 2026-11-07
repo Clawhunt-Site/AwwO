@@ -1,9 +1,9 @@
-// What the market's surfaces read once and share: whether a workspace has the market (its capabilities), whether its
-// owner's plan can pay a paid Agent (route-usage's plan), and the details of the Agents nodes are using, kept for the
-// page so every card, chip and settings box of the same Agent reads one request.
+// What the market's surfaces read once and share: whether a workspace has the market and what AwwO's official Agents
+// cost (its capabilities), whether its owner's plan can pay a paid Agent (route-usage's plan), and the details of the
+// Agents nodes are using, kept for the page so every card, chip and settings box of the same Agent reads one request.
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, SaaSApiError, tenantPath } from '../api';
-import { readCapabilities } from '../capabilitiesApi';
+import { readCapabilities, type WorkspaceCapabilities } from '../capabilitiesApi';
 import { fetchRouteUsage } from '../routeUsage';
 import type { SaaSRuntimeStatus } from '../runtimeCatalog';
 import { groupModels, type ModelPaletteSelection } from '../../canvas/modelPalette';
@@ -30,13 +30,25 @@ export function useWorkspaceModels(tenantId: string | null | undefined, given: R
   return { models: current && !current.failed ? current.models : null, failed: current?.failed === true };
 }
 
+/** The workspace's market as its capabilities say, with what AwwO's official Agents cost and from when, where the server
+ *  prices them (officialPrice from officialPriceFrom; marketText.ts officialPriceNotice says it before it starts). */
+export type MarketView = MarketSettings & { officialPrice?: number; officialPriceFrom?: string };
+function marketViewOf(capabilities: WorkspaceCapabilities): MarketView | null {
+  const settings = marketSettingsOf(capabilities);
+  if (!settings) return null;
+  const price = capabilities.market?.officialPrice;
+  const from = capabilities.market?.officialPriceFrom;
+  return { ...settings, ...(typeof price === 'number' && Number.isInteger(price) && price > 0 ? { officialPrice: price } : {}),
+    ...(typeof from === 'string' && from ? { officialPriceFrom: from } : {}) };
+}
+
 /** The workspace's market: undefined while its capabilities are read, null where it is off (or they cannot be read). */
-export function useMarketSettings(tenantId: string | null | undefined): MarketSettings | null | undefined {
-  const [settings, setSettings] = useState<{ tenantId: string; value: MarketSettings | null } | null>(null);
+export function useMarketSettings(tenantId: string | null | undefined): MarketView | null | undefined {
+  const [settings, setSettings] = useState<{ tenantId: string; value: MarketView | null } | null>(null);
   useEffect(() => {
     if (!tenantId) return;
     const controller = new AbortController();
-    readCapabilities(tenantId, controller.signal).then(value => { if (!controller.signal.aborted) setSettings({ tenantId, value: marketSettingsOf(value) }); },
+    readCapabilities(tenantId, controller.signal).then(value => { if (!controller.signal.aborted) setSettings({ tenantId, value: marketViewOf(value) }); },
       () => { if (!controller.signal.aborted) setSettings({ tenantId, value: null }); });
     return () => controller.abort();
   }, [tenantId]);

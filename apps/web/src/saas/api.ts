@@ -110,6 +110,14 @@ export const quotaExceededMessages: [string, string] = [
   'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro or Max plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC.',
 ];
 
+/** The free trial is over for this workspace (free_plan_ended, AWWO_FREE_PLAN_UNTIL): nothing that calls a model or makes
+ *  media starts until its owner subscribes, and nothing was charged or counted for the refusal. Only a plan lifts it, so
+ *  the copy names the plans and no other way on; what the workspace holds stays (owner 2026-11-07). */
+export const freePlanEndedMessages: [string, string] = [
+  '免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行。画布和成果都还在。',
+  'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. Your canvases and results are all still here.',
+];
+
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
 export function saasErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   return serviceMessage(error, locale, serviceCodes());
@@ -221,6 +229,7 @@ function serviceCodes(): Record<string, [string, string]> {
     model3d_motion_plan_required: ['给 3D 模型绑定骨骼、加动作需要 Pro / Max 付费套餐（账号菜单 → 套餐与点数）；不加骨骼的 3D 模型仍可免费生成。', 'Rigging and animating a 3D model needs the Pro or Max plan (account menu → Plans and credits); a 3D model without a skeleton can still be made for free.'],
     media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试；需要更多次数可以看看 Pro / Max 付费套餐（账号菜单 → 套餐与点数）。', 'This workspace has used today’s image and video generations. Try again after the next UTC day; for more, see the Pro and Max plans (account menu → Plans and credits).'],
     plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
+    free_plan_ended: freePlanEndedMessages,
     model_unpriced: ['这个模型还不能按点数计费，请换用其他模型。', 'This model cannot be billed in credits yet. Choose another model.'],
     credits_exhausted: ['本期套餐点数已用完：可以换成默认模型继续，点数在下次续费后重置；需要更多点数可以请工作区所有者在「套餐与点数」里升级。', 'This period’s plan credits are used up: switch to the default model to keep going; credits reset after the next renewal. For more, the workspace’s owner can upgrade in Plans and credits.'],
     plan_busy: ['套餐的同时运行数已用满（包括所有者的其他工作区）。等其中一个运行结束后再试。', 'The plan’s agents at once are all running, counting the owner’s other workspaces. Try again when one finishes.'],
@@ -302,7 +311,9 @@ function serviceCodes(): Record<string, [string, string]> {
     web_decode_failed: ['无法识别页面的文字编码。', 'The page’s text encoding could not be read.'],
     web_empty_content: ['页面里没有读到正文。', 'No readable text was found on the page.'],
     // The Agent market (docs/awwo-agent-market.md). A paid Agent's fee comes off the workspace owner's plan credits, as a
-    // model's does, so credits_exhausted (above) covers a fee the credits cannot pay.
+    // model's does, so credits_exhausted (above) covers a fee the credits cannot pay. A price of 0 is no Agent fee, never
+    // "free": the model is billed as usual (owner 2026-11-07). An official Agent's fee is AwwO's and any member may run
+    // it, so only an author's paid Agent is refused for the role, and only its copy names an author.
     market_unavailable: ['Agent 市场没有开放，市场里的 Agent 现在用不了。', 'The Agent market is not open, so its Agents cannot be used right now.'],
     market_agent_not_found: ['找不到这个市场 Agent，它可能已被作者删除。请换一个 Agent。', 'This market Agent was not found; its author may have removed it. Choose another Agent.'],
     market_agent_unavailable: ['这个市场 Agent 现在用不了：它被停用了、已经下架，或这个版本不能再选用。请换一个 Agent，或在节点上选「不用 Agent」。', 'This market Agent cannot be used now: it was suspended or unlisted, or this version can no longer be chosen. Choose another Agent, or choose “No Agent” on the node.'],
@@ -310,15 +321,15 @@ function serviceCodes(): Record<string, [string, string]> {
     market_text_to_sandbox: ['市场 Agent 写的内容不能交给沙箱电脑节点或团队节点（它们能运行命令、联网）。请断开这条连线，或把下游换成文字节点。', 'A market Agent’s text cannot go to a sandbox computer node or a team node, which can run commands and reach the network. Remove the connection, or make the next node a text node.'],
     market_agent_model_unavailable: ['这个 Agent 的作者锁定了模型，而你的工作区用不了这个模型，所以没有运行。请换一个 Agent，或在节点上选「不用 Agent」。', 'This Agent’s author locked its model, and your workspace cannot use that model, so it did not run. Choose another Agent, or choose “No Agent” on the node.'],
     market_agent_version_changed: ['这个 Agent 现在上架的是另一个版本，价格可能不同。请在节点上重新选一次这个 Agent。', 'This Agent lists another version now, which may cost differently. Choose the Agent again on the node.'],
-    market_agent_role_required: ['这是付费 Agent：它的价格从工作区所有者的点数里付给作者，只有工作区的所有者和管理员能运行它。', 'This is a paid Agent: its price is paid to its author out of the workspace owner’s credits, so only the workspace’s owner or an administrator can run it.'],
-    market_agent_plan_required: ['这是付费 Agent：工作区所有者有 Pro / Max 付费套餐才能使用，每次运行完成从套餐点数里扣它的价格（账号菜单 → 套餐与点数）。免费 Agent 不需要套餐。', 'This is a paid Agent: it needs the workspace owner to have the Pro or Max plan, and each completed call takes its price from the plan’s credits (account menu → Plans and credits). Free Agents need no plan.'],
+    market_agent_role_required: ['这是作者发布的付费 Agent：它的价格从工作区所有者的点数里付给作者，只有工作区的所有者和管理员能运行它。', 'This is a paid Agent from an author: its price is paid to the author out of the workspace owner’s credits, so only the workspace’s owner or an administrator can run it.'],
+    market_agent_plan_required: ['这是付费 Agent：工作区所有者有 Pro / Max 付费套餐才能使用，每次运行完成从套餐点数里扣它的价格（账号菜单 → 套餐与点数）。', 'This is a paid Agent: it needs the workspace owner to have the Pro or Max plan, and each completed call takes its price from the plan’s credits (account menu → Plans and credits).'],
     market_name_reserved: ['名称和署名不能用 AwwO、ClawHunt、阿呜的名字，署名也不能自称官方。', 'A name or author name may not use the name of AwwO, ClawHunt or 阿呜, and an author name may not claim to be official.'],
     canvas_reload_required: ['AwwO 已经更新，这个页面的版本不能再保存这张画布。没同步的修改都保留在这台设备上：重新加载页面后可以恢复或导出。', 'AwwO was updated, and this page’s version can no longer save this canvas. Your unsynced changes are kept on this device: reload the page to recover or export them.'],
     market_draft_invalid: ['Agent 的内容不符合要求，请按标出的地方修改后再保存。', 'Some of the Agent’s fields do not meet the requirements. Fix the marked ones and save again.'],
     market_skill_unavailable: ['有一个技能带不进市场 Agent：它已归档，或你已不是它所在工作区的成员。请移除它后再保存。', 'A skill cannot go into the market Agent: it was archived, or you are no longer a member of its workspace. Remove it and save again.'],
     market_skill_license: ['从 skills.sh 导入的技能，只有许可证明确宽松时才能带进市场 Agent。请移除这个技能后再保存。', 'A skill imported from skills.sh can go into a market Agent only under a clearly permissive license. Remove that skill and save again.'],
     market_hidden_text: ['内容里有看不见或会伪装的字符（例如零宽字符、软连字符、文字方向控制符、私用区字符或多余的变体选择符），市场不接受。请删掉它们后再保存。', 'The text holds invisible or disguising characters (such as zero-width characters, soft hyphens, text-direction controls, private-use characters or extra variation selectors), which the market does not accept. Remove them and save again.'],
-    market_price_invalid: ['价格要是 0 到上限之间的整数点数（0 表示免费）。', 'The price must be a whole number of credits from 0 to the limit (0 is free).'],
+    market_price_invalid: ['价格要是 0 到上限之间的整数点数（0 表示不收 Agent 费）。', 'The price must be a whole number of credits from 0 to the limit (0 is no Agent fee).'],
     invalid_market_response: ['Agent 市场返回的数据不完整，请重试。', 'The Agent market returned incomplete data. Try again.'],
     market_agent_limit: ['一个账号能发布的 Agent 已经到上限，请先整理不再需要的 Agent。', 'This account has published as many Agents as it may. Tidy up Agents you no longer need first.'],
     market_review_pending: ['这个 Agent 有一个版本正在审核：先撤回它，再改草稿或提交新的版本。', 'A version of this Agent is in review: withdraw it first, then change the draft or submit a new version.'],

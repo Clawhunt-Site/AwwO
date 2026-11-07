@@ -10,7 +10,18 @@ import { renderInertMarkdown } from '../inertMarkdown';
 import type { MarketAgentDetail as Detail } from '../marketApi';
 import type { MarketAgentReference } from '../../canvas/canvasDoc';
 import { decisionNote, type MarketModelDecision } from './marketModel';
-import { authorText, categoryName, creditsText, dateText, numberText, percentText, priceText, secondsText, useMarketI18n } from './marketText';
+import { authorText, categoryName, creditsText, dateText, numberText, percentText, priceText, secondsText, useMarketI18n, type MarketT } from './marketText';
+
+/** What a paid Agent asks of a workspace whose owner has no paid plan. An official Agent's fee is AwwO's, never an
+ *  author's (it has none), and the model is billed apart from it as on any node. */
+function planNote(detail: Detail, t: MarketT): string {
+  const credits = `${detail.price} ${detail.price === 1 ? 'credit' : 'credits'}`;
+  return detail.official
+    ? t(`AwwO 官方 Agent 每次成功调用扣 ${detail.price} 点（Agent 费归 AwwO，模型费另算）：工作区所有者有 Pro / Max 付费套餐才能用。`,
+      `An AwwO official Agent takes ${credits} a successful call (the Agent fee is AwwO’s; the model is billed apart): it needs the workspace owner to have the Pro or Max plan.`)
+    : t(`这是付费 Agent，每次成功调用扣 ${detail.price} 点：工作区所有者有 Pro / Max 付费套餐才能用。`,
+      `This is a paid Agent that takes ${credits} a successful call: it needs the workspace owner to have the Pro or Max plan.`);
+}
 
 export type MarketTarget =
   /** Choosing the Agent for one node (its composer chip, or its settings). */
@@ -58,8 +69,7 @@ export function MarketAgentDetailView({ detail, tenantId, target, decision, plan
         : t(`这个节点用的是 v${pinned}，最新上架的是 v${detail.version}。`, `This node uses v${pinned}; v${detail.version} is listed now.`)}</p>}
       {decision && <p className={`awwo-market-note${decision.kind === 'blocked' ? ' is-warning' : ''}`}>{decisionNote(decision, detail.model.locked, t)}</p>}
       {planNeeded && <div className="awwo-market-plan" role="note">
-        <p>{t(`这是付费 Agent，每次成功调用扣 ${detail.price} 点：工作区所有者有 Pro / Max 付费套餐才能用。免费 Agent 不需要套餐。`,
-          `This is a paid Agent that takes ${detail.price} credits a successful call: it needs the workspace owner to have the Pro or Max plan. Free Agents need no plan.`)}</p>
+        <p>{planNote(detail, t)}</p>
         {!localEdition && <a className="awwo-library-primary awwo-market-plan-link" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
           onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('查看 Pro / Max 套餐', 'See the Pro and Max plans')}</a>}
       </div>}

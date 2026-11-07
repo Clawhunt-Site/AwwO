@@ -9,6 +9,7 @@ import { Sparkles } from 'lucide-react';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
 import { fetchRouteUsage, recordUpgradeInterest, routeOrder, type RouteName, type RouteUsage } from './routeUsage';
+import { freePlanStanding } from './freePlan';
 import './opus-upsell.css';
 
 /** The model this invites to: the strongest one the canvas offers. */
@@ -37,7 +38,9 @@ export function useFreeAllowance(tenantId: string, enabled = true) {
 }
 
 /** The invitation: what Opus 5.5 is for, what is left of today's free calls, and the way to a plan. The plans page opens in
- * a new tab so the canvas and its draft stay put; a click records the interest the operator reads, as PlanUpsell does. */
+ * a new tab so the canvas and its draft stay put; a click records the interest the operator reads, as PlanUpsell does.
+ * Once the workspace's free trial is over (route-usage freePlan.ended) nothing is left of today's free calls, whatever the
+ * numbers still say: no model runs there until its owner subscribes, so the card says so and offers no switch. */
 export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose }: {
   tenantId: string; usage: RouteUsage; route: RouteName | undefined;
   /** Opus 5.5 is the model chosen now. */ chosen: boolean;
@@ -45,13 +48,15 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
   /** Switches to Opus 5.5; absent while the model cannot be changed. */ onChoose?: () => void;
 }) {
   const { t } = useSaaSPreferences();
+  const ended = freePlanStanding(usage) === 'ended';
   const allowance = route ? usage.routes?.[route] : undefined;
   const left = allowance && allowance.limit > 0 ? Math.max(0, allowance.limit - allowance.used) : null;
-  const included = available && allowance?.limit !== 0;
-  const today = !included ? t('Pro / Max 专享：升级后按点数使用，不受次数限制。', 'Pro and Max only: upgrade and run it on credits, with no daily limit.')
-    : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max 用点数接着用。', 'Today’s free calls are used up; Pro and Max carry on with credits.')
-      : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro and Max run it on credits, past that limit.`)
-        : t('免费版每天有少量次数；升级 Pro / Max 用点数畅用。', 'The free plan has a few calls a day; Pro and Max run it on credits.');
+  const included = available && !ended && allowance?.limit !== 0;
+  const today = ended ? t('免费试用已结束：工作区所有者订阅 Pro / Max 后，就能按点数使用 Opus 5.5。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, Opus 5.5 runs on credits.')
+    : !included ? t('Pro / Max 专享：升级后按点数使用，不受次数限制。', 'Pro and Max only: upgrade and run it on credits, with no daily limit.')
+      : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max 用点数接着用。', 'Today’s free calls are used up; Pro and Max carry on with credits.')
+        : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro and Max run it on credits, past that limit.`)
+          : t('免费版每天有少量次数；升级 Pro / Max 用点数畅用。', 'The free plan has a few calls a day; Pro and Max run it on credits.');
   return <div className="saas-opus-upsell" role="note">
     <p className="saas-opus-upsell-title"><Sparkles size={14} aria-hidden="true" />{t('Claude Opus 5.5 · 这里最强的模型', 'Claude Opus 5.5 · the strongest model here')}</p>
     <p>{t('复杂网页、游戏和 3D 交给它，做得更完整。', 'Complex pages, games and 3D come out more complete.')}{' '}

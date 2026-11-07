@@ -5,7 +5,7 @@
 // The secret is shown only right after it is made, and only this section's own state holds it: no storage, no title or
 // label carries it, and closing the section (or the panel) drops it. The list names a token by its prefix alone.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { Check, ChevronDown, Copy, KeyRound, UserPlus } from 'lucide-react';
+import { Check, ChevronDown, Copy, ExternalLink, Globe, KeyRound, UserPlus } from 'lucide-react';
 import type { AgentTokenItem } from './types';
 import { failureDetail, shortDate, useMultiplayerText } from './multiplayerText';
 import './multiplayer.css';
@@ -80,6 +80,29 @@ export function connectionSnippets({ token, mcpUrl, apiBase, tenantId, canvasId 
   };
 }
 
+/** treg (treg.to): the hosted MCP server of Superdesign's third-party catalog of paid tools (web search and page reads,
+ *  keywords and backlinks, social trends, company and market data). AwwO only links to the hosted service and shows
+ *  lines that carry no credential: it runs none of treg's software (treg's licence keeps hosting it for others to
+ *  Superdesign) and never handles a treg sign-in. */
+export const TREG_MCP_URL = 'https://treg.to/mcp/';
+export const TREG_SITE_URL = 'https://treg.to/';
+
+export interface TregSnippets { claude: string; codex: string; cursor: string }
+
+/** The lines that give the Agent connected here treg's tools too. Checked on 2026-11-07 with Claude Code 2.1.317
+ *  (`claude mcp add` keeps the server as "Needs authentication" until /mcp signs in) and Codex 0.162.1 (`codex mcp add
+ *  --url` writes [mcp_servers.treg] and starts treg's OAuth sign-in at once; treg refuses an account that is in no
+ *  team). None names a key: treg's own sign-in asks the person, in their browser, which of their teams pays. */
+export function tregSnippets(): TregSnippets {
+  return {
+    claude: `claude mcp add --transport http treg ${TREG_MCP_URL}`,
+    codex: `codex mcp add treg --url ${TREG_MCP_URL}`,
+    // The entry to add inside the file's mcpServers, beside awwo-canvas: a whole file pasted over the canvas's would drop
+    // its connection, whose token is shown once.
+    cursor: `"treg": { "url": "${TREG_MCP_URL}" }`,
+  };
+}
+
 /** Whether a reader may revoke a token, as the server judges it (canvas_agent_tokens.go): its maker, or an admin. */
 export function mayRevokeToken(item: AgentTokenItem, viewer: AgentInviteViewer | undefined): boolean {
   if (!viewer) return true;
@@ -150,7 +173,38 @@ function InviteBody({ id, tokens, onCreate, onRevoke, mcpUrl, apiBase, tenantId,
       secretRef={focus.secretRef} doneRef={focus.doneRef} onDone={done} />
       : <TokenForm id={id} onCreate={onCreate} onMade={made} formRef={focus.formRef} createRef={focus.createRef} />}
     <TokenList tokens={{ ...tokens, items: listed }} onRevoke={onRevoke} now={now} viewer={viewer} />
+    <TregConnect />
   </div>;
+}
+
+/** 加上 treg: a disclosure of its own, closed unless asked. Its lines name no secret, so it is open to every reader of
+ *  this section, a token made or not. */
+function TregConnect() {
+  const { t } = useMultiplayerText();
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
+  const lines = tregSnippets();
+  return <section className="awwo-multiplayer-treg" data-open={open || undefined}>
+    <h4 className="awwo-multiplayer-treg-title">
+      <button type="button" className="awwo-multiplayer-disclosure" aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={() => setOpen(was => !was)}>
+        <Globe size={15} aria-hidden="true" /><span>{t('treg.toggle')}</span><ChevronDown size={14} aria-hidden="true" className="awwo-multiplayer-chevron" />
+      </button>
+    </h4>
+    {open && <div id={bodyId} className="awwo-multiplayer-treg-body">
+      <p className="awwo-multiplayer-hint">{t('treg.intro')}</p>
+      <p className="awwo-multiplayer-hint">{t('treg.billing')}</p>
+      <p className="awwo-multiplayer-label">{t('treg.stepsLabel')}</p>
+      <ol className="awwo-multiplayer-steps"><li>{t('treg.step1')}</li><li>{t('treg.step2')}</li><li>{t('treg.step3')}</li></ol>
+      <CopyBlock label={t('treg.forClaude')} value={lines.claude} />
+      <CopyBlock label={t('treg.forCodex')} value={lines.codex} />
+      <CopyBlock label={t('treg.forCursor')} value={lines.cursor} />
+      <CopyBlock label={t('treg.forTask')} value={t('treg.task')} />
+      <p className="awwo-multiplayer-hint">{t('treg.caution')}</p>
+      <a className="awwo-multiplayer-link" href={TREG_SITE_URL} target="_blank" rel="noopener noreferrer" aria-label={t('treg.siteLabel')}>
+        {t('treg.site')}<ExternalLink size={12} aria-hidden="true" />
+      </a>
+    </div>}
+  </section>;
 }
 
 /** Where the keyboard goes as a token's secret comes and goes (the form it replaces goes with the focus in it), and

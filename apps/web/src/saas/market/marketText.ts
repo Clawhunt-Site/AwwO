@@ -4,6 +4,7 @@
 import { useMemo } from 'react';
 import { useCanvasI18n } from '../../canvas/i18n';
 import type { MarketAgentStatus, MarketCallStatus, MarketCategory, MarketSort, MarketVersionState } from '../marketApi';
+import { momentText } from '../freePlan';
 
 export type MarketT = (zh: string, en: string) => string;
 export function useMarketI18n(): { locale: 'zh' | 'en'; t: MarketT } {
@@ -56,7 +57,21 @@ export const payoutErrorText = (code: string, t: MarketT) => {
 export const monthText = (month: string | null, locale: 'zh' | 'en') => month
   ? new Date(`${month}-01T00:00:00Z`).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', timeZone: 'UTC' }) : '—';
 
-export const priceText = (price: number, t: MarketT) => price > 0 ? t(`每次 ${price} 点`, `${price} ${price === 1 ? 'credit' : 'credits'} a call`) : t('免费', 'Free');
+/** An Agent's fee per call. A price of 0 is no Agent fee, never "free": the node's model calls are billed as any node's
+ *  (owner 2026-11-07: writing 免费 on market Agents is not reasonable). */
+export const priceText = (price: number, t: MarketT) => price > 0 ? t(`每次 ${price} 点`, `${price} ${price === 1 ? 'credit' : 'credits'} a call`) : t('只收模型费', 'Model cost only');
+
+/** Before the official Agents' price starts (the server's market capability, officialPrice from officialPriceFrom), the
+ *  line that says when and how much; null once it applies (the cards show it then) or where official Agents have none. */
+export function officialPriceNotice(market: { officialPrice?: number; officialPriceFrom?: string } | undefined, now: number, locale: 'zh' | 'en', t: MarketT): string | null {
+  const price = market?.officialPrice ?? 0;
+  if (!(price > 0) || !market?.officialPriceFrom) return null;
+  const from = Date.parse(market.officialPriceFrom);
+  if (!Number.isFinite(from) || from <= now) return null;
+  const when = momentText(market.officialPriceFrom, locale);
+  return t(`${when} 起，AwwO 官方 Agent 每次调用 ${price} 点（模型费另算），需要工作区所有者有 Pro / Max 套餐。`,
+    `From ${when}, a call to an AwwO official Agent costs ${price} ${price === 1 ? 'credit' : 'credits'} (the model is billed apart) and needs the workspace owner’s Pro or Max plan.`);
+}
 export const authorText = (agent: { official: boolean; author: { name: string } | null }, t: MarketT) =>
   agent.official ? t('AwwO 官方', 'AwwO official') : agent.author?.name || t('作者未署名', 'Unnamed author');
 export const percentText = (rate: number | null) => rate === null ? '—' : `${Math.round(rate * 100)}%`;

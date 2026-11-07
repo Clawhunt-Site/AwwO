@@ -36,7 +36,7 @@ import { AdminPanel } from './AdminPanel';
 import { LocalEdition, inLocalWindow, isLocalEdition } from './edition';
 import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
-import { WorkspaceHome } from './WorkspaceHome';
+import { HomeShell } from './home/HomeShell';
 import { ProductionCases } from './ProductionCases';
 import { claimPlanHandoff, clearPlanHandoff, takePlanHandoff } from './planHandoff';
 import { ActionMenu } from './ActionMenu';
@@ -92,7 +92,8 @@ function canvasResultsOptions(tenantId: string, canvasId: string): CanvasResults
 function CanvasBackLink({ tenantId }: { tenantId: string }) {
   const { t } = useSaaSPreferences();
   // A normal navigation preserves beforeunload protection for unsynced changes.
-  return <a className="saas-canvas-back" href={workspaceURL(tenantId)}><ArrowLeft size={15} aria-hidden="true" /><span>{t('返回画布列表', 'Back to canvases')}</span></a>;
+  // It says the canvas list, so it opens the home's 我的画布 (home/homeSections.ts), not its 首页.
+  return <a className="saas-canvas-back" href={`${workspaceURL(tenantId)}&section=canvases`}><ArrowLeft size={15} aria-hidden="true" /><span>{t('返回画布列表', 'Back to canvases')}</span></a>;
 }
 function CanvasTitle({ tenant, name, status, tone }: { tenant: Tenant; name: string; status: React.ReactNode; tone: 'synced' | 'pending' | 'readonly' | 'warning' }) {
   return <div className="saas-canvas-title"><CanvasBackLink tenantId={tenant.id} /><div className="saas-canvas-title-text"><span className="saas-canvas-title-workspace">{tenant.name}</span><strong title={name}>{name}</strong></div><span className={`saas-sync-pill is-${tone}`} role="status">{status}</span></div>;
@@ -342,23 +343,24 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
   const canvasId = params.get('canvas');
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
-  // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options.
-  const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy />;
+  // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options. The home's
+  // meter is in its account card (home/HomeAccountCard.tsx), so its top bar has none.
+  const homeControls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} academy meter={false} />;
   if (!tenant || tenant.status !== 'active') return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header><section className="saas-page-intro"><h1>{tenant ? t('工作区已暂停', 'Workspace suspended') : t('选择工作区', 'Choose a workspace')}</h1><p role="status">{tenant ? t('你可以切换其他工作区，或联系工作区管理员恢复访问。', 'Switch to another workspace or contact its administrator to restore access.') : requested ? t('你无权访问这个工作区，请切换其他工作区。', 'You cannot access this workspace. Choose another one.') : t('账号尚未加入工作区。可以新建工作区，或请所有者发送邀请链接。', 'You have not joined a workspace. Create one or ask its owner for an invitation.')}</p>{identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin">{t('进入平台管理', 'Open platform administration')}</a>}</section></main>;
   const readOnly = tenant.role === 'reader';
   if (canvasId) return readOnly ? <ReadOnlyCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} /> : <CloudCanvas key={tenant.id + canvasId} identity={identity} tenant={tenant} canvasId={canvasId} controls={controls} />;
   return <main className="saas-dashboard saas-home"><header><a href="/" className="saas-logo">AwwO</a>{homeControls}</header>
-    <WorkspaceHome key={identity.user.id + ':' + tenant.id + ':' + tenant.role} identity={identity} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
+    <HomeShell key={identity.user.id + ':' + tenant.id + ':' + tenant.role} identity={identity} tenant={tenant} onOpen={id => navigate(tenant.id, id)} />
   </main>;
 }
-function WorkspaceControls({ identity, tenant, onProfile, academy = false }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void; academy?: boolean }) {
+function WorkspaceControls({ identity, tenant, onProfile, academy = false, meter = true }: { identity: Identity; tenant?: Tenant; onProfile: (name: string) => void; academy?: boolean; meter?: boolean }) {
   const { locale, t } = useSaaSPreferences();
   const [error, setError] = useState('');
   const [managementTenant, setManagementTenant] = useState<string | null>(tenant?.id || null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(() => new URLSearchParams(window.location.search).get('createWorkspace') === '1');
   const accountApi = useMemo(() => createSaaSAccountApi(onProfile), [identity.user.id, onProfile]);
   return <div className="saas-account-actions" data-onboarding="workspace-actions">
-    {tenant && tenant.status === 'active' && !isLocalEdition(identity) && <RouteUsageMeter key={tenant.id} tenantId={tenant.id} />}
+    {meter && tenant && tenant.status === 'active' && !isLocalEdition(identity) && <RouteUsageMeter key={tenant.id} tenantId={tenant.id} owner={tenant.role === 'owner'} />}
     {identity.tenants.length > 0 && <select aria-label={t('切换工作区', 'Switch workspace')} value={tenant?.id || ''} onChange={event => navigate(event.target.value)}>{!tenant && <option value="" disabled>{t('选择工作区', 'Choose a workspace')}</option>}{identity.tenants.map(item => <option key={item.id} value={item.id}>{item.name}{item.status !== 'active' ? t('（已暂停）', ' (suspended)') : ''}</option>)}</select>}
     {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}

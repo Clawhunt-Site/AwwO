@@ -10,11 +10,12 @@ import type { AssistantExecutionHost, AssistantTaskActions } from '../canvas/ass
 import { automaticChoices } from '../canvas/userChosenModels';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
-import { saasErrorMessage } from './api';
+import { freePlanEndedMessages, saasErrorMessage } from './api';
 import { runErrorText } from './canvasErrors';
 import { useLocalEdition } from './edition';
 import { PlanUpsell, planUpsellCode, upsellReason } from './PlanUpsell';
 import { OPUS_MODEL_ID, OpusUpsell, modelRoute, useFreeAllowance } from './OpusUpsell';
+import { freePlanStanding } from './freePlan';
 import { withPlanTag } from './runtimeCatalog';
 import type { UiLocale } from '../locale';
 import { accountURL } from './PersonalAccount';
@@ -187,13 +188,15 @@ function TaskSummary({ execution, task }: { execution: ManagedExecution; task: E
 /** A direct task refused for want of a plan. A premium refusal gets the paid plans first, then the free way on — the
  * model the service lists first, less any only a user may choose (userChosenModels.ts), which is the one a new canvas's
  * direct tasks start on (the default model). A full daily allowance counts the default model too, so it gets the plans
- * alone. Switching changes only the choice; the request is sent again by the reader, never re-sent here. */
+ * alone, as the end of the free trial does (nothing runs then until the owner subscribes). Switching changes only the
+ * choice; the request is sent again by the reader, never re-sent here. */
 function PremiumTaskActions({ execution, code }: { execution: ManagedExecution; code: string }) {
   const { t } = useSaaSPreferences();
   const fallback = automaticChoices(execution.runtime?.models ?? [])[0];
   const key = fallback ? executionModelKey(fallback.runtime, fallback.id) : '';
   const label = fallback ? fallback.label || fallback.id : '';
-  if (upsellReason(code) === 'daily') return <div className="awwo-execution-premium"><PlanUpsell tenantId={execution.tenantId} reason="daily" /></div>;
+  const reason = upsellReason(code);
+  if (reason !== 'premium') return <div className="awwo-execution-premium"><PlanUpsell tenantId={execution.tenantId} reason={reason} /></div>;
   return <div className="awwo-execution-premium">
     <PlanUpsell tenantId={execution.tenantId} />
     {fallback && execution.choice.key !== key
@@ -401,13 +404,24 @@ function ExecutionNotices({ execution, planAvailable }: { execution: ManagedExec
       </div>
     </div>}
     {blockedHere && <p className="awwo-execution-warning" role="status">{t(`暂时不能直接执行任务：${blockedHere}`, `Direct tasks are paused: ${blockedHere}`)}{elsewhere ? ` ${elsewhere}` : ''}</p>}
-    {/* A model the workspace's plan does not include is refused when the task starts; said while it can still be changed. */}
-    {execution.choice.model?.requiresUpgrade === true && <div className="awwo-execution-plan-needed" role="note">
-      <p>{t('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。',
-        'This model is outside this workspace’s free allowance and needs Pro or Max, so a direct task on it is refused. Choose the default model to run it free.')}</p>
-      <PlanUpsell tenantId={execution.tenantId} />
-    </div>}
+    {execution.choice.model?.requiresUpgrade === true && <PlanNeededNote tenantId={execution.tenantId} />}
     {execution.knowledgeCount > 0 && <p className="awwo-execution-knowledge">{t(`将带上 ${execution.knowledgeCount} 份已选知识`, `Takes ${execution.knowledgeCount} selected knowledge items`)}</p>}
+  </div>;
+}
+
+/** A model the workspace's plan does not include is refused when the task starts: said while it can still be changed,
+ *  with the default model as the free way on. Past the free trial's end the default model runs no more than this one, so
+ *  the allowance is read to say that instead (only while such a model is chosen; never in the local edition, which sells
+ *  no plan). */
+function PlanNeededNote({ tenantId }: { tenantId: string }) {
+  const { t } = useSaaSPreferences();
+  const local = useLocalEdition();
+  const allowance = useFreeAllowance(tenantId, !local);
+  const ended = freePlanStanding(allowance.usage) === 'ended';
+  return <div className="awwo-execution-plan-needed" role="note">
+    <p>{ended ? t(...freePlanEndedMessages) : t('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。',
+      'This model is outside this workspace’s free allowance and needs Pro or Max, so a direct task on it is refused. Choose the default model to run it free.')}</p>
+    <PlanUpsell tenantId={tenantId} reason={ended ? 'ended' : 'premium'} />
   </div>;
 }
 
@@ -494,8 +508,8 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
             {chosen.efforts.map(level => <option key={level} value={level}>{level}</option>)}
           </select>
         </label>}
-        <p className="awwo-execution-model-note">{t('选好后，直接执行的任务和画布助手新加的组件都用这个模型；规划画布本身仍由平台免费完成。',
-          'Once chosen, direct tasks and the components the assistant adds run on this model; planning the canvas itself stays free.')}</p>
+        <p className="awwo-execution-model-note">{t('选好后，直接执行的任务和画布助手新加的组件都用这个模型；规划画布本身用平台的模型。',
+          'Once chosen, direct tasks and the components the assistant adds run on this model; planning the canvas itself runs on the platform’s model.')}</p>
         {/* Engines are managed in the account; a change there shows here once the list is read again. */}
         <div className="awwo-execution-settings-actions">
           <a href={accountURL('engines')}>{t('管理我的引擎', 'Manage my engines')}</a>

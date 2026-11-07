@@ -86,6 +86,33 @@ describe('the eight styles', () => {
     expect(contrast(v['--saas-tank-muted'], v['--saas-tank-card'])).toBeGreaterThanOrEqual(4.5);
   });
 
+  // The workspace home's frame (home/home.css, 2026-11-07) paints text on surfaces of its own: the rail's washes of ink
+  // over --bg-sidebar (--saas-soft is 5%, --saas-soft-strong 9%), the trial banner's and the market note's tint of the
+  // AwwO teal over the card, and an ended trial's banner on the warning chip's ground.
+  it.each(AWWO_THEMES.map(theme => [theme.id] as const))('%s keeps the workspace home’s rail, banners and badges readable (WCAG AA)', id => {
+    const home = readFileSync(resolve(process.cwd(), 'src/saas/home/home.css'), 'utf8');
+    const tokens = readFileSync(resolve(process.cwd(), 'src/saas/design/tokens.css'), 'utf8');
+    expect(tokens).toContain('--saas-soft: color-mix(in srgb, var(--text-primary) 5%, transparent);');
+    expect(tokens).toContain('--saas-soft-strong: color-mix(in srgb, var(--text-primary) 9%, transparent);');
+    expect(home).toMatch(/\[aria-current='page'\][^{]*\{[^}]*background: var\(--saas-soft-strong\)[^}]*color: var\(--saas-text\)/);
+    expect(home).toMatch(/\.saas-home-banner \{[^}]*background: color-mix\(in srgb, var\(--saas-bio\) 10%, var\(--saas-card\)\)/);
+    expect(home).toMatch(/\.saas-home-banner\.is-ended \{[^}]*background: var\(--saas-warning-bg\)/);
+    expect(home).toMatch(/\.saas-home-account-badge\.is-ended \{[^}]*background: var\(--saas-warning-bg\); color: var\(--saas-warning\)/);
+    const v = block(id)!.values;
+    const ink = v['--text-primary'], muted = v['--text-secondary'];
+    for (const share of [0.05, 0.09]) {
+      const wash = mix(ink, v['--bg-sidebar'], share);
+      expect(contrast(ink, wash), `${id} ink on the rail's ${share} wash`).toBeGreaterThanOrEqual(7);
+      expect(contrast(muted, wash), `${id} muted on the rail's ${share} wash`).toBeGreaterThanOrEqual(4.5);
+    }
+    const tint = mix(v['--saas-bio'], v['--bg-card'], 0.10);
+    expect(contrast(ink, tint), `${id} ink on the banner`).toBeGreaterThanOrEqual(7);
+    expect(contrast(muted, tint), `${id} muted on the banner`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v['--saas-link'], tint), `${id} link on the banner`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(ink, v['--warn-soft']), `${id} ink on the ended banner`).toBeGreaterThanOrEqual(7);
+    expect(contrast(v['--warn'], v['--warn-soft']), `${id} ended badge`).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('keeps 潮汐 and 深潜 exactly the values the tokens always had', () => {
     const tokens = readFileSync(resolve(process.cwd(), 'src/saas/design/tokens.css'), 'utf8');
     const tide = block('tide')!.values, night = block('night')!.values;

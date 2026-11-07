@@ -104,7 +104,10 @@ export function PlansPage({ identity }: { identity: Identity }) {
         <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
         <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
       </> : <>
-        <p>{t('免费版：每天有固定的总次数，默认模型和 Claude / GPT、Bedrock 等高级模型都能用（高级模型全站每天共享一份免费名额），图片视频另有免费次数；详见工作区顶部的「今日额度」。Claude Opus 5.5 和标着「不含」的模型需要 Pro 或 Max。', 'Free: a daily number of calls for the default model and for premium models such as Claude / GPT and Bedrock (premium calls share one service-wide daily number), plus free image or video calls; see Today’s allowance at the top of a workspace. Claude Opus 5.5, and what is marked Not included, need Pro or Max.')}</p>
+        {/* True before the free trial ends and after it: the page knows no workspace, so it names no date (the
+            workspace's own allowance, 今日额度, says when and how many). */}
+        <p>{t('免费版：免费试用期间，每天有一定的调用次数，默认模型和 Claude、GPT 等高级模型都能用，图片和视频另有次数；具体数字见工作区里的「今日额度」。免费试用结束后，规划和运行需要 Pro 或 Max，画布和成果都会保留。',
+          'Free: during the free trial there is a daily number of calls for the default model and for premium models such as Claude and GPT, plus image and video generations; see Today’s allowance in a workspace for the numbers. Once the free trial ends, planning and runs need Pro or Max, and your canvases and results are kept.')}</p>
         {billing.checkoutEnabled && <p className="saas-plans-lead">{t('选一张点数券：付款成功后点数自动到账，按月订阅，可随时取消。', 'Pick a voucher: the credits arrive automatically once the payment goes through. Monthly, cancel anytime.')}</p>}
       </>}
     </section>

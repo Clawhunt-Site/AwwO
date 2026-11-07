@@ -32,7 +32,7 @@ export function PlansUsage({ identity }: { identity: Identity }) {
   return <section className="saas-card saas-settings-card saas-settings-usage">
     <h2>{t('今天的用量', 'Today’s usage')}</h2>
     <TenantPicker identity={identity} tenant={tenant} onChange={setTenant} />
-    <RouteUsageMeter key={tenant.id} tenantId={tenant.id} />
+    <RouteUsageMeter key={tenant.id} tenantId={tenant.id} owner={tenant.role === 'owner'} />
   </section>;
 }
 

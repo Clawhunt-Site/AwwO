@@ -8,6 +8,21 @@
 /* --saas-warning-bg is a dark-theme colour; a tint of the theme's own card keeps the text readable in both. */
 .saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger.is-out,
 .saas-account-actions > button.saas-route-usage-trigger.saas-route-usage-trigger.is-out:not(:disabled):hover { border-color:var(--saas-warning); background:color-mix(in srgb, var(--saas-warning) 18%, var(--saas-card)); }
+/* The card variant: the home's account card at the bottom of its left rail (home/HomeAccountCard.tsx). A full-width chip
+   that wraps a long label instead of running out of the rail. The page's button rules reach it there too, up to
+   :is(.saas-login, .saas-dashboard, .saas-notice) button:not(:disabled):hover (0,3,1): a doubled class, and
+   :not(:disabled) on hover, outrank them. The colours are the header chip's own. */
+button.saas-route-usage-trigger.is-card.is-card, button.saas-checkin-trigger.is-card.is-card {
+  display:flex; align-items:center; gap:8px; width:100%; min-height:36px; padding:6px 12px;
+  border:1px solid var(--saas-border); border-radius:12px; background:var(--saas-card); color:var(--saas-text);
+  font:600 var(--saas-text-sm)/1.35 var(--saas-font); text-align:start; white-space:normal;
+}
+button.saas-route-usage-trigger.is-card.is-card:not(:disabled):hover { border-color:var(--saas-accent); background:var(--saas-card); color:var(--saas-text); }
+button.saas-route-usage-trigger.is-card.is-card.is-out,
+button.saas-route-usage-trigger.is-card.is-card.is-out:not(:disabled):hover { border-color:var(--saas-warning); background:color-mix(in srgb, var(--saas-warning) 18%, var(--saas-card)); }
+button.saas-checkin-trigger.is-card.is-card { border-color:var(--saas-accent); background:color-mix(in srgb, var(--saas-accent) 14%, var(--saas-card)); }
+button.saas-checkin-trigger.is-card.is-card:not(:disabled):hover { border-color:var(--saas-accent); background:color-mix(in srgb, var(--saas-accent) 26%, var(--saas-card)); color:var(--saas-text); }
+.saas-route-usage-trigger.is-card svg, .saas-checkin-trigger.is-card svg { flex:none; }
 .saas-route-usage { width:min(320px, calc(100vw - 24px)); padding:16px; }
 .saas-route-usage h2 { margin:0 0 6px; font-size:15px; }
 .saas-route-usage p { margin:0 0 12px; color:var(--saas-muted); font-size:13px; line-height:1.55; }
@@ -19,6 +34,9 @@
 .saas-route-usage p.saas-route-usage-recorded, .saas-route-usage p.saas-route-usage-out { color:var(--saas-text); }
 .saas-route-usage a.saas-route-usage-plans { display:block; margin-top:10px; text-align:center; font-size:13px; font-weight:600; color:var(--saas-link); text-decoration:none; }
 .saas-route-usage a.saas-route-usage-plans:hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
+/* Someone who does not own the workspace: a plan of their own, a quiet link (only the owner's plan opens this one). */
+.saas-route-usage a.saas-route-usage-own { display:block; margin-top:10px; text-align:center; font-size:13px; font-weight:600; color:var(--saas-link); text-decoration:none; }
+.saas-route-usage a.saas-route-usage-own:hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
 .saas-route-usage button.saas-route-usage-ask { display:block; width:100%; margin-top:10px; padding:4px 0; border:0; background:transparent; text-align:center; font:600 13px/1.4 var(--saas-font, inherit); color:var(--saas-link); cursor:pointer; }
 .saas-route-usage button.saas-route-usage-ask:not(:disabled):hover { color:var(--saas-link-hover); text-decoration:underline; text-underline-offset:3px; }
 .saas-route-usage button.saas-route-usage-ask:disabled { opacity:.5; cursor:default; }

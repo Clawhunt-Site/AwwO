@@ -64,6 +64,15 @@ describe('a node with a market Agent', () => {
       persona: 'MY OWN PERSONA', skills: ['builtin:critic'] });
   });
 
+  it('says a price of 0 as the market does: the model cost only, never free', async () => {
+    serve(version(1, { price: 0, official: true, author: null }));
+    open(node({ agentRef: { source: 'market', agentId: 'agent-1', version: 1 } }));
+    const shown = await box();
+    await waitFor(() => expect(shown).toHaveTextContent('只收模型费'));
+    expect(shown).toHaveTextContent('AwwO 官方');
+    expect(shown).not.toHaveTextContent('免费');
+  });
+
   it('offers a paid newer version only where the workspace owner has a plan', async () => {
     configureSaaSCanvas({ tenant: { id: 'team', name: 'Team', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 }, canvasId: 'canvas' });
     const listed = version(2);

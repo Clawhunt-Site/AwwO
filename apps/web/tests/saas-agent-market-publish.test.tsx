@@ -69,13 +69,16 @@ describe('publishing from a node', () => {
     await waitFor(() => expect(field('署名')).toHaveValue('Grace Hopper'));
     expect(await screen.findByText('Critic')).toBeVisible();
     expect(await screen.findByText('House style')).toBeVisible();
+    // A price of 0 is no Agent fee, never "free": the caller's model is billed as usual.
+    expect(screen.getByText('价格为 0：不收 Agent 费，调用方的模型照常计费。')).toBeVisible();
+    expect(document.body).not.toHaveTextContent('免费');
     fireEvent.change(field('名称'), { target: { value: 'x'.repeat(61) } });
     fireEvent.change(field('每次调用的价格'), { target: { value: '51' } });
     fireEvent.change(field('指令'), { target: { value: `Hidden${String.fromCodePoint(0x200b)}text` } });
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     expect(await screen.findByText('最多 60 个字符。')).toBeVisible();
     expect(screen.getByText('请写一句话简介，市场的卡片上会显示它。')).toBeVisible();
-    expect(screen.getByText('价格是 0 到 50 的整数点数（0 表示免费）。')).toBeVisible();
+    expect(screen.getByText('价格是 0 到 50 的整数点数（0 表示不收 Agent 费）。')).toBeVisible();
     expect(screen.getByText('含有看不见的格式字符，请删掉它们。')).toBeVisible();
     expect(writes(calls)).toEqual([]);
     fireEvent.change(field('名称'), { target: { value: 'Release notes writer' } });

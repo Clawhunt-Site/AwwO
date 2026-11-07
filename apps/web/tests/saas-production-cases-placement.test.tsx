@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { COMPACT_CASE_COUNT } from '../src/saas/ProductionCases';
 import { PRODUCTION_CASES } from '../src/saas/productionCatalog';
 import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -10,7 +9,7 @@ import type { Identity, Tenant } from '../src/saas/api';
 
 // Where the production cases sit in the app, and how a member copies a case's canvas. The cases read in English in
 // both interface languages; these tests run in the Chinese interface.
-const cards = () => screen.getAllByRole('listitem').filter(item => item.classList.contains('production-card'));
+const cards = () => screen.queryAllByRole('listitem').filter(item => item.classList.contains('production-card'));
 beforeAll(async () => { await import('../src/saas/ProductionShowcase'); }, 300_000);
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); window.history.replaceState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
@@ -31,20 +30,27 @@ it('puts the cases on the signed-out homepage, after the welcome, with no other 
 
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const identity: Identity = { user: { id: 'user-a', name: 'Alice', email: 'a@example.test', platformRole: 'user' }, tenants: [tenant] };
-it.each(['owner', 'reader'] as const)('shows one row of cases on the %s workspace home, with no other examples', async role => {
+// The workspace home has sections since 2026-11-07 (home/HomeShell.tsx): 首页 has a tile to 制作案例, which holds every
+// case, sorted by kind.
+it.each(['owner', 'reader'] as const)('puts every case in the %s workspace home’s 制作案例, a tile away from 首页, with no other examples', async role => {
   vi.stubGlobal('fetch', vi.fn(async (input: string) => new Response(JSON.stringify(new URL(input, 'http://localhost').pathname.endsWith('/runtime')
     ? { available: true, configured: true, plannerAvailable: true, models: [] } : { items: [], nextCursor: null }))));
-  render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+  const onSection = vi.fn();
+  const home = (section?: 'cases') => <SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={vi.fn()} section={section} onSection={onSection} /></SaaSPreferencesProvider>;
+  const { rerender } = render(home());
+  await screen.findByRole('heading', { name: '继续工作' });
+  expect(screen.queryByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' })).toBeNull();
+  expect(cards()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: `打开制作案例（${PRODUCTION_CASES.length} 个）` }));
+  expect(onSection).toHaveBeenCalledWith('cases');
+  rerender(home('cases'));
   const cases = await screen.findByRole('heading', { level: 2, name: 'One brief, handed to a team of agents.' });
   expect(cases.closest('section')).toHaveAttribute('lang', 'en');
   expect(screen.queryByRole('heading', { level: 2, name: '从一个作品开始' })).toBeNull();
-  expect(cards()).toHaveLength(COMPACT_CASE_COUNT);
-  expect(screen.getByRole('button', { name: `See all ${PRODUCTION_CASES.length} cases` })).toHaveAttribute('aria-expanded', 'false');
-  // The row is the catalog's first cases, so the pixel case is one click away.
-  for (const item of PRODUCTION_CASES.slice(0, COMPACT_CASE_COUNT)) expect(screen.getByRole('button', { name: item.title })).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Pixel platformer' })).toBeNull();
+  expect(cards()).toHaveLength(PRODUCTION_CASES.length);
+  expect(screen.queryByRole('button', { name: /^See all \d+ cases$/ })).toBeNull();
+  expect(screen.getByRole('group', { name: 'Case kinds' })).toBeVisible();
   // Members copy a case's canvas; readers cannot copy.
-  fireEvent.click(screen.getByRole('button', { name: `See all ${PRODUCTION_CASES.length} cases` }));
   fireEvent.click(screen.getByRole('button', { name: 'Pixel platformer' }));
   const dialog = screen.getByRole('dialog', { name: 'Pixel platformer' });
   await within(dialog).findByRole('region');
