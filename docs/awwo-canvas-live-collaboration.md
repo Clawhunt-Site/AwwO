@@ -406,7 +406,7 @@ Both CLIs ask before a server's tools, and a headless run can answer no prompt. 
 not let it run by itself: since the tools carry annotations (above), the destructive ones (changing or deleting a node,
 removing a wire, raw ops), while the reads and the tools that only add run without the allowance. The `claude -p` and
 `codex exec` lines are therefore the unattended runs. They allow the canvas's tools on their own command line, never in a config file:
-- an interactive session still asks first;
+- an interactive session still asks first: Claude Code before every canvas tool, Codex before the destructive ones;
 - a `[mcp_servers.awwo_canvas]` table added before stays as it is (a second one would stop Codex from loading the file);
 - an edit token's allowance covers every tool of the canvas, deleting nodes included, and the run acts on what others
   write on the canvas (the panel says to run it in a folder with nothing private); a read token's run can only look.

@@ -629,7 +629,7 @@ describe('邀请 Agent', () => {
     const labels = [...secret.querySelectorAll('.awwo-multiplayer-copy-label')].map(label => label.textContent);
     expect(labels.slice(4, 6)).toEqual(['Claude Code · 无人值守（claude -p）', 'Codex · 无人值守（codex exec）']);
     // What the two unattended lines allow, right under them: an edit token's runs may change and delete.
-    const unattended = within(secret).getByText('把 <task> 换成要 Agent 做的事；claude -p 要在运行过 claude mcp add 的文件夹里启动。这两条无人值守命令不经询问就使用这张画布的全部工具，包括删除节点，也会照画布上别人写的内容去做，所以请在没有私密文件的文件夹里运行。交互使用时，Claude Code 和 Codex 用画布工具前仍会先问你。随时可以在下面撤销令牌。');
+    const unattended = within(secret).getByText('把 <task> 换成要 Agent 做的事；claude -p 要在运行过 claude mcp add 的文件夹里启动。这两条无人值守命令不经询问就使用这张画布的全部工具，包括删除节点，也会照画布上别人写的内容去做，所以请在没有私密文件的文件夹里运行。交互使用时，Claude Code 用画布工具前仍会先问你，Codex 则在可能弄丢别人工作的工具前问你（改动或删除节点、拆掉连线、原始操作）。随时可以在下面撤销令牌。');
     expect(unattended.previousElementSibling?.querySelector('pre')?.textContent).toBe(blocks[5]);
     expect(JSON.parse(blocks[6])).toEqual({ mcpServers: { 'awwo-canvas': { url: MCP_URL, headers: { Authorization: `Bearer ${TOKEN}` } } } });
     expect(blocks[7]).toBe(`curl -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/tenants/tenant-one/canvases/canvas-one/changes?after=0"`);
@@ -816,7 +816,7 @@ describe('邀请 Agent', () => {
     const secret = await screen.findByRole('group', { name: 'Token for “Claude Code”' });
     expect(within(secret).getByText('Claude Code · unattended (claude -p)')).toBeInTheDocument();
     expect(within(secret).getByText('Codex · unattended (codex exec)')).toBeInTheDocument();
-    const hint = within(secret).getByText('Put what the Agent should do in place of <task>, and start claude -p in the folder where you ran claude mcp add. These two unattended runs use all of this canvas’s tools without asking, deleting nodes included, and act on what others write on the canvas, so run them in a folder with nothing private. Used interactively, Claude Code and Codex still ask before using a canvas tool. You can revoke the token below at any time.');
+    const hint = within(secret).getByText('Put what the Agent should do in place of <task>, and start claude -p in the folder where you ran claude mcp add. These two unattended runs use all of this canvas’s tools without asking, deleting nodes included, and act on what others write on the canvas, so run them in a folder with nothing private. Used interactively, Claude Code still asks before using a canvas tool, and Codex before the ones that can lose someone’s work (changing or deleting a node, removing a wire, raw ops). You can revoke the token below at any time.');
     expect(hint.previousElementSibling?.querySelector('pre')?.textContent).toBe(`codex exec --skip-git-repo-check -c 'mcp_servers.awwo_canvas.default_tools_approval_mode="approve"' "<task>"`);
   });
 
