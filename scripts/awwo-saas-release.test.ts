@@ -440,7 +440,7 @@ test('a binary\'s modules are read from go version -m', () => {
   const modules = 'go go1.27.1\ngithub.com/a/b v1.0.0 h1:abc=\ngolang.org/x/c v0.1.0 h1:def=\n';
   assert.equal(linkedModules(output), modules);
   // The binary's path can hold spaces and ": ", and an experiment follows the version.
-  assert.equal(linkedModules(output.replace('/awwo-api: go1.27.1', 'E:\\Bobo\'s Coding cache\\a: b\\awwo-api: go1.27.1 X:boringcrypto')), modules);
+  assert.equal(linkedModules(output.replace('/awwo-api: go1.27.1', 'D:\\a builder\'s files\\a: b\\awwo-api: go1.27.1 X:boringcrypto')), modules);
   assert.throws(() => linkedModules('awwo-api\n'), /printed no Go version/);
   assert.throws(() => linkedModules(`${output}\t=>\t../local\t(devel)\t\n`), /replaced module/);
 });

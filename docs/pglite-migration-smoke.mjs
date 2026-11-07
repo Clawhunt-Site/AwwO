@@ -7,7 +7,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { fuzzystrmatch } from '@electric-sql/pglite/contrib/fuzzystrmatch';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 
-const MIG_DIR = String.raw`E:\work\bo-work\superclaw\server\packages\db\dist\migrations`;
+// The server's built drizzle migrations: run this from a checkout's root, or point MIG_DIR at them.
+const MIG_DIR = process.env.MIG_DIR || 'server/packages/db/dist/migrations';
 const DATA_DIR = './pgdata-smoke';
 
 rmSync(DATA_DIR, { recursive: true, force: true });

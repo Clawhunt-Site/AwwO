@@ -201,9 +201,8 @@ back out so the tree stays green until the run:
 ## Running it
 
 1. **Apply** the card and the canvas above. A patch of exactly the text above, taken from the tree it
-   was tested in, is kept outside the repository at
-   `E:/KiroCrew/awwo-simready-20261024/out/robot-cell-case.patch` (`git apply` it; re-checked against
-   `a1373063`). It can also be retyped from the two code blocks above, which are the source of truth.
+   was tested in, is kept outside the repository (`git apply` it). It can also be retyped from the two
+   code blocks above, which are the source of truth.
    The two failures above are expected until step 5; nothing is committed yet.
 2. **Run** the case on production in the operator's workspace, on the openai-agents runtime with
    Claude Opus 5.5 at the published limits (200,000-token context, 32,000 output tokens, thinking on,
@@ -216,9 +215,8 @@ back out so the tree stays green until the run:
      this egress: `ValidationException` - *"Access to Anthropic models is not allowed from unsupported
      countries, regions, or territories"* - for the `global.` and `us.` profiles alike, while a
      **non-streaming** `Converse` with the same credentials succeeds. AwwO streams every run. The
-     production host (UCloud Tokyo) is unaffected. Details and the five other gates that had to be
-     cleared first are in the `awwo-local-case-run-geoblock` memory; the working kit is in
-     `E:/KiroCrew/awwo-simready-20261024/tools/`.
+     production host (UCloud Tokyo) is unaffected. The details, the five other gates that had to be
+     cleared first and the working kit are kept outside the repository.
    - The documented local alternative,
      `AWWO_SHOWCASE_EMAIL=… AWWO_SHOWCASE_PASSWORD=… node scripts/showcase/run-production-cases.mjs --api <url> --out <dir> --cases robot-cell --runtime openai-agents --model bedrock.claude-opus-5-5`,
      is therefore only usable where Anthropic allows streaming (the email and password are values the
