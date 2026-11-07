@@ -462,8 +462,9 @@ How the lines behave (checked on 2026-11-07 with Claude Code 2.1.317 and Codex 0
   treg saved in a folder's Claude Code settings carries over to `claude -p` there. treg's tool list itself was not seen
   signed in.
 
-The home's composer recommends the same pairing when a request names a need for live data (`liveDataNeed`): see
-the CHANGELOG entry of the public beta release.
+The home's composer recommends the same pairing when a request may need live data (`liveDataNeed`,
+apps/web/src/canvas/liveDataNeed.ts), and a canvas's Next card says so when its newest request may: see the
+CHANGELOG entry "treg for a person's own Agent".
 
 ## The canvas page
 
