@@ -30,7 +30,7 @@ imports keep their original README, lockfiles, and license files under
 
 ## Adapted material
 
-These projects were read during the 2026-10-15 open-source intake, and open-design and refero_skill on 2026-10-26. No new source tree was vendored for them: the
+These projects were read during the 2026-10-15 open-source intake, open-design and refero_skill on 2026-10-26, and cinecode and the lemo-opuscar recipes it includes on 2026-11-08. No new source tree was vendored for them: the
 files listed adapt parts of them and name the source in their own attribution, and the license texts are kept
 under `third_party/adapted/`. Built-in skills reach users as text through the API, so the skill library links the
 licenses of their sources beside each adapted skill's source line: `apps/web/src/saas/skillLicences.txt`,
@@ -46,6 +46,8 @@ when a skill's attribution and that file disagree).
 | Pi coding agent (Copyright (c) 2025 Mario Zechner) | earendil-works/pi | v0.79.10, as vendored in `third_party/clawwork` | MIT | `backend/internal/app/skills/handoff-summary.md` (the headings of its session summary) | `third_party/clawwork/LICENSE` |
 | open-design (Copyright 2026 Open Design contributors) | nexu-io/open-design | 9724c44142ea0afaee3d207f37901b31c66a44ad | Apache-2.0 | `backend/internal/app/skills/design-craft.md`, `anti-ai-slop.md`, `design-directions.md`, `ui-state-coverage.md`, `motion-discipline.md` and `design-jury.md` (its craft rules, its design charter's craft section, its direction library and its design-review panel, condensed, partly rewritten and fitted to what AwwO's previews supply) | `third_party/adapted/open-design/LICENSE` |
 | refero_skill (Copyright (c) 2026 Refero) | referodesign/refero_skill | 2382e518f90096df607196b9a635da2d1bc142f9 | MIT | `backend/internal/app/skills/design-craft.md` and `anti-ai-slop.md` (the typography, colour and anti-template rules open-design adapted from it, which reach AwwO through open-design) | `third_party/adapted/refero-skill/LICENSE` |
+| cinecode (Copyright (c) 2026 Sarp Yıldız) | sarpstar/cinecode | 67f9807112b97ae253d4a5f0eccaccc46c3b2633 | MIT | `backend/internal/app/skills/film-sound.md` (its sound method and music genre cards) and `film-looks.md` (its look library and rules), condensed, partly rewritten and fitted to what AwwO's film kit and render worker do | `third_party/adapted/cinecode/LICENSE` |
+| lemo-opuscar (Copyright (c) 2026 LemoLab) | lemomo-ai/lemo-opuscar, as included in sarpstar/cinecode `styles/` | d33bdea74eeecde3922b0fbad227f0d3dc7afe75 | MIT | `backend/internal/app/skills/film-looks.md` (the style recipes cinecode includes from it, which reach AwwO through cinecode, in AwwO's words with their numbers) | `third_party/adapted/lemo-opuscar/LICENSE` |
 
 Ideas only, with no text or code copied: Agent-Reach (Panniantong/Agent-Reach, MIT, Copyright (c) 2025 Agent
 Eyes) and Scrapling (D4Vinci/Scrapling, BSD-3-Clause, Copyright (c) 2024 Karim Shoair) for

@@ -34,6 +34,9 @@ export const SOURCES = Object.freeze([
   { name: 'open-design (nexu-io/open-design)', match: /\bopen-design\b/, files: ['third_party/adapted/open-design/LICENSE'] },
   { name: 'refero_skill (referodesign/refero_skill)', match: /\brefero_skill\b/, files: ['third_party/adapted/refero-skill/LICENSE'],
     note: 'open-design adapted its typography, colour and anti-template rules from this project; AwwO adapts them from open-design.' },
+  { name: 'cinecode (sarpstar/cinecode)', match: /\bcinecode\b/, files: ['third_party/adapted/cinecode/LICENSE'] },
+  { name: 'lemo-opuscar (lemomo-ai/lemo-opuscar)', match: /\blemo-opuscar\b/, files: ['third_party/adapted/lemo-opuscar/LICENSE'],
+    note: 'cinecode includes these style recipes under their MIT license (styles/LICENSE-lemo-opuscar); AwwO adapts them from cinecode.' },
 ]);
 
 const PLAIN_CLAUSES = Object.freeze([/^modified for AwwO$/, /^trimmed for AwwO$/, /^author \S.*$/]);
