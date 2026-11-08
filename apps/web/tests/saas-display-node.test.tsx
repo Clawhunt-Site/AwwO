@@ -3,6 +3,7 @@
 // reads changes; the content runs as soon as it is shown, zooms, goes full screen and follows what it is pointed at.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { DisplayLinks, DisplayTile, type DisplayTileProps } from '../src/canvas/DisplayTile';
 import { CANVAS_STORAGE_KEY, createSessionNode, sanitizeDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
@@ -15,6 +16,7 @@ import { canonicalCanvasDocumentJSON } from '../src/saas/canvasDraft';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { studioGroups } from '../src/canvas/studio/studioModel';
 import { LocaleProvider } from '../src/canvas/i18n';
+import { outsideAct } from './draw-gap';
 
 const PAGE = '<!doctype html><html><head><title>跳一跳</title></head><body><h1>跳一跳小游戏</h1></body></html>';
 
@@ -247,6 +249,53 @@ describe('the display on the board', () => {
     expect(screen.getByTestId('canvas-display-dp-1')).toHaveAttribute('aria-label', 'Preview display: Whole canvas · all results');
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Show alone' })).toHaveLength(2);
+  });
+
+  // Someone else's change (多人同屏) reaches the page in a draw no input of its own asked for, and React runs that draw's
+  // effects in a later task. A component picked in between is the reader's, kept and shown alone.
+  describe('as someone else changes the components', () => {
+    const three = [notesNode('notes', '玩法设计'), pageNode('game', '小游戏页面', 400), notesNode('story', '剧情设定', 800)];
+    /** The board's stand-in: its components change from outside, and it counts the effects run of its draws. */
+    function Board({ effects, change }: { effects: { ran: number }; change: { to?: (next: SessionNode[]) => void } }) {
+      const [list, setList] = useState<SessionNode[]>(three);
+      change.to = setList;
+      useEffect(() => { effects.ran++; }, [list, effects]);
+      const shown = studioGroups({ nodes: list, edges: [WIRE] });
+      return <DisplayTile {...props({ groups: shown, canvasEntries: shown.flatMap(group => group.entries), choices: list.map(node => ({ id: node.id, title: node.title })) })} />;
+    }
+    const chip = (title: string) => within(document.querySelector('.awwo-display-chips') as HTMLElement).getByRole('button', { name: title });
+    const shownAlone = () => document.querySelector('.awwo-display-chip-title')?.textContent ?? null;
+
+    it('keeps a component picked right after the draw that took the one shown away, before that draw’s effects have run', async () => {
+      const effects = { ran: 0 };
+      const change: { to?: (next: SessionNode[]) => void } = {};
+      render(<Board effects={effects} change={change} />);
+      fireEvent.click(chip('剧情设定'));
+      expect(shownAlone()).toBe('剧情设定');
+      let effectsAtThePick = -1;
+      await outsideAct(() => {
+        if (shownAlone() !== null) return false;
+        effectsAtThePick = effects.ran;
+        chip('玩法设计').click();
+        return true;
+      }, () => change.to!(three.filter(node => node.id !== 'story')));
+      // Picked before the effects of the draw that took 剧情设定 away ran (1, the first draw's), which have run since (2).
+      expect([effectsAtThePick, effects.ran]).toEqual([1, 2]);
+      expect(shownAlone()).toBe('玩法设计');
+      expect(screen.getByRole('heading', { name: '设计说明' })).toBeTruthy();
+    });
+
+    it('forgets a component that went away: drawn again, the display still shows them all', () => {
+      const effects = { ran: 0 };
+      const change: { to?: (next: SessionNode[]) => void } = {};
+      render(<Board effects={effects} change={change} />);
+      fireEvent.click(chip('剧情设定'));
+      act(() => change.to!(three.filter(node => node.id !== 'story')));
+      expect(shownAlone()).toBeNull();
+      act(() => change.to!(three));
+      expect(shownAlone()).toBeNull();
+      expect(chip('全部')).toHaveAttribute('aria-pressed', 'true');
+    });
   });
 
   it('draws a dashed link only for a display that shows one component on the board', () => {

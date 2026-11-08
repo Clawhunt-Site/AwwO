@@ -255,8 +255,14 @@ export const DisplayTile = memo(function DisplayTile({
   const sourceNodeId = source.type === 'node' ? source.nodeId : null;
   useEffect(() => { setTab(null); }, [source.type, sourceNodeId]);
   const tabGroup = !sourceNodeId && tab ? groups.find(group => group.nodeId === tab) : undefined;
-  // A picked component that has nothing to show any more (deleted, or its result cleared) falls back to all.
-  useEffect(() => { if (tab && !tabGroup) setTab(null); }, [tab, tabGroup]);
+  // A picked component that has nothing to show any more (deleted, or its result cleared) falls back to all, and is
+  // forgotten. Asked, as before, only when this draw's component is gone, but judged on the one picked as React applies
+  // the reset: the effect can run a task after the draw that took it away (someone else's change, which no input of this
+  // page drew), and one picked in between is the reader's.
+  useEffect(() => {
+    const gone = (id: string | null) => Boolean(id) && !groups.some(group => group.nodeId === id);
+    if (gone(tab)) setTab(current => gone(current) ? null : current);
+  }, [tab, groups]);
   const nodeId = sourceNodeId ?? tabGroup?.nodeId ?? null;
   const group = nodeId ? groups.find(item => item.nodeId === nodeId) : undefined;
   const choice = nodeId ? choices.find(item => item.id === nodeId) : undefined;
