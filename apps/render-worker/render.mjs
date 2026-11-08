@@ -11,6 +11,7 @@ import { chromium } from 'playwright-core';
 import { frameTimes } from './config.mjs';
 import { childEnv, contactArgs, encodeArgs, gifArgs, gifRate, parseProbe, probeArgs, runProcess, writeChunk } from './ffmpeg.mjs';
 import { heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
+import { suppliedKit } from './kits.mjs';
 import { allowedRequest, hostResolverRules, NETWORK_GUARD_SCRIPT } from './network.mjs';
 import { MAX_TIMER_FIRINGS, VIRTUAL_TIME_SCRIPT } from './virtual-time.mjs';
 
@@ -138,7 +139,11 @@ async function openPage(request, config, state, extra = []) {
     viewport: { width: request.width, height: request.height }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false,
   });
   await context.route('**/*', (route) => {
-    if (allowedRequest(route.request().url())) return route.continue().catch(() => {});
+    const url = route.request().url();
+    // A kit AwwO supplies (kits.mjs) is answered from the worker's pinned copy: its URL is never fetched.
+    const kit = suppliedKit(url);
+    if (kit) return route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: kit }).catch(() => {});
+    if (allowedRequest(url)) return route.continue().catch(() => {});
     state.blocked += 1;
     return route.abort('blockedbyclient').catch(() => {});
   });

@@ -6,6 +6,7 @@
  * are pinned here and checked by tests/canvas-artifact-preview.test.tsx.
  */
 import { FIGURE_KIT_BYTES, FIGURE_KIT_SHA256, FIGURE_KIT_URL } from './figureKit/figureKit';
+import { FILM_KIT_BYTES, FILM_KIT_SHA256, FILM_KIT_URL } from './filmKit/filmKit';
 import { previewFontFaces, previewFontNeeds, PREVIEW_FONTS_KEY, type PreviewFont } from './previewFonts';
 import { moduleImportEntries, moduleNeeds, pinnedModuleFile, PREVIEW_IMPORT_MAP_KEY, THREE_MODULES_ID, THREE_MODULES_LABEL, type ModuleNeeds } from './previewModules';
 
@@ -89,6 +90,17 @@ export const PREVIEW_LIBRARIES: readonly PreviewLibrary[] = [{
   bytes: FIGURE_KIT_BYTES,
   sha256: FIGURE_KIT_SHA256,
   load: () => import('./figureKit/anatomy-kit.js?raw').then(module => module.default),
+}, {
+  id: 'film-kit-1',
+  label: 'Film kit',
+  labelZh: '代码影片组件',
+  // AwwO's own film kit (filmKit/filmKit.ts): cinecode's frame engine (third_party/cinecode, MIT) as one classic script
+  // that defines window.Film. The hosted site serves these same bytes at the URL for downloaded pages, and the render
+  // worker answers it with its own pinned copy.
+  urls: [FILM_KIT_URL],
+  bytes: FILM_KIT_BYTES,
+  sha256: FILM_KIT_SHA256,
+  load: () => import('./filmKit/film-kit.js?raw').then(module => module.default),
 }];
 
 const BY_URL = new Map(PREVIEW_LIBRARIES.flatMap(library => library.urls.map(url => [url, library] as const)));

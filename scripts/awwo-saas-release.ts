@@ -20,7 +20,7 @@ const previewFontLicences = ['bebas-neue', 'cinzel', 'exo-2', 'instrument-serif'
 export const noticePaths = ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'apps/web/licences', ...previewFontLicences, 'apps/web/src/saas/bundleLicences.txt', 'apps/web/src/saas/design/fonts/LICENSE-mona-sans.txt', 'apps/web/src/saas/skillLicences.txt',
   'examples/knowledge-workbench/data/unicode/LICENSE.txt', 'examples/knowledge-workbench/data/unicode/17.0.0/LICENSE.txt', 'server/LICENSE',
   'server/packages/adapters/hermes/LICENSE', 'third_party/adapted',
-  'third_party/anatomy/LICENSE', 'third_party/clawwork/LICENSE', 'third_party/clawwork/NOTICE', goLicences, 'third_party/open-design/LICENSE',
+  'third_party/anatomy/LICENSE', 'third_party/cinecode/LICENSE', 'third_party/clawwork/LICENSE', 'third_party/clawwork/NOTICE', goLicences, 'third_party/open-design/LICENSE',
   'third_party/openpencil/LICENSE', 'third_party/openpencil/packages/agent-native/LICENSE', 'third_party/osiris/LICENSE', 'third_party/wshobson-agents/LICENSE'];
 // The workers the release carries (their runtime files: runtimeSource), and the files they load beside their folders, in
 // apps/ (the release test reads the workers' imports to keep this whole).

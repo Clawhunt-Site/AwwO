@@ -68,7 +68,9 @@ frames 0 … N-1 and repeats seamlessly.
   host lets it refuse such a page, and whether it tells throttling of its own doing apart there ("throttling of its own
   doing told apart").
 - The page may load scripts, styles and fonts only from the CDN origins in `cdn-allowlist.json` (the same list as
-  the web preview's `LIVE_CDNS`); everything else is blocked. It must not navigate away (that fails the render).
+  the web preview's `LIVE_CDNS`), and the kits AwwO supplies by their exact URLs (`kits.mjs`: the film kit,
+  `https://awwo.clawhunt.store/kits/film/1/film.js`, answered from the pinned copy in `kits/`, which a release ships);
+  everything else is blocked. It must not navigate away (that fails the render).
 
 ## API
 

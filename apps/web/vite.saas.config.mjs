@@ -14,6 +14,23 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 /** Where the hosted site serves the figure kit: the path of FIGURE_KIT_URL (tests/saas-figure-kit.test.ts checks both). */
 const FIGURE_KIT_PATH = '/kits/anatomy/1/anatomy.js';
 const FIGURE_KIT_FILE = join(root, 'src', 'canvas', 'figureKit', 'anatomy-kit.js');
+/** Where the hosted site serves the film kit: the path of FILM_KIT_URL (tests/saas-film-kit.test.ts checks both). */
+const FILM_KIT_PATH = '/kits/film/1/film.js';
+const FILM_KIT_FILE = join(root, 'src', 'canvas', 'filmKit', 'film-kit.js');
+/** A kit the hosted site serves at its path: the dev server answers it, and the build writes it there. */
+const servedKit = (name, path, file) => ({ name,
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      if (req.url !== path) return next();
+      res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+      res.end(readFileSync(file));
+    });
+  },
+  writeBundle(options) {
+    const target = join(options.dir, ...path.split('/').filter(Boolean));
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(file, target);
+  } });
 export default defineConfig({
   root, plugins: [react(), { name: 'awwo-saas-entry', configureServer(server) {
     server.middlewares.use((req, _res, next) => {
@@ -30,19 +47,10 @@ export default defineConfig({
   stagedShowcase(),
   // The figure kit a figure page names by URL (src/canvas/figureKit/figureKit.ts FIGURE_KIT_URL). Running previews inline
   // these bytes; the hosted site serves the same file at that path so a downloaded page still draws.
-  { name: 'awwo-saas-figure-kit',
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== FIGURE_KIT_PATH) return next();
-        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
-        res.end(readFileSync(FIGURE_KIT_FILE));
-      });
-    },
-    writeBundle(options) {
-      const target = join(options.dir, ...FIGURE_KIT_PATH.split('/').filter(Boolean));
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(FIGURE_KIT_FILE, target);
-    } },
+  servedKit('awwo-saas-figure-kit', FIGURE_KIT_PATH, FIGURE_KIT_FILE),
+  // The film kit a film page names by URL (src/canvas/filmKit/filmKit.ts FILM_KIT_URL), served the same way so a
+  // downloaded film still plays; the render worker answers that URL with its own pinned copy.
+  servedKit('awwo-saas-film-kit', FILM_KIT_PATH, FILM_KIT_FILE),
   // Mona Sans is under the SIL Open Font License, which asks that every copy carry its license: the build writes
   // fonts/LICENSE-mona-sans.txt beside the font files it emits (scripts/font-licences.mjs).
   fontLicences(join(root, 'src', 'saas', 'design', 'fonts')),

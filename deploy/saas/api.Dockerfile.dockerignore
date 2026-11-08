@@ -40,6 +40,7 @@ backend/**/build
 !third_party/adapted/
 !third_party/adapted/**
 !third_party/anatomy/LICENSE
+!third_party/cinecode/LICENSE
 !third_party/clawwork/LICENSE
 !third_party/clawwork/NOTICE
 !third_party/go-modules/

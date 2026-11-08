@@ -13,6 +13,7 @@ COPY server/LICENSE /server/
 COPY server/packages/adapters/hermes/LICENSE /server/packages/adapters/hermes/
 COPY third_party/adapted/ /third_party/adapted/
 COPY third_party/anatomy/LICENSE /third_party/anatomy/
+COPY third_party/cinecode/LICENSE /third_party/cinecode/
 COPY third_party/clawwork/LICENSE third_party/clawwork/NOTICE /third_party/clawwork/
 COPY third_party/go-modules/ /third_party/go-modules/
 COPY third_party/open-design/LICENSE /third_party/open-design/
