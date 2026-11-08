@@ -23,7 +23,7 @@ const SECTION_COPY: Readonly<Record<AcademySection, { title: [string, string]; c
   flagship: { title: ['拆解旗舰案例', 'Inside the flagship cases'], chip: ['旗舰案例', 'Flagship cases'],
     note: ['打开案例，看它是怎么做出来的，把画布复制成草稿，再用它交付的成品。英文讲解，中英字幕。', 'Open the case, see how it was made, copy its canvas as a draft and use what it delivered. English narration, with English and Chinese subtitles.'] },
   build: { title: ['跟着做一个案例', 'Build a case, step by step'], chip: ['跟着做', 'Build a case'],
-    note: ['按四个部分写需求，让画布助手搭好团队，运行画布，再试用它做出的成品。英文讲解，中英字幕。', 'Write the request in four parts, let the canvas assistant build the team, then run the canvas and try what it made. English narration, with English and Chinese subtitles.'] },
+    note: ['按四个部分写需求，让画布助手搭好团队；或者说清要交付什么，再通过 MCP 请来你自己的 Agent。然后运行画布，试用它做出的成品。英文讲解，中英字幕。', 'Write the request in four parts and let the canvas assistant build the team, or say what to deliver and bring your own agents in over MCP; then run the canvas and try what it made. English narration, with English and Chinese subtitles.'] },
 };
 const pick = (copy: [string, string], t: T) => t(copy[0], copy[1]);
 
@@ -61,8 +61,8 @@ function VideoCard({ video, locale, t, onPlay }: { video: AcademyVideo; locale: 
 
 function Lead({ t }: { t: T }) {
   const minutes = Math.round(ACADEMY_VIDEOS.reduce((sum, video) => sum + video.seconds, 0) / 60);
-  return <p className="academy-lead">{t(`${ACADEMY_VIDEOS.length} 个视频，共 ${minutes} 分钟，全部在线上 AwwO 里真实操作录制：先看入门短片，再看首页的每个案例是怎么做出来的。`,
-    `${ACADEMY_VIDEOS.length} videos, ${minutes} minutes in all, every one recorded on the live AwwO: start with the short how-tos, then see how each homepage case was made.`)}</p>;
+  return <p className="academy-lead">{t(`${ACADEMY_VIDEOS.length} 个视频，共 ${minutes} 分钟，全部在线上 AwwO 里真实操作录制：先看入门短片，再看首页的每个案例是怎么做出来的，以及怎样把你自己的 Agent 请进画布。`,
+    `${ACADEMY_VIDEOS.length} videos, ${minutes} minutes in all, every one recorded on the live AwwO: start with the short how-tos, then see how each homepage case was made, and how to bring your own agents onto a canvas.`)}</p>;
 }
 
 function Library({ filter, setFilter, locale, t, onPlay }: { filter: Filter; setFilter: (value: Filter) => void; locale: UiLocale; t: T; onPlay: (video: AcademyVideo) => void }) {

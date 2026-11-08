@@ -1,5 +1,6 @@
 /** The AwwO Academy (Academy.tsx): the tutorial videos, each recorded on the live AwwO. Six short how-tos to start with
- * (Chinese narration), then a walk through each flagship case and a build of each other homepage case (English narration);
+ * (Chinese narration), then a walk through each flagship case, a build with your own agents on one canvas (Multiplayer)
+ * and a build of each other homepage case (English narration);
  * every video has Chinese and English subtitles burned in. The files are too large for a release: each is staged once on
  * the host, outside every release, under /showcase/staged/academy/<first 16 hex digits of its sha256>.mp4, and the dev
  * server serves them from AWWO_STAGED_SHOWCASE (docs/academy.md). */
@@ -159,6 +160,14 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     changes: [{ on: '2026-10-24', text: {
       en: 'Recorded again on the live AwwO. A fresh copy’s Next card now counts the six nodes its first run still makes, the turn recorder, the four turns and the assembly, and the narration says so.',
       zh: '在线上 AwwO 重新录制：新副本的「接下来」卡片会提示首次运行还要生成的 6 个节点（轮次记录器、四个轮次和组装节点），讲解也随之更新。' } }] },
+  // Multiplayer, on a case of its own (LOCKSTEP is not a homepage case): the person, the real Claude Code and Codex CLIs
+  // (a token each, over MCP) and two AwwO agents on Claude Opus 5.5 on one canvas (docs/academy.md).
+  { id: 'multiplayer-lockstep', section: 'build', voice: 'en', recordedOn: '2026-11-07',
+    title: { en: 'Build a game with Claude Code and Codex on one canvas', zh: '和 Claude Code、Codex 在同一张画布上做一款游戏' },
+    summary: { en: 'Multiplayer: invite your own agents with a token each. Claude Code turns your brief for LOCKSTEP into the team and the build’s instructions, Codex designs the levels and proves each one solvable, you steer them in the live thread, and two AwwO agents on Claude Opus 5.5 build and review the game.',
+      zh: '多人同屏：每个 Agent 一张令牌，把你自己的 Agent 请进画布。Claude Code 把你给 LOCKSTEP 写的需求搭成团队、写好构建指令，Codex 设计关卡并证明每一关都能解开，你在实时消息里引导它们，再由两个用 Claude Opus 5.5 的 AwwO Agent 做出并审查这款游戏。' },
+    seconds: 239, src: '/showcase/staged/academy/145bb03610446ec5.mp4', bytes: 49811016, sha256: '145bb03610446ec5c12722ae17871cab84a15834de976efcead75e8aadf9c244',
+    poster: '/showcase/academy/multiplayer-lockstep.jpg' },
   { id: 'neon-city', section: 'build', caseId: 'neon-city', voice: 'en', recordedOn: '2026-10-15',
     title: { en: 'Build a cinematic brand page with a team of agents', zh: '用 Agent 团队和媒体节点，做一个电影感品牌页' },
     summary: { en: 'A brand page, its pictures and its clip, by two agents and four media nodes.',
