@@ -447,11 +447,16 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login .saas-card { gap: 16px; padding: 28px; border: 0; box-shadow: var(--saas-shadow-xl), 0 0 0 1px var(--saas-hairline) inset; }
 .saas-login .saas-card h2 { margin: 0 0 4px; font-size: var(--saas-text-2xl); }
 .saas-login .saas-card > button.saas-link { align-self: center; min-height: 32px; }
-/* "Create a ClawHunt account" under the sign-in action: a quiet link, the action stays the one pill. */
-.saas-login .saas-card > a.saas-sso-signup { align-self: center; display: inline-flex; align-items: center; min-height: 32px; color: var(--saas-accent); font-size: var(--saas-text-sm); font-weight: 600; text-underline-offset: 4px; }
+/* "Create a ClawHunt account" under the sign-in action, and a sign-in result's way back (返回工作区 / 返回登录): a quiet
+   link, the action stays the one pill (the way back was the browser's own blue, underlined). */
+.saas-login .saas-card > a.saas-sso-signup, .saas-login .saas-card > a.saas-sso-back { align-self: center; display: inline-flex; align-items: center; min-height: 32px; color: var(--saas-accent); font-size: var(--saas-text-sm); font-weight: 600; text-underline-offset: 4px; }
 .saas-login .saas-card > .saas-secret-field + button.saas-link { align-self: flex-end; margin-top: -8px; font-size: var(--saas-text-xs); }
 .saas-login .saas-card > button.saas-primary { margin-top: 4px; padding-left: 9px; gap: 10px; }
 .saas-login a.saas-sso-action { padding-left: 9px; gap: 10px; }
+/* A sign-in result's actions (打开 ClawHunt 账号 over 重新使用 ClawHunt 账号继续) are one size, the sign-in card's pill:
+   a.saas-primary keeps its first action at the control height and the small type, while the second, a bare
+   .saas-sso-action, took the 46 px and the larger type meant for that class. */
+.saas-sso-layout .saas-card > a.saas-sso-action { min-height: var(--saas-control); padding-block: 0; font-size: var(--saas-text-sm); }
 .saas-sso-choice { border-color: color-mix(in srgb, var(--saas-accent) 35%, var(--saas-border)); }
 .saas-login > .saas-preferences { position: absolute; top: 40px; right: 40px; z-index: 2; }
 .saas-login > .saas-preferences button { border-color: rgb(var(--saas-tank-line-rgb, 140 200 220) / 22%); background: rgb(var(--saas-tank-glass-rgb, 9 30 45) / 62%); color: var(--saas-tank-ink, #eaf3f5); }

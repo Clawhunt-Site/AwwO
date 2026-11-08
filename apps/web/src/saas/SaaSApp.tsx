@@ -217,7 +217,7 @@ function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; si
     <section className="saas-card"><h2>{ssoFailureHeading(reason, t)}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
       {accountURL && <a className="saas-primary saas-sso-action" href={accountURL}>{reason === 'waitlisted' ? t('打开 ClawHunt 账号', 'Open your ClawHunt account') : t('到 ClawHunt 验证邮箱', 'Verify your email on ClawHunt')}</a>}
       <a className={accountURL ? 'saas-sso-action' : 'saas-primary saas-sso-action'} href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>
-      <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
+      <a className="saas-sso-back" href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
     </section></main>;
 }
 function LinkExistingAccount({ onAuthenticated }: { onAuthenticated: (identity: Identity) => void }) {

@@ -71,6 +71,11 @@ it('sends a barred account to its ClawHunt account in both languages, with no in
   // The alert renders at once; the account link only once /auth/options has named the ClawHunt site.
   await waitFor(() => expect(screen.getByRole('link', { name: '打开 ClawHunt 账号' })).toHaveAttribute('href', 'https://clawhunt.example/account'));
   expect(screen.getByRole('link', { name: '重新使用 ClawHunt 账号继续' })).toHaveAttribute('href', `/api/v1/auth/clawhunt/start?invite=${invite}`);
+  // Both actions are the card's pills, and the way back is the card's quiet link, not the browser's own blue.
+  expect(screen.getByRole('link', { name: '打开 ClawHunt 账号' })).toHaveClass('saas-sso-action');
+  expect(screen.getByRole('link', { name: '重新使用 ClawHunt 账号继续' })).toHaveClass('saas-sso-action');
+  expect(screen.getByRole('link', { name: '返回登录' })).toHaveClass('saas-sso-back');
+  expect(screen.getByRole('link', { name: '返回登录' })).toHaveAttribute('href', '/');
   expect(document.body).not.toHaveTextContent('邀请码');
   expect(document.body).not.toHaveTextContent('候补');
   await waitFor(() => expect(location.search).toBe(`?invite=${invite}`));
