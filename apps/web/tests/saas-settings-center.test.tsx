@@ -65,9 +65,9 @@ it('opens every section in one centre whose navigation marks the open page', asy
     open(section);
     const nav = await screen.findByRole('navigation', { name: '设置' });
     const current = within(nav).getAllByRole('link').filter(link => link.getAttribute('aria-current') === 'page');
-    if (section === 'invites') expect(current).toHaveLength(0); // A local account has no 邀请好友 page in the list.
-    // The hosted site has no 本机 (the local edition's page): its address opens 账号安全.
-    else if (section === 'local') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=security']);
+    // The hosted site has no 本机 (the local edition's page), and 邀请好友 went with the invite codes: their addresses
+    // open 账号安全.
+    if (section === 'local' || section === 'invites') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=security']);
     // A site that does not offer AwwO 本地版 its models has no 本机版连接: its address opens the engines page.
     else if (section === 'relay') expect(current.map(link => link.getAttribute('href'))).toEqual(['/?account=engines']);
     else expect(current.map(link => link.getAttribute('href'))).toEqual([`/?account=${section}`]);
@@ -76,7 +76,7 @@ it('opens every section in one centre whose navigation marks the open page', asy
   }
 });
 
-it('lists 邀请好友 for a ClawHunt account only, and keeps the old account links working', async () => {
+it('lists 邀请好友 for no account (no invite codes since the public beta), and keeps the old account links working', async () => {
   server();
   open('security');
   const nav = await screen.findByRole('navigation', { name: '设置' });
@@ -85,8 +85,13 @@ it('lists 邀请好友 for a ClawHunt account only, and keeps the old account li
   expect(within(nav).getByRole('link', { name: '返回工作区' })).toHaveAttribute('href', '/');
   for (const group of ['账户', '设置', '功能', '工作区', '数据', '关于']) expect(within(nav).getByText(group)).toBeVisible();
   cleanup();
-  open('security', { ...identity, authentication: 'clawhunt', clawhuntSiteURL: 'https://clawhunt.store' } as Identity);
-  expect(within(await screen.findByRole('navigation', { name: '设置' })).getByRole('link', { name: '邀请好友' })).toHaveAttribute('href', '/?account=invites');
+  const clawhunt = { ...identity, authentication: 'clawhunt', clawhuntSiteURL: 'https://clawhunt.store' } as Identity;
+  open('security', clawhunt);
+  expect(within(await screen.findByRole('navigation', { name: '设置' })).queryByRole('link', { name: '邀请好友' })).toBeNull();
+  cleanup();
+  // An old 邀请好友 link opens 账号安全, for a ClawHunt account too.
+  open('invites', clawhunt);
+  expect(await screen.findByRole('heading', { level: 1, name: '账号安全' })).toBeVisible();
 });
 
 it('shows the platform administration link to platform administrators only', async () => {

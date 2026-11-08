@@ -440,7 +440,7 @@
 }
 
 /* An account linked to ClawHunt: its own AwwO invite codes, on the personal page. */
-.account-invite-friends-link {
+.account-profile-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -451,7 +451,7 @@
   text-decoration: none;
 }
 
-.account-invite-friends-link:hover {
+.account-profile-link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }

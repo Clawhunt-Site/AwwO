@@ -108,7 +108,7 @@ npm run local
 
 运行时以 `AWWO_EDITION=local` 启动 API（`backend/internal/app/edition.go`），网页据此（`/auth/options` 与 `/auth/me` 中的 `edition`）换成本地版的样子，其余与线上相同：
 
-- **「设置 → 本机」代替「用量与计费」**：数据目录与备份方法、`providers.env` 的位置与媒体服务是否开启、直接执行 / 渲染 / 从网址读取 / 技能库是否在运行（以及开不起来时缺什么）、版本。内容来自 `GET /api/v1/local`（只在本地版、只对平台管理员回答，不含任何 Key 或令牌）。应用中指向「用量与计费」或「邀请好友」的链接都打开这一页。
+- **「设置 → 本机」代替「用量与计费」**：数据目录与备份方法、`providers.env` 的位置与媒体服务是否开启、直接执行 / 渲染 / 从网址读取 / 技能库是否在运行（以及开不起来时缺什么）、版本。内容来自 `GET /api/v1/local`（只在本地版、只对平台管理员回答，不含任何 Key 或令牌）。应用中指向「用量与计费」的链接、以及旧的「邀请好友」地址（`?account=invites`，邀请码随公测取消，2026-11-08）都打开这一页。
 - **没有套餐与升级**：升级卡片、Opus 5.5 邀请、今日额度表和画布「下一步」里的升级都不出现。本机账号拥有的工作区本来就没有模型层面的限制（运营方工作区）。
 - **不再注册**：`AWWO_REGISTRATION=closed`，API 拒绝 `/auth/register`（`registration_closed`），登录页不显示「创建账号和工作区」，并说明初始密码在 `admin-credentials.txt`。这个开关只关闭本机注册，所以 API 不接受它与 ClawHunt 登录同时设置（那时账号来自 ClawHunt 的首次登录）。成员页不再提供邀请：没有人能接受。
 - **忘记密码**：本地版不发邮件，登录页不显示「忘记密码？」。停止本地版后运行 `npm run local -- --reset-password`：运行时生成新密码，写入 `local.env` 和 `admin-credentials.txt`，API 在启动时把它设到本机账号上（`AWWO_BOOTSTRAP_ADMIN_RESET=<重置标识>`，只在本地版有效），并结束该账号的所有登录会话。`local.env` 中的 `AWWO_LOCAL_PASSWORD_RESET=<重置标识>` 记着这次重置，直到 API 带着它启动成功：这次启动在 API 之前失败的话，下一次普通启动会接着完成。API 对每个标识只执行一次（记在审计记录里），所以没能清掉的标记不会在之后覆盖你改过的密码。

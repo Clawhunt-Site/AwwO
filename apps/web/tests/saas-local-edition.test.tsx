@@ -72,10 +72,12 @@ const exportFile = (overrides: Record<string, unknown> = {}) => JSON.stringify({
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); history.replaceState(null, '', '/'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); history.replaceState(null, '', '/'); localStorage.clear(); });
 
-it('opens the links to 用量与计费 and 邀请好友 as 本机 in the local edition, and 本机 as 账号安全 on the hosted site', () => {
+it('opens the links to 用量与计费 and the old 邀请好友 as 本机 in the local edition, and 本机 and 邀请好友 as 账号安全 on the hosted site', () => {
   for (const section of ['plans', 'invites', 'local'] as const) expect(editionSection(local, section)).toBe('local');
   expect(editionSection(local, 'security')).toBe('security');
   expect(editionSection(hosted, 'local')).toBe('security');
+  // 邀请好友 went with the invite codes (the public beta): its old links open 账号安全.
+  expect(editionSection(hosted, 'invites')).toBe('security');
   expect(editionSection(hosted, 'plans')).toBe('plans');
 });
 

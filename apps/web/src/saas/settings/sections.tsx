@@ -124,7 +124,7 @@ export function WorkspaceSettings({ identity, onProfile }: { identity: Identity;
     <section className="saas-card saas-settings-card saas-settings-members">
       <AccountWorkspacePanel key={tenant?.id || 'none'} locale={locale} clawHuntIdentity={null} selectedCompanyId={tenant?.id || null}
         onCompanyChange={setTenant} onClawHuntLogin={() => {}} onClawHuntLogout={() => {}} api={api} workspaceOnly
-        {...(clawhunt ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {})} />
+        {...(clawhunt ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, plansUrl: accountURL('plans') } } : {})} />
     </section>
   </>;
 }

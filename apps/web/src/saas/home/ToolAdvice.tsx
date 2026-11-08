@@ -7,7 +7,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { Check, Copy, ExternalLink, Globe } from 'lucide-react';
 import { liveDataNeed, type LiveDataNeed } from '../../canvas/liveDataNeed';
 import { TREG_SITE_URL, tregSnippets } from '../../canvas/multiplayer/AgentInvite';
-import { copyText } from '../InviteFriends';
+import { copyText } from '../copyText';
 import { useSaaSPreferences } from '../preferences';
 import './home.css';
 

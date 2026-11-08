@@ -555,7 +555,6 @@ export function AccountSecurity({ personalCredentialsRequired = true, identity }
     >
       <PageNav>
         {personalCredentialsRequired && <a href={accountURL("engines")}>{t("我的执行引擎", "My engines")}</a>}
-        {unified && <a href={accountURL("invites")}>{t("邀请好友", "Invite friends")}</a>}
         <a href={home()}>{t("返回工作区", "Back to workspace")}</a>
       </PageNav>
       {error !== null && (

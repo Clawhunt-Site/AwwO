@@ -69,22 +69,6 @@ export function clawHuntAccountURL(value?: string): string | null {
   return site ? new URL('/account', site.origin).href : null;
 }
 
-/** The main-site page where a signed-in account redeems an AwwO invite code and continues in. */
-export function clawHuntRedeemURL(value?: string): string | null {
-  const site = siteURL(value);
-  return site ? new URL('/awwo?from=signin', site.origin).href : null;
-}
-
-/** A member's share link: the main site's invite page with the code filled in, for printed codes only.
- *  The code rides in the fragment, which no server log and no analytics on the main site records. */
-export function clawHuntInviteLink(code: string, value?: string): string | null {
-  const site = siteURL(value);
-  if (!site || !/^AWWO(-[0-9A-Z]{4}){3}$/.test(code)) return null;
-  const url = new URL('/awwo', site.origin);
-  url.hash = `invite=${code}`;
-  return url.href;
-}
-
 /** Only the main site's dedicated sign-out route may receive a one-time ticket. */
 export function trustedClawHuntLogoutURL(value: unknown, siteValue?: string): string | null {
   // An already-revoked provider grant has nothing left to revoke upstream.

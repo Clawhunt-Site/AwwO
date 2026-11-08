@@ -3,12 +3,12 @@
 const isInviteToken = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{32,256}$/.test(value);
 
 /** A workspace invitation opened while signed out, carried across a sign-in that leaves AwwO.
- * An account without AwwO access is sent to ClawHunt to redeem an invite code, and the way back is
+ * A new person registers on ClawHunt first (and verifies the email there), and the way back is
  * a fresh sign-in that no longer carries the invitation. It lives in this tab's sessionStorage
  * only: the first plain landing after sign-in restores it to the address bar, once, and the
  * invitation page still asks for an explicit acceptance. */
 export const PENDING_INVITE_KEY = 'awwo.saas.pending-invite.v1';
-/** Long enough to register on ClawHunt and redeem a code; short enough that a shared browser does
+/** Long enough to register on ClawHunt and verify the email; short enough that a shared browser does
  * not offer someone's invitation to the next person to sign in there. */
 export const PENDING_INVITE_TTL_MS = 30 * 60_000;
 // The same browser writes and reads the time, so only a small adjustment of its clock is tolerated.

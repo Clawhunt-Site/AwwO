@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Check, Copy, ExternalLink } from 'lucide-react';
 import { api, SaaSApiError, saasErrorMessage, type Identity } from '../api';
 import { isLocalEdition } from '../edition';
-import { copyText } from '../InviteFriends';
+import { copyText } from '../copyText';
 import { useSaaSPreferences } from '../preferences';
 import { SettingsCard, SettingsIntro } from './general';
 

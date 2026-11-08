@@ -1,13 +1,13 @@
 // The 设置 centre: one page with every setting of the account, its left navigation grouped as 账户 / 设置 / 功能 /
 // 工作区 / 数据 / 关于. Each section is an ?account= address, so the links the app already sends (?account=security,
-// plans, invites, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 邀请好友, 我的引擎)
-// are drawn as they were, inside the centre (settingsFrame.ts); the others live in settings/.
+// plans, engines) open their section here. Pages that existed before (账号安全, 套餐与点数, 我的引擎) are drawn as they
+// were, inside the centre (settingsFrame.ts); the others live in settings/. 邀请好友 (?account=invites) is gone with the
+// invite codes (the public beta: AwwO is open to every ClawHunt account); its old links open 账号安全.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, CreditCard, Database, Gift, Info, KeyRound, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, Store, UserRound, Users, Wand2 } from 'lucide-react';
+import { ArrowLeft, CreditCard, Database, Info, KeyRound, Keyboard, LogOut, Monitor, Palette, Plug, Settings2, ShieldCheck, Sparkles, Store, UserRound, Users, Wand2 } from 'lucide-react';
 import type { Identity } from './api';
 import { isLocalEdition } from './edition';
 import { AccountSecurity, accountURL } from './PersonalAccount';
-import { InviteFriends } from './InviteFriends';
 import { PlansPage } from './PlansPage';
 import { PreferenceControls, useSaaSPreferences } from './preferences';
 import { MainSiteLink } from './SaaSOnboarding';
@@ -22,14 +22,15 @@ import { useMarketSettings } from './market/useMarket';
 import './settings/settings-center.css';
 
 /**
- * The page an address opens in this edition. The local edition sells nothing and takes no invited friends, so the links
- * the app sends to 用量与计费 or 邀请好友 open 本机 there; the hosted site has no 本机 and opens 账号安全 for it.
+ * The page an address opens in this edition. The local edition sells nothing, so the links the app sends to 用量与计费
+ * open 本机 there; the hosted site has no 本机 and opens 账号安全 for it. 邀请好友 is gone (no invite codes since the public
+ * beta): an old link to it opens 本机 in the local edition and 账号安全 on the hosted site.
  * 本机版连接 is the hosted site's where it offers AwwO 本地版 its models; elsewhere its address opens the engines page.
  */
 export function editionSection(identity: Identity, section: SettingsSection): SettingsSection {
   if (section === 'relay' && !relayOffered(identity)) return 'engines';
   if (isLocalEdition(identity)) return section === 'plans' || section === 'invites' ? 'local' : section;
-  return section === 'local' ? 'security' : section;
+  return section === 'local' || section === 'invites' ? 'security' : section;
 }
 
 const home = () => {
@@ -42,13 +43,11 @@ type Item = { id: SettingsSection; icon: ReactNode; zh: string; en: string };
 type Group = { zh: string; en: string; items: Item[] };
 /** `market`: 我的 Agent is listed where the server offers the Agent market, and while it is the page open. */
 function navigation(identity: Identity, market = false): Group[] {
-  const clawhunt = identity.authentication === 'clawhunt';
   return [
     { zh: '账户', en: 'Account', items: [
       { id: 'security', icon: <UserRound size={16} />, zh: '账号安全', en: 'Account security' },
       isLocalEdition(identity) ? { id: 'local', icon: <Monitor size={16} />, zh: '本机', en: 'This computer' }
         : { id: 'plans', icon: <CreditCard size={16} />, zh: '用量与计费', en: 'Usage and billing' },
-      ...(clawhunt ? [{ id: 'invites' as const, icon: <Gift size={16} />, zh: '邀请好友', en: 'Invite friends' }] : []),
     ] },
     { zh: '设置', en: 'Settings', items: [
       { id: 'general', icon: <Settings2 size={16} />, zh: '通用', en: 'General' },
@@ -109,13 +108,9 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
   switch (section) {
     case 'security': return <AccountSecurity personalCredentialsRequired={identity.personalCredentialsRequired === true} identity={identity} />;
     case 'plans': return <>
-      <SettingsIntro title={t('用量与计费', 'Usage and billing')} intro={t('免费试用期间，免费版每天有一定的次数（Claude、GPT 等高级模型由全站共享一份每日免费名额）；试用结束后，要有 Pro 或 Max 才能继续运行。Pro 和 Max 每月给一笔点数，用于这些高级模型和图片视频生成，默认模型的次数也更多。', 'During the free trial the free plan has a number of calls a day (premium models such as Claude and GPT share one daily number of free calls across the service); after the trial, running needs Pro or Max. Pro and Max add credits every month for those premium models and for image and video generation, and more calls on the default model.')} />
+      <SettingsIntro title={t('用量与计费', 'Usage and billing')} intro={t('免费试用期间，免费版每天有一定的次数（Claude、GPT 等高级模型由全站共享一份每日免费名额）；试用结束后，要有 Pro 或 Max 才能继续规划和运行。Pro 和 Max 每月给一笔点数，用于这些高级模型和图片视频生成，默认模型的次数也更多。', 'During the free trial the free plan has a number of calls a day (premium models such as Claude and GPT share one daily number of free calls across the service); after the trial, planning and running need Pro or Max. Pro and Max add credits every month for those premium models and for image and video generation, and more calls on the default model.')} />
       <PlansUsage identity={identity} />
       <PlansPage identity={identity} />
-    </>;
-    case 'invites': return <>
-      <SettingsIntro title={t('邀请好友', 'Invite friends')} intro={t('每个开通了 AwwO 的账号都有 3 个邀请码。把邀请链接发给好友，对方就能用 ClawHunt 账号开通 AwwO。', 'Every account with AwwO access has three invite codes. Send a friend an invite link and they can open AwwO with their ClawHunt account.')} />
-      <InviteFriends identity={identity} />
     </>;
     case 'local': return <LocalComputerSettings />;
     case 'general': return <GeneralSettings identity={identity} />;

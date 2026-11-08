@@ -2,7 +2,7 @@ import { SecretInput } from './SecretInput';
 import { CanvasThumbnail } from './CanvasThumbnail';
 import { PersonalEngineGate, PasswordRecovery, accountURL } from './PersonalAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Gift, Scale, Settings2 } from 'lucide-react';
+import { LogOut, Plus, ArrowLeft, ShieldCheck, Save, Check, Download, Eye, KeyRound, Scale, Settings2 } from 'lucide-react';
 import { api, onSessionEnded, tenantPath, trackSignedInSession, SaaSApiError, saasErrorMessage, type Identity, type Tenant, type CanvasRecord } from './api';
 import { configureSaaSCanvas, configureSaaSCanvasSave, configureSaaSCanvasInitialize, currentSaaSCanvas, clearSaaSCanvas } from './canvasBridge';
 import { configureCanvasStorage, canvasStorage, canvasStorageKey, canvasStore, canvasStoragePrefix, canvasStoreUsable, openCanvasStorage, openCanvasStorageInMemory, setLegacyCachePreservation } from '../canvas/canvasStorage';
@@ -56,7 +56,7 @@ import { AppearanceScope } from './SaaSAppearance';
 import { ThemePicker } from './ThemePicker';
 import { SaaSOnboarding, GuideLauncher, MainSiteLink, TutorialLauncher } from './SaaSOnboarding';
 import { AcademyLauncher, AcademyProvider } from './Academy';
-import { clearSSOReturnURL, clawHuntAccountURL, clawHuntRedeemURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
+import { clearSSOReturnURL, clawHuntAccountURL, clawHuntStartURL, readSSOReturn, trustedAwwORedirectURL, type AuthOptions, type SSOFailureReason, type SSOReturn } from './clawhuntAuth';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed';
 // An earlier release's document cache the canvas store does not take in is kept as a draft when it may hold unsynced edits.
@@ -189,7 +189,9 @@ function useAuthOptions() {
   return { options, optionsError: error, retryOptions: () => setRevision(value => value + 1) };
 }
 const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
-  waitlisted: ['这个 ClawHunt 账号还未开通 AwwO。使用邀请码兑换后即可直接进入；没有邀请码也可以在兑换页加入候补名单。', "This ClawHunt account doesn't have AwwO access yet. Redeem an invite code to enter right away, or join the waitlist on the redemption page."],
+  // The public beta (ClawHunt #1193, 2026-11-07): sign-in needs no invite code; ClawHunt bars only an account whose
+  // access is not active (an email sign-up still unverified, or access an admin withdrew), so no code or waitlist helps.
+  waitlisted: ['这个 ClawHunt 账号暂时不能使用 AwwO：可能是邮箱还没验证完，或者访问权限被收回了。请在 ClawHunt 账号里查看；邮箱验证完后，重新用 ClawHunt 账号继续即可。', "This ClawHunt account can't use AwwO right now: its email may not be verified yet, or its access was withdrawn. Check your ClawHunt account; once the email is verified, continue with ClawHunt again."],
   expired: ['登录请求已过期。请重新使用 ClawHunt 账号继续。', 'The sign-in request expired. Continue with ClawHunt again.'],
   unavailable: ['暂时无法完成统一登录。请稍后重试。', 'Unified sign-in is temporarily unavailable. Please try again.'],
   conflict: ['此账号关联存在冲突，尚未访问任何 AwwO 工作区。请联系管理员处理。', 'This account has a linking conflict. No AwwO workspace was opened. Contact an administrator.'],
@@ -200,7 +202,7 @@ const ssoFailureCopy: Record<SSOFailureReason, [string, string]> = {
   email_unverified: ['你的 ClawHunt 账号邮箱还没有验证，所以这次没有创建 AwwO 账号。请先在 ClawHunt 账号里验证邮箱，再回来用 ClawHunt 账号继续。', 'The email address of your ClawHunt account is not verified yet, so no AwwO account was created. Verify it in your ClawHunt account first, then continue with ClawHunt again.'],
 };
 function ssoFailureHeading(reason: SSOFailureReason, t: (zh: string, en: string) => string): string {
-  if (reason === 'waitlisted') return t('用邀请码开通 AwwO', 'Unlock AwwO with an invite code');
+  if (reason === 'waitlisted') return t('这个账号暂时不能使用 AwwO', 'AwwO is not open to this account yet');
   if (reason === 'signup_limited') return t('今天无法创建新账号', 'No new account today');
   if (reason === 'email_unverified') return t('请先验证邮箱', 'Verify your email first');
   return t('请检查登录状态', 'Check your sign-in');
@@ -208,13 +210,13 @@ function ssoFailureHeading(reason: SSOFailureReason, t: (zh: string, en: string)
 function SSOFailure({ reason, signedIn = false }: { reason: SSOFailureReason; signedIn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const { options } = useAuthOptions();
-  const redeemURL = clawHuntRedeemURL(options?.clawhuntSiteURL);
-  const accountURL = reason === 'email_unverified' ? clawHuntAccountURL(options?.clawhuntSiteURL) : null;
+  // Both an unverified email and an account ClawHunt bars are settled on the ClawHunt account page; a new sign-in then
+  // goes on (no invite code exists any more to redeem).
+  const accountURL = reason === 'email_unverified' || reason === 'waitlisted' ? clawHuntAccountURL(options?.clawhuntSiteURL) : null;
   return <main className="saas-login saas-sso-layout"><PreferenceControls /><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('账号连接未完成', 'Account connection not completed')}</h1></div>
     <section className="saas-card"><h2>{ssoFailureHeading(reason, t)}</h2><p role="alert">{ssoFailureCopy[reason][locale === 'zh' ? 0 : 1]}</p>
-      {reason === 'waitlisted' && redeemURL && <a className="saas-primary saas-sso-action" href={redeemURL}>{t('输入邀请码进入 AwwO', 'Enter your invite code')}</a>}
-      {accountURL && <a className="saas-primary saas-sso-action" href={accountURL}>{t('到 ClawHunt 验证邮箱', 'Verify your email on ClawHunt')}</a>}
-      {reason !== 'waitlisted' && <a className={accountURL ? 'saas-sso-action' : 'saas-primary saas-sso-action'} href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>}
+      {accountURL && <a className="saas-primary saas-sso-action" href={accountURL}>{reason === 'waitlisted' ? t('打开 ClawHunt 账号', 'Open your ClawHunt account') : t('到 ClawHunt 验证邮箱', 'Verify your email on ClawHunt')}</a>}
+      <a className={accountURL ? 'saas-sso-action' : 'saas-primary saas-sso-action'} href={clawHuntStartURL(location.search)}>{t('重新使用 ClawHunt 账号继续', 'Continue with ClawHunt again')}</a>
       <a href="/">{signedIn ? t('返回工作区', 'Back to workspace') : t('返回登录', 'Back to sign in')}</a>
     </section></main>;
 }
@@ -309,7 +311,7 @@ function Login({ onAuthenticated, invited }: { onAuthenticated: (identity: Ident
   return <main className="saas-login"><PreferenceControls><AcademyLauncher variant="landing" /></PreferenceControls><div className="saas-login-brand"><span>AwwO</span><MainSiteLink /><h1>{t('让 Agent 在同一张画布上协作。', 'Bring your agents together on one canvas.')}</h1><p>{t('独立工作区、持久会话与实时执行。你的团队，从这里开始。', 'Separate workspaces, persistent conversations and live execution. Your team starts here.')}</p><LoginPreview /></div>
     {optionsError ? <section className="saas-card"><h2>{t('无法确认登录方式', 'Could not check sign-in methods')}</h2><p role="alert">{t('请检查网络连接后重试。', 'Check your connection and try again.')}</p><button onClick={retryOptions}>{t('重试', 'Retry')}</button></section>
     : !options ? <section className="saas-card" role="status">{t('正在读取登录方式…', 'Loading sign-in methods…')}</section>
-    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><a className="saas-sso-signup" href={clawHuntStartURL(location.search, { signup: true })}>{t('没有账号？注册 ClawHunt 账号', 'New here? Create a ClawHunt account')}</a><small>{t('还没开通 AwwO？注册或登录后会弹出邀请码输入框，输入后即可进入。', 'No access yet? After you sign up or sign in, a box asks for your invite code and you go straight in.')}</small></section>}
+    : <div className="saas-auth-choices">{options.clawhuntSSO === true && <section className="saas-card saas-sso-choice"><span className="saas-eyebrow">{t('统一账号', 'ONE ACCOUNT')}</span><h2>{t('使用 ClawHunt 登录 AwwO', 'Sign in to AwwO with ClawHunt')}</h2><p>{t('使用主站账号继续，保留已关联的工作区和个人执行引擎。', 'Continue with your main-site account and keep linked workspaces and personal engines.')}</p><a className="saas-primary saas-sso-action" href={clawHuntStartURL(location.search)}>{t('使用 ClawHunt 账号继续', 'Continue with ClawHunt')}</a><a className="saas-sso-signup" href={clawHuntStartURL(location.search, { signup: true })}>{t('没有账号？注册 ClawHunt 账号', 'New here? Create a ClawHunt account')}</a><small>{t('AwwO 公测中，对所有人开放：注册或登录 ClawHunt 账号后就能直接进入。', 'AwwO is in public beta and open to everyone: sign up or sign in to ClawHunt and you go straight in.')}</small></section>}
     {options.localAuth === true && <form className="saas-card" onSubmit={async event => {
       event.preventDefault(); if (busy) return; setBusy(true); setError(null);
       const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -365,7 +367,7 @@ function WorkspaceControls({ identity, tenant, onProfile, academy = false, meter
     {identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}
     <CanvasAccountControl locale={locale} identity={null} onLogin={() => {}} onLogout={() => {}} onOpenWorkspaceAuth={() => navigate()}
       workspace={{ displayName: identity.user.name, selectedCompanyId: managementTenant, onCompanyChange: setManagementTenant, api: accountApi,
-        ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, invitesUrl: accountURL('invites'), plansUrl: accountURL('plans') } } : {}) }} />
+        ...(identity.authentication === 'clawhunt' ? { externalProfile: { url: clawHuntAccountURL(identity.clawhuntSiteURL) || undefined, plansUrl: accountURL('plans') } } : {}) }} />
     {academy && <AcademyLauncher />}
     <ThemePicker />
     <ActionMenu label={t('更多选项', 'More options')}>{close => <>
@@ -375,7 +377,6 @@ function WorkspaceControls({ identity, tenant, onProfile, academy = false, meter
       <AcademyLauncher variant="menu" onLaunch={close} /><TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <LicensesLink icon />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
-      {identity.authentication === 'clawhunt' && <a href={accountURL('invites')}><Gift size={16}/>{t('邀请好友', 'Invite friends')}</a>}
       <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>
       {identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {

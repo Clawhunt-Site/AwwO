@@ -59,18 +59,25 @@ it('routes even a legacy AwwO reset link to the main-site account under unified 
   await waitFor(() => expect(location.search).toBe(''));
 });
 
-it('offers invite-code redemption in both languages on the waitlisted result, clears callback parameters and never signs in', async () => {
+// The public beta (ClawHunt #1193): no invite code exists to redeem; ClawHunt bars only an account whose access is not
+// active (an email sign-up not yet verified, or access an admin withdrew), so the way on is its ClawHunt account page.
+it('sends a barred account to its ClawHunt account in both languages, with no invite code, clears callback parameters and never signs in', async () => {
   history.replaceState(null, '', `/?sso=error&reason=waitlisted&invite=${invite}`);
   const fetch = vi.fn(async (url: string) => url.endsWith('/auth/me') ? unauthorized() : response({ clawhuntSSO: true, localAuth: false, clawhuntSiteURL: 'https://clawhunt.example/' }));
   vi.stubGlobal('fetch', fetch);
   render(<SaaSApp />);
-  expect(await screen.findByRole('alert')).toHaveTextContent('邀请码');
-  // The alert renders at once; the redemption link only once /auth/options has named the ClawHunt site.
-  await waitFor(() => expect(screen.getByRole('link', { name: '输入邀请码进入 AwwO' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('这个 ClawHunt 账号暂时不能使用 AwwO：可能是邮箱还没验证完，或者访问权限被收回了。');
+  expect(screen.getByRole('heading', { name: '这个账号暂时不能使用 AwwO' })).toBeVisible();
+  // The alert renders at once; the account link only once /auth/options has named the ClawHunt site.
+  await waitFor(() => expect(screen.getByRole('link', { name: '打开 ClawHunt 账号' })).toHaveAttribute('href', 'https://clawhunt.example/account'));
+  expect(screen.getByRole('link', { name: '重新使用 ClawHunt 账号继续' })).toHaveAttribute('href', `/api/v1/auth/clawhunt/start?invite=${invite}`);
+  expect(document.body).not.toHaveTextContent('邀请码');
+  expect(document.body).not.toHaveTextContent('候补');
   await waitFor(() => expect(location.search).toBe(`?invite=${invite}`));
   fireEvent.click(screen.getByRole('button', { name: '切换为英文' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('invite code');
-  expect(screen.getByRole('link', { name: 'Enter your invite code' })).toHaveAttribute('href', 'https://clawhunt.example/awwo?from=signin');
+  expect(screen.getByRole('alert')).toHaveTextContent("This ClawHunt account can't use AwwO right now");
+  expect(screen.getByRole('link', { name: 'Open your ClawHunt account' })).toHaveAttribute('href', 'https://clawhunt.example/account');
+  expect(document.body).not.toHaveTextContent(/invite code|waitlist/i);
   expect(fetch.mock.calls.some(([url]) => url.endsWith('/auth/login') || url.endsWith('/auth/register'))).toBe(false);
 });
 
