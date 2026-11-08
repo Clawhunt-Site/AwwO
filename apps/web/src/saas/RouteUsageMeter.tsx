@@ -72,6 +72,8 @@ export function RouteUsageMeter({ tenantId, variant = 'header', onUsage, owner =
   const left = state.left;
   const one = state.usedUp.length === 1 ? short[state.usedUp[0]] : null;
   const ended = usage.freePlan?.ended === true;
+  // The trial's last UTC day: no reset is promised (the end comes before it).
+  const lastDay = trialEndsBeforeReset(usage);
   const label = ended ? t('免费试用已结束', 'Free trial ended') : {
     'daily-out': t('今日次数已用完', 'No calls left today'),
     'premium-out': t(`剩 ${left} 次 · 高级次数已用完`, `${left} left · premium used up`),
@@ -110,9 +112,12 @@ export function RouteUsageMeter({ tenantId, variant = 'header', onUsage, owner =
       {usage.freePlan && <FreePlanNote view={usage.freePlan} owner={owner} />}
       {/* Past the trial's end nothing here is free any more: no allowance to show, only the way on. */}
       {ended ? <EndedWay owner={owner} tenantId={tenantId} /> : <>
-      <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>
+      {lastDay
+        ? <p>{t(`今天是免费试用的最后一天：今天的次数不会再重置，试用 ${momentText(lastDay, locale, { end: true })} 结束。默认模型不单独限次，只占总次数。`,
+          `Today is the free trial’s last day: today’s calls will not reset, as the trial ends on ${momentText(lastDay, locale, { end: true })}. The default model has no limit of its own and only uses the daily total.`)}</p>
+        : <p>{t('每天 UTC 0 点重置。默认模型不单独限次，只占总次数。', 'Resets at 00:00 UTC. The default model has no limit of its own and only uses the daily total.')}</p>}
       <CallsNote />
-      {usage.promo && <PromoNote promo={usage.promo} />}
+      {usage.promo && <PromoNote promo={usage.promo} trialUntil={usage.freePlan?.until} />}
       {checkin && <CheckinRow checkin={checkin} busy={checking} announced={checkedNow} onCheckIn={check} />}
       {Boolean(checkError) && <p role="alert" className="saas-error">{saasErrorMessage(checkError, locale)}</p>}
       <dl>
@@ -124,7 +129,10 @@ export function RouteUsageMeter({ tenantId, variant = 'header', onUsage, owner =
             <dd>{!allowance ? t('不单独限次', 'No limit of its own') : allowance.limit === 0 ? t('不含', 'Not included') : `${Math.min(allowance.used, allowance.limit)} / ${allowance.limit}`}</dd></div>;
         })}
       </dl>
-      {state.kind === 'daily-out' && <p className="saas-route-usage-out">{t('今天的总次数已用完，所有模型都要等到 UTC 0 点后才能再运行。', 'Today’s calls are used up; no model can run again until 00:00 UTC.')}</p>}
+      {state.kind === 'daily-out' && <p className="saas-route-usage-out">{!lastDay
+        ? t('今天的总次数已用完，所有模型都要等到 UTC 0 点后才能再运行。', 'Today’s calls are used up; no model can run again until 00:00 UTC.')
+        : owner ? t('今天的总次数已用完，免费试用今天结束，不会再重置：订阅 Pro 或 Max 后就能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: subscribe to Pro or Max to keep running.')
+          : t('今天的总次数已用完，免费试用今天结束，不会再重置：工作区所有者订阅 Pro 或 Max 后才能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: it runs again once the workspace owner subscribes to Pro or Max.')}</p>}
       {premiumClosed && <p className="saas-route-usage-out">{t('标着「不含」的高级模型不在这个工作区的免费额度里，需要 Pro / Max 套餐，按点数使用。', 'Premium models marked Not included are outside this workspace’s free allowance; they need the Pro or Max plan and run on credits.')}</p>}
       {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro or Max now and keep using premium models on credits.')}</p>}
       {/* Paid plans are on sale, so upgrading is the way to more calls; a click still records the interest the
@@ -179,8 +187,20 @@ function FreePlanNote({ view, owner }: { view: FreePlanView; owner: boolean }) {
     : t('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. The canvases and results are all still here.')}</p>;
   const end = momentText(view.until, locale, { end: true });
   return end ? <p className="saas-route-usage-promo">{owner
-    ? t(`免费试用到 ${end} 结束，之后要订阅 Pro 或 Max 才能继续运行。`, `The free trial ends on ${end}; after that, running needs Pro or Max.`)
-    : t(`免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续运行。`, `The free trial ends on ${end}; after that, this workspace runs once its owner subscribes to Pro or Max.`)}</p> : null;
+    ? t(`免费试用到 ${end} 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。`, `The free trial ends on ${end}; after that, planning and running need Pro or Max.`)
+    : t(`免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。`, `The free trial ends on ${end}; after that, this workspace plans and runs once its owner subscribes to Pro or Max.`)}</p> : null;
+}
+
+/** The free trial's end when it comes before the daily calls next reset (the trial's last UTC day: 08:00 to 24:00 in
+ *  Beijing on the 12th), as `until`; null otherwise. Today's calls then never come back: the end closes the workspace
+ *  first, so the meter must not promise the reset. */
+export function trialEndsBeforeReset(usage: RouteUsage, now = Date.now()): string | null {
+  const plan = usage.freePlan;
+  if (!plan || plan.ended) return null;
+  const until = Date.parse(plan.until);
+  const today = new Date(now);
+  const reset = usage.resetsAt ? Date.parse(usage.resetsAt) : Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1);
+  return Number.isFinite(until) && Number.isFinite(reset) && until <= reset ? plan.until : null;
 }
 
 /** Past the free trial's end: the owner is asked to subscribe for the workspace; anyone else is offered a plan of their
@@ -191,11 +211,16 @@ function EndedWay({ owner, tenantId }: { owner: boolean; tenantId: string }) {
     onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('订阅 Pro / Max', 'Subscribe to Pro or Max') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>;
 }
 
-/** A promotion's limited-time allowances and when they end, in the reader's own time. */
-function PromoNote({ promo }: { promo: PromoView }) {
+/** A promotion's limited-time allowances and when they end, in the reader's own time. Where it lasts the whole free trial
+ *  (`trialUntil`, the trial's end, which the note above names), it is the trial's allowance: said without a second date,
+ *  and without reading as if a free plan went on after it. */
+function PromoNote({ promo, trialUntil }: { promo: PromoView; trialUntil?: string }) {
   const { t, locale } = useSaaSPreferences();
-  const until = new Date(promo.until).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const media = promo.routes?.media;
+  if (trialUntil && Date.parse(promo.until) >= Date.parse(trialUntil)) return <p className="saas-route-usage-promo">{media
+    ? t(`试用期间每天 ${promo.daily} 次调用、${media} 次图片 / 视频生成，下面的数字已经算上。`, `During the trial: ${promo.daily} calls and ${media} image / video generations a day; the numbers below include them.`)
+    : t(`试用期间每天 ${promo.daily} 次调用，下面的数字已经算上。`, `During the trial: ${promo.daily} calls a day; the numbers below include them.`)}</p>;
+  const until = new Date(promo.until).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   return <p className="saas-route-usage-promo">{media
     ? t(`限时放开：到 ${until}，免费版每天 ${promo.daily} 次调用、${media} 次图片 / 视频生成，下面的数字已经算上。`, `Limited time: until ${until}, the free plan has ${promo.daily} calls and ${media} image / video generations a day; the numbers below include it.`)
     : t(`限时放开：到 ${until}，免费版每天 ${promo.daily} 次调用，下面的数字已经算上。`, `Limited time: until ${until}, the free plan has ${promo.daily} calls a day; the numbers below include it.`)}</p>;

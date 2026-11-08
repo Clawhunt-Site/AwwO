@@ -80,7 +80,8 @@ describe('the advice under the composer', () => {
     expect(card).toHaveAccessibleName('推荐搭配 · treg（第三方工具目录）');
     expect(card).toHaveTextContent('这个需求可能要用到实时数据：网页资料、社媒趋势。');
     expect(card).toHaveTextContent('AwwO 自己的 Agent 不联网');
-    expect(card).toHaveTextContent('「同屏 → 邀请 Agent」');
+    // The 同屏 button shows no word of its own: the card says where it is and what it looks like.
+    expect(card).toHaveTextContent('点画布右上角的「同屏」按钮（一个圆点和你的头像），打开「邀请 Agent」');
     expect(card).toHaveTextContent('treg 按次计费，记在你自己的 treg 账户上，不经过 AwwO。');
     // No key or token is asked for or named, and no logo is drawn.
     expect(card.textContent).not.toMatch(/key|密钥|token/i);
@@ -135,7 +136,7 @@ describe('the advice under the composer', () => {
     const card = advice()!;
     expect(card).toHaveAccessibleName('Pairs well with treg (a third-party tool catalog)');
     expect(card).toHaveTextContent('This request may need live data: web research, company and people data.');
-    expect(card).toHaveTextContent('open Multiplayer → Invite an Agent on it');
+    expect(card).toHaveTextContent('click the Multiplayer button at its top right (a dot and your avatar) and open Invite an Agent');
     expect(card).toHaveTextContent('treg charges per call to your own treg account, never through AwwO.');
     fireEvent.click(within(card).getByRole('button', { name: 'How to connect' }));
     expect(within(card).getByRole('button', { name: 'Copy: Claude Code' })).toBeVisible();

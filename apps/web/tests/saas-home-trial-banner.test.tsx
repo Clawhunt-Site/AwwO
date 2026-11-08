@@ -29,7 +29,8 @@ describe('the trial banner', () => {
     const onDismiss = vi.fn();
     const view = render(banner(free({ freePlan: { until: TRIAL_END, ended: false } }), { onDismiss }));
     const shown = screen.getByRole('status');
-    expect(shown).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续运行 Agent。');
+    // Planning is refused after the end as running is (free_plan.go): the banner says both.
+    expect(shown).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。');
     const plans = screen.getByRole('link', { name: '查看套餐' });
     expect(plans).toHaveAttribute('href', '/?tenant=team-b&account=plans');
     fireEvent.click(plans);
@@ -65,7 +66,7 @@ describe('the trial banner', () => {
     expect(screen.queryByRole('link')).toBeNull();
     cleanup();
     render(banner(free({ freePlan: { until: TRIAL_END, ended: false } }), { owner: false }));
-    expect(screen.getByRole('status')).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续运行 Agent。');
+    expect(screen.getByRole('status')).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。');
     expect(screen.queryByRole('link')).toBeNull();
     cleanup();
     localStorage.setItem('superclaw_locale', 'en');
@@ -74,8 +75,10 @@ describe('the trial banner', () => {
   });
 
   it('says a promotion’s end where the API has no trial end, and the owner’s plan set to end', () => {
+    // A promotion alone (e.g. a workspace an administrator owns, which the trial's end never closes) is no trial: its
+    // end is the limited-time allowance's, in the same form as the trial's.
     render(banner(free({ promo: { until: TRIAL_END, daily: 100 } })));
-    expect(screen.getByRole('status')).toHaveTextContent(/^免费试用到 11月13日 00:00 结束。/);
+    expect(screen.getByRole('status')).toHaveTextContent(/^限时额度到 11月12日 24:00 结束。/);
     expect(screen.getByRole('link', { name: '查看套餐' })).toBeVisible();
     cleanup();
     render(banner(plan()));
@@ -97,7 +100,7 @@ describe('the trial banner', () => {
   it('reads in English', () => {
     localStorage.setItem('superclaw_locale', 'en');
     render(banner(free({ freePlan: { until: TRIAL_END, ended: false } })));
-    expect(screen.getByRole('status')).toHaveTextContent('The AwwO beta is ending: the free trial ends on Nov 12, 24:00; after that, running Agents needs Pro or Max.');
+    expect(screen.getByRole('status')).toHaveTextContent('The AwwO beta is ending: the free trial ends on Nov 12, 24:00; after that, planning and running need Pro or Max.');
     expect(screen.getByRole('link', { name: 'See plans' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Dismiss this notice' })).toBeVisible();
     cleanup();

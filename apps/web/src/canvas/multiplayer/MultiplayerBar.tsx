@@ -135,7 +135,9 @@ export const MultiplayerBar = memo(function MultiplayerBar({ participants, selfI
   const shown = ordered.slice(0, BAR_AVATARS);
   const more = ordered.length - shown.length;
   const label = status === 'live' ? t('bar.live', { count: hereCount(participants, selfId) }) : t(status === 'connecting' ? 'bar.connecting' : 'bar.offline');
-  return <button type="button" className="awwo-multiplayer-bar" data-status={status} aria-label={label} aria-haspopup="dialog"
+  // The button shows a dot and avatars only: its name (同屏 · N 人在线) is its tooltip too, so a person the treg advice
+  // sends to 「同屏」 can confirm it on hover.
+  return <button type="button" className="awwo-multiplayer-bar" data-status={status} aria-label={label} title={label} aria-haspopup="dialog"
     aria-expanded={open === undefined ? undefined : open} onClick={onOpen}>
     <span className="awwo-multiplayer-dot" data-status={status} aria-hidden="true"
       title={t(status === 'live' ? 'status.live' : status === 'connecting' ? 'status.connecting' : 'status.offline')} />

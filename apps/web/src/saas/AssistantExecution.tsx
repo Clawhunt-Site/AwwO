@@ -59,7 +59,7 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
     computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
     computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
     computer_output_limit: ['任务的输出超过了上限。', 'The task produced more output than allowed.'],
-    quota_exceeded: ['今天的调用次数用完了，任务没有开始。升级 Pro / Max 每天的次数多得多，马上就能继续；不升级的话，等 UTC 0 点（北京时间早上 8 点）次数重置。', 'Today’s calls are used up, so the task did not start. Pro and Max have many more calls a day, so upgrading lets you continue now; otherwise the calls reset at 00:00 UTC.'],
+    quota_exceeded: ['今天的调用次数用完了，任务没有开始。升级 Pro / Max 每天的次数多得多，马上就能继续；不升级的话，等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。', 'Today’s calls are used up, so the task did not start. Pro and Max have many more calls a day, so upgrading lets you continue now; otherwise the calls reset at 00:00 UTC (no reset once the free trial has ended).'],
   };
   const text = known[code];
   // The run errors every run shares (the paid plan's and the daily allowances') read as they do on a node.

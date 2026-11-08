@@ -9,8 +9,8 @@ import { resetAllSessions } from '../src/canvas/sessions';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 
 // The Next card under a canvas whose newest request names live data (liveDataNeed): AwwO's own Agents have no live web,
-// so its footnote says how the person's own Agent brings it, treg through 同屏 → 邀请 Agent. A request that names none
-// gets no such line.
+// so its footnote says how the person's own Agent brings it, treg through 同屏 → 邀请 Agent, naming the 同屏 button by what
+// it shows (a dot and the person's avatar: it has no visible word). A request that names none gets no such line.
 type Locale = 'zh' | 'en';
 const text = (locale: Locale, key: CanvasTextKey) => canvasText(locale, key);
 const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
@@ -53,7 +53,7 @@ describe('the Next card and live data', () => {
     seed('做一份竞品调研，整理小红书上的热门话题和 SEO 关键词，再做成一页报告');
     const card = nextCard('zh');
     expect(within(card).getByText(text('zh', 'assistant.nextLiveData'))).toBeVisible();
-    expect(text('zh', 'assistant.nextLiveData')).toContain('同屏 → 邀请 Agent');
+    expect(text('zh', 'assistant.nextLiveData')).toContain('点右上角的「同屏」按钮（一个圆点和你的头像），在「邀请 Agent」接入');
     expect(text('zh', 'assistant.nextLiveData')).toContain('treg');
   });
 
@@ -67,7 +67,7 @@ describe('the Next card and live data', () => {
     seed('Research our competitors and the latest news on them, then build a landing page');
     const card = nextCard('en');
     expect(within(card).getByText(text('en', 'assistant.nextLiveData'))).toBeVisible();
-    expect(text('en', 'assistant.nextLiveData')).toContain('Multiplayer → Invite an Agent');
+    expect(text('en', 'assistant.nextLiveData')).toContain('click the Multiplayer button at the top right (a dot and your avatar), and in Invite an Agent connect');
     expect(text('en', 'assistant.nextLiveData')).not.toMatch(/[㐀-鿿]/);
   });
 });

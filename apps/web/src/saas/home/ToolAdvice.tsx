@@ -34,8 +34,9 @@ export function ToolAdvice({ text, scope }: { text: string; scope: { user: strin
   const hide = () => { saveHidden(storage, named); setHidden(named); setOpen(false); };
   return <aside className="saas-home-advice" aria-labelledby={titleId}>
     <p className="saas-home-advice-title" id={titleId}><Globe size={15} aria-hidden="true" />{t('推荐搭配 · treg（第三方工具目录）', 'Pairs well with treg (a third-party tool catalog)')}</p>
-    <p>{t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不联网；生成画布后，在画布上打开「同屏 → 邀请 Agent」，用画布令牌接入你自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
-      `This request may need live data: ${list}. AwwO’s own Agents have no live web. Once the canvas is made, open Multiplayer → Invite an Agent on it, connect your own Claude Code or Codex with a canvas token, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)}</p>
+    {/* The 同屏 button shows a dot and avatars only (MultiplayerBar): the words say where it is and what it looks like. */}
+    <p>{t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不联网；生成画布后，点画布右上角的「同屏」按钮（一个圆点和你的头像），打开「邀请 Agent」，用画布令牌接入你自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
+      `This request may need live data: ${list}. AwwO’s own Agents have no live web. Once the canvas is made, click the Multiplayer button at its top right (a dot and your avatar) and open Invite an Agent; connect your own Claude Code or Codex with a canvas token, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)}</p>
     <p className="saas-home-advice-billing">{t('treg 按次计费，记在你自己的 treg 账户上，不经过 AwwO。', 'treg charges per call to your own treg account, never through AwwO.')}</p>
     <div className="saas-home-advice-actions">
       <button type="button" className="saas-home-advice-toggle" aria-expanded={open} aria-controls={open ? stepsId : undefined} onClick={() => setOpen(value => !value)}>{t('怎么接入', 'How to connect')}</button>
@@ -50,7 +51,7 @@ function AdviceSteps({ id, t }: { id: string; t: T }) {
   const lines = tregSnippets();
   return <div className="saas-home-advice-steps" id={id}>
     <ol>
-      <li>{t('生成画布后，在画布上打开「同屏 → 邀请 Agent」，生成画布令牌，按那里的命令接入你自己的 Claude Code 或 Codex。', 'Once the canvas is made, open Multiplayer → Invite an Agent on it, make a canvas token, and connect your own Claude Code or Codex with the lines there.')}</li>
+      <li>{t('生成画布后，点画布右上角的「同屏」按钮（一个圆点和你的头像），打开「邀请 Agent」，生成画布令牌，按那里的命令接入你自己的 Claude Code 或 Codex。', 'Once the canvas is made, click the Multiplayer button at its top right (a dot and your avatar), open Invite an Agent, make a canvas token, and connect your own Claude Code or Codex with the lines there.')}</li>
       <li>{t('在 treg.to 注册并建一个团队（调用费用由这个团队付），再用下面一行把 treg 加进同一个 Agent，按提示登录。', 'Sign up at treg.to and create a team (the team pays for the calls), then add treg to that same Agent with a line below and sign in when it asks.')}</li>
       <li>{t('让 Agent 用 treg 查资料，再用画布工具把结果写进节点。', 'Ask the Agent to look things up with treg, then write the findings into the nodes with its canvas tools.')}</li>
     </ol>

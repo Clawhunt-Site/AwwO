@@ -93,7 +93,8 @@ function PaidPlan({ view, tenantId }: { view: PaidView; tenantId: string }) {
 function freeLine(view: FreeView, t: T, locale: 'zh' | 'en'): string {
   if (view.standing === 'ended') return view.owner ? t('免费试用已结束，订阅后继续运行', 'The free trial has ended; subscribe to keep running')
     : t('免费试用已结束，工作区所有者订阅后继续运行', 'The free trial has ended; it runs again once the workspace owner subscribes');
-  const end = view.until ? momentText(view.until, locale, { end: view.standing === 'trial' }) : '';
+  // An end in the banner's form (the last day's 24:00), the trial's and a promotion's alike.
+  const end = view.until ? momentText(view.until, locale, { end: true }) : '';
   if (!end) return '';
   if (view.standing === 'free') return t(`限时额度到 ${end}`, `Limited-time allowance until ${end}`);
   const days = daysLeft(view.until!, Date.now());

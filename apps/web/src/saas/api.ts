@@ -106,8 +106,8 @@ export const freeCapacityMessages: [string, string] = [
  *  have at once are going. Admission refuses it only without a plan, and the paid plans have more of both, so the copy
  *  leads with them; waiting is the free way on. */
 export const quotaExceededMessages: [string, string] = [
-  '工作区运行额度已满：今天的调用次数用完了，或同时运行的任务到了上限。升级 Pro / Max 付费套餐，每天的次数多得多、能同时运行更多任务，马上就能继续（账号菜单 → 套餐与点数）；不升级的话，等进行中的任务结束，或等 UTC 0 点（北京时间早上 8 点）次数重置。',
-  'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro or Max plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC.',
+  '工作区运行额度已满：今天的调用次数用完了，或同时运行的任务到了上限。升级 Pro / Max 付费套餐，每天的次数多得多、能同时运行更多任务，马上就能继续（账号菜单 → 套餐与点数）；不升级的话，等进行中的任务结束，或等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。',
+  'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro or Max plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC (no reset once the free trial has ended).',
 ];
 
 /** The free trial is over for this workspace (free_plan_ended, AWWO_FREE_PLAN_UNTIL): nothing that calls a model or makes

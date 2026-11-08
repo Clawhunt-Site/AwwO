@@ -121,7 +121,7 @@ it('says when the free trial ends, and once it has, that nothing runs until a pl
   showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: false } });
   meter();
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
-  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续运行。')).toBeVisible();
+  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。')).toBeVisible();
   expect(screen.getByRole('link', { name: '升级 Pro / Max' })).toBeVisible();
   cleanup();
   showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: true } });
@@ -142,7 +142,7 @@ it('tells anyone but the owner that the owner subscribes, offering them a plan o
   showing({ ...usage({ gate: { limit: 3, used: 1 } }), freePlan: { until, ended: false } });
   meter(false);
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 18 次' }));
-  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续运行。')).toBeVisible();
+  expect(await screen.findByText('免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。')).toBeVisible();
   expect(screen.queryByRole('link', { name: '升级 Pro / Max' })).toBeNull();
   expect(screen.getByRole('link', { name: '为我自己的账号订阅' })).not.toHaveClass('saas-primary');
   cleanup();

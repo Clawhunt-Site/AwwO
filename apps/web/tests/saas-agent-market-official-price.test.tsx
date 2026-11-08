@@ -64,7 +64,11 @@ describe('the official Agents’ price, before it starts', () => {
     const expected = officialPriceNotice({ officialPrice: 5, officialPriceFrom: from }, Date.now(), 'zh', zh)!;
     const note = await screen.findByText(expected);
     expect(note).toHaveAttribute('role', 'note');
-    expect(note).toHaveTextContent(`${momentText(from, 'zh')} 起，AwwO 官方 Agent 每次调用 5 点（模型费另算）`);
+    expect(note).toHaveTextContent(`${momentText(from, 'zh', { end: true })} 起，AwwO 官方 Agent 每次调用 5 点（模型费另算）`);
+    // A start on a local midnight reads as the trial banner names the same moment (the day before's 24:00), not 00:00.
+    // (A local midnight, as the trial banner's tests build theirs, so this holds in any time zone.)
+    expect(officialPriceNotice({ officialPrice: 5, officialPriceFrom: new Date(2026, 10, 13).toISOString() }, new Date(2026, 10, 8).getTime(), 'zh', zh))
+      .toMatch(/^11月12日 24:00 起，AwwO 官方 Agent 每次调用 5 点/);
     // Under the subtitle, in the dialog's heading.
     expect(note.closest('.awwo-library-heading')).not.toBeNull();
     expect(note.previousElementSibling).toHaveTextContent('排行只看真实运行');
@@ -78,7 +82,7 @@ describe('the official Agents’ price, before it starts', () => {
     server([official], { officialPrice: 1, officialPriceFrom: from });
     open('en');
     const note = await waitFor(() => { const found = notice(); expect(found).not.toBeNull(); return found!; });
-    expect(note).toHaveTextContent(`From ${momentText(from, 'en')}, a call to an AwwO official Agent costs 1 credit (the model is billed apart)`);
+    expect(note).toHaveTextContent(`From ${momentText(from, 'en', { end: true })}, a call to an AwwO official Agent costs 1 credit (the model is billed apart)`);
     expect(note).toHaveAttribute('role', 'note');
     expect(document.body).not.toHaveTextContent(/\bfree\b/i);
   });
