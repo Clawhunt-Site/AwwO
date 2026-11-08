@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AUTOSAVE_BURST_GAP_MS, AUTOSAVE_HOLD_MS, AUTOSAVE_MAX_DEFER_MS, AUTOSAVE_MAX_QUIET_MS, AUTOSAVE_MS_PER_MILLION_CHARS, AUTOSAVE_PACED_SIZE, AUTOSAVE_QUIET_MS, autosavePace } from '../src/saas/autosavePace';
+import { AUTOSAVE_BURST_GAP_MS, AUTOSAVE_HOLD_MS, AUTOSAVE_LIVE_MAX_DEFER_MS, AUTOSAVE_MAX_DEFER_MS, AUTOSAVE_MAX_QUIET_MS, AUTOSAVE_MS_PER_MILLION_CHARS, AUTOSAVE_PACED_SIZE, AUTOSAVE_QUIET_MS, autosavePace } from '../src/saas/autosavePace';
 
 // The pace on its own: a clock the test moves and a window stand-in whose pointer events the test sends.
-function setup() {
+function setup(live = false) {
   let time = 1_000_000;
   const target = new EventTarget();
-  const pace = autosavePace(target as unknown as Window, () => time);
+  const pace = autosavePace(target as unknown as Window, () => time, () => live);
   const pointer = (type: string, pointerId = 1) => target.dispatchEvent(Object.assign(new Event(type), { pointerId }));
   return { pace, pointer, target, at: (ms: number) => { time += ms; } };
 }
@@ -95,6 +95,31 @@ describe('autosave pace', () => {
     expect(pace.wait()).toBeGreaterThan(0);
     pointer('pointerup');
     at(AUTOSAVE_MAX_QUIET_MS); expect(pace.wait()).toBe(0);
+  });
+
+  // 多人同屏: others see a canvas's changes as they are sent, so a drag or typing with no pause goes as it goes.
+  it('sends a run of writes with no pause within about 1.5 s on a canvas others see live, a press held too', () => {
+    const { pace, pointer, at } = setup(true);
+    pointer('pointerdown');
+    pace.wrote(20_000);
+    for (let elapsed = 100; elapsed <= 2000; elapsed += 100) {
+      at(100); pace.wrote(20_000);
+      if (elapsed < AUTOSAVE_LIVE_MAX_DEFER_MS) expect(pace.wait()).toBe(Math.min(AUTOSAVE_QUIET_MS, AUTOSAVE_LIVE_MAX_DEFER_MS - elapsed));
+      else expect(pace.wait()).toBe(0);
+    }
+    // Once it went, the next run counts from its own first write.
+    pace.sent();
+    at(100); pace.wrote(20_000);
+    expect(pace.wait()).toBe(AUTOSAVE_QUIET_MS);
+  });
+
+  it('keeps the longer waits on a canvas nobody sees live, and on a big one', () => {
+    for (const [live, size] of [[false, 20_000], [true, AUTOSAVE_PACED_SIZE]] as const) {
+      const { pace, at } = setup(live);
+      pace.wrote(size);
+      for (let index = 0; index < 20; index++) { at(100); pace.wrote(size); }
+      expect(pace.wait()).toBeGreaterThan(0);
+    }
   });
 
   it('stops listening once disposed', () => {

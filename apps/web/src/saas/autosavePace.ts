@@ -6,7 +6,8 @@
 // its writes' own pace: AUTOSAVE_QUIET_MS and AUTOSAVE_MS_PER_MILLION_CHARS more per million characters, or twice the gap
 // between its last two writes (writes further apart than AUTOSAVE_BURST_GAP_MS start a new burst), at most
 // AUTOSAVE_MAX_QUIET_MS. A smaller canvas keeps the plain wait. Whatever comes after it, an edit waits at most
-// AUTOSAVE_MAX_DEFER_MS.
+// AUTOSAVE_MAX_DEFER_MS; on a canvas others see live (多人同屏, `live`) and below the paced size, at most
+// AUTOSAVE_LIVE_MAX_DEFER_MS, so a drag or a long stretch of typing with no pause reaches them as it goes.
 
 export const AUTOSAVE_QUIET_MS = 450;
 export const AUTOSAVE_PACED_SIZE = 1_000_000;
@@ -15,6 +16,7 @@ export const AUTOSAVE_MAX_QUIET_MS = 4000;
 export const AUTOSAVE_BURST_GAP_MS = 2000;
 export const AUTOSAVE_HOLD_MS = 10_000;
 export const AUTOSAVE_MAX_DEFER_MS = 15_000;
+export const AUTOSAVE_LIVE_MAX_DEFER_MS = 1500;
 /** How often a held pointer is looked at again. */
 const HELD_RECHECK_MS = 200;
 
@@ -30,7 +32,8 @@ export type AutosavePace = {
 
 type PointerTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
 
-export function autosavePace(target: PointerTarget = window, now: () => number = () => Date.now()): AutosavePace {
+/** `live`: whether others see this canvas's changes as they are sent (多人同屏 saves). */
+export function autosavePace(target: PointerTarget = window, now: () => number = () => Date.now(), live: () => boolean = () => false): AutosavePace {
   // Pointers are counted on the way down (capture: a tile's drag stops its press from bubbling), so two fingers or a pen
   // and a mouse hold it until the last one lifts. Each press counts the hold anew: a release the window never saw (a
   // native menu took it) leaves its pointer in the set, and the same pointer pressing again must still hold.
@@ -38,8 +41,11 @@ export function autosavePace(target: PointerTarget = window, now: () => number =
   let pressedAt = 0;
   let last = Number.NEGATIVE_INFINITY;
   let quiet = AUTOSAVE_QUIET_MS;
+  /** The size of the document the last write held. */
+  let written = 0;
   /** When the oldest write not yet sent was made. */
   let oldest: number | null = null;
+  const longest = () => live() && written < AUTOSAVE_PACED_SIZE ? AUTOSAVE_LIVE_MAX_DEFER_MS : AUTOSAVE_MAX_DEFER_MS;
   const press = (event: Event) => { pressedAt = now(); pressed.add((event as PointerEvent).pointerId); };
   const lift = (event: Event) => { pressed.delete((event as PointerEvent).pointerId); };
   // A window that loses focus mid-press may never see the pointer lift.
@@ -53,6 +59,7 @@ export function autosavePace(target: PointerTarget = window, now: () => number =
       const at = now();
       const gap = at - last;
       last = at;
+      written = size;
       oldest ??= at;
       quiet = size < AUTOSAVE_PACED_SIZE ? AUTOSAVE_QUIET_MS
         : Math.min(AUTOSAVE_MAX_QUIET_MS, Math.max(AUTOSAVE_QUIET_MS + Math.round(size / 1_000_000 * AUTOSAVE_MS_PER_MILLION_CHARS),
@@ -62,12 +69,13 @@ export function autosavePace(target: PointerTarget = window, now: () => number =
     sent() { oldest = null; },
     wait() {
       const at = now();
-      if (oldest !== null && at - oldest >= AUTOSAVE_MAX_DEFER_MS) return 0;
+      const most = longest();
+      if (oldest !== null && at - oldest >= most) return 0;
       const settling = Math.max(0, last + quiet - at);
       const heldFor = at - pressedAt;
       const held = pressed.size && heldFor < AUTOSAVE_HOLD_MS ? Math.min(HELD_RECHECK_MS, AUTOSAVE_HOLD_MS - heldFor) : 0;
       const waited = Math.max(settling, held);
-      return oldest === null ? waited : Math.min(waited, AUTOSAVE_MAX_DEFER_MS - (at - oldest));
+      return oldest === null ? waited : Math.min(waited, most - (at - oldest));
     },
     dispose() {
       target.removeEventListener('pointerdown', press, true);

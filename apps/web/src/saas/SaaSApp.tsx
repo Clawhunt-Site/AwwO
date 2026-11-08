@@ -713,11 +713,20 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
     let disposed = false;
     const setupAbort = new AbortController();
     let initializationQueue: Promise<unknown> = Promise.resolve();
-    const pace = autosavePace();
+    // 多人同屏: a canvas someone else is on now (a person or an agent, not a run) sends a run of edits within about 1.5 s
+    // (autosavePace.ts); one this page has to itself keeps the longer waits.
+    const othersHere = () => {
+      const live = multiplayerRef.current;
+      return live.saves.current && Boolean(live.live?.snapshot().participants.some(participant =>
+        participant.id !== live.clientId && participant.kind !== 'awwo'));
+    };
+    const pace = autosavePace(window, () => Date.now(), othersHere);
     // Autosave goes when the pace lets it (autosavePace.ts): a held pointer or a burst of writes still going puts it off.
+    // While a save is out it waits for it: that save's own loop sends what came meanwhile, so one timer looks again.
     const later = (delay: number) => {
       clearTimeout(timer);
       timer = setTimeout(function due() {
+        if (saving.current) { timer = setTimeout(due, 100); return; }
         const wait = pace.wait();
         if (wait > 0) { timer = setTimeout(due, wait); return; }
         void flush(true).catch(() => {});
@@ -852,7 +861,9 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       } catch (error) {
         failed.current = true; setSaveState('未同步'); setError(localDraftFailure(error)); return;
       }
-      setSaveState('等待同步…'); later(pace.wrote(size));
+      // Never later than the pace's longest wait from the oldest write not sent: a run of writes with no pause in it (a
+      // drag, typing) still goes by then.
+      setSaveState('等待同步…'); later(Math.min(pace.wrote(size), pace.wait()));
     };
     const leave = (event: BeforeUnloadEvent) => { if (pending.current || saving.current || failed.current || multiplayerRef.current.holding()) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('awwo:canvas-cache-write', observe); window.addEventListener('beforeunload', leave);
