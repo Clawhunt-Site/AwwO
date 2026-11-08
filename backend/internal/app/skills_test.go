@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,6 +60,64 @@ func TestBuiltinSkillsVideoSetFitsOneNode(t *testing.T) {
 	}
 	if total > maxNodeSkillBytes {
 		t.Fatalf("the four video skills add %d bytes; one node takes at most %d", total, maxNodeSkillBytes)
+	}
+}
+
+// A film's tester attaches film-checks with the skills that run and judge its checks; a builder attaches motion-effects
+// beside code-motion and either the 3D scene skill or the video brief. Each set must fit one node's skill budget.
+func TestBuiltinSkillsFilmSetsFitOneNode(t *testing.T) {
+	skills, err := builtinSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := map[string]int{}
+	for _, s := range skills {
+		size[s.Name] = s.Bytes
+	}
+	for label, set := range map[string][]string{
+		"tester":     {"film-checks", "self-test-oracle", "critic", "code-motion"},
+		"3D effects": {"motion-effects", "code-motion", "procedural-3d-scene"},
+		"effects":    {"motion-effects", "code-motion", "code-video-brief"},
+	} {
+		total := 0
+		for _, name := range set {
+			n, ok := size[name]
+			if !ok {
+				t.Fatalf("%s set: skill %s missing", label, name)
+			}
+			total += n
+		}
+		if len(set) > maxNodeSkills || total > maxNodeSkillBytes {
+			t.Fatalf("the %s set adds %d bytes in %d skills; one node takes at most %d bytes in %d", label, total, len(set), maxNodeSkillBytes, maxNodeSkills)
+		}
+	}
+}
+
+// motion-effects names each library only as the look it stands for. A page sent to a CDN, a script or link tag or an
+// import for one would fail the preview, the page check and the output policy, so the body names no CDN host (the
+// render worker's allowlist and the common CDN names), script or link tag, or import.
+func TestMotionEffectsNamesNoLibraryToLoad(t *testing.T) {
+	skill, ok := builtinSkill("motion-effects")
+	if !ok {
+		t.Fatal("motion-effects missing")
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "apps", "render-worker", "cdn-allowlist.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var origins []string
+	if err := json.Unmarshal(raw, &origins); err != nil || len(origins) < 5 {
+		t.Fatalf("read %d CDN origins from cdn-allowlist.json: %v", len(origins), err)
+	}
+	needles := []string{"://", "<script", "<link", "import(", "import '", `import "`, "from '", `from "`, "jsdelivr", "unpkg", "cdnjs"}
+	for _, origin := range origins {
+		needles = append(needles, strings.TrimPrefix(origin, "https://"))
+	}
+	body := strings.ToLower(skill.Body)
+	for _, needle := range needles {
+		if strings.Contains(body, strings.ToLower(needle)) {
+			t.Fatalf("motion-effects names %q, which would send a page to load a library", needle)
+		}
 	}
 }
 

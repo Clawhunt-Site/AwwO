@@ -113,6 +113,16 @@ No text, code, prompt or media is copied, so the three `attribution:` lines are 
 `scripts/build-skill-licences.mjs` carries no entry for them. A comparison of the three skills with every text file
 of those commits, both posts and the pages read finds no run of five words in common.
 
+Read on 2026-11-08, ideas only: two posts by m4lka (@m4lkxx) on X. The article "Motion Engineering: What Opus 5.5
+Gets Wrong, and How to Catch It" (post 2116504147465757161, article 2116482348103401472, 2026-10-31) sorts the
+defects its author logged in ten films made as code into kinds and pairs each kind with the check that catches it; a
+later post (2119124947821883511, 2026-11-07) lists twelve open-source motion libraries. Neither offers a license, so
+no text, table or figure of theirs is used: the defect kinds, the order of the checks and the measurements informed
+`backend/internal/app/skills/film-checks.md`, and the effects those libraries are known for informed
+`backend/internal/app/skills/motion-effects.md`, which names each library only as the look it stands for, uses none
+of their code and has a page load none of them. Both skills are written in AwwO's own words, carry an empty
+`attribution`, and share no run of four words with either post, even with word endings ignored.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
