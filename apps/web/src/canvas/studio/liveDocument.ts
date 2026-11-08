@@ -9,7 +9,8 @@
 //      (SameSite=Lax, never sent cross-site), storage, DOM or API with the session; no top navigation, no popups;
 //   2. a Content-Security-Policy injected before anything else in <head>: scripts, styles and fonts only inline or
 //      from well-known public CDNs, network requests only to those CDNs, forms never submit anywhere, pictures and
-//      media by any https URL (by none outside those CDNs on a page holding a market Agent's words);
+//      media by any https URL (by none outside those CDNs on a page holding a market Agent's words, or one an Agent
+//      invited to the canvas handed in);
 //   3. a link guard: following a link would navigate the preview itself away, so the click is stopped and handed to
 //      the host (which may offer to open it in a new tab).
 //
@@ -50,8 +51,9 @@ const livePagePolicy = (pictures: string) => [
 ].join('; ');
 /** A page's pictures and media from any https address. */
 export const LIVE_PAGE_CSP = livePagePolicy('https:');
-/** A page holding a market Agent's words (marketPages.ts): pictures and media only from the page itself or the CDNs
- *  above, so that showing it contacts no address the Agent's author chose. */
+/** A page holding a market Agent's words (marketPages.ts), or one an Agent invited to the canvas handed in
+ *  (agentPages.ts): pictures and media only from the page itself or the CDNs above, so that showing it contacts no
+ *  address its author chose. */
 export const MARKET_PAGE_CSP = livePagePolicy(CDN_LIST);
 
 /** Sandbox flags of a live page: scripts, forms handled by its own script, dialogs, pointer lock and downloads. */
@@ -193,7 +195,7 @@ export interface LiveDocumentOptions {
   resolve?: AssetResolver;
   /** Bytes the inlined assets may add, in total. */
   inlineBudget?: number;
-  /** The page holds a market Agent's words: it runs under MARKET_PAGE_CSP. */
+  /** The page is held (a market Agent's words, or an invited Agent's hand-in: LivePage): it runs under MARKET_PAGE_CSP. */
   market?: boolean;
 }
 

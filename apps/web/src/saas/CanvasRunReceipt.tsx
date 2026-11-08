@@ -5,6 +5,7 @@
 // own read of the run it names, what the list does not carry: the canvas that run froze at admission and the run its
 // step made, whose result the reader rates here.
 import { useEffect, useState } from 'react';
+import { agentDisplayName, handedInBy } from '../canvas/agentPages';
 import { caseRunLabel, isMarketReference, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { nodeModelName, type ModelNameSources } from '../canvas/modelNames';
 import { api } from './api';
@@ -48,6 +49,9 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
 
   const when = (value: string) => new Date(value).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const output = final && final.kind !== 'form' ? final.lastOutput : null;
+  // A result an invited Agent handed in was made by no run: none is claimed for it, as for a copied case's recording.
+  const agent = handedInBy(output);
+  const agentName = agent === undefined ? '' : agentDisplayName(agent);
   // A partial result is what a step left when a run did not finish it: the receipt names that run instead.
   const partial = output?.partial === true;
   const matches = (state: string) => partial ? state === 'failed' || state === 'cancelled' || state === 'blocked' : state === 'done';
@@ -57,7 +61,7 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   // canvas, and the step's own run carries the reader's rating of its result, and a market Agent's fee and rating where
   // the step uses one (a copied case's recording names no run of this workspace, so none is read for it).
   const step = final && run ? run.nodes.find(node => node.nodeId === final.id) : undefined;
-  const read = useRunRead(tenantId, canvasId, run && output?.source !== 'case' ? run.id : '', final?.id ?? '', step?.state ?? '');
+  const read = useRunRead(tenantId, canvasId, run && output?.source !== 'case' && agent === undefined ? run.id : '', final?.id ?? '', step?.state ?? '');
   const frozen = read === undefined ? undefined : read?.canvas ?? null;
   // The step's run as a read that saw it end as the list says names it (a read taken earlier may name an attempt the
   // step was retried after).
@@ -69,6 +73,11 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
   // A copied case's recording ran in the case, not here: no run of this workspace is claimed for it.
   if (output?.source === 'case') body = <p className="awwo-results-receipt-note">{t(`这份交付是复制来的案例实录（${caseRunLabel(output)}），没有在这个工作区运行；运行整张图会换成你自己的结果。`,
     `This delivery is a copied case recording (${caseRunLabel(output)}), not run in this workspace; running the graph replaces it with your own result.`)}</p>;
+  else if (agent !== undefined) body = <p className="awwo-results-receipt-note">{agentName
+    ? t(`这份交付是受邀进入画布的 Agent「${agentName}」交来的，不是 AwwO 运行的结果；运行这一步会换成 AwwO 的结果。`,
+      `This delivery was handed in by “${agentName}”, an Agent invited to this canvas, not made by an AwwO run; running this step replaces it with AwwO’s result.`)
+    : t('这份交付是受邀进入画布的 Agent 交来的，不是 AwwO 运行的结果；运行这一步会换成 AwwO 的结果。',
+      'This delivery was handed in by an Agent invited to this canvas, not made by an AwwO run; running this step replaces it with AwwO’s result.')}</p>;
   else if (!runs || (run && frozen === undefined)) body = <p className="awwo-results-receipt-note" role="status">{failed ? t('暂时读不到运行记录。', 'The run records cannot be read right now.') : t('正在读取运行记录…', 'Reading the run records…')}</p>;
   else if (run) {
     const counts = { done: 0, cached: 0, failed: 0 };

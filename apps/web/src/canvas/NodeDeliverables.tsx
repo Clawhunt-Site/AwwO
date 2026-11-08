@@ -8,6 +8,7 @@ import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
+import { agentDisplayName, handedInBy } from './agentPages';
 import { useMarketPage } from './marketPages';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
@@ -142,6 +143,9 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   const output = result || !session ? node.lastOutput ?? undefined : node.lastOutput ?? activeNodeThread(session).lastOutput;
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
+  // A result an Agent invited to the canvas handed in (agentPages.ts): its page is held, and it is said to be the Agent's.
+  const agent = handedInBy(output);
+  const agentName = agent === undefined ? '' : agentDisplayName(agent);
   const locked = readOnly || !onUpdateNode;
   // What the result is read by: the declared form, or a session's page when it declared none (resultPage.ts). The
   // form's editor and a publication keep to the declared form.
@@ -194,7 +198,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   const now = useMinuteClock(dated);
   const age = output ? deliveryAge(output.at, now, t) : '';
   const receipt = output ? [
-    output.source === 'run' ? t('deliverable.fromRun') : output.source === 'manual' ? t('deliverable.fromManual')
+    output.source === 'run' ? t('deliverable.fromRun')
+      : output.source === 'manual' ? agent === undefined ? t('deliverable.fromManual') : agentName ? t('deliverable.fromAgent', { name: agentName }) : t('deliverable.fromAgentUnnamed')
       : output.source === 'case' ? t('deliverable.fromCase', { run: caseRunLabel(output) }) : '',
     // A case recording's date is the case's run, already named above, not when this canvas got it.
     age && output.source !== 'case' ? t('deliverable.receivedAt', { age }) : '',
@@ -240,7 +245,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
       {!result && (historical || output.partial || output.source === 'manual' || output.source === 'case') && <div className="awwo-deliverables-meta">
         {historical && <span>{t('deliverable.historical')}</span>}
         {output.partial && <span>{t('deliverable.partial')}</span>}
-        {output.source === 'manual' && <span>{t('deliverable.manual')}</span>}
+        {output.source === 'manual' && <span>{t(agent === undefined ? 'deliverable.manual' : 'deliverable.agentHandIn')}</span>}
         {output.source === 'case' && !historical && <span>{t('deliverable.case')}</span>}
       </div>}
       {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>{t('deliverable.invalid')}</p> : null}
@@ -309,10 +314,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
               ? <ArtifactPreview key={`${node.id}:${threadKey}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
-                  resolveAsset={field.type === 'html' ? resolveAsset : undefined} market={market}
+                  resolveAsset={field.type === 'html' ? resolveAsset : undefined} market={market} handedInBy={agent}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
-                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`} market={market}
+                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`} market={market} handedInBy={agent}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : fileState(field, String(value), output.source === 'manual') === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />

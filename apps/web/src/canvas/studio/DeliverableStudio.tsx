@@ -23,7 +23,7 @@ import { standaloneWrapper, type AssetResolver } from './liveDocument';
 import { pickCanvasFile } from './canvasAssets';
 import { RenderVideoPanel, useRenderCapability } from './RenderVideoPanel';
 import { buildArchive, decodeText, entryMediaUrl, fetchEntryBytes, mimeOfName, saveBlob, unzipMembers, type LoadedFile } from './studioData';
-import { formatBytes, isTextKind, kindOfName, kindOfType, studioGroups, type StudioEntry, type StudioGroup, type StudioKind } from './studioModel';
+import { entrySource, formatBytes, isTextKind, kindOfName, kindOfType, studioGroups, type StudioEntry, type StudioGroup, type StudioKind } from './studioModel';
 import './studio.css';
 
 export interface DeliverableStudioProps {
@@ -45,6 +45,7 @@ export interface DeliverableStudioProps {
 }
 
 type Loaded = { state: 'loading' } | { state: 'ready'; file: LoadedFile; text: string | null; url?: string } | { state: 'error'; reason: string };
+type Members = StudioEntry[] | 'loading' | 'error';
 type ContentHit = { entryId: string; line: number; snippet: string; column: number };
 
 const KIND_ICON: Record<StudioKind, typeof FileIcon> = {
@@ -64,6 +65,31 @@ const PREVIEWABLE: ReadonlySet<StudioKind> = new Set(['page', 'markdown', 'table
  *  wraps the header at the same width (@container awwo-studio). */
 const STUDIO_NARROW = 760;
 
+/** What a read of an entry is kept under: the entry and the file it names (entrySource). A new delivery under the same
+ *  entry names another file, read and kept apart from the earlier one, so neither a late read of the earlier file nor a
+ *  page still resolving it can take the later one's place. */
+const readKey = (id: string, source: string) => JSON.stringify([id, source]);
+const keyOf = (entry: StudioEntry) => readKey(entry.id, entrySource(entry));
+
+/** What was read for an entry, from the file it names now. */
+function loadedOf(loaded: Readonly<Record<string, Loaded>>, entry: StudioEntry): Loaded | undefined {
+  return loaded[keyOf(entry)];
+}
+
+/** An archive's files, read from the archive the entry names now. */
+function membersOf(members: Readonly<Record<string, Members>>, entry: StudioEntry): Members | undefined {
+  return members[keyOf(entry)];
+}
+
+/** A file of an archive, held as the archive's entry is now (agentPages.ts), and of its delivery: the result that names
+ *  the archive may have been handed in, or replaced by a run, since the archive was opened. */
+function asInArchive(member: StudioEntry, archive: StudioEntry): StudioEntry {
+  if (member.handedInBy === archive.handedInBy && member.deliveredAt === archive.deliveredAt) return member;
+  const { handedInBy: _then, deliveredAt: _at, ...rest } = member;
+  return { ...rest, ...(archive.handedInBy === undefined ? {} : { handedInBy: archive.handedInBy }),
+    ...(archive.deliveredAt === undefined ? {} : { deliveredAt: archive.deliveredAt }) };
+}
+
 /** An entry as the studio shows it once its bytes are known: a stored file takes its real name and kind. */
 function shown(entry: StudioEntry, loaded?: Loaded): StudioEntry {
   if (entry.source.type !== 'stored' || loaded?.state !== 'ready') return entry;
@@ -77,23 +103,32 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const groups = useMemo(() => studioGroups({ nodes: [...nodes], edges: [...edges], execution }, nodeId), [nodes, edges, execution, nodeId]);
   const [loaded, setLoaded] = useState<Record<string, Loaded>>({});
   const loadedRef = useRef(loaded); loadedRef.current = loaded;
-  const [members, setMembers] = useState<Record<string, StudioEntry[] | 'loading' | 'error'>>({});
+  // The reads under way, by key (keyOf).
+  const reads = useRef(new Map<string, Promise<LoadedFile | null>>());
+  const [members, setMembers] = useState<Record<string, Members>>({});
   const [openArchives, setOpenArchives] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const flat = useMemo(() => {
     const list: StudioEntry[] = [];
     for (const group of groups) for (const entry of group.entries) {
       list.push(entry);
-      const inside = members[entry.id];
-      if (Array.isArray(inside)) list.push(...inside);
+      const inside = membersOf(members, entry);
+      if (Array.isArray(inside)) list.push(...inside.map(member => asInArchive(member, entry)));
     }
     return list;
   }, [groups, members]);
   const firstId = initialEntryId && flat.some(entry => entry.id === initialEntryId) ? initialEntryId
     : groups[0]?.entries.find(entry => entry.primary)?.id ?? groups[0]?.entries[0]?.id ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(firstId);
-  const selectedSource = flat.find(entry => entry.id === selectedId) ?? flat.find(entry => entry.id === firstId) ?? null;
-  const selected = selectedSource ? shown(selectedSource, loaded[selectedSource.id]) : null;
+  // A file inside an archive is listed only while its archive's files are read: while a new delivery's archive is read
+  // again, the file's own archive stands in for it (and is read: it is then the file selected), never the first file.
+  const lastShown = useRef<StudioEntry | null>(null);
+  const lastMember = lastShown.current?.id === selectedId && lastShown.current.source.type === 'member' ? lastShown.current.source : null;
+  const selectedSource = flat.find(entry => entry.id === selectedId)
+    ?? (lastMember ? flat.find(entry => entry.id === lastMember.parentId) : undefined)
+    ?? flat.find(entry => entry.id === firstId) ?? null;
+  if (selectedSource && selectedSource.id === selectedId) lastShown.current = selectedSource;
+  const selected = selectedSource ? shown(selectedSource, loadedOf(loaded, selectedSource)) : null;
   const marketNodes = useMemo(() => marketPageNodes(nodes, edges), [nodes, edges]);
   const [mode, setMode] = useState<'preview' | 'code'>('preview');
   const [device, setDevice] = useState<LiveDevice>('desktop');
@@ -149,9 +184,10 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const [maximized, setMaximized] = useState(false);
   const [notice, setNotice] = useState<{ text: string; href?: string } | null>(null);
   const [bundling, setBundling] = useState<{ done: number; total: number } | null>(null);
-  // The document the live page built, with the entry it was built for: a page still building, or another one
-  // chosen since, never hands its predecessor's document to Open in a new tab or Render.
-  const pageDocument = useRef<{ entryId: string; html: string } | null>(null);
+  // The document the live page built, with the entry, the page and the policy it was built for: a page still building,
+  // another one chosen since, a new delivery of the same entry or a page held since (a market Agent's, an invited
+  // Agent's hand-in, before its reader runs it) never hands its predecessor's document to Open in a new tab or Render.
+  const pageDocument = useRef<{ entryId: string; source: string; held: boolean; html: string } | null>(null);
   // Counts the builds, so the render panel can look up a page's earlier renders once its document exists.
   const [pageBuilds, setPageBuilds] = useState(0);
   // Rendering a page as a video: offered on a cloud canvas whose server has a render worker (RenderVideoPanel.tsx).
@@ -162,75 +198,108 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const controllers = useRef(new Set<AbortController>());
   useEffect(() => () => { for (const controller of controllers.current) controller.abort(); }, []);
 
-  /** Load (once) and cache an entry's bytes; text kinds are decoded, binary kinds get an object URL. */
+  /** Load (once) and cache an entry's bytes; text kinds are decoded, binary kinds get an object URL. Kept under the
+   *  entry and the file it names (keyOf), so each file a delivery names is read once and kept apart. */
   const load = useCallback((entry: StudioEntry): Promise<LoadedFile | null> => {
-    const current = loadedRef.current[entry.id];
+    const key = keyOf(entry);
+    const current = loadedRef.current[key];
     if (current?.state === 'ready') return Promise.resolve(current.file);
-    if (current?.state === 'loading') {
-      return new Promise(resolve => {
-        const poll = setInterval(() => {
-          const value = loadedRef.current[entry.id];
-          if (value?.state !== 'loading') { clearInterval(poll); resolve(value?.state === 'ready' ? value.file : null); }
-        }, 120);
-      });
-    }
+    // Two callers in one pass (the selected file's load and an archive opening again) share one read. A read that was
+    // stopped (the studio closing, or StrictMode's trial unmount) is never shared: a later call reads again, and so does
+    // a call that finds the record still 'loading' with no read under way.
+    const pending = reads.current.get(key);
+    if (pending) return pending;
     if (entry.source.type === 'missing') return Promise.resolve(null);
     const controller = new AbortController();
     controllers.current.add(controller);
-    setLoaded(previous => ({ ...previous, [entry.id]: { state: 'loading' } }));
-    return fetchEntryBytes(entry, controller.signal).then(file => {
+    setLoaded(previous => ({ ...previous, [key]: { state: 'loading' } }));
+    const read = fetchEntryBytes(entry, controller.signal).then(file => {
       const name = file.name || entry.name;
       const kind = entry.source.type === 'stored' ? (kindOfName(name) !== 'file' ? kindOfName(name) : kindOfType(file.contentType) ?? 'file') : entry.kind;
       const text = isTextKind(kind) || kind === 'file' ? decodeText(file.bytes) : null;
       const binary = !text && ['image', 'video', 'audio'].includes(kind);
       const url = binary ? URL.createObjectURL(new Blob([file.bytes.slice().buffer as ArrayBuffer], { type: file.contentType && !/octet-stream/.test(file.contentType) ? file.contentType : mimeOfName(name) })) : undefined;
-      setLoaded(previous => ({ ...previous, [entry.id]: { state: 'ready', file, text, ...(url ? { url } : {}) } }));
+      setLoaded(previous => ({ ...previous, [key]: { state: 'ready', file, text, ...(url ? { url } : {}) } }));
       return file;
     }).catch(error => {
-      if (!controller.signal.aborted) setLoaded(previous => ({ ...previous, [entry.id]: { state: 'error', reason: error instanceof Error ? error.message : 'studio_unavailable' } }));
+      if (!controller.signal.aborted) setLoaded(previous => ({ ...previous, [key]: { state: 'error', reason: error instanceof Error ? error.message : 'studio_unavailable' } }));
       return null;
-    }).finally(() => controllers.current.delete(controller));
+    }).finally(() => { controllers.current.delete(controller); if (reads.current.get(key) === read) reads.current.delete(key); });
+    reads.current.set(key, read);
+    controller.signal.addEventListener('abort', () => { if (reads.current.get(key) === read) reads.current.delete(key); }, { once: true });
+    return read;
   }, []);
   // Object URLs live as long as the studio.
   useEffect(() => () => { for (const value of Object.values(loadedRef.current)) if (value.state === 'ready' && value.url) URL.revokeObjectURL(value.url); }, []);
+  // Only the files listed now (and the canvas files a page may name) keep what was read of them: an earlier delivery's
+  // file, and an earlier revision of an archive with its files, go once nothing lists them, object URLs and all. A read
+  // still under way is left to end; it goes at the next change.
+  useEffect(() => {
+    const listed = new Set([...flat, ...(assetEntries ?? [])].map(keyOf));
+    const stale = Object.keys(loadedRef.current).filter(key => !listed.has(key) && loadedRef.current[key].state !== 'loading');
+    if (stale.length) {
+      for (const key of stale) { const value = loadedRef.current[key]; if (value.state === 'ready' && value.url) URL.revokeObjectURL(value.url); }
+      setLoaded(previous => { const next = { ...previous }; for (const key of stale) delete next[key]; return next; });
+    }
+    setMembers(previous => {
+      const gone = Object.keys(previous).filter(key => !listed.has(key) && previous[key] !== 'loading');
+      if (!gone.length) return previous;
+      const next = { ...previous };
+      for (const key of gone) delete next[key];
+      return next;
+    });
+  }, [flat, assetEntries]);
 
   // The selected file loads as soon as it is chosen (an inline value needs nothing).
   useEffect(() => {
     if (!selectedSource || selectedSource.source.type === 'inline' || selectedSource.source.type === 'missing') return;
     if (selectedSource.source.type === 'media' && (selectedSource.kind === 'image' || selectedSource.kind === 'video')) return;
     void load(selectedSource);
-  }, [selectedSource?.id, load]);
+  }, [selectedSource?.id, selectedSource ? entrySource(selectedSource) : '', load]);
 
-  const toggleArchive = useCallback((entry: StudioEntry) => {
-    const open = !openArchives[entry.id];
-    setOpenArchives(previous => ({ ...previous, [entry.id]: open }));
-    if (!open || members[entry.id]) return;
-    setMembers(previous => ({ ...previous, [entry.id]: 'loading' }));
+  /** Opens an archive in the tree, reading its files unless they were read from the archive it names now. Its files
+   *  name that archive (their source's `archive`), and take its current hold where they are listed (asInArchive). */
+  const openArchive = useCallback((entry: StudioEntry) => {
+    setOpenArchives(previous => ({ ...previous, [entry.id]: true }));
+    if (membersOf(members, entry)) return;
+    const key = keyOf(entry);
+    const archive = entrySource(entry);
+    setMembers(previous => ({ ...previous, [key]: 'loading' }));
     const controller = new AbortController();
     controllers.current.add(controller);
     void load(entry).then(async file => {
       if (!file) throw new Error('studio_unavailable');
       const inside = await unzipMembers(file.bytes, controller.signal);
-      setMembers(previous => ({ ...previous, [entry.id]: inside.map(member => {
+      setMembers(previous => ({ ...previous, [key]: inside.map((member): StudioEntry => {
         const parts = member.path.split('/');
         const name = parts.pop()!;
         return { id: `${entry.id}::${member.path}`, nodeId: entry.nodeId, nodeTitle: entry.nodeTitle, folder: [...entry.folder, entry.name.replace(/\.zip$/i, ''), ...parts],
           name, label: member.path, kind: kindOfName(name), state: entry.state, size: member.bytes.length,
-          source: { type: 'member', parentId: entry.id, path: member.path, bytes: member.bytes } };
+          source: { type: 'member', parentId: entry.id, archive, path: member.path, bytes: member.bytes } };
       }) }));
-    }).catch(() => setMembers(previous => ({ ...previous, [entry.id]: 'error' }))).finally(() => controllers.current.delete(controller));
-  }, [openArchives, members, load]);
+    }).catch(() => setMembers(previous => ({ ...previous, [key]: 'error' }))).finally(() => controllers.current.delete(controller));
+  }, [members, load]);
+  const toggleArchive = useCallback((entry: StudioEntry) => {
+    if (openArchives[entry.id]) setOpenArchives(previous => ({ ...previous, [entry.id]: false }));
+    else openArchive(entry);
+  }, [openArchives, openArchive]);
 
-  // A stored archive opens in place when it is the file selected.
+  // A stored archive opens in place when it is the file selected; an archive open in the tree reads its files again once
+  // a new delivery names another archive.
   useEffect(() => {
-    if (selected?.kind === 'archive' && !openArchives[selected.id] && !members[selected.id]) toggleArchive(selected);
-  }, [selected?.id, selected?.kind]);
+    if (selected?.kind === 'archive' && !membersOf(members, selected)) openArchive(selected);
+  }, [selected?.id, selected?.kind, selected ? entrySource(selected) : '']);
+  useEffect(() => {
+    for (const group of groups) for (const entry of group.entries) {
+      if (openArchives[entry.id] && !membersOf(members, entry)) openArchive(entry);
+    }
+  }, [groups]);
 
   /** What a page's relative URLs point at: its archive's own files, or (for a page a node published) any file of the
    *  canvas with that name, such as a picture another node generated. */
   const resolverFor = useCallback((entry: StudioEntry): AssetResolver => async (path: string) => {
     if (entry.source.type === 'member') {
-      const siblings = members[entry.source.parentId];
+      const siblings = members[readKey(entry.source.parentId, entry.source.archive)];
       if (!Array.isArray(siblings)) return null;
       const match = siblings.find(item => item.source.type === 'member' && item.source.path === path)
         ?? siblings.find(item => item.source.type === 'member' && item.source.path.toLowerCase() === path.toLowerCase());
@@ -239,7 +308,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     const pool = assetEntries ? [...flat, ...assetEntries.filter(item => !flat.some(own => own.id === item.id))] : flat;
     // Every image node calls its first picture image-1.jpg: a page names which by the node folder, `<node id>/image-1.jpg`
     // (pickCanvasFile). Matching the name alone gave every chapter of a page the first node's picture.
-    const candidate = pickCanvasFile(pool, path, entry.id, item => shown(item, loadedRef.current[item.id]).name);
+    const candidate = pickCanvasFile(pool, path, entry.id, item => shown(item, loadedOf(loadedRef.current, item)).name);
     if (!candidate) return null;
     const file = await load(candidate);
     return file ? { bytes: file.bytes, name: file.name || candidate.name } : null;
@@ -261,13 +330,13 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   useEffect(() => {
     if (!searching) return;
     for (const entry of flat) {
-      if (entry.source.type === 'stored' && !loadedRef.current[entry.id] && (isTextKind(kindOfName(entry.name)) || entry.kind === 'file')) void load(entry);
+      if (entry.source.type === 'stored' && !loadedOf(loadedRef.current, entry) && (isTextKind(kindOfName(entry.name)) || entry.kind === 'file')) void load(entry);
     }
   }, [searching, flat, load]);
   const textOf = useCallback((entry: StudioEntry): string | null => {
     if (entry.source.type === 'inline') return entry.source.text;
     if (entry.source.type === 'member' && isTextKind(entry.kind)) return decodeText(entry.source.bytes);
-    const value = loaded[entry.id];
+    const value = loadedOf(loaded, entry);
     return value?.state === 'ready' ? value.text : null;
   }, [loaded]);
   const hits = useMemo<ContentHit[]>(() => {
@@ -292,7 +361,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     setSelectedId(entry.id);
     setJump(line ? { entryId: entry.id, line } : null);
     if (line) setMode('code');
-    else setMode(PREVIEWABLE.has(shown(entry, loaded[entry.id]).kind) || !isTextKind(shown(entry, loaded[entry.id]).kind) ? 'preview' : 'code');
+    else setMode(PREVIEWABLE.has(shown(entry, loadedOf(loaded, entry)).kind) || !isTextKind(shown(entry, loadedOf(loaded, entry)).kind) ? 'preview' : 'code');
     setReloadKey(0);
     if (treeOverFile()) foldTree();
   };
@@ -304,7 +373,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       return;
     }
     const file = await load(selected);
-    if (file) saveBlob(new Blob([file.bytes.slice().buffer as ArrayBuffer], { type: file.contentType || mimeOfName(selected.name) }), shown(selected, loadedRef.current[selected.id]).name);
+    if (file) saveBlob(new Blob([file.bytes.slice().buffer as ArrayBuffer], { type: file.contentType || mimeOfName(selected.name) }), shown(selected, loadedOf(loadedRef.current, selected)).name);
     else setNotice({ text: t('studio.downloadFailed') });
   };
   const downloadAll = async () => {
@@ -322,11 +391,11 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const openInTab = () => {
     if (!selected) return;
     let url: string | null = null;
-    const built = pageDocument.current?.entryId === selected.id ? pageDocument.current.html : null;
+    const built = builtPage();
     if (selected.kind === 'page' && built) {
       url = URL.createObjectURL(new Blob([standaloneWrapper(selected.name, built)], { type: 'text/html;charset=utf-8' }));
     } else {
-      const value = loaded[selected.id];
+      const value = loadedOf(loaded, selected);
       // SVG can carry script: it is never opened as a document of this site.
       if (value?.state === 'ready' && value.url && !/svg/i.test(value.file.contentType || selected.name)) url = value.url;
       else if (selected.source.type === 'media') url = entryMediaUrl(selected);
@@ -357,8 +426,15 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   }, [variant]);
 
   const total = groups.reduce((sum, group) => sum + group.entries.length, 0);
-  const selectedLoaded = selected ? loaded[selected.id] : undefined;
+  const selectedLoaded = selected ? loadedOf(loaded, selected) : undefined;
   const selectedText = selected ? textOf(selected) : null;
+  // A page shown under the policy that loads no pictures by URL, and only once its reader runs it (LivePage).
+  const selectedHeld = selected ? marketNodes.has(selected.nodeId) || selected.handedInBy !== undefined : false;
+  /** The live page's own build of the page shown now, under the policy it is shown with; null until it has one. */
+  const builtPage = (): string | null => {
+    const value = pageDocument.current;
+    return value && selected && value.entryId === selected.id && value.source === selectedText && value.held === selectedHeld ? value.html : null;
+  };
   const hasPreview = selected ? PREVIEWABLE.has(selected.kind) : false;
   const canCode = selected ? isTextKind(selected.kind) && (selectedText !== null || selected.source.type === 'inline') : false;
   const showCode = canCode && (mode === 'code' || !hasPreview);
@@ -411,25 +487,25 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
         const entry = flat.find(item => item.id === hit.entryId)!;
         const before = hit.snippet.toLowerCase().indexOf(lowered);
         return <li key={`${hit.entryId}:${hit.line}:${hit.column}`}><button type="button" onClick={() => choose(entry, hit.line)} title={`${entry.name}:${hit.line}`}>
-          <span className="awwo-studio-hit-file">{shown(entry, loaded[entry.id]).name}<small>:{hit.line}</small></span>
+          <span className="awwo-studio-hit-file">{shown(entry, loadedOf(loaded, entry)).name}<small>:{hit.line}</small></span>
           <span className="awwo-studio-hit-text">{before >= 0 ? <>{hit.snippet.slice(0, before)}<mark>{hit.snippet.slice(before, before + lowered.length)}</mark>{hit.snippet.slice(before + lowered.length)}</> : hit.snippet}</span>
         </button></li>;
       })}</ul> : <p>{t('studio.noContentMatch')}</p>}
     </section>}
     <div className="awwo-studio-groups">
       {groups.map(group => {
-        const visible = group.entries.filter(entry => nameMatches(entry) || (Array.isArray(members[entry.id]) && (members[entry.id] as StudioEntry[]).some(nameMatches)));
+        const visible = group.entries.filter(entry => { const inside = membersOf(members, entry); return nameMatches(entry) || (Array.isArray(inside) && inside.some(nameMatches)); });
         if (lowered && !visible.length && !group.title.toLowerCase().includes(lowered)) return null;
         const closed = collapsed[group.nodeId] && !lowered;
         return <section key={group.nodeId} className={`awwo-studio-group${group.final ? ' is-final' : ''}`}>
           <button type="button" className="awwo-studio-group-head" aria-expanded={!closed} onClick={() => setCollapsed(previous => ({ ...previous, [group.nodeId]: !closed }))}>
             {closed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
             <Folder size={14} aria-hidden="true" /><span title={group.title}>{group.title}</span>
-            {group.final ? <em className="awwo-studio-badge is-final">{t('studio.finalBadge')}</em> : group.state !== 'run' ? <em className={`awwo-studio-badge is-${group.state}`}>{t(STATE_LABEL[group.state])}</em> : null}
+            {group.final ? <em className="awwo-studio-badge is-final">{t('studio.finalBadge')}</em> : group.state !== 'run' ? <em className={`awwo-studio-badge is-${group.state}`}>{t(group.state === 'manual' && group.entries.some(entry => entry.handedInBy !== undefined) ? 'results.stateAgent' : STATE_LABEL[group.state])}</em> : null}
           </button>
-          {!closed && <ul>{(lowered ? visible : group.entries).map(entry => <TreeItem key={entry.id} entry={shown(entry, loaded[entry.id])} depth={0} selectedId={selected?.id ?? null}
-            loading={loaded[entry.id]?.state === 'loading'} archive={entry.kind === 'archive' || shown(entry, loaded[entry.id]).kind === 'archive'}
-            open={Boolean(openArchives[entry.id])} members={members[entry.id]} filter={lowered ? nameMatches : undefined}
+          {!closed && <ul>{(lowered ? visible : group.entries).map(entry => <TreeItem key={entry.id} entry={shown(entry, loadedOf(loaded, entry))} depth={0} selectedId={selected?.id ?? null}
+            loading={loadedOf(loaded, entry)?.state === 'loading'} archive={entry.kind === 'archive' || shown(entry, loadedOf(loaded, entry)).kind === 'archive'}
+            open={Boolean(openArchives[entry.id])} members={membersOf(members, entry)} filter={lowered ? nameMatches : undefined}
             onChoose={choose} onToggle={() => toggleArchive(entry)} t={t} />)}</ul>}
         </section>;
       })}
@@ -447,7 +523,8 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       line={jump?.entryId === selected.id ? jump.line : undefined} query={lowered} t={t} />;
   else if (selected.kind === 'page') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <LivePage key={selected.id} html={selectedText} title={selected.name} path={selected.source.type === 'member' ? selected.source.path : selected.name}
-      resolve={selectedResolver} device={device} reloadKey={reloadKey} market={marketNodes.has(selected.nodeId)} onDocument={document => { pageDocument.current = { entryId: selected.id, html: document }; setPageBuilds(count => count + 1); }}
+      resolve={selectedResolver} device={device} reloadKey={reloadKey} market={marketNodes.has(selected.nodeId)} handedInBy={selected.handedInBy} delivery={selected.deliveredAt}
+      onDocument={document => { pageDocument.current = document === null ? null : { entryId: selected.id, source: selectedText, held: selectedHeld, html: document }; setPageBuilds(count => count + 1); }}
       onLink={href => setNotice({ text: t('studio.linkBlocked'), href })} />;
   else if (selected.kind === 'markdown') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <div className="awwo-studio-doc awwo-markdown-preview"><DeliverableMarkdown>{selectedText}</DeliverableMarkdown></div>;
@@ -465,7 +542,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   } else if (selected.kind === 'pdf') {
     body = selectedLoaded?.state === 'ready' ? <div className="awwo-studio-pdf"><PdfPreview file={{ name: selectedLoaded.file.name || selected.name, bytes: selectedLoaded.file.bytes }} /></div> : <Pending loaded={selectedLoaded} t={t} />;
   } else if (selected.kind === 'archive') {
-    const inside = members[selected.id];
+    const inside = membersOf(members, selected);
     const pages = Array.isArray(inside) ? inside.filter(item => item.kind === 'page') : [];
     const index = pages.find(item => /(?:^|\/)index\.html?$/i.test(item.source.type === 'member' ? item.source.path : item.name)) ?? pages[0];
     body = <div className="awwo-studio-placeholder"><Archive size={28} aria-hidden="true" />
@@ -493,7 +570,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       {sidebar && tree}
       <main className="awwo-studio-main">{body}</main>
       {rendering && selected?.kind === 'page' && !showCode && renderCapability && <RenderVideoPanel key={selected.id} nodeId={selected.nodeId} pageName={selected.name}
-        capability={renderCapability} documentOf={() => pageDocument.current?.entryId === selected.id ? pageDocument.current.html : null} documentVersion={pageBuilds}
+        capability={renderCapability} documentOf={builtPage} documentVersion={pageBuilds}
         onClose={() => setRendering(false)} />}
     </div>
     {status}

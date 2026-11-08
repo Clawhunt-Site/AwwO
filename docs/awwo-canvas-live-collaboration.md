@@ -298,7 +298,8 @@ cookie. A `scope: read` token only watches.
 - Set a node's `title`, `persona`, `x`, `y`, `w`, `h`, `deliverablesOpen`; a form's `fields`; an assemble node's
   `template` and `fileName`; an edit node's `timeline`.
 - Write a node's `lastOutput`: the server keeps it as `source: "manual"`, at the time it came, with `by` naming the
-  agent, so it is never shown as AwwO's engine's result.
+  agent (`{kind: "agent", name}`, the token's name), so it is never shown as AwwO's engine's result. The canvas keeps
+  `by` too, and its panel says "Handed in by <name>" over the result (see "An agent's page" below).
 - Add and remove wires, checked against the nodes' ports and types (graph_contracts.go `nodePort`, `edgeTypesFit`).
 - Each value is checked (`agentFieldValue`): a title is text of at most 200 bytes (UTF-8, so about 66 Chinese
   characters), a persona 32,000 bytes, a template or a timeline 1 MiB, a file name 200 bytes without `/` or `\`; `x` and
@@ -321,6 +322,39 @@ An agent's write takes the nodes it wrote for 60 s, or renews its own claim, nev
   check sends a run's page back to the node once when it fails (`docs/agent-graph.md`, Delivery formats). A contract
   stays a person's to set; adding one gives the node its fields' ports in place of `context` and `result`, so the wires
   on those two go.
+
+### An agent's page
+
+A page an agent hands in reaches every viewer's browser as the agent wrote it, never through AwwO's engine, and a running
+page can send what it shows, and what a viewer types into it, to another address (a picture's URL, or its own frame sent
+elsewhere, which no sandbox flag forbids). So it is held as a market Agent's page is (`apps/web/src/canvas/agentPages.ts`,
+the owner's choice of 2026-11-08):
+
+- A result whose `by` is an agent, in a declared html field or as the whole result of a session with no output fields,
+  shows still in the deliverables panel, an enlarged card, the results studio (a page inside an archive it names too), a
+  preview display and the 成果 view: no script runs and nothing is loaded from elsewhere. A line names the agent.
+- **运行页面 / Run page** runs it, for that delivery and where it is shown; an enlarged card only shows it still (the
+  studio runs it). Running, it loads pictures and media by URL only from the CDNs (`MARKET_PAGE_CSP`).
+- A new hand-in shows still again, the same page handed in again included. The hold ends when a run or a person's own
+  publication replaces the result.
+- A stored file or an archive a hand-in names is held the same way. A view reads a stored file again whenever a new
+  delivery of the same deliverable names another file, and an archive's pages take the hold of the result that names
+  the archive now; Open in a new tab and Render take only the live page's own build of the page shown, under the policy
+  it is shown with.
+- The page check never sends a hand-in back for a repair, held or run. A run's record shows a result it reused as text.
+- The panel, the 成果 view, the studio, a preview display, a form's card on the board and the home page's recent results
+  say who handed it in (with the agent's name where they have room), never "published by hand"; the 成果 view's run receipt
+  claims no run for it, as for a copied case's recording.
+- Not held, an open limit: a run's result made from words an agent wrote, once a person runs it. A session's run reads
+  a hand-in as its input, as it reads a person's; an assemble node copies its inputs and its `template` into its page as
+  they are, so a hand-in an agent wires into one, or a `template`, a form's `fields` or a `persona` it writes, comes out
+  as an ordinary run's result and runs as one. The document records no writer of a template, a form's fields or a
+  persona, so holding only a wired hand-in would leave the same page one template away; closing this takes the server
+  marking such nodes.
+- Also open: a member's own write is applied as sent, so a member could put an agent's `by` on their own result: that
+  page is then held and named after the agent wherever it is shown. And a hand-in can lose its `by` for everyone through
+  a write from a page that never kept it: an unsent draft a page from before this release saved, restored by this one,
+  or an undo or redo in a tab still open on an older page.
 
 ### Ports
 

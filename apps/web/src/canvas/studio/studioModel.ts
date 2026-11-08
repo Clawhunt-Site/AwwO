@@ -6,6 +6,7 @@
 // film, subtitles, report and stills) become their own files, and a field that named a file no server holds is listed
 // as missing, never as a delivery.
 // Stored bytes are not fetched here; the studio loads them when a file is opened (studioData.ts).
+import { handedInBy } from '../agentPages';
 import type { CanvasDocument, CanvasNode, SessionNode } from '../canvasDoc';
 import { canvasResult, type DeliveryState } from '../canvasResultModel';
 import { deliveryPresentation } from '../fileDeliveryPresentation';
@@ -24,8 +25,8 @@ export type StudioSource =
   | { type: 'stored'; reference: string }
   /** A generated image, video or 3D model (an artifact id from an `awwo.media` record). */
   | { type: 'media'; artifactId: string; contentType: string; size: number }
-  /** A file inside an archive the studio has opened. */
-  | { type: 'member'; parentId: string; path: string; bytes: Uint8Array }
+  /** A file inside an archive the studio has opened: the archive entry and the file it named then (entrySource). */
+  | { type: 'member'; parentId: string; archive: string; path: string; bytes: Uint8Array }
   /** A file field that came back as a name with no file behind it. */
   | { type: 'missing'; claimed: string };
 
@@ -47,6 +48,12 @@ export interface StudioEntry {
   primary?: boolean;
   /** An acceptance step's report. */
   review?: boolean;
+  /** The Agent invited to the canvas that handed the node's result in (agentPages.ts), '' where it has no name: a page of
+   *  it shows still until its reader runs it, wherever it is shown. */
+  handedInBy?: string;
+  /** When the node's result came (its `at`): a held page's reader chooses to run one delivery, so a page handed in again
+   *  asks again (LivePage's `delivery`). */
+  deliveredAt?: number;
 }
 
 export interface StudioGroup {
@@ -74,6 +81,15 @@ const EXTENSION_KIND: ReadonlyArray<readonly [RegExp, StudioKind]> = [
   [/\.(?:[cm]?[jt]sx?|css|scss|sass|less|py|go|rs|java|kt|swift|c|h|cc|cpp|hpp|cs|php|rb|lua|sh|bash|zsh|ps1|bat|sql|ya?ml|toml|ini|cfg|conf|env|xml|vue|svelte|astro|graphql|gql|proto|r|dart|scala|ex|exs|erl|hs|ml|tf|dockerfile|makefile|gitignore|editorconfig|lock)$/i, 'code'],
 ];
 const BARE_CODE = /(?:^|\/)(?:Dockerfile|Makefile|Procfile|LICENSE|README|CHANGELOG|\.gitignore|\.env\.example)$/i;
+
+/** What an entry's bytes are read from. An entry's id names a node's deliverable, not its bytes: once the node delivers
+ *  again, the same id can name another stored file, so whatever was read for it is kept with this, and read again when
+ *  it differs. */
+export function entrySource(entry: StudioEntry): string {
+  const source = entry.source;
+  return source.type === 'stored' ? `stored:${source.reference}` : source.type === 'media' ? `media:${source.artifactId}`
+    : source.type === 'member' ? `member:${source.parentId}:${source.archive}:${source.path}` : source.type === 'missing' ? `missing:${source.claimed}` : 'inline';
+}
 
 /** The viewer a file name calls for. */
 export function kindOfName(name: string): StudioKind {
@@ -144,7 +160,10 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
   // A session that declared no deliverables and returned a complete HTML document delivered that page (resultPage.ts):
   // it is the node's `<title>.html`.
   const contract = displayContract(node, node.lastOutput.text);
-  const base = { nodeId: node.id, nodeTitle, folder: [] as string[], state, ...(review ? { review: true } : {}) };
+  // Every file of a result an invited Agent handed in is held as its page is (agentPages.ts), an archive's included.
+  const agent = handedInBy(node.lastOutput);
+  const base = { nodeId: node.id, nodeTitle, folder: [] as string[], state, ...(review ? { review: true } : {}),
+    ...(agent === undefined ? {} : { handedInBy: agent }), deliveredAt: node.lastOutput.at };
   const text = node.lastOutput.text;
   const entries: StudioEntry[] = [];
   const used = new Set<string>();

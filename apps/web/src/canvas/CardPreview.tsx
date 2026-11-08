@@ -12,7 +12,7 @@ import { ModelPreview } from './ModelPreview';
 import { canvasFileBytes, canvasResolver } from './studio/canvasAssets';
 import { LivePage } from './studio/LivePage';
 import { decodeText, entryMediaUrl, type LoadedFile } from './studio/studioData';
-import { kindOfName, kindOfType, nodeEntries, type StudioEntry, type StudioKind } from './studio/studioModel';
+import { entrySource, kindOfName, kindOfType, nodeEntries, type StudioEntry, type StudioKind } from './studio/studioModel';
 import './card-preview.css';
 
 export interface CardPreviewProps {
@@ -32,16 +32,18 @@ function stateOf(node: SessionNode): DeliveryState {
   return !output ? 'none' : output.partial ? 'partial' : output.source === 'case' ? 'case' : output.source === 'manual' ? 'manual' : 'run';
 }
 
-/** A stored file's bytes and what they turned out to be. */
+/** A stored file's bytes and what they turned out to be: of the file the entry names now (entrySource), which a new
+ *  delivery under the same entry can change. */
 function useStoredFile(entry: StudioEntry | undefined) {
-  const [file, setFile] = useState<{ id: string; file: LoadedFile | null } | null>(null);
+  const [file, setFile] = useState<{ key: string; file: LoadedFile | null } | null>(null);
+  const key = entry ? JSON.stringify([entry.id, entrySource(entry)]) : '';
   useEffect(() => {
     if (!entry || (entry.source.type !== 'stored' && !(entry.source.type === 'media' && entry.kind === 'model'))) return;
     let live = true;
-    void canvasFileBytes(entry).then(value => { if (live) setFile({ id: entry.id, file: value }); });
+    void canvasFileBytes(entry).then(value => { if (live) setFile({ key, file: value }); });
     return () => { live = false; };
-  }, [entry?.id]);
-  return file && entry && file.id === entry.id ? file : null;
+  }, [key]);
+  return file && entry && file.key === key ? file : null;
 }
 
 export function CardPreview({ node, canvasEntries, running, liveText, onOpenStudio, onOpenChat }: CardPreviewProps) {
@@ -70,7 +72,7 @@ export function CardPreview({ node, canvasEntries, running, liveText, onOpenStud
     body = <div className="awwo-card-preview-empty is-warning"><AlertTriangle size={20} aria-hidden="true" />
       <p>{t('studio.missingFile', { name: entry.source.type === 'missing' ? entry.source.claimed : entry.name })}</p></div>;
   } else if (kind === 'page') {
-    body = text !== null ? <LivePage passive html={text} title={entry.name} path={entry.name} resolve={resolver} market={market} />
+    body = text !== null ? <LivePage passive html={text} title={entry.name} path={entry.name} resolve={resolver} market={market} handedInBy={entry.handedInBy} />
       : <div className="awwo-card-preview-empty"><Loader2 size={18} aria-hidden="true" className="awwo-studio-spin" /></div>;
   } else if (kind === 'image' && images.length > 1) {
     body = <div className={`awwo-card-preview-grid is-${Math.min(images.length, 4)}`}>{images.slice(0, 4).map(image =>

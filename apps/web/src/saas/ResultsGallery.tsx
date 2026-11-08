@@ -7,6 +7,7 @@
 // or, for a member, deletes the canvas; 管理 does either for several cards at once.
 import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Clapperboard, FileText, Image as ImageIcon } from 'lucide-react';
+import { handedInBy } from '../canvas/agentPages';
 import { caseRunLabel, sanitizeDocument } from '../canvas/canvasDoc';
 import { forgetCanvasStorage } from '../canvas/canvasStorage';
 import { canvasResult, type StepDelivery } from '../canvas/canvasResultModel';
@@ -144,7 +145,8 @@ function ScopedResultsGallery({ tenant, canvases, userId, onCanvasesDeleted }: G
   const stopManaging = () => { setSelecting(false); setSelected(new Set()); };
   const state = (entry: Entry) => entry.final.state === 'partial' ? t('部分结果', 'Partial result')
     : entry.final.state === 'case' ? t('案例实录', 'Case recording')
-    : entry.final.state === 'manual' ? t('手动发布', 'Published by hand') : t('运行交付', 'From a run');
+    : entry.final.state === 'manual' ? handedInBy(entry.final.output) === undefined ? t('手动发布', 'Published by hand') : t('Agent 交来', 'Handed in by an Agent')
+    : t('运行交付', 'From a run');
   const body = (entry: Entry) => <>
     <ResultThumbnail step={entry.final} />
     <span className="saas-result-body">

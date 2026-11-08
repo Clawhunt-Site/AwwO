@@ -38,6 +38,7 @@ import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { nodeModelName, unlistedModelLabel, type ModelNameSources } from './modelNames';
 import { AGENT_KIND_META, isMarketReference, type CanvasNode, type SessionNode } from './canvasDoc';
+import { handedInBy } from './agentPages';
 import { MarketAgentChip, useMarketModelLocked } from './MarketAgentChip';
 import { marketUsable } from './marketAgents';
 import { TAIL_LINES, lodFor, type TileLod } from './lod';
@@ -1196,7 +1197,7 @@ export const SessionTile = memo(function SessionTile({
   const outputView = output ? <div className="canvas-tile-output" data-testid={`canvas-tile-output-${nodeId}`}>
     <div className="canvas-tile-output-head">
       <span className="canvas-tile-output-label">{t(output.partial ? 'tile.partialOutput' : 'tile.lastPublished')}</span>
-      <span className="canvas-tile-output-meta">{output.source === 'manual' ? t('tile.manualOutput') : ''}{outputAge}</span>
+      <span className="canvas-tile-output-meta">{output.source === 'manual' ? t(handedInBy(output) === undefined ? 'tile.manualOutput' : 'tile.agentOutput') : ''}{outputAge}</span>
     </div>
     <div className="canvas-tile-output-body" title={output.text}>{output.text}</div>
   </div> : null;

@@ -4,6 +4,7 @@
 // it is elsewhere.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, Box, Download, FileCode2, FileDown, FileText, Film, Image as ImageIcon, Loader2, Music, Play, SquareArrowOutUpRight, X } from 'lucide-react';
+import { agentDisplayName, handedInBy } from './agentPages';
 import { caseRunLabel, type CanvasEdge, type CanvasNode, type ReviewGraphPolicy } from './canvasDoc';
 import { canvasResult, deliveredItems, type DeliveredItem, type StepDelivery } from './canvasResultModel';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
@@ -66,7 +67,9 @@ function stepChip(step: StepDelivery, runs: CanvasResultsProps['runs'], running:
   const live = running ? runs[step.node.id] : undefined;
   if (live) return { tone: live.state === 'done' ? 'run' : live.state === 'running' ? 'live' : live.state === 'failed' || live.state === 'blocked' ? 'failed' : 'idle', label: t(RUN_STATE_KEY[live.state]) };
   if (step.input) return { tone: 'idle', label: t('results.stateInput') };
-  return { tone: step.state === 'run' ? 'run' : step.state === 'none' ? 'idle' : 'caveat', label: t(DELIVERY_KEY[step.state]) };
+  // A result an invited Agent handed in is said to be the Agent's, not a person's publication (agentPages.ts).
+  const agent = step.state === 'manual' && handedInBy(step.output) !== undefined;
+  return { tone: step.state === 'run' ? 'run' : step.state === 'none' ? 'idle' : 'caveat', label: t(agent ? 'results.stateAgent' : DELIVERY_KEY[step.state]) };
 }
 
 export function CanvasResults({ nodes, edges, execution, runs, running, readOnly, runUnavailableReason, onRun, notice, onOpenNode, onBack, receipt, modelNames, studio = false, studioTitle }: CanvasResultsProps) {
@@ -173,9 +176,13 @@ function SelectedStep({ step, final, complete, pending, stage, total, onBackToRe
   canvasEntries?: ReadonlyArray<StudioEntry>;
 }) {
   const { t } = useCanvasI18n();
-  // A case recording is named with the model and day it ran, not when this canvas received it.
+  // A case recording is named with the model and day it ran, not when this canvas received it; a result an invited
+  // Agent handed in, with that Agent.
+  const agent = step.state === 'manual' ? handedInBy(step.output) : undefined;
+  const agentName = agent === undefined ? '' : agentDisplayName(agent);
   const facts = [step.input ? t('results.stateInput') : step.output?.source === 'case' && !step.output.partial
-    ? t('deliverable.fromCase', { run: caseRunLabel(step.output) }) : t(DELIVERY_KEY[step.state]),
+    ? t('deliverable.fromCase', { run: caseRunLabel(step.output) })
+    : agent !== undefined ? agentName ? t('deliverable.fromAgent', { name: agentName }) : t('deliverable.fromAgentUnnamed') : t(DELIVERY_KEY[step.state]),
     step.output && step.output.source !== 'case' ? deliveryAge(step.output.at, t) : '', t('results.stepOf', { step: stage, total })].filter(Boolean);
   // The result is called the canvas's only when it is complete and nothing after it is still owed; a copied
   // case's recording is called the case's.
@@ -215,7 +222,8 @@ function SelectedStep({ step, final, complete, pending, stage, total, onBackToRe
 function ReviewNote({ step, onOpen }: { step: StepDelivery; onOpen: () => void }) {
   const { t } = useCanvasI18n();
   const title = step.node.title || '—';
-  const note = step.state === 'partial' ? 'results.reviewPartial' : step.state === 'manual' ? 'results.reviewManual'
+  const note = step.state === 'partial' ? 'results.reviewPartial'
+    : step.state === 'manual' ? handedInBy(step.output) !== undefined ? 'results.reviewAgent' : 'results.reviewManual'
     : step.state === 'case' ? 'results.reviewCase' : 'results.reviewNote';
   return <section className={`awwo-results-review${step.state === 'partial' ? ' is-partial' : ''}`} aria-label={t('results.reviewTitle')}>
     <header><h3>{t('results.reviewTitle')}</h3><p>{t(note, { title })}</p></header>

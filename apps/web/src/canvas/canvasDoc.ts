@@ -172,6 +172,26 @@ export interface NodeOutput {
   partial?: boolean;
   /** For a case recording, the model that produced it (the copy may run another one). */
   model?: string;
+  /** For a result an Agent invited to the canvas handed in over MCP, that Agent: the server stamps it on every result an
+   *  Agent writes, and this page writes none. Its page is held until its reader runs it (agentPages.ts). A member's own
+   *  write is applied as sent, so a member could put one on their own result, which only holds their page. */
+  by?: OutputAuthor;
+}
+
+/** Who handed a result in, as the server stamps it (canvas_change_write.go): an Agent, by its token's name. */
+export interface OutputAuthor { kind: 'agent'; name: string }
+
+/** The longest name a canvas's Agent token has (canvas_agent_tokens.go canvasAgentTokenNameMax). */
+const AGENT_NAME_MAX = 60;
+
+/** The Agent that handed a result in, read as the server stamps it: `{kind: "agent", name}`, its name text of at most
+ *  AGENT_NAME_MAX characters ('' where it is not text). Any other author, or none, is undefined. */
+export function sanitizeOutputAuthor(raw: unknown): OutputAuthor | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const author = raw as Record<string, unknown>;
+  if (author.kind !== 'agent') return undefined;
+  const name = typeof author.name === 'string' ? Array.from(author.name.trim()).slice(0, AGENT_NAME_MAX).join('') : '';
+  return { kind: 'agent', name };
 }
 
 /** "qwen3.8-27b-p6 · 2026-10-03": the model that made a case recording and the day it ran (UTC). A media model's id is
@@ -403,10 +423,14 @@ function sanitizeOutput(raw: unknown): NodeOutput | null {
   if (!text) return null;
   const at = typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0;
   const source = r.source === 'manual' || r.source === 'case' ? r.source : 'run';
+  // Only a result handed in has an author: the server stamps an Agent's (canvas_change_write.go), and it is kept, as it
+  // decides how the result's page is shown (agentPages.ts).
+  const by = source === 'manual' ? sanitizeOutputAuthor(r.by) : undefined;
   return {
     text,
     at,
     source,
+    ...(by ? { by } : {}),
     ...(r.partial === true ? { partial: true } : {}),
     ...(source === 'run' && typeof r.supersedesGraphCanvasId === 'string' && r.supersedesGraphCanvasId.trim() && r.supersedesGraphCanvasId.length <= 200
       && Number.isSafeInteger(r.supersedesThroughGraphVersion) && Number(r.supersedesThroughGraphVersion) >= 1

@@ -19,7 +19,7 @@ import { PdfPreview } from './PdfPreview';
 import { canvasFileBytes, canvasResolver } from './studio/canvasAssets';
 import { LivePage } from './studio/LivePage';
 import { decodeText, entryMediaUrl, mimeOfName, type LoadedFile } from './studio/studioData';
-import { isTextKind, kindOfName, kindOfType, type StudioEntry, type StudioGroup, type StudioKind } from './studio/studioModel';
+import { entrySource, isTextKind, kindOfName, kindOfType, type StudioEntry, type StudioGroup, type StudioKind } from './studio/studioModel';
 import './studio/studio.css';
 import './card-preview.css';
 import './display-tile.css';
@@ -55,21 +55,27 @@ const MAGNIFY_KINDS: ReadonlySet<StudioKind> = new Set(['image', 'video', 'model
 const TEXT_LIMIT = 60_000;
 const DRAG_THRESHOLD_PX = 3;
 
-function stateLabel(state: DeliveryState, d: DisplayTranslate): string | null {
-  return state === 'partial' ? d('display.statePartial') : state === 'manual' ? d('display.stateManual') : state === 'case' ? d('display.stateCase') : null;
+function stateLabel(group: StudioGroup, d: DisplayTranslate): string | null {
+  const state: DeliveryState = group.state;
+  // A result an invited Agent handed in is the Agent's, not one a person adopted (agentPages.ts).
+  const agent = group.entries.some(entry => entry.handedInBy !== undefined);
+  return state === 'partial' ? d('display.statePartial') : state === 'manual' ? d(agent ? 'display.stateAgent' : 'display.stateManual')
+    : state === 'case' ? d('display.stateCase') : null;
 }
 
 /** A stored file's bytes (or a generated 3D model's), from the canvas's shared cache. */
 function useEntryBytes(entry: StudioEntry) {
   const wanted = entry.source.type === 'stored' || (entry.source.type === 'media' && entry.kind === 'model');
-  const [loaded, setLoaded] = useState<{ id: string; file: LoadedFile | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; file: LoadedFile | null } | null>(null);
+  // Of the file the entry names now (entrySource): a new delivery under the same entry can name another.
+  const key = JSON.stringify([entry.id, entrySource(entry)]);
   useEffect(() => {
     if (!wanted) return;
     let live = true;
-    void canvasFileBytes(entry).then(file => { if (live) setLoaded({ id: entry.id, file }); });
+    void canvasFileBytes(entry).then(file => { if (live) setLoaded({ key, file }); });
     return () => { live = false; };
-  }, [entry.id, wanted]);
-  const current = loaded?.id === entry.id ? loaded : null;
+  }, [key, wanted]);
+  const current = loaded?.key === key ? loaded : null;
   return { wanted, file: current?.file ?? null, state: !wanted ? 'none' as const : !current ? 'loading' as const : current.file ? 'ready' as const : 'failed' as const };
 }
 
@@ -144,7 +150,7 @@ function EntryView({ entry, canvasEntries, zoom, onOpenStudio }: EntryViewProps)
   if (kind === 'missing') body = fileBox(t('studio.missingFile', { name: entry.source.type === 'missing' ? entry.source.claimed : entry.name }), true);
   else if (bytes.state === 'loading') body = <div className="awwo-display-empty" role="status"><Loader2 size={18} className="awwo-studio-spin" aria-hidden="true" /></div>;
   else if (bytes.state === 'failed') body = fileBox(d('display.unreadable'), true);
-  else if (kind === 'page' && resolved.text !== null) body = <LivePage html={resolved.text} title={entry.name} path={entry.name} resolve={resolve} market={market} />;
+  else if (kind === 'page' && resolved.text !== null) body = <LivePage html={resolved.text} title={entry.name} path={entry.name} resolve={resolve} market={market} handedInBy={entry.handedInBy} delivery={entry.deliveredAt} />;
   else if (kind === 'image' && mediaUrl) body = <img className="awwo-display-picture" src={mediaUrl} alt={entry.name} draggable={false} />;
   else if (kind === 'video' && mediaUrl) body = <video className="awwo-display-picture" src={mediaUrl} controls playsInline preload="metadata" />;
   else if (kind === 'audio' && mediaUrl) body = <div className="awwo-display-audio"><audio src={mediaUrl} controls preload="metadata" /><span>{name}</span></div>;
@@ -174,7 +180,7 @@ function Overview({ groups, running, canvasEntries, zoom, onShow, onOpenStudio }
   const rest = groups.filter(group => group !== hero);
   const card = (group: StudioGroup, isHero: boolean) => {
     const entry = group.entries.find(item => item.primary) ?? group.entries[0];
-    const state = stateLabel(group.state, d);
+    const state = stateLabel(group, d);
     return <article key={group.nodeId} className={`awwo-display-card${isHero ? ' is-hero' : ''}${running.has(group.nodeId) ? ' is-running' : ''}`}
       aria-label={group.title} data-node-id={group.nodeId}>
       <header>

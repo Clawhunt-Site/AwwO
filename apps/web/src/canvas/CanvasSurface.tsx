@@ -15,6 +15,7 @@ import { readCapabilities } from '../saas/capabilitiesApi';
 import { marketSettingsOf, type MarketSettings } from '../saas/marketApi';
 import { useCanvasMarket } from './canvasMarket';
 import { keepMarketMark, MarketPagesContext, marketPageNodes, unmarkedMarketNodes } from './marketPages';
+import { handedInBy } from './agentPages';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphIdOfOperation, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
@@ -3414,12 +3415,14 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   // moved card does not hand every card a new array (cards are memoised).
   const outputsKey = nodes.map(node => node.kind !== 'form'
     ? `${node.id}\u0001${node.title}\u0001${node.lastOutput?.at ?? ''}\u0001${node.lastOutput?.text.length ?? 0}` : node.id).join('\u0002');
-  const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey]);
+  // Who handed each result in: an entry of one an invited Agent handed in is held (agentPages.ts), whatever its time.
+  const handInsKey = JSON.stringify(nodes.map(node => handedInBy(node.lastOutput) ?? null));
+  const canvasEntries = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: docRef.current.edges }).flatMap(group => group.entries), [outputsKey, handInsKey]);
   // What the 预览展示 windows read, keyed so a moved card hands them nothing new (they are memoised and run pages).
   const edgesKey = edges.map(edge => `${edge.id}\u0001${edge.kind ?? ''}`).join('\u0002');
   const executionKey = doc.execution ? JSON.stringify(doc.execution) : '';
   const displayGroups = useMemo(() => studioGroups({ nodes: docRef.current.nodes, edges: edgesRef.current, execution: docRef.current.execution }),
-    [outputsKey, edgesKey, executionKey]);
+    [outputsKey, handInsKey, edgesKey, executionKey]);
   const choicesKey = nodes.map(node => node.kind === 'session' ? `${node.id}\u0001${node.title}` : '').join('\u0002');
   const displayChoices = useMemo<DisplayChoice[]>(() => {
     const depths = nodeDepths(docRef.current.nodes, edgesRef.current.filter(edge => edge.kind !== 'feedback'));

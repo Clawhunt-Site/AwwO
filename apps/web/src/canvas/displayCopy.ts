@@ -39,6 +39,7 @@ const EN = {
   'display.unreadable': 'This file could not be read here.',
   'display.statePartial': 'Unfinished',
   'display.stateManual': 'Adopted by hand',
+  'display.stateAgent': 'Handed in by an Agent',
   'display.stateCase': 'Case recording',
   'display.tooMany': 'A canvas holds at most {count} preview displays.',
 } as const;
@@ -80,6 +81,7 @@ const ZH: Record<DisplayTextKey, string> = {
   'display.unreadable': '这个文件无法在这里读取。',
   'display.statePartial': '未完成',
   'display.stateManual': '手动采用',
+  'display.stateAgent': 'Agent 交来',
   'display.stateCase': '案例记录',
   'display.tooMany': '一张画布最多放 {count} 个预览展示。',
 };
