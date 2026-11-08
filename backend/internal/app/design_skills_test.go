@@ -38,7 +38,9 @@ func TestPreviewModulesImportMapMatchesTheWeb(t *testing.T) {
 }
 
 // The design skills are meant to be attached together: a page node takes the four page skills, a review node the jury
-// with three of them, and a 3D scene node the scene skill with the direction library and the craft rules.
+// with three of them, and a 3D scene node the scene skill with the direction library and the craft rules. A landing
+// page takes its skill with the craft rules, anti-ai-slop and motion-discipline; a page in one tactile material its
+// skill with the craft rules and anti-ai-slop; an agent workbench its skill with the craft rules and ui-state-coverage.
 func TestBuiltinSkillsDesignSetsFitOneNode(t *testing.T) {
 	skills, err := builtinSkills()
 	if err != nil {
@@ -49,9 +51,12 @@ func TestBuiltinSkillsDesignSetsFitOneNode(t *testing.T) {
 		size[s.Name] = s.Bytes
 	}
 	for label, set := range map[string][]string{
-		"page":   {"design-craft", "anti-ai-slop", "design-directions", "ui-state-coverage"},
-		"review": {"design-jury", "anti-ai-slop", "design-craft", "ui-state-coverage"},
-		"scene":  {"procedural-3d-scene", "design-directions", "design-craft"},
+		"page":      {"design-craft", "anti-ai-slop", "design-directions", "ui-state-coverage"},
+		"review":    {"design-jury", "anti-ai-slop", "design-craft", "ui-state-coverage"},
+		"scene":     {"procedural-3d-scene", "design-directions", "design-craft"},
+		"landing":   {"cinematic-landing", "design-craft", "anti-ai-slop", "motion-discipline"},
+		"material":  {"tactile-materials", "design-craft", "anti-ai-slop"},
+		"workbench": {"agent-workbench-ui", "design-craft", "ui-state-coverage"},
 	} {
 		total := 0
 		for _, name := range set {
