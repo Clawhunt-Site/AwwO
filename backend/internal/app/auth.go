@@ -304,8 +304,9 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		var u User
 		var issuer, subject string
+		var shown *string
 		var grant []byte
-		e = a.db.QueryRow(r.Context(), "SELECT u.id,u.email,u.name,u.platform_role,COALESCE(s.sso_issuer,''),COALESCE(s.sso_subject,''),s.sso_grant FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()", tokenHash(c.Value)).Scan(&u.ID, &u.Email, &u.Name, &u.PlatformRole, &issuer, &subject, &grant)
+		e = a.db.QueryRow(r.Context(), "SELECT u.id,u.email,u.name,u.platform_role,u.display_name,COALESCE(s.sso_issuer,''),COALESCE(s.sso_subject,''),s.sso_grant FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()", tokenHash(c.Value)).Scan(&u.ID, &u.Email, &u.Name, &u.PlatformRole, &shown, &issuer, &subject, &grant)
 		if noRows(e) {
 			fail(w, 401, "unauthorized", "Session expired")
 			return
@@ -329,9 +330,33 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			// memberships and credential ownership remain the stable local account.
 			u.Name, u.Email = profile.Name, profile.Email
 		}
+		a.keepDisplayName(r.Context(), u.ID, shown, len(grant) > 0, u.Name)
 		ctx := context.WithValue(r.Context(), userKey{}, u)
 		ctx = context.WithValue(ctx, clawHuntSessionKey{}, len(grant) > 0)
 		next(w, r.WithContext(ctx))
+	}
+}
+
+// shownUserName is the name a person is shown by, for a query that joins their account as u: the one their sessions
+// show them by (keepDisplayName); none for an account linked to ClawHunt that has no such name kept yet (linked before
+// migration 058, or by an older API: its own name may be one ClawHunt no longer shows); else, for an account never
+// linked, its own.
+const shownUserName = "COALESCE(u.display_name,CASE WHEN EXISTS(SELECT 1 FROM external_identities e WHERE e.user_id=u.id) THEN '' ELSE u.name END,'')"
+
+// keepDisplayName keeps on a person's account the name a session signed in through ClawHunt shows them by, ClawHunt's
+// current one (users.display_name, migration 058), for what names them from the database when they are not there to
+// say it. A session without ClawHunt keeps none: an account never linked is named by its own name, which a change of
+// its profile renames at once, and one linked keeps the name ClawHunt last showed (no name of its own is ever kept as
+// ClawHunt's). It writes only when that changed; one it cannot write stays as it was until a later request. Two
+// sessions of one person may hold ClawHunt's answers of different moments for a minute (its verification is reused
+// that long, five during an outage), and then each request writes its own: the latest after that window is ClawHunt's
+// current name.
+func (a *App) keepDisplayName(ctx context.Context, userID string, stored *string, linked bool, shown string) {
+	if !linked || shown == "" || (stored != nil && *stored == shown) {
+		return // a verified identity always has a name: none never clears the one kept
+	}
+	if _, err := a.db.Exec(ctx, "UPDATE users SET display_name=$2 WHERE id=$1 AND display_name IS DISTINCT FROM $2", userID, shown); err != nil {
+		a.log.Warn("the name a person is shown by was not kept", "error_type", errorType(err))
 	}
 }
 func (a *App) tenant(next http.HandlerFunc, minRole int) http.HandlerFunc {

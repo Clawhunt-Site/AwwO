@@ -578,7 +578,11 @@ func (a *App) mcpOverview(r *http.Request, canvas mcpCanvas) map[string]any {
 	claims, _ := listCanvasClaims(ctx, a.db, agent.TenantID, agent.CanvasID)
 	holder := map[string]string{}
 	for _, c := range claims {
-		holder[c.NodeID] = c.Name + " (" + c.ParticipantID + ")"
+		name := c.Name
+		if name == "" {
+			name = "someone" // a person whose name the canvas does not know yet
+		}
+		holder[c.NodeID] = name + " (" + c.ParticipantID + ")"
 	}
 	awwo, _ := liveAwwoAgents(ctx, a.db, agent.TenantID, agent.CanvasID)
 	running := map[string]bool{}

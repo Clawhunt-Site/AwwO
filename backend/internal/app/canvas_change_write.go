@@ -139,7 +139,7 @@ func canvasChangesAfter(ctx context.Context, q querier, tid, cid string, after, 
 		return nil, true, nil
 	}
 	rows, err := q.Query(ctx, `SELECT c.version,c.actor_kind,COALESCE(c.actor_id,''),COALESCE(c.token_id,''),c.client_id,c.label,c.ops,c.created_at,
-		CASE WHEN c.token_id IS NOT NULL THEN COALESCE(t.name,'') WHEN c.actor_kind='awwo' THEN 'AwwO' ELSE COALESCE(u.name,'') END
+		CASE WHEN c.token_id IS NOT NULL THEN COALESCE(t.name,'') WHEN c.actor_kind='awwo' THEN 'AwwO' ELSE `+shownUserName+` END
 		FROM canvas_changes c LEFT JOIN users u ON u.id=c.actor_id LEFT JOIN canvas_agent_tokens t ON t.tenant_id=c.tenant_id AND t.id=c.token_id
 		WHERE c.tenant_id=$1 AND c.canvas_id=$2 AND c.version>$3 AND c.version<=$4 ORDER BY c.version`, tid, cid, after, current)
 	if err != nil {

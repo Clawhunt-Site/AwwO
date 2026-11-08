@@ -367,6 +367,13 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | POST /agent-tokens | `{name, days?, scope?}` | admin 以上（会话，按 IP 限速；迁移 059 起 member 不能生成）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
 | DELETE /agent-tokens/{tokenId} | | 创建人或工作区 admin/owner；204，令牌的流立刻 `bye: revoked`，其认领放开 |
 
+参与者、认领、消息、变更记录、令牌列表的创建人，以及 Agent 读到的每个回答，都用一个人当前会话显示的名字称呼他：
+经 ClawHunt 登录的账号用 ClawHunt 当前的名字，从不用账号自己存的名字（`users.name`：先注册后绑定 ClawHunt 的账号是注册时填的那个，
+ClawHunt 建的账号是当时的名字）。这个名字记在账号上（`users.display_name`，migration 058，2026-11-08）：登录时写入，会话显示的名字
+变了的请求会改写（会话对 ClawHunt 的核验沿用 1 分钟，ClawHunt 不可用时至多 5 分钟；不经 ClawHunt 的会话不记），所以这个人
+不在画布上时，他以前写的也用这个名字。已绑定 ClawHunt 但还没记下名字的账号（058 之前绑定，或由旧版 API 绑定）在这个人下次请求之前
+不显示名字（`""`）；从未绑定的账号用自己的名字。`users.name` 不变。
+
 令牌随创建人离开工作区、不再是它的 owner/admin（迁移 059 起）、修改或重置密码而失效（与本机版连接密钥相同）。`POST /initialize` 也记它的变更（label
 `setup`）；可选的 `clientId` 写进这条变更。
 

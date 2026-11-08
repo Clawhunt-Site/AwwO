@@ -266,7 +266,7 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().Add(time.Duration(grant.ExpiresIn) * time.Second)
-	user, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "", a.clientIP(r))
+	user, session, collision, err := a.acceptClawHunt(r.Context(), grant.Identity, grant.Token, expires, "", a.clientIP(r), grant.Identity.Name)
 	if err != nil {
 		reason := signupRefusal(err)
 		if reason != "conflict" {
@@ -310,7 +310,7 @@ func (a *App) clawHuntCallback(w http.ResponseWriter, r *http.Request) {
 // ownership of an existing AwwO user, including an unverified provider email.
 // ip is the client address of a first sign-in, which only the creation of a new
 // account counts (admitNewAccount); a link with proof creates none.
-func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant string, expires time.Time, proof, ip string) (User, string, bool, error) {
+func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant string, expires time.Time, proof, ip, shown string) (User, string, bool, error) {
 	var u User
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -358,6 +358,11 @@ func (a *App) acceptClawHunt(ctx context.Context, id clawHuntIdentity, grant str
 			return u, "", false, err
 		}
 	} else if err != nil {
+		return u, "", false, err
+	}
+	// The name the person's sessions show them by (users.display_name, migration 058), as ClawHunt answered last (the
+	// link's own check, made after the claim it proves): the canvas names them by it, never by the account's own.
+	if _, err = tx.Exec(ctx, "UPDATE users SET display_name=$2 WHERE id=$1 AND display_name IS DISTINCT FROM $2", u.ID, shown); err != nil {
 		return u, "", false, err
 	}
 	token, err := a.createLogin(ctx, tx, u.ID)
@@ -448,7 +453,7 @@ func (a *App) clawHuntLink(w http.ResponseWriter, r *http.Request) {
 	}
 	a.identityFlowCookie(w, "", -1)
 	expires = grantExpiry
-	u, token, _, err := a.acceptClawHunt(r.Context(), id, grant, expires, b.Password, "")
+	u, token, _, err := a.acceptClawHunt(r.Context(), id, grant, expires, b.Password, "", live.Name)
 	if err != nil {
 		fail(w, 401, "sso_link_failed", "Account proof failed; continue with ClawHunt again")
 		return

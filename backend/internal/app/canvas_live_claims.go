@@ -58,7 +58,7 @@ func activeCanvasClaims(ctx context.Context, q querier, tid, cid string) (map[st
 // listCanvasClaims gives a canvas's claims as they are sent, with their holders' names, the soonest to end first.
 func listCanvasClaims(ctx context.Context, q querier, tid, cid string) ([]liveClaim, error) {
 	rows, err := q.Query(ctx, `SELECT c.node_id,c.participant_id,c.holder_kind,
-		CASE WHEN c.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE COALESCE(u.name,'') END,c.note,c.expires_at
+		CASE WHEN c.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE `+shownUserName+` END,c.note,c.expires_at
 		FROM canvas_claims c LEFT JOIN users u ON u.id=c.user_id LEFT JOIN canvas_agent_tokens t ON t.tenant_id=c.tenant_id AND t.id=c.token_id
 		WHERE c.tenant_id=$1 AND c.canvas_id=$2 AND c.expires_at>clock_timestamp() ORDER BY c.expires_at,c.node_id`, tid, cid)
 	if err != nil {

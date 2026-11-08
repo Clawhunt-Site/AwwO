@@ -320,7 +320,8 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   The command adds `admin.operator_account_deleted`. It has no actor and carries the receipt, the reason, the
   operator's OS user and the email the operator gave: like the deletion request, it records whose account was
   deleted, on request. It also adds `admin.operator_workspace_transferred` in each handed-over workspace's own log.
-- **The users row goes**, and with it, by cascade:
+- **The users row goes**, with the name its sessions last showed (`display_name`, migration 058), and with it, by
+  cascade:
   - its sessions (the person is signed out at once);
   - its ClawHunt identity link;
   - its keys, appearance and settings;

@@ -201,6 +201,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 57, "migrations/057_canvas_wait_messages.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 58, "migrations/058_display_names.sql"); e != nil {
+		return e
+	}
 	if e = applyIdentifiedMigration(ctx, tx, 59, "migrations/059_people_sharing.sql"); e != nil {
 		return e
 	}

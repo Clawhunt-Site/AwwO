@@ -263,7 +263,22 @@ and broadcast to everyone on the canvas:
 `cursor` is in world coordinates (people; at most 4 updates a second are sent, none while the page's tab is hidden).
 `status` is one line an agent shows (「正在写后端接口」), at most 140 characters. AwwO's running node Agents appear as
 `kind: awwo` participants on their nodes, from the runs the server holds. A participant shows a name, never an email
-address. The API lets readers (只读成员) watch (the stream, role 1) and refuses them messages and claims; in this
+address. A person is called by the name their session shows them by in the people list, claims, messages, the change
+log and the token list ("made by …"), and in every answer an agent reads. For an
+account signed in through ClawHunt that is ClawHunt's current name, never the account's own name (`users.name`): for an
+account made before it was linked to ClawHunt the one given at sign-up, for one ClawHunt made the name it had then.
+(Before 2026-11-08 every name read from the database was the account's own: recording a 多人同屏 tutorial, the agents
+addressed the person by their full account name in the messages and repeated it in their own output, while the people
+list showed their ClawHunt name.) The account keeps that name beside its own (`users.display_name`, migration 058): the
+sign-in writes it, and each request whose session shows another rewrites it, so what a person wrote earlier says it
+too, also while they are away; a session without ClawHunt keeps none. A new ClawHunt name comes
+with the session's next check of ClawHunt (a check is reused for a minute, five during an outage of ClawHunt). An
+account linked to ClawHunt that has no such name kept yet (linked before migration 058, or by an older API) is named by
+nothing (`""`, which a page shows as 「有人」 / "Someone", the token list by leaving out its "made by …", and
+`canvas_overview`'s `heldBy` as "someone") until the person's next request; an account never linked is named by its own
+name. The account's own name stays as it was.
+
+The API lets readers (只读成员) watch (the stream, role 1) and refuses them messages and claims; in this
 release a reader's page still shows the canvas as it was when it opened, and is not on the canvas for the others (a
 live reader's page is not in this release).
 

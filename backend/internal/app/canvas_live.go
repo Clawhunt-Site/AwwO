@@ -50,7 +50,7 @@ const livePresenceSelectionMax = 100
 // liveMessageColumns and liveMessageFrom read live messages as liveMessage scans them (scanLiveMessages).
 const (
 	liveMessageColumns = `m.id,m.author_kind,m.user_id,COALESCE(m.token_id,''),
-		CASE WHEN m.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE COALESCE(u.name,'') END,m.node_id,m.text,m.created_at`
+		CASE WHEN m.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE ` + shownUserName + ` END,m.node_id,m.text,m.created_at`
 	liveMessageFrom = `canvas_live_messages m LEFT JOIN users u ON u.id=m.user_id LEFT JOIN canvas_agent_tokens t ON t.tenant_id=m.tenant_id AND t.id=m.token_id`
 )
 

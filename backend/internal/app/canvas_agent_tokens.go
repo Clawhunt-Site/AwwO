@@ -24,7 +24,7 @@ const (
 	maxCanvasAgentTokenDays  = 90
 	canvasAgentTokenNameMax  = 60
 	canvasAgentTokenItemJSON = `jsonb_build_object('id',t.id,'name',t.name,'prefix',t.prefix,'scope',t.scope,'createdAt',t.created_at,'expiresAt',t.expires_at,
-		'lastUsedAt',t.last_used_at,'revokedAt',t.revoked_at,'createdBy',jsonb_build_object('id',t.created_by,'name',COALESCE(u.name,'')))`
+		'lastUsedAt',t.last_used_at,'revokedAt',t.revoked_at,'createdBy',jsonb_build_object('id',t.created_by,'name',` + shownUserName + `))`
 )
 
 // revokeCanvasAgentTokens revokes a person's canvas agent tokens ($1), in one workspace when tid is not empty, and lets
