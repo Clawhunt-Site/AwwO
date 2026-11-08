@@ -55,6 +55,8 @@ type graphNode struct {
 	FileName string `json:"fileName,omitempty"`
 	// An edit node's own awwo.timeline/1 document, used when no timeline is wired into it (edits.go).
 	Timeline string `json:"timeline,omitempty"`
+	// An analyze node's settings: the upload it analyses when no video is wired into it, and its options (analyses.go).
+	Analyze *analyzeSettings `json:"analyze,omitempty"`
 	// A media node in a canvas run generates from the draft of its active conversation (graph_media.go). Read raw:
 	// a shape this host does not expect leaves the draft empty instead of failing the whole graph.
 	ActiveThreadID json.RawMessage `json:"activeThreadId,omitempty"`
@@ -200,6 +202,9 @@ func nodePort(n graphNode, id string, input bool) (string, bool) {
 	if n.Kind == "edit" {
 		return editPort(id, input)
 	}
+	if n.Kind == "analyze" {
+		return analysisPort(id, input)
+	}
 	if n.Contract != nil {
 		fields, prefix := n.Contract.Outputs, "out:"
 		if input {
@@ -292,7 +297,7 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 	in := map[string]bool{}
 	indeg := map[string]int{}
 	for _, n := range d.Nodes {
-		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session" && n.Kind != "assemble" && n.Kind != "edit") {
+		if n.ID == "" || byID[n.ID].ID != "" || (n.Kind != "form" && n.Kind != "session" && n.Kind != "assemble" && n.Kind != "edit" && n.Kind != "analyze") {
 			return d, nil, errors.New("Invalid or duplicate graph node")
 		}
 		if n.Kind == "assemble" {
@@ -369,6 +374,11 @@ func parseGraph(raw []byte, scope []string) (graphDocument, []string, error) {
 		}
 		if n.Kind == "edit" {
 			if err := validateEditNode(n, incoming[n.ID+"\x00timeline"]); err != nil {
+				return d, nil, err
+			}
+		}
+		if n.Kind == "analyze" {
+			if err := validateAnalyzeNode(n, incoming[n.ID+"\x00video"]); err != nil {
 				return d, nil, err
 			}
 		}

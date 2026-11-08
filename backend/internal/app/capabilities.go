@@ -7,7 +7,7 @@ import "net/http"
 // rendering honestly.
 func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 	tid := r.PathValue("tenantId")
-	reads, renders, edits := 0, 0, 0
+	reads, renders, edits, analyses := 0, 0, 0, 0
 	if a.cfg.WebReaderEnabled {
 		if err := a.db.QueryRow(r.Context(), "SELECT count(*) FROM web_reads w WHERE w.tenant_id=$1 AND "+webReadsToday, tid).Scan(&reads); err != nil {
 			a.dbError(w, err)
@@ -24,7 +24,14 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if a.cfg.AnalysisURL != "" {
+		if err := a.db.QueryRow(r.Context(), "SELECT count(*) FROM analysis_jobs WHERE tenant_id=$1 AND "+analysisCountedToday, tid).Scan(&analyses); err != nil {
+			a.dbError(w, err)
+			return
+		}
+	}
 	editsPerDay, _, _, _ := a.editLimits()
+	analysesPerDay, _, _, _ := a.analysisLimits()
 	writeJSON(w, 200, map[string]any{
 		"skills":        map[string]any{"enabled": true, "maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes},
 		"skillRegistry": map[string]any{"enabled": a.cfg.SkillRegistryEnabled, "source": "skills.sh"},
@@ -35,6 +42,9 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		// Edit nodes (edits.go) render on the same worker.
 		"edit": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": editsPerDay, "usedToday": edits,
 			"limits": map[string]any{"maxSeconds": 1200, "maxFiles": maxEditFiles, "maxTimelineBytes": maxEditTimelineBytes}},
+		// Video breakdown nodes (analyses.go) run on the video analysis worker.
+		"analyze": map[string]any{"enabled": a.cfg.AnalysisURL != "", "perDay": analysesPerDay, "usedToday": analyses,
+			"limits": map[string]any{"maxInputBytes": maxAnalysisInputBytes}},
 		// The Agent market (market.go).
 		"market": a.marketCapability(),
 		// 多人同屏 (docs/awwo-canvas-live-collaboration.md): a page saves by changes (PATCH) and opens the canvas's live

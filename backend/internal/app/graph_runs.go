@@ -188,6 +188,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "edit_unavailable", "Edit nodes need the render worker, which this server does not run")
 		return
 	}
+	// A video breakdown node runs on the video analysis worker, refused the same way without one.
+	if a.cfg.AnalysisURL == "" && scopeHasAnalysis(d, scope) {
+		fail(w, 409, "analysis_unavailable", "Video breakdown nodes need the video analysis worker, which this server does not run")
+		return
+	}
 	// Several graphs may run on one canvas at once, each executing its own nodes; the canvas row lock taken above
 	// serializes admissions, so two graphs can never both claim a node.
 	busy, e := graphAdmissionConflict(r.Context(), tx, tid, cid, scope, b.Collaboration != nil)
@@ -688,6 +693,10 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				a.settleGraphEdit(ctx, tid, id, n)
 				continue
 			}
+			if n.Kind == "analyze" && s.State == "running" {
+				a.settleGraphAnalysis(ctx, tid, id, n)
+				continue
+			}
 			if s.State == "running" {
 				var rs, out, code string
 				var generation bool
@@ -785,6 +794,13 @@ func (a *App) executeGraph(ctx context.Context, tid, id string) {
 				// No model: the render worker joins its files (edits.go); the node runs until its job ends.
 				if err := a.admitGraphEdit(ctx, tid, id, canvasID, n, d, outputs); err != nil && !errors.Is(err, errEditWaiting) {
 					a.setGraphNode(ctx, tid, id, n.ID, "failed", "", editAdmissionDetail(err))
+				}
+				continue
+			}
+			if n.Kind == "analyze" {
+				// No model: the video analysis worker reads its video (analyses.go); the node runs until its job ends.
+				if err := a.admitGraphAnalysis(ctx, tid, id, canvasID, n, d, outputs); err != nil && !errors.Is(err, errAnalysisWaiting) {
+					a.setGraphNode(ctx, tid, id, n.ID, "failed", "", analysisAdmissionDetail(err))
 				}
 				continue
 			}
@@ -1188,7 +1204,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
-	var edits []string
+	var edits, analyses []string
 	var cancelledNodes int64
 	if status == "queued" || status == "running" {
 		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, id)
@@ -1230,6 +1246,10 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
+		if analyses, e = cancelGraphAnalyses(r.Context(), tx, tid, id); e != nil {
+			a.dbError(w, e)
+			return
+		}
 		status, e = a.reconcileCancelledGraph(r.Context(), tx, tid, id)
 		if e != nil {
 			a.dbError(w, e)
@@ -1252,6 +1272,7 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		a.notifyRunEvent(rid)
 	}
 	a.stopEdits(edits)
+	a.stopAnalyses(analyses)
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")
 	}
@@ -1333,7 +1354,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := []string{}
-	var edits []string
+	var edits, analyses []string
 	var cancelledNodes int64
 	if gid != "" && (status == "queued" || status == "running") {
 		cancelledNodes, e = collaborationCancellationTransitionCount(r.Context(), tx, tid, gid)
@@ -1375,6 +1396,10 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 			a.dbError(w, e)
 			return
 		}
+		if analyses, e = cancelGraphAnalyses(r.Context(), tx, tid, gid); e != nil {
+			a.dbError(w, e)
+			return
+		}
 		status, e = a.reconcileCancelledGraph(r.Context(), tx, tid, gid)
 		if e != nil {
 			a.dbError(w, e)
@@ -1397,6 +1422,7 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		a.notifyRunEvent(id)
 	}
 	a.stopEdits(edits)
+	a.stopAnalyses(analyses)
 	for i := int64(0); i < cancelledNodes; i++ {
 		a.observeGraphNodeState("cancelled")
 	}
