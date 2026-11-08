@@ -301,7 +301,10 @@ describe('the canvas header', () => {
       claim: vi.fn(), release: vi.fn(async () => undefined), say: vi.fn(), olderMessages: vi.fn(), listTokens: vi.fn(async () => []),
       createToken: vi.fn(), revokeToken: vi.fn() } as unknown as CanvasLive;
     let attention = { focus: null, selection: [] as readonly string[] };
-    const multiplayer = { live, recent: [], attention: { get: () => attention, set: (next: typeof attention) => { attention = next; }, subscribe: () => () => undefined } } as unknown as CanvasMultiplayer;
+    // The canvas surface's model names too (the header names a running AwwO Agent's model by them): none yet here.
+    const names = {};
+    const multiplayer = { live, recent: [], attention: { get: () => attention, set: (next: typeof attention) => { attention = next; }, subscribe: () => () => undefined },
+      modelNames: { get: () => names, set: () => undefined, subscribe: () => () => undefined } } as unknown as CanvasMultiplayer;
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
       const path = new URL(url, 'http://localhost').pathname;
       if (path.endsWith('/invites') && init?.method === 'POST') return json({ id: 'inv-new', role: 'member', token: 'made-up-invitation-token', inviteUrl: 'https://awwo.example/?invite=made-up-invitation-token',

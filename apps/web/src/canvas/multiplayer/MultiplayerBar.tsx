@@ -4,8 +4,7 @@
 import { memo, type CSSProperties } from 'react';
 import { Bot } from 'lucide-react';
 import type { UiLocale } from '../../locale';
-import { isMediaModelId } from '../mediaModelIds';
-import { nodeModelName, type ModelNameSources } from '../modelNames';
+import { shownChatModelName, type ModelNameSources } from '../modelNames';
 import type { LiveParticipant } from './types';
 import { mt, participantInitials, portLabel, useMultiplayerText } from './multiplayerText';
 import './multiplayer.css';
@@ -57,15 +56,13 @@ export function participantName(locale: UiLocale, participant: { name: string; k
   return self ? mt(locale, 'self.name', { name }) : name;
 }
 
-/** A running AwwO Agent's model as the canvas names models (modelNames.ts): a chat model by the workspace catalogue's
- *  name for it, else by its selector; a media model not at all, since even a generic name says nothing a person needs
- *  in one line, and its id names the service that makes it (AWWO-LAW-018); a team connection's selector is no name. */
-export function awwoModelName(locale: UiLocale, model: string | undefined, sources: ModelNameSources = NO_MODEL_NAMES): string {
-  if (typeof model !== 'string' || !model.trim() || isMediaModelId(model)) return '';
-  // The participant says no runtime: the catalogue's entry for its model tells it.
-  const entry = sources.models?.find(item => item.model === model);
-  if (/^byok_/.test(model) && !entry?.label) return '';
-  return nodeModelName({ model, runtime: entry?.runtime }, sources, locale);
+/** A running AwwO Agent's model as the node's model picker names it (modelNames.ts shownChatModelName): by the name the
+ *  workspace's catalogue publishes for it, else by a name read from its selector, never by the selector, which can name
+ *  the service AwwO reaches the model through (`bedrock.claude-opus-5-5` is Claude Opus 5.5); a media model not at all,
+ *  since even a generic name says nothing a person needs in one line, and its id names the service that makes it
+ *  (AWWO-LAW-018); a team connection's selector is no name. The same in either language. */
+export function awwoModelName(_locale: UiLocale, model: string | undefined, sources: ModelNameSources = NO_MODEL_NAMES): string {
+  return shownChatModelName(model, sources);
 }
 
 /** What a participant is doing, in one line: an Agent's own status, as it wrote it; a running AwwO Agent's run, queued or
@@ -119,7 +116,8 @@ export interface MultiplayerBarProps {
   onOpen: () => void;
   /** The 同屏 panel is open now (the button's aria-expanded). */
   open?: boolean;
-  /** What names a running AwwO Agent's model: the workspace's models (absent, a chat model goes by its selector). */
+  /** What names a running AwwO Agent's model: the workspace's models (absent, a chat model goes by a name read from its
+   *  selector). */
   modelNames?: ModelNameSources;
 }
 

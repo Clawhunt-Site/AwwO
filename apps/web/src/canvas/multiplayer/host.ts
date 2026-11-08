@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react';
 import type { CanvasDocument, CanvasNode } from '../canvasDoc';
+import type { ModelNameSources } from '../modelNames';
 
 /** A rebase: `working` for the document the surface shows (others' changes, and the server's answer to this page's own),
  *  `history` for each undo and redo step (others' changes only, so an undo still takes the page's own edit back). */
@@ -55,4 +56,7 @@ export interface CanvasMultiplayerHost {
   /** Takes over the landing of a canvas run that had ended before this page took it up from its journal (a reopening):
    *  the host lands it by its versioned save (saas/useRunLanding.ts), which leaves what others published since it ended. */
   landEnded?: (graphRunId: string) => void;
+  /** What the surface names models by, given again whenever it changes: the workspace's chat models and media catalogue,
+   *  as the node's model picker has them. The people bar and the 同屏 panel name a running AwwO Agent's model by them. */
+  modelNames?: (sources: ModelNameSources) => void;
 }

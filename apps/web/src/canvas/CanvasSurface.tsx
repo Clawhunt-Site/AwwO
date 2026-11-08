@@ -5315,6 +5315,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // What a run report names models with (the 成果 view's receipt): this workspace's chat models and media catalogue.
   const modelNames = useMemo<ModelNameSources>(() => ({ models: currentModelCatalogue, media: mediaCatalogueOf(mediaState) }),
     [currentModelCatalogue, mediaState]);
+  // 多人同屏's people bar and 同屏 panel name a running AwwO Agent's model by the same names (multiplayer/host.ts).
+  useEffect(() => { multiplayer?.modelNames?.(modelNames); }, [multiplayer, modelNames]);
   // The models a node's own chat can switch to, in its composer: the workspace's chat models for an agent, the
   // media catalogue's models of its kind for an image, video or 3D node. Stable arrays, so cards stay memoised.
   // Each chat model is offered once, on the runtime AwwO runs it on (nodeRuntime.ts): the reader picks a model, never a

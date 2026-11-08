@@ -59,7 +59,8 @@ export interface MultiplayerPanelProps {
   status?: MultiplayerStatus;
   /** The clock claims count down by (ms since the epoch); absent, the panel ticks its own each second. */
   now?: number;
-  /** What names a running AwwO Agent's model (the workspace's models); absent, a chat model goes by its selector. */
+  /** What names a running AwwO Agent's model (the workspace's models); absent, a chat model goes by a name read from its
+   *  selector. */
   modelNames?: ModelNameSources;
   /** Opens the Share dialog, where the server offers sharing with people: the panel puts people first, and alone on the
    *  canvas it asks to share it (邀请 Agent is then the Share dialog's, under 高级). */

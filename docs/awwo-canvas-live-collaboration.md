@@ -602,6 +602,19 @@ CHANGELOG entry "treg for a person's own Agent".
   box to write one, the latest changes (「Claude Code 添加了节点「后端接口」」), and 邀请 Agent: make a token, copy the
   connection lines for Claude Code, Codex and Cursor, see and revoke the canvas's tokens, and add treg to the same
   Agent for live data (above).
+- **A running AwwO Agent's model**: its status in the panel and its avatar's tooltip in the bar say its run (运行中 /
+  排队中) and its node's model by the name the node's model picker shows it by (运行中 · Claude Opus 5.5): the workspace
+  catalogue's published name, which the canvas surface hands the header (`modelNames` in multiplayer/host.ts). Before
+  that catalogue arrives, or for a model it no longer lists, the name is read from the selector without its route,
+  region or vendor (`bedrock.claude-opus-5-5` is Claude Opus 5.5, a single Bedrock profile's `bedrock-kimi` Kimi),
+  never the selector itself: the server sends the node's model as the document holds it, and that names the service
+  AwwO reaches the model through. A catalogue name that is itself such a selector, written as selectors are (in lower
+  case, with no space, or one word starting with a service's name, `Bedrock-Kimi`), is read the same way: a connection
+  names its models by the ids its service gives them, and AwwO 云端's are AwwO's own; a name an operator published
+  (GPT-5.6/Team) is kept as published. A media model is not named at all, nor a connection's model the catalogue does
+  not name (its selector, `byok_…`, holds no name). A run is named after its node, whose title is the document's own:
+  in the local edition a node its model rail names after an AwwO 云端 model is titled by that model's id, as its picker
+  shows it there.
 - **On the board**: a ring in each participant's colour around the nodes they have selected, with their name; a claim's
   badge on its node; each person's pointer with their name; a short glow on a node another participant just changed.
   These mark the cards the board draws: a component inside a converged icon (收敛成一个图标, one person's own way of

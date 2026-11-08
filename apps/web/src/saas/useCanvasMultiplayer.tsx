@@ -15,6 +15,7 @@ import { advanceConfirmed, changeBatches, heldOps, opNode, readableConfirmed, re
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument, type CanvasNode } from '../canvas/canvasDoc';
 import { canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../canvas/multiplayer/host';
+import type { ModelNameSources } from '../canvas/modelNames';
 import type { CanvasChange, CanvasChangeResponse, CanvasOp, LiveParticipant } from '../canvas/multiplayer/types';
 import { UserPlus } from 'lucide-react';
 import { MultiplayerBar } from '../canvas/multiplayer/MultiplayerBar';
@@ -93,6 +94,9 @@ export interface CanvasMultiplayer {
   landed(nodes: readonly string[], say?: boolean): void;
   /** The node this page has open and the nodes it has selected: a message in the panel is about the one in view. */
   attention: ValueStore<Attention>;
+  /** What the canvas surface names models by (the workspace's chat models and media catalogue, as its model picker has
+   *  them): the people bar and the 同屏 panel name a running AwwO Agent's model by it. */
+  modelNames: ValueStore<ModelNameSources>;
 }
 
 /** The node a page has open, and its selection. */
@@ -136,6 +140,7 @@ export function useCanvasMultiplayer(options: {
   const [recent, setRecent] = useState<readonly RecentChange[]>([]);
   const flashes = useRef<ValueStore<readonly BoardFlash[]>>(createValueStore<readonly BoardFlash[]>([])).current;
   const attention = useRef<ValueStore<Attention>>(createValueStore<Attention>({ focus: null, selection: [] })).current;
+  const modelNames = useRef<ValueStore<ModelNameSources>>(createValueStore<ModelNameSources>({})).current;
   const { locale } = useSaaSPreferences();
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -353,13 +358,14 @@ export function useCanvasMultiplayer(options: {
       return busy;
     },
     landEnded: graphRunId => optionsRef.current.handOver?.(graphRunId),
-  } : undefined, [live, drain, flashes, attention]);
+    modelNames: sources => { if (sources !== modelNames.get()) modelNames.set(sources); },
+  } : undefined, [live, drain, flashes, attention, modelNames]);
 
   const focusNode = useCallback((nodeId: string) => surface.current?.focus(nodeId), []);
   const canLand = useCallback((operationId: string, nodes: readonly string[]) => Boolean(surface.current?.canLand?.(operationId, nodes)), []);
   const landed = useCallback((nodes: readonly string[], say = true) => surface.current?.landed?.(nodes, say), []);
-  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention }),
-    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention]);
+  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames }),
+    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames]);
 }
 
 const OFFLINE: LiveSnapshot = { status: 'offline', ended: null, you: null, participants: [], claims: [], messages: [] };
@@ -414,6 +420,8 @@ export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, r
   const now = useNow(open && snapshot.claims.length > 0, 1000);
   const attention = useSyncExternalStore(multiplayer.attention.subscribe, multiplayer.attention.get, multiplayer.attention.get);
   const messageNodeId = attention.focus ?? (attention.selection.length === 1 ? attention.selection[0] : null);
+  // A running AwwO Agent's model by the names the canvas's model picker shows (never its selector).
+  const modelNames = useSyncExternalStore(multiplayer.modelNames.subscribe, multiplayer.modelNames.get, multiplayer.modelNames.get);
   // An owner or admin connects Agents (canvas_agent_tokens.go); the server judges again with every token it makes.
   const connectsAgents = canWrite && (role === 'owner' || role === 'admin');
   const loadTokens = useCallback(async () => {
@@ -440,14 +448,14 @@ export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, r
   const openShare = () => { setOpen(false); setSharing(true); };
   return <>
     <MultiplayerBar participants={snapshot.participants} selfId={live.clientId} status={snapshot.status} open={open}
-      onOpen={() => { setSharing(false); setOpen(value => !value); if (!open && !people) void loadTokens(); }} />
+      onOpen={() => { setSharing(false); setOpen(value => !value); if (!open && !people) void loadTokens(); }} modelNames={modelNames} />
     {people && <button type="button" className="awwo-multiplayer-share-button" aria-haspopup="dialog" aria-expanded={sharing}
       aria-label={t('share.buttonLabel')} title={t('share.buttonLabel')} onClick={() => { if (sharing) setSharing(false); else openShare(); }}>
       <UserPlus size={14} aria-hidden="true" /><span>{t('share.button')}</span>
     </button>}
     <MultiplayerPanel open={open} onClose={() => setOpen(false)} participants={snapshot.participants} selfId={live.clientId}
       claims={snapshot.claims} messages={snapshot.messages} activity={activity} canWrite={canWrite} canInvite={!people && connectsAgents}
-      nodeTitle={nodeTitle} onFocusNode={onFocusNode} status={snapshot.status} now={now} messageNodeId={messageNodeId}
+      nodeTitle={nodeTitle} onFocusNode={onFocusNode} status={snapshot.status} now={now} messageNodeId={messageNodeId} modelNames={modelNames}
       onSend={async (text, nodeId) => { await live.say(text, nodeId); }}
       onRelease={async nodeIds => { await live.release(nodeIds); }}
       onShare={people ? openShare : undefined} invite={invite} />

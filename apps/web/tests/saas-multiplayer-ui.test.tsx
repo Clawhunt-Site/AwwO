@@ -28,13 +28,22 @@ const ADA = person('page-ada-00001', 'Ada Lovelace', '#f59e0b', 'user-0002', { s
 // An agent is named by its token ('t_' + the token's id); its userId is the person who made the token.
 const CLAUDE: LiveParticipant = { id: 't_00000000000000aa', kind: 'agent', port: 'mcp', name: 'Claude Code', color: '#7c3aed', userId: 'user-0001',
   state: state({ focus: 'n2', status: '正在写后端接口' }), since: SINCE };
-// AwwO's own Agent on a node it runs: named after the node, its run's status as its status, the node's model.
-const RUNNER: LiveParticipant = { id: 'run_example0001', kind: 'awwo', port: 'awwo', name: '测试', color: '#10b981', model: 'claude-opus-5-5',
+// AwwO's own Agent on a node it runs: named after the node, its run's status as its status, the node's model as the
+// document holds it, its selector (canvas_live.go liveAwwoAgents), which names the service AwwO reaches the model through.
+const RUNNER: LiveParticipant = { id: 'run_example0001', kind: 'awwo', port: 'awwo', name: '测试', color: '#10b981', model: 'bedrock.claude-opus-5-5',
   state: state({ selection: ['n3'], focus: 'n3', status: 'running' }), since: SINCE };
 
 const TITLES: Record<string, string> = { n1: '后端接口', n2: '前端页面', n3: '测试' };
 const nodeTitle = (id: string): string | undefined => TITLES[id];
-const MODEL_NAMES: ModelNameSources = { models: [{ key: 'pi:claude-opus-5-5', label: 'Claude Opus 5.5', providerGroup: 'claude', runtime: 'pi', model: 'claude-opus-5-5', available: true }] };
+// The workspace's chat models as the node's model picker has them (modelPalette.ts groupModels): a published name, and a
+// label that carries the plan tag on a workspace whose free allowance leaves the model out; a name the selector does
+// not spell (GPT-6.1 Sol).
+const MODEL_NAMES: ModelNameSources = { models: [
+  { key: '["openai-agents","bedrock.claude-opus-5-5"]', label: 'Claude Opus 5.5 · Pro', displayName: 'Claude Opus 5.5', providerGroup: 'claude',
+    runtime: 'openai-agents', model: 'bedrock.claude-opus-5-5', available: true, requiresUpgrade: true },
+  { key: '["openai-agents","bedrock.gpt-6-1-sol"]', label: 'GPT-6.1 Sol', displayName: 'GPT-6.1 Sol', providerGroup: 'codex',
+    runtime: 'openai-agents', model: 'bedrock.gpt-6-1-sol', available: true },
+] };
 
 const TOKEN = 'awwo_ct_example_secret_for_tests';
 const MCP_URL = 'https://awwo.example/api/v1/mcp';
@@ -195,9 +204,15 @@ describe('the people bar', () => {
 
   it('says a running AwwO Agent’s run in words, with its model named as the canvas names it and a media model’s never', () => {
     // The server sends the run's status ('running', 'queued') as the participant's status: never shown as that word.
-    expect(participantTitle('zh', RUNNER, false)).toBe('测试 · AwwO · 运行中 · claude-opus-5-5');
-    expect(participantStatus('en', { ...RUNNER, state: state({ selection: ['n3'], focus: 'n3', status: 'queued' }) })).toBe('Queued · claude-opus-5-5');
+    // Without the workspace's names, the model goes by a name read from its selector, never by the selector.
+    expect(participantTitle('zh', RUNNER, false)).toBe('测试 · AwwO · 运行中 · Claude Opus 5.5');
+    expect(participantStatus('en', { ...RUNNER, state: state({ selection: ['n3'], focus: 'n3', status: 'queued' }) })).toBe('Queued · Claude Opus 5.5');
+    // With them, by the name the node's model picker shows, never the label's plan tag.
     expect(participantStatus('zh', RUNNER, MODEL_NAMES)).toBe('运行中 · Claude Opus 5.5');
+    // The catalogue's own name where the selector spells it otherwise.
+    const gpt = { ...RUNNER, model: 'bedrock.gpt-6-1-sol' };
+    expect(participantStatus('en', gpt, MODEL_NAMES)).toBe('Running · GPT-6.1 Sol');
+    expect(participantStatus('en', gpt)).toBe('Running · GPT 6.1 Sol');
     // A media model's id names the service that makes it: nothing names it here.
     const media = { ...RUNNER, model: 'tripo.v3-turbo' };
     expect(participantStatus('zh', media)).toBe('运行中');
@@ -207,11 +222,14 @@ describe('the people bar', () => {
     expect(awwoModelName('zh', 'byok_abcdef123456')).toBe('');
     expect(awwoModelName('en', undefined)).toBe('');
     // One on an untitled node is the AwwO Agent.
-    expect(participantTitle('zh', { ...RUNNER, name: '' }, false)).toBe('AwwO Agent · AwwO · 运行中 · claude-opus-5-5');
+    expect(participantTitle('zh', { ...RUNNER, name: '' }, false)).toBe('AwwO Agent · AwwO · 运行中 · Claude Opus 5.5');
     // A person's status is theirs; none, no line.
     expect(participantStatus('zh', ADA)).toBe('');
-    const { container } = render(<MultiplayerBar participants={[SELF, RUNNER]} selfId={SELF.id} status="live" onOpen={() => {}} modelNames={MODEL_NAMES} />);
+    const { container, rerender } = render(<MultiplayerBar participants={[SELF, RUNNER]} selfId={SELF.id} status="live" onOpen={() => {}} modelNames={MODEL_NAMES} />);
     expect(container.querySelector(`.awwo-multiplayer-avatar[data-participant="${RUNNER.id}"]`)).toHaveAttribute('title', '测试 · AwwO · 运行中 · Claude Opus 5.5');
+    rerender(<MultiplayerBar participants={[SELF, RUNNER]} selfId={SELF.id} status="live" onOpen={() => {}} />);
+    expect(container.querySelector(`.awwo-multiplayer-avatar[data-participant="${RUNNER.id}"]`)).toHaveAttribute('title', '测试 · AwwO · 运行中 · Claude Opus 5.5');
+    expect(container.innerHTML).not.toMatch(/bedrock/i);
   });
 
   it('counts this page while its stream is open, before the server lists it', () => {
@@ -254,16 +272,26 @@ describe('the 同屏 panel', () => {
     expect(props.onFocusNode).toHaveBeenLastCalledWith('n2');
 
     const runner = row(container, RUNNER.id);
-    expect(runner.querySelector('.awwo-multiplayer-person-status')).toHaveTextContent('运行中 · claude-opus-5-5');
+    expect(runner.querySelector('.awwo-multiplayer-person-status')).toHaveTextContent('运行中 · Claude Opus 5.5');
     expect(runner.textContent).not.toMatch(/running/);
+    expect(runner.textContent).not.toMatch(/bedrock/i);
     expect(within(runner).getByRole('button', { name: '测试' })).toBeInTheDocument();
     // This page's own selection is the board's: its row names no node.
     expect(within(row(container, SELF.id)).queryByRole('button')).toBeNull();
   });
 
   it('names an AwwO Agent’s model by the workspace’s names when it is given them', () => {
-    const { container } = render(<MultiplayerPanel {...panelProps({ modelNames: MODEL_NAMES })} />);
-    expect(row(container, RUNNER.id).querySelector('.awwo-multiplayer-person-status')).toHaveTextContent('运行中 · Claude Opus 5.5');
+    // A second run, on a model whose published name its selector spells otherwise: the catalogue's name is the one shown.
+    const gpt: LiveParticipant = { ...RUNNER, id: 'run_example0002', name: '前端页面', model: 'bedrock.gpt-6-1-sol', state: state({ selection: ['n2'], focus: 'n2', status: 'running' }) };
+    const { container, rerender } = render(<MultiplayerPanel {...panelProps({ participants: [ADA, CLAUDE, SELF, RUNNER, gpt], modelNames: MODEL_NAMES })} />);
+    const status = (id: string) => row(container, id).querySelector('.awwo-multiplayer-person-status');
+    expect(status(RUNNER.id)?.textContent).toBe('运行中 · Claude Opus 5.5');
+    expect(status(gpt.id)?.textContent).toBe('运行中 · GPT-6.1 Sol');
+    // Before the catalogue arrives: a name read from each selector.
+    rerender(<MultiplayerPanel {...panelProps({ participants: [ADA, CLAUDE, SELF, RUNNER, gpt] })} />);
+    expect(status(RUNNER.id)?.textContent).toBe('运行中 · Claude Opus 5.5');
+    expect(status(gpt.id)?.textContent).toBe('运行中 · GPT 6.1 Sol');
+    expect(container.innerHTML).not.toMatch(/bedrock/i);
   });
 
   it('lists the claims with their time left, and lets this page release only its own', async () => {
@@ -594,7 +622,7 @@ describe('the 同屏 panel', () => {
     expect(within(dialog).getByRole('button', { name: 'Release “后端接口”' })).toBeInTheDocument();
     expect(within(dialog).getByRole('status')).toHaveTextContent('Not connected');
     expect(within(dialog).getByText('2 min 05 s left')).toBeInTheDocument();
-    expect(row(container, RUNNER.id).querySelector('.awwo-multiplayer-person-status')).toHaveTextContent('Running · claude-opus-5-5');
+    expect(row(container, RUNNER.id).querySelector('.awwo-multiplayer-person-status')).toHaveTextContent('Running · Claude Opus 5.5');
     expect(within(screen.getByRole('log', { name: 'Messages' })).getByText('Leon (you)')).toBeInTheDocument();
   });
 });
