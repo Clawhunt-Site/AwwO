@@ -49,6 +49,9 @@ npm run local
   别另起一套。
 - **契约只有一个源。** 跨表层共享的能力清单、控件规格与默认值由内核契约给出，前端不要硬编码
   任何 runtime 的模型名或档位 —— 加一个就要同步另一端，断一层就算 bug。
+- **会动的东西照 [MOTION.md](MOTION.md)。** 曲线、时长、弹簧只用它的 token（数值在
+  `apps/motion-tokens.json`，界面里是 `--dur-*` / `--ease-*`），不要手写数值。改动效前后各跑一次
+  `npm run check:motion`：新出现的问题即失败，不要调高基线来过关。
 
 ## 测试
 
@@ -65,6 +68,7 @@ npm run test:local                    # 本地版
 python -m pytest                      # Python 包
 ruff check packages apps              # Python lint
 npm run check:hygiene                 # 源码卫生（控制字符、CRLF）
+npm run check:motion                  # 动效检查（对照 MOTION.md）
 ```
 
 后端测试必须用可丢弃的数据库：启动器读本地专用库，或显式给 `AWWO_TEST_DATABASE_URL`。
