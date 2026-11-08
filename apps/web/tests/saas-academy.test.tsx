@@ -71,10 +71,12 @@ it('lists every video once, by section, each staged by its checksum outside the 
 it('puts the videos added or updated most recently first: within a week of the newest, newest first', () => {
   for (const video of ACADEMY_VIDEOS) expect(academyLatestDay(video), video.id).toBe(video.changes?.[0]?.on ?? video.recordedOn);
   const latest = academyLatest();
-  const newest = Math.max(...ACADEMY_VIDEOS.map(video => dayOf(academyLatestDay(video))));
+  // A video marked `latest: false` is not among them, and the week counts from the newest of the others.
+  const shown = ACADEMY_VIDEOS.filter(video => video.latest !== false);
+  const newest = Math.max(...shown.map(video => dayOf(academyLatestDay(video))));
   expect(latest.length).toBeGreaterThan(0);
   expect(dayOf(academyLatestDay(latest[0]))).toBe(newest);
-  expect(latest.map(video => video.id).sort()).toEqual(ACADEMY_VIDEOS
+  expect(latest.map(video => video.id).sort()).toEqual(shown
     .filter(video => newest - dayOf(academyLatestDay(video)) < ACADEMY_LATEST_DAYS).map(video => video.id).sort());
   const days = latest.map(video => dayOf(academyLatestDay(video)));
   expect(days).toEqual([...days].sort((a, b) => b - a));
@@ -92,6 +94,27 @@ it('counts an update as a video’s latest day, keeps the catalog’s order with
   ];
   expect(academyLatest(catalog).map(item => item.id)).toEqual(['updated', 'same-day', 'six-days-older']);
   expect(academyLatest([])).toEqual([]);
+  // A marked video is left out before the week is counted: the newest of all, or one on the newest day, changes nothing.
+  const marked = (item: AcademyVideo): AcademyVideo => ({ ...item, latest: false });
+  expect(academyLatest([marked(video('newest-of-all', '2026-02-20')), ...catalog, marked(video('also-on-the-day', '2026-02-10'))])
+    .map(item => item.id)).toEqual(['updated', 'same-day', 'six-days-older']);
+  expect(academyLatest(catalog.map(marked))).toEqual([]);
+});
+
+// The owner's people-first multiplayer (2026-11-08, phase 1, decision 5): multiplayer is people on one canvas, as in Figma,
+// and the Multiplayer tutorial (your own agents over MCP) becomes an advanced how-to, out of 「最新」, kept in Build a case.
+it('keeps the advanced tutorial on connecting your own agents out of New and updated, under its new name, where it was in Build a case', () => {
+  const advanced = ACADEMY_VIDEOS.find(video => video.id === 'multiplayer-lockstep')!;
+  expect(advanced.title).toEqual({ en: 'Advanced: connect your own agents', zh: '高级：连接你自己的 Agent' });
+  // Its summary no longer opens with the feature's old name, which under the new title read as what it teaches.
+  expect(advanced.summary.en).not.toMatch(/^\s*multiplayer/i);
+  expect(advanced.summary.zh).not.toMatch(/^\s*多人同屏/);
+  expect(ACADEMY_VIDEOS.filter(video => video.latest === false).map(video => video.id)).toEqual(['multiplayer-lockstep']);
+  // Its place: first in Build a case, as before.
+  expect(ACADEMY_VIDEOS.filter(video => video.section === 'build')[0]).toBe(advanced);
+  // Out of 「最新」, which is what it would be without it in the catalog: the mark moves nothing else.
+  expect(academyLatest()).not.toContain(advanced);
+  expect(academyLatest().map(video => video.id)).toEqual(academyLatest(ACADEMY_VIDEOS.filter(video => video !== advanced)).map(video => video.id));
 });
 
 it('walks through homepage cases in the homepage’s order, one video a case, each with a poster on disk', () => {
@@ -365,6 +388,26 @@ it('shows New and updated first in the whole library only, in Chinese too', asyn
   // Back to the whole library: first again.
   fireEvent.click(within(dialog).getByRole('button', { name: /^全部/ }));
   expect(within(within(dialog).getAllByRole('region')[0]).getByRole('heading', { level: 3 })).toHaveTextContent('最新');
+});
+
+it('shows the advanced tutorial once, under its new name, in Build a case and not in New and updated, in English and Chinese', async () => {
+  const advanced = ACADEMY_VIDEOS.find(video => video.id === 'multiplayer-lockstep')!;
+  for (const locale of ['en', 'zh'] as const) {
+    window.history.replaceState({}, '', '/');
+    library(locale);
+    fireEvent.click(screen.getByRole('button', { name: locale === 'en' ? 'Academy' : '教程' }));
+    const dialog = await loaded(locale === 'en' ? TITLE : '从真实画布学会 AwwO');
+    const [latest, ...sections] = within(dialog).getAllByRole('region');
+    expect(cardTitles(latest)).toEqual(academyLatest().map(video => video.title[locale]));
+    expect(cardTitles(latest)).not.toContain(advanced.title[locale]);
+    // Every section as the catalog orders it, the advanced tutorial first in Build a case.
+    expect(sections.map(section => cardTitles(section))).toEqual(ACADEMY_SECTIONS
+      .map(section => ACADEMY_VIDEOS.filter(video => video.section === section).map(video => video.title[locale])));
+    expect(cardTitles(sections[ACADEMY_SECTIONS.indexOf('build')])[0]).toBe(locale === 'en' ? 'Advanced: connect your own agents' : '高级：连接你自己的 Agent');
+    const card = within(dialog).getByRole('button', { name: advanced.title[locale] });
+    expect(card).toHaveAccessibleDescription(advanced.summary[locale]);
+    cleanup();
+  }
 });
 
 it('reads in Chinese in the Chinese interface, the case names in English', async () => {

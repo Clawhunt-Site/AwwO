@@ -11,14 +11,16 @@ narration, and quiet sound effects under the narration.
 | --- | --- | --- | --- |
 | Start here (`start`) | 6, about 2 min each | Chinese | One sentence and the canvas assistant writes code, makes a poster, builds a site, writes a plan with a team; then a node opened and changed with the assistant, and the settings centre |
 | Inside the flagship cases (`flagship`) | 7 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
-| Build a case, step by step (`build`) | 18 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result; or, in the first, bring your own agents onto the canvas over MCP (Multiplayer) |
+| Build a case, step by step (`build`) | 18 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result; or, in the first, an advanced how-to, connect your own agents to the canvas over MCP |
 
 The library opens with what is new (2026-11-08, the owner: 「所有更新的教程页面的都应该放在最前面」): 「最新」 / **New and
 updated**, before the three sections, lists every video added or updated within seven days of the newest one, newest
 first and in the catalog's order within a day. A video's day is its newest update's, else the day it was recorded.
 Those videos stay in their own sections too, so the numbered how-tos keep their order, and a section's own view shows
 only that section. It reads only the catalog, never the clock, so the latest release is always first (`academyLatest`
-in `academyCatalog.ts`).
+in `academyCatalog.ts`). A video marked `latest: false` stays out of it, and out of the week it counts (the week runs
+from the newest of the others), while it keeps its place in its own section: since 2026-11-08 the advanced tutorial on
+connecting your own agents (below), so 「最新」 starts with GYROID's video.
 
 The first build video (`multiplayer-lockstep`, recorded 2026-11-07) walks through no homepage case: on the live AwwO, in
 the workspace kept for the cases, a person, the real Claude Code and Codex CLIs (each with its own token, over MCP) and
@@ -33,6 +35,13 @@ person's full account name, which the agents read in the live messages and the t
 shown as their handle, and the panel's model id for a running AwwO agent as the model's own name (the Academy's videos
 name no provider), each written in the panel's own type wherever a pass over every frame the edit draws from finds the
 panel's rendering of it. Its poster is its title frame (`showcase/academy/multiplayer-lockstep.jpg`).
+
+Since 2026-11-08 that video is an advanced how-to, 「高级：连接你自己的 Agent」 / **Advanced: connect your own agents**
+(it was "Build a game with Claude Code and Codex on one canvas", its card's summary opening with "Multiplayer:"), and it
+is marked `latest: false`. The owner wants multiplayer to be people working on one canvas together, from many clients at
+once, as in Figma's enterprise edition: inviting your own agents over MCP stays as an advanced option. The video keeps its id, file and
+place, first in Build a case. A people-first tutorial, on working on a canvas with colleagues, is recorded after the
+first phase of that work; as the newest video, it will lead 「最新」 with no change to the rule.
 
 The two how-tos added on 2026-10-25 were recorded as the first four were (2026-10-17): on the live AwwO, in the workspace
 kept for them, in Chinese and simple mode, with the same tools and motion layer. One opens a node of a three-node canvas
@@ -99,8 +108,8 @@ free plan holds until the promotion ends on 2026-10-29.
 
 - `apps/web/src/saas/academyCatalog.ts`: the videos, in order. Each has an id, a section, its case (`caseId`), the narration's
   language, the day it was recorded, a title and a summary in both languages, its length, its file's size and sha256, a
-  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`), its notes, if any, and its updates
-  (`changes`), if it was updated after it was first published.
+  poster (a case's video shows its case's cover, `/showcase/<footage>.jpg`), its notes, if any, its updates
+  (`changes`), if it was updated after it was first published, and `latest: false` if it stays out of 「最新」.
 - `apps/web/src/saas/Academy.tsx`: `AcademyProvider` (in `SaaSApp`, around every page) and `AcademyLauncher` (`header`, `menu`,
   `landing`). The dialog itself, `AcademyDialog.tsx`, loads only when it opens.
 - `apps/web/src/saas/academyLink.ts`: reading and writing `?academy`.
