@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_ROOTS = Object.freeze([
   'backend', 'apps/web/src', 'apps/web/tests', 'apps/pi-worker', 'apps/openai-agents-worker',
-  'apps/openai-agents-python-worker', 'apps/render-worker', 'apps/openmaus-worker', 'scripts', 'docs',
+  'apps/openai-agents-python-worker', 'apps/render-worker', 'apps/video-analysis-worker', 'apps/openmaus-worker', 'scripts', 'docs',
 ]);
 /** Directory names the walk never enters; a git listing leaves out what git ignores instead. */
 export const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '__pycache__']);

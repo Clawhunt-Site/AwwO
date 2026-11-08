@@ -1,0 +1,14 @@
+{
+  "name": "@awwo/video-analysis-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test --test-concurrency=1 *.test.mjs",
+    "check": "node --check server.mjs && node --check config.mjs && node --check children.mjs && node --check analysis-run.mjs && node --check analysis-jobs.mjs"
+  }
+}
