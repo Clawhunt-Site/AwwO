@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowUpFromLine, Check, Copy, FileCode2, FileDown, FileT
 import { caseRunLabel, type AssembleNode, type SessionNode } from './canvasDoc';
 import { ContractFields } from './ContractFields';
 import { emptyContract, parseContractOutput, validateContractFields, type ContractField } from './nodeContracts';
+import { displayContract } from './resultPage';
 import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
@@ -142,8 +143,12 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   // Looking at an earlier Session must not publish its historical result downstream.
   const historical = !node.lastOutput && Boolean(output);
   const locked = readOnly || !onUpdateNode;
-  const parsed = output ? deliveryPresentation(contract, output.text, locale) : null;
-  const publishedFields = parsed ? contract.outputs.filter(field => Object.hasOwn(parsed.values, field.id) || parsed.pendingFiles.has(field.id)) : [];
+  // What the result is read by: the declared form, or a session's page when it declared none (resultPage.ts). The
+  // form's editor and a publication keep to the declared form.
+  const shown = output ? displayContract(node, output.text) : contract;
+  const page = !contract.outputs.length && shown.outputs.length > 0;
+  const parsed = output ? deliveryPresentation(shown, output.text, locale) : null;
+  const publishedFields = parsed ? shown.outputs.filter(field => Object.hasOwn(parsed.values, field.id) || parsed.pendingFiles.has(field.id)) : [];
   const outputIdentity = `${node.id}:${threadKey}:${output?.at ?? ''}`;
   // A selection belongs to one publication. New Sessions/results and removed fields fall
   // back synchronously, so no render exposes a previous file while effects catch up.
@@ -152,7 +157,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   // An image or video node's result names stored files; it is shown as them, not as its record.
   const media = output && !contract.outputs.length && session && mediaKindOf(session.agentKind) ? parseMediaOutput(output.text) : null;
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
-  const showRawOutput = output && !media && (!contract.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
+  const showRawOutput = output && !media && (!shown.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
 
   // Without onChangeOutputs each change builds on the ones made since this render (files landing in two fields at once),
   // until the render that draws the owner's answer (asked for with each change, as SessionTile's writeNode does).
@@ -194,8 +199,8 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
     // A case recording's date is the case's run, already named above, not when this canvas got it.
     age && output.source !== 'case' ? t('deliverable.receivedAt', { age }) : '',
     // A field present but blank was not delivered; count only what has content.
-    !showRawOutput && contract.outputs.length > 1
-      ? t('deliverable.fieldCount', { done: publishedFields.filter(field => String(parsed!.values[field.id]).trim() !== '').length, total: contract.outputs.length }) : '',
+    !showRawOutput && shown.outputs.length > 1
+      ? t('deliverable.fieldCount', { done: publishedFields.filter(field => String(parsed!.values[field.id]).trim() !== '').length, total: shown.outputs.length }) : '',
   ].filter(Boolean) : [];
 
   return <div className="awwo-deliverables">
@@ -290,9 +295,12 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
           // Text-like values get a copy action. A file reference has its own path copy, a stored
           // artifact a download, and an HTML document is downloaded rather than pasted.
           const copyable = typeof value === 'string' && !filePath && !artifactUrl && field.type !== 'html' && value.trim() !== '';
-          return <article className="awwo-deliverable" key={field.id} id={selectedPanelId} aria-label={field.label || field.id}>
+          // A page no deliverable declared is still the run's output, as the panel called it when it showed the text; the
+          // page itself is named after its node (the preview's title, a download's file name).
+          const heading = page ? t('deliverable.runOutput') : field.label || field.id;
+          return <article className="awwo-deliverable" key={field.id} id={selectedPanelId} aria-label={heading}>
           {publishedFields.length === 1 || copyable ? <header className="awwo-deliverable-head">
-            {publishedFields.length === 1 ? <h3 className="awwo-deliverable-title">{field.label || field.id}</h3> : <span className="awwo-deliverable-head-spacer" />}
+            {publishedFields.length === 1 ? <h3 className="awwo-deliverable-title">{heading}</h3> : <span className="awwo-deliverable-head-spacer" />}
             {/* Keyed to this publication: a new delivery must not inherit an earlier "Copied". */}
             {copyable ? <CopyValue key={`${outputIdentity}:${field.id}`} value={value} title={field.label || field.id} /> : null}
           </header> : null}

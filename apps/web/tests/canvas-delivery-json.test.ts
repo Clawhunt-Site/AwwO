@@ -70,3 +70,47 @@ describe('delivery JSON missing its final closers', () => {
     expect(parseContractOutput(prose, '{"other":"x"').values.answer).toBe('{"other":"x"');
   });
 });
+
+describe('a delivery’s JSON fence', () => {
+  // What deliveryJsonSource read with a regex before 2026-11-08, which backtracked quadratically on blank lines after a
+  // fence that never closes. The fence is now read by position; it must read every text as the regex did.
+  const byRegex = (output: string) => {
+    const trimmed = output.trim();
+    const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    return closeUnterminatedJsonObject(fenced ? fenced[1] : trimmed);
+  };
+
+  it('reads every fence as the regex it replaces did', () => {
+    const texts = ['{"a":"x"}', '```json\n{"a":"x"}\n```', '```JSON {"a":"x"} ```', '```\n{"a":"x"\n```', '  ```json\n\n{"a":1}\n\n```  ',
+      '```json```', '``````', '`````', '````', '```', '```x```', '```jsonx\n{}\n```', '```js\n{}\n```', '```json\n{}\n````', '````json\n{}\n```',
+      '```html\n<!doctype html><html><head></head><body></body></html>\n```', '```json\n{"a":"```"}\n```', 'prose ```json\n{}\n```',
+      '```json\n{}\n``` and words', '\uFEFF```json\n{"a":"x"}\n```\uFEFF', '```json\n\u00a0{"a":"x"}\u2028\n```', 'Done.', '', '   '];
+    for (const text of texts) expect(deliveryJsonSource(text)).toBe(byRegex(text));
+  });
+
+  it('reads a fence that never closes, after any number of blank lines, at once', () => {
+    const open = '```json' + '\n'.repeat(50_000) + 'x';
+    const started = performance.now();
+    expect(deliveryJsonSource(open)).toBe(open);
+    expect(deliveryJsonSource(`${open}\n\`\`\``)).toBe('x');
+    // The regex took about 0.8 s at 2,000 lines, and grows with their square.
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe('the closers’ trailing whitespace', () => {
+  it('is dropped as the regex it replaces did, and a long run inside the text costs nothing', () => {
+    const byRegex = (text: string) => text.replace(/[ \t\r\n]+$/, '');
+    for (const tail of ['', ' ', '\n', '\t \r\n ', '\u00a0', ' \u00a0 ', '\f']) {
+      const text = `{"a":"x"${tail}`;
+      const expected = byRegex(text).endsWith('"') ? `${byRegex(text)}}` : text;
+      expect(closeUnterminatedJsonObject(text)).toBe(expected);
+    }
+    // An unbalanced object with 200,000 spaces before its last character: the regex took seconds (quadratic in the run).
+    const text = `{"a":1${' '.repeat(200_000)}x`;
+    const started = performance.now();
+    expect(closeUnterminatedJsonObject(text)).toBe(text);
+    expect(closeUnterminatedJsonObject(`{"a":"x"${' '.repeat(200_000)}`)).toBe('{"a":"x"}');
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});

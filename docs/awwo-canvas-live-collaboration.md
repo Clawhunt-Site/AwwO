@@ -316,6 +316,11 @@ every page reads fixed and every canvas run refuses.)
 An agent's write takes the nodes it wrote for 60 s, or renews its own claim, never shortening it or blanking its note.
 - Not: bindings, conversations, Agent references, skills, teams, task frames, contracts, models, runtimes, efforts,
   media settings, evolution marks, `execution`. A new session node has no runtime or model chosen; a person picks them.
+  It has no output fields either, so its result is text, its own `result` port's: when that result is one complete
+  HTML document (a run's, or one an agent hands in), the canvas shows it as the node's page all the same, and the page
+  check sends a run's page back to the node once when it fails (`docs/agent-graph.md`, Delivery formats). A contract
+  stays a person's to set; adding one gives the node its fields' ports in place of `context` and `result`, so the wires
+  on those two go.
 
 ### Ports
 

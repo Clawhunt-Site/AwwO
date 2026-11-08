@@ -1,17 +1,18 @@
 // What a canvas made, as files: the model behind the deliverable studio (成果工作台) and the live card previews.
 //
 // Read from published outputs only (the same rules as canvasResultModel): each node's contract fields become
-// files (a page, a document, a stored file, a scalar summary), an image/video/3D node's generated media (and an edit's
+// files (a page, a document, a stored file, a scalar summary; a session that declared none and returned a complete HTML
+// document, that page: resultPage.ts), an image/video/3D node's generated media (and an edit's
 // film, subtitles, report and stills) become their own files, and a field that named a file no server holds is listed
 // as missing, never as a delivery.
 // Stored bytes are not fetched here; the studio loads them when a file is opened (studioData.ts).
-import { nodeContract, type CanvasDocument, type CanvasNode, type SessionNode } from '../canvasDoc';
+import type { CanvasDocument, CanvasNode, SessionNode } from '../canvasDoc';
 import { canvasResult, type DeliveryState } from '../canvasResultModel';
 import { deliveryPresentation } from '../fileDeliveryPresentation';
 import { htmlDocumentSource } from '../htmlDeliverable';
 import { mediaKindOf } from '../mediaCatalog';
 import { parseEditFacts, parseMediaOutput } from '../mediaOutput';
-import { emptyContract } from '../nodeContracts';
+import { displayContract } from '../resultPage';
 
 export type StudioKind = 'page' | 'markdown' | 'text' | 'code' | 'data' | 'table' | 'image' | 'video' | 'audio' | 'model' | 'pdf'
   | 'archive' | 'file' | 'missing';
@@ -140,7 +141,9 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
   // An assemble node's page and file are deliverables like an agent's.
   if (node.kind === 'form' || !node.lastOutput?.text.trim()) return [];
   const nodeTitle = node.title.trim() || node.id;
-  const contract = nodeContract(node) || emptyContract();
+  // A session that declared no deliverables and returned a complete HTML document delivered that page (resultPage.ts):
+  // it is the node's `<title>.html`.
+  const contract = displayContract(node, node.lastOutput.text);
   const base = { nodeId: node.id, nodeTitle, folder: [] as string[], state, ...(review ? { review: true } : {}) };
   const text = node.lastOutput.text;
   const entries: StudioEntry[] = [];
@@ -192,7 +195,9 @@ export function nodeEntries(node: SessionNode | CanvasNode, state: DeliveryState
     const value = parsed!.values[field.id];
     const textValue = String(value);
     if (field.type === 'html') {
-      entries.push({ ...base, id, name: unique(`${fileStem(label, 'index')}.html`), label, kind: 'page', source: { type: 'inline', text: htmlDocumentSource(textValue) } });
+      // A label (or a node title) that already names the page "index.html" keeps that name, as its download does.
+      const stem = fileStem(label, 'index').replace(/\.html?$/i, '') || 'index';
+      entries.push({ ...base, id, name: unique(`${stem}.html`), label, kind: 'page', source: { type: 'inline', text: htmlDocumentSource(textValue) } });
     } else if (field.type === 'markdown') {
       entries.push({ ...base, id, name: unique(`${fileStem(label)}.md`), label, kind: 'markdown', source: { type: 'inline', text: textValue } });
     } else if (field.type === 'text') {

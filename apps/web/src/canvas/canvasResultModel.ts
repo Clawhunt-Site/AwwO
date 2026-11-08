@@ -6,13 +6,13 @@
 // came from and how complete it is are kept as recorded: a manual publication is never called a run's
 // result, a copied case's recording is never called this canvas's run, and a failed run's partial capture
 // is evidence, never a delivered result.
-import { nodeContract, type CanvasDocument, type CanvasNode, type NodeOutput } from './canvasDoc';
+import type { CanvasDocument, CanvasNode, NodeOutput } from './canvasDoc';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { deliveryPresentation } from './fileDeliveryPresentation';
 import { mediaKindOf } from './mediaCatalog';
 import { parseMediaOutput } from './mediaOutput';
-import { emptyContract } from './nodeContracts';
 import { nodeDepths } from './nodePresentation';
+import { displayContract } from './resultPage';
 
 /** What a published result is, by the richest field it carries. */
 export type DeliveryKind = 'html' | 'media' | 'file' | 'markdown' | 'text';
@@ -80,7 +80,8 @@ export function stepDelivery(node: CanvasNode, depth: number, reviewer = false):
   const base = { node, depth, output, input, review };
   if (!output || !output.text.trim()) return { ...base, output: null, state: 'none', kind: null };
   const state: DeliveryState = output.partial ? 'partial' : output.source === 'manual' ? 'manual' : output.source === 'case' ? 'case' : 'run';
-  const contract = nodeContract(node) || emptyContract();
+  // A session that declared no deliverables and returned a complete HTML document delivered that page (resultPage.ts).
+  const contract = displayContract(node, output.text);
   if (!contract.outputs.length && mediaNode(node) && parseMediaOutput(output.text)) return { ...base, state, kind: 'media' };
   const parsed = deliveryPresentation(contract, output.text);
   const published = parsed.errors.length ? [] : contract.outputs.filter(field => {
@@ -176,7 +177,7 @@ export function deliveredItems(doc: Pick<CanvasDocument, 'nodes' | 'edges'> & Pa
     const node = step.node;
     if (step.input || !step.output || node.kind === 'form') continue;
     const nodeTitle = node.title.trim() || node.id;
-    const contract = nodeContract(node) || emptyContract();
+    const contract = displayContract(node, step.output.text);
     // An edit lists its film, like a video; its subtitles, report and stills open with it.
     if (!contract.outputs.length && mediaNode(node)) {
       const media = parseMediaOutput(step.output.text);
