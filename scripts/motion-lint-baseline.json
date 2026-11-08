@@ -1,0 +1,1823 @@
+{
+  "about": "Known motion drift, listed by rule and text rather than by file, so code that moves keeps its allowance. A finding that matches nothing here fails. Lower it with --prune-baseline once drift is fixed; never raise it to pass the check.",
+  "known": [
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 120ms ease, border-color 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/account/account.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 120ms ease, border-color 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/account/account.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: account-spin 900ms linear infinite",
+      "count": 1,
+      "where": "apps/web/src/account/account.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 120ms ease, border-color 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/account/account.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform .15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/awwo-node.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform .15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/awwo-node.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity .12s",
+      "count": 2,
+      "where": "apps/web/src/canvas/awwo-node.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform .15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/awwo-node.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-assistant-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-assistant-sweep 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-assistant-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-assistant-sweep 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-assistant-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-assistant-spin 1s linear infinite",
+      "count": 2,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-assistant-sweep 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas-assistant.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-results-spin 1s linear infinite",
+      "count": 2,
+      "where": "apps/web/src/canvas/canvas-results.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "--ease: cubic-bezier(0.4, 0, 0.2, 1);",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: canvas-run-pulse 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.14s ease, background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.14s ease, box-shadow 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 160ms ease, visibility 160ms",
+      "count": 2,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: stroke-opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: canvas-run-pulse 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.14s ease, background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.14s ease, box-shadow 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 160ms ease, visibility 160ms",
+      "count": 2,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: stroke-opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: canvas-run-pulse 1.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: canvas-tile-breathe 1.9s var(--ease) infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.14s ease, background 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.14s ease, box-shadow 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.14s var(--ease)",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 160ms ease, visibility 160ms",
+      "count": 2,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: stroke-opacity 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 0.14s var(--ease), opacity 0.14s var(--ease)",
+      "count": 1,
+      "where": "apps/web/src/canvas/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-studio-spin 1s linear infinite",
+      "count": 3,
+      "where": "apps/web/src/canvas/card-preview.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-attachment-spin 1s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/composer-attachments.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-converged-blink 4.4s linear infinite",
+      "count": 2,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-converged-breathe 2.2s var(--saas-ease-in-out, ease-in-out) infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-converged-hop .9s var(--saas-ease-spring, cubic-bezier(.34, 1.56, .64, 1))",
+      "count": 2,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-converged-pop .2s var(--saas-ease-spring, cubic-bezier(.34, 1.56, .64, 1))",
+      "count": 1,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-converged-shake .6s var(--saas-ease-in-out, ease-in-out)",
+      "count": 2,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: stroke .2s var(--saas-ease, ease)",
+      "count": 1,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform .45s var(--saas-ease-in-out, ease-in-out)",
+      "count": 1,
+      "where": "apps/web/src/canvas/converged-icon.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "--anatomy-weight:.6px;--anatomy-ease:cubic-bezier(.32,.72,0,1);",
+      "count": 1,
+      "where": "apps/web/src/canvas/figureKit/anatomy-kit.js"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation:iso-flow 1600ms linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/figureKit/anatomy-kit.js"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation:iso-pulse 1600ms steps(1,end) infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/figureKit/anatomy-kit.js"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background .15s, border-color .15s, box-shadow .15s",
+      "count": 1,
+      "where": "apps/web/src/canvas/ios-theme.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color .15s, background .15s",
+      "count": 1,
+      "where": "apps/web/src/canvas/ios-theme.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color .15s, box-shadow .15s",
+      "count": 3,
+      "where": "apps/web/src/canvas/ios-theme.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "const KEYWORD_CURVES: Record<string, number[]> = { ease: [0.25, 0.1, 0.25, 1], 'ease-in': [0.42, 0, 1, 1], 'ease-out': [0, 0, 0.58, 1], 'ease-in-out': [0.42,...",
+      "count": 1,
+      "where": "apps/web/src/canvas/motionNotes.ts"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "const KEYWORD_CURVES: Record<string, number[]> = { ease: [0.25, 0.1, 0.25, 1], 'ease-in': [0.42, 0, 1, 1], 'ease-out': [0, 0, 0.58, 1], 'ease-in-out': [0.42,...",
+      "count": 1,
+      "where": "apps/web/src/canvas/motionNotes.ts"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-multiplayer-flash 1400ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-multiplayer-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-multiplayer-flash 1400ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-multiplayer-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-multiplayer-flash 1400ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-multiplayer-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background-color 140ms, border-color 140ms",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 140ms, background-color 140ms",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 140ms",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 200ms linear",
+      "count": 1,
+      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "0% { translate: 0 0; animation-timing-function: cubic-bezier(.61, 1, .88, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "0%, 100% { transform: translateY(0); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "25% { translate: 7% 0; animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "50% { transform: translateY(6%); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "75% { translate: -7% 0; animation-timing-function: cubic-bezier(.12, 0, .39, 0); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "0% { translate: 0 0; animation-timing-function: cubic-bezier(.61, 1, .88, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "0%, 100% { transform: translateY(0); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "25% { translate: 7% 0; animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "50% { transform: translateY(6%); animation-timing-function: cubic-bezier(.37, 0, .63, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "75% { translate: -7% 0; animation-timing-function: cubic-bezier(.12, 0, .39, 0); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-node-icon-gx 2.2s linear infinite, awwo-node-icon-gy 2.2s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-node-icon-orbit 2.2s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: translate .45s var(--saas-ease-in-out, ease-in-out)",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-icon.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color .12s, color .12s",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-model-picker.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: nv-spin 2.4s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/node-view-styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-review-flow 800ms linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/selectionCollaboration.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": ".awwo-studio-dialog[open] { animation: awwo-studio-in .22s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-studio-fade .18s ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": ".awwo-studio-dialog[open] { animation: awwo-studio-in .22s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-studio-fade .18s ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-studio-fade .18s ease-out",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-studio-in .22s cubic-bezier(.2, .8, .2, 1)",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background-color .12s, color .12s, border-color .12s",
+      "count": 1,
+      "where": "apps/web/src/canvas/studio/studio.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: canvas-wire-forward 1s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/canvas/wire-state.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-execution-spin 1s linear infinite",
+      "count": 2,
+      "where": "apps/web/src/saas/assistant-execution.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation:awwo-knowledge-mark 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/canvas-knowledge-dock.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation:awwo-knowledge-mark 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/canvas-knowledge-dock.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation:awwo-knowledge-mark 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/canvas-knowledge-dock.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation:awwo-web-reader-spin 1s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/canvas-web-reader.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-signal-dot 1.8s ease-out infinite",
+      "count": 2,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: saas-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-signal-dot 1.8s ease-out infinite",
+      "count": 2,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: saas-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation-delay: .2s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation-delay: .4s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-dot-hold 1.6s steps(2, jump-none) infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-msg-in .18s var(--saas-ease)",
+      "count": 2,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-signal-breathe 2.2s var(--saas-ease-in-out) infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-signal-dot 1.8s ease-out infinite",
+      "count": 2,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-wire-signal .9s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background-color .15s, color .15s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color .15s, background-color .15s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform .12s var(--saas-ease), opacity .15s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform .16s var(--saas-ease, ease)",
+      "count": 1,
+      "where": "apps/web/src/saas/design/canvas.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: awwo-scrim-in var(--saas-dur-2) ease-out",
+      "count": 3,
+      "where": "apps/web/src/saas/design/motion.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: awwo-scrim-in var(--saas-dur-2) ease-out",
+      "count": 3,
+      "where": "apps/web/src/saas/design/motion.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-node-done-ping .9s var(--saas-ease) 1",
+      "count": 1,
+      "where": "apps/web/src/saas/design/motion.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-node-failed-ping .9s var(--saas-ease) 1",
+      "count": 1,
+      "where": "apps/web/src/saas/design/motion.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": ".saas-home-head .awwo-boot-gaze { animation: saas-home-glance 9s cubic-bezier(.45, 0, .55, 1) infinite; }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: saas-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": ".saas-home-head .awwo-boot-gaze { animation: saas-home-glance 9s cubic-bezier(.45, 0, .55, 1) infinite; }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: saas-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-home-blink 5.6s linear 1.2s infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-home-file-spin 1s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-home-glance 9s cubic-bezier(.45, 0, .55, 1) infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: saas-spin .9s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/system.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": ":is(.saas-dashboard, .saas-canvas-shell) { animation: awwo-page-in .28s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "html:root .saas-canvas-shell .awwo-results { animation: awwo-view-in .24s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "html:root .saas-canvas-shell .canvas-tile.awwo-node.has-preview .awwo-card-preview { animation: awwo-view-in .22s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "html[data-navigating] body::after { animation: awwo-nav-progress 1s cubic-bezier(.4, 0, .2, 1) infinite; }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity .18s ease-out .06s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": ":is(.saas-dashboard, .saas-canvas-shell) { animation: awwo-page-in .28s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "html:root .saas-canvas-shell .awwo-results { animation: awwo-view-in .24s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "html:root .saas-canvas-shell .canvas-tile.awwo-node.has-preview .awwo-card-preview { animation: awwo-view-in .22s cubic-bezier(.2, .8, .2, 1); }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "html[data-navigating] body::after { animation: awwo-nav-progress 1s cubic-bezier(.4, 0, .2, 1) infinite; }",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity .18s ease-out .06s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-nav-progress 1s cubic-bezier(.4, 0, .2, 1) infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-page-in .28s cubic-bezier(.2, .8, .2, 1)",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-view-in .22s cubic-bezier(.2, .8, .2, 1)",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: awwo-view-in .24s cubic-bezier(.2, .8, .2, 1)",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity .18s ease-out .06s",
+      "count": 1,
+      "where": "apps/web/src/saas/design/transitions.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 1100ms var(--saas-ease)",
+      "count": 1,
+      "where": "apps/web/src/saas/plan-voucher.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform .22s var(--saas-ease, ease), box-shadow .22s var(--saas-ease, ease), border-color .22s",
+      "count": 1,
+      "where": "apps/web/src/saas/production-cases.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition:border-color .15s,box-shadow .15s",
+      "count": 1,
+      "where": "apps/web/src/saas/saas.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "left: 0",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "max-width: 0",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: background .3s, width .3s",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-flow 1.3s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-rise .45s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-rise .4s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: wmt-rise .5s ease both",
+      "count": 5,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-flow 1.3s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-rise .45s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-rise .4s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: wmt-rise .5s ease both",
+      "count": 5,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation-delay: .6s",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation-delay: .9s",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-flow 1.3s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-pulse 1.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-pulse 1.4s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-rise .45s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-rise .4s ease both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-rise .5s ease both",
+      "count": 5,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: wmt-type 1.1s steps(28, end) both",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background .3s, width .3s",
+      "count": 1,
+      "where": "apps/web/src/saas/work-mode-tutorial.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: width 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 140ms ease, border-color 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: width 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 140ms ease, border-color 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: width 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 140ms ease, border-color 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: width 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "reduced-motion-missing",
+      "text": "transition: transform 140ms ease;",
+      "count": 1,
+      "where": "apps/web/src/settings/settings.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: background 140ms ease, width 140ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: max-width 160ms ease, opacity 140ms ease, margin-left 160ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: padding-right 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "layout-property",
+      "text": "transition: width 0.3s ease, background 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: agent-pulse 1.6s ease-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: chatLiveShimmer 2.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: cphSurfaceIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: onboarding-fade 0.28s ease both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: onboarding-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: onboarding-slide 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: startup-breathe 2.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "animation: toast-in 160ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.12s ease, color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.15s ease, border-color 0.15s ease",
+      "count": 4,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.15s ease, color 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 0.2s ease, color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: background 140ms ease, width 140ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: filter 0.15s ease, opacity 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: max-width 160ms ease, opacity 140ms ease, margin-left 160ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 0.12s ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 120ms ease, background 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: opacity 120ms ease, transform 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: padding-right 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 0.14s ease, border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: transform 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "off-language-curve",
+      "text": "transition: width 0.3s ease, background 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: agent-pulse 1.6s ease-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: chatLiveShimmer 2.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: cphSurfaceIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: onboarding-fade 0.28s ease both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: onboarding-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: onboarding-slide 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: startup-breathe 2.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "animation: toast-in 160ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.12s ease, color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.15s ease, border-color 0.15s ease",
+      "count": 4,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.15s ease, color 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 0.2s ease, color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: background 140ms ease, width 140ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: filter 0.15s ease, opacity 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: max-width 160ms ease, opacity 140ms ease, margin-left 160ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 0.12s ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 120ms ease, background 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: opacity 120ms ease, transform 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: padding-right 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 0.14s ease, border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: transform 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-curve",
+      "text": "transition: width 0.3s ease, background 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation-duration: 0.3s",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: agent-pulse 1.6s ease-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: chatLiveDots 1.25s steps(1, end) infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: chatLiveShimmer 2.2s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: cphSurfaceIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: native-browser-spin 0.8s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: onboarding-fade 0.28s ease both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: onboarding-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: onboarding-slide 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: runtime-spin 0.8s linear infinite",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: spin 0.9s linear infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: startup-breathe 2.6s ease-in-out infinite",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "animation: toast-in 160ms ease-out",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.12s ease, color 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.15s ease, border-color 0.15s ease",
+      "count": 4,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.15s ease, color 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 0.2s ease, color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: background 140ms ease, width 140ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: filter 0.15s ease, opacity 0.15s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: max-width 160ms ease, opacity 140ms ease, margin-left 160ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 0.12s ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 120ms ease, background 120ms ease, color 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: opacity 120ms ease, transform 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: padding-right 120ms ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 0.12s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 0.14s ease, border-color 0.14s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: transform 120ms ease, color 120ms ease",
+      "count": 2,
+      "where": "apps/web/src/styles.css"
+    },
+    {
+      "rule": "raw-duration",
+      "text": "transition: width 0.3s ease, background 0.3s ease",
+      "count": 1,
+      "where": "apps/web/src/styles.css"
+    }
+  ]
+}

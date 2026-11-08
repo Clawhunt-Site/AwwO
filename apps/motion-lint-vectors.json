@@ -1,0 +1,998 @@
+{
+  "about": "Cases both motion checks agree on: scripts/motion-lint.mjs (every profile) and the web's motion notes (apps/web/src/canvas/motionNotes.ts, the page profile). expect lists [line, rule] pairs in line order; an empty list means nothing to report.",
+  "cases": [
+    {
+      "name": "transition all is never right",
+      "path": "a.css",
+      "profile": "strict",
+      "text": ".a { transition: all .2s; }\n@media (prefers-reduced-motion: reduce) { .a { transition: none; } }",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ],
+        [
+          1,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "a token block defines raw values and uses none",
+      "path": "tokens.css",
+      "profile": "strict",
+      "text": ":root {\n  --dur-base: 200ms;\n  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);\n}\n.b { transition: transform var(--dur-base) var(--ease-enter); }\n@media (prefers-reduced-motion: reduce) { :root { --dur-base: 140ms; } }",
+      "expect": []
+    },
+    {
+      "name": "a raw curve and duration outside the tokens",
+      "path": "c.css",
+      "profile": "strict",
+      "text": ".c { transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1); }\n@media (prefers-reduced-motion: reduce) { .c { transition: none; } }",
+      "expect": [
+        [
+          1,
+          "raw-curve"
+        ],
+        [
+          1,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "a curve no token or preset names",
+      "path": "d.css",
+      "profile": "strict",
+      "text": ":root { --ease-x: cubic-bezier(0.4, 0, 0.2, 1); }",
+      "expect": [
+        [
+          1,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "the fallback inside var() is not a raw use",
+      "path": "e.css",
+      "profile": "strict",
+      "text": ".e { animation: hop var(--dur-slow) var(--ease-emphasis, cubic-bezier(0.34, 1.4, 0.64, 1)) both; }\n@media (prefers-reduced-motion: reduce) { .e { animation: none; } }",
+      "expect": []
+    },
+    {
+      "name": "layout properties in a transition and in keyframes",
+      "path": "f.css",
+      "profile": "strict",
+      "text": ".f { transition: width var(--dur-base) var(--ease-move); }\n@keyframes grow {\n  from { height: 0; }\n  to { height: 40px; }\n}\n@media (prefers-reduced-motion: reduce) { .f { transition: none; } }",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ],
+        [
+          3,
+          "layout-property"
+        ],
+        [
+          4,
+          "layout-property"
+        ]
+      ]
+    },
+    {
+      "name": "movement with no reduced-motion path",
+      "path": "g.css",
+      "profile": "strict",
+      "text": ".g { transition: opacity var(--dur-fast) var(--ease-enter); }\n.h { transition: transform var(--dur-base) var(--ease-enter); }",
+      "expect": [
+        [
+          2,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "fades and colour changes alone need no reduced-motion path",
+      "path": "h.css",
+      "profile": "strict",
+      "text": ".h { transition: opacity var(--dur-fast) var(--ease-enter), color var(--dur-fast) var(--ease-enter); }",
+      "expect": []
+    },
+    {
+      "name": "short durations inside the reduced-motion query are the point",
+      "path": "i.css",
+      "profile": "strict",
+      "text": ".i { transition: transform var(--dur-slow) var(--ease-enter); }\n@media (prefers-reduced-motion: reduce) {\n  .i { transition: transform 1ms linear; animation-duration: 0.01ms !important; }\n}",
+      "expect": []
+    },
+    {
+      "name": "comments are not code",
+      "path": "j.css",
+      "profile": "strict",
+      "text": "/* never transition: all; cubic-bezier(0.4, 0, 0.2, 1) */\n.j { color: red; }",
+      "expect": []
+    },
+    {
+      "name": "a film page reading the clock and chance",
+      "path": "film.html",
+      "profile": "strict",
+      "text": "<script>\nwindow.renderAt = t => {\n  const wobble = Math.random();\n  const now = Date.now();\n};\n</script>",
+      "expect": [
+        [
+          3,
+          "render-clock"
+        ],
+        [
+          4,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "the real-time player may read the clock when it says so",
+      "path": "film2.html",
+      "profile": "strict",
+      "text": "<script>\nwindow.renderAt = t => draw(t);\n// motion-lint-allow render-clock: the player only chooses t\nfunction play() { const start = performance.now(); }\n</script>",
+      "expect": []
+    },
+    {
+      "name": "a page that only calls renderAt is not a film",
+      "path": "host.ts",
+      "profile": "strict",
+      "text": "await frame.evaluate(t => window.renderAt(t), 0.5);\nconst stamp = Date.now();",
+      "expect": []
+    },
+    {
+      "name": "a Remotion spring written by hand, with a fixed frame rate",
+      "path": "Scene.tsx",
+      "profile": "strict",
+      "text": "import { spring } from 'remotion';\nconst s = spring({ frame, fps: 30, config: { damping: 32, stiffness: 380 } });\nconst wild = spring({ frame, fps, config: { damping: 9, stiffness: 300 } });",
+      "expect": [
+        [
+          2,
+          "raw-spring"
+        ],
+        [
+          2,
+          "fps-literal"
+        ],
+        [
+          3,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "a Remotion curve outside the language",
+      "path": "Title.tsx",
+      "profile": "strict",
+      "text": "import { Easing } from 'remotion';\nconst e = Easing.bezier(0.05, 0.7, 0.1, 1);",
+      "expect": [
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "a token module may hold the numbers",
+      "path": "motion-tokens.ts",
+      "profile": "strict",
+      "text": "import { Easing } from 'remotion';\nexport const enter = Easing.bezier(0.16, 1, 0.3, 1);\nexport const sheet = { stiffness: 380, damping: 32 };",
+      "expect": []
+    },
+    {
+      "name": "a spring evaluated by zeta and settle",
+      "path": "film3.html",
+      "profile": "strict",
+      "text": "<script>\nwindow.renderAt = t => {\n  const a = springAt(t, 0.8, 0.6);\n  const b = springAt(t, 0.3, 2);\n};\n</script>",
+      "expect": [
+        [
+          3,
+          "raw-spring"
+        ],
+        [
+          4,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "a deliberate exception on the line above",
+      "path": "k.css",
+      "profile": "strict",
+      "text": "/* motion-lint-allow raw-duration: the shimmer matches the skeleton's 1.6 s cycle */\n.k { animation: shimmer 1.6s linear infinite; }\n@media (prefers-reduced-motion: reduce) { .k { animation: none; } }",
+      "expect": []
+    },
+    {
+      "name": "minified: a keyframes block does not reach the rule after it on the same line",
+      "path": "min.css",
+      "profile": "strict",
+      "text": "@keyframes fade{from{opacity:0}to{opacity:1}} .card{width:300px;height:200px}",
+      "expect": []
+    },
+    {
+      "name": "minified: every transition on a line is read, not only the first",
+      "path": "min2.css",
+      "profile": "strict",
+      "text": ".a{transition:opacity 200ms}.b{transition:width 200ms}",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ],
+        [
+          1,
+          "raw-duration"
+        ],
+        [
+          1,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "a transition value over several lines",
+      "path": "multi.css",
+      "profile": "strict",
+      "text": ".a {\n  transition:\n    width 200ms ease;\n}",
+      "expect": [
+        [
+          2,
+          "layout-property"
+        ],
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "off-language-curve"
+        ],
+        [
+          2,
+          "raw-duration"
+        ],
+        [
+          2,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "React style properties, camel-cased",
+      "path": "Card.tsx",
+      "profile": "strict",
+      "text": "const s = { transitionProperty: 'width', transitionDuration: '200ms' };",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ],
+        [
+          1,
+          "raw-duration"
+        ],
+        [
+          1,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "a shorthand that names its property last",
+      "path": "order.css",
+      "profile": "strict",
+      "text": ".a { transition: var(--dur-base) var(--ease-move) width; }\n@media (prefers-reduced-motion: reduce) { .a { transition: none; } }",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ]
+      ]
+    },
+    {
+      "name": "all after a comma, and a transition that names no property",
+      "path": "implicit.css",
+      "profile": "strict",
+      "text": ".a { transition: opacity var(--dur-fast) var(--ease-enter), all var(--dur-base) var(--ease-enter); }\n.b { transition: var(--dur-base) var(--ease-enter); }\n@media (prefers-reduced-motion: reduce) { .a, .b { transition: none; } }",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ],
+        [
+          2,
+          "transition-all"
+        ]
+      ]
+    },
+    {
+      "name": "a token declaration does not excuse the raw values beside it",
+      "path": "mixed.css",
+      "profile": "strict",
+      "text": ":root{--dur-base:200ms}.a{transition:opacity 250ms cubic-bezier(.16,1,.3,1)}",
+      "expect": [
+        [
+          1,
+          "raw-curve"
+        ],
+        [
+          1,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "a MOTION object defines its curves in place",
+      "path": "Scene.tsx",
+      "profile": "strict",
+      "text": "import { Easing } from 'remotion';\nconst MOTION = {\n  ease: { enter: Easing.bezier(0.16, 1, 0.3, 1) },\n};",
+      "expect": []
+    },
+    {
+      "name": "a comment that names reduced motion is not a reduced-motion path",
+      "path": "todo.css",
+      "profile": "strict",
+      "text": "/* TODO: add prefers-reduced-motion */\n.a { transition: transform var(--dur-base) var(--ease-enter); }",
+      "expect": [
+        [
+          2,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "a commented-out renderAt does not make a file a film",
+      "path": "clock.ts",
+      "profile": "strict",
+      "text": "// window.renderAt = t => draw(t);\nconst stamp = Date.now();",
+      "expect": []
+    },
+    {
+      "name": "page profile: prose about motion is not motion",
+      "path": "prose.html",
+      "profile": "page",
+      "text": "<!doctype html><html><body><p>Avoid transition: all, because it animates layout like width: 10px.</p></body></html>",
+      "expect": []
+    },
+    {
+      "name": "page profile: a page's file name exempts nothing",
+      "path": "tokens.html",
+      "profile": "page",
+      "text": "<style>:root { --ease-a: cubic-bezier(0.1, 0.2, 0.3, 1); }\n.x { transition: opacity 200ms cubic-bezier(0.1, 0.2, 0.3, 1); }</style>",
+      "expect": [
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a style attribute is read",
+      "path": "attr.html",
+      "profile": "page",
+      "text": "<div style=\"transition: all 300ms ease; transform: translateY(4px)\">Hi</div>",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ],
+        [
+          1,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a delivered page without tokens gets only the judgement-free rules",
+      "path": "page.html",
+      "profile": "page",
+      "text": "<style>\n.card { transition: all 300ms ease; }\n.bar { transition: width 200ms ease; }\n</style>",
+      "expect": [
+        [
+          2,
+          "transition-all"
+        ],
+        [
+          3,
+          "layout-property"
+        ],
+        [
+          3,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a page that declares tokens is held to them",
+      "path": "page2.html",
+      "profile": "page",
+      "text": "<style>\n:root { --dur-base: 200ms; --ease-enter: cubic-bezier(0.16, 1, 0.3, 1); }\n.x { transition: transform 260ms cubic-bezier(0.2, 0, 0, 1); }\n@media (prefers-reduced-motion: reduce) { .x { transition: none; } }\n</style>",
+      "expect": [
+        [
+          3,
+          "raw-curve"
+        ],
+        [
+          3,
+          "off-language-curve"
+        ],
+        [
+          3,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a film page reading chance",
+      "path": "page3.html",
+      "profile": "page",
+      "text": "<script>window.renderAt = t => { const r = Math.random(); };</script>",
+      "expect": [
+        [
+          1,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a page with a motion language of its own is held to its own tokens, not AwwO's",
+      "path": "page5.html",
+      "profile": "page",
+      "text": "<style>\n:root { --ease-pop: cubic-bezier(0.5, 0, 0.5, 1.5); --dur-pop: 320ms; }\n.x { transition: transform var(--dur-pop) var(--ease-pop); }\n@media (prefers-reduced-motion: reduce) { .x { transition: none; } }\n</style>",
+      "expect": []
+    },
+    {
+      "name": "page profile: springs and frame rates are left to the page",
+      "path": "page6.html",
+      "profile": "page",
+      "text": "<script>\nconst sheet = { type: 'spring', stiffness: 300, damping: 9 };\nconst calm = matchMedia('(prefers-reduced-motion: reduce)');\n</script>",
+      "expect": []
+    },
+    {
+      "name": "page profile: a reduced-motion path in script counts",
+      "path": "page4.html",
+      "profile": "page",
+      "text": "<style>.s { transition: transform 200ms ease; }</style>\n<script>const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;</script>",
+      "expect": []
+    },
+    {
+      "name": "CSS timing keywords are curves: ease-in-out and ease-out are none of the language's",
+      "path": "k.css",
+      "profile": "strict",
+      "text": ".a { transition: transform var(--dur-base) ease-in-out; }\n.b { animation: pop var(--dur-slow) ease-out both; }\n.c { transition-timing-function: ease; }\n@media (prefers-reduced-motion: reduce) { .a, .b { transition: none; animation: none; } }",
+      "expect": [
+        [
+          1,
+          "raw-curve"
+        ],
+        [
+          1,
+          "off-language-curve"
+        ],
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "off-language-curve"
+        ],
+        [
+          3,
+          "raw-curve"
+        ],
+        [
+          3,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "linear and steps are not curves the language rejects",
+      "path": "l.css",
+      "profile": "strict",
+      "text": ".s { animation: spin var(--dur-scene) linear infinite; }\n.t { animation: tick var(--dur-scene) steps(4) infinite; }",
+      "expect": []
+    },
+    {
+      "name": "an easing given by name in script: WAAPI, Motion, GSAP",
+      "path": "e.js",
+      "profile": "strict",
+      "text": "el.animate(frames, { duration: MOTION.dur.base * 1000, easing: \"ease-in\" });\nanimate(el, { x: 10 }, { ease: \"easeOut\" });\ngsap.to(el, { x: 10, ease: \"power2.out\" });\nconst pick = { ease: 'enter' };",
+      "expect": [
+        [
+          1,
+          "raw-curve"
+        ],
+        [
+          1,
+          "off-language-curve"
+        ],
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "off-language-curve"
+        ],
+        [
+          3,
+          "raw-curve"
+        ],
+        [
+          3,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "Remotion's named easings are library curves",
+      "path": "Rise.tsx",
+      "profile": "strict",
+      "text": "import { Easing, interpolate } from 'remotion';\nconst y = interpolate(frame, [0, 12], [40, 0], { easing: Easing.out(Easing.cubic) });\nconst z = interpolate(frame, [0, 12], [0, 1], { easing: Easing.linear });",
+      "expect": [
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "an .animate call over several lines",
+      "path": "a.js",
+      "profile": "strict",
+      "text": "el.animate(\n  [{ height: \"0px\" }, { height: \"120px\" }],\n  { duration: 300 },\n);",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ],
+        [
+          1,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "a spring config over several lines, and one key alone",
+      "path": "Scene.tsx",
+      "profile": "strict",
+      "text": "import { spring } from 'remotion';\nconst a = spring({ frame, fps, config: {\n  damping: 12,\n  stiffness: 200,\n} });\nconst b = spring({ frame, fps, config: { damping: 200 } });",
+      "expect": [
+        [
+          3,
+          "raw-spring"
+        ],
+        [
+          6,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "a Framer spring transition over several lines",
+      "path": "Card.tsx",
+      "profile": "strict",
+      "text": "<motion.div animate={{ opacity: 1 }} transition={{\n  type: \"spring\",\n  stiffness: 300,\n  damping: 30,\n}} />",
+      "expect": [
+        [
+          3,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "a lone damping outside a spring is not a spring",
+      "path": "pan.ts",
+      "profile": "strict",
+      "text": "const pan = { damping: 0.9, maxSpeed: 40 };",
+      "expect": []
+    },
+    {
+      "name": "a transition assigned in script",
+      "path": "p.js",
+      "profile": "strict",
+      "text": "panel.style.transition = \"height 300ms ease\";",
+      "expect": [
+        [
+          1,
+          "layout-property"
+        ],
+        [
+          1,
+          "raw-curve"
+        ],
+        [
+          1,
+          "off-language-curve"
+        ],
+        [
+          1,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "MOTION.md's own MOTION object in a film page is the language, not drift",
+      "path": "film4.html",
+      "profile": "strict",
+      "text": "<script>\nconst MOTION = {\n  dur: { fast: 0.14, base: 0.2, slow: 0.26, scene: 0.4 },\n  ease: { enter: [0.16, 1, 0.3, 1], move: [0.65, 0, 0.35, 1], exit: [0.3, 0, 0.8, 0.15], emphasis: [0.34, 1.4, 0.64, 1] },\n  spring: {\n    snappy: { stiffness: 520, damping: 36, zeta: 0.79, settle: 0.24 },\n    sheet: { stiffness: 380, damping: 32, zeta: 0.82, settle: 0.28 },\n  },\n};\nwindow.renderAt = (t) => { draw(t); };\n</script>",
+      "expect": []
+    },
+    {
+      "name": "a film page: the clock inside renderAt, not in the player around it",
+      "path": "film5.html",
+      "profile": "strict",
+      "text": "<script>\nconst t0 = performance.now();\nconst now = () => performance.now() / 1e3 - t0;\nwindow.renderAt = (t) => {\n  draw(t, Math.random());\n};\nfunction selfTest() { const started = Date.now(); }\n</script>",
+      "expect": [
+        [
+          5,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "renderAt given by name: the named function is the frame",
+      "path": "film6.html",
+      "profile": "strict",
+      "text": "<script>\nfunction draw(t) {\n  const x = Date.now();\n}\nwindow.renderAt = draw;\n</script>",
+      "expect": [
+        [
+          3,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a video project holds every file to the clock rule",
+      "path": "lib/noise.ts",
+      "profile": "strict",
+      "video": true,
+      "text": "export const jitter = () => Math.random();",
+      "expect": [
+        [
+          1,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a TUNE object holds the tunables in place",
+      "path": "tune.ts",
+      "profile": "strict",
+      "text": "export const TUNE = {\n  rise: { ease: [0.16, 1, 0.3, 1] },\n  landing: { stiffness: 85, damping: 14.7 },\n};",
+      "expect": []
+    },
+    {
+      "name": "a TUNE object still names a curve that is off the language",
+      "path": "tune2.ts",
+      "profile": "strict",
+      "text": "export const TUNE = {\n  rise: { ease: [0.05, 0.7, 0.1, 1] },\n};",
+      "expect": [
+        [
+          2,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "SCSS line comments are comments",
+      "path": "a.scss",
+      "profile": "strict",
+      "text": "// .a { transition: all 1s; }\n.b { transition: opacity var(--dur-base) var(--ease-enter); }",
+      "expect": []
+    },
+    {
+      "name": "page profile: transition all that only changes colour claims no movement",
+      "path": "all1.html",
+      "profile": "page",
+      "text": "<style>a { color:#333; transition: all 150ms ease; } a:hover { color:#06f; }</style>",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: transition all where something is moved by a transform",
+      "path": "all2.html",
+      "profile": "page",
+      "text": "<style>a { transition: all 150ms ease; }\na:hover { transform: translateY(-2px); }</style>",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ],
+        [
+          1,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: attributes other than style are not code",
+      "path": "attrs.html",
+      "profile": "page",
+      "text": "<meta name=\"description\" content=\"Avoid transition: all\">\n<img alt=\"--dur-base: 200ms; transition: transform 300ms cubic-bezier(0.1, 0.2, 0.3, 0.4)\" src=\"a.png\">",
+      "expect": []
+    },
+    {
+      "name": "page profile: a JSON data block is not code",
+      "path": "ld.html",
+      "profile": "page",
+      "text": "<script type=\"application/ld+json\">{\"transition\": \"all 1s\"}</script>",
+      "expect": []
+    },
+    {
+      "name": "page profile: a protocol-relative url in CSS is not a comment",
+      "path": "url.html",
+      "profile": "page",
+      "text": "<style>.h{background:url(//cdn.example.com/bg.png);transition:all .3s}</style>",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a Remotion import does not make a page a film",
+      "path": "rem.html",
+      "profile": "page",
+      "text": "<script type=\"module\">import { interpolate } from \"remotion\";\nconst a = Date.now();\n</script>\n<style>.c{transition:transform .3s}</style>",
+      "expect": [
+        [
+          4,
+          "reduced-motion-missing"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a page named like a token file exempts nothing",
+      "path": "motion-tokens.html",
+      "profile": "page",
+      "text": "<style>:root { --ease-a: cubic-bezier(0.2, 0, 0, 1); }\n.c { transition: opacity 300ms cubic-bezier(0.2, 0, 0, 1); }</style>",
+      "expect": [
+        [
+          2,
+          "raw-curve"
+        ],
+        [
+          2,
+          "raw-duration"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a page's MOTION object curves are its own language",
+      "path": "mo.html",
+      "profile": "page",
+      "text": "<script>\nconst MOTION = { ease: { enter: [0.2, 0, 0, 1] } };\nel.animate(k, { duration: MOTION.dur, easing: \"cubic-bezier(0.2, 0, 0, 1)\" });\nel.animate(k, { duration: MOTION.dur, easing: \"cubic-bezier(0.5, 0, 0, 1)\" });\n</script>",
+      "expect": [
+        [
+          3,
+          "raw-curve"
+        ],
+        [
+          4,
+          "raw-curve"
+        ],
+        [
+          4,
+          "off-language-curve"
+        ]
+      ]
+    },
+    {
+      "name": "code shown as text reads no clock and holds no spring",
+      "path": "lines.ts",
+      "profile": "strict",
+      "video": true,
+      "text": "export const SHOWN = [\n  'const wobble = Math.sin(Date.now() / 200) * 4;',\n  \"const pop = spring({ frame, fps: 30, config: { damping: 9, stiffness: 300 } });\",\n];",
+      "expect": []
+    },
+    {
+      "name": "an expression inside a template literal still runs",
+      "path": "stamp.ts",
+      "profile": "strict",
+      "video": true,
+      "text": "export const stamp = `frame drawn at ${Date.now()}`;",
+      "expect": [
+        [
+          1,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a film page that shows its code as text",
+      "path": "show.html",
+      "profile": "page",
+      "text": "<script>\nconst sample = \"window.renderAt = t => Math.random()\";\nwindow.renderAt = (t) => { draw(t, sample); };\n</script>",
+      "expect": []
+    },
+    {
+      "name": "every renderAt definition is read, not only the first eight",
+      "path": "film7.html",
+      "profile": "strict",
+      "text": "<script>\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => {};\nwindow.renderAt = (t) => Math.random();\n</script>",
+      "expect": [
+        [
+          10,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "quoted spring keys are a spring by hand too",
+      "path": "conf.ts",
+      "profile": "strict",
+      "text": "const config = {\"stiffness\":300,\"damping\":9};",
+      "expect": [
+        [
+          1,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "page profile: a style written inside another attribute is not a style attribute",
+      "path": "fake.html",
+      "profile": "page",
+      "text": "<div data-x=\" style='transition:all 200ms' \">Hi</div>",
+      "expect": []
+    },
+    {
+      "name": "page profile: a style attribute after others is still read",
+      "path": "real.html",
+      "profile": "page",
+      "text": "<div class=\"a\" data-x=\"y\" style=\"transition: all 200ms ease\">Hi</div>",
+      "expect": [
+        [
+          1,
+          "transition-all"
+        ]
+      ]
+    },
+    {
+      "name": "an alias to a function defined later covers nothing in between",
+      "path": "film8.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = draw;\nw.renderAt = () => Math.random();\nfunction draw() {}\n</script>",
+      "expect": [
+        [
+          3,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a function shown in a string does not shadow the one that runs",
+      "path": "film9.html",
+      "profile": "strict",
+      "text": "<script>\nconst tutorial = 'function draw() {}';\nfunction draw() {\n  return Math.random();\n}\nw.renderAt = draw;\n</script>",
+      "expect": [
+        [
+          4,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a ternary operand is text, not a property name",
+      "path": "film10.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => x ? 'Math.random()' : 'ok';\nconst a = b ? 'stiffness' : 300;\nconst c = d ? 'damping' : 20;\n</script>",
+      "expect": []
+    },
+    {
+      "name": "a quoted key that reads like a function shadows nothing",
+      "path": "film11.html",
+      "profile": "strict",
+      "text": "<script>\nconst labels = {\"function draw(){ return 0; }\": 0};\nfunction draw() {\n  return Date.now();\n}\nw.renderAt = draw;\n</script>",
+      "expect": [
+        [
+          4,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a template literal in an expression body ends where the expression does",
+      "path": "film12.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => `${1 + 2}`;\nconst stamp = Date.now();\n</script>",
+      "expect": []
+    },
+    {
+      "name": "a quoted key that reads like the clock reads nothing",
+      "path": "film13.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => ({\"Date.now()\": 0});\n</script>",
+      "expect": []
+    },
+    {
+      "name": "quoted spring keys with any whitespace before their colon",
+      "path": "conf2.ts",
+      "profile": "strict",
+      "text": "const opts = {\"stiffness\"                              :300,\"damping\"                              :20};",
+      "expect": [
+        [
+          1,
+          "raw-spring"
+        ]
+      ]
+    },
+    {
+      "name": "a function shown in a template does not shadow the one that runs",
+      "path": "film14.html",
+      "profile": "strict",
+      "text": "<script>\nconst s = `function draw(){}`;\nfunction draw() {\n  return Date.now();\n}\nw.renderAt = draw;\n</script>",
+      "expect": [
+        [
+          4,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "an expression inside a template runs, whatever the template text holds",
+      "path": "film15.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => `it's ${Date.now()}`;\n</script>",
+      "expect": [
+        [
+          2,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "a template that only names the clock reads nothing",
+      "path": "film16.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => `Date.now()`;\n</script>",
+      "expect": []
+    },
+    {
+      "name": "a template over several lines is one expression",
+      "path": "film17.html",
+      "profile": "strict",
+      "text": "<script>\nw.renderAt = () => `line one\nline two ${Math.random()}`;\nconst later = Date.now();\n</script>",
+      "expect": [
+        [
+          3,
+          "render-clock"
+        ]
+      ]
+    },
+    {
+      "name": "quoted spring keys with a no-break space before their colon",
+      "path": "conf3.ts",
+      "profile": "strict",
+      "text": "const config = {'stiffness' :300,'damping' :20};",
+      "expect": [
+        [
+          1,
+          "raw-spring"
+        ]
+      ]
+    }
+  ]
+}
