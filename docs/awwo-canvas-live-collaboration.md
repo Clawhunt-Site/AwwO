@@ -455,7 +455,7 @@ the owner's choice of 2026-11-08):
 | --- | --- | --- |
 | `canvas_overview` | the canvas: nodes (id, kind, title, place, a short brief, the start of its result), wires, participants, claims | R I |
 | `canvas_read_node` | one node in full | R I |
-| `canvas_wait` | waits up to 25 s for someone else's change, message or claim after a version, and says what happened (the agent's own changes are listed but do not end the wait) | R I |
+| `canvas_wait` | waits up to 25 s for someone else's change, message or claim after a version, and says what happened (the agent's own changes are listed but do not end the wait); the messages others wrote after `afterMessage`, or after the newest the token was given, end it at once (below) | R I |
 | `canvas_add_node` | adds a session or form node, claimed for the caller | |
 | `canvas_update_node` | sets the fields an agent may set | D |
 | `canvas_delete_node` | deletes a node | D I |
@@ -496,6 +496,32 @@ single input, which is why that reason asks whether the wire may go. Only the se
 sentences, so a change sent again under its id is answered with what its codes meant then. The MCP instructions and
 every tool that makes ops say where to look, and a tool's text content is its JSON as written (a wire's `->` and a
 path's `<id>` are not escaped for HTML).
+
+`canvas_wait` gives the live messages someone else wrote after the position it goes on from, one written while the agent
+was busy between two waits too. (Before 2026-11-08 a wait gave only the messages written while it waited, so an agent
+that only waited never heard what was said while it worked: recording a 多人同屏 tutorial, Claude Code's "Levels is your
+node" reached Codex only through `canvas_messages`.) It goes on from `afterMessage` when the canvas still holds that
+message, and from before the oldest message it holds when it holds no such message (`start`, the position before every
+message; one gone with the 200 kept, all of whose successors still kept are newer; or one that went with its author's
+account, another canvas's or a mistyped id: for all but `start`, `fromOldest: true` says some may come again); without
+`afterMessage`, from the newest message the token has been given, which each token keeps (its time and id,
+`canvas_agent_tokens.seen_message_at` and `seen_message_id`, migration 057), so a restart of the API forgets none. It
+gives them the oldest first, at most 50 (`moreMessages: true` when more wait), moves the token's newest given up to them
+(never back, and only to a message still there), and says in `lastMessage` where the next wait goes on from (`start`
+before any message); `canvas_overview` gives the `lastMessage` the first wait goes on from. An agent that passes back
+each `lastMessage` as `afterMessage`, the overview's first, is given again what an answer lost on its way held, its
+first one too, and two waits after one message give the same; one that passes nothing is given each message once by its
+token's cursor, unless an answer is lost after the cursor moved, or two waits run at once (they may each give a message,
+or share them out). A token starts after the newest message its canvas holds when it is made, so what is said from then
+on is new to it; one made before migration 057 starts at the newest message its canvas holds at its first read, so what
+was written between its last wait on the API before and that read is taken as given. Reading the messages
+(`canvas_messages`, `GET …/live/messages`, the stream's hello and `message` events) moves no cursor: a later wait may
+give again what an agent read there, never skip it. The tenant's row, which every write of a message locks first, orders
+the writes, and each message is stamped at least a microsecond after the newest of its canvas and after every token's
+cursor there, so one committed later is never older than one already given, even when the clock steps back or a message
+goes with its author's account; the wait reads them from the database each time the stream says someone else wrote one,
+or fell behind. The token's own messages never end a wait or come in one. Keeping its cursor changes nothing on the
+canvas, so `canvas_wait` stays read-only, and with `afterMessage` repeating it changes nothing more.
 
 A wire joins an output port to an input port (`nodePort`). Outputs: a form's `data`, a session's or an edit's `result`,
 `out:<field id>` of a node with a contract. Inputs: a session's `context`; `reference` (a picture) of an image, video or

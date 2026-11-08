@@ -134,8 +134,11 @@ func (a *App) createCanvasAgentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, token, hash, prefix := newCanvasAgentToken()
-	if _, err = tx.Exec(ctx, `INSERT INTO canvas_agent_tokens(id,tenant_id,canvas_id,created_by,name,token_hash,prefix,scope,expires_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+make_interval(days=>$9))`, id, tid, cid, currentUser(r).ID, b.Name, hash, prefix, b.Scope, b.Days); err != nil {
+	// The messages written after the newest the canvas holds now are new to the token (canvas_wait gives them): the
+	// tenant's row this holds orders every later message after it.
+	if _, err = tx.Exec(ctx, `INSERT INTO canvas_agent_tokens(id,tenant_id,canvas_id,created_by,name,token_hash,prefix,scope,expires_at,seen_message_at,seen_message_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+make_interval(days=>$9),`+newestLiveMessageAt("$2", "$3")+`,`+newestLiveMessageID("$2", "$3")+`)`,
+		id, tid, cid, currentUser(r).ID, b.Name, hash, prefix, b.Scope, b.Days); err != nil {
 		a.dbError(w, err)
 		return
 	}

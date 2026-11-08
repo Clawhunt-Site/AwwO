@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The live stream of a canvas and what goes with it (docs/awwo-canvas-live-collaboration.md): its changes, who is on it
@@ -45,22 +47,150 @@ var liveMessageIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // the first ones), so a large selection costs every stream on the canvas no more than this.
 const livePresenceSelectionMax = 100
 
+// liveMessageColumns and liveMessageFrom read live messages as liveMessage scans them (scanLiveMessages).
+const (
+	liveMessageColumns = `m.id,m.author_kind,m.user_id,COALESCE(m.token_id,''),
+		CASE WHEN m.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE COALESCE(u.name,'') END,m.node_id,m.text,m.created_at`
+	liveMessageFrom = `canvas_live_messages m LEFT JOIN users u ON u.id=m.user_id LEFT JOIN canvas_agent_tokens t ON t.tenant_id=m.tenant_id AND t.id=m.token_id`
+)
+
 func listLiveMessages(ctx context.Context, q querier, tid, cid string, before string, limit int) ([]liveMessage, error) {
-	rows, err := q.Query(ctx, `SELECT m.id,m.author_kind,m.user_id,COALESCE(m.token_id,''),
-		CASE WHEN m.token_id IS NOT NULL THEN COALESCE(t.name,'') ELSE COALESCE(u.name,'') END,m.node_id,m.text,m.created_at
-		FROM canvas_live_messages m LEFT JOIN users u ON u.id=m.user_id LEFT JOIN canvas_agent_tokens t ON t.tenant_id=m.tenant_id AND t.id=m.token_id
+	rows, err := q.Query(ctx, `SELECT `+liveMessageColumns+` FROM `+liveMessageFrom+`
 		WHERE m.tenant_id=$1 AND m.canvas_id=$2
 		AND ($3='' OR (m.created_at,m.id)<(SELECT b.created_at,b.id FROM canvas_live_messages b WHERE b.tenant_id=$1 AND b.canvas_id=$2 AND b.id=$3))
 		ORDER BY m.created_at DESC,m.id DESC LIMIT $4`, tid, cid, before, limit)
 	if err != nil {
 		return nil, err
 	}
+	return scanLiveMessages(rows)
+}
+
+// liveMessageCursor is a position among the live messages of a canvas: the newest message a canvas agent token has
+// been given (migration 057), or the one a wait was told it has (afterMessage). The messages others wrote after it are
+// news. A position before every message is ('epoch', ""): a token made on a canvas without one.
+type liveMessageCursor struct {
+	at time.Time
+	id string
+}
+
+// newestLiveMessageAt and newestLiveMessageID are SQL for the position of the newest message of a canvas (its tenant
+// and canvas the SQL given), or the position before every message when it has none.
+func newestLiveMessageAt(tenant, canvas string) string {
+	return "COALESCE((SELECT created_at FROM canvas_live_messages WHERE tenant_id=" + tenant + " AND canvas_id=" + canvas +
+		" ORDER BY created_at DESC,id DESC LIMIT 1),'epoch')"
+}
+func newestLiveMessageID(tenant, canvas string) string {
+	return "COALESCE((SELECT id FROM canvas_live_messages WHERE tenant_id=" + tenant + " AND canvas_id=" + canvas +
+		" ORDER BY created_at DESC,id DESC LIMIT 1),'')"
+}
+
+// liveMessageCursorOf gives a token's cursor. A token made before tokens kept one has none: it is set now to the newest
+// message its canvas holds (which of the earlier ones it saw is not known, so none of them comes again). Two first reads
+// at once each read it back after either set it.
+func (a *App) liveMessageCursorOf(ctx context.Context, tid, cid, tokenID string) (liveMessageCursor, error) {
+	var at *time.Time
+	var id *string
+	read := func() error {
+		return a.db.QueryRow(ctx, "SELECT seen_message_at,seen_message_id FROM canvas_agent_tokens WHERE tenant_id=$1 AND id=$2 AND canvas_id=$3",
+			tid, tokenID, cid).Scan(&at, &id)
+	}
+	if err := read(); err != nil {
+		return liveMessageCursor{}, err
+	}
+	if at == nil {
+		if err := a.withMessagesHeld(ctx, tid, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, "UPDATE canvas_agent_tokens SET seen_message_at="+newestLiveMessageAt("$1", "$3")+",seen_message_id="+newestLiveMessageID("$1", "$3")+
+				" WHERE tenant_id=$1 AND id=$2 AND canvas_id=$3 AND seen_message_at IS NULL", tid, tokenID, cid)
+			return err
+		}); err != nil {
+			return liveMessageCursor{}, err
+		}
+		if err := read(); err != nil {
+			return liveMessageCursor{}, err
+		}
+	}
+	if at == nil || id == nil {
+		return liveMessageCursor{}, fmt.Errorf("the token's newest given message is not set")
+	}
+	return liveMessageCursor{at: *at, id: *id}, nil
+}
+
+// liveMessageAt gives the position of a message of a canvas; false when the canvas holds none of that id (never had it,
+// or it went with the 200 kept).
+func liveMessageAt(ctx context.Context, q querier, tid, cid, id string) (liveMessageCursor, bool, error) {
+	var c liveMessageCursor
+	err := q.QueryRow(ctx, "SELECT created_at,id FROM canvas_live_messages WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3", tid, cid, id).Scan(&c.at, &c.id)
+	if noRows(err) {
+		return c, false, nil
+	}
+	return c, err == nil, err
+}
+
+// liveMessagesAfter gives the live messages of a canvas written after a position by anyone but a token, the oldest first,
+// at most limit; more says that more follow. The tenant's row, which every write of a message locks first
+// (canvasWriteRole), orders the writes, and each is stamped after the newest of its canvas (canvasLiveSay): a message
+// committed after this read is newer than every one it gave, whatever the clock did.
+func liveMessagesAfter(ctx context.Context, q querier, tid, cid, tokenID string, after liveMessageCursor, limit int) ([]liveMessage, bool, error) {
+	rows, err := q.Query(ctx, `SELECT `+liveMessageColumns+` FROM `+liveMessageFrom+`
+		WHERE m.tenant_id=$1 AND m.canvas_id=$2 AND m.token_id IS DISTINCT FROM $3 AND (m.created_at,m.id)>($4::timestamptz,$5::text)
+		ORDER BY m.created_at,m.id LIMIT $6`, tid, cid, tokenID, after.at, after.id, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	items, err := scanLiveMessages(rows)
+	if err != nil || len(items) <= limit {
+		return items, false, err
+	}
+	return items[:limit], true, nil
+}
+
+// markLiveMessagesGiven moves a token's cursor up to a message it has been given (never back), while that message is
+// still there: one that went since it was read (with its author's account) may have been the newest of its canvas, so
+// a message written after it may be stamped below it, and the cursor stays where it was. It moves with the workspace
+// row held (withMessagesHeld), so no message is stamped between the check and the move. A cursor that could not be
+// kept costs that token those messages again at its next wait, never a message.
+func (a *App) markLiveMessagesGiven(ctx context.Context, tid, tokenID string, newest liveMessage) {
+	if err := a.withMessagesHeld(ctx, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE canvas_agent_tokens t SET seen_message_at=$3,seen_message_id=$4 WHERE t.tenant_id=$1 AND t.id=$2
+			AND (t.seen_message_at IS NULL OR (t.seen_message_at,t.seen_message_id)<($3::timestamptz,$4::text))
+			AND EXISTS(SELECT 1 FROM canvas_live_messages m WHERE m.tenant_id=$1 AND m.canvas_id=t.canvas_id AND m.id=$4)`, tid, tokenID, newest.CreatedAt, newest.ID)
+		return err
+	}); err != nil {
+		a.log.Warn("a canvas agent token's newest given message was not kept; it is given its messages again", "error_type", errorType(err))
+	}
+}
+
+// withMessagesHeld runs a cursor's move in a transaction holding the workspace's row for share: every write of a live
+// message takes that row for update before it stamps its message (canvasLiveSay), so none is stamped while the move
+// runs, and the next one is stamped above the cursor the move left (the statement after the lock reads what was
+// committed before it, a message gone with its author's account included). Its locks wait 2 s at most: the row held
+// for share holds up the workspace's writers while the move waits for its token's row (one an account's deletion
+// holds, say), and a move given up costs its token those messages again, never a message.
+func (a *App) withMessagesHeld(ctx context.Context, tid string, move func(pgx.Tx) error) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id=$1 FOR SHARE", tid); err != nil {
+		return err
+	}
+	if err = move(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func scanLiveMessages(rows pgx.Rows) ([]liveMessage, error) {
 	defer rows.Close()
 	out := []liveMessage{}
 	for rows.Next() {
 		var m liveMessage
 		var userID, tokenID string
-		if err = rows.Scan(&m.ID, &m.AuthorKind, &userID, &tokenID, &m.Name, &m.NodeID, &m.Text, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.AuthorKind, &userID, &tokenID, &m.Name, &m.NodeID, &m.Text, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		m.ParticipantID = "u_" + userID
@@ -73,7 +203,8 @@ func listLiveMessages(ctx context.Context, q querier, tid, cid string, before st
 	return out, rows.Err()
 }
 
-// canvasLiveMessages answers GET .../live/messages?before=id: the 50 messages before that one, the newest first.
+// canvasLiveMessages answers GET .../live/messages?before=id: the 50 messages before that one, the newest first. It
+// moves no token's cursor: what canvas_wait gives does not hang on what an agent read here.
 func (a *App) canvasLiveMessages(w http.ResponseWriter, r *http.Request) {
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
 	before := r.URL.Query().Get("before")
@@ -137,7 +268,12 @@ func (a *App) canvasLiveSay(w http.ResponseWriter, r *http.Request) {
 		kind, token = "agent", actor.TokenID
 	}
 	id := randomID()
-	if _, err = tx.Exec(ctx, "INSERT INTO canvas_live_messages(id,tenant_id,canvas_id,author_kind,user_id,token_id,node_id,text) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+	// Stamped after the newest message of its canvas and after every token's cursor there, whatever the clock did (it may
+	// step back, and a message goes with its author's account): with the tenant's row locked above, a message written
+	// later is never older, so a cursor of canvas_wait never passes one it did not give.
+	if _, err = tx.Exec(ctx, `INSERT INTO canvas_live_messages(id,tenant_id,canvas_id,author_kind,user_id,token_id,node_id,text,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,
+		GREATEST(clock_timestamp(),(SELECT max(created_at)+interval '1 microsecond' FROM canvas_live_messages WHERE tenant_id=$2 AND canvas_id=$3),
+			(SELECT max(seen_message_at)+interval '1 microsecond' FROM canvas_agent_tokens WHERE tenant_id=$2 AND canvas_id=$3)))`,
 		id, tid, cid, kind, actor.UserID, token, b.NodeID, b.Text); err != nil {
 		a.dbError(w, err)
 		return

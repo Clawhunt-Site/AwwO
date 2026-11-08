@@ -28,17 +28,19 @@ const (
 	mcpWaitDefault = 20 * time.Second
 	mcpWaitMax     = 25 * time.Second
 	mcpTextExcerpt = 500
+	// mcpWaitMessages is how many live messages one canvas_wait gives at most (moreMessages: more wait).
+	mcpWaitMessages = liveMessagePageSize
 )
 
 var mcpProtocols = map[string]bool{"2025-11-25": true, "2025-06-18": true, "2025-03-26": true, "2024-11-05": true}
 
 const mcpInstructions = `You are on one AwwO canvas (多人同屏 / Multiplayer): people and other agents may be working on it at this very moment.
-- Start with canvas_overview: the nodes (each an Agent session, a form, an assembly or an edit), the wires between them, who is here and which nodes are held.
+- Start with canvas_overview: the nodes (each an Agent session, a form, an assembly or an edit), the wires between them, who is here, which nodes are held, and the version and lastMessage your first canvas_wait goes on from (for the first one only).
 - Before you change an existing node, take it with canvas_claim; a node you add with canvas_add_node is yours at once. A node someone else holds is refused "claimed": pick another, or ask in canvas_say.
 - While AwwO runs a node, its place, size and result stay free; anything else of it is refused "node_running" until the run ends.
 - A change answers results, one code per op it makes: ok, or claimed, node_running, forbidden (a rule of what an agent may change) or gone (what it names is no longer there). When one is refused, reasons says in one sentence per op what it would have changed, the rule and what to do instead: follow it rather than sending the same op again.
 - A wire joins an output port of one node to an input port of another, of one type: canvas_connect names the ports.
-- Call canvas_wait to see what others change and say, and canvas_set_status to tell them what you are doing.
+- Call canvas_wait to see what others change and say, each time with the version and the lastMessage your last canvas_wait gave (after an error, the one before it) as afterVersion and afterMessage; it gives you what others wrote while you were busy too. Use canvas_set_status to tell them what you are doing.
 - Put your work into a node with canvas_update_node {result}: it is shown as handed in by you, never as AwwO's engine's result. A message (a tool call) is at most 1.9 MB; a larger result goes by PATCH on the canvas's URL with the same token.
 - You cannot run nodes, choose models or spend credits: ask a person in canvas_say.`
 
@@ -268,7 +270,14 @@ func (a *App) mcpTool(r *http.Request, name string, args mcpArgs) (map[string]an
 		if failure != nil {
 			return nil, failure
 		}
-		return mcpToolResult(a.mcpOverview(r, canvas), false), nil
+		overview := a.mcpOverview(r, canvas)
+		// Where the agent's first wait goes on from, so even its first answer can be asked for again.
+		from, err := a.liveMessageCursorOf(r.Context(), agent.TenantID, agent.CanvasID, agent.TokenID)
+		if err != nil {
+			return nil, &mcpError{-32603, "The messages cannot be read"}
+		}
+		overview["lastMessage"] = mcpWaitPosition(from)
+		return mcpToolResult(overview, false), nil
 	case "canvas_read_node":
 		id, _ := args.str("nodeId")
 		canvas, failure := a.mcpRead(r)
@@ -635,7 +644,9 @@ func (a *App) mcpOverview(r *http.Request, canvas mcpCanvas) map[string]any {
 
 // mcpWait waits for someone else to change the canvas, say something or take or give back a claim, after a version;
 // at most 25 s. What the agent did itself does not end the wait (it knows), but the answer lists its own changes too,
-// so the version it gives back covers everything up to it.
+// so the version it gives back covers everything up to it. The messages others wrote after afterMessage, or else after
+// the newest one the token has been given (those written while the agent was busy too), end it at once: the oldest
+// first, at most mcpWaitMessages at a time, and lastMessage says where the next wait goes on from.
 func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError) {
 	agent := agentOf(r)
 	ctx := r.Context()
@@ -643,6 +654,10 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 	after := int64(-1)
 	if v, ok := args.num("afterVersion"); ok {
 		after = int64(v)
+	}
+	afterMessage, _ := args.str("afterMessage")
+	if afterMessage != "" && !liveMessageIDPattern.MatchString(afterMessage) {
+		return mcpToolResult(map[string]any{"error": "afterMessage is the id of a message (lastMessage of a wait)"}, true), nil
 	}
 	wait := mcpWaitDefault
 	if s, ok := args.num("seconds"); ok && s >= 0 {
@@ -673,7 +688,13 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 	closing := a.multiplayer.closed()
 	deadline := time.NewTimer(wait)
 	defer deadline.Stop()
-	messages := []any{}
+	var messages []liveMessage
+	var from liveMessageCursor
+	fromOldest := false
+	// The messages after the position the wait goes on from are read at the start, once the watch is open (one written
+	// in between is both read and heard, never neither), and again whenever the stream says someone else wrote one: the
+	// stream only wakes the wait, and what it gives is read in the order the database holds them.
+	readMessages, moreMessages := true, false
 	claimsChanged, timedOut := false, false
 	// checked is the newest version known to hold nothing but the agent's own changes since after.
 	checked := after
@@ -684,6 +705,16 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 		}
 		if after < 0 {
 			after, checked = version, version
+		}
+		if readMessages {
+			var err error
+			if from, fromOldest, err = a.mcpWaitFrom(ctx, agent, afterMessage); err == nil {
+				messages, moreMessages, err = liveMessagesAfter(ctx, a.db, agent.TenantID, agent.CanvasID, agent.TokenID, from, mcpWaitMessages)
+			}
+			if err != nil {
+				return nil, &mcpError{-32603, "The messages cannot be read"}
+			}
+			readMessages = false
 		}
 		others := len(messages) > 0 || claimsChanged
 		var changes []canvasChangeOut
@@ -706,9 +737,22 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 				return mcpToolResult(map[string]any{"error": "This token no longer reaches the canvas"}, true), nil
 			}
 			out := map[string]any{"version": version, "changes": []any{}, "messages": messages}
+			if len(messages) > 0 {
+				// Given now: a later wait without afterMessage, after a restart too, gives only newer ones.
+				newest := messages[len(messages)-1]
+				a.markLiveMessagesGiven(ctx, agent.TenantID, agent.TokenID, newest)
+				from = liveMessageCursor{at: newest.CreatedAt, id: newest.ID}
+			}
+			out["lastMessage"] = mcpWaitPosition(from)
+			if moreMessages {
+				out["moreMessages"] = true
+			}
+			if fromOldest {
+				out["fromOldest"] = true
+			}
 			if reset {
 				out["reset"] = true
-				out["note"] = "Too much changed to list: read the canvas again with canvas_overview"
+				out["note"] = "Too much changed to list: read the canvas again with canvas_overview, then wait with its version and this answer's lastMessage"
 			} else if len(changes) > 0 {
 				out["changes"] = mcpChangeLines(changes)
 			}
@@ -733,6 +777,11 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 			if reason := a.multiplayer.takeBye(stream); reason != "" {
 				return mcpToolResult(map[string]any{"error": "The wait ended: " + reason}, true), nil
 			}
+			if a.multiplayer.takeBehind(stream) {
+				// Events were dropped while the wait fell behind: what they said is read again.
+				readMessages = true
+				claimsChanged = claimsChanged || othersClaims() != claimsAtStart
+			}
 		case event := <-stream.events:
 			if event.name == "bye" {
 				data, _ := event.data.(map[string]any)
@@ -742,7 +791,7 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 			if event.name == "message" {
 				if data, ok := event.data.(map[string]any); ok {
 					if said, ok := data["message"].(liveMessage); !ok || said.ParticipantID != self {
-						messages = append(messages, data["message"])
+						readMessages = true
 					}
 				}
 			}
@@ -751,6 +800,36 @@ func (a *App) mcpWait(r *http.Request, args mcpArgs) (map[string]any, *mcpError)
 			}
 		}
 	}
+}
+
+// mcpWaitStart is the lastMessage of the position before every message (a token made on a canvas without any): passed
+// back as afterMessage, it names no message the canvas holds.
+const mcpWaitStart = "start"
+
+// mcpWaitPosition is a position as lastMessage says it: the message's id, or mcpWaitStart before every message.
+func mcpWaitPosition(at liveMessageCursor) string {
+	if at.id == "" {
+		return mcpWaitStart
+	}
+	return at.id
+}
+
+// mcpWaitFrom is the position a wait goes on from: the message afterMessage names when the canvas still holds it (an
+// agent that passes back each wait's lastMessage is given again what an answer lost on its way held, and two waits of
+// one position give the same); before every message the canvas holds when it holds no such message (mcpWaitStart, one
+// gone with the 200 kept, all of whose successors the canvas holds are newer, or one that went with its author's
+// account, another canvas's, a mistyped id: none an agent may not have received is skipped, and fromOldest says some
+// may come again); without afterMessage, the newest message the token has been given.
+func (a *App) mcpWaitFrom(ctx context.Context, agent *canvasAgent, afterMessage string) (at liveMessageCursor, fromOldest bool, err error) {
+	if afterMessage == "" {
+		at, err = a.liveMessageCursorOf(ctx, agent.TenantID, agent.CanvasID, agent.TokenID)
+		return at, false, err
+	}
+	at, held, err := liveMessageAt(ctx, a.db, agent.TenantID, agent.CanvasID, afterMessage)
+	if err != nil || held {
+		return at, false, err
+	}
+	return liveMessageCursor{at: time.Unix(0, 0).UTC()}, afterMessage != mcpWaitStart, nil
 }
 
 // mcpChangeLines describes changes for an agent: who, what, and each op in one line (long values cut).
@@ -805,9 +884,9 @@ func mcpTools() []map[string]any {
 	}
 	const refusals = " A refused op says why: its code in results, and in reasons one sentence naming the rule and what to do instead."
 	return []map[string]any{
-		tool("canvas_overview", "Canvas overview", "The canvas now: its nodes (kind, title, place, a brief, the start of each result, who holds it, whether AwwO runs it), its wires, who is here, the claims, and its version.", read, obj(map[string]any{})),
+		tool("canvas_overview", "Canvas overview", "The canvas now: its nodes (kind, title, place, a brief, the start of each result, who holds it, whether AwwO runs it), its wires, who is here, the claims, its version, and lastMessage, where your first canvas_wait goes on from (pass it as afterMessage to that first one only: later waits take the lastMessage of the wait before).", read, obj(map[string]any{})),
 		tool("canvas_read_node", "Read a node", "One node of the canvas in full (a contract's inputs and outputs are its ports in:<field id> and out:<field id>).", read, obj(map[string]any{"nodeId": str}, "nodeId")),
-		tool("canvas_wait", "Wait for others", "Waits up to 25 seconds for someone else to change the canvas after afterVersion, send a live message or take or give back a claim, and says what happened (your own changes since afterVersion are listed too, but do not end the wait). Call it again with the version it gives.", read, obj(map[string]any{"afterVersion": num, "seconds": num})),
+		tool("canvas_wait", "Wait for others", "Waits up to 25 seconds for someone else to change the canvas after afterVersion, write a live message or take or give back a claim, and says what happened (your own changes since afterVersion are listed too, but do not end the wait). The messages others wrote after afterMessage come at once, those written while you were busy too: the oldest first, at most 50 at a time (moreMessages: more follow). Call it again with the version and the lastMessage it gives (without afterMessage, it goes on after the newest message you were given; after a message the canvas no longer holds, from the oldest it holds, and fromOldest says some may come again).", read, obj(map[string]any{"afterVersion": num, "afterMessage": str, "seconds": num})),
 		tool("canvas_add_node", "Add a node", "Adds an Agent session node (kind session: a person picks its model before it runs) or a form (kind form, with fields), held by you at once. Optionally with a result you wrote."+refusals, hints{}, obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"session", "form"}}, "title": str, "persona": str, "x": num, "y": num, "fields": fields, "result": str})),
 		tool("canvas_update_node", "Change a node", "Sets fields of a node you hold or nobody holds: title (at most 200 bytes), persona (a session's instructions), place and size (w and h at least 40), a form's fields (ids of ASCII letters, digits, _ . : -), an assembly's template, an edit's timeline, or result (your work, shown as handed in by you; empty clears it). A call is at most 1.9 MB."+refusals, hints{destructive: true}, obj(map[string]any{"nodeId": str, "title": str, "persona": str, "x": num, "y": num, "w": num, "h": num, "fields": fields, "template": str, "fileName": str, "timeline": str, "result": str}, "nodeId")),
 		tool("canvas_delete_node", "Delete a node", "Deletes a node you hold or nobody holds, with its wires."+refusals, hints{destructive: true, idempotent: true}, obj(map[string]any{"nodeId": str}, "nodeId")),

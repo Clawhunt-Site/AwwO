@@ -361,7 +361,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | POST /live/presence | `{clientId, state}` | 204；state 只含要改的部分：`selection`（节点 id 列表）、`focus`、`cursor`（世界坐标，只对人）、`status`（至多 140 字）；每位参与者每秒至多 10 次，多的丢弃。只读成员也可以（只在内存，不写库）|
 | POST /live/claims | `{clientId, nodeIds, ttlSeconds?, note?}` | 认领 1–50 个节点 15–600 秒（默认 120），别人持有的列入 `refused`；`{claims, refused, missing}`。Agent 写一个节点时自动认领 60 秒；人不受认领限制 |
 | DELETE /live/claims | `{clientId, nodeIds?}` | 放开自己的认领（不写 nodeIds 为全部）；`{claims}` |
-| GET /live/messages?before=id | | 实时消息，新的在前，每页 50 条；每张画布保留最近 200 条 |
+| GET /live/messages?before=id | | 实时消息，新的在前，每页 50 条；每张画布保留最近 200 条。不移动任何令牌的消息游标 |
 | POST /live/messages | `{clientId, text, nodeId?}` | member 以上或 edit 令牌；1–2000 字；`{message}` |
 | GET /agent-tokens | | member 以上（会话）；`{items}`，不含密钥 |
 | POST /agent-tokens | `{name, days?, scope?}` | admin 以上（会话，按 IP 限速；迁移 059 起 member 不能生成）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
@@ -372,7 +372,15 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 MCP：`POST /api/v1/mcp`（Streamable HTTP，JSON 应答，令牌放在 Bearer 头），工具 `canvas_overview`、`canvas_read_node`、`canvas_wait`、
 `canvas_add_node`、`canvas_update_node`、`canvas_delete_node`、`canvas_connect`、`canvas_disconnect`、`canvas_claim`、`canvas_release`、
-`canvas_set_status`、`canvas_say`、`canvas_messages`、`canvas_apply`；每个工具都走上表的同一套处理，规则完全相同。Agent 只能改
+`canvas_set_status`、`canvas_say`、`canvas_messages`、`canvas_apply`；每个工具都走上表的同一套处理，规则完全相同。`canvas_wait`
+立刻给出别人在 `afterMessage` 之后（不带时为这个令牌已收到的最新一条之后）写的实时消息，Agent 两次等待之间忙着时写的也在内，
+旧的在前，每次至多 50 条（还有更多时 `moreMessages: true`），并用 `lastMessage` 说明下一次从哪一条之后接着给（还没有消息时为
+`start`；`canvas_overview` 给出第一次等待用的 `lastMessage`）；画布已不保留 `afterMessage` 那一条（`start`、已随 200 条上限删去、
+随作者账号删除、别的画布的或写错的 id）时从保留的最旧一条起给，后几种情况带 `fromOldest: true`，可能有重复。每次把 `lastMessage`
+作为 `afterMessage` 传回的 Agent，丢在路上的回答（第一次的也一样）会再给一次，同一个 `afterMessage` 的两次等待给出相同的消息。令牌记下它收到的最新一条
+（`canvas_agent_tokens.seen_message_at` / `seen_message_id`，migration 057，2026-11-08），API 重启也不丢。新令牌从生成时画布上最新的
+一条之后算起；057 之前生成的令牌从它第一次读取时画布上最新的一条之后算起。读消息（`canvas_messages`、实时流）不移动游标。每条消息的时间
+至少比同一画布最新一条和各令牌的游标晚 1 微秒，时钟回拨、消息随作者账号删除也不会让新消息排到已给出的之前。令牌自己的消息从不给它，也不结束等待。Agent 只能改
 标题、设定、位置尺寸、表单字段、装配模板、剪辑时间线和结果（结果存为 `source: "manual"`、`by` 写明 Agent），不能改绑定、会话、
 技能、团队、任务要求、契约、模型、运行时、思考强度，也不能运行节点或花额度。`GET` / `DELETE /api/v1/mcp` 405。
 
