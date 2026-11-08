@@ -1,6 +1,7 @@
 import type { ContractField, ContractFieldType } from './nodeContracts';
 import type { AgentTemplate } from './agentTemplates';
 import { figurePersona } from './figureKit/figureKit';
+import { filmPersona } from './filmKit/filmKit';
 
 const field = (
   id: string,
@@ -22,6 +23,8 @@ function template(spec: Omit<AgentTemplate, 'input' | 'output'>): AgentTemplate 
 
 /** An explainer-figure node builds its page with AwwO's figure kit: its persona carries the kit guide after the role. */
 const withFigureGuide = (item: AgentTemplate): AgentTemplate => ({ ...item, persona: figurePersona(item.persona) });
+/** A code-film node builds its page with AwwO's film kit: its persona carries the kit guide after the role. */
+const withFilmGuide = (item: AgentTemplate): AgentTemplate => ({ ...item, persona: filmPersona(item.persona) });
 
 /** English presentation and defaults for newly created nodes. Stable IDs mirror the Chinese set. */
 export const EN_AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
@@ -194,5 +197,23 @@ export const EN_AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
       { label: 'Build the figure', prompt: 'Build that machine from the idea and its true numbers, and deliver one page with an interactive figure that works as soon as it opens.' },
     ],
     deliverableTitle: 'Interactive figure', emptyTitle: 'Name an idea to explain', emptyDescription: 'For example "explain how an LRU cache evicts entries": it builds a machine you can play with to show it.',
+  })),
+  withFilmGuide(template({
+    id: 'film', title: 'Code film', subtitle: 'One sentence becomes a short film with sound', tag: 'FILM',
+    persona: "Turn an idea into a short film drawn in code, with its own sound: first write a one-page shot plan second by second (each scene's action, camera, transition, words on screen and sound), then deliver one complete film page made with AwwO's film kit. Picture and sound are computed from time and share one set of cues; the words on screen are few and exact. Default 16:9 and 15-20 seconds unless the brief says otherwise.",
+    inputs: [
+      field('idea', 'Film idea', true, 'Idea:\nWho it is for:\nLength and frame (optional, default 15-20 s, 16:9):\nWords that must appear (optional):', 'Say what the film is about and who watches it, for example "a 15-second launch spot for a budgeting app".'),
+      field('style', 'Look and sound', false, 'Look:\nColours or brand colours:\nMusic (style, tempo):', 'Left empty, the node picks the look, palette and music to fit the idea and writes them into the plan.'),
+    ],
+    outputs: [
+      field('film', 'Film', true, 'One complete HTML page: the whole short film drawn with the film kit, playing with its sound on a click', 'Play it in Results with its sound, render it to video, or download it as one web page.', 'html'),
+    ],
+    workflow: ['Put the idea in one sentence; choose the look, palette, type and music', 'Write the shot plan second by second: one action, one camera move, the transition in and the sound per scene', 'Write the scene functions from the plan, every frame from time alone', 'Write the score and effects on the same cues as the picture', 'Check against the checklist, then deliver'],
+    checklist: ['Frame 0 already moves and opens on the action', 'Every scene changes something; adjacent scenes differ in camera move and shot size', 'Scenes start where the last ended and fill the film exactly', 'Few, exact words on screen, readable on a phone', 'The page names one external script: the film kit'],
+    starterPrompts: [
+      { label: 'Write the shot plan', prompt: "From the idea, write a one-page shot plan: each scene's action, camera, transition, words on screen and sound, plus the look and the music." },
+      { label: 'Make the film', prompt: 'Following the shot plan, deliver one complete film page made with the film kit, picture and sound computed from time.' },
+    ],
+    deliverableTitle: 'Film', emptyTitle: 'Name a short film you want', emptyDescription: 'For example "a 15-second opening-day film for a coffee shop": it writes the shot plan and delivers a film that plays with its sound on a click.',
   })),
 ];

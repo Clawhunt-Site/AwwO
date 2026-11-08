@@ -947,7 +947,7 @@ func planTaskSlips(ops []any) []any {
 
 // planAgentTemplateIDs are the templates of the Agent nodes a plan may add (planTemplateIDs without the media ones),
 // the nodes that take the model new nodes take.
-var planAgentTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure"}
+var planAgentTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure", "film"}
 
 // planNodeOutputs reads the "outputs" a plan gave a new node: a list of whole output field definitions (id, label,
 // type and required; a value, help and placeholder may be there too), each an add_field of the node's output side.

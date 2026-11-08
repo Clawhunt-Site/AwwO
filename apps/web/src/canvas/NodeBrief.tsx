@@ -9,6 +9,7 @@ import type { SessionNode } from './canvasDoc';
 import { useCanvasI18n } from './i18n';
 import { isTaskFrame } from './taskFrame';
 import { figureRole } from './figureKit/figureKit';
+import { filmRole } from './filmKit/filmKit';
 import type { AgentTemplate } from './agentTemplates';
 import './node-brief.css';
 
@@ -27,7 +28,7 @@ export function NodeBrief({ node, template, modelLabel, onAskAssistant, compact 
   const { t } = useCanvasI18n();
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const persona = node.templateId === 'figure' ? figureRole(node.persona) : node.persona;
+  const persona = node.templateId === 'figure' ? figureRole(node.persona) : node.templateId === 'film' ? filmRole(node.persona) : node.persona;
   const task = persona.trim() || template?.subtitle?.trim() || '';
   const frame = isTaskFrame(node.taskFrame) ? node.taskFrame : null;
   const criteria = frame?.acceptanceCriteria.filter(item => item.trim()) ?? [];

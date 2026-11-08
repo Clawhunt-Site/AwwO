@@ -315,7 +315,7 @@ export const ASSEMBLE_NODE_SIZE = { w: 320, h: 220 } as const;
 export const EDIT_NODE_SIZE = { w: 320, h: 240 } as const;
 
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['llm', 'coding', 'image', 'video', 'model3d', 'audio'];
-const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'];
+const AGENT_TEMPLATE_IDS: ReadonlyArray<AgentTemplateId> = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure', 'film'];
 /** Waypoint slots are the number-row keys; anything outside is clamped into range. */
 export const WAYPOINT_MIN_SLOT = 1;
 export const WAYPOINT_MAX_SLOT = 9;

@@ -69,7 +69,8 @@ const (
 // image, video and model3d declare media nodes, which generate from a prompt instead of
 // running an Agent; the canvas offers them to the planner only when the workspace can run them.
 // figure is an Agent that draws an interactive explainer figure with AwwO's figure kit.
-var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure", "image", "video", "model3d"}
+// film is an Agent that makes a short film with sound in code with AwwO's film kit.
+var planTemplateIDs = []string{"general", "frontend", "backend", "data", "users", "materials", "review", "figure", "film", "image", "video", "model3d"}
 
 // planTeamTemplateIDs is the closed set of team templates a set_team may name (the canvas's NODE_TEAM_TEMPLATE_IDS in
 // nodeTeamTemplates.ts; TestPlanTeamTemplatesMatchTheCanvas keeps the two the same).

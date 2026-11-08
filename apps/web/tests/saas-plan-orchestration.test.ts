@@ -484,9 +484,12 @@ describe('a page on a hosted canvas', () => {
     const renamed = applyCanvasPlan(doc(existing), plan({ type: 'update_node', nodeId: 'old', title: 'Shop' }), 'en', REQUEST, undefined, undefined, true);
     expect(session(renamed.doc, 'old').contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
     expect(session(renamed.doc, 'old').skills).toBeUndefined();
-    // A figure page keeps its own kit, whose guide already fills most of its system prompt.
+    // A figure page keeps its own kit, whose guide already fills most of its system prompt; so does a film page.
     const figure = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'fig', templateId: 'figure' }), 'en', REQUEST, undefined, undefined, true);
     expect((figure.doc.nodes[0] as SessionNode).skills).toBeUndefined();
+    const film = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film' }), 'en', REQUEST, undefined, undefined, true);
+    expect((film.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.id)).toEqual(['film']);
+    expect((film.doc.nodes[0] as SessionNode).skills).toBeUndefined();
   });
 
   // The API refuses a run whose system prompt passes 32,768 UTF-16 units; the skills take about 11,400 of them, and

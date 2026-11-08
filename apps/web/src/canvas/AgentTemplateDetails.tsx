@@ -1,9 +1,9 @@
-import { Bot, Boxes, CheckCheck, Code2, Database, DraftingCompass, FileText, Pencil, TerminalSquare } from 'lucide-react';
+import { Bot, Boxes, CheckCheck, Code2, Database, DraftingCompass, FileText, Film, Pencil, TerminalSquare } from 'lucide-react';
 import { AGENT_TEMPLATES, getAgentTemplates, type AgentTemplate, type AgentTemplateId } from './agentTemplates';
 import type { NodeContract } from './nodeContracts';
 import { useCanvasI18n } from './i18n';
 
-const ICONS: Record<AgentTemplateId, typeof Bot> = { general: Bot, frontend: Code2, backend: TerminalSquare, data: Database, users: Boxes, materials: FileText, review: CheckCheck, figure: DraftingCompass };
+const ICONS: Record<AgentTemplateId, typeof Bot> = { general: Bot, frontend: Code2, backend: TerminalSquare, data: Database, users: Boxes, materials: FileText, review: CheckCheck, figure: DraftingCompass, film: Film };
 
 export function AgentGlyph({ title, templateId, size = 18 }: { title?: string; templateId?: AgentTemplateId; size?: number }) {
   const template = [...AGENT_TEMPLATES, ...getAgentTemplates('en')]

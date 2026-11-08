@@ -27,16 +27,18 @@ describe('canvas add menu model shelf mode', () => {
     expect(p.onOpenAgentLibrary).toHaveBeenCalledOnce();
   });
 
-  it('preserves all eight template choices when the model shelf is not supplied', () => {
+  it('preserves all nine template choices when the model shelf is not supplied', () => {
     const p = props(); render(<AddNodeMenu {...p} />);
-    // The eight templates and the assemble node.
-    expect(screen.getAllByRole('menuitem')).toHaveLength(9);
+    // The nine templates and the assemble node.
+    expect(screen.getAllByRole('menuitem')).toHaveLength(10);
     expect(screen.getByRole('menuitem', { name: '添加装配节点' })).toBeEnabled();
     expect(screen.queryByRole('menuitem', { name: '模型与人设…' })).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: '前端开发' }));
     expect(p.onPick).toHaveBeenCalledWith('frontend');
     fireEvent.click(screen.getByRole('menuitem', { name: '原理图解' }));
     expect(p.onPick).toHaveBeenCalledWith('figure');
+    fireEvent.click(screen.getByRole('menuitem', { name: '代码影片' }));
+    expect(p.onPick).toHaveBeenCalledWith('film');
   });
 
   it('localizes the model shelf entry and cleans up Escape and outside-click listeners', () => {

@@ -4,8 +4,9 @@ import type { ContractField, ContractFieldType } from './nodeContracts';
 import type { UiLocale } from '../locale';
 import { EN_AGENT_TEMPLATES } from './agentTemplates.en';
 import { figurePersona } from './figureKit/figureKit';
+import { filmPersona } from './filmKit/filmKit';
 
-export type AgentTemplateId = 'general' | 'frontend' | 'backend' | 'data' | 'users' | 'materials' | 'review' | 'figure';
+export type AgentTemplateId = 'general' | 'frontend' | 'backend' | 'data' | 'users' | 'materials' | 'review' | 'figure' | 'film';
 export const AGENT_TEMPLATE_VERSION = 1;
 
 export interface AgentTemplate {
@@ -40,6 +41,11 @@ function template(spec: Omit<AgentTemplate, 'input' | 'output'>): AgentTemplate 
 /** A figure node (原理图解) builds its page with AwwO's figure kit: its persona carries the kit guide after the role. */
 function withFigureGuide(item: AgentTemplate): AgentTemplate {
   return { ...item, persona: figurePersona(item.persona) };
+}
+
+/** A film node (代码影片) builds its page with AwwO's film kit: its persona carries the kit guide after the role. */
+function withFilmGuide(item: AgentTemplate): AgentTemplate {
+  return { ...item, persona: filmPersona(item.persona) };
 }
 
 export const AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
@@ -213,6 +219,24 @@ export const AGENT_TEMPLATES: ReadonlyArray<AgentTemplate> = [
     ],
     deliverableTitle: '交互原理图', emptyTitle: '说一个想讲清楚的原理', emptyDescription: '比如“解释 LRU 缓存怎么淘汰旧数据”，它会造一台能上手玩的机器来讲。',
   })),
+  withFilmGuide(template({
+    id: 'film', title: '代码影片', subtitle: '一句话变成一支有声短片', tag: 'FILM',
+    persona: '负责把一个想法做成一支用代码画出、带声音的短片：先写一页逐秒分镜（每个场景的动作、镜头、转场、屏幕文字和声音），再用 AwwO 的影片组件交付一页完整的影片网页。画面和声音都由时间算出，共用同一组节拍；屏幕文字少而准。默认 16:9、15–20 秒，需求另有要求时按需求。',
+    inputs: [
+      field('idea', '影片想法', true, '想法：\n给谁看：\n时长和画幅（可选，默认 15–20 秒、16:9）：\n必须出现的文字（可选）：', '说清楚这支片子讲什么、给谁看，例如“15 秒的产品发布短片，介绍一款记账 App”。'),
+      field('style', '风格与声音', false, '画面风格：\n颜色或品牌色：\n音乐（风格、速度）：', '不写时由节点按想法选择画面风格、配色和配乐，并写进分镜。'),
+    ],
+    outputs: [
+      field('film', '影片', true, '一页完整的 HTML：用影片组件画出的整支短片，点击即可连同声音播放', '交付后在成果里点击播放（含声音），也可以渲染成视频或下载成单个网页文件。', 'html'),
+    ],
+    workflow: ['把想法写成一句话，选定画面风格、配色、字体和配乐', '写逐秒分镜：每个场景一个动作、一个镜头运动、进场转场和声音', '按分镜写场景函数，每一帧只由时间算出', '写配乐和音效，与画面共用同一组节拍', '对照检查清单核对后交付'],
+    checklist: ['第 0 帧就在动，开场就是动作', '每个场景都有变化，相邻场景的镜头运动和景别不重复', '场景首尾相接，正好铺满整支片子', '屏幕文字少而准，手机上也读得清', '整页只引用影片组件这一个外部脚本'],
+    starterPrompts: [
+      { label: '写分镜', prompt: '根据想法写一页逐秒分镜：每个场景的动作、镜头、转场、屏幕文字和声音，以及画面风格和配乐。' },
+      { label: '做出影片', prompt: '按分镜用影片组件交付一页完整的影片网页，画面和声音都由时间算出。' },
+    ],
+    deliverableTitle: '影片', emptyTitle: '说一支想拍的短片', emptyDescription: '比如“15 秒的咖啡店开业短片”，它会写好分镜，交付一支点击就能连声音播放的影片。',
+  })),
 ];
 
 const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
@@ -224,10 +248,11 @@ const LEGACY_TITLES: Record<AgentTemplateId, ReadonlyArray<string>> = {
   materials: ['物料制作', 'Content production'],
   review: ['交付验收', 'Delivery review'],
   figure: ['原理图解', 'Explainer figure'],
+  film: ['代码影片', 'Code film'],
 };
 
 /** The closed template set; the only values planning progress may name a node with. */
-export const AGENT_TEMPLATE_IDS: ReadonlySet<string> = new Set<AgentTemplateId>(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure']);
+export const AGENT_TEMPLATE_IDS: ReadonlySet<string> = new Set<AgentTemplateId>(['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure', 'film']);
 
 /** The legacy export remains Chinese so existing callers and saved documents keep their defaults. */
 export function getAgentTemplates(locale: UiLocale): ReadonlyArray<AgentTemplate> {

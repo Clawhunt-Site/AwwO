@@ -11,6 +11,7 @@ import { findCycle } from './runGraph';
 import type { UiLocale } from '../locale';
 import { cleanTaskFrame, isTaskFrame, taskFrameError, TASK_FRAME_MAX_ENTRIES, TASK_FRAME_MAX_ENTRY_LENGTH, TASK_FRAME_MAX_TOTAL_LENGTH, type TaskFrame } from './taskFrame';
 import { figurePersona } from './figureKit/figureKit';
+import { filmPersona } from './filmKit/filmKit';
 import { automaticEntry, computerRuntime } from './nodeRuntime';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, inheritingRuntime, newTeamRuntime, nodeTeamRuntimeLabel, validateNodeTeam, type NodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
@@ -22,7 +23,7 @@ export type PlanTemplateId = AgentTemplateId | MediaKind;
 const isMediaTemplate = (value: unknown): value is MediaKind => MEDIA_PLAN_TEMPLATE_IDS.includes(value as MediaKind);
 /** Every template id a plan may declare, media nodes included: planning progress names a node only by one of these.
  *  Literal ids (checked against AgentTemplateId), so building it at load never reads another module's bindings. */
-const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure'] as const satisfies ReadonlyArray<AgentTemplateId>;
+const AGENT_PLAN_TEMPLATE_IDS = ['general', 'frontend', 'backend', 'data', 'users', 'materials', 'review', 'figure', 'film'] as const satisfies ReadonlyArray<AgentTemplateId>;
 export const PLAN_TEMPLATE_IDS: ReadonlySet<string> = new Set<string>([...AGENT_PLAN_TEMPLATE_IDS, ...MEDIA_PLAN_TEMPLATE_IDS]);
 
 /** On a hosted canvas a frontend node the assistant adds is the page itself: its one model call delivers one complete
@@ -201,7 +202,7 @@ const TEAM_LIMITS = NODE_TEAM_LIMITS;
 export const CANVAS_PLAN_PROTOCOL = `只返回一个 JSON 对象，不要执行任何操作：
 {"version":1,"summary":"简短说明","operations":[...]}
 允许的 operations（未知键会被拒绝）：
-add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure",title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:{[已有输入字段ID]:string},constraints?:string[]}
+add_node: {type:"add_node",ref:string,templateId:"general"|"frontend"|"backend"|"data"|"users"|"materials"|"review"|"figure"|"film",title?:string,acceptanceCriteria:string[],persona?:string,inputValues?:{[已有输入字段ID]:string},constraints?:string[]}
 新增 Agent 节点的 add_node 必须写 acceptanceCriteria：1 到 3 条，每条是能对照这个节点自己的交付逐条核对的检查。
 update_node: {type:"update_node",nodeId:string,title?:string,persona?:string}
 set_task: {type:"set_task",nodeId:string,constraints?:string[],acceptanceCriteria?:string[]}
@@ -923,8 +924,9 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
             if (constraints.length) node.taskFrame = { version: 1, source: 'manual', constraints: [...constraints], acceptanceCriteria: [] };
           }
         }
-        // A figure node's page is built with AwwO's figure kit: a planned persona replaces its role, never the guide.
-        if (persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(persona) : persona;
+        // A figure node's page is built with AwwO's figure kit and a film node's with its film kit: a planned persona
+        // replaces its role, never the guide.
+        if (persona !== undefined) node.persona = op.templateId === 'figure' ? figurePersona(persona) : op.templateId === 'film' ? filmPersona(persona) : persona;
         for (const [fieldId, value] of Object.entries(op.inputValues ?? {})) setInput(node, fieldId, value, adjust, undefined, shownOf(node, true));
         draft.nodes.push(node); refs.set(op.ref, node.id); addedNodeIds.push(node.id);
         break;
@@ -938,7 +940,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (op.persona !== undefined && node.kind === 'session' && !mediaKindOf(node.agentKind)) {
           if (shownOf(node)?.partial('persona')) keptPartialAdjust(node, '人设', 'persona', adjust);
           else if (copied(op.persona)) copiedAdjust(node, '人设', 'persona', adjust);
-          else node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : op.persona;
+          else node.persona = node.templateId === 'figure' ? figurePersona(op.persona) : node.templateId === 'film' ? filmPersona(op.persona) : op.persona;
         }
         break;
       }

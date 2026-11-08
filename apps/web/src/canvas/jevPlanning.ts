@@ -27,9 +27,9 @@ const fail = (locale: UiLocale, zh: string, en: string): never => { throw new Er
 
 function roles(locale: UiLocale): Role[] {
   return [
-    // Jev's roles become general nodes with Jev's own delivery fields; the figure template's guide needs its own
-    // one-page contract, so it is offered through the canvas planner instead.
-    ...getAgentTemplates(locale).filter(role => role.id !== 'figure').map((role, index) => ({ key: `template_${index}`, name: role.title, description: role.subtitle, persona: () => role.persona })),
+    // Jev's roles become general nodes with Jev's own delivery fields; the figure and film templates' guides need their
+    // own one-page contract, so they are offered through the canvas planner instead.
+    ...getAgentTemplates(locale).filter(role => role.id !== 'figure' && role.id !== 'film').map((role, index) => ({ key: `template_${index}`, name: role.title, description: role.subtitle, persona: () => role.persona })),
     ...getTeamMarketAgents().map((role, index) => ({ key: `market_${index}`, name: `${role.name} · ${role.source.teamName}`,
       description: `${role.role}: ${role.description}. Role instructions only; required skills, original harness and tools are not installed.`,
       persona: () => createMarketplaceRoleNode(role, { x: 0, y: 0 }, locale).persona })),

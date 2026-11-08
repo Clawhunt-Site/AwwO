@@ -31,13 +31,14 @@ export function createModelNode(model: ModelPaletteSelection, personaId: AgentTe
   if (!model.available || !model.model || !['pi', 'openai-agents'].includes(model.runtime)) {
     throw new Error(locale === 'zh' ? '这个模型尚未配置，无法添加。' : 'This model is not configured.');
   }
-  // A figure persona's guide delivers one html page into the figure template's contract, so it keeps that contract;
-  // any other persona joins the general contract's result.
-  const node = createAgentTemplate(personaId === 'figure' ? 'figure' : 'general', world, locale);
+  // A figure or film persona's guide delivers one html page into its own template's contract, so it keeps that
+  // contract; any other persona joins the general contract's result.
+  const ownTemplate = personaId === 'figure' || personaId === 'film' ? personaId : null;
+  const node = createAgentTemplate(ownTemplate ?? 'general', world, locale);
   const persona = personaId ? getAgentTemplates(locale).find(template => template.id === personaId) : undefined;
   if (personaId && !persona) throw new Error('Unknown persona');
   const title = model.displayName || model.label;
   return { ...node, title: persona ? `${title} · ${persona.title}` : title,
-    contract: personaId === 'figure' ? node.contract! : { ...node.contract!, outputs: node.contract!.outputs.filter(field => field.id === 'result') },
+    contract: ownTemplate ? node.contract! : { ...node.contract!, outputs: node.contract!.outputs.filter(field => field.id === 'result') },
     runtime: model.runtime, model: model.model, effort: '', persona: persona?.persona ?? node.persona };
 }

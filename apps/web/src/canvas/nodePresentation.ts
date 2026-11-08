@@ -8,14 +8,14 @@ export const FOCUSED_SESSION_MIN_SIZE = { w: 520, h: 380 } as const;
 export const DELIVERY_DRAWER_WIDTH = 320;
 
 /** What an opened node mostly shows, which decides how much of the stage it takes and how wide its delivery drawer is:
- *  a page (a web page, game or figure it delivers as HTML), a picture, clip or 3D model it generates, another delivery
- *  (a document, data or code), or only its conversation so far. */
+ *  a page (a web page, game, figure or film it delivers as HTML), a picture, clip or 3D model it generates, another
+ *  delivery (a document, data or code), or only its conversation so far. */
 export type OpenContent = 'page' | 'media' | 'delivery' | 'chat';
 
 export function openContentOf(node: CanvasNode): OpenContent {
   if (node.kind !== 'session') return 'chat';
   if (mediaKindOf(node.agentKind)) return 'media';
-  if (node.templateId === 'figure' || node.contract?.outputs.some(field => field.type === 'html')) return 'page';
+  if (node.templateId === 'figure' || node.templateId === 'film' || node.contract?.outputs.some(field => field.type === 'html')) return 'page';
   return node.lastOutput ? 'delivery' : 'chat';
 }
 
