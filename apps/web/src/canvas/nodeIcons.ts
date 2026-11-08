@@ -71,9 +71,18 @@ export function nodeIconWireBox<T extends CanvasNode>(node: T, icon: Box = nodeI
   return { ...node, ...band } as T & WireGeometry;
 }
 
+/** How wide an icon's rows may be in world units: its node's closed card. Icons sit where the cards sat, so rows no
+ *  wider than the card they replace cannot meet a neighbour's (the cards did not), and a name too long for it is cut
+ *  with an ellipsis exactly as its card's title is. */
+export function nodeIconLabelWidth(node: Pick<CanvasNode, 'kind' | 'w'>): number {
+  return node.kind === 'session' ? COMPACT_SESSION_SIZE.w : node.w;
+}
+
 export interface NodeIconGeometry<T extends CanvasNode = CanvasNode> {
   /** The plate: where the icon is drawn. */
   icon: Box;
+  /** How wide its rows may be (nodeIconLabelWidth), in world units. */
+  labelWidth: number;
   /** The node as the wires and its own ports see it: its band. */
   wire: T & WireGeometry;
   /** The node as the 多人同屏 marks, the marquee, the minimap and display links see it: its plate, round. */
@@ -88,7 +97,8 @@ export function nodeIconGeometry<T extends CanvasNode>(node: T): NodeIconGeometr
   const known = GEOMETRY.get(node) as NodeIconGeometry<T> | undefined;
   if (known) return known;
   const icon = nodeIconBox(node);
-  const geometry: NodeIconGeometry<T> = { icon, wire: nodeIconWireBox(node, icon), plate: { ...node, ...icon, round: true } };
+  const geometry: NodeIconGeometry<T> = { icon, labelWidth: nodeIconLabelWidth(node), wire: nodeIconWireBox(node, icon),
+    plate: { ...node, ...icon, round: true } };
   GEOMETRY.set(node, geometry);
   return geometry;
 }

@@ -9,7 +9,7 @@ import { createAssembleNode, createEditNode, createFormNode, createSessionNode, 
 import { eyeGaze } from '../src/canvas/avatarFace';
 import { canvasText, LocaleProvider } from '../src/canvas/i18n';
 import { NodeIconTile, type NodeIconTileProps } from '../src/canvas/NodeIconTile';
-import { nodeIconGeometry } from '../src/canvas/nodeIcons';
+import { nodeIconGeometry, nodeIconLabelWidth } from '../src/canvas/nodeIcons';
 import { portsFor } from '../src/canvas/ports';
 import type { RunView } from '../src/canvas/RunTimeline';
 import { appendTurn, getSnapshot, resetAllSessions } from '../src/canvas/sessions';
@@ -93,6 +93,8 @@ describe('what it draws', () => {
     expect(root().style.width).toBe('112px');
     expect(root().style.height).toBe('112px');
     expect(root().style.getPropertyValue('--cv-px')).toBe('2');
+    // The room its rows may take: the card it replaces (a session's compact card), which the sheet caps them at.
+    expect(root().style.getPropertyValue('--cv-label-w')).toBe(String(nodeIconLabelWidth(node)));
     const [gx, gy] = eyeGaze(.5).map(share => Math.round(share * 100) / 100);
     expect(root().querySelector<HTMLElement>('.awwo-node-icon-gaze')!.style.translate).toBe(`${gx}% ${gy}%`);
     cleanup();

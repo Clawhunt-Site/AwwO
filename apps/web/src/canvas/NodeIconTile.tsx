@@ -104,7 +104,7 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
   const { t, locale } = useCanvasI18n();
   const simple = useSimpleCanvas();
   const hintId = useId();
-  const { icon, wire } = nodeIconGeometry(drawn);
+  const { icon, wire, labelWidth } = nodeIconGeometry(drawn);
   const members = useMemo(() => [node], [node]);
   const stream = useMemberStreams(members)[0];
   const form = useMemo(() => node.kind === 'form' ? formFill(node) : null, [node]);
@@ -326,7 +326,8 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
   return (
     <div
       className={`canvas-tile awwo-node awwo-node-icon is-${state}${selected ? ' canvas-tile--selected' : ''}${settledMark ? ` is-just-${settledMark}` : ''}`}
-      style={{ left: icon.x, top: icon.y, width: icon.w, height: icon.h, '--cv-px': 1 / (scale || 1) } as CSSProperties}
+      style={{ left: icon.x, top: icon.y, width: icon.w, height: icon.h, '--cv-px': 1 / (scale || 1),
+        '--cv-label-w': labelWidth } as CSSProperties}
       data-node-icon={node.id}
       data-kind={node.kind}
       data-state={state}

@@ -56,15 +56,31 @@ html:root[data-theme='dark'] .saas-canvas-shell .canvas-root .canvas-tile.awwo-n
 .awwo-node-icon-ports .canvas-port { pointer-events: auto; }
 .awwo-node-icon .canvas-port:not(:hover):not(:focus-visible) .canvas-port-field-label { display: none; }
 
-/* The rows: the name is part of the icon (a press or a double-click on it is the icon's, never the board's), as wide as
-   the space between two icons in a row; a halo of the board's colour (the hosted skin's token, else the board's own
-   page colour, as in the local edition) keeps a wire under them from cutting the words, and is let past the rows' edges
-   (clipped, not hidden: the ellipsis stays). */
-.awwo-node-icon-label {
-  max-width: min(calc(280px * var(--cv-px, 1)), 320px);
+/* The rows: the name is part of the icon (a press or a double-click on it is the icon's, never the board's). They are
+   never wider than the card the icon replaces (--cv-label-w, nodeIconLabelWidth), so two icons laid out where their
+   cards were keep their gap and no name can reach a neighbour's, and never wider than 280 px on screen, so a long name
+   at a close zoom stays a row and not a banner; a name too long for that is cut with an ellipsis, as its card's title
+   is. A halo of the board's colour (the hosted skin's token, else the board's own page colour, as in the local edition)
+   keeps a wire under them from cutting the words, and is let past each row's edges (clipped, not hidden, with the
+   ellipsis kept). */
+/* Two classes, never one: the group icon's own rule (converged-icon.css, .awwo-converged-label) sets the same property
+   with one class, so with one here the sheets' order would decide — and in the built bundle it decided for the group
+   icon's wider cap, which is how a name came to run into its neighbour's. */
+.awwo-node-icon .awwo-node-icon-label {
+  max-width: min(calc(var(--cv-label-w, 260) * 1px), calc(280px * var(--cv-px, 1)));
+  /* The rows' own column, which may be narrower than the words (an auto column never is, so each row kept its whole
+     width and reached past the cap, and its clip then had nothing to cut); every row takes the column, its words
+     centred in it by the text-align the rows inherit. */
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch;
   text-shadow: 0 0 calc(3px * var(--cv-px, 1)) var(--saas-canvas, var(--page, #e9ecea)), 0 0 calc(2px * var(--cv-px, 1)) var(--saas-canvas, var(--page, #e9ecea));
 }
-.awwo-node-icon .awwo-node-icon-label > span { overflow: clip; overflow-clip-margin: calc(3px * var(--cv-px, 1)); }
+.awwo-node-icon .awwo-node-icon-label > span {
+  max-width: 100%;
+  overflow: clip;
+  overflow-clip-margin: calc(3px * var(--cv-px, 1));
+  text-overflow: ellipsis;
+}
 .awwo-node-icon-label .awwo-converged-name { pointer-events: auto; }
 
 /* Still by default: the full running ring under reduced motion, the arc going round otherwise. */

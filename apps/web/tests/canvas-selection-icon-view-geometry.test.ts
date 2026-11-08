@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { createAssembleNode, createEditNode, createFormNode, createSessionNode, type CanvasNode } from '../src/canvas/canvasDoc';
 import { configureCanvasStorage } from '../src/canvas/canvasStorage';
 import {
-  ICON_VIEW_KEY, loadIconView, NODE_ICON_LINE_MIN_PX, NODE_ICON_NAME_MIN_PX, NODE_ICON_WORLD, nodeIconBox, nodeIconGeometry, nodeIconTier,
-  nodeIconWireBox, saveIconView, withIconGeometry,
+  ICON_VIEW_KEY, loadIconView, NODE_ICON_LINE_MIN_PX, NODE_ICON_NAME_MIN_PX, NODE_ICON_WORLD, nodeIconBox, nodeIconGeometry,
+  nodeIconLabelWidth, nodeIconTier, nodeIconWireBox, saveIconView, withIconGeometry,
 } from '../src/canvas/nodeIcons';
 import { laneTopOf, portAnchorWorld, portsFor, type WireGeometry } from '../src/canvas/ports';
 
@@ -153,6 +153,30 @@ describe('the board\'s boxes', () => {
 });
 
 describe('the rows under an icon', () => {
+  it('may be no wider than the card the icon replaces, so two icons\' rows cannot meet', () => {
+    // A session's icon stands on its compact card (260 wide), whatever its saved size: an enlarged one does not give
+    // its rows more room than the card they replace.
+    expect(nodeIconLabelWidth({ kind: 'session', w: 900 })).toBe(260);
+    expect(nodeIconLabelWidth({ kind: 'session', w: 260 })).toBe(260);
+    const form = createFormNode({ x: 0, y: 0 });
+    expect(nodeIconLabelWidth(form)).toBe(form.w);
+    const assemble = createAssembleNode({ x: 0, y: 0 });
+    expect(nodeIconLabelWidth(assemble)).toBe(assemble.w);
+    const edit = createEditNode({ x: 0, y: 0 });
+    expect(nodeIconLabelWidth(edit)).toBe(edit.w);
+    // Two cards side by side do not overlap, so neither do rows no wider than them: the gap between the icons' middles
+    // is at least the two half-widths.
+    const left = session('a', 0, 0);
+    const right = session('b', 500, 0);
+    const gap = (nodeIconBox(right).x + 56) - (nodeIconBox(left).x + 56);
+    expect(gap).toBeGreaterThanOrEqual((nodeIconLabelWidth(left) + nodeIconLabelWidth(right)) / 2);
+    // The geometry carries it, memoised with the rest.
+    const geometry = nodeIconGeometry(left);
+    expect(geometry.labelWidth).toBe(260);
+    expect(nodeIconGeometry(left).labelWidth).toBe(geometry.labelWidth);
+    expect(nodeIconGeometry(form).labelWidth).toBe(form.w);
+  });
+
   it('shows nothing under 20 px on screen, the name from there, and the state line from 44 px', () => {
     expect([NODE_ICON_NAME_MIN_PX, NODE_ICON_LINE_MIN_PX]).toEqual([20, 44]);
     expect(nodeIconTier(19.9 / 112)).toBe('S');

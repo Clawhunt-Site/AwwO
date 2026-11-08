@@ -152,15 +152,31 @@ describe('its ports, rows and contrast', () => {
     expect(ICON).toMatch(/\.awwo-node-icon \.canvas-port:not\(:hover\):not\(:focus-visible\) \.canvas-port-field-label \{ display: none; \}/);
   });
 
-  it('caps its rows at the room between two icons and keeps a wire under them from cutting the words, in every edition', () => {
-    const label = /\.awwo-node-icon-label \{([^}]*)\}/.exec(ICON)![1];
-    expect(label).toMatch(/max-width: min\(calc\(280px \* var\(--cv-px, 1\)\), 320px\);/);
+  it('caps its rows at its own card and keeps a wire under them from cutting the words, in every edition', () => {
+    const rule = /(\.awwo-node-icon \.awwo-node-icon-label) \{([^}]*)\}/.exec(ICON);
+    expect(rule, 'the icon\'s own label rule').toBeTruthy();
+    const [, selector, label] = rule!;
+    // Never wider than the card it replaces (--cv-label-w, nodeIconLabelWidth: two icons laid out where their cards
+    // were keep their gap, so no name can reach a neighbour's), nor than 280 px on screen.
+    expect(label).toMatch(/max-width: min\(calc\(var\(--cv-label-w, 260\) \* 1px\), calc\(280px \* var\(--cv-px, 1\)\)\);/);
+    // Above the group icon's own rule for the same property, whatever order the sheets end up in: that order once
+    // decided for its wider cap, which is how a name came to run into its neighbour's.
+    expect(outranks(specificity(selector), specificity('.awwo-converged-label'))).toBeGreaterThan(0);
+    // The rows' column may be narrower than the words: an auto column never is, so a row kept its whole width, reached
+    // past the cap and its clip had nothing to cut.
+    expect(label).toMatch(/grid-template-columns: minmax\(0, 1fr\);/);
+    expect(label).toMatch(/justify-items: stretch;/);
     // The hosted skin's board token, else the board's own page colour (the local edition defines no --saas-canvas).
     const halos = [...label.matchAll(/var\(--saas-canvas, var\(--page, #e9ecea\)\)/g)];
     expect(halos).toHaveLength(2);
     expect(label).not.toMatch(/var\(--saas-canvas, #/);
-    // The halo is let past the rows' edges: clipped there, never hidden (the ellipsis stays).
-    expect(ICON).toMatch(/\.awwo-node-icon \.awwo-node-icon-label > span \{ overflow: clip; overflow-clip-margin: calc\(3px \* var\(--cv-px, 1\)\); \}/);
+    // A row too long is cut with an ellipsis, as its card's title is; the halo is let past its edges (clipped there,
+    // never hidden, so the words keep their halo and the ellipsis stays).
+    const row = /\.awwo-node-icon \.awwo-node-icon-label > span \{([^}]*)\}/.exec(ICON)![1];
+    expect(row).toMatch(/max-width: 100%;/);
+    expect(row).toMatch(/overflow: clip;/);
+    expect(row).toMatch(/overflow-clip-margin: calc\(3px \* var\(--cv-px, 1\)\);/);
+    expect(row).toMatch(/text-overflow: ellipsis;/);
     expect(ICON).toMatch(/\.awwo-node-icon-label \.awwo-converged-name \{ pointer-events: auto; \}/);
     // The cursor is the card's (move, grabbing while pressed): the sheet sets none that would outrank it.
     expect(ICON).not.toMatch(/cursor:/);
