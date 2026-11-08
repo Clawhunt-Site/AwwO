@@ -40,7 +40,10 @@ Since 2026-11-08 that video is an advanced how-to, 「高级：连接你自己�
 (it was "Build a game with Claude Code and Codex on one canvas", its card's summary opening with "Multiplayer:"), and it
 is marked `latest: false`. The owner wants multiplayer to be people working on one canvas together, from many clients at
 once, as in Figma's enterprise edition: inviting your own agents over MCP stays as an advanced option. The video keeps its id, file and
-place, first in Build a case. A people-first tutorial, on working on a canvas with colleagues, is recorded after the
+place, first in Build a case. The library's opening line names only the main path again (the short how-tos, then how
+each homepage case was made), and Build a case's note names the MCP route only after it, as an advanced how-to (the
+owner, the same day: «Yes, reword them»). The player shows that note under each case's build video, not under the
+advanced how-to itself, whose summary says what it is. A people-first tutorial, on working on a canvas with colleagues, is recorded after the
 first phase of that work; as the newest video, it will lead 「最新」 with no change to the rule.
 
 The two how-tos added on 2026-10-25 were recorded as the first four were (2026-10-17): on the live AwwO, in the workspace

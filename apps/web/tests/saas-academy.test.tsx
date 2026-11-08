@@ -410,6 +410,40 @@ it('shows the advanced tutorial once, under its new name, in Build a case and no
   }
 });
 
+// The owner (2026-11-08, «Yes, reword them»): the library's front no longer presents your own agents over MCP as a main path.
+it('keeps your own agents over MCP out of the library’s opening line, and names them in Build a case only as an advanced how-to', async () => {
+  const OWN_AGENTS = /MCP|your\s+own\s+agents?\b|你自己的\s*Agent/i;
+  const advanced = ACADEMY_VIDEOS.find(video => video.id === 'multiplayer-lockstep')!;
+  const caseBuild = ACADEMY_VIDEOS.find(video => video.section === 'build' && video.caseId)!;
+  for (const locale of ['en', 'zh'] as const) {
+    window.history.replaceState({}, '', '/');
+    library(locale);
+    fireEvent.click(screen.getByRole('button', { name: locale === 'en' ? 'Academy' : '教程' }));
+    const dialog = await loaded(locale === 'en' ? TITLE : '从真实画布学会 AwwO');
+    const lead = dialog.querySelector('.academy-lead')!.textContent!;
+    expect(lead).not.toMatch(OWN_AGENTS);
+    expect(lead.endsWith(locale === 'en' ? 'then see how each homepage case was made.' : '再看首页的每个案例是怎么做出来的。')).toBe(true);
+    // Every section's note, 「最新」 first: only Build a case names your own agents, in a sentence of its own that says
+    // it is an advanced how-to, after the main path.
+    const notes = within(dialog).getAllByRole('region').map(section => section.querySelector('header p')!.textContent!);
+    const sentences = (text: string) => text.split(/(?<=[.。])\s*/).filter(Boolean);
+    const naming = notes.map(note => sentences(note).filter(sentence => OWN_AGENTS.test(sentence)));
+    expect(naming.map(found => found.length)).toEqual([0, 0, 0, 1]);
+    expect(naming[3][0]).toMatch(locale === 'en' ? /^An advanced how-to / : /^另有一个高级教程/);
+    expect(sentences(notes[3])[0]).toBe(locale === 'en' ? 'Write the request in four parts, let the canvas assistant build the team, then run the canvas and try what it made.'
+      : '按四个部分写需求，让画布助手搭好团队，运行画布，再试用它做出的成品。');
+    // Under a case's build the player says how a case is built; under the advanced how-to itself it does not, since
+    // that video is not that path and the note would point it at itself.
+    fireEvent.click(within(dialog).getAllByRole('button', { name: caseBuild.title[locale] })[0]);
+    expect(dialog.querySelector('.academy-player-how')?.textContent).toBe(notes[3]);
+    fireEvent.click(within(dialog).getByRole('button', { name: locale === 'en' ? 'All videos' : '全部视频' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: advanced.title[locale] }));
+    expect(within(dialog).getByRole('heading', { level: 2, name: advanced.title[locale] })).toBeVisible();
+    expect(dialog.querySelector('.academy-player-how')).toBeNull();
+    cleanup();
+  }
+});
+
 it('reads in Chinese in the Chinese interface, the case names in English', async () => {
   library('zh');
   fireEvent.click(screen.getByRole('button', { name: '教程' }));
