@@ -198,6 +198,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 56, "migrations/056_canvas_live.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 57, "migrations/057_analysis_jobs.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 

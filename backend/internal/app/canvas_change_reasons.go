@@ -73,6 +73,8 @@ func kindPhrase(kind string) string {
 		return "an assemble node"
 	case "edit":
 		return "an edit node"
+	case "analyze":
+		return "a video breakdown node"
 	case "":
 		return "a node without a kind"
 	}
@@ -102,6 +104,8 @@ func nodePortNames(n graphNode, input bool) (names []string, more bool) {
 		candidates = []string{"data"}
 	case n.Kind == "edit":
 		candidates = []string{"result", "timeline", "clips", "sounds", "pictures"}
+	case n.Kind == "analyze":
+		candidates = []string{"result", "video"}
 	case n.Contract != nil:
 		fields, prefix := n.Contract.Outputs, "out:"
 		if input {

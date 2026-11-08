@@ -271,6 +271,8 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 **视频渲染** 需要单独部署 `apps/render-worker`（Playwright + Chromium + ffmpeg，见其 README），并配置 `AWWO_RENDER_URL`、`AWWO_RENDER_TOKEN` 和 `AWWO_MEDIA_DIR`（`AWWO_RENDERS_PER_DAY` 默认 20、`AWWO_RENDERS_SITE_PER_DAY` 默认 300、`AWWO_RENDER_TIMEOUT` 默认 8m）。前端发送成果工作台里构建好的页面文档；页面定义 `window.renderAt(t)` 时逐帧精确（渲染约定），否则在虚拟时钟下运行。渲染器一次只渲染一个：其他工作区的渲染保持 queued 排队，渲染器仍在释放上一个时会重试；渲染器没有接手的渲染（忙、不可用、服务重启、排队时被停止）不计入每日次数。MP4（以及可选的 GIF、帧缩略图）全部校验 hash 与文件类型后，与完成状态在同一事务里存为画布的媒体文件，随画布删除与清理；渲染记录本身是每日次数的账本，画布删除后仍保留，画布在渲染排队或进行中时不能删除。服务重启或关闭时排队或进行中的渲染标记为 `interrupted`，不会重复渲染。
 
+**视频拆解节点**（画布节点 kind `analyze`，`analyses.go`）需要单独部署 `apps/video-analysis-worker`（rea-video + ffmpeg，见其 README），并配置 `AWWO_ANALYSIS_URL`、`AWWO_ANALYSIS_TOKEN`（至少 32 个字符，与 worker 的同名变量相同）和 `AWWO_MEDIA_DIR`（`AWWO_ANALYSES_PER_DAY` 默认 20、`AWWO_ANALYSES_SITE_PER_DAY` 默认 200、`AWWO_ANALYSIS_TIMEOUT` 默认 40m）。没有配置时，含拆解节点的画布运行在开始前返回 409 `analysis_unavailable`，`GET /capabilities` 的 `analyze.enabled` 为 false。节点拆解的视频是接入 `video` 口的视频节点片段或剪辑成片，没有接入时是节点设置 `analyze.source` 指定的本画布上传视频（artifact id）；不调用模型、不向服务商付费。worker 一次只拆一个：同一工作区的第二个拆解节点等前一个结束，其他工作区的排队；worker 没接手的拆解（不可用、忙、服务重启、文件缺失或不一致、存不下）不计入每日次数，worker 拒绝的视频（太长、太大、没有画面）计入。报告、摘要、故事板、逐镜联系表、字幕、复核任务（勾选 `stems` 时还有人声与配乐）校验 hash 与类型后，与完成状态在同一事务里存为该节点的画布文件；节点交付文本：摘要、公开报告 JSON 和文件名（`<节点 ID>/<文件名>`），下游 Agent 作为上下文读取。拆解记录（`analysis_jobs`，迁移 057）是每日次数的账本，画布删除后仍保留；工作区在拆解排队或进行中时不能删除。服务重启后，运行仍在进行的拆解从记录重新开始（最多 3 次），运行已结束的标记为 `interrupted`。
+
 ## 画布经验与结果评分
 
 以下路径以 `/tenants/{tenantId}` 开头；读取需 reader，写入需 member（写入事务里按当时的角色再查一次）。

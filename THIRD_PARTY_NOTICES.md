@@ -28,7 +28,7 @@ imports keep their original README, lockfiles, and license files under
 
 ## Adapted material
 
-These projects were read during the 2026-10-15 open-source intake, and open-design and refero_skill on 2026-10-26. No new source tree was vendored for them: the
+These projects were read during the 2026-10-15 open-source intake, open-design and refero_skill on 2026-10-26, and rea-video and cutaway on 2026-11-08. No new source tree was vendored for them: the
 files listed adapt parts of them and name the source in their own attribution, and the license texts are kept
 under `third_party/adapted/`. Built-in skills reach users as text through the API, so the skill library links the
 licenses of their sources beside each adapted skill's source line: `apps/web/src/saas/skillLicences.txt`,
@@ -44,6 +44,8 @@ when a skill's attribution and that file disagree).
 | Pi coding agent (Copyright (c) 2025 Mario Zechner) | earendil-works/pi | v0.79.10, as vendored in `third_party/clawwork` | MIT | `backend/internal/app/skills/handoff-summary.md` (the headings of its session summary) | `third_party/clawwork/LICENSE` |
 | open-design (Copyright 2026 Open Design contributors) | nexu-io/open-design | 9724c44142ea0afaee3d207f37901b31c66a44ad | Apache-2.0 | `backend/internal/app/skills/design-craft.md`, `anti-ai-slop.md`, `design-directions.md`, `ui-state-coverage.md`, `motion-discipline.md` and `design-jury.md` (its craft rules, its design charter's craft section, its direction library and its design-review panel, condensed, partly rewritten and fitted to what AwwO's previews supply) | `third_party/adapted/open-design/LICENSE` |
 | refero_skill (Copyright (c) 2026 Refero) | referodesign/refero_skill | 2382e518f90096df607196b9a635da2d1bc142f9 | MIT | `backend/internal/app/skills/design-craft.md` and `anti-ai-slop.md` (the typography, colour and anti-template rules open-design adapted from it, which reach AwwO through open-design) | `third_party/adapted/refero-skill/LICENSE` |
+| rea-video (Copyright 2026 JuneYaooo) | JuneYaooo/rea-video | b32fbbdb074adbd72f54505114ed8600366cdaa5 | Apache-2.0 | `backend/internal/app/skills/video-breakdown.md` (version 2: its production-method taxonomy, its rules of evidence, the packaging and sound layers) and `video-remake.md` (routing each shot by how it was made and merging shots into as few generations as a model's limits allow), condensed and rewritten in AwwO's words | `third_party/adapted/rea-video/LICENSE` and `NOTICE` |
+| cutaway (Copyright (c) 2026 Nyxera0x, Copyright (c) 2026 whaleyxbt) | Nyxera0x/cutaway, built on whaleyxbt/claude-motion | 5d8f1c6efe0ed65a8fc7647a7a2a3ee9fbb4d20a | MIT | `backend/internal/app/skills/cutaway.md` (its method: measure the picture, a checklist per picture, the graded still before any film, one camera per part, one beat script; fitted to AwwO's three.js release and render contract) | `third_party/adapted/cutaway/LICENSE` |
 
 Ideas only, with no text or code copied: Agent-Reach (Panniantong/Agent-Reach, MIT, Copyright (c) 2025 Agent
 Eyes) and Scrapling (D4Vinci/Scrapling, BSD-3-Clause, Copyright (c) 2024 Karim Shoair) for
@@ -69,6 +71,15 @@ drift; a model review against the spec that answers in findings; a decision reco
 `MOTION.md`, `apps/motion-tokens.json`, `scripts/motion-lint.mjs`, the web's motion notes and the `motion-language`
 and `motion-review` skills, written in AwwO's own words; no text or code of it is copied. The two spring settings
 named sheet (stiffness 380, damping 32) and snappy (520, 36) are the article's numbers.
+
+Read on 2026-11-08, ideas only, for `backend/internal/app/skills/video-remake.md`: hypit (hypit-ai/hypit, commit
+2d31e88765e297f0795348b460c77a6067f12261, the Apache License 2.0 with additional conditions, (c) 2026 Hypit.AI) for
+timing tied to a film's words and for variants that change one thing at a time, and video-clone-lite
+(liangdabiao/video-clone-lite, commit 925a61f0adfe3454a30f54a61af31b7cadd32279, no license) for one plan as the single
+record, references made before clips, generating at a model's shortest length and trimming in the edit, and pricing a
+generation before running it. No text or code of either is copied or shipped. hypit's conditions require Hypit.AI's
+written authorization before its code runs in a multi-tenant service or is supplied to third parties, so a change
+that runs hypit itself inside AwwO needs that authorization first.
 
 Read on 2026-10-26, ideas only: open-design's `webgl-experience` design template (in the repository above) informed
 the robustness checks of `backend/internal/app/skills/procedural-3d-scene.md`, which is written in AwwO's own words,

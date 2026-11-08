@@ -22,6 +22,7 @@
     "test:saas:smoke": "node scripts/awwo-saas-smoke.mjs",
     "test:saas:stack": "node --test scripts/awwo-saas-stack.test.mjs",
     "test:saas:render": "npm test --prefix apps/render-worker",
+    "test:saas:video-analysis": "npm test --prefix apps/video-analysis-worker",
     "test:saas:engineering": "node --test scripts/check-source-hygiene.test.mjs scripts/awwo-doctor.test.mjs scripts/build-skill-licences.test.mjs scripts/motion-lint.test.mjs",
     "check:hygiene": "node scripts/check-source-hygiene.mjs",
     "check:motion": "node scripts/motion-lint.mjs --ignore apps/web/src/saas/production-canvases/ --ignore apps/web/src/saas/production-runs/ --baseline scripts/motion-lint-baseline.json apps/web/src",

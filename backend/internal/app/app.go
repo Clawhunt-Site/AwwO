@@ -25,6 +25,7 @@ type App struct {
 	workspaceLeases sync.Map // hashed ephemeral bearer -> one admitted coding run
 	computerLeases  sync.Map // hashed task token; never a provider credential
 	editWaits       sync.Map // tenant/graph/node of an edit node waiting for its workspace's other edit -> when it looks again
+	analysisWaits   sync.Map // tenant/graph/node of an analyze node waiting for its workspace's other analysis -> when it looks again
 	exports         accountExports
 
 	obs         *observability
@@ -95,6 +96,10 @@ type App struct {
 	// queued (renders.go). Made on first use.
 	renderSlotOnce sync.Once
 	renderSlot     chan struct{}
+	// analysisSlot lets one analysis at a time go to the video analysis worker, which analyses one at a time
+	// (analysis_worker.go). Made on first use.
+	analysisSlotOnce sync.Once
+	analysisSlot     chan struct{}
 	// canvasSaves bounds the canvas creates and saves validated and stored at once: each holds up to
 	// maxCanvasBodyBytes of document several times over while it is validated and stored (resources.go). Made on
 	// first use.
@@ -194,6 +199,9 @@ func (a *App) Start(ctx context.Context) error {
 		return e
 	}
 	if e = interruptEdits(ctx, tx); e != nil {
+		return e
+	}
+	if e = interruptAnalyses(ctx, tx); e != nil {
 		return e
 	}
 	if e = interruptRenders(ctx, tx); e != nil {

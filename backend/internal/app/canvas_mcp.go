@@ -548,6 +548,8 @@ func defaultInputPort(doc map[string]any, id string) string {
 	switch {
 	case n.Kind == "edit":
 		return "timeline"
+	case n.Kind == "analyze":
+		return "video"
 	case n.Contract != nil && len(n.Contract.Inputs) > 0:
 		return "in:" + n.Contract.Inputs[0].ID
 	}

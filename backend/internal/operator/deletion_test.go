@@ -119,7 +119,8 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 		want []string
 	}{
 		"references to users and tenants": {fmt.Sprintf(foreignKeysSQL, "c.confrelid IN ('users'::regclass,'tenants'::regclass)"), []string{
-			"account_deletion_requests user_id users n", "agents tenant_id tenants a", "artifacts tenant_id tenants a",
+			"account_deletion_requests user_id users n", "agents tenant_id tenants a", "analysis_jobs tenant_id tenants c",
+			"artifacts tenant_id tenants a",
 			"audit_events actor_id users a", "audit_events tenant_id tenants a", "auth_sessions user_id users c",
 			// A canvas's agent tokens, claims and live messages go with the person who made them; its change log keeps the
 			// changes without a name for who made them (migration 056).
@@ -393,6 +394,7 @@ func TestPostgresDeletionPreviewsAndRefusalsChangeNothing(t *testing.T) {
 		"busy graph":           {"INSERT INTO graph_runs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,document_version,document,scope,status) VALUES('g-busy','w-own','cv-own','member','g-busy','h',1,'{}','[]','queued')", "DELETE FROM graph_runs WHERE id='g-busy'", "workspace_busy:w-own", nil},
 		"busy render":          {"INSERT INTO render_jobs(id,tenant_id,canvas_id,actor_id,operation_id,request_hash,status,params,html_sha256,html_bytes) VALUES('rj2','w-solo','cv-solo',NULL,'rj-op2','h','queued','{}','x',1)", "DELETE FROM render_jobs WHERE id='rj2'", "workspace_busy:w-solo", nil},
 		"busy edit":            {"INSERT INTO edit_jobs(id,tenant_id,canvas_id,graph_id,node_id,status,timeline) VALUES('ej','w-solo','cv-solo','g-solo','edit','running','{}')", "DELETE FROM edit_jobs WHERE id='ej'", "workspace_busy:w-solo", nil},
+		"busy analysis":        {"INSERT INTO analysis_jobs(id,tenant_id,canvas_id,graph_id,node_id,status) VALUES('aj','w-solo','cv-solo','g-solo','analyze','queued')", "DELETE FROM analysis_jobs WHERE id='aj'", "workspace_busy:w-solo", nil},
 		"busy dispatch":        {"INSERT INTO openmaus_dispatches(tenant_id,operation_id,request_hash,actor_id,bot_id,task_id,status) VALUES('w-own','om-op2','h','member','b','t','sending')", "DELETE FROM openmaus_dispatches WHERE operation_id='om-op2'", "workspace_busy:w-own", nil},
 		"busy call":            {"INSERT INTO model_invocations(id,tenant_id,run_id,status) VALUES('mi2','w-own','r-own-member','running')", "DELETE FROM model_invocations WHERE id='mi2'", "workspace_busy:w-own", nil},
 		"evaluation":           {`INSERT INTO audit_events(actor_id,tenant_id,action,resource_id,metadata) VALUES('person','w-team','typesafe.evaluation','ts-now','{"status":"started"}')`, "DELETE FROM audit_events WHERE resource_id='ts-now'", "active_work", nil},

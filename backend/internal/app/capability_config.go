@@ -31,6 +31,14 @@ type capabilitySettings struct {
 	EditsTotalPerDay int
 	EditTimeout      time.Duration
 	EditQueueWait    time.Duration
+	// Video breakdown nodes (analyses.go) run on the video analysis worker: one analysis at a time, which may wait
+	// AnalysisQueueWait for it and run for AnalysisTimeout.
+	AnalysisURL        string
+	AnalysisToken      string
+	AnalysesPerDay     int
+	AnalysesSitePerDay int
+	AnalysisTimeout    time.Duration
+	AnalysisQueueWait  time.Duration
 }
 
 func positiveEnvInt(key string, fallback, max int) (int, error) {
@@ -94,6 +102,18 @@ func (c *Config) capabilityFromEnv() error {
 		return err
 	}
 	c.EditQueueWait = 45 * time.Minute
+	c.AnalysisURL, c.AnalysisToken = strings.TrimSpace(os.Getenv("AWWO_ANALYSIS_URL")), os.Getenv("AWWO_ANALYSIS_TOKEN")
+	if c.AnalysesPerDay, err = positiveEnvInt("AWWO_ANALYSES_PER_DAY", 20, 10000); err != nil {
+		return err
+	}
+	if c.AnalysesSitePerDay, err = positiveEnvInt("AWWO_ANALYSES_SITE_PER_DAY", 200, 1000000); err != nil {
+		return err
+	}
+	// The worker's own limit is 30 minutes (AWWO_ANALYSIS_TIMEOUT_MS); the API waits a little longer for its reply.
+	if c.AnalysisTimeout, err = envDuration("AWWO_ANALYSIS_TIMEOUT", 40*time.Minute, time.Minute, 4*time.Hour); err != nil {
+		return err
+	}
+	c.AnalysisQueueWait = 45 * time.Minute
 	return nil
 }
 
@@ -140,6 +160,21 @@ func (c Config) validateCapabilities() error {
 		}
 		if c.MediaDir == "" {
 			return errors.New("the motion renderer stores its videos in AWWO_MEDIA_DIR, which must be set")
+		}
+	}
+	if (c.AnalysisURL == "") != (c.AnalysisToken == "") {
+		return errors.New("AWWO_ANALYSIS_URL and AWWO_ANALYSIS_TOKEN must be configured together")
+	}
+	if c.AnalysisURL != "" {
+		u, err := url.Parse(c.AnalysisURL)
+		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("invalid AWWO_ANALYSIS_URL")
+		}
+		if len(c.AnalysisToken) < 32 || strings.ContainsAny(c.AnalysisToken, "\r\n") {
+			return errors.New("AWWO_ANALYSIS_TOKEN must be at least 32 characters")
+		}
+		if c.MediaDir == "" {
+			return errors.New("the video analysis worker's videos and outputs live in AWWO_MEDIA_DIR, which must be set")
 		}
 	}
 	return nil
