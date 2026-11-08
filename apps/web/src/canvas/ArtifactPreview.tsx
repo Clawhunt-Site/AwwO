@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
@@ -7,6 +7,7 @@ import { agentDisplayName } from './agentPages';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
+import { motionNotes, type MotionNote, type MotionRule } from './motionNotes';
 import { readPageErrorMessage, reportPageError } from './pageErrors';
 import { LivePage } from './studio/LivePage';
 import type { AssetResolver } from './studio/liveDocument';
@@ -36,6 +37,19 @@ const messages = {
     runPage: '运行页面',
     marketStill: '这个页面含市场 Agent 写的内容，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容发到其他网站。',
     agentStill: '这个页面是受邀进入画布的 Agent「{name}」交来的，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
+    motionCheck: '动效检查（脚本读源码，免费，不评判手感）：{items}。',
+    motionMore: '另有 {count} 处',
+    motionOpen: '打开源码第 {line} 行',
+    motionRule: {
+      // motion-lint-allow transition-all, reduced-motion-missing: this text names the rule
+      'transition-all': '第 {line} 行用了 transition: all',
+      'layout-property': '第 {line} 行的动画改了布局属性',
+      'raw-curve': '第 {line} 行直接写了曲线，没用页面自己的 token',
+      'off-language-curve': '第 {line} 行的曲线不是页面自己的 token',
+      'raw-duration': '第 {line} 行直接写了时长，没用页面自己的 token',
+      'reduced-motion-missing': '有位移动画，但没有「减少动态效果」的处理（第 {line} 行起）',
+      'render-clock': '第 {line} 行：影片的 renderAt 读了时钟或随机数，同一时刻可能画出不同的帧',
+    } as Record<MotionRule, string>,
     agentStillUnnamed: '这个页面是受邀进入画布的 Agent 交来的，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
   },
   en: {
@@ -57,6 +71,19 @@ const messages = {
     runPage: 'Run page',
     marketStill: 'This page holds a market Agent’s work, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows to other sites.',
     agentStill: '“{name}”, an Agent invited to this canvas, handed this page in, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
+    motionCheck: 'Motion check (a free script reads the source; it does not judge the feel): {items}.',
+    motionMore: '{count} more',
+    motionOpen: 'Open line {line} of the source',
+    motionRule: {
+      // motion-lint-allow transition-all, reduced-motion-missing: this text names the rule
+      'transition-all': 'transition: all on line {line}',
+      'layout-property': 'a layout property animates on line {line}',
+      'raw-curve': 'a curve written by hand instead of the page’s own tokens on line {line}',
+      'off-language-curve': 'a curve that is none of the page’s own tokens on line {line}',
+      'raw-duration': 'a duration written by hand instead of the page’s own tokens on line {line}',
+      'reduced-motion-missing': 'things move with no reduced-motion path (from line {line})',
+      'render-clock': 'the film’s renderAt reads the clock or chance on line {line}, so one moment can draw different frames',
+    } as Record<MotionRule, string>,
     agentStillUnnamed: 'An Agent invited to this canvas handed this page in, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
   },
 };
@@ -200,6 +227,54 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
       () => { if (live) setSupplied({ needs, code: null }); });
     return () => { live = false; };
   }, [needs]);
+  // The free motion check reads the delivered source only (motionNotes.ts), so it also covers a held page. It runs
+  // after the preview has painted, so even a large page never holds up its first frame. Each noted line opens the
+  // source at that line.
+  const [motion, setMotion] = useState<{ source: string; notes: MotionNote[] } | null>(null);
+  useEffect(() => {
+    if (type !== 'html' || tooLarge) return;
+    let current = true;
+    const timer = setTimeout(() => { if (current) setMotion({ source: documentSource, notes: motionNotes(documentSource) }); }, 0);
+    return () => { current = false; clearTimeout(timer); };
+  }, [type, tooLarge, documentSource]);
+  const notes = type === 'html' && !tooLarge && motion?.source === documentSource ? motion.notes : [];
+  const [jump, setJump] = useState<{ line: number } | null>(null);
+  const sourceRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const code = sourceRef.current;
+    const node = code?.firstChild;
+    if (!jump || mode !== 'source' || !code || !node || node.nodeType !== Node.TEXT_NODE) return;
+    const value = node.textContent ?? '';
+    let start = 0;
+    for (let line = 1; line < jump.line && start >= 0; line += 1) {
+      const next = value.indexOf('\n', start);
+      start = next < 0 ? -1 : next + 1;
+    }
+    if (start < 0) return;
+    const end = value.indexOf('\n', start);
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end < 0 ? value.length : end);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const pre = code.parentElement;
+    if (pre && typeof range.getBoundingClientRect === 'function' && typeof pre.scrollBy === 'function') {
+      pre.scrollBy({ top: range.getBoundingClientRect().top - pre.getBoundingClientRect().top - pre.clientHeight / 3 });
+    }
+  }, [jump, mode]);
+  const [motionLead, motionEnd = ''] = text.motionCheck.split('{items}');
+  const motionSeparator = locale === 'zh' ? '；' : '; ';
+  const motionLine = notes.length === 0 ? null : <p className="awwo-artifact-note awwo-artifact-motion">
+    {motionLead}
+    {notes.slice(0, 3).map((note, index) => <Fragment key={`${note.line}:${note.rule}`}>
+      {index > 0 && motionSeparator}
+      <button type="button" className="awwo-artifact-motion-line" title={text.motionOpen.replace('{line}', String(note.line))}
+        onClick={() => { setMode('source'); setJump({ line: note.line }); }}>{text.motionRule[note.rule].replace('{line}', String(note.line))}</button>
+    </Fragment>)}
+    {notes.length > 3 && `${motionSeparator}${text.motionMore.replace('{count}', String(notes.length - 3))}`}
+    {motionEnd}
+  </p>;
   const libraries = !needs.libraries.length ? 'none' : supplied?.needs !== needs ? 'loading' : supplied.code ? 'ready' : 'failed';
   const libraryNames = needs.libraries.map(library => (locale === 'zh' && library.labelZh) || library.label).join(', ');
   const code = libraries === 'ready' ? supplied?.code ?? undefined : undefined;
@@ -275,7 +350,8 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
       : type === 'text' || mode === 'source' ? <>
         {navigation.stopped && <p className="awwo-artifact-status" role="alert">{text.navigationStopped}</p>}
-        <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code>{documentSource}</code></pre>
+        <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code ref={sourceRef}>{documentSource}</code></pre>
+        {motionLine}
       </>
         : type === 'html' ? <>
           {live
@@ -294,6 +370,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
             {needs.additions.length > 0 && ` ${text.libraryAdditions.replace('{additions}', needs.additions.map(addition => addition.label).join(', '))}`}</p>}
           {running && libraries === 'failed' && <p className="awwo-artifact-status" role="alert">{text.libraryFailed.replace('{name}', libraryNames)}</p>}
           {running && needs.blocked.length > 0 && <p className="awwo-artifact-note">{text.blockedScripts.replace('{hosts}', needs.blocked.join(', '))}</p>}
+          {motionLine}
         </> : <div className="awwo-artifact-markdown awwo-markdown-preview">{renderMarkdown(previewSource ?? source)}</div>}
     {downloadError && <p className="awwo-artifact-status" role="alert">{t('deliverable.downloadFailed')}</p>}
     {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>
