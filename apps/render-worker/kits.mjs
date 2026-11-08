@@ -1,7 +1,7 @@
 // Kits AwwO supplies to the pages it renders. A page names a kit by one fixed URL on AwwO's own site, which a render's
 // browser can never reach (it resolves only the CDNs, network.mjs); the worker answers exactly that URL with its own
-// pinned copy instead, so the kit never comes over the network and is always reviewed bytes (a film's brand fonts
-// still come from jsDelivr, a CDN on the allowlist, as other pages' fonts do). Each copy is the web
+// pinned copy instead, so the kit never comes over the network and is always reviewed bytes (and so are a film's brand
+// fonts, at the jsDelivr URLs the kit names for them: fonts.mjs). Each copy is the web
 // bundle's file byte for byte (apps/web/src/canvas/filmKit/film-kit.js, built from third_party/cinecode), checked
 // against its size and sha256 when this module loads: a worker with a damaged copy fails to start rather than render
 // with it. kits.test.mjs keeps the copy equal to the web's file.

@@ -71,6 +71,17 @@ frames 0 … N-1 and repeats seamlessly.
   the web preview's `LIVE_CDNS`), and the kits AwwO supplies by their exact URLs (`kits.mjs`: the film kit,
   `https://awwo.clawhunt.store/kits/film/1/film.js`, answered from the pinned copy in `kits/`, which a release ships);
   everything else is blocked. It must not navigate away (that fails the render).
+- **Brand fonts come from the worker, not the network.** The 26 faces of AwwO's 17 brand fonts are answered at exactly
+  the jsDelivr URLs the film kit names for them (the Fontsource 5.3.0 files, e.g.
+  `https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.3.0/files/inter-latin-wght-normal.woff2`) from the copies
+  in `fonts/` (`fonts.mjs`; each family's SIL Open Font License beside its files), which a release ships as it ships
+  `kits/`: the worker refuses to start when a copy differs from its pinned size and sha256 or has no license beside
+  it. So a film whose roles name brand families, as its guide says, draws its type with no network, as its preview
+  does. 22 of the copies are the file at their URL byte for byte; Orbitron, Playfair Display and Press Start 2P
+  reserve their names, which no subset may keep, so their four URLs are answered with the full fonts AwwO carries,
+  which draw the subsets' Latin range pixel for pixel (Playfair Display's ⁒ aside) and, as a preview's do, the
+  characters a subset lacks too. Any other font URL (another family, or a brand family's other subsets or versions) is
+  fetched or blocked as before.
 
 ## API
 

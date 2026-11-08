@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { frameTimes } from './config.mjs';
 import { childEnv, contactArgs, encodeArgs, gifArgs, gifRate, parseProbe, probeArgs, runProcess, writeChunk } from './ffmpeg.mjs';
+import { suppliedFont } from './fonts.mjs';
 import { heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
 import { suppliedKit } from './kits.mjs';
 import { allowedRequest, hostResolverRules, NETWORK_GUARD_SCRIPT } from './network.mjs';
@@ -143,6 +144,12 @@ async function openPage(request, config, state, extra = []) {
     // A kit AwwO supplies (kits.mjs) is answered from the worker's pinned copy: its URL is never fetched.
     const kit = suppliedKit(url);
     if (kit) return route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: kit }).catch(() => {});
+    // So is a brand font at the URL the film kit names for it (fonts.mjs). A font is fetched with CORS: the answer
+    // carries the header jsDelivr's own does (Playwright would add one for an answer without it).
+    const font = suppliedFont(url);
+    if (font) {
+      return route.fulfill({ status: 200, contentType: 'font/woff2', headers: { 'access-control-allow-origin': '*' }, body: font }).catch(() => {});
+    }
     if (allowedRequest(url)) return route.continue().catch(() => {});
     state.blocked += 1;
     return route.abort('blockedbyclient').catch(() => {});
