@@ -9,6 +9,7 @@ import { SessionTile, type SessionTileProps } from '../src/canvas/SessionTile';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createSessionNode, type CanvasDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
+import { writeComposerDraft } from '../src/canvas/composerDrafts';
 import { createNodeThread, getNodeThreads } from '../src/canvas/nodeThreads';
 import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 import { looksLikeCode } from '../src/canvas/codeLike';
@@ -20,7 +21,8 @@ import { NodeFailure } from '../src/canvas/NodeBrief';
 import { SHORT_COLUMN_PX } from '../src/canvas/useShortColumn';
 import { DEFAULT_NODE_VIEW, nodeViewStorageKey, saveNodeViewPreference } from '../src/canvas/nodeViewStyle';
 
-beforeEach(() => { cleanup(); resetAllSessions(); });
+// A chat node's unsent message is on the device (composerDrafts.ts): one test's must not show in the next.
+beforeEach(() => { cleanup(); resetAllSessions(); localStorage.clear(); });
 
 const agent = (extra: Partial<SessionNode> = {}): SessionNode => ({ ...createAgentTemplate('general', { x: 0, y: 0 }, 'zh'), id: 'n', title: '关卡设计', ...extra });
 const simple = (ui: ReactElement) => render(<CanvasUiModeProvider mode="simple">{ui}</CanvasUiModeProvider>);
@@ -563,7 +565,9 @@ describe('an opened node says what it was asked', () => {
         <SessionTile node={node} scale={1} focused modelChoices={choices} onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div></CanvasUiModeProvider>;
       // A draft that carries a file: the composer shows its chip above the box.
       const fileLine = '[附件] 参考稿.pdf · awwo-file:aTestFile00001';
-      const withFile = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: `请按参考稿改写\n\n${fileLine}`, createdAt: 1 }] });
+      // The draft is this person's, on the device (composerDrafts.ts): put there for a render, and taken away for the next.
+      const withFile = (node: SessionNode): SessionNode => { writeComposerDraft(node.id, 'default', `请按参考稿改写\n\n${fileLine}`); return node; };
+      const noDraft = (node: SessionNode): SessionNode => { writeComposerDraft(node.id, 'default', ''); return node; };
       const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
       const drawer = () => document.querySelector('.awwo-input-drawer')!;
       const composer = () => document.querySelector('.canvas-composer')!;
@@ -642,7 +646,7 @@ describe('an opened node says what it was asked', () => {
       // pinned within the panel), unless the composer is taller or a failure note is above, either of which could lift
       // it over the note's toggle; beside the opened inputs nothing is pinned, as the note takes its row from them.
       const reworkedNode = agent({ taskFrame: { ...brief.taskFrame!, constraints: ['【验收返工·交付验收】交付结果没有列出检查过的文件。'] } });
-      const reworked = render(tile(reworkedNode));
+      const reworked = render(tile(noDraft(reworkedNode)));
       const findings = () => screen.getByTestId('rework-findings-n');
       expect([findings().matches(openNote), composer().matches(pinnedComposer)]).toEqual([false, true]);
       reworked.rerender(tile(reworkedNode, { sendUnavailableReason: '这个模型暂不可用' }));
@@ -651,7 +655,7 @@ describe('an opened node says what it was asked', () => {
       expect([Boolean(document.querySelector('.awwo-node-failure')), composer().matches(pinnedComposer)]).toEqual([true, false]);
       reworked.rerender(tile(withFile(reworkedNode)));
       expect([shows('awwo-attachment-chip'), composer().matches(pinnedComposer)]).toEqual([true, false]);
-      reworked.rerender(tile(reworkedNode));
+      reworked.rerender(tile(noDraft(reworkedNode)));
       expect([uploadNotice(() => composer().matches(pinnedComposer)), composer().matches(pinnedComposer)]).toEqual([false, true]);
       // What the note's toggle says, and whether its findings are drawn.
       const toggle = () => findings().querySelector<HTMLButtonElement>('.awwo-rework-note-toggle')!;
@@ -933,7 +937,8 @@ describe('an opened node says what it was asked', () => {
         <SessionTile node={node} scale={1} focused modelChoices={choices} onChangeModel={vi.fn()} onRunNode={vi.fn()} onAskAssistant={vi.fn()}
           onUpdateNode={vi.fn()} freeConversation initializeOnSend onSend={vi.fn()} {...extra} /></div></CanvasUiModeProvider>;
       const tenLines = Array.from({ length: 10 }, (_, i) => `第${i + 1}行：把这一段的语气改得更口语一些`).join('\n');
-      const drafted = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: tenLines, createdAt: 1 }] });
+      // The draft is this person's, on the device (composerDrafts.ts).
+      const drafted = (node: SessionNode): SessionNode => { writeComposerDraft(node.id, 'default', tenLines); return node; };
       const failed = { run: { state: 'failed', detail: 'run_timeout' } as RunNodeStatus };
       const panel = () => document.querySelector('.awwo-node-panel--conversation')!;
       const replies = () => document.querySelector('.awwo-node-panel--conversation > .canvas-transcript');
@@ -1184,7 +1189,8 @@ describe('an opened node says what it was asked', () => {
         return <CanvasUiModeProvider mode="simple">{shell ? <div className="saas-canvas-shell">{root}</div> : root}</CanvasUiModeProvider>;
       };
       const tenLines = Array.from({ length: 10 }, (_, i) => `第${i + 1}行：把这一段的语气改得更口语一些`).join('\n');
-      const drafted = (node: SessionNode): SessionNode => ({ ...node, threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: tenLines, createdAt: 1 }] });
+      // The draft is this person's, on the device (composerDrafts.ts).
+      const drafted = (node: SessionNode): SessionNode => { writeComposerDraft(node.id, 'default', tenLines); return node; };
       const failed = { run: { state: 'failed', detail: 'run_timeout' } as RunNodeStatus };
       const running = { run: { state: 'running' } as RunNodeStatus };
       const panel = () => document.querySelector('.awwo-node-panel--conversation')!;

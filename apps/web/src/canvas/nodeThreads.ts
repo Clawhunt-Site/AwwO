@@ -115,6 +115,14 @@ export function updateNodeDraft(node: SessionNode, draft: string, threadId = act
   return { ...node, threads: threads.map(thread => thread.id === threadId ? { ...thread, draft } : thread) };
 }
 
+/** The node with no draft in its stored conversations (those of `threadIds`; every one without it), or the same node
+ *  when none of them holds one. */
+export function withoutThreadDrafts(node: SessionNode, threadIds?: ReadonlySet<string>): SessionNode {
+  const clears = (thread: { id: string; draft: string }) => Boolean(thread.draft) && (!threadIds || threadIds.has(thread.id));
+  if (!node.threads?.some(clears)) return node;
+  return { ...node, threads: node.threads.map(thread => clears(thread) ? { ...thread, draft: '' } : thread) };
+}
+
 export function updateThreadIssueId(node: SessionNode, threadId: string, issueId: string): SessionNode {
   const threads = getNodeThreads(node);
   const target = threads.find(thread => thread.id === threadId);

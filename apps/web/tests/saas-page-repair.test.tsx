@@ -14,7 +14,8 @@ import { CANVAS_STORAGE_KEY, createSessionNode, loadDocumentWithStatus, type Can
 import { canFeed, portsFor } from '../src/canvas/ports';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { htmlPreviewDocument, PREVIEW_HOST_SCRIPT, PREVIEW_STORAGE_SCRIPT, PREVIEW_VIEWPORT_SCRIPT } from '../src/canvas/htmlDeliverable';
-import { activeThreadId, getNodeThreads, sessionStoreKey, updateNodeDraft } from '../src/canvas/nodeThreads';
+import { activeThreadId, getNodeThreads, sessionStoreKey } from '../src/canvas/nodeThreads';
+import { readComposerDraft, writeComposerDraft } from '../src/canvas/composerDrafts';
 import { PAGE_ERROR_MESSAGE, PAGE_ERROR_SCRIPT, pageErrorScript, readPageErrorMessage, reportPageError, subscribePageErrors, type PageErrorReport } from '../src/canvas/pageErrors';
 import { deferPageRepair, isPageRepairMessage, loadPageRepairRecords, MAX_REPAIR_PAGE_CHARS, PAGE_REPAIR_STORAGE_KEY, pageRepairDecision, pageRepairDelivery, pageRepairDisplayText, pageRepairMessage,
   pageRepairMessageKey, pageRepairRecordKey, pageRepairRetryAfter, pageRepairTarget, REPAIR_RESULT_WINDOW_MS, REPAIR_RETRY_SOON_MS, savePageRepairRecord } from '../src/canvas/pageRepair';
@@ -991,31 +992,30 @@ describe('on the canvas', () => {
   }, 20_000);
 
   it('leaves what a person left unsent in the node’s chat as it was, whether the repair is refused or runs', async () => {
-    // They typed into the node's chat and have not sent it; the page they are looking at fails.
-    const draftOf = (node: SessionNode) => getNodeThreads(node).find(thread => thread.id === activeThreadId(node))?.draft;
-    const saved = () => (JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).nodes.find(item => item.id === 'fig') as SessionNode;
+    // They typed into the node's chat and have not sent it; the page they are looking at fails. What they typed is theirs,
+    // on this device (composerDrafts.ts).
     const doc = JSON.parse(localStorage.getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument;
-    localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...doc,
-      nodes: doc.nodes.map(node => node.id === 'fig' ? updateNodeDraft(node as SessionNode, '把标题改大') : node) }));
+    const fig = doc.nodes.find(item => item.id === 'fig') as SessionNode;
+    writeComposerDraft('fig', activeThreadId(fig), '把标题改大');
+    const unsent = () => readComposerDraft('fig', activeThreadId(fig));
     const runs = vi.mocked(fetch).getMockImplementation()!;
     refuseWith(429, { code: 'quota_exceeded', error: '工作区运行额度已满', admissionRejected: true });
     const tiles = watchTiles();
     render(<CanvasSurface />);
     act(() => { reportPageError(report); });
     await waitFor(() => expect(repairs()).toHaveLength(1));
-    // Refused before it ran: the draft is as they left it, in the canvas and in the node's tile.
+    // Refused before it ran: the draft is as they left it.
     await waitFor(() => expect(loadPageRepairRecords(canvasStorage()).fig?.retryAfter).toBeGreaterThan(Date.now()));
     await waitFor(() => expect(showsRunning()).toBe(false));
-    expect(draftOf(saved())).toBe('把标题改大');
-    expect(draftOf(tiles.fig.node as SessionNode)).toBe('把标题改大');
+    expect(unsent()).toBe('把标题改大');
     // Sent again later, and this time it runs: the draft was never its message either.
     vi.mocked(fetch).mockImplementation(runs);
     savePageRepairRecord(canvasStorage(), 'fig', { ...loadPageRepairRecords(canvasStorage()).fig!, retryAfter: Date.now() - 1 });
     act(() => { reportPageError(report); });
     await waitFor(() => expect(repairs()).toHaveLength(2), { timeout: 8_000 });
     await waitFor(() => expect(tiles.fig.run?.state).toBe('running'));
-    expect(draftOf(saved())).toBe('把标题改大');
-    expect(draftOf(tiles.fig.node as SessionNode)).toBe('把标题改大');
+    expect(unsent()).toBe('把标题改大');
+    expect(getNodeThreads(tiles.fig.node as SessionNode).every(thread => !thread.draft)).toBe(true);
   }, 20_000);
 
   it('sends a figure that never moves back once of its own, even after the page’s error was repaired', async () => {

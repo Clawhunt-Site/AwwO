@@ -134,7 +134,8 @@ it('adopts canonical identity without creating a new dirty save, and retains old
   node.threads = [
     { id: 'old-thread', title: 'Old conversation', issueId: 'old-session', preview: 'Prior answer', draft: '', createdAt: 1,
       binding: { companyId: 'tenant-a', agentId: 'old-agent', agentName: 'Old agent' }, runtime: 'pi', model: 'old-model', persona: 'Old persona' },
-    { id: 'new-thread', title: 'New configuration', issueId: null, preview: '', draft: 'Keep this draft', createdAt: 2,
+    // A chat node's unsent message lives on the device (composerDrafts.ts), never in the document node setup rewrites.
+    { id: 'new-thread', title: 'New configuration', issueId: null, preview: '', draft: '', createdAt: 2,
       binding: null, runtime: '', model: '', persona: 'Original persona' },
   ];
   const state = server(record(source)); render(<SaaSApp />); await writerReady();

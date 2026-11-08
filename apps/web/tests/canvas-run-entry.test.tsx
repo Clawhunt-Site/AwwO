@@ -5,7 +5,7 @@ import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithS
 import { canvasPlanRevision, type CanvasPlan } from '../src/canvas/canvasPlan';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal } from '../src/canvas/runJournal';
-import { activeNodeThread, getNodeThreads } from '../src/canvas/nodeThreads';
+import { readComposerDraft, writeComposerDraft } from '../src/canvas/composerDrafts';
 
 const execute = vi.fn(async (node: SessionNode) => ({ ok: true,
   output: JSON.stringify(Object.fromEntries((node.contract?.outputs ?? []).map(field => [field.id, `Result from ${node.title}`]))) }));
@@ -96,26 +96,24 @@ describe('canvas run entry document freshness', () => {
   });
 });
 
+// A chat node's unsent messages are this person's, on the device (composerDrafts.ts), not in the document.
 function seedManualDrafts() {
   const node: SessionNode = { ...createSessionNode('llm', { x: 0, y: 0 }), id: 'manual', title: 'Manual', runtime: 'pi',
     binding: { companyId: 'company', agentId: 'agent-manual', agentName: 'Manual' }, activeThreadId: 'second',
     threads: [
-      { id: 'default', title: 'Session 1', draft: 'Keep the first Session draft', issueId: null, preview: '', createdAt: 1 },
+      { id: 'default', title: 'Session 1', draft: '', issueId: null, preview: '', createdAt: 1 },
       { id: 'second', title: 'Session 2', draft: '', issueId: null, preview: '', createdAt: 2 },
     ] };
-  const other: SessionNode = { ...createSessionNode('llm', { x: 600, y: 0 }), id: 'other', title: 'Other',
-    threads: [{ id: 'default', title: 'Session 1', draft: 'Keep the other node draft', issueId: null, preview: '', createdAt: 1 }] };
+  const other: SessionNode = { ...createSessionNode('llm', { x: 600, y: 0 }), id: 'other', title: 'Other' };
   localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...emptyDocument(), nodes: [node, other] }));
-}
-
-function storedManual() {
-  return loadDocumentWithStatus().doc.nodes.find(node => node.id === 'manual') as SessionNode;
+  writeComposerDraft('manual', 'default', 'Keep the first Session draft');
+  writeComposerDraft('other', 'default', 'Keep the other node draft');
 }
 
 function openManualAndType() {
   fireEvent.click(screen.getByRole('button', { name: '打开 Manual', exact: true }));
   fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'Send this once' } });
-  expect(activeNodeThread(storedManual()).draft).toBe('Send this once');
+  expect(readComposerDraft('manual', 'second')).toBe('Send this once');
 }
 
 describe('manual run acceptance persists composer drafts', () => {
@@ -131,9 +129,9 @@ describe('manual run acceptance persists composer drafts', () => {
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     expect(screen.getByTestId('composer-input')).toHaveValue('');
     expect(loadRunJournal()).toMatchObject({ manual: true, manualMessage: 'Send this once' });
-    expect(activeNodeThread(storedManual()).draft).toBe('');
-    expect(getNodeThreads(storedManual()).find(thread => thread.id === 'default')?.draft).toBe('Keep the first Session draft');
-    expect(activeNodeThread(loadDocumentWithStatus().doc.nodes.find(node => node.id === 'other') as SessionNode).draft).toBe('Keep the other node draft');
+    expect(readComposerDraft('manual', 'second')).toBe('');
+    expect(readComposerDraft('manual', 'default')).toBe('Keep the first Session draft');
+    expect(readComposerDraft('other', 'default')).toBe('Keep the other node draft');
 
     const operationId = loadRunJournal()!.nodes.manual.operationId;
     await act(async () => { detach({ ok: false, output: '', unconfirmed: true }); });
@@ -183,12 +181,14 @@ describe('manual run acceptance persists composer drafts', () => {
     fireEvent.click(screen.getByTestId('composer-send'));
     expect(await screen.findByRole('alert')).toHaveTextContent('画布已在其他标签页更新');
     expect(screen.getByTestId('composer-input')).toHaveValue('Send this once');
-    expect(activeNodeThread(storedManual()).draft).toBe('Send this once');
+    expect(readComposerDraft('manual', 'second')).toBe('Send this once');
     expect(loadRunJournal()).toBeNull();
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it.each([CANVAS_STORAGE_KEY, CANVAS_RUN_JOURNAL_KEY])('keeps the draft if accepting the run cannot persist %s', async failedKey => {
+  // A chat send changes nothing in the document (its draft is on the device), so only the journal can refuse it here;
+  // canvas-accepted-draft.test.tsx covers the device's own refusal.
+  it.each([CANVAS_RUN_JOURNAL_KEY])('keeps the draft if accepting the run cannot persist %s', async failedKey => {
     seedManualDrafts();
     render(<CanvasSurface />);
     openManualAndType();
@@ -200,7 +200,7 @@ describe('manual run acceptance persists composer drafts', () => {
     fireEvent.click(screen.getByTestId('composer-send'));
     expect(await screen.findByRole('alert')).toHaveTextContent('本地存储不可用，尚未启动任务。');
     expect(screen.getByTestId('composer-input')).toHaveValue('Send this once');
-    expect(activeNodeThread(storedManual()).draft).toBe('Send this once');
+    expect(readComposerDraft('manual', 'second')).toBe('Send this once');
     expect(loadRunJournal()).toBeNull();
     expect(execute).not.toHaveBeenCalled();
   });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, loadDocumentWithStatus, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { readComposerDraft, writeComposerDraft } from '../src/canvas/composerDrafts';
 import { edgeBezierPath } from '../src/canvas/ports';
 import { resetAllSessions } from '../src/canvas/sessions';
 
@@ -9,7 +10,7 @@ function seed(): CanvasDocument {
   const node = (id: string, title: string, x: number): SessionNode => ({
     ...createSessionNode('coding', { x, y: 80 }), id, title, w: 700, h: 460,
     activeThreadId: 'default',
-    threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: `${title}的未发送草稿`, createdAt: 1 }],
+    threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: '', createdAt: 1 }],
   });
   return {
     version: 2, updatedAt: 1, nodes: [node('a', '甲', 100), node('b', '乙', 950)],
@@ -29,6 +30,9 @@ beforeEach(() => {
   });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })));
   localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify(seed()));
+  // Each node's unsent message is this person's, on the device (composerDrafts.ts).
+  writeComposerDraft('a', 'default', '甲的未发送草稿');
+  writeComposerDraft('b', 'default', '乙的未发送草稿');
 });
 
 describe('progressive node disclosure', () => {
@@ -57,6 +61,7 @@ describe('progressive node disclosure', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起节点', exact: true }));
     expect(screen.queryAllByTestId('composer-input')).toHaveLength(0);
     expect(loadDocumentWithStatus().doc.nodes).toEqual(original);
+    expect([readComposerDraft('a', 'default'), readComposerDraft('b', 'default')]).toEqual(['甲的未发送草稿', '乙的未发送草稿']);
   });
 
   it('keeps wire endpoints on the visible compact or opened node borders without rewriting stored sizes', () => {

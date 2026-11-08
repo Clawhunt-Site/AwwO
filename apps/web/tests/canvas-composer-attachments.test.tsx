@@ -19,6 +19,7 @@ import { TileTranscript } from '../src/canvas/TileTranscript';
 import type { ContractField } from '../src/canvas/nodeContracts';
 import { resetAllSessions, setStreaming, type Turn } from '../src/canvas/sessions';
 import { activeNodeThread, activeThreadId, getNodeThreads, selectNodeThread, updateNodeDraft, updateThreadPreview } from '../src/canvas/nodeThreads';
+import { readComposerDraft } from '../src/canvas/composerDrafts';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 
@@ -57,6 +58,8 @@ class FakeUpload {
 const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ deleted: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
 beforeEach(() => {
+  // A chat node's unsent message is kept on the device (composerDrafts.ts): one test's must not show in the next.
+  localStorage.clear();
   FakeUpload.sent = []; FakeUpload.ids = [ID_A, ID_B]; FakeUpload.hold = false;
   fetchMock.mockClear();
   vi.stubGlobal('XMLHttpRequest', FakeUpload);
@@ -1005,8 +1008,9 @@ describe('an opened node’s inputs', () => {
   });
 
   it.each([
+    // The message goes on the device (composerDrafts.ts), and the node keeps the file.
     ['a keystroke in the message box', () => fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '先看参考资料' } }),
-      (saved: SessionNode) => expect(activeNodeThread(saved).draft).toBe('先看参考资料')],
+      (saved: SessionNode) => expect(readComposerDraft(saved.id, activeThreadId(saved))).toBe('先看参考资料')],
     ['the delivery drawer opened', () => fireEvent.click(screen.getByRole('button', { name: '展开交付物' })),
       (saved: SessionNode) => expect(saved.deliverablesOpen).toBe(true)],
   ])('keep a file that lands in the inputs as %s before its render, where the canvas does not handle it itself', async (_what, act2, check) => {
@@ -1069,14 +1073,17 @@ describe('an opened node’s inputs', () => {
   });
 
   it('keep the draft in its box with its conversation when another opens, where the host saves no draft as it is typed', () => {
-    // The host hears each draft (onDraftChange) and keeps none of them in the node: the switch saves the box's.
+    // The host hears each draft (onDraftChange) and keeps none of them: the switch saves the box's, on the device
+    // (composerDrafts.ts), never in the node.
     render(<CanvasUiModeProvider mode="developer"><SessionTile node={templated()} scale={1} focused initializeOnSend onSend={vi.fn()}
       onUpdateNode={next => updates.push(next as SessionNode)} onDraftChange={vi.fn()} /></CanvasUiModeProvider>);
     fireEvent.click(screen.getByRole('button', { name: '展开 Session 列表' }));
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '先看参考资料' } });
     expect(updates).toHaveLength(0);
+    expect(readComposerDraft(templated().id, 'default')).toBe('');
     fireEvent.click(screen.getByRole('button', { name: '新建 Session' }));
-    expect(getNodeThreads(updates.at(-1)!).find(thread => thread.id === 'default')?.draft).toBe('先看参考资料');
+    expect(readComposerDraft(templated().id, 'default')).toBe('先看参考资料');
+    expect(getNodeThreads(updates.at(-1)!).every(thread => !thread.draft)).toBe(true);
   });
 
   it('leave the draft in its box with the conversation the box showed, when the canvas changed conversations before the render', async () => {
@@ -1092,8 +1099,11 @@ describe('an opened node’s inputs', () => {
     });
     const threads = getNodeThreads(updates.at(-1)!);
     expect(threads).toHaveLength(3);
-    expect(threads.find(thread => thread.id === second)?.draft).toBe('第二个对话的草稿');
-    expect(threads.find(thread => thread.id === 'default')?.draft ?? '').toBe('');
+    // On the device (composerDrafts.ts), with the conversation the box showed.
+    const id = updates.at(-1)!.id;
+    expect(readComposerDraft(id, second)).toBe('第二个对话的草稿');
+    expect(readComposerDraft(id, 'default')).toBe('');
+    expect(threads.every(thread => !thread.draft)).toBe(true);
   });
 
   it('bring back no file an undo took out of a field: the next edit there builds on what the undo left', async () => {
@@ -1258,14 +1268,16 @@ describe('an opened node’s starter prompts', () => {
     const files = `[附件] shot.png · awwo-file:${ID_A}\n[附件] voice.wav · awwo-file:${ID_B}`;
     // voice.wav's write is made and waits for a render (its chip not drawn yet); the prompt is chosen before that render,
     // so both are drawn together.
+    // The draft is this person's, on the device (composerDrafts.ts).
     await act(async () => {
       FakeUpload.sent[1].finish();
       await Promise.resolve();
-      expect(activeNodeThread(saved.at(-1)!).draft).toBe(`先说明\n\n${files}`);
+      expect(readComposerDraft('n', 'default')).toBe(`先说明\n\n${files}`);
       expect(screen.queryByRole('link', { name: 'voice.wav' })).toBeNull();
       button.click();
     });
-    expect(activeNodeThread(saved.at(-1)!).draft).toBe(`先说明\n\n${starter.prompt}\n\n${files}`);
+    expect(readComposerDraft('n', 'default')).toBe(`先说明\n\n${starter.prompt}\n\n${files}`);
+    expect(saved.every(node => !activeNodeThread(node).draft)).toBe(true);
     expect(box).toHaveValue(`先说明\n\n${starter.prompt}`);
     expect(screen.getByRole('link', { name: 'voice.wav' })).toBeInTheDocument();
   });

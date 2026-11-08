@@ -5,6 +5,7 @@ import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithS
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { createNodeTeam } from '../src/canvas/nodeTeam';
 import { activeNodeThread, sessionStoreKey } from '../src/canvas/nodeThreads';
+import { readComposerDraft } from '../src/canvas/composerDrafts';
 import { getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { forgetNode } from '../src/canvas/sessionTransport';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
@@ -231,8 +232,10 @@ it('keeps a cloud canvas editable but blocks manual conversation before initiali
   await waitFor(() => expect(loadDocumentWithStatus().doc.nodes[0]).toMatchObject({
     id: original.nodes[0].id, title: original.nodes[0].title,
     lastOutput: original.nodes[0].lastOutput,
-    threads: [{ draft: 'Keep this draft until the engine is connected.' }],
   }));
+  // The draft is kept on this device (composerDrafts.ts), not in the document.
+  const node = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
+  expect(readComposerDraft(node.id, activeNodeThread(node).id)).toBe('Keep this draft until the engine is connected.');
 });
 
 it('preserves published outputs and downstream deliverables after successful natural-language chat and reload', async () => {
@@ -316,7 +319,10 @@ it('preserves a newer SaaS draft while ownership and canonical initialization ad
   await finished();
   expect(runs[0].prompt).toBe('Original question');
   expect(screen.getByTestId('composer-input')).toHaveValue('My next question');
-  expect(activeNodeThread(loadDocumentWithStatus().doc.nodes[0] as SessionNode).draft).toBe('My next question');
+  // On this device (composerDrafts.ts), not in the document.
+  const node = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
+  expect(readComposerDraft(node.id, activeNodeThread(node).id)).toBe('My next question');
+  expect(activeNodeThread(node).draft).toBe('');
   expect(initialize).toHaveBeenCalledOnce();
   expect(writes()).toHaveLength(1);
 });

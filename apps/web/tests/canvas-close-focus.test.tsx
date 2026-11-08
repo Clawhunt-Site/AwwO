@@ -10,6 +10,7 @@ import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createSessionNode, type CanvasDocument, type CanvasNode, type SessionNode } from '../src/canvas/canvasDoc';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
 import { getNodeThreads } from '../src/canvas/nodeThreads';
+import { writeComposerDraft } from '../src/canvas/composerDrafts';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { CanvasUiModeProvider, type CanvasUiMode } from '../src/canvas/uiMode';
 import { isTypingTarget } from '../src/canvas/useCanvasKeys';
@@ -348,7 +349,9 @@ describe('an attachment chip’s own ✕', () => {
   }
 
   it('in a node’s message box hands the focus to the chip that takes its place, else the one before it, else the box', () => {
-    render(<TileHost initial={{ ...templated(), threads: [{ id: 'default', title: 'Session 1', issueId: null, preview: '', draft: joinAttachments('说明', FILES, 'zh'), createdAt: 1 }], activeThreadId: 'default' }} />);
+    // The unsent message, files and all, is this person's, on the device (composerDrafts.ts).
+    writeComposerDraft('n', 'default', joinAttachments('说明', FILES, 'zh'));
+    render(<TileHost initial={{ ...templated(), activeThreadId: 'default' }} />);
     press(removeButton('b.pdf'));
     expect(chipNames()).toEqual(['a.png', 'c.mp4']);
     expect(document.activeElement).toBe(removeButton('c.mp4'));

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { emptyDocument, loadDocumentWithStatus, saveDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { readComposerDraft, writeComposerDraft } from '../src/canvas/composerDrafts';
 import { markPlanContextCondensed, type CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import { resetAllSessions } from '../src/canvas/sessions';
@@ -24,11 +25,13 @@ function seedExisting(): SessionNode {
     runtime: 'claude_local', model: 'kept-model', effort: 'low', persona: '保留人工设定的职责。',
     binding: { companyId: 'company', agentId: 'bound-agent', agentName: 'Existing agent' },
     issueId: 'original-server-thread', preview: '先前会话摘要', activeThreadId: 'default',
-    threads: [{ id: 'default', title: '需求澄清', issueId: 'original-server-thread', preview: '先前会话摘要', draft: '未发送的会话草稿', createdAt: 1 }],
+    threads: [{ id: 'default', title: '需求澄清', issueId: 'original-server-thread', preview: '先前会话摘要', draft: '', createdAt: 1 }],
   };
   node.contract!.inputs[0] = { ...node.contract!.inputs[0], label: '节点需求', value: '人工填写的原始需求' };
   node.contract!.outputs[0].value = '未发布的交付草稿';
   saveDocument({ ...emptyDocument(), nodes: [node], view: { x: 0, y: 0, scale: 1 } });
+  // The unsent message is this person's, on the device (composerDrafts.ts); a plan never touches it.
+  writeComposerDraft('existing', 'default', '未发送的会话草稿');
   return loadDocumentWithStatus().doc.nodes[0] as SessionNode;
 }
 
@@ -138,6 +141,7 @@ describe('canvas planning integration', () => {
       inputs: original.contract!.inputs.map(field => field.id === 'brief' ? { ...field, value: '改为移动端成员管理' } : field),
     } });
     expect(planRequest.mock.calls[0][1].nodes[0]).toEqual(original);
+    expect(readComposerDraft('existing', 'default')).toBe('未发送的会话草稿');
   });
 
   it('keeps a text a shortened view of the canvas showed only in part, and says the canvas was read in part', async () => {

@@ -135,7 +135,8 @@ import { getSnapshot as getSessionSnapshot, reset as resetSession, replaceTurns,
 import { forgetNode, restoreHistory } from './sessionTransport';
 import { forgetConversationPresentation, projectConversationTurns, updateConversationPresentation } from './conversationPresentation';
 import { activeThreadId, boundAgentConfigurationChanged, getNodeThreads, preserveThreadRuntime, rebindNodeThread, sessionStoreKey,
-  updateNodeDraft, updateThreadIssueId, updateThreadPreview } from './nodeThreads';
+  updateNodeDraft, updateThreadIssueId, updateThreadPreview, withoutThreadDrafts } from './nodeThreads';
+import { draftIsShared, readComposerDraft, writeComposerDraft } from './composerDrafts';
 import { arrangeNodePositions, deliverablesShown, DRAWER_BESIDE_MIN_WIDTH, FOCUSED_SESSION_MIN_SIZE, nodeDepths, openContentOf, openFrameFor, presentationNodes,
   type OpenContent } from './nodePresentation';
 import { boundsOfBoxes, boundsWithinViewport, fitBounds, fitOverview, focusWorld, MIN_READABLE_FIT_SCALE, openInPlace, screenToWorld, visibleBoxIds, type ViewportState } from './viewport';
@@ -2170,6 +2171,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     const submittedThread = submittedNode
       ? getNodeThreads(submittedNode).find(thread => thread.id === activeThreadId(submittedNode))
       : undefined;
+    // The draft the send came from: a media node's prompt in the document, a chat node's message on this device.
+    const submittedDraft = submittedNode && submittedThread
+      ? draftIsShared(submittedNode) ? submittedThread.draft : readComposerDraft(submittedNode.id, submittedThread.id)
+      : undefined;
     return withCanvasRunOwnership(async () => {
     try {
     // Another lane may be preparing its nodes (that rewrites the document through the server): wait for it.
@@ -2340,12 +2345,23 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     // storage failure can discard a request that has not been accepted or dispatched. AwwO's
     // own page repair was never the draft: what a person left unsent there stays.
     const acceptedThreadId = acceptedManualNode?.kind === 'session' ? activeThreadId(acceptedManualNode) : undefined;
-    const consumeDraft = !automaticRepair && acceptedManualNode?.kind === 'session' && submittedThread
-      && getNodeThreads(acceptedManualNode).find(thread => thread.id === acceptedThreadId)?.draft === submittedThread.draft;
-    const acceptedDocument = consumeDraft ? { ...prepared, nodes: prepared.nodes.map(node =>
+    // A media node's draft is its prompt in the document; a chat node's is this person's message on this device
+    // (composerDrafts.ts). Either is consumed only while it is still what was sent: a newer one typed meanwhile stays.
+    const sharedDraft = acceptedManualNode?.kind === 'session' && draftIsShared(acceptedManualNode);
+    const draftNow = acceptedManualNode?.kind === 'session' && acceptedThreadId
+      ? sharedDraft ? getNodeThreads(acceptedManualNode).find(thread => thread.id === acceptedThreadId)?.draft
+        : readComposerDraft(acceptedManualNode.id, acceptedThreadId, acceptedStorage)
+      : undefined;
+    const consumeDraft = !automaticRepair && acceptedManualNode?.kind === 'session' && submittedThread && draftNow === submittedDraft;
+    const acceptedDocument = consumeDraft && sharedDraft ? { ...prepared, nodes: prepared.nodes.map(node =>
       node.id === acceptedManualNode.id && node.kind === 'session'
         ? updateNodeDraft(node, '', acceptedThreadId) : node) } : prepared;
     if (acceptedDocument !== prepared && !saveLocalDocument(acceptedDocument)) {
+      clearRunJournal(pending.id);
+      setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return;
+    }
+    // A sent message that stayed on the device would come back after a reload, to be sent again: not dispatched then.
+    if (consumeDraft && !sharedDraft && !writeComposerDraft(acceptedManualNode.id, acceptedThreadId!, '', acceptedStorage)) {
       clearRunJournal(pending.id);
       setHandoffNote(surfaceNotice(t, 'storage_unavailable')); return;
     }
@@ -2843,10 +2859,15 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   useEffect(() => () => { if (previewWrite.current) clearTimeout(previewWrite.current.timer); }, []);
 
   const persistDraft = useCallback((nodeId: string, threadId: string, draft: string) => {
+    if (readOnlyRef.current) return;
+    // A chat node's unsent message is this person's own (composerDrafts.ts): kept on the device, never in the document,
+    // so nothing anyone else does with the canvas reads it or writes over it, also while its node runs.
+    const owner = docRef.current.nodes.find(node => node.id === nodeId);
+    if (owner?.kind === 'session' && !draftIsShared(owner)) { writeComposerDraft(nodeId, threadId, draft); return; }
     // Once a node's own run executes, its draft belongs to that run's acceptance (as with the single run before lanes);
     // a draft typed while the run still waits for ownership is kept, and every other node's draft saves while others run.
     const executing = RUN_LANES.some(lane => laneList[lane].abort.current && laneList[lane].journal.current?.scope.includes(nodeId));
-    if (readOnlyRef.current || inspectorCloseLocked.current || executing) return;
+    if (inspectorCloseLocked.current || executing) return;
     patchDoc(prev => {
       const target = prev.nodes.find(node => node.id === nodeId);
       if (!target || target.kind !== 'session') return prev;
@@ -2854,6 +2875,32 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
       return next === target ? prev : { ...prev, nodes: prev.nodes.map(node => node.id === nodeId ? next : node) };
     }, { silent: true });
   }, [patchDoc, laneList]);
+
+  // Before chat drafts were kept on the device, they were typed into the shared document, where everyone on the canvas
+  // reads them. An editor's page moves what it finds there once, when it opens the canvas: a conversation's draft goes
+  // into this device's drafts where it holds none for that conversation (so someone alone on their canvas keeps what they
+  // left unsent), and out of the document once the device holds it (or held the same already). One the device holds
+  // otherwise (another person's, or this person's from another device) stays for the page that holds none, as does one
+  // the device refused. A media node's draft is its prompt and stays.
+  useEffect(() => {
+    if (readOnlyRef.current) return;
+    const moved = new globalThis.Map<string, Set<string>>();
+    for (const node of docRef.current.nodes) {
+      if (node.kind !== 'session' || draftIsShared(node)) continue;
+      for (const thread of node.threads ?? []) {
+        if (!thread.draft) continue;
+        const held = readComposerDraft(node.id, thread.id);
+        if (held === thread.draft || (!held && writeComposerDraft(node.id, thread.id, thread.draft))) {
+          moved.set(node.id, (moved.get(node.id) ?? new Set()).add(thread.id));
+        }
+      }
+    }
+    if (!moved.size) return;
+    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.kind === 'session' && moved.has(node.id)
+      ? withoutThreadDrafts(node, moved.get(node.id)) : node) }), { silent: true });
+    // Once a page: what an older page types into the document later goes when a page of this release opens it next.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The reader's choice is kept against what the node shows now (deliverablesShown), so closing a drawer that opened by
   // itself is remembered, and so is closing a drawer its tile holds open (an edit of its form kept it). An open is asked

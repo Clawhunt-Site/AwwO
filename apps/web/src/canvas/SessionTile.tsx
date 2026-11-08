@@ -64,6 +64,7 @@ import { useShortColumn } from './useShortColumn';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { AgentGlyph, AgentTemplateDetails } from './AgentTemplateDetails';
 import { activeNodeThread, getNodeThreads, createNodeThread, selectNodeThread, updateNodeDraft, sessionStoreKey } from './nodeThreads';
+import { draftIsShared, readComposerDraft, writeComposerDraft } from './composerDrafts';
 import { prepareNodeConversation, type NodeConversationContext } from './nodeConversation';
 import './awwo-node.css';
 import { NodeViewStylePicker } from './NodeViewStylePicker';
@@ -610,14 +611,20 @@ export const SessionTile = memo(function SessionTile({
   const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   // The drafts as this box last changed them, also before that change is drawn (a file landing in the box, then a click).
   const boxDrafts = useRef<Record<string, string>>({});
-  const composerDraft = localDrafts[storeKey] ?? currentThread?.draft ?? '';
+  // A media node's draft is its prompt, in the document for everyone; a chat node's is this person's unsent message, on
+  // their device only (composerDrafts.ts).
+  // Read when the box is drawn (an opened node), so a card the camera moves past never reads the storage.
+  const sharedDraft = node.kind === 'session' && draftIsShared(node);
+  const composerDraft = (): string => localDrafts[storeKey]
+    ?? (!currentThread ? '' : sharedDraft ? currentThread.draft : readComposerDraft(nodeId, currentThread.id));
   const setComposerDraft = (value: string) => {
     if (viewOnlyRef.current) return;
     boxDrafts.current[storeKey] = value;
     setLocalDrafts(previous => ({ ...previous, [storeKey]: value }));
     if (node.kind !== 'session' || !currentThread) return;
     if (onDraftChange) onDraftChange(nodeId, currentThread.id, value);
-    else writeNode(current => updateNodeDraft(current, value, currentThread.id));
+    else if (sharedDraft) writeNode(current => updateNodeDraft(current, value, currentThread.id));
+    else writeComposerDraft(nodeId, currentThread.id, value);
   };
   // The starter prompts write into the message box through it, as typing does, so a file landing there is not lost.
   const composerHandle = useRef<TileComposerHandle>(null);
@@ -1030,8 +1037,11 @@ export const SessionTile = memo(function SessionTile({
     // the document holds it.
     const shownThread = currentThread?.id;
     const boxDraft = Object.hasOwn(boxDrafts.current, storeKey) ? boxDrafts.current[storeKey] : undefined;
+    // A chat node's message goes on the device, where its conversation's box finds it again (a host that hears the box's
+    // drafts may keep none of them).
+    if (boxDraft !== undefined && shownThread && !sharedDraft) writeComposerDraft(nodeId, shownThread, boxDraft);
     writeNode(current => {
-      const withDraft = boxDraft === undefined ? current : updateNodeDraft(current, boxDraft, shownThread);
+      const withDraft = boxDraft === undefined || !draftIsShared(current) ? current : updateNodeDraft(current, boxDraft, shownThread);
       return id ? selectNodeThread(withDraft, id) : createNodeThread(withDraft);
     });
   };
@@ -1399,7 +1409,7 @@ export const SessionTile = memo(function SessionTile({
                     : <TileTranscript key={storeKey} turns={session.turns} history={session.history} streaming={session.streaming} streamingSince={session.streamingSince}
                       currentRunDetails={currentRunDetails} mediaResults={node.kind === 'session' && Boolean(mediaKindOf(node.agentKind))}
                       limit={tail} status={session.status ? statusLabel(session.status) : null} autoScroll={expanded} renderTurnDetails={renderTurnDetails ? (turn, latest) => renderTurnDetails(node, turn, latest) : undefined} />}
-                  {expanded ? <TileComposer ref={composerHandle} deferClear draft={composerDraft} onDraftChange={setComposerDraft} streaming={busy}
+                  {expanded ? <TileComposer ref={composerHandle} deferClear draft={composerDraft()} onDraftChange={setComposerDraft} streaming={busy}
                     attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}

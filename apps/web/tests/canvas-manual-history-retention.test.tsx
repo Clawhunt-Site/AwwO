@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
-import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
-import { activeNodeThread, updateNodeDraft } from '../src/canvas/nodeThreads';
+import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument } from '../src/canvas/canvasDoc';
+import { readComposerDraft, writeComposerDraft } from '../src/canvas/composerDrafts';
 import { loadRunJournal, type CanvasRunJournal } from '../src/canvas/runJournal';
 import { persistRecoveredManualConversation, hasManualRecoveryCapacity } from '../src/canvas/runRecoveryDocument';
 import { forgetNode } from '../src/canvas/sessionTransport';
@@ -12,8 +12,10 @@ const ID = 'retention-node';
 const DRAFT = '第51轮请求';
 
 function fullSession() {
-  const node = updateNodeDraft({ ...createSessionNode('llm', { x: 0, y: 0 }), id: ID, title: 'Retention Agent',
-    runtime: 'codex_local', issueId: 'issue', binding: { companyId: 'company', agentId: 'agent', agentName: 'Agent' } }, DRAFT);
+  const node = { ...createSessionNode('llm', { x: 0, y: 0 }), id: ID, title: 'Retention Agent',
+    runtime: 'codex_local', issueId: 'issue', binding: { companyId: 'company', agentId: 'agent', agentName: 'Agent' } };
+  // The unsent message is this person's, on the device (composerDrafts.ts).
+  writeComposerDraft(ID, 'default', DRAFT);
   const history: Array<Record<string, unknown>> = [];
   for (let index = 0; index < 50; index += 1) {
     const operation = `old-operation-${index}`;
@@ -100,7 +102,7 @@ it.each(['partial', 'unreadable'] as const)('refuses a known-full Session before
   expect(loadRunJournal()).toBeNull();
   expect(input).toHaveValue(DRAFT);
   expect(input).toBeEnabled();
-  expect(activeNodeThread(loadDocumentWithStatus().doc.nodes[0] as SessionNode).draft).toBe(DRAFT);
+  expect(readComposerDraft(ID, 'default')).toBe(DRAFT);
   expect(fallbackRaw()).toBe(original);
 });
 
@@ -133,5 +135,5 @@ it('keeps a newer draft typed during the native capacity read while sending only
   await waitFor(() => expect(loadRunJournal()).toBeNull());
   expect(remote.posts.find(post => post.url.endsWith('/messages'))?.body.message).toBe(DRAFT);
   expect(input).toHaveValue('下一条未发送草稿');
-  expect(activeNodeThread(loadDocumentWithStatus().doc.nodes[0] as SessionNode).draft).toBe('下一条未发送草稿');
+  expect(readComposerDraft(ID, 'default')).toBe('下一条未发送草稿');
 });
