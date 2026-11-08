@@ -1,0 +1,55 @@
+{
+  "name": "AwwO motion language",
+  "version": 1,
+  "about": "The single source of AwwO's motion vocabulary: MOTION.md explains it; the hosted app's tokens.css, the built-in skills and scripts/motion-lint.mjs are checked against it.",
+  "ease": {
+    "enter": { "curve": [0.16, 1, 0.3, 1], "use": "anything arriving or settling into place; the default for a state change" },
+    "move": { "curve": [0.65, 0, 0.35, 1], "use": "moving between two places that are both on screen; camera moves" },
+    "exit": { "curve": [0.3, 0, 0.8, 0.15], "use": "anything leaving" },
+    "emphasis": { "curve": [0.34, 1.4, 0.64, 1], "use": "one hero moment at a time, about 5 % overshoot; position and scale only, never opacity or colour" },
+    "linear": { "curve": [0, 0, 1, 1], "use": "only motion that never starts or stops on screen: a spinner, a ticker, a constant drift" }
+  },
+  "ui": {
+    "duration_ms": { "fast": 140, "base": 200, "slow": 260, "scene": 400 },
+    "uses": {
+      "fast": "press, toggle, hover, confirming a state",
+      "base": "something small entering: a menu, a popover, a toast",
+      "slow": "a sheet, a dialog or a drawer; a container changing shape",
+      "scene": "moving between screens or a staged reveal; the most a UI transition may take"
+    },
+    "exit_ratio": 0.67,
+    "phone_ratio": 0.8,
+    "reduced": { "motion_distance": 0, "fade_ms": 140 }
+  },
+  "film": {
+    "seconds": { "xs": 0.2, "s": 0.4, "m": 0.6, "l": 1.0 },
+    "frames_at_30fps": { "xs": 6, "s": 12, "m": 18, "l": 30 },
+    "uses": {
+      "xs": "a small element, a tick, a chip",
+      "s": "a card or a panel",
+      "m": "a move across the whole frame",
+      "l": "a title reveal"
+    },
+    "cascade_frames_at_30fps": 2,
+    "cascade_max_frames_at_30fps": 15,
+    "exit_ratio": 0.67,
+    "text_hold": { "base_s": 1, "words_per_s": 4, "cjk_chars_per_s": 5 },
+    "max_flashes_per_s": 3
+  },
+  "spring": {
+    "snappy": { "stiffness": 520, "damping": 36, "zeta": 0.79, "settle": 0.24, "use": "toggles, chips, small things a finger moves" },
+    "sheet": { "stiffness": 380, "damping": 32, "zeta": 0.82, "settle": 0.28, "use": "sheets, drawers and panels that should feel heavy" },
+    "land": { "stiffness": 85, "damping": 14.7, "zeta": 0.8, "settle": 0.6, "use": "a title or card landing in a film" },
+    "glide": { "stiffness": 95, "damping": 19.5, "zeta": 1, "settle": 0.6, "use": "cameras and large containers: no overshoot" },
+    "bounce": { "stiffness": 97, "damping": 11.8, "zeta": 0.6, "settle": 0.7, "use": "one playful moment, about 9.5 % overshoot" }
+  },
+  "character": {
+    "about": "Starting points for a project's own motion language: each overrides the entrance curve and the main move.",
+    "trust": { "enter": [0, 0, 0.2, 1], "main_move_frames_at_30fps": 21, "overshoot_pct": 0, "squash": 0 },
+    "premium": { "enter": [0.4, 0, 0.6, 1], "main_move_frames_at_30fps": 48, "overshoot_pct": 2, "squash": 0 },
+    "bold": { "enter": [0.16, 1, 0.3, 1], "main_move_frames_at_30fps": 18, "overshoot_pct": 12, "squash": 0.25 },
+    "playful": { "enter": [0.34, 1.56, 0.64, 1], "main_move_frames_at_30fps": 27, "overshoot_pct": 8, "squash": 0.18 },
+    "calm": { "enter": [0.65, 0, 0.35, 1], "main_move_frames_at_30fps": 42, "overshoot_pct": 0, "squash": 0.04 },
+    "friendly": { "enter": [0.25, 0.46, 0.45, 0.94], "main_move_frames_at_30fps": 26, "overshoot_pct": 4, "squash": 0.08 }
+  }
+}

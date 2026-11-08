@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import '../motion-tokens.css';
 import '../styles.css';
 import './saas.css';
 import { ErrorBoundary } from '../ErrorBoundary';

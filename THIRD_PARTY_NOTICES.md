@@ -62,6 +62,14 @@ may not cover, so no prompt text is used: the patterns they share (the order of 
 on-screen text, vertical safe areas, banned effects, stills to check) informed `code-video-brief` and
 `vertical-reel`, written in AwwO's own words and checked for shared five-word runs against the whole collection.
 
+Read on 2026-11-08, ideas only: "Design Engineering: Build a Motion Studio Around Opus 5.5", an article by @dyfwsammy
+on X (2026-11-04), which carries no license. Its method (one motion language per project, written once and kept as
+tokens; behaviour described in physical words and turned into numbers a person tunes; a free script that catches
+drift; a model review against the spec that answers in findings; a decision record per component) informed
+`MOTION.md`, `apps/motion-tokens.json`, `scripts/motion-lint.mjs`, the web's motion notes and the `motion-language`
+and `motion-review` skills, written in AwwO's own words; no text or code of it is copied. The two spring settings
+named sheet (stiffness 380, damping 32) and snappy (520, 36) are the article's numbers.
+
 Read on 2026-10-26, ideas only: open-design's `webgl-experience` design template (in the repository above) informed
 the robustness checks of `backend/internal/app/skills/procedural-3d-scene.md`, which is written in AwwO's own words,
 copies no text and so carries an empty `attribution`; its three.js facts are those of the release AwwO's previews

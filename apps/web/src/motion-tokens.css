@@ -1,0 +1,16 @@
+/* The motion language's tokens (MOTION.md, "As code"), loaded by both apps so its names work everywhere. The hosted
+   pages' --saas-ease and --saas-dur-1..4 (saas/design/tokens.css) are the same values under older names. */
+:root {
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 260ms;
+  --dur-scene: 400ms;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-emphasis: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --motion-distance: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-base: 140ms; --dur-slow: 140ms; --dur-scene: 140ms; --motion-distance: 0; }
+}

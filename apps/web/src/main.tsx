@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 // Global stylesheet must load before any component module so that
 // module-scoped CSS (e.g. settings/settings.css) wins equal-specificity ties.
+import './motion-tokens.css';
 import './styles.css';
 import { App } from './App';
 // The shared workspace markup needs the same layout overrides as the hosted app.
