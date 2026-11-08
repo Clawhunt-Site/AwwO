@@ -364,6 +364,260 @@ describe('the film kit bundle', () => {
     expect(render.made.every(source => source.startsWith('url(https://cdn.jsdelivr.net/'))).toBe(true);
   });
 
+  /** A face of the page's own, as Chrome keeps one: its status and its `loaded` promise. Once it starts loading (at
+   *  `status` 'loading', or when asked to load from 'unloaded'), it loads, fails or never settles, after `ms`. */
+  type Held = { family: string; status: string; loaded: Promise<unknown>; load: () => Promise<unknown>; started: boolean };
+  const pageFace = (family: string, { status = 'loaded', outcome = 'load', ms = 0 }: { status?: string; outcome?: 'load' | 'fail' | 'never'; ms?: number } = {}): Held => {
+    let settle = { resolve: (_value: unknown) => {}, reject: (_error: unknown) => {} };
+    const face: Held = { family, status, started: status !== 'unloaded', loaded: new Promise((resolve, reject) => { settle = { resolve, reject }; }), load: () => face.loaded };
+    face.loaded.catch(() => {});
+    const start = () => {
+      if (outcome !== 'never') setTimeout(() => { face.status = outcome === 'load' ? 'loaded' : 'error'; if (outcome === 'load') settle.resolve(face); else settle.reject(new Error('404')); }, ms);
+    };
+    if (status === 'loaded') settle.resolve(face); else if (status === 'error') settle.reject(new Error('404')); else if (status === 'loading') start();
+    face.load = () => { if (face.status === 'unloaded') { face.status = 'loading'; face.started = true; start(); } return face.loaded; };
+    return face;
+  };
+  type Cut = { style?: string; weight?: string; unicodeRange?: string };
+  /** A page whose FontFace loads as `load` says for its family and cut, whose document holds `pageFaces` (the page's
+   *  own, or a running preview's), and which lists the faces the kit adds and every load it asks the document for. The
+   *  document answers a load as Chrome does: with the faces of the family it holds when asked (the kit's own among
+   *  them), each started and waited for, those that loaded. */
+  const fontPage = (load: (family: string, cut: Cut) => Promise<void>, pageFaces: Held[] = [], policy: string | null = null) => {
+    const added: string[] = [], asked: string[] = [];
+    class FontFace {
+      family: string;
+      cut: Cut;
+      status = 'unloaded';
+      constructor(family: string, _source: string, cut: Cut = {}) { this.family = family; this.cut = cut; }
+      load() { return load(this.family, this.cut).then(() => { this.status = 'loaded'; return this; }, error => { this.status = 'error'; throw error; }); }
+    }
+    const held: Array<Held | FontFace> = [...pageFaces];
+    const fonts = {
+      ready: Promise.resolve(), forEach: (each: (face: unknown) => void) => held.forEach(each),
+      add: (face: FontFace) => { held.push(face); added.push(face.family + (face.cut.style === 'italic' ? ' italic' : '') + (face.cut.unicodeRange ? ' ranged' : '')); },
+      load: (font: string) => {
+        asked.push(font);
+        const now = held.filter(face => font.includes(`"${face.family}"`));
+        return Promise.all(now.map(face => (face.status === 'loaded' ? Promise.resolve(face) : face.load()).then(() => face, () => null)))
+          .then(all => all.filter(face => face && face.status === 'loaded'));
+      },
+    };
+    const meta = policy === null ? null : { getAttribute: () => policy };
+    return { page: kitInSandbox({ window: { FontFace }, document: { fonts, querySelector: () => meta } }), added, asked, held };
+  };
+  const settle = (ms = 20) => new Promise(resolve => setTimeout(resolve, ms));
+  const never = () => new Promise<never>(() => {});
+  const fail = () => Promise.reject(new Error('net::ERR_NAME_NOT_RESOLVED'));
+  const ok = () => Promise.resolve();
+  const scene = [{ from: 0, to: 2, draw() {} }];
+  const PREVIEW_POLICY = "default-src 'none'; font-src data:";
+
+  it('tells a renderer, with its first frame and once, which roles a font did not load for, the frame drawn first', async () => {
+    const { page, added } = fontPage(family => family === 'Orbitron' ? fail() : ok());
+    const drawn: number[] = [];
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron', text: 'Inter' } }, scenes: [{ from: 0, to: 2, draw(_g: unknown, _k: number, t: number) { drawn.push(t); } }] });
+    await settle();
+    expect(page.__ready).toBe(true);
+    expect(added).toEqual(['Inter', 'Inter italic']);
+    drawn.length = 0;
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Orbitron"$/);
+    expect(drawn).toEqual([0]);
+    expect(() => page.renderAt(1 / 24)).not.toThrow();
+    expect(drawn).toEqual([0, 1 / 24]);
+  });
+
+  it('says a role whose own faces failed is not loaded, while it waits at the first frame on a face of the page\'s', async () => {
+    const { page } = fontPage(fail, [pageFace('Orbitron', { status: 'unloaded', outcome: 'never' })]);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    await settle();
+    expect(page.__ready).toBe(false);
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Orbitron"$/);
+  });
+
+  it('gives each role at the first frame its own reason: its faces still loading, or failed while the page\'s are awaited', async () => {
+    const { page } = fontPage(family => family === 'Orbitron' ? fail() : never(), [pageFace('Orbitron', { status: 'unloaded', outcome: 'never' })]);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron', text: 'Inter' } }, scenes: scene });
+    await settle();
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Orbitron"; fonts still loading at the first frame, not used in this film: text "Inter"$/);
+  });
+
+  it('says nothing of a role it has no face of its own for, reached only after the first frame: it could not ask', async () => {
+    const own = pageFace('Orbitron', { status: 'loaded' });
+    const { page, asked } = fontPage(fail, [own], PREVIEW_POLICY);
+    expect(() => page.renderAt(0)).toThrow(/Film\.run had not been called/);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    await settle();
+    expect(asked).toEqual([]);
+    expect(() => page.renderAt(1 / 24)).not.toThrow();
+  });
+
+  it('names the cuts and the character ranges a role lacks beside the ones it has', async () => {
+    const italic = fontPage((_family, cut) => cut.style === 'italic' ? fail() : ok());
+    italic.page.Film.run({ duration: 2, type: { roles: { text: 'Inter' } }, scenes: scene });
+    const weights = fontPage((_family, cut) => cut.weight === '600' || cut.weight === '700' ? fail() : ok());
+    weights.page.Film.run({ duration: 2, type: { roles: { display: 'Rajdhani' } }, scenes: scene });
+    const ext = (cut: Cut) => !!cut.unicodeRange?.startsWith('U+0100');
+    const range = fontPage((_family, cut) => ext(cut) ? fail() : ok());
+    range.page.Film.run({ duration: 2, type: { roles: { text: { family: 'Inter', subsets: ['latin', 'latin-ext'] } } }, scenes: scene });
+    const both = fontPage((_family, cut) => ext(cut) || cut.style === 'italic' ? fail() : ok());
+    both.page.Film.run({ duration: 2, type: { roles: { text: { family: 'Inter', subsets: ['latin', 'latin-ext'] } } }, scenes: scene });
+    await settle(40);
+    expect(italic.added).toEqual(['Inter']);
+    expect(() => italic.page.renderAt(0)).toThrow(/^Film: fonts not loaded: text "Inter" italic$/);
+    expect(weights.added).toEqual(['Rajdhani', 'Rajdhani']);
+    expect(() => weights.page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Rajdhani" 600 and 700$/);
+    expect(range.added).toEqual(['Inter ranged', 'Inter italic ranged']);
+    expect(() => range.page.renderAt(0)).toThrow(/^Film: fonts not loaded: text "Inter" latin-ext$/);
+    expect(() => both.page.renderAt(0)).toThrow(/^Film: fonts not loaded: text "Inter" latin italic and latin-ext$/);
+  });
+
+  it('says what it knows of a role from the first frame, while another role still loads', async () => {
+    const roboto = { family: 'Roboto', pkg: 'roboto', version: '5.3.0', weights: [400], subsets: ['latin'] };
+    const { page } = fontPage(family => family === 'Roboto' ? fail() : family === 'Inter' ? never() : ok());
+    page.Film.run({ duration: 2, type: { roles: { display: 'Bebas Neue', text: 'Inter', mono: roboto } }, scenes: scene });
+    await settle();
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts not loaded: mono "Roboto"; fonts still loading at the first frame, not used in this film: text "Inter"$/);
+    expect(() => page.renderAt(1 / 24)).not.toThrow();
+  });
+
+  it('says the roles a font did not load for under one reason, in role order whatever order they failed in', async () => {
+    const later = () => new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('blocked')), 8));
+    const { page } = fontPage(family => family === 'Orbitron' ? later() : family === 'Inter' ? ok() : fail());
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron', text: 'Inter', mono: 'JetBrains Mono' } }, scenes: scene });
+    await settle(40);
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Orbitron", mono "JetBrains Mono"$/);
+  });
+
+  it('uses no face of its own that is still loading at the first frame, for the whole film, and says so', async () => {
+    let finish = () => {};
+    const late = new Promise<void>(resolve => { finish = resolve; });
+    const { page, added } = fontPage(family => family === 'Inter' ? late : ok());
+    page.Film.run({ duration: 2, type: { roles: { display: 'Bebas Neue', text: 'Inter' } }, scenes: scene });
+    await settle();
+    expect(page.__ready).toBe(false);
+    expect(added).toEqual(['Bebas Neue']);
+    // The renderer's ready wait ran out: its first frame is drawn now, and the type it has is the film's.
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts still loading at the first frame, not used in this film: text "Inter"$/);
+    finish();
+    await settle();
+    expect(page.__ready).toBe(true);
+    expect(added).toEqual(['Bebas Neue']);
+    expect(() => page.renderAt(1 / 24)).not.toThrow();
+  });
+
+  it('uses no face that loads after a renderer\'s first frame when the film boots after it, and asks the page for none', async () => {
+    const unloaded = pageFace('Inter', { status: 'unloaded' });
+    const { page, added, asked } = fontPage(ok, [unloaded]);
+    expect(() => page.renderAt(0)).toThrow(/Film\.run had not been called/);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Inter' } }, scenes: scene });
+    await settle();
+    expect(added).toEqual([]);
+    expect(asked).toEqual([]);
+    expect(unloaded.started).toBe(false);
+    expect(() => page.renderAt(1 / 24)).toThrow(/^Film: fonts loaded only after the first frame, not used in this film: display "Inter"$/);
+    expect(() => page.renderAt(2 / 24)).not.toThrow();
+  });
+
+  it('asks the document to load nothing while the kit\'s own faces load, however long a face of the page\'s own takes', async () => {
+    // A face asked for while the page loads holds up its load event, which a render waits for, and so would the kit's
+    // ready: the page names the family in a font of its own that never arrives (a Google Fonts link where it never loads).
+    // (One the page itself had started would hold up document.fonts.ready, which the kit waits for, whatever the kit
+    // does: that is the page's own wait, and not this case.)
+    const own = pageFace('Inter', { status: 'unloaded', outcome: 'never' });
+    const { page, added, asked } = fontPage(ok, [own]);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Inter', text: 'Space Grotesk' } }, scenes: scene });
+    await settle();
+    expect(page.__ready).toBe(true);
+    expect(asked).toEqual([]);
+    expect(own.started).toBe(false);
+    expect(added).toEqual(['Inter', 'Inter italic', 'Space Grotesk']);
+    expect(() => page.renderAt(0)).not.toThrow();
+  });
+
+  it('draws a role from the page\'s own faces of its family, as a running preview supplies them, and says nothing', async () => {
+    // A preview allows fonts only as data: the kit fetches none, and uses the faces the preview started loading.
+    const preview = fontPage(fail, [pageFace('Orbitron', { status: 'loading', ms: 5 })], PREVIEW_POLICY);
+    preview.page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    // A page face that comes after Film.run is found when the kit's own fail before the first frame, and asked to load.
+    const arriving = fontPage(() => new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('blocked')), 10)));
+    arriving.page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    const late = pageFace('Orbitron', { status: 'unloaded', ms: 5 });
+    arriving.held.push(late);
+    await settle(60);
+    expect(preview.page.__ready).toBe(true);
+    expect(preview.added).toEqual([]);
+    expect(() => preview.page.renderAt(0)).not.toThrow();
+    expect(arriving.page.__ready).toBe(true);
+    expect(late.started).toBe(true);
+    expect(() => arriving.page.renderAt(0)).not.toThrow();
+  });
+
+  it('counts none of its own faces, nor a failed face of the page\'s, as the page having the family', async () => {
+    const failing = fontPage((_family, cut) => cut.style === 'italic' ? fail() : ok(), [pageFace('Inter', { status: 'loading', outcome: 'fail', ms: 5 })]);
+    failing.page.Film.run({ duration: 2, type: { roles: { text: 'Inter' } }, scenes: scene });
+    const broken = fontPage(fail, [pageFace('Orbitron', { status: 'error' })]);
+    broken.page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    await settle(40);
+    expect(failing.asked).toHaveLength(1);
+    expect(() => failing.page.renderAt(0)).toThrow(/^Film: fonts not loaded: text "Inter" italic$/);
+    expect(() => broken.page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Orbitron"$/);
+  });
+
+  it('names a role it has no face of its own for, still waiting on the page\'s at the first frame, without saying what is used', async () => {
+    const { page } = fontPage(fail, [pageFace('Orbitron', { status: 'loading', outcome: 'never' })], PREVIEW_POLICY);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: scene });
+    await settle();
+    expect(() => page.renderAt(0)).toThrow(/^Film: fonts still loading at the first frame: display "Orbitron"$/);
+  });
+
+  it('still checks the glyphs of a role some of whose cuts loaded', async () => {
+    // A context that measures a character in the role's family only where the family draws it, and otherwise in the
+    // generic family after it, as a browser falls back: Inter here has no Cyrillic.
+    const covers = (family: string, char: string) => family === 'Inter' && char !== 'ж';
+    const measuring = () => {
+      const state: Record<string, unknown> = { font: '10px sans-serif', letterSpacing: '0px' };
+      return new Proxy({}, {
+        get(_target, key) {
+          if (key in state) return state[key];
+          if (key === 'measureText') return (text: string) => {
+            const [, family = '', generic = ''] = /"([^"]+)",\s*([\w-]+)/.exec(String(state.font)) ?? [];
+            const width = [...String(text)].reduce((sum, char) => sum + (covers(family, char) ? 8 : generic === 'monospace' ? 7 : generic === 'serif' ? 9 : 10), 0);
+            return { width, actualBoundingBoxAscent: 10, actualBoundingBoxDescent: 3 };
+          };
+          if (key === 'getTransform') return () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+          if (key === 'getImageData') return (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(Math.max(1, w * h * 4)) });
+          if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
+          return () => undefined;
+        },
+        set(_target, key, value) { state[key] = value; return true; },
+      });
+    };
+    const added: string[] = [];
+    class FontFace {
+      family: string;
+      style: string;
+      constructor(family: string, _source: string, cut: { style?: string } = {}) { this.family = family; this.style = cut.style ?? 'normal'; }
+      load() { return this.style === 'italic' ? Promise.reject(new Error('404')) : Promise.resolve(this); }
+    }
+    const element = (tag: string) => ({ tagName: tag, style: {}, className: '', textContent: '', width: 0, height: 0, children: [] as unknown[],
+      getContext: () => measuring(), appendChild(child: unknown) { this.children.push(child); }, remove() {}, setAttribute() {} });
+    const page = kitInSandbox({ window: { FontFace }, document: { createElement: element, body: element('body'), head: element('head'),
+      fonts: { ready: Promise.resolve(), forEach() {}, add: (face: FontFace) => added.push(face.family), load: async () => [] } } });
+    page.Film.run({ duration: 2, type: { lang: 'en', roles: { text: 'Inter' }, check: { strings: { text: ['Aж'] } } }, scenes: [{ from: 0, to: 2, draw() {} }] });
+    await settle();
+    expect(added).toEqual(['Inter']);
+    expect(() => page.renderAt(0)).toThrow(/^Film: text "Inter" has no glyphs for: ж; fonts not loaded: text "Inter" italic$/);
+  });
+
+  it('says what is wrong with a film before what its type lacks, in one error with the frame\'s own', async () => {
+    const { page } = fontPage(fail);
+    page.Film.run({ duration: 2, type: { roles: { display: 'Orbitron' } }, scenes: [] });
+    await settle();
+    expect(() => page.renderAt(0)).toThrow(/^Film: scenes: give at least one .*; fonts not loaded: display "Orbitron" \(the frame could not be drawn: /);
+    expect(() => page.renderAt(1 / 24)).not.toThrow(/^Film:/);
+  });
+
   it('passes on whatever a scene throws, falsy values too', async () => {
     const page = kitInSandbox();
     // It throws for frame 0 only, not for the poster (0.8 s) a running preview draws once the film is ready.

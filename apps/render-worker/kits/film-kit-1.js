@@ -1192,7 +1192,10 @@ let ARRANGEMENT = [], CAST = {}, score = () => {};
 const beat = (n) => BEAT0 + n * 60 / BPM, bar = (n) => beat(4 * n);
 
 // AwwO's brand fonts, the families its running previews supply by name (apps/web/src/canvas/previewFontList.ts), as
-// the Fontsource 5.3.0 packages the renderer loads from jsDelivr (Latin). A TYPE role may name one by family alone.
+// the Fontsource 5.3.0 packages on jsDelivr (Latin). A TYPE role may name one by family alone. AwwO's render worker
+// answers the URLs these name from its own copies (apps/render-worker/fonts.mjs), so a render of a role that names a
+// brand family alone needs no network (one that sets other subsets or another version names other files, which it
+// fetches); a downloaded page loads them from jsDelivr.
 const BRAND_FONTS = {
   'Inter': { pkg: 'inter', variable: 'wght', axes: { wght: [100, 900] }, styles: ['normal', 'italic'] },
   'Space Grotesk': { pkg: 'space-grotesk', variable: 'wght', axes: { wght: [300, 700] } },
@@ -1228,28 +1231,99 @@ function filmRole(value) {
   return null;
 }
 
-/** Loads every role's faces. A face that cannot load (a preview reaches no network) is fine when the page already has
- *  the family: AwwO's previews supply its brand fonts by name. Returns the roles that have neither. */
+// The roles whose faces are still loading, with what is known of each (loadFilmType). The type a renderer's first frame
+// finds is the type the whole film keeps, as far as the kit's own faces go: one that comes after that frame is not
+// used, and the renderer is told (renderAt). A page's own @font-face of a role's family (which the film guide does not
+// ask for) is the page's: the kit cannot refuse one, so a face of the page's that arrives late can still change it.
+const typeLoading = new Map();
+// The FontFace objects the kit made: the document's other faces are the page's own.
+const kitFaces = new WeakSet();
+
+/** Loads every role's faces, the roles together. A face that cannot load (a preview reaches no network) is fine when
+ *  the page has the family itself: AwwO's previews supply its brand fonts by name (and AwwO's render worker answers
+ *  their URLs, so in a render they load). A face that loads only after a renderer has drawn its first frame is not
+ *  used, so a film keeps one type from its first frame to its last. Returns each role that lacks a face the page does
+ *  not make up for, in role order, as { name, state, used } (used[i]: whether state.faces[i] is in use). */
 async function loadFilmType(T) {
-  const missing = [];
-  // Whether the document already has the family's faces: a running preview supplies the brand fonts it sees a page
-  // name, and has no network, so a role it supplies is never fetched (the renderer, which supplies none, fetches all).
+  // Whether the page has faces of the family itself, as the browser picks them for the role's first weight upright:
+  // asked, as before, only once the kit's own faces are not all used, since asking starts loading them, and a face in
+  // flight while the page loads holds up its load event, which a render waits for; and never once a frame is drawn,
+  // when one that came would change the film's type. The kit's own faces do not count.
   const supplied = async (r) => {
-    try { return (await document.fonts.load((r.weights?.[0] ?? 400) + ' 40px "' + r.family + '"')).length > 0; } catch (e) { return false; }
+    if (rendering) return false;
+    try {
+      return (await document.fonts.load((r.weights?.[0] ?? 400) + ' 40px "' + r.family + '"')).some((face) => !kitFaces.has(face));
+    } catch (e) { return false; }
   };
   const remote = remoteFontsAllowed();
-  for (const [name, r] of Object.entries(T.roles || {})) {
-    if (!r || (!r.pkg && !r.files)) continue;
-    if (remote) {
-      const loads = roleFaces(r).map(([family, url, desc]) => {
+  const outcomes = await Promise.all(Object.entries(T.roles || {}).map(async ([name, r]) => {
+    if (!r || (!r.pkg && !r.files)) return null;
+    const state = { family: r.family, faces: remote ? roleFaces(r) : [], used: [], late: [], settled: [] };
+    typeLoading.set(name, state);
+    try {
+      const used = await Promise.all(state.faces.map(([family, url, desc], i) => {
         const face = new FontFace(family, 'url(' + url + ')', desc);
-        return face.load().then(() => { document.fonts.add(face); return true; }, () => false);
-      });
-      if ((await Promise.all(loads)).every(Boolean)) continue;
+        kitFaces.add(face);
+        return face.load().then(() => {
+          state.settled[i] = true;
+          if (rendering) { state.late[i] = true; return false; }
+          document.fonts.add(face); state.used[i] = true; return true;
+        }, () => { state.settled[i] = true; return false; });
+      }));
+      if (used.length && used.every(Boolean)) return null;
+      if (await supplied(r)) return null;
+      // A role with no face of the kit's own, reached once a frame is drawn: nothing of the kit's is missing, and the
+      // page's faces cannot be asked about then without starting them, so nothing is said (nor checked for glyphs).
+      if (!state.faces.length && rendering) return { name, state, used };
+      // Said as soon as it is known, not once every role has settled: a role still loading holds up no other's news.
+      const late = state.late.some(Boolean) && used.every((ok, i) => ok || state.late[i]);
+      typeTrouble([{ name, words: roleLack(name, state, used) }], late ? 'fonts loaded only after the first frame, not used in this film: ' : 'fonts not loaded: ');
+      return { name, state, used };
+    } finally {
+      typeLoading.delete(name);
     }
-    if (!(await supplied(r))) missing.push(name);
+  }));
+  return outcomes.filter(Boolean);
+}
+
+/** What of the kit's own fonts a role lacks, in words for a renderer (what draws instead is the browser's choice: a cut
+ *  it makes from the ones that loaded, a local font of that name, a page's own face, or the fallback): 'text "Roboto"'
+ *  when none of its faces is in use, else the cuts and character ranges it lacks, 'text "Inter" italic', 'display
+ *  "Rajdhani" 600 and 700', 'text "Inter" latin-ext'. A cut is named by its style and its weight (not a variable font's
+ *  range), or by its family when the role makes faces under other names for axis stops. */
+function roleLack(name, state, used) {
+  const head = name + ' "' + state.family + '"';
+  if (!used.some(Boolean)) return head;
+  const rangeOf = ([, , desc]) => desc.unicodeRange || '';
+  const cut = ([family, , desc]) => [family === state.family ? '' : '"' + family + '"', desc.style === 'italic' ? 'italic' : '',
+    String(desc.weight).includes(' ') ? '' : String(desc.weight)].filter(Boolean).join(' ') || 'regular';
+  const parts = [];
+  for (const range of new Set(state.faces.map(rangeOf))) {
+    const faces = state.faces.map((face, i) => [face, i]).filter(([face]) => rangeOf(face) === range);
+    const missing = faces.filter(([, i]) => !used[i]);
+    if (!missing.length) continue;
+    const subset = range ? (Object.keys(TYPE_SUBSETS).find((key) => TYPE_SUBSETS[key] === range) || 'some characters') : '';
+    parts.push(missing.length === faces.length ? subset || 'some characters'
+      : [subset, [...new Set(missing.map(([face]) => cut(face)))].join(' and ')].filter(Boolean).join(' '));
   }
-  return missing;
+  return head + ' ' + parts.join(' and ');
+}
+
+// What the film's type lacks, for a renderer: each role, named once, said with the next frame it draws (renderAt),
+// since its console is read by no one.
+const typeNamed = new Set();
+let typeNews = [];
+function typeTrouble(lacks, why) {
+  for (const lack of lacks) if (!typeNamed.has(lack.name)) { typeNamed.add(lack.name); typeNews.push({ name: lack.name, words: lack.words, why }); }
+}
+
+/** The news of the film's type not yet told, in words, and told: each reason once, with its roles in role order. */
+function typeTold() {
+  const order = Object.keys(TYPE.roles || {});
+  const told = [...new Set(typeNews.map((news) => news.why))].map((why) => why + typeNews.filter((news) => news.why === why)
+    .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((news) => news.words).join(', '));
+  typeNews = [];
+  return told;
 }
 
 /** Whether the document's own policy lets it fetch the brand fonts: AwwO's preview allows no font but data (it
@@ -1350,10 +1424,11 @@ function boot() {
     const notes = [];
     try {
       const missing = await loadFilmType(TYPE);
-      if (missing.length) notes.push('fonts not loaded, the system font stands in for: ' + missing.join(', '));
+      if (missing.length) notes.push('fonts not loaded: ' + missing.map(({ name, state, used }) => roleLack(name, state, used)).join(', '));
       await document.fonts.ready;
       // Glyphs are checked only in the faces that loaded: a system family or a stand-in proves nothing about the film's.
-      const loaded = { ...TYPE, roles: Object.fromEntries(Object.entries(TYPE.roles || {}).filter(([name, r]) => r && (r.pkg || r.files) && !missing.includes(name))) };
+      const absent = missing.filter(({ used }) => !used.some(Boolean)).map(({ name }) => name);
+      const loaded = { ...TYPE, roles: Object.fromEntries(Object.entries(TYPE.roles || {}).filter(([name, r]) => r && (r.pkg || r.files) && !absent.includes(name))) };
       const qc = typeCheck(g, loaded, W, H, PALETTE);
       for (const e of qc.errors) (/glyphs/.test(e) ? (failure = failure ? failure + '; ' + e : e) : notes.push(e));
       notes.push(...qc.warnings);
@@ -1406,7 +1481,16 @@ function run(spec) {
 let unrun = false, pending = null;
 const frameAt = (t) => { const time = OFFSET + Math.max(0, Number(t) || 0); renderFrame(Math.floor(time * FPS + 1e-6), time); };
 window.renderAt = (t) => {
-  if (!rendering) { rendering = true; if (hud) hud.remove(); }
+  if (!rendering) {
+    rendering = true;
+    if (hud) hud.remove();
+    // A face of the kit's still loading now would change the film's type mid-film when it came: it is left out
+    // (loadFilmType). A role whose own faces have all settled waits only on the page's (its own failed); one with no
+    // face of the kit's own waits on the page's, which the kit cannot refuse.
+    const loading = [...typeLoading].map(([name, state]) => [state.faces.some((face, i) => !state.settled[i]) ? 'fonts still loading at the first frame, not used in this film: '
+      : state.faces.length ? 'fonts not loaded: ' : 'fonts still loading at the first frame: ', { name, words: roleLack(name, state, state.faces.map((face, i) => state.used[i] === true)) }]);
+    for (const why of new Set(loading.map(([reason]) => reason))) typeTrouble(loading.filter(([reason]) => reason === why).map(([, lack]) => lack), why);
+  }
   if (!canvas) {
     // A film that starts later still (Film.run after a timer, a frame or a long await) draws this frame as it boots.
     pending = t;
@@ -1417,12 +1501,15 @@ window.renderAt = (t) => {
     return;
   }
   pending = null;
-  // What is wrong with the film is said first, even when it is also why its frame cannot be drawn.
+  // What is wrong with the film is said first (even when it is also why its frame cannot be drawn), then what its type
+  // lacks; the frame is drawn before either is said, so the render goes on with it.
   let threw = false, error;
   try { frameAt(t); } catch (e) { threw = true; error = e; }
-  if (failure && !thrown) {
-    thrown = true;
-    throw new Error('Film: ' + failure + (threw ? ' (the frame could not be drawn: ' + String((error && error.message) || error) + ')' : ''));
+  const news = [];
+  if (failure && !thrown) { thrown = true; news.push(failure); }
+  if (typeNews.length) news.push(...typeTold());
+  if (news.length) {
+    throw new Error('Film: ' + news.join('; ') + (threw ? ' (the frame could not be drawn: ' + String((error && error.message) || error) + ')' : ''));
   }
   if (threw) throw error;
 };

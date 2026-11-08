@@ -82,6 +82,19 @@ frames 0 … N-1 and repeats seamlessly.
   which draw the subsets' Latin range pixel for pixel (Playfair Display's ⁒ aside) and, as a preview's do, the
   characters a subset lacks too. Any other font URL (another family, or a brand family's other subsets or versions) is
   fetched or blocked as before.
+- **A film keeps the type its first frame has, and says what it lacks.** The film kit uses no face of its own that
+  loads after the renderer's first frame, so its own type never changes mid-film. What of its own fonts a role lacks
+  it says as a page error, once per role, with the first frame drawn after it is known (a font still loading at the
+  first frame, with that frame): `Film: fonts not loaded: text "Roboto"`, or the cuts and character ranges a family
+  lacks beside the ones it has (`text "Inter" italic`, `display "Rajdhani" 600 and 700`, `text "Inter" latin-ext`);
+  `fonts still loading at the first frame, not used in this film: …`; `fonts loaded only after the first frame, not
+  used in this film: …` (a film that calls `Film.run` late). What draws such text instead is the browser's choice (a
+  cut it makes from those that loaded, a local font of that name, the fallback). A family the page supplies itself, as
+  a running preview supplies the brand fonts, draws the role and is not named: the kit asks the browser for the page's
+  faces of it only where it did before, once its own faces are not all used and no frame is drawn yet, since asking
+  starts loading them (a face in flight while the page loads holds up the load event a render waits for). A page's own
+  `@font-face` of a role's family, which the film guide does not ask for, stays the page's: the kit cannot refuse one,
+  so one that arrives late can still change the film's type.
 
 ## API
 

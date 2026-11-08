@@ -270,3 +270,76 @@ window.renderAt = () => { if (!failed || failed.length) throw new Error('not loa
   assert.deepEqual(result.pageErrors, []);
   assert.deepEqual(result.warnings.filter((w) => NOT_A_FAULT.test(w)), [], result.warnings.join(','));
 });
+
+test('a film whose font cannot load says which role, and draws that role in a stand-in', { skip, timeout: 120_000 }, async () => {
+  // Bungee is no brand font (nor one a system has): the kit asks jsDelivr for it, which this browser cannot reach. The
+  // page's own check throws (a second page error) if Bebas Neue is not drawn by its face, or Bungee is.
+  const bungee = { family: 'Bungee', pkg: 'bungee', version: '5.3.0', weights: [400], subsets: ['latin'] };
+  const result = await renderWithNoNetwork('film_fonts_missing', typePage({ display: 'Bebas Neue', text: bungee }, ['400 60px "Bebas Neue"'], ['400 60px "Bungee"']));
+  assert.equal(result.mode, 'contract');
+  assert.deepEqual(result.pageErrors, ['Film: fonts not loaded: text "Bungee"']);
+  assert.ok(result.warnings.includes('page_errors:1'), result.warnings.join(','));
+  assert.ok(!result.warnings.includes('ready_timeout'), result.warnings.join(','));
+});
+
+test('a film in a page that supplies its brand faces itself, as a running preview does, draws them and checks their glyphs', { skip, timeout: 120_000 }, async () => {
+  // Built as AwwO's preview builds one (htmlDeliverable.ts, liveDocument.ts): fonts only as data:, the faces as
+  // @font-face rules in the head and its script that starts loading them, the kit inlined. The kit fetches nothing, finds
+  // the page's faces of the family and uses them, and still checks the film's glyphs in them: Inter's Latin file has no
+  // Cyrillic, so the check names one.
+  const list = readFileSync(path.join(WEB, 'previewFontList.ts'), 'utf8');
+  const loadScript = /PREVIEW_FONT_LOAD_SCRIPT = '([^']+)';/.exec(list)[1];
+  const face = (file, style) => `@font-face{font-family:"Inter";src:url(data:font/woff2;base64,${readFileSync(path.join(WEB, 'fonts', file)).toString('base64')}) format("woff2");font-weight:100 900;font-style:${style};font-display:block}`;
+  const film = typePage({ text: 'Inter' }, ['400 60px "Inter"', 'italic 400 60px "Inter"']).replace("type: { lang: 'en', roles:", "type: { lang: 'en', check: { strings: { text: ['Aж'] } }, roles:");
+  // Replaced by functions: the kit's text holds `$` sequences a replacement string would read.
+  const html = film
+    .replace('<meta charset="utf-8">', () => `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:"><style>${face('inter-latin-wght-normal.woff2', 'normal')}\n${face('inter-latin-wght-italic.woff2', 'italic')}</style><script>${loadScript}</script>`)
+    .replace(`<script src="${FILM.url}"></script>`, () => `<script>${readFileSync(path.join(here, 'kits', FILM.file), 'utf8')}</script>`);
+  assert.ok(html.includes("check: { strings: { text: ['Aж'] } }") && !html.includes(FILM.url), 'the page is built as meant');
+  const result = await renderWithNoNetwork('film_fonts_preview_page', html);
+  assert.equal(result.mode, 'contract');
+  assert.deepEqual(result.pageErrors, ['Film: text "Inter" has no glyphs for: ж']);
+  assert.ok(!result.warnings.some((w) => /^(?:ready_timeout|fonts_timeout|network_blocked)/.test(w)), result.warnings.join(','));
+});
+
+test('when its own faces fail, the kit asks the browser only for the page\'s faces that would draw the role', { skip, timeout: 90_000 }, async () => {
+  // The live studio's policy (fonts as data: and from the CDN), in a browser of the test's own: the kit's Inter fails
+  // (its requests are refused), the page has Inter upright as data: (its preview script starts it) and an italic of its
+  // own whose file never answers. The browser picks the upright for the kit's question, so the page loads, the film
+  // turns ready and the italic is never asked for; waiting for every face of the family would wait for ever.
+  const list = readFileSync(path.join(WEB, 'previewFontList.ts'), 'utf8');
+  const loadScript = /PREVIEW_FONT_LOAD_SCRIPT = '([^']+)';/.exec(list)[1];
+  const upright = readFileSync(path.join(WEB, 'fonts', 'inter-latin-wght-normal.woff2')).toString('base64');
+  const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data: https://cdn.jsdelivr.net";
+  const faces = `@font-face{font-family:"Inter";src:url(data:font/woff2;base64,${upright}) format("woff2");font-weight:100 900;font-style:normal}
+@font-face{font-family:"Inter";src:url(https://cdn.jsdelivr.net/never/inter-italic.woff2) format("woff2");font-weight:100 900;font-style:italic}`;
+  // As a preview orders its head: the faces, then its script that starts the ones it supplied (here the upright only).
+  const start = loadScript.replace('f.load().catch(()=>{})', 'if(f.style!=="italic")f.load().catch(()=>{})');
+  assert.notEqual(start, loadScript, 'the page starts its upright face only');
+  const page = typePage({ text: 'Inter' }, ['400 60px "Inter"'])
+    .replace('<meta charset="utf-8">', () => `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><style>${faces}</style><script>${start}</script>`)
+    .replace(`<script src="${FILM.url}"></script>`, () => `<script>${readFileSync(path.join(here, 'kits', FILM.file), 'utf8')}</script>`);
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-proxy-server'] });
+  try {
+    const context = await browser.newContext();
+    const asked = [];
+    await context.route('https://cdn.jsdelivr.net/**', (route) => {
+      asked.push(route.request().url());
+      if (!route.request().url().includes('/never/')) return route.abort('failed');   // the kit's own faces fail
+      return undefined;                                                                // the page's italic never answers
+    });
+    const tab = await context.newPage();
+    const errors = [];
+    tab.on('pageerror', (error) => errors.push(error.message));
+    await tab.setContent(page, { waitUntil: 'load', timeout: 20_000 });
+    await tab.waitForFunction(() => window.__ready === true, null, { timeout: 15_000 });
+    // The kit adds no face of its own that failed, so the one italic face in the set is the page's.
+    const italic = await tab.evaluate(() => { const found = []; document.fonts.forEach((face) => { if (face.style === 'italic') found.push(face.status); }); return found; });
+    assert.deepEqual(errors, []);
+    assert.ok(asked.some((url) => url.includes('/@fontsource-variable/inter@')), asked.join(' '));
+    assert.ok(!asked.some((url) => url.includes('/never/')), 'the unused italic was asked for');
+    assert.deepEqual(italic, ['unloaded']);
+  } finally {
+    await browser.close();
+  }
+});
