@@ -34,6 +34,10 @@ export const SOURCES = Object.freeze([
   { name: 'open-design (nexu-io/open-design)', match: /\bopen-design\b/, files: ['third_party/adapted/open-design/LICENSE'] },
   { name: 'refero_skill (referodesign/refero_skill)', match: /\brefero_skill\b/, files: ['third_party/adapted/refero-skill/LICENSE'],
     note: 'open-design adapted its typography, colour and anti-template rules from this project; AwwO adapts them from open-design.' },
+  { name: 'rea-video (JuneYaooo/rea-video)', match: /\brea-video\b/,
+    files: ['third_party/adapted/rea-video/LICENSE', 'third_party/adapted/rea-video/NOTICE'] },
+  { name: 'cutaway (Nyxera0x/cutaway)', match: /\bcutaway\b/, files: ['third_party/adapted/cutaway/LICENSE'],
+    note: 'cutaway is built on whaleyxbt/claude-motion (MIT); its licence carries both copyright notices.' },
 ]);
 
 const PLAIN_CLAUSES = Object.freeze([/^modified for AwwO$/, /^trimmed for AwwO$/, /^author \S.*$/]);
