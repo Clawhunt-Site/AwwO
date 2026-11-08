@@ -45,7 +45,7 @@ describe('the 成果 view’s run receipt', () => {
     expect(within(region).getByText('完成')).toBeVisible();
     expect(within(region).getByText('3 分 12 秒')).toBeVisible();
     expect(within(region).getByText('1 步完成 · 1 步沿用上次结果')).toBeVisible();
-    expect(within(region).getByText('qwen3.8-27b-p6（1 步）')).toBeVisible();
+    expect(within(region).getByText('Qwen3.8 27B P6（1 步）')).toBeVisible();
     expect(within(region).getByText('done-run-1')).toBeVisible();
     expect(within(region).getByText('运行完成不等于人工验收通过。完整过程见「运行记录」。')).toBeVisible();
     // The list is the panel's read; the receipt reads only the run it names, for the canvas that run froze.
@@ -75,11 +75,12 @@ describe('the 成果 view’s run receipt', () => {
     // The clip's model is not in this catalogue, so its kind names it; the two pictures share one generic name.
     expect(await within(region).findByText('Claude Opus 5.5（1 步），视频（1 步），图片 · 高清（2 步）')).toBeVisible();
     expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream|bedrock/i);
-    // A host that cannot name models still never shows a media model's id; a chat model keeps its selector, as before.
+    // A host that cannot name models still never shows a media model's id, nor a chat model's selector: its name is read
+    // from the selector (saas-run-model-names).
     rerender(shown(false));
     region = screen.getByRole('region', { name: '运行回执' });
-    expect(within(region).getByText('bedrock.claude-opus-5-5（1 步），视频（1 步），图片（2 步）')).toBeVisible();
-    expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream/i);
+    expect(within(region).getByText('Claude Opus 5.5（1 步），视频（1 步），图片（2 步）')).toBeVisible();
+    expect(region.innerHTML).not.toMatch(/xt\.|xtasy|seedream|bedrock/i);
   });
 
   it('reads the runs itself, once, when nothing has read them yet, and follows later polls', async () => {

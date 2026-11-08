@@ -28,7 +28,8 @@ function duration(t: T, from: string, to?: string): string {
 }
 
 export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantId: string; canvasId: string; final: CanvasNode | null;
-  /** What the canvas names models with (its chat models and media catalogue); without it a media model is named by its kind. */
+  /** What the canvas names models with (its chat models and media catalogue); without it a media model is named by its
+   *  kind and a chat model from its selector. */
   names?: ModelNameSources }) {
   const { locale, t } = useSaaSPreferences();
   const [runs, setRuns] = useState(() => latestGraphRuns(tenantId, canvasId));
@@ -86,8 +87,9 @@ export function CanvasRunReceipt({ tenantId, canvasId, final, names }: { tenantI
       else if (node.state === 'cached') counts.cached++;
       else if (node.state === 'failed' || node.state === 'blocked' || node.state === 'cancelled') counts.failed++;
     }
-    // The models of the steps that actually ran in it, as the run recorded them, named as the canvas names them: a media
-    // model only by its generic name (图片 · 高清), never by the id that says who generates it.
+    // The models of the steps that actually ran in it, as the run recorded them, named as the canvas names them: a chat
+    // model as its picker does, a media model only by its generic name (图片 · 高清); never by a selector or an id that
+    // says which service runs or generates it.
     const ran = new Set(run.nodes.filter(node => node.state === 'done' || node.state === 'failed').map(node => node.nodeId));
     const models = new Map<string, number>();
     for (const node of frozen?.nodes ?? []) {

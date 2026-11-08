@@ -5,6 +5,8 @@ import { useId } from 'react';
 import { ChevronDown, Cpu } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { mediaKindOf } from './mediaCatalog';
+import { listedModelName } from './modelNames';
+import type { UiLocale } from '../locale';
 import type { SessionNode } from './canvasDoc';
 import './node-model-picker.css';
 
@@ -51,8 +53,17 @@ export interface NodeModelPickerProps {
   onChange: (key: string) => void;
 }
 
+/** The text a choice is listed by: a chat model by its name, read as a selector where its catalogue names it by one (a
+ *  connection names its models by the ids its service gives them, AwwO 云端's by AwwO's own selectors), else by a name
+ *  read from its selector, else as an unnamed model (modelNames.ts listedModelName): never by a selector, since AwwO
+ *  never says which service runs a model. Any other choice (a media model's) by its label. The task card says the
+ *  same of the node's model. */
+export function choiceText(choice: NodeModelChoice, locale: UiLocale): string {
+  return choice.model ? listedModelName(choice.label, choice.model, locale) : choice.label;
+}
+
 export function NodeModelPicker({ choices, value, currentLabel, disabled = false, disabledReason, onChange }: NodeModelPickerProps) {
-  const { t } = useCanvasI18n();
+  const { t, locale } = useCanvasI18n();
   const id = useId();
   const known = choices.some(choice => choice.key === value);
   const groups = new Map<string, NodeModelChoice[]>();
@@ -61,7 +72,7 @@ export function NodeModelPicker({ choices, value, currentLabel, disabled = false
     groups.set(group, [...(groups.get(group) ?? []), choice]);
   }
   const selected = choices.find(choice => choice.key === value);
-  const shown = selected?.label || currentLabel || t('model.pickerNone');
+  const shown = (selected && choiceText(selected, locale)) || currentLabel || t('model.pickerNone');
   return <label className={`awwo-node-model-picker${disabled ? ' is-disabled' : ''}`} htmlFor={id} title={disabled ? disabledReason : t('model.pickerTitle', { model: shown })}>
     <Cpu size={13} aria-hidden="true" />
     <span className="awwo-node-model-picker-value" aria-hidden="true">{shown}</span>
@@ -71,8 +82,8 @@ export function NodeModelPicker({ choices, value, currentLabel, disabled = false
       {!known && <option value="" disabled>{currentLabel ? t('model.pickerCurrent', { model: currentLabel }) : t('model.pickerNone')}</option>}
       {[...groups.entries()].map(([group, items]) => group
         ? <optgroup key={group} label={group}>{items.map(choice => <option key={choice.key} value={choice.key} disabled={!choice.available}
-          title={choice.available ? undefined : choice.reason}>{choice.available ? choice.label : `${choice.label} · ${t('model.pickerUnavailable')}`}</option>)}</optgroup>
-        : items.map(choice => <option key={choice.key} value={choice.key} disabled={!choice.available}>{choice.available ? choice.label : `${choice.label} · ${t('model.pickerUnavailable')}`}</option>))}
+          title={choice.available ? undefined : choice.reason}>{choice.available ? choiceText(choice, locale) : `${choiceText(choice, locale)} · ${t('model.pickerUnavailable')}`}</option>)}</optgroup>
+        : items.map(choice => <option key={choice.key} value={choice.key} disabled={!choice.available}>{choice.available ? choiceText(choice, locale) : `${choiceText(choice, locale)} · ${t('model.pickerUnavailable')}`}</option>))}
     </select>
   </label>;
 }

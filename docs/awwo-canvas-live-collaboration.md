@@ -653,9 +653,12 @@ CHANGELOG entry "treg for a person's own Agent".
   case, with no space, or one word starting with a service's name, `Bedrock-Kimi`), is read the same way: a connection
   names its models by the ids its service gives them, and AwwO 云端's are AwwO's own; a name an operator published
   (GPT-5.6/Team) is kept as published. A media model is not named at all, nor a connection's model the catalogue does
-  not name (its selector, `byok_…`, holds no name). A run is named after its node, whose title is the document's own:
-  in the local edition a node its model rail names after an AwwO 云端 model is titled by that model's id, as its picker
-  shows it there.
+  not name (its selector, `byok_…`, holds no name). The node's model picker lists its models by these names too, and
+  the opened node's task card names its model as the picker's chip does. The execution timeline and the run receipt
+  name a node's model by them, taking first the catalogue's entry on the node's own runtime, which 多人同屏 is not sent
+  (modelNames.ts nodeModelName); where no name can be read, they and the picker say the model is unnamed or missing from
+  the catalogue. A run is named after its node, whose title is the document's own: in the local edition a node its
+  model rail names after an AwwO 云端 model is titled by that model's id.
 - **On the board**: a ring in each participant's colour around the nodes they have selected, with their name; a claim's
   badge on its node; each person's pointer with their name; a short glow on a node another participant just changed.
   These mark the cards the board draws: a component inside a converged icon (收敛成一个图标, one person's own way of

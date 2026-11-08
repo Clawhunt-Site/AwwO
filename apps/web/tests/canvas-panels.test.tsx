@@ -356,7 +356,8 @@ describe('RunTimeline', () => {
     );
     const rowA = within(screen.getByTestId('runline-a'));
     expect(rowA.getByText('1:05')).toBeTruthy();
-    expect(rowA.getByText('claude_local · opus')).toBeTruthy();
+    // A model no catalogue names goes by a name read from its selector, as the node's model picker would (modelNames.ts).
+    expect(rowA.getByText('claude_local · Opus')).toBeTruthy();
     const rowB = within(screen.getByTestId('runline-b'));
     // The reason replaces the generic chip — "被阻断" alone would hide WHY. The local engine's own words for it
     // (runGraph.ts 上游未完成) are said in the reader's language (surfaceMessages.ts).

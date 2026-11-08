@@ -1,14 +1,21 @@
-// The name a node's model goes by where a run is reported (the execution timeline, the 成果 view's run receipt) and in
-// a node's model chip when its model is not among the workspace's choices.
+// The name a node's model goes by where a run is reported (the execution timeline, the 成果 view's run receipt), in an
+// opened node's task card, and in a node's model chip when its model is not among the workspace's choices.
 //
-// A chat model is named by the workspace catalogue's label when the catalogue has it, else by its selector, as before.
+// A chat model goes by the catalogue's published name for it, as the node's model picker shows it (its entry on the
+// node's runtime first), else by a name read from its selector (shownChatModelName), never by the selector itself:
+// `bedrock.claude-opus-5-5` names the service AwwO reaches the model through, and AwwO never says which service runs a
+// model (owner decisions 2026-10-11). The picker lists a model by the same names (NodeModelPicker). Nor by the catalogue's
+// label, which the picker does not show either: it carries a free workspace's plan tag (` · Pro`, a hint for choosing a model,
+// not part of its name) and, for a connection's model, the connection's service and the model's id at that service
+// (connections.go), which for an AwwO 云端 connection is AwwO's own selector. A team connection's selector (byok_…) holds
+// no name: where the catalogue does not list it, the model is said to be missing, with just enough of it to tell two
+// apart.
 // A media model (image, video, 3D) is only ever named generically, in the reader's language: by the media catalogue's
 // name for it (图片 · 高清 / Image · HD), else by its kind (图片 / Image). Never by its id: `xt.seedream-5-pro` names the
 // service and the model family that produce it, and users see neither (owner decisions 2026-10-11, mediaCatalog.ts).
 //
 // Where a view has only a model's selector and none of a node's other fields (多人同屏's running AwwO Agents), a chat
-// model goes by the name the node's model picker shows it by, else by a name read from the selector (shownChatModelName),
-// never by the selector itself: `bedrock.claude-opus-5-5` names the service AwwO reaches the model through.
+// model goes by the same name (shownChatModelName), and a media model or an unlisted connection's model by none.
 import type { UiLocale } from '../locale';
 import { mediaKindOf, mediaModelLabel, type MediaCatalogue, type MediaKind } from './mediaCatalog';
 import { isMediaModelId } from './mediaModelIds';
@@ -47,24 +54,34 @@ export function mediaModelName(kind: MediaKind | null, model: string, media: Med
   return locale === 'zh' ? '媒体模型' : 'Media model';
 }
 
-/** The name a node's model is reported by; '' when the node has no model. */
+/** The name a node's model is reported by; '' when the node has no model. A chat model goes by the catalogue's name for
+ *  it on the node's own runtime, since workers configured apart may give one id to different models, else by the name
+ *  the picker shows it by (the picker offers each model once), read as a selector where it is one, else by a name read
+ *  from the selector (shownChatModelName). One no name can be read from (a team connection's selector, a value no
+ *  selector looks like) is said to be unnamed or missing from the catalogue (unnamedModelText); never shown as it is. */
 export function nodeModelName(node: ModelNamed, sources: ModelNameSources, locale: UiLocale): string {
   const model = modelOf(node);
   if (!model) return '';
   if (runsOnMediaModel(node)) return mediaModelName(mediaKindOf(node.agentKind ?? ''), model, sources.media, locale);
-  const entry = sources.models?.find(item => item.runtime === node.runtime && item.model === model);
-  if (entry?.label) return entry.label;
-  // A team connection's selector (byok_…) is not a name: say it is missing, with just enough of it to tell two apart.
-  if (/^byok_[a-zA-Z0-9_-]+$/.test(model)) return `${locale === 'zh' ? '当前目录未包含该模型' : 'Model not in current catalogue'} · ${model.slice(-8)}`;
-  return model;
+  const own = sources.models?.find(item => item.runtime === node.runtime && item.model === model);
+  return shownChatModelName(model, own ? { ...sources, models: [own] } : sources)
+    || unnamedModelText(model, Boolean(sources.models?.some(item => item.model === model)), locale);
+}
+
+/** What a chat model is called when no name can be read for it: one the catalogue lists by nothing but a selector that
+ *  holds no name is unnamed, one it does not list is missing from it; a team connection's either way with just enough of
+ *  its selector to tell two apart. Never the selector itself. */
+export function unnamedModelText(model: string, listed: boolean, locale: UiLocale): string {
+  const text = listed ? (locale === 'zh' ? '未命名的模型' : 'Unnamed model') : (locale === 'zh' ? '当前目录未包含该模型' : 'Model not in current catalogue');
+  return /^byok_[a-zA-Z0-9_-]+$/.test(model) ? `${text} · ${model.slice(-8)}` : text;
 }
 
 /** What a node's model chip shows when its model is not among the workspace's choices (a model it no longer offers): a
- *  media model by its kind, since the catalogue that would name it does not list it; any other model by its selector. */
-export function unlistedModelLabel(node: ModelNamed, locale: UiLocale): string | undefined {
-  const model = modelOf(node);
-  if (!model) return undefined;
-  return runsOnMediaModel(node) ? mediaModelName(mediaKindOf(node.agentKind ?? ''), model, null, locale) : model;
+ *  media model by its kind, since the catalogue that would name it does not list it; a chat model as a run report names
+ *  it (nodeModelName): by the catalogue's name where the catalogue lists it for the node's runtime only (a computer of
+ *  its own), else by a name read from its selector, never by the selector. */
+export function unlistedModelLabel(node: ModelNamed, locale: UiLocale, models?: readonly ModelPaletteSelection[]): string | undefined {
+  return nodeModelName(node, { models }, locale) || undefined;
 }
 
 /** A selector's route, region or vendor in front of the model: a leading word of letters alone before a dot (`bedrock.`,
@@ -81,16 +98,34 @@ const ROUTE = /^(?:[a-z]+\.|(?:bedrock|llmgate)[-_])/i;
 const providerPrefixed = (name: string): boolean => /^(?:bedrock|llmgate)[._-]\S*$/i.test(name)
   || (/^[a-z0-9][a-z0-9._:/-]*$/.test(name) && (ROUTE.test(name) || name.includes('/')));
 
+/** Whether a name is a selector that holds no name in any case: a team connection's (`byok_…`) or a media model's id
+ *  (`RH.Seedance-Pro`), as a catalogue relayed from another AwwO may name a connection's model by its own selector. */
+const nameless = (name: string): boolean => /^byok_/i.test(name) || isMediaModelId(name.toLowerCase());
+
+/** A chat model's name as a list of its choices gives it (a catalogue entry, a node's model picker's choice), read as a
+ *  selector where it is one (selectorModelName): the model's own selector, where the catalogue has no other name for it,
+ *  one with its route, region or vendor in front, as a connection names its models by the ids its service gives them
+ *  (AwwO 云端's are AwwO's own selectors, `bedrock.claude-opus-5-5`), or one that holds no name (nameless). '' for a
+ *  name that holds no name. */
+export function choiceModelName(name: string, model: string): string {
+  const shown = name.trim();
+  return shown === model || providerPrefixed(shown) || nameless(shown) ? selectorModelName(shown) : shown;
+}
+
+/** The name a list of choices shows a chat model by (the node's model picker, and the task card, which names its model
+ *  as the picker's chip does): its name read as a selector where it is one (choiceModelName), else a name read from
+ *  its selector, else unnamed (unnamedModelText); never a selector. */
+export function listedModelName(name: string, model: string, locale: UiLocale): string {
+  return choiceModelName(name, model) || selectorModelName(model) || unnamedModelText(model, true, locale);
+}
+
 /** The name the node's model picker shows a chat model by (CanvasSurface's chat model choices: the catalogue's published
- *  name, else its label), from the entry the picker lists it by, else from any of the catalogue's entries for it. A name
- *  that is a selector is read as one (selectorModelName): the model's own selector, where the catalogue has no other
- *  name for it, or one with its route, region or vendor in front, as a connection names its models by the ids its
- *  service gives them (AwwO 云端's are AwwO's own selectors, `bedrock.claude-opus-5-5`). '' when the catalogue has none. */
+ *  name, else its label), from the entry the picker lists it by, else from any of the catalogue's entries for it, read
+ *  as a selector where it is one (choiceModelName). '' when the catalogue has none. */
 export function pickerModelName(model: string, models: readonly ModelPaletteSelection[] | undefined): string {
   if (!model || !models?.length) return '';
   const entry = automaticEntries(models).find(item => item.model === model) ?? models.find(item => item.model === model);
-  const name = (entry?.displayName || entry?.label || '').trim();
-  return name === model || providerPrefixed(name) ? selectorModelName(name) : name;
+  return choiceModelName(entry?.displayName || entry?.label || '', model);
 }
 
 /** The longest name read from a selector (the catalogue's own names are at most 80 characters). */
@@ -122,11 +157,11 @@ export function selectorModelName(model: unknown): string {
   return name.length > SELECTOR_NAME_MAX ? `${name.slice(0, SELECTOR_NAME_MAX - 1).trimEnd()}…` : name;
 }
 
-/** A chat model's name for a view that has only its selector (多人同屏's running AwwO Agents): the name the node's model
- *  picker shows it by, else one read from the selector; never a selector with its route, region or vendor, which names
- *  the service AwwO reaches the model through. '' for no model, a media model (its id names the service that makes it,
- *  and even a generic name says nothing a person needs in one line) and a team connection's selector the catalogue does
- *  not name. */
+/** A chat model's name from its selector (多人同屏's running AwwO Agents, and a node's chat model wherever nodeModelName
+ *  names it): the name the node's model picker shows it by, else one read from the selector; never a selector with its
+ *  route, region or vendor, which names the service AwwO reaches the model through. '' for no model, a media model (its
+ *  id names the service that makes it, and even a generic name says nothing a person needs in one line) and a team
+ *  connection's selector the catalogue does not name. */
 export function shownChatModelName(model: unknown, sources: ModelNameSources): string {
   if (typeof model !== 'string' || !model.trim() || isMediaModelId(model.trim().toLowerCase())) return '';
   return pickerModelName(model, sources.models) || selectorModelName(model);

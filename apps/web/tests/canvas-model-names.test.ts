@@ -32,11 +32,12 @@ describe('the name a node’s model is reported by', () => {
     expect(mediaModelName(null, '', media, 'en')).toBe('Media model');
   });
 
-  it('keeps naming chat models as before: the catalogue label, a missing team connection, else the selector', () => {
+  it('names chat models as their picker does: the catalogue’s name, a missing team connection, else a name read from the selector', () => {
     expect(nodeModelName({ agentKind: 'llm', runtime: 'pi', model: 'bedrock.claude-opus-5-5' }, { models: chat }, 'en')).toBe('Claude Opus 5.5');
-    expect(nodeModelName({ agentKind: 'llm', runtime: 'claude_local', model: 'bedrock.claude-opus-5-5' }, { models: chat }, 'en')).toBe('bedrock.claude-opus-5-5');
+    // The picker offers a model once, whatever runtime a node is on; never the selector (saas-run-model-names).
+    expect(nodeModelName({ agentKind: 'llm', runtime: 'claude_local', model: 'bedrock.claude-opus-5-5' }, { models: chat }, 'en')).toBe('Claude Opus 5.5');
     expect(nodeModelName({ agentKind: 'coding', runtime: 'pi', model: 'byok_scope_x_12345678' }, {}, 'zh')).toBe('当前目录未包含该模型 · 12345678');
-    expect(nodeModelName({ agentKind: 'llm', runtime: 'pi', model: 'qwen3.8-27b-p6' }, {}, 'zh')).toBe('qwen3.8-27b-p6');
+    expect(nodeModelName({ agentKind: 'llm', runtime: 'pi', model: 'qwen3.8-27b-p6' }, {}, 'zh')).toBe('Qwen3.8 27B P6');
     expect(nodeModelName({ agentKind: 'llm', runtime: 'pi', model: '' }, { models: chat }, 'zh')).toBe('');
     expect(nodeModelName({ agentKind: 'image', model: undefined }, { media }, 'zh')).toBe('');
   });
@@ -48,10 +49,10 @@ describe('the name a node’s model is reported by', () => {
     expect(runsOnMediaModel({ agentKind: 'coding', model: 'bedrock.claude-opus-5-5' })).toBe(false);
   });
 
-  it('labels an unlisted model in a node’s chip by its kind for media, by its selector otherwise', () => {
+  it('labels an unlisted model in a node’s chip by its kind for media, by a name read from its selector otherwise', () => {
     expect(unlistedModelLabel({ agentKind: 'image', model: 'xt.seedream-5-pro' }, 'en')).toBe('Image');
     expect(unlistedModelLabel({ agentKind: 'video', model: 'xt.xtasy-v3' }, 'zh')).toBe('视频');
-    expect(unlistedModelLabel({ agentKind: 'llm', runtime: 'pi', model: 'qwen3.8-27b-p6' }, 'zh')).toBe('qwen3.8-27b-p6');
+    expect(unlistedModelLabel({ agentKind: 'llm', runtime: 'pi', model: 'qwen3.8-27b-p6' }, 'zh')).toBe('Qwen3.8 27B P6');
     expect(unlistedModelLabel({ agentKind: 'image', model: '' }, 'zh')).toBeUndefined();
   });
 

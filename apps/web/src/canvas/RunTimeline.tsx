@@ -121,7 +121,8 @@ export function RunTimeline({
   onClose: () => void;
   /** Inspect a recorded node without retrying or changing its execution. */
   onOpenNode?: (nodeId: string) => void;
-  /** A scope-checked catalogue lets cloud model selectors render as their public labels. */
+  /** A scope-checked catalogue names each model as the node's model picker does; without it (a reader's canvas, before
+   *  it arrives) a chat model is named from its selector, never shown as one (modelNames.ts). */
   modelCatalogue?: readonly ModelPaletteSelection[];
   /** The workspace's media catalogue, for the generic names of its image, video and 3D models. */
   mediaCatalogue?: MediaCatalogue | null;

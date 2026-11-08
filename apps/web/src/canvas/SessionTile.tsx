@@ -68,7 +68,7 @@ import { draftIsShared, readComposerDraft, writeComposerDraft } from './composer
 import { prepareNodeConversation, type NodeConversationContext } from './nodeConversation';
 import './awwo-node.css';
 import { NodeViewStylePicker } from './NodeViewStylePicker';
-import { currentChoiceKey, modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
+import { choiceText, currentChoiceKey, modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
 import { useSimpleCanvas } from './uiMode';
 import { CardPreview } from './CardPreview';
 import { showsPreview } from './cardFrames';
@@ -411,7 +411,8 @@ export interface SessionTileProps {
   onAskAssistant?: (nodeId: string, kind: 'edit' | 'fix') => void;
   /** Whether the opened node's delivery drawer sits beside its conversation (it opens by itself only then). */
   deliveryBeside?: boolean;
-  /** What the canvas names models by, for a node whose model its choices do not list (a read-only canvas). */
+  /** What the canvas names models by, for a node whose model its choices do not list (a read-only canvas, a model the
+   *  workspace no longer offers). Without it a chat model is named from its selector. */
   modelNames?: ModelNameSources;
 }
 
@@ -898,9 +899,11 @@ export const SessionTile = memo(function SessionTile({
   const outputAge = output ? relativeAge(output.at, Date.now(), locale) : '';
 
   const runDetail = run ? recoveryDetailMessage(t, run.detail, locale) : undefined;
-  // The model the node runs, as its picker names it (the task card says it); none when it runs the workspace default.
+  // The model the node runs, as its picker's chip names it (the task card says it), else as a run report names it; none
+  // when it runs the workspace default. Never by a selector: a choice named by one is read as one (choiceText).
+  const modelChoice = sessionNode?.model ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices)) : undefined;
   const modelLabel = sessionNode?.model
-    ? modelChoices?.find(choice => choice.key === currentChoiceKey(sessionNode, modelChoices))?.label || nodeModelName(sessionNode, modelNames ?? {}, locale)
+    ? (modelChoice ? choiceText(modelChoice, locale) : '') || nodeModelName(sessionNode, modelNames ?? {}, locale)
     : undefined;
   const badge = run ? runBadgeText(run, locale, t) : '';
   const showBody = lod !== 'glance';
@@ -1414,7 +1417,7 @@ export const SessionTile = memo(function SessionTile({
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={composerAccessory(node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
-                      ? <NodeModelPicker choices={modelChoices} value={currentChoiceKey(node, modelChoices)} currentLabel={unlistedModelLabel(node, locale)}
+                      ? <NodeModelPicker choices={modelChoices} value={currentChoiceKey(node, modelChoices)} currentLabel={unlistedModelLabel(node, locale, modelNames?.models)}
                         disabled={busy || readOnly || (Boolean(marketRef) && marketLocked)}
                         disabledReason={busy ? t('tile.taskRunning') : marketLocked ? (locale === 'zh' ? '这个 Agent 的作者锁定了模型' : 'The Agent’s author locked its model') : undefined}
                         onChange={key => onChangeModel(nodeId, key)} /> : null,
