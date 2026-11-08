@@ -156,6 +156,7 @@ import { ConvergedIcon } from './ConvergedIcon';
 import { loadIconView, nodeIconBox, saveIconView, withIconGeometry } from './nodeIcons';
 import { NodeIconTile } from './NodeIconTile';
 import type { CanvasMultiplayerHost, CanvasMultiplayerRebase } from './multiplayer/host';
+import { withOthersEdits, withOthersPaths, type OthersPaths } from './multiplayer/history';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
 import { DisplayLinks, DisplayTile, type DisplayChoice } from './DisplayTile';
@@ -761,6 +762,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   }, []);
   const undoStack = useRef<CanvasDocument[]>([]);
   const redoStack = useRef<CanvasDocument[]>([]);
+  // 多人同屏: for each undo and redo step, the paths others changed since it was taken (multiplayerRebase): an undo or redo
+  // leaves those as they made them (multiplayer/history.ts).
+  const othersSince = useRef(new WeakMap<CanvasDocument, OthersPaths>());
   const lastCommit = useRef<{ label: string; at: number } | null>(null);
   const [history, setHistory] = useState({ undo: 0, redo: 0 });
   const syncHistory = useCallback(() => {
@@ -924,24 +928,29 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     if (!prevDoc) return false;
     const overPlan = planStep.current?.isPlan() ?? false;
     const current = docRef.current;
+    // What someone else changed since the step stays theirs (multiplayer/history.ts).
+    const { doc: target, kept } = withOthersEdits(current, prevDoc, othersSince.current.get(prevDoc));
     undoStack.current = undoStack.current.slice(0, -1);
     redoStack.current = [...redoStack.current, current].slice(-HISTORY_LIMIT);
-    restoreDoc(prevDoc);
+    restoreDoc(target);
     syncHistory();
+    if (kept) setHandoffNote(surfaceNotice(t, 'undo_kept_others'));
     if (overPlan) planStep.current?.undone(current);
     return true;
-  }, [canEditStructure, restoreDoc, syncHistory]);
+  }, [canEditStructure, restoreDoc, syncHistory, t]);
 
   const redo = useCallback(() => {
     if (!canEditStructure()) return;
     const nextDoc = redoStack.current.at(-1);
     if (!nextDoc) return;
+    const { doc: target, kept } = withOthersEdits(docRef.current, nextDoc, othersSince.current.get(nextDoc));
     redoStack.current = redoStack.current.slice(0, -1);
     undoStack.current = [...undoStack.current, docRef.current].slice(-HISTORY_LIMIT);
-    restoreDoc(nextDoc);
+    restoreDoc(target);
     syncHistory();
+    if (kept) setHandoffNote(surfaceNotice(t, 'redo_kept_others'));
     planStep.current?.redone(nextDoc);
-  }, [canEditStructure, restoreDoc, syncHistory]);
+  }, [canEditStructure, restoreDoc, syncHistory, t]);
 
   useEffect(() => {
     // Another tab can clear the durable journal before this observer adopts its final
@@ -1102,11 +1111,17 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   const multiplayerRebase = useCallback((rebase: CanvasMultiplayerRebase) => {
     const prev = docRef.current;
     const next = rebase.working(prev);
-    // Undo and redo steps take others' changes only: this page's own saved edit stays theirs to take back.
+    // Undo and redo steps take others' changes only: this page's own saved edit stays theirs to take back. Each step also
+    // keeps the paths others changed (multiplayer/history.ts): one the page's own edit had changed too still holds the
+    // page's older value, which its undo must not put back over theirs.
+    const others = rebase.othersPaths ?? [];
     const carried = new globalThis.Map<CanvasDocument, CanvasDocument>();
     const carry = (step: CanvasDocument) => {
       let out = carried.get(step);
-      if (!out) { out = rebase.history(step); carried.set(step, out); }
+      if (!out) {
+        out = rebase.history(step); carried.set(step, out);
+        if (others.length) othersSince.current.set(out, withOthersPaths(othersSince.current.get(step), others));
+      }
       return out;
     };
     undoStack.current = undoStack.current.map(carry);

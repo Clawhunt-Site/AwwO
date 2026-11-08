@@ -112,6 +112,9 @@ export function heldOps(sent: readonly CanvasOp[], results: readonly OpResult[] 
 export interface CanvasRebase {
   working(doc: CanvasDocument): CanvasDocument;
   history(doc: CanvasDocument): CanvasDocument;
+  /** The paths others set or deleted in the move (their order ops left out): an undo or redo step taken before it goes
+   *  to its older value at none of them (multiplayer/history.ts). */
+  othersPaths: readonly (readonly string[])[];
 }
 
 /** A confirmed document's move: from `before` to `after` (both as the server holds them), by `changes` in version
@@ -174,8 +177,9 @@ export function rebaseFor({ before, after, changes = [], sent = [], own = () => 
     const read = sanitizeDocument(next);
     return { ...read, view: doc.view, updatedAt: doc.updatedAt };
   };
-  if (!steps.length && !sent.length) return { working: doc => doc, history: doc => doc };
-  return { working: doc => carry(doc, true), history: doc => steps.length ? carry(doc, false) : doc };
+  const othersPaths = steps.flatMap(({ moved }) => moved.flatMap(op => op.op === 'order' ? [] : [op.path]));
+  if (!steps.length && !sent.length) return { working: doc => doc, history: doc => doc, othersPaths };
+  return { working: doc => carry(doc, true), history: doc => steps.length ? carry(doc, false) : doc, othersPaths };
 }
 
 /** Whether two documents hold the same canvas, as a change would see it: each person's camera and clock are theirs. */

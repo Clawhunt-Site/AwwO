@@ -26,6 +26,8 @@ export type SurfaceNotice =
   | 'plan_interrupted'
   | 'plan_undone'
   | 'node_busy_edit'
+  | 'undo_kept_others'
+  | 'redo_kept_others'
   | 'node_already_running'
   | 'run_wait_others'
   | 'run_lanes_full'
@@ -52,6 +54,8 @@ const NOTICE_KEYS = {
   plan_interrupted: 'surface.planInterrupted',
   plan_undone: 'surface.planUndone',
   node_busy_edit: 'surface.nodeBusyEdit',
+  undo_kept_others: 'surface.undoKeptOthers',
+  redo_kept_others: 'surface.redoKeptOthers',
   node_already_running: 'surface.nodeAlreadyRunning',
   run_wait_others: 'surface.runWaitOthers',
   run_lanes_full: 'surface.runLanesFull',

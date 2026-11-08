@@ -10,6 +10,9 @@ import type { CanvasDocument, CanvasNode } from '../canvasDoc';
 export interface CanvasMultiplayerRebase {
   working(doc: CanvasDocument): CanvasDocument;
   history(doc: CanvasDocument): CanvasDocument;
+  /** The paths others set or deleted in this rebase: an undo or redo step taken before it does not put its older value
+   *  back at any of them (multiplayer/history.ts). None: an undo goes to its step whole. */
+  othersPaths?: readonly (readonly string[])[];
 }
 
 /** What the surface gives the host once it is ready for others' changes. */

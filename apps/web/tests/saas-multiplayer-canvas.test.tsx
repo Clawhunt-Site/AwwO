@@ -167,6 +167,37 @@ describe('a canvas page with 多人同屏', () => {
     expect(answers[1].ops).toEqual([{ op: 'del', path: created.path }]);
   }, 40000);
 
+  it('leaves on undo what someone else has changed since, and says so', async () => {
+    const answers: { baseVersion: number; ops: CanvasOp[] }[] = [];
+    let version = 3;
+    const view = openLive({
+      patch: body => {
+        answers.push(body);
+        version += 1;
+        return json({ version, results: body.ops.map(() => 'ok'), changes: [ownChange(version, body.ops, body.clientId)] });
+      },
+    });
+    await screen.findByTestId('canvas-tile-a');
+    await waitFor(() => expect(view.streams).toHaveLength(1));
+    const tiles = () => document.querySelectorAll('[data-testid^="canvas-tile-"].canvas-tile').length;
+    fireEvent.doubleClick(document.querySelector('.canvas-viewport')!, { clientX: 300, clientY: 300 });
+    await waitFor(() => expect(answers).toHaveLength(1), { timeout: 8000 });
+    const created = answers[0].ops.find(op => op.op === 'set' && op.path.length === 2 && op.path[0] === 'nodes')!;
+    const id = created.path[1];
+    // Someone else moves the node this page just added.
+    version += 1;
+    await act(async () => view.streams[0].push({ event: 'changes', data: change(version, [{ op: 'set', path: ['nodes', id, 'x'], value: 1234 }]) }));
+    await waitFor(() => expect(view.shown().nodes.find(node => node.id === id)?.x).toBe(1234));
+    await quiet(600);
+    // The undo would delete the node they have moved since: it stays, as they left it, and the page says why.
+    fireEvent.keyDown(window, { key: 'z', code: 'KeyZ', ctrlKey: true });
+    expect(await screen.findByText('已撤销；之后被他人改过的部分保留了他们的修改。')).toBeTruthy();
+    expect(tiles()).toBe(3);
+    await quiet(2500);
+    expect(answers).toHaveLength(1);
+    expect(view.shown().nodes.find(node => node.id === id)?.x).toBe(1234);
+  }, 40000);
+
   it('takes a change sent under its page id by another account as someone else’s', async () => {
     const view = openLive({ patch: () => json({ error: { code: 'unexpected' } }, 500) });
     await screen.findByTestId('canvas-tile-a');
