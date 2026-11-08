@@ -19,11 +19,13 @@ two AwwO agents on Claude Opus 5.5 make LOCKSTEP, a two-player puzzle game, on o
 Claude Code turns the person's brief into a Brief form, adds and wires the nodes its job lists and writes the build's
 instructions; Codex designs four levels and proves them with a solver it writes. The person steers in the live thread,
 picks the review's model, runs the two nodes left (the run's choice shown at real speed), plays the game and revokes
-the tokens. The two terminals are drawn from each CLI's own event stream. The page masks each token as it records; the
+the tokens. Each terminal starts with the panel's lines and the CLI's start command, shortened and typed in by the edit
+(the take gave Codex the same server settings as `-c` flags, not in its config file); the rest is drawn from each CLI's
+own event stream, with Claude Code's model id written as the model's name. The page masks each token as it records; the
 person's full account name, which the agents read in the live messages and the token list shows under "made by", is
-shown as their handle, and the panel's model id for a running AwwO agent as the model's own name (the Academy's
-videos name no provider), each written in the panel's own type wherever a pass over every frame the edit draws from finds the panel's
-rendering of it. Its poster is its title frame (`showcase/academy/multiplayer-lockstep.jpg`).
+shown as their handle, and the panel's model id for a running AwwO agent as the model's own name (the Academy's videos
+name no provider), each written in the panel's own type wherever a pass over every frame the edit draws from finds the
+panel's rendering of it. Its poster is its title frame (`showcase/academy/multiplayer-lockstep.jpg`).
 
 The two how-tos added on 2026-10-25 were recorded as the first four were (2026-10-17): on the live AwwO, in the workspace
 kept for them, in Chinese and simple mode, with the same tools and motion layer. One opens a node of a three-node canvas

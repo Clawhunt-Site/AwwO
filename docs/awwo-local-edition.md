@@ -139,7 +139,7 @@ npm run local
 
 首页 23 个生产案例（含 PALLWARD、THE LONG CHORD 与四个旗舰案例的运行记录、封面与媒体）、Academy 目录、画布模板、内置技能、角色市场和模型目录都随代码，构建时进入网页。
 
-Academy 的视频和《THE LONG CHORD》的成片太大，不在代码中。用 `--staged-videos` 下载后从本机播放；未下载时，本地版从线上公开副本播放这些视频（`local.env` 中 `AWWO_LOCAL_STAGED_FALLBACK=none` 可关闭，改为 404）。
+Academy 的视频和各个影片案例的成片太大，不在代码中。用 `--staged-videos` 下载后从本机播放；未下载时，本地版从线上公开副本播放这些视频（`local.env` 中 `AWWO_LOCAL_STAGED_FALLBACK=none` 可关闭，改为 404）。
 
 线上的账号、画布和运行记录不会自动复制到本地版；画布可以用线上的数据导出文件导入（见上文「数据管理」）。
 
