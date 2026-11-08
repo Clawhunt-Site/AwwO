@@ -13,6 +13,13 @@ narration, and quiet sound effects under the narration.
 | Inside the flagship cases (`flagship`) | 7 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
 | Build a case, step by step (`build`) | 18 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result; or, in the first, bring your own agents onto the canvas over MCP (Multiplayer) |
 
+The library opens with what is new (2026-11-08, the owner: 「所有更新的教程页面的都应该放在最前面」): 「最新」 / **New and
+updated**, before the three sections, lists every video added or updated within seven days of the newest one, newest
+first and in the catalog's order within a day. A video's day is its newest update's, else the day it was recorded.
+Those videos stay in their own sections too, so the numbered how-tos keep their order, and a section's own view shows
+only that section. It reads only the catalog, never the clock, so the latest release is always first (`academyLatest`
+in `academyCatalog.ts`).
+
 The first build video (`multiplayer-lockstep`, recorded 2026-11-07) walks through no homepage case: on the live AwwO, in
 the workspace kept for the cases, a person, the real Claude Code and Codex CLIs (each with its own token, over MCP) and
 two AwwO agents on Claude Opus 5.5 make LOCKSTEP, a two-player puzzle game, on one canvas. Each CLI gets a written job:

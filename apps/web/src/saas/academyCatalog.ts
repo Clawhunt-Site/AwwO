@@ -323,6 +323,27 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
       zh: '在线上 AwwO 重新录制第 3 步（给每个 Agent 分配工作）：现在 Agent 的「配置」里只需选模型，运行引擎由 AwwO 自动选择，讲解也随之更新。' } }] },
 ];
 
+/** A video's latest day: the day of its newest update (`changes` is newest first), else the day it was recorded. */
+export const academyLatestDay = (video: AcademyVideo): string => video.changes?.[0]?.on ?? video.recordedOn;
+
+/** How many days back from the newest video's latest day 「最新」 reaches. */
+export const ACADEMY_LATEST_DAYS = 7;
+
+const dayNumber = (day: string) => Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) / 86_400_000;
+
+/** 「最新」 / New and updated, the library's first section (owner 2026-11-08: 「所有更新的教程页面的都应该放在最前面」): every
+ *  video added or updated within ACADEMY_LATEST_DAYS of the newest one, by its latest day, newest first, and in the
+ *  catalog's order within a day. It reads only the catalog, never the clock: the newest release is always first. */
+export function academyLatest(videos: ReadonlyArray<AcademyVideo> = ACADEMY_VIDEOS): AcademyVideo[] {
+  if (!videos.length) return [];
+  const newest = Math.max(...videos.map(video => dayNumber(academyLatestDay(video))));
+  return videos
+    .map((video, index) => ({ video, index, day: dayNumber(academyLatestDay(video)) }))
+    .filter(item => newest - item.day < ACADEMY_LATEST_DAYS)
+    .sort((a, b) => b.day - a.day || a.index - b.index)
+    .map(item => item.video);
+}
+
 /** 6:15, 1:02:03. */
 export function academyDuration(seconds: number): string {
   const s = Math.round(seconds), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, rest = String(s % 60).padStart(2, '0');

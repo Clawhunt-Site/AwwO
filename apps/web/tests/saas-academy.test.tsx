@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AcademyLauncher, AcademyProvider, preloadAcademy } from '../src/saas/Academy';
-import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration } from '../src/saas/academyCatalog';
+import { ACADEMY_LATEST_DAYS, ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, academyLatest, academyLatestDay, type AcademyVideo } from '../src/saas/academyCatalog';
 import { academySearch, readAcademyLink } from '../src/saas/academyLink';
 import { caseURL, canOpenCase, openCase } from '../src/saas/caseLink';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
@@ -44,6 +44,8 @@ const openLibrary = async () => {
 };
 const cancel = (dialog: HTMLElement) => fireEvent(dialog, new Event('cancel', { cancelable: true }));
 const cardTitles = (scope: HTMLElement) => within(scope).getAllByRole('listitem').map(item => within(item).getByRole('heading', { level: 4 }).textContent);
+const SECTION_TITLES: Readonly<Record<AcademyVideo['section'], string>> = { start: 'Start here', flagship: 'Inside the flagship cases', build: 'Build a case, step by step' };
+const dayOf = (day: string) => Date.parse(`${day}T00:00:00Z`) / 86_400_000;
 
 // The dialog's part of the site, loaded up front as a launcher's hover loads it: the tests time behaviour, not the bundler.
 beforeAll(async () => { await preloadAcademy(); await import('../src/saas/ProductionShowcase'); }, 300_000);
@@ -63,6 +65,33 @@ it('lists every video once, by section, each staged by its checksum outside the 
   }
   expect(existsSync(resolve(WEB, 'showcase', 'staged'))).toBe(false);
   expect(ACADEMY_VIDEOS.filter(video => video.section === 'start')).toHaveLength(6);
+});
+
+// The owner (2026-11-08): 「所有更新的教程页面的都应该放在最前面」.
+it('puts the videos added or updated most recently first: within a week of the newest, newest first', () => {
+  for (const video of ACADEMY_VIDEOS) expect(academyLatestDay(video), video.id).toBe(video.changes?.[0]?.on ?? video.recordedOn);
+  const latest = academyLatest();
+  const newest = Math.max(...ACADEMY_VIDEOS.map(video => dayOf(academyLatestDay(video))));
+  expect(latest.length).toBeGreaterThan(0);
+  expect(dayOf(academyLatestDay(latest[0]))).toBe(newest);
+  expect(latest.map(video => video.id).sort()).toEqual(ACADEMY_VIDEOS
+    .filter(video => newest - dayOf(academyLatestDay(video)) < ACADEMY_LATEST_DAYS).map(video => video.id).sort());
+  const days = latest.map(video => dayOf(academyLatestDay(video)));
+  expect(days).toEqual([...days].sort((a, b) => b - a));
+});
+
+it('counts an update as a video’s latest day, keeps the catalog’s order within a day, and ends the week at seven days', () => {
+  const video = (id: string, recordedOn: string, updated?: string): AcademyVideo => ({ ...ACADEMY_VIDEOS[0], id, recordedOn, notes: undefined,
+    changes: updated ? [{ on: updated, text: { en: 'Recorded again.', zh: '重新录制。' } }] : undefined });
+  const catalog = [
+    video('old', '2026-01-01'),
+    video('updated', '2026-01-01', '2026-02-10'),
+    video('same-day', '2026-02-10'),
+    video('six-days-older', '2026-02-04'),
+    video('seven-days-older', '2026-02-03'),
+  ];
+  expect(academyLatest(catalog).map(item => item.id)).toEqual(['updated', 'same-day', 'six-days-older']);
+  expect(academyLatest([])).toEqual([]);
 });
 
 it('walks through homepage cases in the homepage’s order, one video a case, each with a poster on disk', () => {
@@ -206,9 +235,11 @@ it('opens from its button on the videos by section, filters them, plays one, and
   expect(dialog).toHaveAttribute('lang', 'en');
   expect(window.location.search).toBe('?academy');
   expect(within(dialog).getByText(new RegExp(`^${ACADEMY_VIDEOS.length} videos, ${Math.round(ACADEMY_VIDEOS.reduce((sum, video) => sum + video.seconds, 0) / 60)} minutes in all, every one recorded on the live AwwO`))).toBeVisible();
+  // New and updated videos first (they are in their sections too), then the three sections with every video once.
   const sections = within(dialog).getAllByRole('region');
-  expect(sections.map(section => within(section).getByRole('heading', { level: 3 }).textContent)).toEqual(['Start here', 'Inside the flagship cases', 'Build a case, step by step']);
-  expect(sections.reduce((sum, section) => sum + within(section).getAllByRole('listitem').length, 0)).toBe(ACADEMY_VIDEOS.length);
+  expect(sections.map(section => within(section).getByRole('heading', { level: 3 }).textContent)).toEqual(['New and updated', 'Start here', 'Inside the flagship cases', 'Build a case, step by step']);
+  expect(cardTitles(sections[0])).toEqual(academyLatest().map(video => video.title.en));
+  expect(sections.slice(1).reduce((sum, section) => sum + within(section).getAllByRole('listitem').length, 0)).toBe(ACADEMY_VIDEOS.length);
   // The library loads posters only; no video until one is opened.
   expect(dialog.querySelector('video')).toBeNull();
   for (const image of dialog.querySelectorAll('img')) expect(image).toHaveAttribute('loading', 'lazy');
@@ -319,6 +350,23 @@ it('opens from a link, on the video it names, which waits for its play button; a
   expect(await loaded(TITLE)).toBeVisible();
 });
 
+it('shows New and updated first in the whole library only, in Chinese too', async () => {
+  library('zh');
+  fireEvent.click(screen.getByRole('button', { name: '教程' }));
+  const dialog = await loaded('从真实画布学会 AwwO');
+  const first = within(dialog).getAllByRole('region')[0];
+  expect(within(first).getByRole('heading', { level: 3 })).toHaveTextContent('最新');
+  expect(within(first).getByText('最近上线或更新的视频，最新的在前。')).toBeVisible();
+  expect(cardTitles(first)).toEqual(academyLatest().map(video => video.title.zh));
+  // A section's own view shows only that section.
+  fireEvent.click(within(dialog).getByRole('button', { name: /^跟着做/ }));
+  expect(within(dialog).getAllByRole('region')).toHaveLength(1);
+  expect(within(dialog).queryByRole('heading', { level: 3, name: '最新' })).toBeNull();
+  // Back to the whole library: first again.
+  fireEvent.click(within(dialog).getByRole('button', { name: /^全部/ }));
+  expect(within(within(dialog).getAllByRole('region')[0]).getByRole('heading', { level: 3 })).toHaveTextContent('最新');
+});
+
 it('reads in Chinese in the Chinese interface, the case names in English', async () => {
   library('zh');
   fireEvent.click(screen.getByRole('button', { name: '教程' }));
@@ -349,11 +397,14 @@ it('marks an updated video on its card and lists its updates beside it, in Engli
   expect([short('2026-10-24', 'en'), short('2026-10-24', 'zh')]).toEqual(['24 Oct', '10月24日']);
   library();
   const dialog = await openLibrary();
-  const card = within(dialog).getByRole('button', { name: updated.title.en });
+  // Its card in its own section (an updated video can also be in New and updated, at the top).
+  const own = within(dialog).getByRole('region', { name: SECTION_TITLES[updated.section] });
+  const card = within(own).getByRole('button', { name: updated.title.en });
   expect(card).toHaveAccessibleDescription(`Updated ${short(latest.on, 'en')} ${updated.summary.en}`);
   expect(within(card.closest('li')!).getByText(`Updated ${short(latest.on, 'en')}`)).toBeVisible();
-  // Only updated videos carry the mark.
-  expect(within(dialog).getAllByText(/^Updated /)).toHaveLength(ACADEMY_VIDEOS.filter(video => video.changes?.length).length);
+  // Only updated videos carry the mark: once in their section, and once more if they are among New and updated.
+  expect(within(dialog).getAllByText(/^Updated /)).toHaveLength(ACADEMY_VIDEOS.filter(video => video.changes?.length).length
+    + academyLatest().filter(video => video.changes?.length).length);
   fireEvent.click(card);
   const updates = within(dialog).getByRole('region', { name: 'Updates' });
   expect(within(updates).getAllByRole('listitem')).toHaveLength(updated.changes!.length);

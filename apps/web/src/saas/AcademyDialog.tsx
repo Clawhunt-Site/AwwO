@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { ArrowLeft, ArrowRight, GraduationCap, Play, RotateCcw, X } from 'lucide-react';
 import { localeHtmlLang, type UiLocale } from '../locale';
 import { useSaaSPreferences } from './preferences';
-import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, type AcademyChange, type AcademyNote, type AcademySection, type AcademyVideo } from './academyCatalog';
+import { ACADEMY_SECTIONS, ACADEMY_VIDEOS, academyDuration, academyLatest, type AcademyChange, type AcademyNote, type AcademySection, type AcademyVideo } from './academyCatalog';
 import { PRODUCTION_CASES, type ProductionCase } from './productionCatalog';
 import { canOpenCase, caseURL, openCase, subscribeCaseOpeners } from './caseLink';
 import { currentSaaSCanvas, subscribeSaaSCanvas } from './canvasBridge';
@@ -24,6 +24,11 @@ const SECTION_COPY: Readonly<Record<AcademySection, { title: [string, string]; c
     note: ['打开案例，看它是怎么做出来的，把画布复制成草稿，再用它交付的成品。英文讲解，中英字幕。', 'Open the case, see how it was made, copy its canvas as a draft and use what it delivered. English narration, with English and Chinese subtitles.'] },
   build: { title: ['跟着做一个案例', 'Build a case, step by step'], chip: ['跟着做', 'Build a case'],
     note: ['按四个部分写需求，让画布助手搭好团队；或者说清要交付什么，再通过 MCP 请来你自己的 Agent。然后运行画布，试用它做出的成品。英文讲解，中英字幕。', 'Write the request in four parts and let the canvas assistant build the team, or say what to deliver and bring your own agents in over MCP; then run the canvas and try what it made. English narration, with English and Chinese subtitles.'] },
+};
+/** The library's first section, before the three: what was added or updated most recently (academyLatest). */
+const LATEST_COPY: Readonly<{ title: [string, string]; note: [string, string] }> = {
+  title: ['最新', 'New and updated'],
+  note: ['最近上线或更新的视频，最新的在前。', 'The videos added or updated most recently, newest first.'],
 };
 const pick = (copy: [string, string], t: T) => t(copy[0], copy[1]);
 
@@ -68,12 +73,18 @@ function Lead({ t }: { t: T }) {
 function Library({ filter, setFilter, locale, t, onPlay }: { filter: Filter; setFilter: (value: Filter) => void; locale: UiLocale; t: T; onPlay: (video: AcademyVideo) => void }) {
   const count = (section: AcademySection) => ACADEMY_VIDEOS.filter(video => video.section === section).length;
   const shown = filter === 'all' ? ACADEMY_SECTIONS : [filter];
+  // New and updated videos come first (they stay in their own sections below too); a section's own view shows only it.
+  const latest = filter === 'all' ? academyLatest() : [];
   return <>
     <div className="academy-filters" role="group" aria-label={t('显示', 'Show')}>
       <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>{t('全部', 'All')}<span>{ACADEMY_VIDEOS.length}</span></button>
       {ACADEMY_SECTIONS.map(section => <button key={section} type="button" aria-pressed={filter === section} onClick={() => setFilter(section)}>
         {pick(SECTION_COPY[section].chip, t)}<span>{count(section)}</span></button>)}
     </div>
+    {latest.length > 0 && <section className="academy-section is-latest" aria-labelledby="academy-section-latest">
+      <header><h3 id="academy-section-latest">{pick(LATEST_COPY.title, t)}</h3><p>{pick(LATEST_COPY.note, t)}</p></header>
+      <ul role="list" className="academy-grid">{latest.map(video => <VideoCard key={video.id} video={video} locale={locale} t={t} onPlay={onPlay} />)}</ul>
+    </section>}
     {shown.map(section => <section key={section} className={`academy-section is-${section}`} aria-labelledby={`academy-section-${section}`}>
       <header><h3 id={`academy-section-${section}`}>{pick(SECTION_COPY[section].title, t)}</h3><p>{pick(SECTION_COPY[section].note, t)}</p></header>
       <ul role="list" className="academy-grid">{ACADEMY_VIDEOS.filter(video => video.section === section)
