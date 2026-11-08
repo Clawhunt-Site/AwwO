@@ -461,18 +461,20 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
 .saas-login > :is(.saas-preferences, .saas-login-brand) :focus-visible { outline-color: var(--saas-tank-focus, #6cc6c8); }
 
 /* ── Workspace home: one prompt, recent canvases, cases ─────────────────────────────────────── */
-/* The main site's AwwO welcome: the orb, the workspace as a lit pill, the condensed title, the composer
+/* The main site's AwwO welcome: the head, the workspace as a lit pill, the condensed title, the composer
    that glows teal while you write, and suggestions as tiles. */
 .saas-home-hero { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 820px; margin: 56px auto 8px; text-align: center; }
-.saas-home-orb {
-  position: relative; width: 96px; aspect-ratio: 1; margin: 0 0 18px; border-radius: 50%;
-  background:
-    radial-gradient(circle at 33% 25%, rgb(255 255 255 / 95%) 0 2.5%, rgb(255 255 255 / 0%) 13%),
-    radial-gradient(circle at 50% 57%, rgb(var(--saas-orb-hi-rgb, 236 253 255) / 95%) 0 4%, rgb(var(--saas-glow-1-rgb, 95 227 232) / 75%) 12%, rgb(var(--saas-glow-2-rgb, 118 100 236) / 32%) 34%, transparent 58%),
-    radial-gradient(circle at 50% 50%, var(--saas-orb-core, #12385a) 0 46%, var(--saas-orb-edge, #0a1c33) 72%);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%), inset -6px -10px 18px rgb(0 0 0 / 38%), 0 18px 40px -18px rgb(var(--saas-glow-1-rgb, 63 214 224) / 60%);
+/* The head (home/HomeHead.tsx) is the loading pages' head, drawn by saas.html's .awwo-boot-* rules (96 px, the plate,
+   the collar, the face, the chin light; dark styles' rim; forced colours), at rest: no arc goes round. Its own loops
+   replace the boot head's 2.2 s gaze and 4.4 s blink (these selectors outrank theirs): a glance to each side now and
+   then and a blink, out of step, so it looks alive and never busy. Still under reduced motion, as the boot head is. */
+.saas-home-head { margin: 0 0 18px; }
+@media (prefers-reduced-motion: no-preference) {
+  .saas-home-head .awwo-boot-gaze { animation: saas-home-glance 9s cubic-bezier(.45, 0, .55, 1) infinite; }
+  .saas-home-head .awwo-boot-blink { animation: saas-home-blink 5.6s linear 1.2s infinite; }
 }
-.saas-home-orb::after { content: ''; position: absolute; inset: 41% -22%; border-radius: 50%; border: 1px solid rgb(var(--saas-orb-ring-rgb, 169 155 255) / 55%); transform: rotate(-10deg); }
+@keyframes saas-home-glance { 0%, 30%, 86%, 100% { translate: 0 0; } 38%, 50% { translate: -7% 1%; } 58%, 72% { translate: 7% 1%; } }
+@keyframes saas-home-blink { 0%, 91%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.12); } }
 .saas-home-workspace {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 28px; margin: 0 0 16px; padding: 0 12px;
   border: 0; border-radius: var(--saas-radius-pill); background: color-mix(in oklab, var(--saas-bio) 12%, transparent);
@@ -725,7 +727,8 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-dashboard .saas-account-actions > select { max-width: 150px; }
   .saas-home-hero { margin: 32px 0 8px; }
   .saas-home-hero h1 { font-size: 34px; }
-  .saas-home-orb { width: 72px; margin-bottom: 14px; }
+  /* Two classes: saas.html's .awwo-boot-head sets 96 px, and must not win by coming later in the page. */
+  .saas-home-head.awwo-boot-head { width: 72px; height: 72px; margin-bottom: 14px; }
   .saas-home-lead { margin: 10px 0 20px; font-size: var(--saas-text-md); }
   .saas-home-composer { padding: 10px 8px 8px 12px; border-radius: 20px; }
   .saas-home-composer textarea { min-height: 88px; font-size: 16px; }
