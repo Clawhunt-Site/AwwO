@@ -37,6 +37,9 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
   (rea-app-reading, self-test-oracle).
 - Media models are shown to users by generic names only, so skills never name vendors or model brands.
 - Concrete numbers beat adjectives. Give the method as steps or tables and end with a short checklist.
+- Motion numbers come from AwwO's one motion language (`MOTION.md`, values in `apps/motion-tokens.json`): curves,
+  durations and springs by their names. `TestBuiltinSkillsSpeakOneMotionLanguage` fails on any other curve or any
+  unnamed stiffness and damping pair; only the skills converted verbatim from wshobson/agents are left as they are.
 - Write in our own words. Sources that are "ideas only" (no licence, or a licence that forbids reuse) are never
   quoted. Apache-2.0 or MIT material may be adapted; say so in `attribution`, and keep the matching entry in
   `THIRD_PARTY_NOTICES.md`.

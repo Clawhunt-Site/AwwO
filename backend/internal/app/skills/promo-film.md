@@ -6,7 +6,7 @@ description: Use when planning or reviewing a 15–90 second product, feature or
 description_zh: 规划或审阅 15–90 秒的产品、功能或发布视频时使用：能量曲线、按品牌气质选择动效参数、可读字号、停留时长与卡点。
 category: video
 applies: video,motion,plan
-version: 1
+version: 2
 attribution: Adapted from video-shotcraft by Vincentwei1021 (Apache-2.0, Copyright 2026 Wei Yihao); modified for AwwO
 ---
 # Promo film pacing
@@ -24,7 +24,9 @@ A promo film earns attention in the first seconds, proves one idea, and leaves t
 
 Put dense, document-like shots second or third from last, never first. Each visual technique stars once per film; repeating the same trick flattens the climb.
 
-## Motion presets by brand character (30 fps)
+## Motion character (30 fps)
+
+Pick one: it sets the entrance curve and main move; the film's motion language sets the rest.
 
 | Character | Main move | Entrance curve | Overshoot | Squash |
 | --- | --- | --- | --- | --- |
@@ -32,7 +34,7 @@ Put dense, document-like shots second or third from last, never first. Each visu
 | Premium | ~48 frames | (0.4, 0, 0.6, 1) | ≤ 2% | 0 |
 | Bold / games | ~18 frames | (0.16, 1, 0.3, 1) | 12% | 0.25 |
 | Playful | ~27 frames | (0.34, 1.56, 0.64, 1) | 8% | 0.18 |
-| Calm / health | ~42 frames | symmetric ease-in-out | none | ≤ 0.04 |
+| Calm / health | ~42 frames | (0.65, 0, 0.35, 1) | none | ≤ 0.04 |
 | Friendly | ~26 frames | (0.25, 0.46, 0.45, 0.94) | 4% | 0.08 |
 
 ## Holds and readability
@@ -40,7 +42,7 @@ Put dense, document-like shots second or third from last, never first. Each visu
 - Hold the wordmark at least 30 frames; leave at least 15 still frames after a batch of animation ends; give the opening hero at least 3 seconds.
 - A breathing title card lasts 50–55 frames; use one per one or two feature shots, two to four per film.
 - Reserve hold frames before animating. Feedback on promos almost always asks for slower, rarely faster.
-- At 1080p, narration-size text is at least 56 px tall on screen and secondary text at least 32 px, measured after every scale applied to it. Text is either readable or deliberately blurred texture, never in between.
+- At 1080p, narration-size text is at least 56 px tall on screen and secondary text 32 px, after every scale. Text is either readable or deliberately blurred texture, never in between.
 - Keep 96 px margins; the product UI fills 50–75% of the frame width.
 - Captions stay clear of the bottom edge on social formats (about 160 px landscape, about 570 px portrait).
 
@@ -48,8 +50,8 @@ Put dense, document-like shots second or third from last, never first. Each visu
 
 - Fit a steady beat grid to the music (one tempo, one start time) and place cuts on beats; full-frame hits at most three per film, at least 16 beats apart.
 - Change layout on the bar, not on every beat.
-- Background music fades in over 1 second and out over the last 1.5 seconds; sound effects sit 6–12 dB under the music unless they are the moment.
-- The outro phrase: a riser, the loudest impact about a second later, a soft sparkle under the logo.
+- Music fades in over 1 s and out over the last 1.5 s; sound effects sit 6–12 dB under it unless they are the moment.
+- Outro: a riser, the loudest hit about a second later, a soft sparkle under the logo.
 - Every audio edit gets a short fade (a few milliseconds); no hard digital stops.
 
 ## Review checklist

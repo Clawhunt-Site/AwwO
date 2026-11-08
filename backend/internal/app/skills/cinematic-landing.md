@@ -47,7 +47,7 @@ Every visible element gets numbers: its size at each breakpoint as a `clamp()`, 
 
 ## Motion
 
-- Entrances follow the reading order, navigation first, then eyebrow, headline, subline, actions and strip, 0.1-0.2 s apart and all settled by about 1.5 s. Each piece fades from 0 while rising 20-30 px, optionally unblurring from 10 px, over 0.6-1.1 s on motion-discipline's entering curve, `cubic-bezier(0, 0, 0, 1)`: a staged entrance, the one place its over-500 ms durations belong.
+- Entrances follow the reading order, navigation first, then eyebrow, headline, subline, actions and strip, 0.1-0.2 s apart and all settled by 1.5 s. Each piece fades from 0 while rising 20-30 px, optionally unblurring from 10 px, over 0.6-1.1 s on motion-discipline's enter curve, `cubic-bezier(0.16, 1, 0.3, 1)`: a staged entrance, the one place its over-500 ms durations belong.
 - One headline treatment per page: words unblurring in turn (80-100 ms apart), lines rising out of a mask, or letters sliding in (30 ms apart).
 - Below the hero, reveal each block once as it enters view: 20-30 px over 300-500 ms, 0.1 s between siblings. Hover stays small (scale up to 1.05 over 150-200 ms); a press scales to 0.97.
 - Still: backgrounds, decoration and the headline once it has landed. The footage supplies the ambient movement.
