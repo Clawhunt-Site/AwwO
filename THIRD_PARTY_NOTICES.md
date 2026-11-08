@@ -82,6 +82,25 @@ two gripper rows - each as that asset's own metadata records it. Should a later 
 text or ship any of its files, that is adapted or redistributed material and belongs in the table above with its
 license text under `third_party/adapted/`.
 
+Read on 2026-11-08, ideas only: two posts on X, one by @Justin1024go listing eight small component libraries and one
+by @abir35627 announcing the MotionSites skill, and what they point to. Looseleaf (kevintngo/looseleaf, commit
+4bdb647940e2fefb3cebb394f3bad25c766a27d2, MIT, Copyright (c) 2026 Looseleaf contributors), PlopUI (Snorlark/plop-ui,
+commit ab9c1f97e84d05ff200968bcd92f170aed511ef2, MIT, Copyright (c) 2026 Lark Sigmuond Babao), Inkra (inkrajs/inkra,
+commit f5f5a2a6d807871fb4ea556d3ae0c03bbd12da0c, MIT, Copyright (c) 2026 Inkra contributors), goopUI
+(Tmmcmasters/goopui, commit c212e7285069b48f38bb34d149114d718df593ef, MIT, Copyright (c) 2026 Timothy McMasters) and
+Solid Glass (deeplethe/solid-glass, commit 6e8903e494a15491ceda38fafea5056c95a74d44, MIT, Copyright (c) 2026
+DeepLethe) informed `backend/internal/app/skills/tactile-materials.md`. Solid Glass's agent components and the public
+home pages of affectUI and BoardUI (both partly paid; nothing behind a purchase was read) informed
+`agent-workbench-ui.md`. The MotionSites Web Builder skill (Motionsites-AI/claude-skill, commit
+faa30d512e3973e58675c72101a7ef42ed37ae83; its instructions are MIT, Copyright (c) 2026 MotionSites, while its example
+prompts and media remain (c) MotionSites and were not used) and Prestige UI's public home page informed
+`cinematic-landing.md`. None of these libraries can load in a page AwwO delivers, so the skills describe their looks
+and methods in AwwO's own words, rebuilt from what AwwO's previews keep; a few numbers are the sources' own figures
+(the dark glass pane at 5% white with a 16% top edge, an 8 px hatching period, context gauges turning at 70% and 90%).
+No text, code, prompt or media is copied, so the three `attribution:` lines are empty and
+`scripts/build-skill-licences.mjs` carries no entry for them. A comparison of the three skills with every text file
+of those commits, both posts and the pages read finds no run of five words in common.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
