@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { CanvasResults, type CanvasResultsProps } from '../src/canvas/CanvasResults';
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
-import { createSessionNode, emptyDocument, loadDocumentWithStatus, saveDocument, type CanvasEdge, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
+import { createSessionNode, emptyDocument, loadDocumentWithStatus, saveDocument, type CanvasDocument, type CanvasEdge, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
+import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../src/canvas/multiplayer/host';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
+import { outsideAct } from './draw-gap';
 
 const now = Date.now();
 const page = '<!doctype html><html><head><title>狐狸邮差</title></head><body><h1>Saved game page</h1></body></html>';
@@ -189,6 +192,56 @@ describe('the 成果 view', () => {
     expect(steps.getByRole('button', { name: '查看「可玩试玩关」的交付（成果 · 运行中）' })).toHaveTextContent('运行中');
     expect(steps.getByRole('button', { name: '查看「试玩验收」的交付（等待中）' })).toHaveTextContent('等待中');
   });
+
+  // Someone else's change (多人同屏) reaches the page in a draw no input of its own asked for, and React runs that draw's
+  // effects in a later task. A step picked in between is the reader's choice, kept and shown.
+  describe('as someone else changes the steps', () => {
+    type Steps = { nodes: CanvasNode[]; edges: CanvasEdge[] };
+    /** The board's stand-in: its steps change from outside, and it counts the effects run of its draws. */
+    function Board({ effects, change }: { effects: { ran: number }; change: { to?: (next: Steps) => void } }) {
+      const [doc, setDoc] = useState<Steps>(pipeline);
+      change.to = setDoc;
+      useEffect(() => { effects.ran++; }, [doc, effects]);
+      return <CanvasResults nodes={doc.nodes} edges={doc.edges} runs={{}} running={false} readOnly={false} onOpenNode={vi.fn()} onBack={vi.fn()} />;
+    }
+    const withoutDesign = (): Steps => {
+      const { nodes, edges } = pipeline();
+      return { nodes: nodes.filter(node => node.id !== 'design'), edges: edges.filter(edge => edge.fromNode !== 'design') };
+    };
+    const stepButton = (title: string) => within(screen.getByRole('complementary', { name: '怎么做出来的' }))
+      .getByRole('button', { name: new RegExp(`^查看「${title}」的交付`) });
+
+    it('keeps a step picked right after the draw that took the step shown away, before that draw’s effects have run', async () => {
+      const effects = { ran: 0 };
+      const change: { to?: (next: Steps) => void } = {};
+      render(<Board effects={effects} change={change} />);
+      fireEvent.click(stepButton('玩法与数值'));
+      expect(screen.getByRole('article', { name: '玩法与数值' })).toBeVisible();
+      let effectsAtThePick = -1;
+      await outsideAct(() => {
+        if (screen.queryByRole('article', { name: '玩法与数值' })) return false;
+        effectsAtThePick = effects.ran;
+        stepButton('试玩验收').click();
+        return true;
+      }, () => change.to!(withoutDesign()));
+      // Picked before the effects of the draw that took 玩法与数值 away ran (1, the first draw's), which have run since (2).
+      expect([effectsAtThePick, effects.ran]).toEqual([1, 2]);
+      expect(screen.getByRole('article', { name: '试玩验收' })).toBeVisible();
+      expect(stepButton('试玩验收')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('forgets a step that went away: drawn again, the result is still the one shown', () => {
+      const effects = { ran: 0 };
+      const change: { to?: (next: Steps) => void } = {};
+      render(<Board effects={effects} change={change} />);
+      fireEvent.click(stepButton('玩法与数值'));
+      act(() => change.to!(withoutDesign()));
+      expect(screen.getByRole('article', { name: '可玩试玩关' })).toBeVisible();
+      act(() => change.to!(pipeline()));
+      expect(stepButton('玩法与数值')).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('article', { name: '可玩试玩关' })).toBeVisible();
+    });
+  });
 });
 
 describe('the canvas with a 成果 view', () => {
@@ -251,5 +304,36 @@ describe('the canvas with a 成果 view', () => {
   it('offers no 成果 view where the host has none (the desktop app)', () => {
     render(<CanvasSurface planRequest={vi.fn<typeof requestCanvasPlan>()} />);
     expect(viewSwitch()).toBeNull();
+  });
+
+  // 多人同屏: the host hands the surface someone else's change as it arrives (a stream's message), so the page draws it
+  // in a task of its own and runs that draw's effects (the document's save among them) in a later one. (A draw that
+  // renders the board's cards right after their mount runs its effects at once instead: React finishes it with a sync
+  // pass for the no-op updates the cards' layout effects queued. Someone else's earlier change has drawn the cards.)
+  it('keeps a step the reader picks as someone else’s deletion of the step shown is drawn, before that draw’s effects', async () => {
+    let surface: CanvasMultiplayerSurface | null = null;
+    const host: CanvasMultiplayerHost = { connect: next => { surface = next; }, presence: () => undefined };
+    render(<CanvasSurface multiplayer={host} results={{ initialView: 'results' }} planRequest={vi.fn<typeof requestCanvasPlan>()} />);
+    const stepButton = (title: string) => within(screen.getByRole('complementary', { name: '怎么做出来的' }))
+      .getByRole('button', { name: new RegExp(`^查看「${title}」的交付`) });
+    fireEvent.click(stepButton('玩法与数值'));
+    expect(screen.getByRole('article', { name: '玩法与数值' })).toBeVisible();
+    // Someone else moves the steps on the board, then deletes the one this reader has open.
+    const moved = (doc: CanvasDocument) => ({ ...doc, nodes: doc.nodes.map(node => ({ ...node, x: node.x + 40 })) });
+    await act(async () => { surface!.rebase({ working: moved, history: moved }); });
+    expect(loadDocumentWithStatus().doc.nodes.map(node => node.x)).toEqual([40, 40, 40]);
+    const deleted = (doc: CanvasDocument) => ({ ...doc, nodes: doc.nodes.filter(node => node.id !== 'design'), edges: doc.edges.filter(edge => edge.fromNode !== 'design') });
+    let savedAtThePick: string[] = [];
+    await outsideAct(() => {
+      if (screen.queryByRole('article', { name: '玩法与数值' })) return false;
+      savedAtThePick = loadDocumentWithStatus().doc.nodes.map(node => node.id);
+      stepButton('试玩验收').click();
+      return true;
+    }, () => surface!.rebase({ working: deleted, history: deleted }));
+    // Picked before that draw's effects ran: the document saved then still held the deleted step; it is saved without it since.
+    expect(savedAtThePick).toEqual(['design', 'build', 'review']);
+    expect(loadDocumentWithStatus().doc.nodes.map(node => node.id)).toEqual(['build', 'review']);
+    expect(screen.getByRole('article', { name: '试玩验收' })).toBeVisible();
+    expect(stepButton('试玩验收')).toHaveAttribute('aria-pressed', 'true');
   });
 });

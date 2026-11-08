@@ -93,9 +93,15 @@ export function CanvasResults({ nodes, edges, execution, runs, running, readOnly
       root.current?.querySelector<HTMLElement>('.awwo-results-stage button[aria-pressed="true"]')?.focus();
     });
   };
-  // A step that went away (deleted, or the canvas changed) falls back to the result.
+  // A step that went away (deleted, or the canvas changed) falls back to the result, and is forgotten. Asked, as before,
+  // only when this draw's step is gone, but judged on the step chosen as React applies the reset: the effect can run a
+  // task after the draw that took the step away (someone else's change, which no input of this page drew), and a step
+  // picked in between is the reader's.
   const selected = (chosen && steps.find(step => step.node.id === chosen)) || result.final;
-  useEffect(() => { if (chosen && !steps.some(step => step.node.id === chosen)) setChosen(null); }, [chosen, steps]);
+  useEffect(() => {
+    const gone = (id: string | null) => Boolean(id) && !steps.some(step => step.node.id === id);
+    if (gone(chosen)) setChosen(current => gone(current) ? null : current);
+  }, [chosen, steps]);
   const showingFinal = Boolean(selected && result.final && selected.node.id === result.final.node.id);
   const stageOf = (step: StepDelivery) => result.stages.findIndex(stage => stage.includes(step)) + 1;
   const tracked = Object.values(runs);
