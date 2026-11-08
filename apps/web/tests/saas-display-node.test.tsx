@@ -12,6 +12,7 @@ import {
   placeDisplayBeside, sanitizeDisplays, stepZoom, type DisplayNode,
 } from '../src/canvas/displayNodes';
 import { canvasPlanRevision } from '../src/canvas/canvasPlan';
+import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../src/canvas/multiplayer/host';
 import { canonicalCanvasDocumentJSON } from '../src/saas/canvasDraft';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { studioGroups } from '../src/canvas/studio/studioModel';
@@ -373,5 +374,84 @@ describe('displays on the canvas', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '预览展示' }));
     await waitFor(() => expect(stored().displays).toHaveLength(1));
     expect(stored().displays![0].source).toEqual({ type: 'canvas' });
+  });
+
+  // 多人同屏: the host hands the surface someone else's change as it arrives (a stream's message), so the page draws it
+  // in a task of its own and runs that draw's effects (the document's save among them) in a later one. A display pressed
+  // in between is the reader's selection. (A draw that renders the cards right after their mount runs its effects at once
+  // instead: React finishes it with a sync pass for the no-op updates the cards' layout effects queued, so someone else
+  // has moved the cards first.)
+  describe('as someone else changes the canvas', () => {
+    let surface: CanvasMultiplayerSurface | null = null;
+    const host: CanvasMultiplayerHost = { connect: next => { surface = next; }, presence: () => undefined };
+    const tile = (id: string) => screen.queryByTestId(`canvas-display-${id}`);
+    /** A press on a display's content, as a pointer's (no act: React handles it as the browser delivers it). */
+    const press = (id: string) => tile(id)!.querySelector('.awwo-display-body')!
+      .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+    const moved = (doc: CanvasDocument) => ({ ...doc, nodes: doc.nodes.map(node => ({ ...node, x: node.x + 40 })) });
+    beforeEach(() => {
+      surface = null;
+      localStorage.setItem(CANVAS_STORAGE_KEY, JSON.stringify({ ...stored(), displays: [display({ id: 'dp-a', x: 900 }), display({ id: 'dp-b', x: 1700 })] }));
+    });
+
+    it('keeps the display a reader presses as someone else’s deletion of the selected one is drawn, before that draw’s effects', async () => {
+      render(<CanvasSurface multiplayer={host} />);
+      act(() => { press('dp-a'); });
+      expect(tile('dp-a')).toHaveClass('canvas-tile--selected');
+      await act(async () => { surface!.rebase({ working: moved, history: moved }); });
+      const deleted = (doc: CanvasDocument) => ({ ...doc, displays: doc.displays!.filter(item => item.id !== 'dp-a') });
+      let savedAtThePress: string[] = [];
+      await outsideAct(() => {
+        if (tile('dp-a')) return false;
+        savedAtThePress = stored().displays!.map(item => item.id);
+        press('dp-b');
+        return true;
+      }, () => surface!.rebase({ working: deleted, history: deleted }));
+      // Pressed before that draw's effects ran: the document saved then still held the deleted display.
+      expect(savedAtThePress).toEqual(['dp-a', 'dp-b']);
+      expect(stored().displays!.map(item => item.id)).toEqual(['dp-b']);
+      expect(tile('dp-b')).toHaveClass('canvas-tile--selected');
+    });
+
+    it('forgets a selected display someone else deleted: drawn again, it is not selected', async () => {
+      render(<CanvasSurface multiplayer={host} />);
+      act(() => { press('dp-a'); });
+      const held = stored().displays!.find(item => item.id === 'dp-a')!;
+      const deleted = (doc: CanvasDocument) => ({ ...doc, displays: doc.displays!.filter(item => item.id !== 'dp-a') });
+      await act(async () => { surface!.rebase({ working: deleted, history: deleted }); });
+      expect(tile('dp-a')).toBeNull();
+      const restored = (doc: CanvasDocument) => ({ ...doc, displays: [held, ...doc.displays!] });
+      await act(async () => { surface!.rebase({ working: restored, history: restored }); });
+      expect(tile('dp-a')).not.toHaveClass('canvas-tile--selected');
+    });
+
+    it('keeps the display a reader presses as someone else’s deletion of one of the selected cards is drawn, before that draw’s effects', async () => {
+      render(<CanvasSurface multiplayer={host} />);
+      const selected = () => [...document.querySelectorAll('.canvas-tile--selected')].map(item => (item as HTMLElement).dataset.nodeId ?? (item as HTMLElement).dataset.displayId);
+      // Selecting cards lets a selected display go.
+      act(() => { press('dp-b'); });
+      expect(selected()).toEqual(['dp-b']);
+      for (const title of ['玩法设计', '小游戏页面']) {
+        const target = screen.getByRole('button', { name: `打开 ${title}`, exact: true });
+        fireEvent.pointerDown(target, { button: 0, pointerId: 1, shiftKey: true });
+        fireEvent.pointerUp(target, { button: 0, pointerId: 1, shiftKey: true });
+        fireEvent.click(target, { shiftKey: true });
+      }
+      expect(selected()).toEqual(['notes', 'game']);
+      await act(async () => { surface!.rebase({ working: moved, history: moved }); });
+      const deleted = (doc: CanvasDocument) => ({ ...doc, nodes: doc.nodes.filter(node => node.id !== 'notes'), edges: [] });
+      let savedAtThePress: string[] = [];
+      await outsideAct(() => {
+        if (screen.queryByTestId('canvas-tile-notes')) return false;
+        savedAtThePress = stored().nodes.map(node => node.id);
+        press('dp-b');
+        return true;
+      }, () => surface!.rebase({ working: deleted, history: deleted }));
+      // Pressed before that draw's effects ran (the saved document still held the deleted card); the press selects the
+      // display alone, as it does on its own.
+      expect(savedAtThePress).toEqual(['notes', 'game']);
+      expect(stored().nodes.map(node => node.id)).toEqual(['game']);
+      expect(selected()).toEqual(['dp-b']);
+    });
   });
 });

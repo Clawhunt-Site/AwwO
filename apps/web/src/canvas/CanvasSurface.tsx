@@ -1092,9 +1092,16 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   const selectedDisplayRef = useRef(selectedDisplayId);
   selectedDisplayRef.current = selectedDisplayId;
   const displays = doc.displays ?? NO_DISPLAYS;
-  useEffect(() => { if (selection.length) setSelectedDisplayId(null); }, [selection]);
+  // Selecting nodes lets a selected display go, in the commit that draws the selection: a passive effect can run a task
+  // after its draw (one no input of this page asked for, as someone else's deletion of a selected node), still judging
+  // that draw's selection, and so undo a display pressed in between.
+  useLayoutEffect(() => { if (selection.length && selectedDisplayRef.current) setSelectedDisplayId(null); }, [selection]);
+  // A selected display that went away (someone else deleted it) is forgotten. Asked, as before, only when this draw's
+  // display is gone (a drag's moves make a new list each frame and queue no update), but judged on the display selected
+  // as React applies the reset: a display pressed after the draw that took it away is the reader's.
   useEffect(() => {
-    if (selectedDisplayId && !displays.some(display => display.id === selectedDisplayId)) setSelectedDisplayId(null);
+    const gone = (id: string | null) => Boolean(id) && !displays.some(display => display.id === id);
+    if (gone(selectedDisplayId)) setSelectedDisplayId(current => gone(current) ? null : current);
   }, [displays, selectedDisplayId]);
   // Read inside the drag so moving a group never depends on the callback identity at press time.
   const selectionRef = useRef(selection);
