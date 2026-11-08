@@ -31,7 +31,8 @@ import { TaskFrameEditor } from './TaskFrameEditor';
 import { NodeSkillsEditor } from './NodeSkillsEditor';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamModelOverrides, type NodeTeam, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
-import { useCanvasI18n, type CanvasTranslate } from './i18n';
+import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
+import { followLiveNode, mergeIntoLive, savedInto, settleConflict, type InspectorView } from './inspectorMerge';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
 import { MediaNodeSettings, mediaCatalogueOf, mediaSetupProblem, withAgentKind, type MediaCatalogueState } from './MediaNodeSettings';
 import { NodeModelSettings } from './NodeModelSettings';
@@ -56,6 +57,14 @@ import {
 } from './canvasDoc';
 
 type ReadJson = (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<any>;
+
+/** What a bind sends with the Agent it hires (hireAgentIntoCompany; the persona is written to it after): the node keeps
+ *  them as sent. */
+const HIRED_FIELDS: readonly string[] = ['title', 'agentKind', 'runtime', 'model', 'effort', 'persona'];
+
+/** The fields a conflict names by their own words (inspector.field.*); any other by its key. */
+const CONFLICT_FIELDS: ReadonlySet<string> = new Set(['title', 'agentKind', 'runtime', 'model', 'effort', 'persona', 'team', 'agentRef',
+  'taskFrame', 'skills', 'mediaParams', 'binding', 'fields', 'template', 'contract', 'fileName', 'timeline']);
 
 export interface InspectorPanelProps {
   node: CanvasNode;
@@ -229,13 +238,35 @@ export function InspectorPanel({
     return () => { initializeRequest.current = null; };
   }, [node.id]);
   // Local draft — committed on 保存 (or as part of 绑定, which saves first so a mid-bind close
-  // never loses the operator's edits).
-  const [draft, setDraft] = useState<CanvasNode>(node);
+  // never loses the operator's edits). With it, the node as the panel last took it in (inspectorMerge.ts): a field the
+  // person has not changed follows others' changes to the node, one both changed asks which to keep, and a save writes
+  // only the person's own changes onto the node as it is then.
+  const [view, setView] = useState<InspectorView>(() => ({ draft: node, base: node, conflicts: [] }));
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const liveRef = useRef(node);
+  liveRef.current = node;
+  const draft = view.draft;
+  const setDraft = (next: CanvasNode) => setView(current => ({ ...current, draft: next }));
+  /** What a save writes: the person's own changes against `base` (the node the panel took in last), onto the node as it
+   *  is now, and `forced` fields as the draft holds them. */
+  const merged = <T extends CanvasNode>(edited: T, forced?: readonly string[], base: CanvasNode = viewRef.current.base): T =>
+    mergeIntoLive(edited, base, liveRef.current, forced);
+  // A setup's save, looked for once the panel is free again (the follow effect below).
+  const pendingSave = useRef<{ saved: CanvasNode; from: CanvasNode } | null>(null);
+  // What a bind saved before it hired: its result is merged against that, so only the binding and what it hired with go
+  // onto the node, and a change someone made meanwhile stays.
+  const bindBase = useRef<CanvasNode | null>(null);
+  useEffect(() => { pendingSave.current = null; bindBase.current = null; }, [node.id]);
+  // A save waits for every field both changed to be answered (the panel asks above the form); a node set up already is
+  // only closed by the button, which waits for nothing.
+  const conflictsOpen = view.conflicts.length > 0;
+  const closesOnly = Boolean(onInitialize && draft.kind === 'session' && initialization === 'done');
   const [teamCatalogValid, setTeamCatalogValid] = useState(!('team' in node && node.team));
   // Keyed on the node IDENTITY, not the whole node: after a bind we setDraft(bound) AND
   // onSave(bound), so the parent re-renders with the same id — resetting here would be a no-op
-  // at best and a clobber of a fresher draft at worst.
-  useEffect(() => setDraft(node), [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // at best and a clobber of a fresher draft at worst. Others' changes come in below (followLiveNode).
+  useEffect(() => setView({ draft: node, base: node, conflicts: [] }), [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Runtime inventory (names only) for the picker's runtime dropdown, host-fed. A failed fetch
   // must be DISTINGUISHABLE from "no runtimes exist" — an empty dropdown with no explanation
@@ -320,6 +351,17 @@ export function InspectorPanel({
   const isBinding = bind.phase === 'binding';
   const busy = isBinding || initialization === 'pending' || readOnly || Boolean(heldBinding);
   const closeLocked = isBinding || initialization === 'pending' || Boolean(heldBinding);
+  // Others' changes to the node come into the panel, except while its inputs are frozen (a bind or a setup carries what
+  // the panel shows); they come in once it is free again. A save the panel made while frozen (a setup's, which leaves the
+  // panel open when it fails) is looked for first: landed, the node as saved is the one the panel took in last, so
+  // nothing that save wrote (a task frame's blank rows taken out) is asked about as a change from elsewhere.
+  useEffect(() => {
+    if (busy) return;
+    const pending = pendingSave.current;
+    pendingSave.current = null;
+    if (pending && savedInto(pending.saved, pending.from, node)) setView({ draft: node, base: node, conflicts: [] });
+    else setView(current => followLiveNode(current, node));
+  }, [node, busy]);
   useEffect(() => {
     closeLockCallbackRef.current?.(closeLocked);
   }, [closeLocked, onCloseLockChange]);
@@ -332,22 +374,38 @@ export function InspectorPanel({
   const touched = useRef(false);
   useEffect(() => registerUnsavedEdits(() => !readOnlyRef.current && (touched.current || mutationLocked())), []); // eslint-disable-line react-hooks/exhaustive-deps
   const editDraft = (next: CanvasNode) => {
-    if (!mutationLocked()) { touched.current = true; setDraft(next); setInitialization('idle'); setInitializationError(''); }
+    if (mutationLocked()) return;
+    touched.current = true;
+    // Only what this edit changed (against the draft it was made on), onto the draft as it is now: a change of someone
+    // else's that came in after this render is not put back by an edit made from it.
+    const basedOn = draft;
+    // An edit that takes a conflicting field back to either value closes its question.
+    setView(current => followLiveNode({ ...current, draft: mergeIntoLive(next, basedOn, current.draft) }, liveRef.current));
+    setInitialization('idle'); setInitializationError('');
   };
+  // A field both the person and someone else changed: the person keeps theirs (saved over the other's) or takes the other's.
+  const settle = (key: string, keep: boolean) => {
+    if (!mutationLocked()) setView(current => settleConflict(current, liveRef.current, key, keep));
+  };
+  const conflictFieldLabel = (key: string) => CONFLICT_FIELDS.has(key)
+    ? t(`inspector.field.${key}` as CanvasTextKey) : t('inspector.field.other', { key });
 
   const save = async () => {
-    if (mutationLocked() || taskFrameInvalid) return;
-    const preparedDraft = draft.kind === 'session' && isTaskFrame(draft.taskFrame)
-      ? { ...draft, taskFrame: cleanTaskFrame(draft.taskFrame) } : draft;
+    // Set up already, the button closes the panel: nothing is saved, so nothing waits for an answer.
+    if (onInitialize && sessionDraft && initialization === 'done' && !mutationLocked()) { onClose(); return; }
+    if (mutationLocked() || taskFrameInvalid || conflictsOpen) return;
+    const saved = merged(draft);
+    const preparedDraft = saved.kind === 'session' && isTaskFrame(saved.taskFrame)
+      ? { ...saved, taskFrame: cleanTaskFrame(saved.taskFrame) } : saved;
     if (mediaBlocked) return;
     if (sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     if (onInitialize && sessionDraft) {
-      if (initialization === 'done') { onClose(); return; }
       const request = Symbol('initialize-node');
       const nodeId = sessionDraft.id;
       initializeRequest.current = request;
       setInitialization('pending'); setInitializationError('');
       closeLockCallbackRef.current?.(true);
+      pendingSave.current = { saved: preparedDraft, from: viewRef.current.base };
       try {
         await onInitialize(preparedDraft as SessionNode);
         if (initializeRequest.current !== request || currentNodeId.current !== nodeId) return;
@@ -385,7 +443,9 @@ export function InspectorPanel({
 
   const completeBinding = async (result: HeldBinding) => {
     if (readOnlyRef.current) { holdBinding(result); return; }
-    onSave(result.node);
+    // The node shows what its Agent was hired with, also where someone changed it while the hire was out; against what
+    // the bind saved first, so a change someone made meanwhile to anything else stays.
+    onSave(merged(result.node, HIRED_FIELDS, bindBase.current ?? undefined));
     if (result.outcome === 'unknown') {
       heldBindingRef.current = null; setHeldBinding(null); bindingRef.current = false;
       setBind({ phase: 'done', kind: 'unknown', tone: 'warn', detail: result.detail });
@@ -417,7 +477,7 @@ export function InspectorPanel({
   };
 
   const bindAgent = async () => {
-    if (!sessionDraft || sessionDraft.agentRef || mutationLocked() || taskFrameInvalid) return;
+    if (!sessionDraft || sessionDraft.agentRef || mutationLocked() || taskFrameInvalid || conflictsOpen) return;
     if (sessionDraft.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length)) return;
     // Only ever POST to a company that is actually in the live list: a selection left over from a
     // company that has since disappeared must fall back to a real one, never be sent as-is.
@@ -431,7 +491,8 @@ export function InspectorPanel({
     closeLockCallbackRef.current?.(true);
     setBind({ phase: 'binding' });
     // Persist the config FIRST so a mid-bind close never loses the operator's edits.
-    onSave(sessionDraft);
+    bindBase.current = merged(sessionDraft, HIRED_FIELDS);
+    onSave(bindBase.current);
     const outcome = await hireAgentIntoCompany(apiBase, companyId, {
       name: sessionDraft.title || t(kindKey(sessionDraft.agentKind)),
       missionRole: KIND_TO_MISSION_ROLE[sessionDraft.agentKind],
@@ -485,6 +546,20 @@ export function InspectorPanel({
 
       <div className="canvas-inspector-body">
         {readOnly ? <div className="canvas-inspector-hint" role="status">{readOnlyMessage || t('inspector.readOnly')}</div> : null}
+        {view.conflicts.length && !readOnly ? (
+          <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.conflicts')}>
+            {view.conflicts.map(key => {
+              const field = conflictFieldLabel(key);
+              return <div key={key} className="canvas-inspector-conflict">
+                <div>{t('inspector.conflict', { field })}</div>
+                <button type="button" disabled={busy} aria-label={t('inspector.conflictKeepMineFor', { field })}
+                  onClick={() => settle(key, true)}>{t('inspector.conflictKeepMine')}</button>
+                <button type="button" disabled={busy} aria-label={t('inspector.conflictTakeTheirsFor', { field })}
+                  onClick={() => settle(key, false)}>{t('inspector.conflictTakeTheirs')}</button>
+              </div>;
+            })}
+          </div>
+        ) : null}
         <label className="canvas-inspector-label" htmlFor="cv-cfg-title">
           {t('inspector.name')}
         </label>
@@ -694,8 +769,8 @@ export function InspectorPanel({
                 <button
                   type="button"
                   className="canvas-inspector-bind"
-                  disabled={busy || !sessionDraft.runtime.trim() || Boolean(sessionDraft.team && !teamCatalogValid)}
-                  title={!sessionDraft.runtime.trim() ? t('inspector.chooseRuntime') : undefined}
+                  disabled={busy || conflictsOpen || !sessionDraft.runtime.trim() || Boolean(sessionDraft.team && !teamCatalogValid)}
+                  title={conflictsOpen ? t('inspector.conflictsFirst') : !sessionDraft.runtime.trim() ? t('inspector.chooseRuntime') : undefined}
                   onClick={() => void bindAgent()}
                 >
                   {isBinding
@@ -766,7 +841,8 @@ export function InspectorPanel({
       </div>
 
       <footer className="canvas-inspector-foot">
-        <button type="button" className="canvas-inspector-save" disabled={busy || taskFrameInvalid || mediaBlocked || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))} onClick={() => void save()}>
+        <button type="button" className="canvas-inspector-save" disabled={busy || (conflictsOpen && !closesOnly) || taskFrameInvalid || mediaBlocked || Boolean(sessionDraft?.team && (!teamCatalogValid || validateNodeTeam(sessionDraft.team).length))}
+          title={conflictsOpen && !closesOnly ? t('inspector.conflictsFirst') : undefined} onClick={() => void save()}>
           {t(onInitialize && sessionDraft ? initialization === 'pending' ? 'inspector.initializing' : initialization === 'done' ? 'common.close' : 'inspector.saveAndInitialize' : 'common.save')}
         </button>
         <button type="button" className="canvas-inspector-cancel" disabled={closeLocked} onClick={close}>

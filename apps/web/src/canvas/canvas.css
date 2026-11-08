@@ -1152,6 +1152,10 @@
 .canvas-inspector-outcome--ok { color: var(--ok); }
 .canvas-inspector-outcome--warn { color: var(--warn); }
 .canvas-inspector-outcome--err { color: var(--err); }
+/* 多人同屏: a field both the person and someone else changed, with its two answers (InspectorPanel). */
+.canvas-inspector-conflict { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.canvas-inspector-conflict + .canvas-inspector-conflict { margin-top: 6px; }
+.canvas-inspector-conflict > div { flex: 1 1 100%; }
 .canvas-inspector-field-row { display: flex; gap: 6px; align-items: center; }
 .canvas-inspector-field-label { flex: 0 0 96px; }
 .canvas-inspector-field-value { flex: 1; }
