@@ -301,9 +301,12 @@ export function normalizeArgs({ input, measured, targetLUFS, truePeakDb, seconds
     '-af', `${loudnorm},aresample=${SAMPLE_RATE},apad=whole_dur=${secs(seconds)},atrim=end=${secs(seconds)}`, '-c:a', 'pcm_f32le', file];
 }
 
+// The AAC encoder's perceptual noise substitution stays off: on by default, it puts short bursts of noise into music and
+// speech, some as loud as the sound itself (found in the Academy's videos, 2026-10-22; one in a code film's score,
+// 2026-11-08).
 export function muxArgs({ video, audio, file }) {
   return ['-y', '-v', 'error', ...inputOptions(MP4), '-i', video, ...inputOptions(WAV), '-i', audio, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
-    '-c:a', 'aac', '-b:a', '192k', '-ar', String(SAMPLE_RATE), '-ac', '2', '-movflags', '+faststart', file];
+    '-c:a', 'aac', '-aac_pns', '0', '-b:a', '192k', '-ar', String(SAMPLE_RATE), '-ac', '2', '-movflags', '+faststart', file];
 }
 
 /**

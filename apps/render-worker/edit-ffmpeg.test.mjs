@@ -155,7 +155,7 @@ test('loudness: measured, read back, then applied in a second pass', () => {
 
 test('mux, stills and subtitles', () => {
   assert.deepEqual(muxArgs({ video: 'picture.mp4', audio: 'mix.wav', file: 'R1.mp4' }), ['-y', '-v', 'error', ...inputOptions(MP4), '-i', 'picture.mp4', ...inputOptions(WAV), '-i', 'mix.wav',
-    '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', 'R1.mp4']);
+    '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-aac_pns', '0', '-b:a', '192k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', 'R1.mp4']);
   assert.deepEqual(stillsArgs({ input: 'R1.mp4', every: 8, max: 3, pattern: 'still-%03d.jpg' }), ['-y', '-v', 'error', ...inputOptions(MP4), '-i', 'R1.mp4', '-map', '0:v:0',
     '-vf', 'fps=1/8,scale=960:-2:in_color_matrix=bt709:in_range=tv:out_color_matrix=bt601:out_range=pc', '-frames:v', '3', '-q:v', '3', 'still-%03d.jpg']);
   assert.equal(srt([{ start: 3.9, end: 5.7, text: "It's louder today." }, { start: 3725.0005, end: 3726, text: 'Two\nlines' }]),
