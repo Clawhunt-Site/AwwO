@@ -299,6 +299,11 @@
   background: var(--bg-muted, #f2f2f2);
 }
 
+/* A name or an email longer than its field ends in an ellipsis instead of being cut mid-letter. */
+.account-workspace-panel input {
+  text-overflow: ellipsis;
+}
+
 .account-company-scope {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
