@@ -59,7 +59,7 @@ Keep a `pose(t)` apart from the drawing, so a check can pose every frame without
 - Visibility: at every beat, project what must be seen; check it is inside the safe area, that rays from the camera to a few of its points meet it first (hidden objects excluded) and that text keeps 4.5:1 contrast with the pixels behind it.
 - Colour: at each beat that shows the brand colour, take the median colour of a box on the lit brand surface and compare it with the brand hex in CIELAB: delta E 1976 under 4. Tone mapping, coloured light and post-processing move a colour, so the probe decides, not the hex in the code; fix the base colour per lighting setup.
 - Loop seam: frame L must draw what frame 0 draws (compare pixels, which see shaders too, or world matrices, where a whole turn counts as none), and for each moving value (unwrapped where it wraps), the step into L and the step out of 0 (1 ms each) differ by at most twice the largest such difference between neighbouring 1 ms steps anywhere else.
-- Sound: for an edit's sound page (renderAudio; a render is silent), find each hit's onset in the rendered buffer; it lands within one frame of the frame it marks.
+- Sound: for a page's sound (renderAudio), in a render or an edit, find each hit's onset in the rendered buffer; it lands within one frame of the frame it marks.
 - The file: read the render's report (frames, duration, distinct frames, warnings) and any edit's report; a warning is a defect until explained. Encoding blurs thin coloured lines and an edit's fit and transitions change the frame: compare an edit's stills with the page at the same times.
 
 ## 5. Turn each fix into a rule
