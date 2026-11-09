@@ -41,7 +41,8 @@ const PREVIEW_PAIRS = new Map(PREVIEW_FONTS.flatMap(font => font.faces.map(face 
 // (tests/canvas-preview-fonts.test.ts pins those): the LICENSE of its Fontsource 5.3.0 package
 // (@fontsource-variable/<family>, or @fontsource/<family> for Bebas Neue, Instrument Serif and Rajdhani), and for the
 // three families that reserve their names, which ship their full fonts, the OFL.txt beside them in google/fonts at
-// bf7c667a (ofl/orbitron, ofl/playfairdisplay, ofl/pressstart2p).
+// bf7c667a (ofl/orbitron, ofl/playfairdisplay, ofl/pressstart2p); for Noto Sans SC too (ofl/notosanssc), whose copyright
+// line is its font's own notice, where its @fontsource package's LICENSE names "Google Inc.".
 const PREVIEW_LICENCES: Record<string, { bytes: number; sha256: string }> = {
   'bebas-neue.LICENSE.txt': { bytes: 4391, sha256: '66c436339f7490c1a99e4f6a7b8aef5c176676edfd071a31638e7d54c1b0aeda' },
   'cinzel.LICENSE.txt': { bytes: 4382, sha256: 'f5a242cf68ad6ebd0603b3359a74c593ca080318a681035be5296ba2c6b04ae6' },
@@ -51,6 +52,7 @@ const PREVIEW_LICENCES: Record<string, { bytes: number; sha256: string }> = {
   'jetbrains-mono.LICENSE.txt': { bytes: 4524, sha256: '403581b69dac5cff4079205e01c6b467e56af449ecbd7247693ddb1baafa005b' },
   'manrope.LICENSE.txt': { bytes: 4383, sha256: 'd826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30' },
   'montserrat.LICENSE.txt': { bytes: 4509, sha256: 'f429f739351287574c0c3175a9222bb3e49c7cad3f568a04f2c08d74c107724e' },
+  'noto-sans-sc.LICENSE.txt': { bytes: 4388, sha256: '1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9' },
   'orbitron.LICENSE.txt': { bytes: 4426, sha256: 'ab609b0e110d622435ff337cdf233288556e011bbf9bd0550be98846c0630819' },
   'outfit.LICENSE.txt': { bytes: 4387, sha256: '0e5fcef5d93bfcae273c11c00f0bb453d3b5491860e1ac8b658767b7577c938f' },
   'oxanium.LICENSE.txt': { bytes: 4383, sha256: '062fa183baec494d989d5d848f78a5466a537033c40f1b7651c19ca5d140ab7c' },
@@ -161,9 +163,10 @@ describe('the fonts AwwO supplies to running previews', () => {
     expect([...files.keys()].sort()).toEqual([...fonts.map(font => font.name), ...Object.keys(PREVIEW_LICENCES)].sort());
     // The Reserved Font Names the licenses declare with their copyright lines: those of the three families that ship
     // their full fonts (Orbitron's fontsource license left its name out; Google Fonts' license of it, as its font
-    // files' own copyright notice, declares it).
+    // files' own copyright notice, declares it), and Noto Sans SC's "Source", which is no part of its name.
     const reserved = Object.keys(PREVIEW_LICENCES).filter(name => files.get(name)!.toString('utf8').split('\n')[0].includes('Reserved Font Name'));
-    expect(reserved).toEqual(['orbitron.LICENSE.txt', 'playfair-display.LICENSE.txt', 'press-start-2p.LICENSE.txt']);
+    expect(reserved).toEqual(['noto-sans-sc.LICENSE.txt', 'orbitron.LICENSE.txt', 'playfair-display.LICENSE.txt', 'press-start-2p.LICENSE.txt']);
+    expect(files.get('noto-sans-sc.LICENSE.txt')!.toString('utf8').split('\n')[0]).toBe("Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'");
   });
 
   it('ship each with its license at the top of the script chunk that holds it, in the hosted build', async () => {

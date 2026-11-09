@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
-import { PREVIEW_FONT_RULE, PREVIEW_FONTS, PREVIEW_FONTS_KEY } from '../src/canvas/previewFontList';
+import { PREVIEW_FONT_RULE, PREVIEW_FONTS, PREVIEW_FONTS_KEY, type PreviewFont } from '../src/canvas/previewFontList';
 import { previewFontFaces, previewFontNeeds, previewFontSource } from '../src/canvas/previewFonts';
-import { loadPreviewLibraries, previewScriptNeeds, PREVIEW_FONTS_LIBRARY } from '../src/canvas/previewLibraries';
+import { FILM_FONT_DEADLINE_MS, FONT_DEADLINE_MS, loadPreviewLibraries, previewScriptNeeds, PREVIEW_FONTS_LIBRARY, suppliedFontRules } from '../src/canvas/previewLibraries';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
-import { copyrightNotice, glyphCount, reservedNames } from './woff2-font';
+import { copyrightNotice, fontOwnNames, glyphCount, reservedNames } from './woff2-font';
 
 const FONT_DIR = path.resolve(__dirname, '../src/canvas/fonts');
 const slug = (family: string) => family.toLowerCase().replace(/ /g, '-');
@@ -43,26 +43,39 @@ describe('brand fonts AwwO supplies to running pages', () => {
   });
 
   it('ships the full font of a family that reserves its name, which no subset may keep', () => {
+    // A name a family's license reserves that its own name uses: a subset of it may not keep that name. Noto Sans SC's
+    // reserves "Source" (it comes from Source Han Sans), which "Noto Sans SC" does not use, so Google Fonts' subsets of it
+    // are no Modified Version under a Reserved Font Name.
+    const ownReserved = (family: string, names: string[]) => names.filter(name => family.toLowerCase().includes(name.toLowerCase()));
     const reservingFaces: string[] = [];
     for (const font of PREVIEW_FONTS) {
       const license = readFileSync(path.join(FONT_DIR, `${slug(font.family)}.LICENSE.txt`), 'utf8');
       const header = license.slice(0, license.indexOf('This Font Software is licensed'));
       for (const face of font.faces) {
         const bytes = readFileSync(path.join(FONT_DIR, face.file)), notice = copyrightNotice(bytes);
-        expect(notice, face.file).toMatch(/^Copyright /);
+        expect(notice, face.file).toMatch(/^(?:Copyright|\(c\)) /);
         // The license beside it reserves every name the font's own notice does.
         expect(reservedNames(header), face.file).toEqual(expect.arrayContaining(reservedNames(notice)));
         // A subset is a Modified Version, which may not use a Reserved Font Name (OFL-FAQ 2.6): such a family ships
         // its whole font, converted to WOFF2 with nothing else changed (OFL-FAQ 2.2.1), with all of its glyphs.
-        if (!reservedNames(notice).length && !reservedNames(header).length) continue;
+        const reserved = [...reservedNames(notice), ...reservedNames(header)];
+        if (!ownReserved(font.family, reserved).length) {
+          // A subset: no name the font calls itself by takes a reserved name either (Noto Sans SC's call it Noto Sans SC).
+          for (const own of fontOwnNames(bytes)) expect(ownReserved(own, reserved), `${face.file}: ${own}`).toEqual([]);
+          continue;
+        }
         reservingFaces.push(face.file);
         expect(face.file, face.file).not.toMatch(/-latin-/);
         expect(glyphCount(bytes), face.file).toBe(WHOLE_FONT_GLYPHS[face.file]);
       }
     }
     expect(reservingFaces.sort()).toEqual(Object.keys(WHOLE_FONT_GLYPHS).sort());
-    const reserving = PREVIEW_FONTS.filter(font => font.faces.some(face => reservedNames(copyrightNotice(readFileSync(path.join(FONT_DIR, face.file)))).length));
+    const reserving = PREVIEW_FONTS.filter(font => font.faces.some(face => ownReserved(font.family, reservedNames(copyrightNotice(readFileSync(path.join(FONT_DIR, face.file))))).length));
     expect(reserving.map(font => font.family)).toEqual(['Orbitron', 'Playfair Display', 'Press Start 2P']);
+    const noto = PREVIEW_FONTS.find(font => font.family === 'Noto Sans SC')!;
+    const notoBytes = readFileSync(path.join(FONT_DIR, noto.faces[0].file));
+    expect(reservedNames(copyrightNotice(notoBytes))).toEqual(['Source']);
+    expect(fontOwnNames(notoBytes)).toEqual(['Noto Sans SC Thin', 'Noto Sans SC Thin Bold', 'NotoSansSCThin-Bold']);
   });
 
   it('reads the names a copyright notice reserves, however it quotes them', () => {
@@ -142,8 +155,60 @@ describe('brand fonts AwwO supplies to running pages', () => {
     expect(guard).toBeGreaterThan(style);
   });
 
-  it('tells a model the families by name', () => {
-    for (const font of PREVIEW_FONTS) expect(PREVIEW_FONT_RULE).toContain(font.family);
+  it('tells a model the families by name, but the film kit\'s Chinese face, which only a film page gets', () => {
+    for (const font of PREVIEW_FONTS.filter(entry => !entry.film)) expect(PREVIEW_FONT_RULE).toContain(font.family);
+    expect(PREVIEW_FONTS.filter(entry => entry.film).map(entry => entry.family)).toEqual(['Noto Sans SC']);
+    expect(PREVIEW_FONT_RULE).not.toContain('Noto Sans SC');
     expect(PREVIEW_FONT_RULE).toContain('document.fonts.ready');
+  });
+
+  it('waits for each family on its own, and longer for the film kit\'s Chinese face, keeping the ones that came', async () => {
+    const family = (name: string) => PREVIEW_FONTS.find(font => font.family === name)!;
+    const inter = family('Inter'), orbitron = family('Orbitron'), noto = family('Noto Sans SC');
+    // One family's rules, after `delays[family]` ms (null: never).
+    const faces = (delays: Record<string, number | null>) => (fonts: readonly PreviewFont[]) => {
+      const delay = delays[fonts[0].family];
+      return delay === null ? new Promise<string>(() => {}) : new Promise<string>(resolve => setTimeout(() => resolve(`rule:${fonts[0].family}`), delay));
+    };
+    vi.useFakeTimers();
+    try {
+      // A Chinese face slower than a Latin family may be costs Inter nothing, and is waited for.
+      const slow = suppliedFontRules([inter, noto], faces({ Inter: 10, 'Noto Sans SC': FONT_DEADLINE_MS + 10_000 }));
+      await vi.advanceTimersByTimeAsync(FONT_DEADLINE_MS + 10_000);
+      expect(await slow).toBe('rule:Inter\nrule:Noto Sans SC');
+      // One that never comes is left out once its wait is over, and Inter is kept.
+      const never = suppliedFontRules([inter, noto], faces({ Inter: 10, 'Noto Sans SC': null }));
+      await vi.advanceTimersByTimeAsync(FILM_FONT_DEADLINE_MS);
+      expect(await never).toBe('rule:Inter');
+      // A Latin family gets the shorter wait, and its stall costs another family nothing either.
+      const latin = suppliedFontRules([inter, orbitron], faces({ Inter: null, Orbitron: FONT_DEADLINE_MS + 10_000 }));
+      await vi.advanceTimersByTimeAsync(FONT_DEADLINE_MS);
+      expect(await latin).toBeUndefined();
+      const stuck = suppliedFontRules([inter, orbitron], faces({ Inter: null, Orbitron: 10 }));
+      await vi.advanceTimersByTimeAsync(FONT_DEADLINE_MS);
+      expect(await stuck).toBe('rule:Orbitron');
+      // A family whose chunk fails is left out.
+      const failed = suppliedFontRules([inter, orbitron], fonts => fonts[0] === inter ? Promise.reject(new Error('chunk')) : Promise.resolve('rule:Orbitron'));
+      expect(await failed).toBe('rule:Orbitron');
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(FILM_FONT_DEADLINE_MS).toBeGreaterThan(FONT_DEADLINE_MS);
+  });
+
+  it('supplies the film kit\'s Chinese face only to a page that loads the film kit', async () => {
+    const kit = '<script src="https://awwo.clawhunt.store/kits/film/1/film.js"></script>';
+    const film = `<!doctype html><html><body>${kit}<script>Film.run({ type: { lang: 'zh', roles: { display: 'Noto Sans SC', text: 'Inter' } } });</script></body></html>`;
+    expect(previewScriptNeeds(film).fonts?.map(font => font.family)).toEqual(['Inter', 'Noto Sans SC']);
+    // Its one cut is bold: a page of its own that names the family gets nothing for it (and its other fonts still).
+    const page = '<!doctype html><html><head><style>body{font-family:"Noto Sans SC",sans-serif}h1{font-family:Inter}</style></head><body><h1>你好</h1></body></html>';
+    expect(previewScriptNeeds(page).fonts?.map(font => font.family)).toEqual(['Inter']);
+    expect(previewScriptNeeds(page.replace('h1{font-family:Inter}', '')).fonts).toBeUndefined();
+    expect(previewScriptNeeds(page.replace('h1{font-family:Inter}', '')).libraries).not.toContain(PREVIEW_FONTS_LIBRARY);
+    // The film page's preview has the face as its pinned bytes, at its one weight.
+    const code = await loadPreviewLibraries(previewScriptNeeds(film));
+    const css = code.get(PREVIEW_FONTS_KEY) ?? '';
+    const noto = PREVIEW_FONTS.find(font => font.family === 'Noto Sans SC')!;
+    expect(css).toContain(`@font-face{font-family:"Noto Sans SC";src:url(data:font/woff2;base64,${readFileSync(path.join(FONT_DIR, noto.faces[0].file)).toString('base64')}) format("woff2");font-weight:700;font-style:normal;font-display:block}`);
   });
 });

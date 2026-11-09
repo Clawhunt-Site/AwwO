@@ -13,8 +13,8 @@ export const KITS = Object.freeze([
     id: 'film-kit-1',
     url: 'https://awwo.clawhunt.store/kits/film/1/film.js',
     file: 'film-kit-1.js',
-    bytes: 110669,
-    sha256: '351b6d10d60b723c6e75b0182728e3c893391cd61dc191c48dae49b42d45c2e8',
+    bytes: 116267,
+    sha256: '099c1d8a6657efb559ea5080a7dddc59ecfa3253a38ca3b216ccec01959c9046',
   }),
 ]);
 

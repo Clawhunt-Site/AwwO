@@ -71,14 +71,15 @@ frames 0 … N-1 and repeats seamlessly.
   the web preview's `LIVE_CDNS`), and the kits AwwO supplies by their exact URLs (`kits.mjs`: the film kit,
   `https://awwo.clawhunt.store/kits/film/1/film.js`, answered from the pinned copy in `kits/`, which a release ships);
   everything else is blocked. It must not navigate away (that fails the render).
-- **Brand fonts come from the worker, not the network.** The 26 faces of AwwO's 17 brand fonts are answered at exactly
+- **Brand fonts come from the worker, not the network.** The 27 faces of AwwO's 18 brand fonts are answered at exactly
   the jsDelivr URLs the film kit names for them (the Fontsource 5.3.0 files, e.g.
   `https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.3.0/files/inter-latin-wght-normal.woff2`) from the copies
   in `fonts/` (`fonts.mjs`; each family's SIL Open Font License beside its files), which a release ships as it ships
   `kits/`: the worker refuses to start when a copy differs from its pinned size and sha256 or has no license beside
   it. So a film whose roles name brand families, as its guide says, draws its type with no network, as its preview
-  does. 22 of the copies are the file at their URL byte for byte; Orbitron, Playfair Display and Press Start 2P
-  reserve their names, which no subset may keep, so their four URLs are answered with the full fonts AwwO carries,
+  does. 23 of the copies are the file at their URL byte for byte, Noto Sans SC's among them (Google Fonts' simplified
+  Chinese subset of its bold cut, 1.17 MB: the face a film's Chinese words have); Orbitron, Playfair Display and Press
+  Start 2P reserve their names, which no subset may keep, so their four URLs are answered with the full fonts AwwO carries,
   which draw the subsets' Latin range pixel for pixel (Playfair Display's ⁒ aside) and, as a preview's do, the
   characters a subset lacks too. Any other font URL (another family, or a brand family's other subsets or versions) is
   fetched or blocked as before.
@@ -95,6 +96,12 @@ frames 0 … N-1 and repeats seamlessly.
   starts loading them (a face in flight while the page loads holds up the load event a render waits for). A page's own
   `@font-face` of a role's family, which the film guide does not ask for, stays the page's: the kit cannot refuse one,
   so one that arrives late can still change the film's type.
+- **A film's listed words are checked in the faces that draw them, Chinese too.** The words a film lists for each role
+  (`type.check.strings`, as its guide asks) are measured in the role's family after two blank fonts the kit makes,
+  0.1 and 0.7 em wide, so a character the family lacks is told whatever fonts the host has (the system's generic
+  families could not tell a missing Chinese one: every font that has a Han character draws it an em wide). Emoji are
+  left out: the system's emoji font draws them whatever the family. It is a page error with the first frame:
+  `Film: display "Instrument Serif" has no glyphs for: 雨停了`.
 
 ## API
 

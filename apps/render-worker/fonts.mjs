@@ -1,15 +1,17 @@
-// Brand fonts AwwO supplies to the pages it renders. AwwO's film kit names each face of its 17 brand families by the
+// Brand fonts AwwO supplies to the pages it renders. AwwO's film kit names each face of its 18 brand families by the
 // file Fontsource 5.3.0 publishes on jsDelivr (apps/web/scripts/build-film-kit.mjs BRAND_FONTS, through cinecode's
 // roleFaces), so a film rendered here used to fetch its type over the network: a face that failed drew the whole film in
-// the system font, and one that came late changed the type mid-film. The worker answers exactly those 26 URLs instead,
+// the system font, and one that came late changed the type mid-film. The worker answers exactly those 27 URLs instead,
 // from its own copies in fonts/: the files of the brand fonts AwwO's running previews supply
 // (apps/web/src/canvas/fonts, previewFontList.ts), each family's license beside them, as the SIL Open Font License asks
 // of every copy. A render therefore draws a film's brand type with no network, and the faces it draws are the ones a
 // preview draws.
 //
-// 22 of the copies are the file at their URL byte for byte: Google Fonts' Latin subsets as the Fontsource packages ship
-// them. Orbitron, Playfair Display and Press Start 2P reserve their names, which no subset may keep, so AwwO carries the
-// full fonts as Google Fonts releases them, and those four URLs are answered with them. Measured in Chrome 157
+// 23 of the copies are the file at their URL byte for byte: Google Fonts' Latin subsets as the Fontsource packages ship
+// them, and its simplified Chinese subset of Noto Sans SC's bold cut, the one face a film's Chinese words have (its
+// license reserves the name "Source", which is no part of its name). Orbitron, Playfair Display and Press Start 2P
+// reserve their names, which no subset may keep, so AwwO carries the full fonts as Google Fonts releases them, and
+// those four URLs are answered with them. Measured in Chrome 157
 // (2026-11-08, weights 400, 650 and 900, upright and italic), they draw every character of the subsets' Latin range
 // (ASCII, Latin-1, the general punctuation block, € ™ Œ œ ı and the rest) pixel for pixel as the subsets do, but for
 // Playfair Display's U+2052 ⁒; and as full fonts they also draw what the subsets lack (‐ † ‡ ‰, and Latin Extended,
@@ -77,6 +79,8 @@ export const FONTS = Object.freeze([
     'press-start-2p-400-normal.woff2', 'press-start-2p.LICENSE.txt', 29920, 'ec0a835d8047efb59e51434c40cce52997d5dd235a0968f611b286c5f6fce743'),
   font('Pixelify Sans', 'https://cdn.jsdelivr.net/npm/@fontsource-variable/pixelify-sans@5.3.0/files/pixelify-sans-latin-wght-normal.woff2',
     'pixelify-sans-latin-wght-normal.woff2', 'pixelify-sans.LICENSE.txt', 12016, '4a5633a0c9c1b73abd133a56d3716c2d8df2ed03cb987346f72194aeb224f382'),
+  font('Noto Sans SC', 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.0/files/noto-sans-sc-chinese-simplified-700-normal.woff2',
+    'noto-sans-sc-chinese-simplified-700-normal.woff2', 'noto-sans-sc.LICENSE.txt', 1172244, 'e1df51edc00bce27b58044e829fb8ec6accc8a5daece475413de90d52818845c'),
 ]);
 
 const BODIES = new Map(FONTS.map((entry) => {

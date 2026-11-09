@@ -36,15 +36,25 @@ function woff2Table(woff2: Buffer, wanted: number): Buffer {
   throw new Error(`no table ${wanted}`);
 }
 
-/** The font's copyright notice: name ID 0 on the Windows platform. */
-export function copyrightNotice(woff2: Buffer): string {
+/** A name of the font, by its ID, on the Windows platform (the first such record), or '' when it has none. */
+export function fontName(woff2: Buffer, id: number): string {
   const name = woff2Table(woff2, 5), strings = name.readUInt16BE(4);
   for (let record = 6; record < 6 + name.readUInt16BE(2) * 12; record += 12) {
-    if (name.readUInt16BE(record) !== 3 || name.readUInt16BE(record + 6) !== 0) continue;
+    if (name.readUInt16BE(record) !== 3 || name.readUInt16BE(record + 6) !== id) continue;
     const start = strings + name.readUInt16BE(record + 10);
     return Buffer.from(name.subarray(start, start + name.readUInt16BE(record + 8))).swap16().toString('utf16le');
   }
   return '';
+}
+
+/** The font's copyright notice: name ID 0 on the Windows platform. */
+export function copyrightNotice(woff2: Buffer): string {
+  return fontName(woff2, 0);
+}
+
+/** The names the font calls itself by: family (1), full name (4), PostScript name (6) and typographic family (16). */
+export function fontOwnNames(woff2: Buffer): string[] {
+  return [1, 4, 6, 16].map(id => fontName(woff2, id)).filter(Boolean);
 }
 
 /** The font's glyph count (maxp): a subset of a font has fewer glyphs than the whole font. */

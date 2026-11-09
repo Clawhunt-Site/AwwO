@@ -10,8 +10,8 @@ export { FILM_GUIDE };
 /** The one external script a film page may name. Versioned: a kit whose API changes gets a new number. */
 export const FILM_KIT_URL = 'https://awwo.clawhunt.store/kits/film/1/film.js';
 /** Byte size and sha256 of film-kit.js, pinned so a preview only ever inlines the reviewed file. */
-export const FILM_KIT_BYTES = 110669;
-export const FILM_KIT_SHA256 = '351b6d10d60b723c6e75b0182728e3c893391cd61dc191c48dae49b42d45c2e8';
+export const FILM_KIT_BYTES = 116267;
+export const FILM_KIT_SHA256 = '099c1d8a6657efb559ea5080a7dddc59ecfa3253a38ca3b216ccec01959c9046';
 
 /** The guide's first line. filmRole finds the guide by it, so a persona that carries an older guide gets the current one
  *  instead of two. When it changes, the line it replaces goes in FILM_GUIDE_OLD_HEADINGS: the personas of the film

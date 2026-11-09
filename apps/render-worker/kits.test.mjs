@@ -50,8 +50,8 @@ test('only the exact kit URL is supplied', () => {
 });
 
 test('each brand font copy is the file the module names, by size and sha256, with its family\'s license beside it', () => {
-  assert.equal(FONTS.length, 26);
-  assert.equal(new Set(FONTS.map((font) => font.family)).size, 17);
+  assert.equal(FONTS.length, 27);
+  assert.equal(new Set(FONTS.map((font) => font.family)).size, 18);
   assert.equal(new Set(FONTS.map((font) => font.url)).size, FONTS.length);
   for (const font of FONTS) {
     const body = readFileSync(path.join(here, 'fonts', font.file));
@@ -282,23 +282,40 @@ test('a film whose font cannot load says which role, and draws that role in a st
   assert.ok(!result.warnings.includes('ready_timeout'), result.warnings.join(','));
 });
 
+test('a film sets its Chinese words in Noto Sans SC with no network, and its glyph check names a family that lacks them', { skip, timeout: 120_000 }, async () => {
+  // The film lists its display role's words. The worker's Noto Sans SC has them; Instrument Serif, a Latin face, has
+  // none, which the kit's glyph probes tell (after a generic family, every Han character measures an em wide).
+  const film = (display) => typePage({ display }, [])
+    .replace("type: { lang: 'en', roles:", "type: { lang: 'zh', check: { strings: { display: ['雨停了'] } }, roles:")
+    .replace("g.fillText('TYPE ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)", "g.fillText('雨停了 ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)");
+  assert.ok(film('Noto Sans SC').includes("display: ['雨停了']") && film('Noto Sans SC').includes("fillText('雨停了 '"), 'the page is built as meant');
+  const noto = await renderWithNoNetwork('film_fonts_chinese', film('Noto Sans SC'));
+  assert.equal(noto.mode, 'contract');
+  assert.deepEqual(noto.pageErrors, []);
+  assert.deepEqual(noto.warnings.filter((w) => NOT_A_FAULT.test(w)), [], noto.warnings.join(','));
+  const latin = await renderWithNoNetwork('film_fonts_chinese_latin', film('Instrument Serif'));
+  assert.equal(latin.mode, 'contract');
+  assert.deepEqual(latin.pageErrors, ['Film: display "Instrument Serif" has no glyphs for: 雨停了']);
+});
+
 test('a film in a page that supplies its brand faces itself, as a running preview does, draws them and checks their glyphs', { skip, timeout: 120_000 }, async () => {
   // Built as AwwO's preview builds one (htmlDeliverable.ts, liveDocument.ts): fonts only as data:, the faces as
   // @font-face rules in the head and its script that starts loading them, the kit inlined. The kit fetches nothing, finds
   // the page's faces of the family and uses them, and still checks the film's glyphs in them: Inter's Latin file has no
-  // Cyrillic, so the check names one.
+  // Cyrillic and no Han, so the check names both, 雨 only through the kit's glyph probes, which the page's policy lets it
+  // make (after a generic family, every Han character measures an em wide).
   const list = readFileSync(path.join(WEB, 'previewFontList.ts'), 'utf8');
   const loadScript = /PREVIEW_FONT_LOAD_SCRIPT = '([^']+)';/.exec(list)[1];
   const face = (file, style) => `@font-face{font-family:"Inter";src:url(data:font/woff2;base64,${readFileSync(path.join(WEB, 'fonts', file)).toString('base64')}) format("woff2");font-weight:100 900;font-style:${style};font-display:block}`;
-  const film = typePage({ text: 'Inter' }, ['400 60px "Inter"', 'italic 400 60px "Inter"']).replace("type: { lang: 'en', roles:", "type: { lang: 'en', check: { strings: { text: ['Aж'] } }, roles:");
+  const film = typePage({ text: 'Inter' }, ['400 60px "Inter"', 'italic 400 60px "Inter"']).replace("type: { lang: 'en', roles:", "type: { lang: 'en', check: { strings: { text: ['Aж雨'] } }, roles:");
   // Replaced by functions: the kit's text holds `$` sequences a replacement string would read.
   const html = film
     .replace('<meta charset="utf-8">', () => `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:"><style>${face('inter-latin-wght-normal.woff2', 'normal')}\n${face('inter-latin-wght-italic.woff2', 'italic')}</style><script>${loadScript}</script>`)
     .replace(`<script src="${FILM.url}"></script>`, () => `<script>${readFileSync(path.join(here, 'kits', FILM.file), 'utf8')}</script>`);
-  assert.ok(html.includes("check: { strings: { text: ['Aж'] } }") && !html.includes(FILM.url), 'the page is built as meant');
+  assert.ok(html.includes("check: { strings: { text: ['Aж雨'] } }") && !html.includes(FILM.url), 'the page is built as meant');
   const result = await renderWithNoNetwork('film_fonts_preview_page', html);
   assert.equal(result.mode, 'contract');
-  assert.deepEqual(result.pageErrors, ['Film: text "Inter" has no glyphs for: ж']);
+  assert.deepEqual(result.pageErrors, ['Film: text "Inter" has no glyphs for: ж雨']);
   assert.ok(!result.warnings.some((w) => /^(?:ready_timeout|fonts_timeout|network_blocked)/.test(w)), result.warnings.join(','));
 });
 

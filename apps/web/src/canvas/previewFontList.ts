@@ -3,8 +3,10 @@
  * vendored in fonts/, each family's license beside its files (THIRD_PARTY_NOTICES.md lists them). Most are the Latin
  * subsets of the Fontsource 5.3.0 packages, byte for byte. Orbitron, Playfair Display and Press Start 2P reserve their
  * names, which no subset may keep, so those three are the full fonts as Google Fonts publishes them, converted to WOFF2
- * with nothing else changed, beside Google Fonts' license of each. Plain data with no loader, so the case canvases
- * (officialWorkflows.ts) and the publish script can name the families without bundling the files.
+ * with nothing else changed, beside Google Fonts' license of each. Noto Sans SC, the face a film's Chinese words have,
+ * is Google Fonts' simplified Chinese subset of its bold cut as the Fontsource 5.3.0 package ships it, beside Google
+ * Fonts' license of it (its Reserved Font Name, "Source", is no part of its name). Plain data with no loader, so the case
+ * canvases (officialWorkflows.ts) and the publish script can name the families without bundling the files.
  * tests/canvas-preview-fonts.test.ts pins every file's size and sha256.
  */
 export interface PreviewFontFace {
@@ -23,6 +25,9 @@ export interface PreviewFont {
   /** What it suits, in the words the page rule gives a model. */
   readonly use: 'sans' | 'display' | 'serif' | 'mono' | 'pixel';
   readonly faces: readonly PreviewFontFace[];
+  /** Supplied only to a page that loads AwwO's film kit, which names it for a film's Chinese words, and left out of the
+   *  page rule: its one cut is bold, which would set every weight of a page's own text bold. */
+  readonly film?: true;
 }
 
 const face = (file: string, weight: string, bytes: number, sha256: string, style: 'normal' | 'italic' = 'normal'): PreviewFontFace =>
@@ -72,9 +77,11 @@ export const PREVIEW_FONTS: readonly PreviewFont[] = [
     face('press-start-2p-400-normal.woff2', '400', 29920, 'ec0a835d8047efb59e51434c40cce52997d5dd235a0968f611b286c5f6fce743')] },
   { family: 'Pixelify Sans', use: 'pixel', faces: [
     face('pixelify-sans-latin-wght-normal.woff2', '400 700', 12016, '4a5633a0c9c1b73abd133a56d3716c2d8df2ed03cb987346f72194aeb224f382')] },
+  { family: 'Noto Sans SC', use: 'sans', film: true, faces: [
+    face('noto-sans-sc-chinese-simplified-700-normal.woff2', '700', 1172244, 'e1df51edc00bce27b58044e829fb8ec6accc8a5daece475413de90d52818845c')] },
 ];
 
-const families = (use: PreviewFont['use']) => PREVIEW_FONTS.filter(font => font.use === use).map(font => font.family).join(', ');
+const families = (use: PreviewFont['use']) => PREVIEW_FONTS.filter(font => font.use === use && !font.film).map(font => font.family).join(', ');
 
 /** Where loadPreviewLibraries hands the fonts' @font-face rules to the document builders. */
 export const PREVIEW_FONTS_KEY = 'awwo:fonts';

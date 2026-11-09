@@ -21,6 +21,7 @@ backend/**/build
 !apps/web/src/canvas/fonts/jetbrains-mono.LICENSE.txt
 !apps/web/src/canvas/fonts/manrope.LICENSE.txt
 !apps/web/src/canvas/fonts/montserrat.LICENSE.txt
+!apps/web/src/canvas/fonts/noto-sans-sc.LICENSE.txt
 !apps/web/src/canvas/fonts/orbitron.LICENSE.txt
 !apps/web/src/canvas/fonts/outfit.LICENSE.txt
 !apps/web/src/canvas/fonts/oxanium.LICENSE.txt

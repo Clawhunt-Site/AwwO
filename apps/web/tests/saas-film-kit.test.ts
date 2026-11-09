@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { buildFilmKit } from '../scripts/build-film-kit.mjs';
+import { buildFilmKit, GLYPH_PROBE_ADVANCES, probeFont } from '../scripts/build-film-kit.mjs';
 import { FILM_GUIDE, FILM_GUIDE_HEADING, FILM_GUIDE_OLD_HEADINGS, FILM_KIT_BYTES, FILM_KIT_SHA256, FILM_KIT_URL, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
 import { loadPreviewLibraries, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
@@ -608,6 +608,193 @@ describe('the film kit bundle', () => {
     await settle();
     expect(added).toEqual(['Inter']);
     expect(() => page.renderAt(0)).toThrow(/^Film: text "Inter" has no glyphs for: ж; fonts not loaded: text "Inter" italic$/);
+  });
+
+  /** A 2D context that measures as Chrome does: each character in the first family of the font string that has it, at
+   *  that family's width. `covers` says which characters a page's family has; a generic family has every character, and
+   *  so does each of the kit's glyph probes, while `present` finds a face of it in the document (one not in it is no
+   *  family at all, and the browser falls back past it). A probe draws a character as a blank of its own width; a Han
+   *  character is an em wide in every font that has it, whichever that is: the reason the generic families cannot tell
+   *  a family lacks one. */
+  const chromeContext = (covers: (family: string, char: string) => boolean, present: (family: string) => boolean) => {
+    const state: Record<string, unknown> = { font: '10px sans-serif', letterSpacing: '0px' };
+    const han = /\p{Script=Han}/u, generic = ['monospace', 'serif', 'cursive', 'sans-serif'];
+    const probe = (family: string) => /^AwwO glyph probe ([ab])$/.exec(family)?.[1];
+    const width = (family: string, char: string, px: number) => {
+      const which = probe(family);
+      if (which) return px * GLYPH_PROBE_ADVANCES['ab'.indexOf(which)] / 1000;
+      if (han.test(char)) return px;
+      return ({ monospace: 7, serif: 9, cursive: 10 } as Record<string, number>)[family] ?? 8;
+    };
+    const measure = (text: string) => {
+      const [, size = '10', list = ''] = /(\d+(?:\.\d+)?)px\s+(.*)$/.exec(String(state.font)) ?? [];
+      const families = list.split(',').map(name => name.trim().replace(/^"|"$/g, ''));
+      return [...String(text)].reduce((sum, char) => {
+        const family = families.find(name => generic.includes(name) || (probe(name) ? present(name) : covers(name, char)));
+        return sum + width(family ?? 'serif', char, Number(size));
+      }, 0);
+    };
+    return new Proxy({}, {
+      get(_target, key) {
+        if (key in state) return state[key];
+        if (key === 'measureText') return (text: string) => ({ width: measure(text), actualBoundingBoxAscent: 10, actualBoundingBoxDescent: 3 });
+        if (key === 'getTransform') return () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+        if (key === 'getImageData') return (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(Math.max(1, w * h * 4)) });
+        if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
+        return () => undefined;
+      },
+      set(_target, key, value) { state[key] = value; return true; },
+    });
+  };
+  /** A render's page (no font policy) whose canvas measures as chromeContext does, with every FontFace loading: what the
+   *  kit made (family and whether from bytes), and the families in the document's set, now and ever. Its FontFace
+   *  refuses a family a word of which starts with a digit, as Firefox 142's does: the face is made, in error, and its
+   *  load() rejects ("probe 1", "Exo 2" and "Press Start 2P" are no family names there; "probe1" is one). */
+  const glyphPage = (covers: (family: string, char: string) => boolean, { bytes = true }: { bytes?: boolean } = {}) => {
+    const made: { family: string; bytes: boolean }[] = [], set = new Set<{ family: string }>(), ever: string[] = [];
+    class FontFace {
+      family: string;
+      status: string;
+      constructor(family: string, source: unknown) {
+        this.family = family;
+        this.status = /(?:^|\s)\d/.test(family) ? 'error' : 'unloaded';
+        made.push({ family, bytes: typeof source !== 'string' });
+      }
+      load() {
+        if (this.status === 'error') return Promise.reject(new SyntaxError(`FontFace: ${this.family} is no family name`));
+        this.status = 'loaded';
+        return Promise.resolve(this);
+      }
+    }
+    const present = (family: string) => [...set].some(face => face.family === family);
+    const element = (tag: string) => ({ tagName: tag, style: {}, className: '', textContent: '', width: 0, height: 0, children: [] as unknown[],
+      getContext: () => chromeContext(covers, present), appendChild(child: unknown) { this.children.push(child); }, remove() {}, setAttribute() {} });
+    const fonts = { ready: Promise.resolve(), forEach: (each: (face: unknown) => void) => set.forEach(each), load: async () => [],
+      add: (face: { family: string }) => { set.add(face); ever.push(face.family); }, delete: (face: { family: string }) => set.delete(face) };
+    const page = kitInSandbox({ window: { FontFace, ...(bytes ? { atob } : {}) },
+      document: { createElement: element, body: element('body'), head: element('head'), fonts } });
+    return { page, made, ever, now: () => [...set].map(face => face.family) };
+  };
+  // A Latin family draws Latin only. Noto Sans SC's subset draws Latin, 雨停了 and its punctuation, not the rare 毖 and
+  // no Cyrillic.
+  const latinOnly = /^[ -ɏ]$/u;
+  const notoCovers = (family: string, char: string) => family === 'Noto Sans SC' ? char !== '毖' && !/\p{Script=Cyrillic}/u.test(char) : latinOnly.test(char);
+  const PROBES = ['AwwO glyph probe a', 'AwwO glyph probe b'];
+
+  it('checks a film\'s Chinese words in the faces that set them, after its own glyph probes', async () => {
+    const latin = glyphPage(notoCovers), noto = glyphPage(notoCovers), rare = glyphPage(notoCovers);
+    latin.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' }, check: { strings: { display: ['雨停了。'] } } }, scenes: scene });
+    noto.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC' }, check: { strings: { display: ['雨停了，Rain'] } } }, scenes: scene });
+    rare.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC' }, check: { strings: { display: ['毖'] } } }, scenes: scene });
+    await settle();
+    expect(() => latin.page.renderAt(0)).toThrow(/^Film: display "Instrument Serif" has no glyphs for: 雨停了。$/);
+    expect(() => noto.page.renderAt(0)).not.toThrow();
+    expect(() => rare.page.renderAt(0)).toThrow(/^Film: display "Noto Sans SC" has no glyphs for: 毖$/);
+    // The two probes were made from bytes, under names any browser takes, and were in the document only while the
+    // check measured.
+    for (const { made, ever, now } of [latin, noto, rare]) {
+      expect(made.filter(face => face.family.startsWith('AwwO glyph probe'))).toEqual(PROBES.map(family => ({ family, bytes: true })));
+      expect(ever.filter(family => family.startsWith('AwwO glyph probe'))).toEqual(PROBES);
+      expect(now().filter(family => family.startsWith('AwwO glyph probe'))).toEqual([]);
+    }
+  });
+
+  it('leaves emoji out of the glyph check: no family choice makes them the film\'s', async () => {
+    const mixed = glyphPage(notoCovers), only = glyphPage(notoCovers);
+    // 🚀, a heart drawn as emoji (its selector), a family of people joined, a flag, a hand with a skin tone and two
+    // text-default pictographs joined go uncounted, and a keycap's digit is measured as a digit; 新 is counted.
+    mixed.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' },
+      check: { strings: { display: ['新🚀', '❤\uFE0F \u{1F469}\u200D\u{1F469}\u200D\u{1F467}', '🇨🇳',
+        '\u270C\u{1F3FD} \u{1F441}\u200D\u{1F5E8} 1\uFE0F\u20E3'] } } }, scenes: scene });
+    only.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' }, check: { strings: { display: '🚀🚀' } } }, scenes: scene });
+    await settle();
+    expect(() => mixed.page.renderAt(0)).toThrow(/^Film: display "Instrument Serif" has no glyphs for: 新$/);
+    // Nothing left to measure: no probe is made, and the film is fine.
+    expect(only.made.filter(face => face.family.startsWith('AwwO glyph probe'))).toEqual([]);
+    expect(() => only.page.renderAt(0)).not.toThrow();
+  });
+
+  it('measures each listed string without its emoji on its own: a base and a skin tone listed apart are no emoji', async () => {
+    const apart = glyphPage(notoCovers), whole = glyphPage(notoCovers);
+    apart.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' }, check: { strings: { display: ['\u270C', '\u{1F3FD}'] } } }, scenes: scene });
+    whole.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' }, check: { strings: { display: '\u270C\u{1F3FD}' } } }, scenes: scene });
+    await settle();
+    // Drawn apart, the hand is text, which a Latin family lacks; written as one string, it is the emoji with its tone.
+    expect(() => apart.page.renderAt(0)).toThrow(/^Film: display "Instrument Serif" has no glyphs for: \u270C$/);
+    expect(() => whole.page.renderAt(0)).not.toThrow();
+  });
+
+  it('still counts a string\'s emoji in its length, for the warning that a line is long', async () => {
+    const warned: string[] = [];
+    const { page } = glyphPage(notoCovers);
+    page.console = { ...console, warn: (message: string) => { warned.push(String(message)); }, error() {} };
+    page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC' }, check: { strings: { display: ['A'.repeat(20) + '🚀'.repeat(20)] } } }, scenes: scene });
+    await settle();
+    expect(() => page.renderAt(0)).not.toThrow();
+    expect(warned.some(message => /is 60 characters on one line \(max 42\)/.test(message))).toBe(true);
+  });
+
+  it('cannot see a missing Chinese glyph without its probes, and still checks: the generic families measure instead', async () => {
+    // A page with no atob cannot make the probes: Chrome draws 雨 an em wide after every generic family, so the old check
+    // passes a Latin family; a Cyrillic letter it still tells.
+    const { page, made } = glyphPage(notoCovers, { bytes: false });
+    page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Instrument Serif' }, check: { strings: { display: ['雨ж'] } } }, scenes: scene });
+    await settle();
+    expect(made.filter(face => face.family.startsWith('AwwO glyph probe'))).toEqual([]);
+    expect(() => page.renderAt(0)).toThrow(/^Film: display "Instrument Serif" has no glyphs for: ж$/);
+  });
+
+  it('makes no glyph probe for a film with no characters to check', async () => {
+    const { page, made } = glyphPage(notoCovers);
+    page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC', text: 'Inter' } }, scenes: scene });
+    await settle();
+    expect(page.__ready).toBe(true);
+    expect(made.map(face => face.family)).toEqual(['Noto Sans SC', 'Inter', 'Inter']);
+    expect(() => page.renderAt(0)).not.toThrow();
+  });
+
+  it('loads Noto Sans SC as its one bold cut of the simplified Chinese subset, for any role that names it', async () => {
+    const faces: [string, string, Record<string, string>][] = [];
+    class FontFace { constructor(family: string, source: string, descriptors: Record<string, string>) { faces.push([family, source, descriptors]); } load() { return Promise.resolve(this); } }
+    const page = kitInSandbox({ window: { FontFace } });
+    page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC', text: { family: 'Noto Sans SC' } } }, scenes: scene });
+    await settle();
+    const url = 'url(https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.0/files/noto-sans-sc-chinese-simplified-700-normal.woff2)';
+    expect(faces).toEqual([['Noto Sans SC', url, { style: 'normal', weight: '700' }], ['Noto Sans SC', url, { style: 'normal', weight: '700' }]]);
+    expect(page.Film.font('display', 40)).toBe('700 normal 40px "Noto Sans SC", ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif');
+  });
+
+  it('carries the glyph probes the build script makes: TrueType fonts whose one blank glyph every character maps to', () => {
+    const embedded = /const GLYPH_PROBES = (\[[^\]]*\]);/.exec(kitText)?.[1];
+    expect(JSON.parse(embedded ?? 'null')).toEqual(GLYPH_PROBE_ADVANCES.map(advance => probeFont(advance).toString('base64')));
+    expect(GLYPH_PROBE_ADVANCES).toEqual([100, 700]);
+    for (const advance of GLYPH_PROBE_ADVANCES) {
+      const font = probeFont(advance);
+      const sum = (bytes: Buffer) => { let s = 0; for (let i = 0; i < bytes.length; i += 4) s = (s + bytes.readUInt32BE(i)) >>> 0; return s; };
+      expect(font.readUInt32BE(0)).toBe(0x00010000);
+      expect(font.length % 4).toBe(0);
+      const tables = new Map<string, Buffer>();
+      for (let i = 0; i < font.readUInt16BE(4); i++) {
+        const at = 12 + 16 * i, tag = font.toString('latin1', at, at + 4), offset = font.readUInt32BE(at + 8), length = font.readUInt32BE(at + 12);
+        const table = font.subarray(offset, offset + length);
+        const padded = Buffer.concat([table, Buffer.alloc((4 - (length % 4)) % 4)]);
+        if (tag === 'head') padded.writeUInt32BE(0, 8);
+        expect(sum(padded), tag).toBe(font.readUInt32BE(at + 4));
+        tables.set(tag, table);
+      }
+      expect([...tables.keys()]).toEqual(['OS/2', 'cmap', 'glyf', 'head', 'hhea', 'hmtx', 'loca', 'maxp', 'name', 'post']);
+      // The whole font sums to the magic number with its adjustment in.
+      expect(sum(font)).toBe(0xB1B0AFBA);
+      const head = tables.get('head')!, hhea = tables.get('hhea')!, hmtx = tables.get('hmtx')!, maxp = tables.get('maxp')!, cmap = tables.get('cmap')!;
+      expect([head.readUInt32BE(12), head.readUInt16BE(18), head.readInt16BE(50)]).toEqual([0x5F0F3CF5, 1000, 0]);
+      expect([maxp.readUInt16BE(4), hhea.readUInt16BE(34), hmtx.readUInt16BE(0)]).toEqual([2, 1, advance]);
+      // One Windows full-Unicode subtable, format 13: every code point but the surrogates to glyph 1.
+      expect([cmap.readUInt16BE(2), cmap.readUInt16BE(4), cmap.readUInt16BE(6), cmap.readUInt32BE(8), cmap.readUInt16BE(12)]).toEqual([1, 3, 10, 12, 13]);
+      const groups = Array.from({ length: cmap.readUInt32BE(24) }, (_, i) => [cmap.readUInt32BE(28 + 12 * i), cmap.readUInt32BE(32 + 12 * i), cmap.readUInt32BE(36 + 12 * i)]);
+      expect(groups).toEqual([[0, 0xD7FF, 1], [0xE000, 0x10FFFF, 1]]);
+      // Both glyphs are empty: no outline to draw.
+      expect([...tables.get('loca')!]).toEqual([0, 0, 0, 0, 0, 0]);
+    }
   });
 
   it('says what is wrong with a film before what its type lacks, in one error with the frame\'s own', async () => {

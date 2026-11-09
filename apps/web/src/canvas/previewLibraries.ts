@@ -156,7 +156,9 @@ export function previewScriptNeeds(source: string, inlined: readonly string[] = 
   const modules = moduleNeeds(template.content, inlined);
   if (modules?.files.length) libraries.add(THREE_MODULES_LIBRARY);
   for (const host of modules?.blocked ?? []) blocked.add(host);
-  const fonts = previewFontNeeds(source, ...texts);
+  // A family only the film kit names (its Chinese face) goes only to a page that loads the kit.
+  const film = BY_URL.get(FILM_KIT_URL);
+  const fonts = previewFontNeeds(source, ...texts).filter(font => !font.film || (film !== undefined && libraries.has(film)));
   if (fonts.length) libraries.add(PREVIEW_FONTS_LIBRARY);
   if (!libraries.size && !blocked.size) return NO_PREVIEW_SCRIPT_NEEDS;
   const additions = [...libraries].flatMap(library => (library.additions ?? []).filter(addition => addition.used.test(source)));
@@ -199,13 +201,24 @@ function scriptOrigin(reference: string): string {
 
 const loaded = new Map<string, Promise<string>>();
 
-// Fonts are a finish, not a requirement: a font chunk still loading after this long is left out and the page runs in its
-// fallback font.
-const FONT_DEADLINE_MS = 20_000;
+// Fonts are a finish, not a requirement: a family whose chunk is still loading after this long is left out and the page
+// runs in its fallback font for that family. Each family is waited for on its own, so a slow one costs no other its
+// faces. The film kit's Chinese face (1.17 MB) is a film's type in its render too, so a film page waits longer for it
+// (showing that it loads); one that comes later still stays loaded for the page's next preview.
+export const FONT_DEADLINE_MS = 20_000;
+export const FILM_FONT_DEADLINE_MS = 60_000;
 function withinDeadline<T>(promise: Promise<T | undefined>, ms: number): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([promise, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms); })])
     .finally(() => clearTimeout(timer));
+}
+
+/** The @font-face rules of the families that loaded in time, in the order given, each waited for on its own (`faces`
+ *  makes one family's rules: previewFontFaces). Undefined when none did. */
+export async function suppliedFontRules(fonts: readonly PreviewFont[], faces: (fonts: readonly PreviewFont[]) => Promise<string> = previewFontFaces): Promise<string | undefined> {
+  const rules = await Promise.all(fonts.map(font =>
+    withinDeadline(faces([font]).catch(() => undefined), font.film ? FILM_FONT_DEADLINE_MS : FONT_DEADLINE_MS)));
+  return rules.filter((rule): rule is string => !!rule).join('\n') || undefined;
 }
 
 /** The inline code for each supplied library (its pinned copy, then the additions this page uses), keyed by every
@@ -218,7 +231,7 @@ export async function loadPreviewLibraries(needs: Pick<PreviewScriptNeeds, 'libr
   const [entries, modules, fonts] = await Promise.all([
     Promise.all(classic.map(async library => [library, await loadLibrary(library)] as const)),
     needs.modules?.files.length ? moduleImportEntries(needs.modules) : Promise.resolve(undefined),
-    needs.fonts?.length ? withinDeadline(previewFontFaces(needs.fonts).catch(() => undefined), FONT_DEADLINE_MS) : Promise.resolve(undefined),
+    needs.fonts?.length ? suppliedFontRules(needs.fonts) : Promise.resolve(undefined),
   ]);
   const code = new Map<string, string>();
   for (const [library, text] of entries) {

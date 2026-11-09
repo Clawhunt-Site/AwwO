@@ -124,7 +124,77 @@ const EDITS = [
     find: '\n};\nwindow.captureFrame = (frame, type = \'image/png\', quality = 0.95) => { window.renderFrame(frame); return canvas.toDataURL(type, quality); };\n',
     replace: '\n}\n',
   },
+  {
+    why: 'the glyph check measures after fonts of the kit\'s own (the generic families cannot tell a missing Chinese glyph: every font that has one draws it an em wide)',
+    find: "    const a = w('monospace'), b = w('serif'), c = w('cursive');\n"
+      + '    if (Math.abs(a - b) > 0.01 || Math.abs(b - c) > 0.01) miss.add(ch);\n',
+    replace: '    const widths = glyphFallbacks().map(w);      // AwwO: the kit\'s glyph probes, or three generic families without them\n'
+      + '    if (widths.some((x) => Math.abs(x - widths[0]) > 0.01)) miss.add(ch);\n',
+  },
+  {
+    why: 'the glyph check measures each listed string without its emoji, string by string (a lone base and a lone skin tone in two strings are no emoji)',
+    find: "    const strs = [...(c.strings?.[name] || []), ...(T.lang === 'tr' || T.lang == null ? [TYPE_TR_TEST] : [])].join('');\n",
+    replace: "    const strs = [...[].concat(c.strings?.[name] || []).map((s) => String(s).replace(EMOJI, '')),   // AwwO: emoji aside\n"
+      + "      ...(T.lang === 'tr' || T.lang == null ? [TYPE_TR_TEST] : [])].join('');\n",
+  },
 ];
+
+// The glyph check's two fonts (RUNTIME, GLYPH_PROBES), AwwO's own, made here: each a TrueType font with one blank glyph,
+// this many thousandths of an em wide, that every code point but the surrogates maps to.
+export const GLYPH_PROBE_ADVANCES = [100, 700];
+
+/** The bytes of one glyph probe: a TrueType font whose one blank glyph (and .notdef), `advance` units of 1000 to the em
+ *  wide, every code point but the surrogates maps to (a cmap format 13 table), so a character a family lacks measures
+ *  that width after it. Deterministic: no dates, no names but "AwwO glyph probe" and "Regular", no outlines. */
+export function probeFont(advance) {
+  const u16 = 'UInt16BE', i16 = 'Int16BE', u32 = 'UInt32BE';
+  const struct = (size, fields) => {
+    const bytes = Buffer.alloc(size);
+    for (const [at, type, value] of fields) bytes['write' + type](value, at);
+    return bytes;
+  };
+  const groups = [[0x0000, 0xD7FF], [0xE000, 0x10FFFF]];
+  const names = [[1, 'AwwO glyph probe'], [2, 'Regular']].map(([id, text]) => [id, Buffer.from(text, 'utf16le').swap16()]);
+  const tables = {
+    // Version 4: weight 400, width 5, regular, ascent 800 and descent 200 (typo and win), break character the space.
+    'OS/2': Buffer.concat([struct(58, [[0, u16, 4], [2, i16, advance], [4, u16, 400], [6, u16, 5], [26, i16, 50], [28, i16, 300]]),
+      Buffer.from('NONE', 'latin1'),
+      struct(34, [[0, u16, 0x40], [2, u16, 0], [4, u16, 0xFFFF], [6, i16, 800], [8, i16, -200], [12, u16, 800], [14, u16, 200], [30, u16, 32]])]),
+    // One subtable, Windows full Unicode, format 13: each group maps its whole range to glyph 1.
+    cmap: Buffer.concat([struct(28, [[2, u16, 1], [4, u16, 3], [6, u16, 10], [8, u32, 12], [12, u16, 13], [16, u32, 16 + 12 * groups.length], [24, u32, groups.length]]),
+      ...groups.map(([from, to]) => struct(12, [[0, u32, from], [4, u32, to], [8, u32, 1]]))]),
+    glyf: Buffer.alloc(1),
+    // checkSumAdjustment (at 8) is set once the font is whole; 1000 units to the em, short loca offsets.
+    head: struct(54, [[0, u32, 0x10000], [4, u32, 0x10000], [12, u32, 0x5F0F3CF5], [16, u16, 0x000B], [18, u16, 1000], [46, u16, 8], [48, i16, 2]]),
+    hhea: struct(36, [[0, u32, 0x10000], [4, i16, 800], [6, i16, -200], [10, u16, advance], [18, i16, 1], [34, u16, 1]]),
+    hmtx: struct(6, [[0, u16, advance]]),
+    loca: Buffer.alloc(6),
+    maxp: struct(32, [[0, u32, 0x10000], [4, u16, 2], [14, u16, 2]]),
+    name: Buffer.concat([struct(6 + 12 * names.length, [[2, u16, names.length], [4, u16, 6 + 12 * names.length],
+      ...names.flatMap(([id, text], i) => [[6 + 12 * i, u16, 3], [8 + 12 * i, u16, 1], [10 + 12 * i, u16, 0x409], [12 + 12 * i, u16, id],
+        [14 + 12 * i, u16, text.length], [16 + 12 * i, u16, names.slice(0, i).reduce((n, [, t]) => n + t.length, 0)]])]),
+      ...names.map(([, text]) => text)]),
+    post: struct(32, [[0, u32, 0x30000], [8, i16, -100], [10, i16, 50]]),
+  };
+  const tags = Object.keys(tables).sort();
+  const pad = (bytes) => Buffer.concat([bytes, Buffer.alloc((4 - (bytes.length % 4)) % 4)]);
+  const sum = (bytes) => { const p = pad(bytes); let s = 0; for (let i = 0; i < p.length; i += 4) s = (s + p.readUInt32BE(i)) >>> 0; return s; };
+  const power = 2 ** Math.floor(Math.log2(tags.length));
+  const directory = struct(12 + 16 * tags.length, [[0, u32, 0x10000], [4, u16, tags.length], [6, u16, power * 16], [8, u16, Math.log2(power)],
+    [10, u16, (tags.length - power) * 16]]);
+  let offset = directory.length, headAt = 0;
+  tags.forEach((tag, i) => {
+    directory.write(tag, 12 + 16 * i, 'latin1');
+    directory.writeUInt32BE(sum(tables[tag]), 16 + 16 * i);
+    directory.writeUInt32BE(offset, 20 + 16 * i);
+    directory.writeUInt32BE(tables[tag].length, 24 + 16 * i);
+    if (tag === 'head') headAt = offset;
+    offset += pad(tables[tag]).length;
+  });
+  const font = Buffer.concat([directory, ...tags.map((tag) => pad(tables[tag]))]);
+  font.writeUInt32BE((0xB1B0AFBA - sum(font)) >>> 0, headAt + 8);
+  return font;
+}
 
 // What must not survive the edits: names of the parts cut out, the URL parameters and the capture globals.
 const GONE = /\b(?:CAPTIONS|CAPTION_STYLE|FORMULAS|FORMULA|OWN_MUSIC|INSTRUMENTS|MODEL_SHEET|modelSheet|loadFormulas|kineticCaptions|captionPunch|loadSamples|BANK|loadAudio|captureFrame|LOOK_ID)\b|\bq\.get\(|window\.(?:renderFrame|READY|renderAudio)\b/;
@@ -141,10 +211,12 @@ let ARRANGEMENT = [], CAST = {}, score = () => {};
 const beat = (n) => BEAT0 + n * 60 / BPM, bar = (n) => beat(4 * n);
 
 // AwwO's brand fonts, the families its running previews supply by name (apps/web/src/canvas/previewFontList.ts), as
-// the Fontsource 5.3.0 packages on jsDelivr (Latin). A TYPE role may name one by family alone. AwwO's render worker
-// answers the URLs these name from its own copies (apps/render-worker/fonts.mjs), so a render of a role that names a
-// brand family alone needs no network (one that sets other subsets or another version names other files, which it
-// fetches); a downloaded page loads them from jsDelivr.
+// the Fontsource 5.3.0 packages on jsDelivr: their Latin subsets, and for Noto Sans SC, the face a film's Chinese words
+// have, Google Fonts' simplified Chinese subset of it (7,333 Han characters, with Latin and CJK punctuation) in one
+// bold cut. A TYPE role may name one by family alone. AwwO's render worker answers the URLs these name from its own
+// copies (apps/render-worker/fonts.mjs), so a render of a role that names a brand family alone needs no network (one
+// that sets other subsets or another version names other files, which it fetches); a downloaded page loads them from
+// jsDelivr.
 const BRAND_FONTS = {
   'Inter': { pkg: 'inter', variable: 'wght', axes: { wght: [100, 900] }, styles: ['normal', 'italic'] },
   'Space Grotesk': { pkg: 'space-grotesk', variable: 'wght', axes: { wght: [300, 700] } },
@@ -163,6 +235,7 @@ const BRAND_FONTS = {
   'JetBrains Mono': { pkg: 'jetbrains-mono', variable: 'wght', axes: { wght: [100, 800] }, styles: ['normal', 'italic'] },
   'Press Start 2P': { pkg: 'press-start-2p', weights: [400] },
   'Pixelify Sans': { pkg: 'pixelify-sans', variable: 'wght', axes: { wght: [400, 700] } },
+  'Noto Sans SC': { pkg: 'noto-sans-sc', weights: [700], subsets: ['chinese-simplified'] },
 };
 
 /** A TYPE role as the engine reads it: a brand family by name, a full Fontsource role, or any other family as written
@@ -287,6 +360,58 @@ function remoteFontsAllowed() {
   return sources === null || /(?:^|\s)(?:\*|https?:\S*)(?:\s|$)/i.test(sources);
 }
 
+// The glyph check (typeCheck) measures each character in a role's family twice, followed each time by another font: a
+// character the family draws measures the same both times, one it lacks takes the width of the font after it. The
+// system's generic families cannot tell for Chinese: every font that has a Han character draws it an em wide, so a
+// Latin family "has" 雨 after each of them. The kit follows the family with two fonts of its own instead, which draw
+// every character as a blank 0.1 and 0.7 em wide (made by apps/web/scripts/build-film-kit.mjs, probeFont). They are
+// made from bytes, so no font policy (a preview's font-src data:) refuses them, are in the document only while the
+// check measures, and are no role's face. Their names are identifiers only: Firefox reads a FontFace's family as CSS,
+// where a word that starts with a digit ("probe 1", as "Exo 2" or "Press Start 2P") is no family name, and the face's
+// load() rejects.
+const GLYPH_PROBES = GLYPH_PROBES_TOKEN;
+const GLYPH_PROBE_NAMES = ['AwwO glyph probe a', 'AwwO glyph probe b'];
+let probing = false;
+const glyphFallbacks = () => (probing ? GLYPH_PROBE_NAMES.map((name) => '"' + name + '"') : ['monospace', 'serif', 'cursive']);
+
+/** check(), run with the glyph probes in the document, or with the generic families where the probes cannot be made. */
+async function withGlyphProbes(check) {
+  const faces = [];
+  try {
+    for (let i = 0; i < GLYPH_PROBES.length; i++) {
+      const face = new FontFace(GLYPH_PROBE_NAMES[i], Uint8Array.from(atob(GLYPH_PROBES[i]), (c) => c.charCodeAt(0)).buffer);
+      kitFaces.add(face);
+      faces.push(face);
+    }
+    await Promise.all(faces.map((face) => face.load()));
+    for (const face of faces) document.fonts.add(face);
+    probing = true;
+  } catch (e) { /* the generic families measure instead */ }
+  try {
+    return check();
+  } finally {
+    probing = false;
+    for (const face of faces) { try { document.fonts.delete(face); } catch (e) { /* never added */ } }
+  }
+}
+
+// Emoji are drawn by the system's emoji font whatever a role's family is, so no choice of family makes them the film's:
+// the glyph check measures none of them, as it always passed them. Whole sequences go first (pictographs joined by
+// ZWJ, a skin tone with its base, a pictograph with its emoji selector), then default emoji, flags and tags, then any
+// stray selector, joiner, keycap mark or skin tone. A pictograph written as text (❤ or ✌ alone) is measured like any
+// character, and so is a keycap's digit. The film's strings themselves stay whole for typeCheck's other checks.
+const EMOJI = /[\p{Extended_Pictographic}\p{Emoji_Modifier_Base}][\u{FE0F}\p{Emoji_Modifier}]?(?:\u{200D}[\p{Extended_Pictographic}\p{Emoji_Modifier_Base}][\u{FE0F}\p{Emoji_Modifier}]?)+|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}|\p{Extended_Pictographic}\u{FE0F}|\p{Emoji_Presentation}|\p{Regional_Indicator}|[\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]|\p{Emoji_Modifier}/gu;
+
+/** typeCheck of the roles in T, the probes made only when it has characters to measure (emoji aside): a role's own
+ *  strings, and Turkish's for a film in Turkish, as typeCheck takes them. */
+function checkType(T) {
+  const listed = (T.check && T.check.strings) || {};
+  const measured = (name) => [].concat(listed[name] || []).map((s) => String(s).replace(EMOJI, '')).join('').trim().length > 0;
+  const measures = Object.keys(T.roles).some((name) => measured(name) || T.lang === 'tr' || T.lang == null);
+  const check = () => typeCheck(g, T, W, H, PALETTE);
+  return measures ? withGlyphProbes(check) : check();
+}
+
 /** What is wrong with the film as described, in words a page's author can act on. */
 function filmErrors() {
   const errs = [], near = (a, b) => Math.abs(a - b) < 1e-3;
@@ -378,7 +503,7 @@ function boot() {
       // Glyphs are checked only in the faces that loaded: a system family or a stand-in proves nothing about the film's.
       const absent = missing.filter(({ used }) => !used.some(Boolean)).map(({ name }) => name);
       const loaded = { ...TYPE, roles: Object.fromEntries(Object.entries(TYPE.roles || {}).filter(([name, r]) => r && (r.pkg || r.files) && !absent.includes(name))) };
-      const qc = typeCheck(g, loaded, W, H, PALETTE);
+      const qc = await checkType(loaded);
       for (const e of qc.errors) (/glyphs/.test(e) ? (failure = failure ? failure + '; ' + e : e) : notes.push(e));
       notes.push(...qc.warnings);
     } catch (e) {
@@ -607,7 +732,8 @@ export function buildFilmKit(kitDir = KIT_DIR) {
   for (const edit of EDITS) text = replaceOnce(text, edit.find, edit.replace, edit.why);
   const leftover = text.match(GONE);
   if (leftover) throw new Error(`film kit: "${leftover[0]}" survived the edits`);
-  const runtime = RUNTIME.replace('KIT_VERSION_TOKEN', JSON.stringify(KIT_VERSION)).replace('KIT_COMMIT_TOKEN', JSON.stringify(KIT_COMMIT));
+  const runtime = RUNTIME.replace('KIT_VERSION_TOKEN', JSON.stringify(KIT_VERSION)).replace('KIT_COMMIT_TOKEN', JSON.stringify(KIT_COMMIT))
+    .replace('GLYPH_PROBES_TOKEN', JSON.stringify(GLYPH_PROBE_ADVANCES.map((advance) => probeFont(advance).toString('base64'))));
   const license = readFileSync(join(kitDir, 'LICENSE'), 'utf8').trimEnd().split('\n').map((line) => (line ? ` * ${line}` : ' *')).join('\n');
   const body = `${looks}\n\n${text}${runtime}`
     // Inlined into an HTML <script>: nothing in it may close the element or open a comment there. In JavaScript source
@@ -617,8 +743,9 @@ export function buildFilmKit(kitDir = KIT_DIR) {
  * templates/quick/film.html) as one classic script that defines window.Film: looks, a 2.5D camera, depth planes,
  * transitions, type, stylised characters and a whole soundtrack rendered offline with Web Audio. AwwO's changes: a page
  * describes its film with Film.run({...}) instead of editing a FILM section; the frame comes from AwwO's renderer
- * (renderAt, __ready, renderAudio) and the picture takes the page's size; casing follows the film's language; and the
- * parts that need cinecode's own tools are left out (local files, recorded instruments, formulas, speech captions).
+ * (renderAt, __ready, renderAudio) and the picture takes the page's size; casing follows the film's language; the glyph
+ * check measures after two blank fonts of AwwO's own; and the parts that need cinecode's own tools are left out (local
+ * files, recorded instruments, formulas, speech captions).
  * Generated by apps/web/scripts/build-film-kit.mjs from third_party/cinecode; do not edit by hand.
  *
 ${license}
