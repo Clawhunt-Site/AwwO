@@ -10,6 +10,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { AgentInvite, CopyBlock, type AgentInviteProps } from './AgentInvite';
+import { useBelowHeader } from './belowHeader';
 import { NEUTRAL_COLOR, participantColorStyle } from './MultiplayerBar';
 import { failureDetail, mt, participantInitials, shortDate, useMultiplayerText, type MultiplayerTextKey } from './multiplayerText';
 import type { UiLocale } from '../../locale';
@@ -103,6 +104,7 @@ function ShareBody({ onClose, workspaceName, role, selfUserId, canvasId, canvasU
   // While an Agent token just made is on screen: its 「已保存，关闭」 (AgentInvite), the one way its secret goes.
   const secretDone = useRef<HTMLButtonElement | null>(null);
   useFocusReturn(dialogRef);
+  useBelowHeader(dialogRef);
   useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, []);
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // The dialog's keys are its own: the board's (Delete removes the selected nodes, Escape lets them go) never see them.

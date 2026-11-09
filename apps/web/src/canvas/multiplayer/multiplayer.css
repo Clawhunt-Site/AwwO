@@ -136,6 +136,9 @@
 
 /* ── The 同屏 panel ──────────────────────────────────────────────────────────────────────────────────────────── */
 
+/* It starts right below the canvas header it opens from, wherever a banner above the header has moved it:
+   --awwo-multiplayer-top is the header's bottom edge, which belowHeader.ts measures before the panel is first painted
+   (64px only where nothing measures it: the hosted header, 56px tall in the page's frame 8px in). */
 .awwo-multiplayer-panel {
   position: fixed;
   z-index: 45;

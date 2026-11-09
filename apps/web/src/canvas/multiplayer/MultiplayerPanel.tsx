@@ -10,6 +10,7 @@ import type { ModelNameSources } from '../modelNames';
 import type { LiveClaim, LiveMessage, LiveParticipant } from './types';
 import type { ActivityItem } from './activity';
 import { AgentInvite, type AgentInviteProps } from './AgentInvite';
+import { useBelowHeader } from './belowHeader';
 import { hereCount, isParticipantColor, ParticipantAvatar, participantColorStyle, participantName, participantStatus, selfFirst, type MultiplayerStatus } from './MultiplayerBar';
 import { clockTime, failureDetail, kindLabel, portLabel, shownTitle, timeLeft, useMultiplayerText } from './multiplayerText';
 import { useEnterToSend } from '../composerKeys';
@@ -102,6 +103,7 @@ function PanelBody({ onClose, participants, selfId, claims, messages, activity, 
   // While a token just made is on screen: its 「已保存，关闭」 button (AgentInvite), the one way its secret goes.
   const secretDone = useRef<HTMLButtonElement | null>(null);
   useFocusReturn(panelRef);
+  useBelowHeader(panelRef);
   // Opened from the header's button, the panel takes the focus, so the keyboard is where the eyes are.
   useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, []);
   const byId = useMemo(() => new Map(participants.map(participant => [participant.id, participant])), [participants]);
