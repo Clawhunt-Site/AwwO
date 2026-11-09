@@ -63,6 +63,35 @@ const posts = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.filter((
 /** The composer is ready once the catalogue has loaded and offered its model. */
 const composerReady = () => screen.findByTitle('画布助手用：已有模型连接');
 const task = () => screen.getByRole('textbox', { name: '任务说明' });
+/** The canvas's stand-in, counting the effects run of the draws that brought it a model list. */
+function Counted({ effects }: { effects: { ran: number } }) {
+  const execution = useManagedExecution('tenant-a', 'canvas-a');
+  useEffect(() => { if (execution.runtime) effects.ran++; }, [execution.runtime, effects]);
+  return <Conversation execution={execution} />;
+}
+/** React draws a fetch's answer in a scheduler task and runs that draw's effects in a later one. Outside act, as in a
+ *  browser, `atTheDraw` is called in the microtasks after each change to the page's elements (added or removed) until it
+ *  returns true: right after the draw it waits for, before that draw's effects. Whatever it and those effects scheduled is
+ *  then drawn. If it throws, the wait ends with that error. */
+async function outsideAct(atTheDraw: () => boolean) {
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let giveUp: ReturnType<typeof setTimeout> | undefined;
+      const observer = new MutationObserver(() => {
+        let drawn: boolean;
+        try { drawn = atTheDraw(); } catch (error) { observer.disconnect(); clearTimeout(giveUp); reject(error); return; }
+        if (!drawn) return;
+        observer.disconnect(); clearTimeout(giveUp); resolve();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      giveUp = setTimeout(() => { observer.disconnect(); reject(new Error('The draw waited for never came.')); }, 5000);
+    });
+    await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0));
+  } finally { environment.IS_REACT_ACT_ENVIRONMENT = previous; }
+}
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clearSaaSCanvas(); });
 
@@ -315,6 +344,129 @@ describe('the canvas assistant’s tasks', () => {
     await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
     const body = JSON.parse(String(posts(fetcher)[0][1]?.body));
     expect(body).toMatchObject({ runtime: 'pi', model: 'plain_model' });
+    expect(body).not.toHaveProperty('effort');
+  });
+
+  // React draws the model list's answer in one task and runs that draw's effects in a later one: it yields in between, so
+  // the page can paint and take input. A level picked in that gap is the reader's choice, kept, shown and sent.
+  it('keeps a level picked as soon as the model list is drawn, before that draw’s effects have run', async () => {
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runtime')) return json(runtime);
+      if (url.endsWith('/computer-runs')) return json(init.method === 'POST' ? { id: 'run-a', status: 'queued' } : { items: [] }, init.method === 'POST' ? 202 : 200);
+      return json({ ...detail, approvals: [] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const effects = { ran: 0 };
+    render(<SaaSPreferencesProvider><Counted effects={effects} /></SaaSPreferencesProvider>);
+    let pickedIn = '';
+    let effectsAtThePick = -1;
+    await outsideAct(() => {
+      const effort = screen.queryByLabelText('思考强度') as HTMLSelectElement | null;
+      if (!effort) return false;
+      pickedIn = [...effort.options].map(option => option.value).join(',');
+      effectsAtThePick = effects.ran;
+      effort.value = 'medium';
+      effort.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    });
+    expect(pickedIn).toBe(',low,medium');
+    // Picked before that draw's effects ran (0), which have run since (1).
+    expect([effectsAtThePick, effects.ran]).toEqual([0, 1]);
+    expect(screen.getByLabelText('思考强度')).toHaveValue('medium');
+    expect(screen.getByTitle('画布助手用：已有模型连接 · medium')).toBeVisible();
+    fireEvent.change(task(), { target: { value: '生成报告' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
+    await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
+    expect(JSON.parse(String(posts(fetcher)[0][1]?.body))).toMatchObject({ runtime: 'openai-agents', model: 'byok_model_a', effort: 'medium' });
+  });
+
+  it('forgets a level the refreshed list stops offering: a later list that offers it again does not bring it back', async () => {
+    let service: typeof runtime = runtime;
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runtime')) return json(service);
+      if (url.endsWith('/computer-runs')) return json(init.method === 'POST' ? { id: 'run-a', status: 'queued' } : { items: [] }, init.method === 'POST' ? 202 : 200);
+      return json({ ...detail, approvals: [] });
+    });
+    const levels = () => [...(screen.getByLabelText('思考强度') as HTMLSelectElement).options].map(option => option.value);
+    vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
+    fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'medium' } });
+    expect(screen.getByTitle('画布助手用：已有模型连接 · medium')).toBeVisible();
+    service = { ...runtime, models: [{ ...runtime.models[0], efforts: ['low'] }] };
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    expect(await screen.findByTitle('画布助手用：已有模型连接')).toBeVisible();
+    expect(levels()).toEqual(['', 'low']);
+    expect(screen.getByLabelText('思考强度')).toHaveValue('');
+    service = runtime;
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    await waitFor(() => expect(levels()).toEqual(['', 'low', 'medium']));
+    expect(screen.getByLabelText('思考强度')).toHaveValue('');
+    expect(screen.getByTitle('画布助手用：已有模型连接')).toBeVisible();
+    fireEvent.change(task(), { target: { value: '生成报告' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
+    await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
+    const body = JSON.parse(String(posts(fetcher)[0][1]?.body));
+    expect(body).toMatchObject({ runtime: 'openai-agents', model: 'byok_model_a' });
+    expect(body).not.toHaveProperty('effort');
+  });
+
+  it('forgets the level of a chosen model the refreshed list drops: the model listed again comes back at its default', async () => {
+    const other = { id: 'byok_model_b', label: '第二个模型', runtime: 'openai-agents', efforts: [] as string[] };
+    let service: typeof runtime = runtime;
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runtime')) return json(service);
+      if (url.endsWith('/computer-runs')) return json(init.method === 'POST' ? { id: 'run-a', status: 'queued' } : { items: [] }, init.method === 'POST' ? 202 : 200);
+      return json({ ...detail, approvals: [] });
+    });
+    vi.stubGlobal('fetch', fetcher); render(view()); await composerReady();
+    fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'medium' } });
+    expect(screen.getByTitle('画布助手用：已有模型连接 · medium')).toBeVisible();
+    service = { ...runtime, models: [other] };
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    expect(await screen.findByTitle('画布助手用：已有模型连接（已不可用）')).toBeVisible();
+    expect(screen.queryByLabelText('思考强度')).toBeNull();
+    service = { ...runtime, models: [runtime.models[0], other] };
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    expect(await screen.findByTitle('画布助手用：已有模型连接')).toBeVisible();
+    expect(screen.getByLabelText('思考强度')).toHaveValue('');
+    fireEvent.change(task(), { target: { value: '生成报告' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始执行' }));
+    await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
+    const body = JSON.parse(String(posts(fetcher)[0][1]?.body));
+    expect(body).toMatchObject({ runtime: 'openai-agents', model: 'byok_model_a' });
+    expect(body).not.toHaveProperty('effort');
+  });
+
+  it('shows and sends no level the refreshed list dropped, even from the draw that brings that list, before its effects', async () => {
+    let service: typeof runtime = runtime;
+    const fetcher = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith('/computer-runtime')) return json(service);
+      if (url.endsWith('/computer-runs')) return json(init.method === 'POST' ? { id: 'run-a', status: 'queued' } : { items: [] }, init.method === 'POST' ? 202 : 200);
+      return json({ ...detail, approvals: [] });
+    });
+    const effects = { ran: 0 };
+    vi.stubGlobal('fetch', fetcher); render(<SaaSPreferencesProvider><Counted effects={effects} /></SaaSPreferencesProvider>); await composerReady();
+    fireEvent.change(screen.getByLabelText('思考强度'), { target: { value: 'medium' } });
+    fireEvent.change(task(), { target: { value: '生成报告' } });
+    expect(screen.getByTitle('画布助手用：已有模型连接 · medium')).toBeVisible();
+    service = { ...runtime, models: [{ ...runtime.models[0], efforts: ['low'] }] };
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型列表' }));
+    // Read right after the draw that brings the shorter list, before that draw's effects: what it shows, and a task sent from it.
+    let shown = '';
+    let effectsAtTheDraw = -1;
+    await outsideAct(() => {
+      const effort = screen.queryByLabelText('思考强度') as HTMLSelectElement | null;
+      if (!effort || effort.options.length !== 2) return false;
+      shown = screen.getAllByTitle(/^画布助手用：/).map(element => element.getAttribute('title')).join(' | ');
+      effectsAtTheDraw = effects.ran;
+      screen.getByRole('button', { name: '开始执行' }).click();
+      return true;
+    });
+    // Read before that draw's effects ran (1, the first list's), which have run since (2).
+    expect([effectsAtTheDraw, effects.ran]).toEqual([1, 2]);
+    expect(shown).toBe('画布助手用：已有模型连接');
+    await waitFor(() => expect(posts(fetcher)).toHaveLength(1));
+    const body = JSON.parse(String(posts(fetcher)[0][1]?.body));
+    expect(body).toMatchObject({ runtime: 'openai-agents', model: 'byok_model_a' });
     expect(body).not.toHaveProperty('effort');
   });
 

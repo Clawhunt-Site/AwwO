@@ -136,6 +136,7 @@ export interface ManagedExecution {
   chooseModel: (key: string) => void;
   /** The model the reader chose (not the default the service lists first): the components a plan adds start on it. */
   componentModel?: { runtime: string; model: string };
+  /** The level the chosen model is asked for, '' for the model's own default: only a level that model lists. */
   effort: string;
   setEffort: (effort: string) => void;
   knowledgeCount: number;
@@ -416,8 +417,14 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
   }, [activated, scope]);
 
   const choiceModel = runtime?.models.find(item => executionModelKey(item.runtime, item.id) === modelKey);
-  // Effort belongs to the model: a model that lists no levels gets none, and a change of model resets it.
-  useEffect(() => { if (!choiceModel?.efforts?.includes(effort)) setEffort(''); }, [choiceModel, effort]);
+  // Effort belongs to the model: a model that lists no levels gets none, and a change of model resets it (chooseModel,
+  // the account's default, another canvas). The level shown and sent is read at each draw, against the list it shows.
+  const chosenEffort = effort && choiceModel?.efforts?.includes(effort) ? effort : '';
+  // A level the list stops offering is forgotten, so a later list that offers it again does not bring it back. React runs
+  // the effects of a fetch answer's draw, as this list's, in a later task (it yields so the page can paint and take input),
+  // and a level picked in between is queued before this update: so it judges the effort as React applies it, not the one
+  // its draw read, and keeps that pick (judging the draw's effort cleared it).
+  useEffect(() => { setEffort(current => choiceModel?.efforts?.includes(current) ? current : ''); }, [choiceModel]);
 
   // The selected task, read until it ends, while its conversation is on screen (closing
   // the assistant stops reading, never the task); a long task pauses reading after six minutes until refreshed.
@@ -497,7 +504,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
       : new TextEncoder().encode(prompt).length > PROMPT_BYTES ? t('任务内容最多 32 KiB。', 'Keep the task within 32 KiB.') : startBlockedReason;
     if (blocked) throw new Error(blocked);
     if (lock.current) throw new Error(t('上一个请求还在处理，请稍候。', 'The previous request is still being handled.'));
-    const input: ExecutionInput = { prompt, runtime: choiceModel!.runtime, model: choiceModel!.id, ...(effort ? { effort } : {}),
+    const input: ExecutionInput = { prompt, runtime: choiceModel!.runtime, model: choiceModel!.id, ...(chosenEffort ? { effort: chosenEffort } : {}),
       knowledgeRevisionIds: canvasKnowledgeRevisionIds(), operationId };
     // Written ahead, before it is sent. A submission another page of this canvas (a second tab) left waiting stays:
     // this page waits for its reconcile too, and sends nothing.
@@ -657,7 +664,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     // A model the workspace's plan does not include (requiresUpgrade, e.g. Claude Opus 5.5 without Pro or Max) is never
     // put on them: they would only be refused when they run.
     ...(chosenByReader && choiceModel && !staleLabel && choiceModel.requiresUpgrade !== true ? { componentModel: { runtime: choiceModel.runtime, model: choiceModel.id } } : {}),
-    effort, setEffort, knowledgeCount,
+    effort: chosenEffort, setEffort, knowledgeCount,
     history, historyFailed, confirmedTasks, startRefusal, selectedId,
     select: id => { setSelectedId(id); setDetailRevision(value => value + 1); setError(null); setPendingImport(null); setPreview(null); },
     run: currentRun, detailLoading, pollingPaused,
