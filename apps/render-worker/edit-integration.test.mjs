@@ -382,3 +382,19 @@ test('the same film whose kernel boots without a timer makes its cards and its s
   assert.deepEqual([reply.report.frames, reply.report.counts.cards], [24, 2]);
   assert.equal((await call('DELETE', '/internal/edits/edit_it_0013')).status, 204);
 });
+
+test('an edit whose only sound is silence finishes, its mix left as it is', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  // ffmpeg measures silence as -inf LUFS and an offset to the target of +inf, which once failed the edit.
+  const hush = `<!doctype html><html><body><script>
+window.renderAudio = async ({ seconds, sampleRate }) => ({ sampleRate, channels: [new Float32Array(Math.round(seconds * sampleRate))] });
+</script></body></html>`;
+  const timeline = { schema: 'awwo.timeline/1', name: 'hush', output: { width: 160, height: 90, fps: 12, crf: 26, stillsEverySeconds: 0 },
+    tracks: { video: [{ id: 'v1', card: BLACK_CARD, seconds: 1 }], music: [{ id: 'score', page: hush, seconds: 1, at: 0 }] } };
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId: 'edit_it_0015', timeline, files: [] }), 'application/json')).status, 201);
+  const rendered = await call('POST', '/internal/edits/edit_it_0015/render');
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  assert.deepEqual([reply.report.frames, reply.report.loudness, reply.report.warnings], [12, null, ['sound_silent:score', 'silent_mix']]);
+  assert.equal((await call('DELETE', '/internal/edits/edit_it_0015')).status, 204);
+});

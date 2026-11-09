@@ -272,7 +272,10 @@ export function loudnessArgs({ input, format = WAV, stream = 'a:0', targetLUFS =
     `loudnorm=I=${secs(targetLUFS)}:TP=${secs(truePeakDb)}:LRA=11:print_format=json`, '-f', 'null', '-'];
 }
 
-/** The last JSON block loudnorm printed → numbers (input_i is -Infinity for silence). */
+/**
+ * The last JSON block loudnorm printed → numbers. For silence input_i is -Infinity, and the offset to the target
+ * +Infinity: a sound whose every sample rounds to 0 in 16 bits measures so, however small its float samples were.
+ */
 export function parseLoudness(stderr) {
   const text = String(stderr);
   const start = text.lastIndexOf('{');
@@ -282,7 +285,9 @@ export function parseLoudness(stderr) {
   const value = (key) => {
     const parsed = Number.parseFloat(raw[key]);
     if (Number.isFinite(parsed)) return parsed;
-    if (/-inf/i.test(String(raw[key]))) return Number.NEGATIVE_INFINITY;
+    const said = String(raw[key]).trim();
+    if (/^-inf/i.test(said)) return Number.NEGATIVE_INFINITY;
+    if (/^\+?inf/i.test(said)) return Number.POSITIVE_INFINITY;
     throw new Error(`loudnorm printed no ${key}`);
   };
   return { i: value('input_i'), tp: value('input_tp'), lra: value('input_lra'), thresh: value('input_thresh'), offset: value('target_offset') };

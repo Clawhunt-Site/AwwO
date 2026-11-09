@@ -148,6 +148,11 @@ test('loudness: measured, read back, then applied in a second pass', () => {
   const measured = parseLoudness(stderr);
   assert.deepEqual(measured, { i: -26.28, tp: -19.91, lra: 5.1, thresh: -36.28, offset: 0.18 });
   assert.equal(parseLoudness('{"input_i":"-inf","input_tp":"-inf","input_lra":"0.00","input_thresh":"-70.00","target_offset":"0.00"}').i, Number.NEGATIVE_INFINITY);
+  // Silence as ffmpeg 8 measures it (anullsrc, or samples too small for 16 bits): its offset to the target is +inf.
+  const silence = '[Parsed_loudnorm_0 @ 0x1] { "input_i" : "-inf", "input_tp" : "-inf", "input_lra" : "0.00", "input_thresh" : "-70.00", "output_i" : "-inf", '
+    + '"normalization_type" : "dynamic", "target_offset" : "inf" }';
+  assert.deepEqual(parseLoudness(silence), { i: Number.NEGATIVE_INFINITY, tp: Number.NEGATIVE_INFINITY, lra: 0, thresh: -70, offset: Number.POSITIVE_INFINITY });
+  assert.throws(() => parseLoudness('{"input_i":"nan","input_tp":"-1","input_lra":"0","input_thresh":"-70","target_offset":"0"}'), /input_i/);
   assert.throws(() => parseLoudness('nothing'));
   const args = normalizeArgs({ input: 'premix.wav', measured, targetLUFS: -16, truePeakDb: -1, seconds: 10, file: 'mix.wav' });
   assert.match(args[args.indexOf('-af') + 1], /^loudnorm=I=-16:TP=-1:LRA=11:measured_I=-26\.28:measured_TP=-19\.91:measured_LRA=5\.1:measured_thresh=-36\.28:offset=0\.18:linear=true:print_format=none,aresample=48000,apad=whole_dur=10,atrim=end=10$/);
