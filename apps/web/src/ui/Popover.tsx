@@ -69,10 +69,13 @@ export function Popover({
   const style = useAnchoredPosition(open, anchorRef, layerRef, placement);
   useOutsideClose(open, [anchorRef, layerRef], onClose);
 
-  // 打开即把焦点移入卡片：否则焦点留在锚点上，卡片内的 Escape 永远收不到
+  // 打开即把焦点移入卡片：否则焦点留在锚点上，卡片内的 Escape 永远收不到。
+  // The card is drawn hidden until it is placed (AnchoredLayer.tsx), one draw after it opens, and a browser does not
+  // focus a hidden element: the focus goes in once the card is shown.
+  const shown = style.visibility === 'visible';
   useEffect(() => {
-    if (open) layerRef.current?.focus({ preventScroll: true });
-  }, [open]);
+    if (open && shown) layerRef.current?.focus({ preventScroll: true });
+  }, [open, shown]);
 
   if (!open) return null;
 

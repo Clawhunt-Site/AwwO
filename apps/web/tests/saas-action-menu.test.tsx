@@ -4,7 +4,7 @@ import { useCanvasKeys } from '../src/canvas/useCanvasKeys';
 import { ActionMenu } from '../src/saas/ActionMenu';
 import { useRef } from 'react';
 import { Popover } from '../src/ui/Popover';
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it('reveals secondary actions on demand and restores the trigger on Escape', () => {
   render(<ActionMenu label="More options">{() => <button>Settings</button>}</ActionMenu>);
@@ -15,6 +15,41 @@ it('reveals secondary actions on demand and restores the trigger on Escape', () 
   expect(dialog).toHaveFocus();
   expect(trigger).toHaveAttribute('aria-expanded', 'true');
   fireEvent.keyDown(dialog, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(trigger).toHaveFocus();
+});
+
+// A browser focuses only what it shows: focus() on an element hidden by visibility, or under display: none, leaves the
+// focus where it was. jsdom focuses anything, so this test runs the menu under the browser's rule.
+function focusLikeABrowser() {
+  const focus = HTMLElement.prototype.focus;
+  vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+    for (let element: Element | null = this; element; element = element.parentElement) {
+      if (getComputedStyle(element).display === 'none') return;
+    }
+    if (getComputedStyle(this).visibility !== 'visible') return;
+    focus.call(this, options);
+  });
+}
+
+it('takes the focus once its layer is shown, so Escape closes it (a home canvas card’s ⋯)', () => {
+  focusLikeABrowser();
+  render(<ActionMenu label="Canvas options: Atlas">{close => <button onClick={close}>Rename</button>}</ActionMenu>);
+  const trigger = screen.getByRole('button', { name: 'Canvas options: Atlas' });
+  // A press on ⋯ focuses it, then opens the menu; its layer is drawn hidden until it is placed by the anchor.
+  trigger.focus();
+  fireEvent.click(trigger);
+  const menu = screen.getByRole('dialog', { name: 'Canvas options: Atlas' });
+  expect(menu).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(trigger).toHaveFocus();
+  // Opened again, and Tab reaches its action.
+  fireEvent.click(trigger);
+  expect(screen.getByRole('dialog', { name: 'Canvas options: Atlas' })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+  expect(screen.getByRole('button', { name: 'Rename' })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(trigger).toHaveFocus();
 });
