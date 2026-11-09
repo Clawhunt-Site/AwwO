@@ -431,9 +431,9 @@ the owner's choice of 2026-11-08):
   the archive now; Open in a new tab and Render take only the live page's own build of the page shown, under the policy
   it is shown with.
 - The page check never sends a hand-in back for a repair, held or run. A run's record shows a result it reused as text.
-- The panel, the 成果 view, the studio, a preview display, a form's card on the board and the home page's recent results
-  say who handed it in (with the agent's name where they have room), never "published by hand"; the 成果 view's run receipt
-  claims no run for it, as for a copied case's recording.
+- The panel, the 成果 view, the studio, a preview display and a form's card on the board say who handed it in (with the
+  agent's name where they have room), never "published by hand"; the 成果 view's run receipt claims no run for it, as for
+  a copied case's recording.
 - Not held, an open limit: a run's result made from words an agent wrote, once a person runs it. A session's run reads
   a hand-in as its input, as it reads a person's; an assemble node copies its inputs and its `template` into its page as
   they are, so a hand-in an agent wires into one, or a `template`, a form's `fields` or a `persona` it writes, comes out

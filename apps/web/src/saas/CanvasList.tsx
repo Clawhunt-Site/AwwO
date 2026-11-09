@@ -24,11 +24,6 @@ const nodeCountOf = (canvas: CanvasListItem, drawn: number) => {
  * shown until the operator expands the full list in place (its pages, rename and delete). Search
  * matches only the loaded page; paging stays explicit, and clearing a search returns recent mode. */
 type CanvasListProps = { tenant: Tenant; onOpen: (canvasId: string) => void; recentLimit?: number; userId?: string;
-  /** The newest canvases as loaded (the first page), for views built from the same list (the home's 最近的成果).
-   * Such a view reads the canvases' outputs, so the list then reads whole documents, not the summary view. */
-  onFirstPage?: (canvases: ReadonlyArray<CanvasRecord>) => void;
-  /** Changing it reloads the list: a view built from it (最近的成果) deleted canvases. */
-  reloadSignal?: number;
   /** With `recentLimit`: 查看全部 goes to the whole list elsewhere (the home's 我的画布) instead of expanding this one. */
   onViewAll?: () => void;
   /** The whole list as 我的画布: grouped by when each canvas was last updated (今天, 最近 7 天, 更早). */
@@ -38,11 +33,11 @@ export function CanvasList(props: CanvasListProps) {
   return <ScopedCanvasList key={JSON.stringify([props.userId ?? null, props.tenant.id])} {...props} />;
 }
 
-function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, reloadSignal, onViewAll, grouped = false }: CanvasListProps) {
+function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onViewAll, grouped = false }: CanvasListProps) {
   const { locale, t } = useSaaSPreferences();
   // The summary view: a card draws only an outline, and a document carries every node's output (megabytes for a
   // workspace of large canvases, 2026-10-17).
-  const path = tenantPath(tenant.id, onFirstPage ? '/canvases' : '/canvases?view=summary');
+  const path = tenantPath(tenant.id, '/canvases?view=summary');
   const listing = usePagedList<CanvasListItem>(path);
   const readOnly = tenant.role === 'reader' || tenant.status !== 'active';
   const [editing, setEditing] = useState<{ canvas: CanvasListItem; action: 'rename' | 'delete' } | null>(null);
@@ -71,19 +66,8 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onFirstPage, re
     window.addEventListener('pageshow', restored);
     return () => window.removeEventListener('pageshow', restored);
   }, []);
-  // Only a change reloads: the first page is already being read.
-  const reloadedFor = useRef(reloadSignal);
-  useEffect(() => {
-    if (reloadSignal === reloadedFor.current) return;
-    reloadedFor.current = reloadSignal;
-    refresh.current();
-  }, [reloadSignal]);
 
   const items = listing.page ? byRecentUpdate(listing.page.items) : [];
-  const firstPage = useRef(onFirstPage);
-  firstPage.current = onFirstPage;
-  // With onFirstPage the list reads the full view, so its items carry their documents.
-  useEffect(() => { if (listing.page && listing.pageNumber === 1) firstPage.current?.(listing.page.items as CanvasRecord[]); }, [listing.page, listing.pageNumber]);
   // Once the first page is read and the page is idle: what this browser keeps of canvases not in the workspace's list is
   // checked, and forgotten where the server says the canvas is gone (canvasStorageEviction.ts).
   const firstListPage = listing.pageNumber === 1 ? listing.page ?? null : null;

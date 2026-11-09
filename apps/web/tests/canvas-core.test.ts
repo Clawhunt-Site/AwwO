@@ -259,6 +259,12 @@ describe('canvasDoc: creation defaults', () => {
 describe('canvasDoc: sanitize', () => {
   beforeEach(() => localStorage.clear());
 
+  it('reads what is not an object at all as an empty canvas, instead of failing', () => {
+    for (const raw of [undefined, null, '', 'not a document', 42, true]) {
+      expect(sanitizeDocument(raw)).toEqual({ ...emptyDocument(), updatedAt: expect.any(Number) });
+    }
+  });
+
   it('drops malformed nodes and dangling edges, and coerces a bad agentKind', () => {
     const good = createSessionNode('llm', { x: 0, y: 0 });
     const doc = sanitizeDocument({

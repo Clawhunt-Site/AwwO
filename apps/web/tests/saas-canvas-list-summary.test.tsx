@@ -5,7 +5,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { CanvasListItem, CanvasRecord, Tenant } from '../src/saas/api';
 
 // The canvas list reads the summary view: each canvas's outline (its nodes' boxes and its edges) for the card, never
-// its document, unless a view built from the list's first page needs the documents.
+// its document.
 const tenant: Tenant = { id: 'tenant-a', name: 'Workspace A', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const wrap = (node: React.ReactNode) => <SaaSPreferencesProvider>{node}</SaaSPreferencesProvider>;
@@ -54,18 +54,6 @@ it('ignores an outline node count that is not a count', async () => {
   for (const name of ['Canvas text', 'Canvas fraction', 'Canvas negative', 'Canvas missing']) {
     expect(within(card(name)).getByText('2 个节点')).toBeInTheDocument();
   }
-});
-
-it('reads whole documents when a view is built from the first page', async () => {
-  const urls: string[] = [];
-  const full: CanvasRecord = { id: 'full', tenantId: tenant.id, name: 'Canvas full', version: 1, createdAt: '2026-10-17T00:00:00Z', updatedAt: '2026-10-17T00:00:00Z',
-    document: { nodes: boxes(1), edges: [] } };
-  vi.stubGlobal('fetch', vi.fn(async (input: string) => { urls.push(input); return json({ items: [full], nextCursor: null }); }));
-  const onFirstPage = vi.fn();
-  render(wrap(<CanvasList tenant={tenant} onOpen={vi.fn()} onFirstPage={onFirstPage}/>));
-  await screen.findByRole('heading', { name: 'Canvas full' });
-  expect(urls).toEqual(['/api/v1/tenants/tenant-a/canvases?limit=50']);
-  await waitFor(() => expect(onFirstPage).toHaveBeenCalledWith([full]));
 });
 
 it('renames a canvas listed by its outline with the canvas it reads first, never the outline', async () => {

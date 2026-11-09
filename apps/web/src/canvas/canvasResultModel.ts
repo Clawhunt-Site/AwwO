@@ -1,6 +1,6 @@
 // What a canvas has delivered, read from its document alone: its steps in order, what each step has
 // published, and which published result is the canvas's own (its 成果). Pure, so the canvas's 成果 view
-// and the workspace's gallery always agree.
+// and its results studio always agree.
 //
 // Only a node's published output counts (lastOutput); a conversation's earlier result does not. Where it
 // came from and how complete it is are kept as recorded: a manual publication is never called a run's

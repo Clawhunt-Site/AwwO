@@ -24,14 +24,12 @@ import { DeliverableStudio } from '../src/canvas/studio/DeliverableStudio';
 import { LivePage } from '../src/canvas/studio/LivePage';
 import { LIVE_PAGE_CSP, MARKET_PAGE_CSP } from '../src/canvas/studio/liveDocument';
 import { nodeEntries, studioGroups } from '../src/canvas/studio/studioModel';
-import type { CanvasRecord } from '../src/saas/api';
 import { CanvasRunReceipt } from '../src/saas/CanvasRunReceipt';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { readableConfirmed, unsentOps } from '../src/saas/canvasSync';
 import { GraphNodeOutput } from '../src/saas/GraphNodeOutput';
 import { publishGraphRuns, type GraphNodeResult, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
-import { ResultsGallery } from '../src/saas/ResultsGallery';
 import { graphRunSummary } from './saas-graph-run-summary-fixture';
 
 afterEach(() => { cleanup(); clearSaaSCanvas(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); });
@@ -573,17 +571,10 @@ describe('a hand-in’s other labels', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('is the Agent on a form’s card and in the home page’s recent results', () => {
+  it('is the Agent on a form’s card', () => {
     const form = { ...createFormNode({ x: 0, y: 0 }), id: 'brief', title: 'Brief', lastOutput: handIn('Three levels') };
     render(<SessionTile node={form} scale={1} focused />);
     expect(screen.getByTestId('canvas-tile-output-brief').textContent).toContain('Agent 交来 · ');
-    cleanup();
-    localStorage.setItem('superclaw_locale', 'zh');
-    const record = { id: 'c-agent', tenantId: tenant.id, name: 'Agent canvas', version: 1, createdAt: '', updatedAt: '',
-      document: { version: 2, updatedAt: Date.now(), nodes: [session(handIn(PAGE, 'Claude Code', Date.now() - 60_000))], edges: [], waypoints: [], view: { x: 0, y: 0, scale: 1 } } };
-    render(<SaaSPreferencesProvider><ResultsGallery tenant={tenant} canvases={[record] as unknown as CanvasRecord[]} /></SaaSPreferencesProvider>);
-    expect(screen.getByText('Agent 交来')).toBeVisible();
-    expect(screen.queryByText('手动发布')).toBeNull();
   });
 
   it('has the studio read a new archive once, though the tree and the selection both open it', async () => {

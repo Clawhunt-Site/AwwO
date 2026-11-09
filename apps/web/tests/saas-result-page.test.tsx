@@ -26,9 +26,6 @@ import { resetAllSessions } from '../src/canvas/sessions';
 import { DeliverableStudio } from '../src/canvas/studio/DeliverableStudio';
 import { LIVE_PAGE_CSP } from '../src/canvas/studio/liveDocument';
 import { nodeEntries, primaryEntry, studioGroups } from '../src/canvas/studio/studioModel';
-import type { CanvasRecord, Tenant } from '../src/saas/api';
-import { SaaSPreferencesProvider } from '../src/saas/preferences';
-import { ResultsGallery } from '../src/saas/ResultsGallery';
 
 /** A game whose first frame throws, as the case's first build did. */
 const PAGE = '<!doctype html>\n<html><head><title>Lantern Path</title></head><body><h1>Lantern Path</h1><canvas id="board"></canvas>\n<script>\n'
@@ -232,19 +229,6 @@ describe('a page in every other view', () => {
     const result = screen.getByRole('article', { name: 'Build the game' });
     expect(within(result).getByTitle('Build the game · HTML 预览')).toHaveAttribute('sandbox', 'allow-scripts allow-pointer-lock');
     expect(screen.getByRole('button', { name: '打开「Build the game」的「Build the game」（网页 · 可运行）' })).toBeVisible();
-  });
-
-  it('is printed, still, as the canvas’s result in the workspace’s gallery', () => {
-    localStorage.setItem('superclaw_locale', 'zh');
-    const tenant: Tenant = { id: 'tenant-a', name: 'Workspace', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
-    const record: CanvasRecord = { id: 'c-game', tenantId: tenant.id, name: 'Lantern Path', version: 1, createdAt: '', updatedAt: '',
-      document: { ...doc([session(PAGE, { lastOutput: { text: PAGE, at: Date.now() - 60_000, source: 'run' } })]), updatedAt: Date.now() } };
-    const { container } = render(<SaaSPreferencesProvider><ResultsGallery tenant={tenant} canvases={[record]} /></SaaSPreferencesProvider>);
-    const frame = container.querySelector('iframe')!;
-    expect(frame).toHaveAttribute('sandbox', '');
-    expect(frame.getAttribute('srcdoc')).toContain('<h1>Lantern Path</h1>');
-    expect(frame.getAttribute('srcdoc')).not.toContain('createRadialGradient');
-    localStorage.clear();
   });
 });
 
