@@ -3,17 +3,17 @@
 // every one of its wires went, unsaid: a node with a deliverable form has only the form's ports (portsFor, nodePort).
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFormNode, emptyDocument, type CanvasDocument } from '../src/canvas/canvasDoc';
+import { createFormNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { agentNode, handIn, nodeIn, openLiveCanvas, setUpLiveCanvas, tearDownLiveCanvas, wire } from './saas-multiplayer-surface-fixture';
 
 beforeEach(setUpLiveCanvas);
 afterEach(tearDownLiveCanvas);
 
 /** The brief and the levels feed the build; the build feeds the review, whose checklist Claude Code handed in. */
-function canvas(): CanvasDocument {
+function canvas(build: Partial<SessionNode> = {}): CanvasDocument {
   const brief = { ...createFormNode({ x: 0, y: 0 }), id: 'brief', title: 'Brief', fields: [{ id: 'f1', label: 'Game', value: 'A two-character puzzle' }] };
   return { ...emptyDocument(), nodes: [brief, agentNode('levels', 'Levels', 0, 400, { lastOutput: handIn('Level 1, Lantern Path: …') }),
-    agentNode('build', 'Build the game', 500, 200, { deliverablesOpen: true }), agentNode('review', 'Review', 1000, 200, { lastOutput: handIn('Checklist: …') })],
+    agentNode('build', 'Build the game', 500, 200, { deliverablesOpen: true, ...build }), agentNode('review', 'Review', 1000, 200, { lastOutput: handIn('Checklist: …') })],
   edges: [wire('brief', 'data', 'build', 'context'), wire('levels', 'result', 'build', 'context'), wire('build', 'result', 'review', 'context')] };
 }
 /** Deliverables → Add a deliverable → its type → Add requirement, on the opened build, as in the tutorial. */
@@ -39,6 +39,18 @@ describe('a person’s deliverable on a session the agents wired', () => {
     expect(nodeIn(doc, 'levels').lastOutput).toEqual(handIn('Level 1, Lantern Path: …'));
     expect(nodeIn(doc, 'review').lastOutput).toEqual(handIn('Checklist: …'));
     expect(notice()).toBeNull();
+  }, 30000);
+
+  it('keeps the page Codex handed in for the build, which the Game deliverable fits, and the review made from it', async () => {
+    const page = '<!doctype html><html><head><title>Lockstep</title></head><body><canvas id="game"></canvas></body></html>';
+    const live = openLiveCanvas(canvas({ lastOutput: handIn(page) }));
+    await addDeliverable('game');
+    await waitFor(() => expect(nodeIn(live.surface().document(), 'build').contract?.outputs.map(field => field.id)).toEqual(['delivery_game']));
+    const doc = live.surface().document();
+    expect(wires(doc)).toEqual(['brief:data->build:in:context', 'build:out:delivery_game->review:context', 'levels:result->build:in:context_2']);
+    expect(nodeIn(doc, 'build').lastOutput).toEqual(handIn(page));
+    expect(nodeIn(doc, 'review').lastOutput).toEqual(handIn('Checklist: …'));
+    expect(nodeIn(doc, 'levels').lastOutput).toEqual(handIn('Level 1, Lantern Path: …'));
   }, 30000);
 
   it('says which wire a deliverable form cannot carry, and Undo brings it back', async () => {

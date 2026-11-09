@@ -1,5 +1,6 @@
-import { isMarketReference, type CanvasDocument, type CanvasEdge, type CanvasNode, type NodeOutput } from './canvasDoc';
-import type { ContractField } from './nodeContracts';
+import { isMarketReference, type CanvasDocument, type CanvasEdge, type CanvasNode, type NodeOutput, type SessionNode } from './canvasDoc';
+import { canvasText } from './i18n';
+import { parseContractOutput, type ContractField, type NodeContract } from './nodeContracts';
 import { mediaMissingText } from './mediaOutput';
 import { nodeTeamFingerprint } from './nodeTeam';
 import { isMediaSessionNode, isMediaSourceNode } from './ports';
@@ -51,18 +52,92 @@ function missingNote(node: CanvasNode | undefined): string | null {
   return node && isMediaSourceNode(node) && !hasResult(node) ? mediaMissingText(node) : null;
 }
 
+/** Does the server read this result as parseContractOutput does? Not where it heals a leaked reasoning preamble, which
+ *  this page leaves (graph_contracts.go graphOutputFiles), nor in a fence named `JSON` other than in lower case: the
+ *  server takes off `json` alone (graphOutputJSONText), so a keyed page inside one is the whole fenced text there, which
+ *  no HTML field takes. */
+function readAlike(text: string): boolean {
+  const start = text.trimStart();
+  const fence = /^```(json)/i.exec(start);
+  return !/^<\/?think(?:ing)?>/i.test(start) && (!fence || fence[1] === 'json');
+}
+
+/** readWhole's answers by result and form. A document's nodes keep both objects through a move, which goes through
+ *  invalidateOutputs on every frame of a drag, so a page is read once, not on each frame. */
+const wholeReads = new WeakMap<NodeOutput, WeakMap<NodeContract, boolean>>();
+
+/** Is a result read whole through this form, as with none: one text, Markdown or HTML field that holds all of it, and the
+ *  result fits it (parseContractOutput reads it so, as readers and a run do)? Never one that could be a JSON object, in a
+ *  fence or not: the server repairs one this page cannot parse (a raw line break inside a string) and gives readers only
+ *  its field. */
+function readWhole(contract: NodeContract, output: NodeOutput): boolean {
+  const [field, ...more] = contract.outputs;
+  if (!field || more.length || (field.type !== 'text' && field.type !== 'markdown' && field.type !== 'html')) return false;
+  const start = output.text.trimStart();
+  if (!readAlike(output.text) || start.startsWith('{') || start.startsWith('```')) return false;
+  let byForm = wholeReads.get(output);
+  const known = byForm?.get(contract);
+  if (known !== undefined) return known;
+  const read = parseContractOutput(contract, output.text);
+  const whole = !read.errors.length && read.values[field.id] === output.text;
+  if (!byForm) wholeReads.set(output, byForm = new WeakMap());
+  byForm.set(contract, whole);
+  return whole;
+}
+
 /** What a node gives the nodes wired to it besides its result's own text, which a change of its settings can change while
- *  its result stays (a case recording through any setting, a hand-in through its engine): the name their prompts quote it
- *  by and its kind (a media delivery's lines name both), the frame a market Agent's text is put in, and the fields their
- *  wires read out of its result and which of them it must hold (a result missing a required one is refused upstream);
- *  for a media node or an edit that made nothing, its note. Nothing for a node with no
- *  result otherwise, nor for a form, which passes its fields on whenever it is reached. */
+ *  its result stays (a case recording through any setting, a hand-in through its engine or a form it fits): the name
+ *  their prompts quote it by and its kind (a media delivery's lines name both), the frame a market Agent's text is put in,
+ *  and the fields their wires read out of its result and which of them it must hold (a result missing a required one is
+ *  refused upstream), none where they read it whole (readWhole); for a media node or an edit that made nothing, its note.
+ *  Nothing for a node with no result otherwise, nor for a form, which passes its fields on whenever it is reached. */
 function gives(node: CanvasNode | undefined): string | null {
   if (!node || node.kind === 'form') return null;
   if (!hasResult(node)) return missingNote(node);
   const session = node.kind === 'session' ? node : null;
-  const fields = (session ? session.contract : node.kind === 'assemble' ? node.contract : undefined)?.outputs.map(field => [field.id, field.type, field.required]) ?? null;
+  const contract = session ? session.contract : node.kind === 'assemble' ? node.contract : undefined;
+  const fields = contract && !readWhole(contract, node.lastOutput!) ? contract.outputs.map(field => [field.id, field.type, field.required]) : null;
   return JSON.stringify([node.title, session ? session.agentKind : node.kind, Boolean(session && isMarketReference(session.agentRef)), fields]);
+}
+
+/**
+ * Does a hand-in stay through a change of its node's deliverable form? Only a person adds or edits a deliverable, often
+ * after an agent has handed the node's result in. It stays when the form's outputs are all that changed and it fits them
+ * as they are now, as the server reads it too (parseContractOutput, readAlike), as it would have been taken had it come
+ * after. A first form's inputs are no change only where they are the ones carried from the wires its `context` read
+ * (`carried`, deliverableWires.ts): any other input, even empty, asks something, as a run's prompt names it.
+ */
+function handInFitsForm(old: CanvasNode | undefined, node: CanvasNode, carried: (node: SessionNode) => boolean): boolean {
+  if (old?.kind !== 'session' || node.kind !== 'session' || !node.contract?.outputs.length) return false;
+  const output = node.lastOutput;
+  if (output?.source !== 'manual' || output.partial || outputKey(old.lastOutput) !== outputKey(output) || !readAlike(output.text)) return false;
+  const inputs = (contract: NodeContract) => JSON.stringify([contract.version, contract.inputs.map(field => fieldKey(field))]);
+  const sameInputs = old.contract ? inputs(old.contract) === inputs(node.contract) : carried(node);
+  return sameInputs && askKey({ ...old, contract: undefined }) === askKey({ ...node, contract: undefined })
+    && !parseContractOutput(node.contract, output.text).errors.length;
+}
+
+/**
+ * Are a first form's inputs all the ones deliverableWires.ts carries: each fed by one wire from a node and port that fed
+ * the node's `context` before, named after that node (or, unnamed, the form's word for context), a text input, optional,
+ * empty and with no guidance? Each wire into `context` is carried once.
+ */
+function carriedInputs(node: SessionNode, previous: ReadonlyArray<CanvasEdge>, next: ReadonlyArray<CanvasEdge>,
+  before: ReadonlyMap<string, CanvasNode>): boolean {
+  const from = (edge: CanvasEdge) => JSON.stringify([edge.fromNode, edge.fromPort, edge.kind ?? 'data']);
+  const fed = new Map<string, number>();
+  for (const edge of previous) if (edge.toNode === node.id && edge.toPort === 'context') fed.set(from(edge), (fed.get(from(edge)) ?? 0) + 1);
+  const unnamed = new Set([canvasText('zh', 'contract.contextInputLabel'), canvasText('en', 'contract.contextInputLabel')]);
+  return node.contract!.inputs.every(field => {
+    const wires = next.filter(edge => edge.toNode === node.id && edge.toPort === `in:${field.id}`);
+    const source = wires.length === 1 ? before.get(wires[0].fromNode) : undefined;
+    if (!source || !fed.get(from(wires[0])) || field.type !== 'text' || field.required || field.value.trim()
+      || field.help?.trim() || field.placeholder?.trim()) return false;
+    const name = source.title.trim();
+    if (name ? field.label !== name : !unnamed.has(field.label)) return false;
+    fed.set(from(wires[0]), fed.get(from(wires[0]))! - 1);
+    return true;
+  });
 }
 
 /** Saved feedback is inactive in Workflow, so it cannot invalidate same-turn outputs. */
@@ -83,13 +158,16 @@ function edgeCounts(edges: ReadonlyArray<CanvasEdge>, moved: ReadonlySet<string>
 }
 
 /**
- * A session that takes its first deliverable form while it has no result (deliverableWires.ts carries its wires onto the
- * form's ports): the nodes it feeds could not have run on it, as a text session without a result holds its readers back,
- * so moving a wire from its `result` to the form's output changes nothing they were given. A media node is not one: its
- * wires are not carried, and a picture it has not made leaves its readers a note instead of holding them back.
+ * A session that takes its first deliverable form (deliverableWires.ts carries its wires onto the form's ports) while it
+ * has no result, or holds a hand-in that stays through it (handInFitsForm). With no result, the nodes it feeds could not
+ * have run on it, as a text session without a result holds its readers back, so moving a wire from its `result` to the
+ * form's output changes nothing they were given; with a hand-in, what they are given now is told by `gives`. Its own
+ * wires carried into the form's inputs bring it what its `context` read. A media node is not one: its wires are not
+ * carried, and a picture it has not made leaves its readers a note instead of holding them back.
  */
-function movedToForm(old: CanvasNode | undefined, node: CanvasNode): boolean {
-  return old?.kind === 'session' && !old.contract && node.kind === 'session' && Boolean(node.contract) && !hasResult(old) && !isMediaSessionNode(old);
+function movedToForm(old: CanvasNode | undefined, node: CanvasNode, carried: (node: SessionNode) => boolean): boolean {
+  return old?.kind === 'session' && !old.contract && node.kind === 'session' && Boolean(node.contract) && !isMediaSessionNode(old)
+    && (!hasResult(old) || handInFitsForm(old, node, carried));
 }
 
 /** Why a node's result may be stale. `hard`: for more than its own engine settings (a hand-in goes only then). `fed`: a
@@ -124,9 +202,11 @@ interface Reach { hard: boolean; fed: boolean }
  * and Agent reference leave it in place (in 多人同屏 only a person can pick a node's model, often after an agent has handed
  * its result in). Opening another conversation publishes none (nodeThreads.ts), and on a node already bound to an Agent
  * another runtime, model, effort or Agent opens one (CanvasSurface saveInspector), so in practice a hand-in stays through
- * them while its node is not bound (an agent's new node is not, until it is set up or run). What the node is asked (its title, task,
- * kind, deliverable form or task frame), a wire into it, and a result upstream replaced or taken back take it back as
- * they take back a run's result.
+ * them while its node is not bound (an agent's new node is not, until it is set up or run). It stays too through a
+ * deliverable form it fits, when the form is all that changed (handInFitsForm): only a person adds one, often after the
+ * hand-in, which would have been taken had it come after. What the node is asked otherwise (its title, task, kind,
+ * deliverable form or task frame), a wire into it, and a result upstream replaced or taken back take it back as they take
+ * back a run's result.
  *
  * A case recording (`source: 'case'`) is a copied case's delivery, kept for reference rather than produced by this node's
  * settings, so settings, wires and structure leave it in place; only a replaced upstream output, on which it no longer
@@ -144,6 +224,7 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
     readers.set(edge.fromNode, targets);
   }
 
+  const carried = (node: SessionNode) => carriedInputs(node, prev.edges, next.edges, before);
   const reached = new Map<string, Reach>();
   const queue: string[] = [];
   // A node is looked at again whenever it is reached for a stronger reason, so that a hand-in kept for an engine setting
@@ -163,10 +244,11 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
   const published = new Set<string>();
   for (const node of next.nodes) {
     const old = before.get(node.id);
-    if (old && askKey(old) !== askKey(node)) reach(node.id, true);
+    // A deliverable form a hand-in fits asks it nothing it has not given: like an engine setting, it leaves it.
+    if (old && askKey(old) !== askKey(node)) reach(node.id, !handInFitsForm(old, node, carried));
     else if (old && engineKey(old) !== engineKey(node)) reach(node.id, false);
     // A change of what it gives its readers reaches them, whether or not its own result stays.
-    if (old && gives(old) !== gives(node)) reachReaders(node.id, false);
+    if (old && old !== node && gives(old) !== gives(node)) reachReaders(node.id, false);
     if (outputKey(old?.lastOutput) !== outputKey(node.lastOutput)) {
       if (node.lastOutput?.source === 'manual') published.add(node.id);
       // A failed run's evidence where there was nothing gives its readers nothing new.
@@ -174,7 +256,7 @@ export function invalidateOutputs(prev: CanvasDocument, next: CanvasDocument): C
     }
   }
 
-  const moved = new Set(next.nodes.filter(node => movedToForm(before.get(node.id), node)).map(node => node.id));
+  const moved = new Set(next.nodes.filter(node => movedToForm(before.get(node.id), node, carried)).map(node => node.id));
   const oldEdges = edgeCounts(previousEdges, moved);
   const newEdges = edgeCounts(nextEdges, moved);
   for (const key of new Set([...oldEdges.keys(), ...newEdges.keys()])) {

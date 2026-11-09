@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type CanvasEdge, type CanvasNode, type NodeOutput, type SessionNode } from '../src/canvas/canvasDoc';
 import { invalidateOutputs } from '../src/canvas/invalidateOutputs';
+import type { ContractField } from '../src/canvas/nodeContracts';
 
 function output(text: string, source: NodeOutput['source'] = 'run', at = 1): NodeOutput {
   return { text, source, at };
@@ -311,6 +312,82 @@ describe('staleness follows results', () => {
       next.edges = [next.edges[0], { ...wire('build', 'review'), toNode: 'other', fromPort: 'out:delivery_game' }];
       expect(outputs(invalidateOutputs(prev, next)).review).toBeNull();
     });
+
+    describe('holding a hand-in', () => {
+      const page = '<!doctype html><html><head><title>Lockstep</title></head><body><canvas></canvas></body></html>';
+
+      it('keeps one the form fits, and what its readers made from it, which they now read whole through the form', () => {
+        const [prev, next] = carried({ lastOutput: handIn(page) });
+        expect(invalidateOutputs(prev, next)).toBe(next);
+      });
+
+      it('takes back one the form does not fit, and what its readers made from it', () => {
+        const [prev, next] = carried({ lastOutput: handIn('Level notes, not a page') });
+        expect(outputs(invalidateOutputs(prev, next))).toEqual({ brief: null, build: null, review: null });
+      });
+
+      it('keeps one the form fits but takes back what its readers made when they now read only part of it', () => {
+        const fenced = '```html\n' + page + '\n```';
+        const [prev, next] = carried({ lastOutput: handIn(fenced) });
+        expect(outputs(invalidateOutputs(prev, next))).toEqual({ brief: null, build: fenced, review: null });
+      });
+
+      it('takes it back when the form brings an input of its own, or anything else the node is asked changes with it', () => {
+        const [prev, next] = carried({ lastOutput: handIn(page) });
+        const asked = changeNode(next, 'build', node => {
+          const build = node as SessionNode;
+          return { ...build, contract: { ...build.contract!, inputs: [...build.contract!.inputs, { id: 'audience', label: 'Audience', type: 'text' as const, required: false, value: 'Teachers' }] } };
+        });
+        expect(outputs(invalidateOutputs(prev, asked))).toEqual({ brief: null, build: null, review: null });
+        const retitled = changeNode(next, 'build', node => ({ ...node, title: 'Build the game' }));
+        expect(outputs(invalidateOutputs(prev, retitled))).toEqual({ brief: null, build: null, review: null });
+      });
+
+      it('takes back a run’s result the form fits: the run was not asked for it', () => {
+        const [prev, next] = carried({ lastOutput: output(page, 'run', 2) });
+        expect(outputs(invalidateOutputs(prev, next))).toEqual({ brief: null, build: null, review: null });
+      });
+
+      it('takes it back when its first form brings an input of its own, even an empty one: a run’s prompt names it', () => {
+        const [prev, next] = carried({ lastOutput: handIn(page) });
+        const asked = changeNode(next, 'build', node => {
+          const build = node as SessionNode;
+          return { ...build, contract: { ...build.contract!, inputs: [...build.contract!.inputs, { id: 'rules', label: 'Exclude violent themes', type: 'text' as const, required: false, value: '' }] } };
+        });
+        expect(outputs(invalidateOutputs(prev, asked))).toEqual({ brief: null, build: null, review: null });
+      });
+
+      it('takes it back when an input carried from its wires is named otherwise, or fed by another node', () => {
+        const [prev, next] = carried({ lastOutput: handIn(page) });
+        const renamed = changeNode(next, 'build', node => {
+          const build = node as SessionNode;
+          return { ...build, contract: { ...build.contract!, inputs: [{ ...build.contract!.inputs[0], label: 'Brief, without violence' }] } };
+        });
+        expect(outputs(invalidateOutputs(prev, renamed)).build).toBeNull();
+        const other = { ...createFormNode({ x: 0, y: 0 }), id: 'other', title: 'Brief' };
+        const elsewhere = { ...next, nodes: [...next.nodes, other], edges: [{ ...next.edges[0], fromNode: 'other' }, next.edges[1]] };
+        expect(outputs(invalidateOutputs({ ...prev, nodes: [...prev.nodes, other] }, elsewhere)).build).toBeNull();
+      });
+
+      it('keeps a hand-in the form fits while taking back what its readers made, where it could be a JSON object', () => {
+        // A raw line break inside a string: this page reads the whole text, the server repairs the object and gives its
+        // readers `body` alone.
+        const broken = '{"body":"Level 1\nLevel 2"}';
+        const [prev, next] = carried({ lastOutput: handIn(broken) });
+        const body = changeNode(next, 'build', node => {
+          const build = node as SessionNode;
+          return { ...build, contract: { ...build.contract!, outputs: [{ id: 'body', label: 'Body', type: 'markdown' as const, required: true, value: '' }] } };
+        });
+        body.edges = [body.edges[0], { ...body.edges[1], fromPort: 'out:body' }];
+        expect(outputs(invalidateOutputs(prev, body))).toEqual({ brief: null, build: broken, review: null });
+      });
+
+      it('takes back a hand-in the server would read otherwise: a page in a fence named JSON, which it leaves on', () => {
+        const fenced = '```JSON\n' + JSON.stringify({ delivery_game: page }) + '\n```';
+        const [prev, next] = carried({ lastOutput: handIn(fenced) });
+        expect(outputs(invalidateOutputs(prev, next))).toEqual({ brief: null, build: null, review: null });
+      });
+    });
   });
 
   it.each([
@@ -336,6 +413,46 @@ describe('staleness follows results', () => {
     const prev = handedIn();
     const next = changeNode(prev, 'b', node => change(node as SessionNode));
     expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: null, b: null, c: null, independent: 'Old independent' });
+  });
+
+  describe('a hand-in through a change of its node’s deliverable form', () => {
+    const summary: ContractField = { id: 'summary', label: 'Summary', type: 'markdown', required: true, value: '' };
+    const notes = (required: boolean): ContractField => ({ id: 'notes', label: 'Notes', type: 'markdown', required, value: '' });
+    const handedInForm = (result: NodeOutput) => changeNode(handedIn(), 'b', node => ({ ...node, lastOutput: result,
+      contract: { ...(node as SessionNode).contract!, outputs: [summary] } } as SessionNode));
+    const withOutputs = (doc: CanvasDocument, fields: ContractField[]) =>
+      changeNode(doc, 'b', node => ({ ...node, contract: { ...(node as SessionNode).contract!, outputs: fields } } as SessionNode));
+    const levels = '{"summary":"Eight levels"}';
+
+    it('stays through an output it may leave out; its readers are reached, as the fields they read from changed', () => {
+      const prev = handedInForm(handIn(levels));
+      expect(outputs(invalidateOutputs(prev, withOutputs(prev, [summary, notes(false)])))).toEqual({ a: null, b: levels, c: null, independent: 'Old independent' });
+    });
+
+    it('stays through a new label on the output it fills, and so does what its readers made', () => {
+      const prev = handedInForm(handIn(levels));
+      const next = withOutputs(prev, [{ ...summary, label: 'Level summary' }]);
+      expect(invalidateOutputs(prev, next)).toBe(next);
+    });
+
+    it('goes, with what its readers made, through an output it lacks and must hold', () => {
+      const prev = handedInForm(handIn(levels));
+      expect(outputs(invalidateOutputs(prev, withOutputs(prev, [summary, notes(true)])))).toEqual({ a: null, b: null, c: null, independent: 'Old independent' });
+    });
+
+    it('goes, with what its readers made, when an input of the form changes with it', () => {
+      const prev = handedInForm(handIn(levels));
+      const next = changeNode(withOutputs(prev, [summary, notes(false)]), 'b', node => {
+        const b = node as SessionNode;
+        return { ...b, contract: { ...b.contract!, inputs: [{ ...b.contract!.inputs[0], value: 'Other input' }] } };
+      });
+      expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: null, b: null, c: null, independent: 'Old independent' });
+    });
+
+    it('takes back a run’s result through an output it may leave out: the run was not asked for it', () => {
+      const prev = handedInForm(output(levels, 'run', 5));
+      expect(outputs(invalidateOutputs(prev, withOutputs(prev, [summary, notes(false)])))).toEqual({ a: null, b: null, c: null, independent: 'Old independent' });
+    });
   });
 
   it('still takes back a hand-in kept for its model when, in the same change, a result it stood on is replaced', () => {
@@ -386,6 +503,14 @@ describe('staleness follows results', () => {
       contract: { ...(node as SessionNode).contract!, outputs: fields(false) } } as SessionNode));
     const next = changeNode(prev, 'a', node => ({ ...node, contract: { ...(node as SessionNode).contract!, outputs: fields(true) } } as SessionNode));
     expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: recorded, b: null, c: null, independent: 'Old independent' });
+  });
+
+  it('keeps a case recording but takes back what read it when it no longer fits its one output: such a result is refused upstream', () => {
+    const body = (type: 'markdown' | 'html'): ContractField[] => [{ id: 'body', label: 'Body', type, required: true, value: '' }];
+    const prev = changeNode(graph(), 'a', node => ({ ...node, lastOutput: output('Recorded notes', 'case', 1),
+      contract: { ...(node as SessionNode).contract!, outputs: body('markdown') } } as SessionNode));
+    const next = changeNode(prev, 'a', node => ({ ...node, contract: { ...(node as SessionNode).contract!, outputs: body('html') } } as SessionNode));
+    expect(outputs(invalidateOutputs(prev, next))).toEqual({ a: 'Recorded notes', b: null, c: null, independent: 'Old independent' });
   });
 
   it('keeps a hand-in but takes back what read it when its node takes a market Agent, whose text is framed as a third party’s', () => {

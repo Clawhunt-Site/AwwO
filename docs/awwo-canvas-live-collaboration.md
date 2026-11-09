@@ -694,15 +694,20 @@ CHANGELOG entry "treg for a person's own Agent".
     fields to give.
   - A result handed in (`source: "manual"`, an agent's or a person's) on a node while it is not bound to an Agent (an
     agent's new node is not, until it is set up or run) stays through the node's runtime, model, effort and the Agent it
-    is first bound to, which only say how AwwO would answer. What the node is asked (its title, task, kind,
-    deliverables or task frame), a wire into it, or a result it stood on changing still takes it back, as it takes back
-    a run's result, and Undo brings it back. On a node already bound, another runtime, model or effort opens a new
-    conversation, as it always has (its notice says a new Session opened), and so does another conversation opened on
-    any node: it starts with no result; the earlier conversation keeps the one it had, and only Undo publishes it again.
+    is first bound to, which only say how AwwO would answer. On any node it stays through a deliverable form it fits,
+    read as the server reads it, when that form is all that changes (a first form's inputs carried from the node's wires
+    are no change; any other input, even an empty one, asks something new): it would have been taken had it come after.
+    What the node is asked otherwise (its title, task, kind, a deliverable it does not fit, or task frame), a wire into
+    it, or a result it stood on changing still takes it back, as it takes back a run's result, and Undo brings it back.
+    On a node already bound, another runtime, model or effort opens a new conversation, as it always has (its notice
+    says a new Session opened), and so does another conversation opened on any node: it starts with no result; the
+    earlier conversation keeps the one it had, and only Undo publishes it again.
   - A session taking its first deliverable form keeps its wires (`deliverableWires.ts`): each wire into its `context`
     becomes an input of the form of its own, named after its source and not required; each wire out of its `result`
     comes from the form's first output its reader can take. While the session has no result, the nodes it feeds keep
-    theirs: they could not have run on it. A wire the form cannot carry (a file a text input cannot read) goes. An
+    theirs: they could not have run on it. Holding a hand-in the form fits, they keep theirs where they read all of it
+    through the form (one text, Markdown or HTML output that holds it whole, written as no JSON object the server could
+    read by its field), as they read it before. A wire the form cannot carry (a file a text input cannot read) goes. An
     image, video, audio or 3D node is offered no deliverable: the API runs it as a generation (unless a text Agent was
     set up for it) from its `context`, `reference` and `audio` wires whatever form it holds, so a form would leave it
     only ports that run reads nothing from; one given a form another way (its inputs, in the developer view) loses every
