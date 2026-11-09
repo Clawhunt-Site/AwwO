@@ -102,11 +102,13 @@ describe('a person invited into a workspace', () => {
 // else's panel asks for none, so no refused request is logged in the browser's console.
 describe('the invitations a workspace has made', () => {
   const INVITE = { id: 'inv-1', role: 'member', status: 'active', expiresAt: '2026-11-12T10:00:00Z', email: 'cy@example.test', canvasId: null, canvasName: null };
-  // `role` may change between reads: the account as the server has it then.
-  function serveAs(role: string | (() => string), status = 'active') {
+  // `role` may change between reads: the account as the server has it then. While `down()` says so, reading the
+  // account fails as a server that cannot answer does.
+  function serveAs(role: string | (() => string), status = 'active', down: () => boolean = () => false) {
     const roleNow = () => typeof role === 'function' ? role() : role;
     const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
       const path = new URL(url, 'http://localhost').pathname;
+      if (path.endsWith('/auth/me') && down()) return json({ error: { code: 'service_unavailable', message: 'Service unavailable' } }, 503);
       if (path.endsWith('/auth/me')) return json({ ...me(roleNow()), tenants: me(roleNow()).tenants.map(item => ({ ...item, status })) });
       if (path.endsWith('/members')) return json({ items: NAMES, nextCursor: null });
       if (path.endsWith('/invites')) return json({ items: [INVITE], nextCursor: null });
@@ -156,6 +158,78 @@ describe('the invitations a workspace has made', () => {
     const accountReads = reads(fetch, '/auth/me').length;
     await api.listInvites('team-a');
     expect(reads(fetch, '/auth/me')).toHaveLength(accountReads);
+  });
+
+  // The members list's own 刷新列表: the panel reads the members and the invitations again, side by side.
+  const refresh = () => fireEvent.click(within(screen.getByRole('navigation', { name: '成员分页' })).getByRole('button', { name: '刷新列表' }));
+
+  it('are listed at once for a person made an admin since, though the panel reads the members beside them', async () => {
+    let role = 'member';
+    const fetch = serveAs(() => role);
+    panel();
+    expect(await screen.findByText('Olive')).toBeInTheDocument();
+    // The page's own read of the account, and the one read again before a member was refused.
+    expect(reads(fetch, '/auth/me')).toHaveLength(2);
+    expect(reads(fetch, '/invites')).toEqual([]);
+    role = 'admin';
+    refresh();
+    // The invitations' side finds the account changed and lists them, with one more read of the account and one of
+    // the invitations, while the members are read once beside it.
+    expect(await screen.findByText('已创建的邀请')).toBeInTheDocument();
+    expect(reads(fetch, '/auth/me')).toHaveLength(3);
+    expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-a/invites']);
+    expect(reads(fetch, '/members')).toHaveLength(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+    // The members read beside them went by the account the page held. The next load goes by the account read again:
+    // an admin's controls, the invitation's 撤销邀请 among them, and no further read of the account.
+    refresh();
+    expect(await screen.findByRole('button', { name: '撤销邀请' })).toBeInTheDocument();
+    expect(reads(fetch, '/auth/me')).toHaveLength(3);
+    expect(reads(fetch, '/invites')).toHaveLength(2);
+  });
+
+  it('pass on a failed read of the account, ask for none, and read it again the next time', async () => {
+    let role = 'member';
+    let down = false;
+    const fetch = serveAs(() => role, 'active', () => down);
+    const api = createSaaSAccountApi(() => {});
+    await expect(api.listMembers('team-a')).resolves.toMatchObject({ access: { canManageMembers: false } });
+    // The account read again before a refusal fails: that failure is what the caller gets, not a refusal or an empty
+    // list, and no invitation is asked for.
+    role = 'admin';
+    down = true;
+    await expect(api.listInvites('team-a')).rejects.toMatchObject({ status: 503 });
+    expect(reads(fetch, '/invites')).toEqual([]);
+    // The failed read is not kept: the next call reads the account again, and lists them for the admin it finds.
+    down = false;
+    const accountReads = reads(fetch, '/auth/me').length;
+    await expect(api.listInvites('team-a')).resolves.toMatchObject({ invites: [INVITE] });
+    expect(reads(fetch, '/auth/me')).toHaveLength(accountReads + 1);
+    expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-a/invites']);
+    // The members list read after it goes by that account too.
+    await expect(api.listMembers('team-a')).resolves.toMatchObject({ access: { canManageMembers: true } });
+    expect(reads(fetch, '/auth/me')).toHaveLength(accountReads + 1);
+  });
+
+  it('say so in the panel when the account cannot be read again, and a refresh lists them', async () => {
+    let role = 'member';
+    let down = false;
+    const fetch = serveAs(() => role, 'active', () => down);
+    panel();
+    expect(await screen.findByText('Olive')).toBeInTheDocument();
+    role = 'admin';
+    down = true;
+    refresh();
+    // The people are listed still, and the panel says the read failed instead of showing no invitations.
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('Olive')).toBeInTheDocument();
+    expect(screen.queryByText('已创建的邀请')).toBeNull();
+    expect(reads(fetch, '/invites')).toEqual([]);
+    down = false;
+    refresh();
+    expect(await screen.findByText('已创建的邀请')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-a/invites']);
   });
 
   it('are read and listed for an owner and an admin, a suspended workspace’s too, in either language', async () => {
