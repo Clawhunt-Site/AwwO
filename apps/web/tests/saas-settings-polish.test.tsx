@@ -5,12 +5,14 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PlanVoucher } from '../src/saas/PlanVoucher';
+import { SaaSApp } from '../src/saas/SaaSApp';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { CatalogPlan } from '../src/saas/billing';
 import type { Identity, Tenant } from '../src/saas/api';
+import { appearanceFixture } from './saas-appearance-fixture';
 
 // vitest runs with cwd = apps/web.
 const SRC = resolve(process.cwd(), 'src');
@@ -252,5 +254,20 @@ describe('a phone’s home', () => {
     // The name is the chip's own flex item.
     expect(container.querySelector('.saas-home-workspace > span')).toHaveTextContent(tenant.name);
     expect(container.querySelector('.saas-home-workspace')?.childNodes).toHaveLength(1);
+  });
+});
+
+// English copy: the 更多选项 menu's link said "Security" for the page titled "Account security" (the current plan's
+// "planning and running" is in saas-plans.test.tsx).
+describe('English copy', () => {
+  it('names the menu’s link as its page is titled: Account security', async () => {
+    localStorage.setItem('superclaw_locale', 'en');
+    const owner = { user: { id: 'member-1', name: 'Ada', email: 'ada@example.test', platformRole: 'user' }, authentication: 'clawhunt',
+      clawhuntSiteURL: 'https://clawhunt.example.test', tenants: [{ id: 'team-a', name: 'Team A', status: 'active', role: 'owner' }] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/auth/me') ? json(owner) : url.endsWith('/appearance') ? json(appearanceFixture) : json({ items: [] })));
+    render(<SaaSApp />);
+    fireEvent.click(await screen.findByRole('button', { name: 'More options' }));
+    expect(await screen.findByRole('link', { name: 'Account security' })).toHaveAttribute('href', '/?account=security');
+    expect(screen.queryByRole('link', { name: 'Security' })).toBeNull();
   });
 });

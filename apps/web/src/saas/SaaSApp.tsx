@@ -376,7 +376,7 @@ function WorkspaceControls({ identity, tenant, onProfile, academy = false, meter
       <AcademyLauncher variant="menu" onLaunch={close} /><TutorialLauncher onLaunch={close} /><GuideLauncher onLaunch={close} /><MainSiteLink />
       <LicensesLink icon />
       <button className="saas-create-workspace-trigger" onClick={() => { close(); setCreatingWorkspace(true); }}><Plus size={16}/>{t('新建工作区', 'Create workspace')}</button>
-      <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Security')}</a>
+      <a href={accountURL('security')}><KeyRound size={16}/>{t('账号安全', 'Account security')}</a>
       {identity.user.platformRole === 'admin' && !isLocalEdition(identity) && <a href="/admin"><ShieldCheck size={17}/>{t('平台管理', 'Administration')}</a>}
     <button title={t('退出登录', 'Sign out')} aria-label={t('退出登录', 'Sign out')} onClick={async () => {
       const failure = await signOut(identity, t);

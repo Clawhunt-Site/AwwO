@@ -107,7 +107,7 @@ export function PlansPage({ identity }: { identity: Identity }) {
         {/* True before the free trial ends and after it: the page knows no workspace, so it names no date (the
             workspace's own allowance, 今日额度, says when and how many). */}
         <p>{t('免费版：免费试用期间，每天有一定的调用次数，默认模型和 Claude、GPT 等高级模型都能用，图片和视频另有次数；具体数字见工作区里的「今日额度」。免费试用结束后，规划和运行需要 Pro 或 Max，画布和成果都会保留。',
-          'Free: during the free trial there is a daily number of calls for the default model and for premium models such as Claude and GPT, plus image and video generations; see Today’s allowance in a workspace for the numbers. Once the free trial ends, planning and runs need Pro or Max, and your canvases and results are kept.')}</p>
+          'Free: during the free trial there is a daily number of calls for the default model and for premium models such as Claude and GPT, plus image and video generations; see Today’s allowance in a workspace for the numbers. Once the free trial ends, planning and running need Pro or Max, and your canvases and results are kept.')}</p>
         {billing.checkoutEnabled && <p className="saas-plans-lead">{t('选一张点数券：付款成功后点数自动到账，按月订阅，可随时取消。', 'Pick a voucher: the credits arrive automatically once the payment goes through. Monthly, cancel anytime.')}</p>}
       </>}
     </section>

@@ -47,7 +47,8 @@ it('shows both plans as coming soon while checkout is closed', async () => {
 it.each([
   ['zh', '当前套餐', ['免费试用期间，每天有一定的调用次数', '具体数字见工作区里的「今日额度」', '免费试用结束后，规划和运行需要 Pro 或 Max，画布和成果都会保留。'], 'Get Pro', '立即开通 Pro'],
   ['en', 'Current plan', ['during the free trial there is a daily number of calls', 'see Today’s allowance in a workspace for the numbers',
-    'Once the free trial ends, planning and runs need Pro or Max, and your canvases and results are kept.'], '立即开通 Pro', 'Get Pro'],
+    // The page's intro words it so too (SettingsCenter.tsx: "after the trial, planning and running need Pro or Max").
+    'Once the free trial ends, planning and running need Pro or Max, and your canvases and results are kept.'], '立即开通 Pro', 'Get Pro'],
 ] as const)('tells a free account (%s) what the free trial gives and that running needs a plan after it', async (locale, title, lines, absent, buy) => {
   localStorage.setItem('superclaw_locale', locale);
   serve(() => response(free));
