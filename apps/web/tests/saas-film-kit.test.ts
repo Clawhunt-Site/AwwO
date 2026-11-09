@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { buildFilmKit } from '../scripts/build-film-kit.mjs';
-import { FILM_GUIDE, FILM_GUIDE_HEADING, FILM_KIT_BYTES, FILM_KIT_SHA256, FILM_KIT_URL, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
+import { FILM_GUIDE, FILM_GUIDE_HEADING, FILM_GUIDE_OLD_HEADINGS, FILM_KIT_BYTES, FILM_KIT_SHA256, FILM_KIT_URL, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
 import { loadPreviewLibraries, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
 import { PREVIEW_FONTS } from '../src/canvas/previewFontList';
@@ -259,6 +259,10 @@ describe('the film kit bundle', () => {
 describe('the film guide', () => {
   it('names the kit URL, fits a node persona and shows a page whose script compiles', () => {
     expect(FILM_GUIDE.startsWith(FILM_GUIDE_HEADING)).toBe(true);
+    // English, as the personas it sits in are (a homepage case's briefs show it as it is), and no earlier line again.
+    expect(FILM_GUIDE_HEADING).toBe('## AwwO film kit: how to build the film page');
+    expect(FILM_GUIDE_HEADING).not.toMatch(/[\u3000-\u9fff]/);
+    expect(FILM_GUIDE_OLD_HEADINGS).not.toContain(FILM_GUIDE_HEADING);
     expect(FILM_GUIDE).toContain(`<script src="${FILM_KIT_URL}"></script>`);
     expect(bytes(FILM_GUIDE)).toBeLessThan(16_500);
     const page = guideExample();
@@ -282,6 +286,18 @@ describe('film personas', () => {
     const older = `新的角色。\n\n${FILM_GUIDE_HEADING}\n\nan older guide`;
     expect(filmPersona(older)).toBe(`新的角色。\n\n${FILM_GUIDE}`);
     expect(filmPersona('')).toBe(FILM_GUIDE);
+  });
+
+  it('replace a guide under an earlier first line too, as the film nodes made before it changed carry', () => {
+    for (const heading of FILM_GUIDE_OLD_HEADINGS) {
+      const saved = `Make a film for the cafe.\n\n${heading}\n\nthe guide as it was`;
+      expect(filmRole(saved)).toBe('Make a film for the cafe.');
+      expect(filmPersona(saved)).toBe(`Make a film for the cafe.\n\n${FILM_GUIDE}`);
+      expect(filmRole(`${heading}\n\nonly a guide`)).toBe('');
+      // Whichever guide comes first ends the role, so an old guide followed by the new one leaves one guide.
+      expect(filmPersona(`${saved}\n\n${FILM_GUIDE}`)).toBe(`Make a film for the cafe.\n\n${FILM_GUIDE}`);
+    }
+    expect(FILM_GUIDE_OLD_HEADINGS).toContain('## 代码影片组件 · how to build the film page');
   });
 
   it('cuts a long role to keep the persona within the node setup limit, never the guide', () => {

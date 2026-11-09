@@ -13,18 +13,28 @@ export const FILM_KIT_URL = 'https://awwo.clawhunt.store/kits/film/1/film.js';
 export const FILM_KIT_BYTES = 102326;
 export const FILM_KIT_SHA256 = '8e6af5d8ee28ad3a9b1d928e395376608b4224e9774dc4cd112155326620b777';
 
-/** The guide's first line. Keep it unchanged when the guide is revised: filmRole finds the guide by it, so a persona that
- *  carries an older guide gets the current one instead of two. */
+/** The guide's first line. filmRole finds the guide by it, so a persona that carries an older guide gets the current one
+ *  instead of two. When it changes, the line it replaces goes in FILM_GUIDE_OLD_HEADINGS: the personas of the film
+ *  nodes made before keep their guide's first line. */
 export const FILM_GUIDE_HEADING = FILM_GUIDE.slice(0, FILM_GUIDE.indexOf('\n'));
+/** The guide's earlier first lines. Until 2026-11-09 it opened in Chinese inside English personas, which a homepage
+ *  case's briefs show as they are (the owner's rule since 2026-10-14: those are English only). */
+export const FILM_GUIDE_OLD_HEADINGS: readonly string[] = ['## 代码影片组件 · how to build the film page'];
+const FILM_GUIDE_HEADINGS = [FILM_GUIDE_HEADING, ...FILM_GUIDE_OLD_HEADINGS];
 
 /** Node setup refuses a persona above 32,000 bytes (backend node_setup.go); keep a margin under it. */
 const PERSONA_BYTES = 31_000;
 const SEPARATOR = '\n\n';
 const encoder = new TextEncoder();
 
-/** The role part of a film persona: everything before the kit guide. A persona without the guide is returned whole. */
+/** The role part of a film persona: everything before the kit guide, the current one or an earlier one. A persona
+ *  without a guide is returned whole. */
 export function filmRole(persona: string): string {
-  const at = persona.startsWith(FILM_GUIDE_HEADING) ? 0 : persona.indexOf(`\n${FILM_GUIDE_HEADING}`);
+  let at = -1;
+  for (const heading of FILM_GUIDE_HEADINGS) {
+    const found = persona.startsWith(heading) ? 0 : persona.indexOf(`\n${heading}`);
+    if (found >= 0 && (at < 0 || found < at)) at = found;
+  }
   return at < 0 ? persona : persona.slice(0, at).trimEnd();
 }
 

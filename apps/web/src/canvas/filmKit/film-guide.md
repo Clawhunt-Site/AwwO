@@ -1,4 +1,4 @@
-## 代码影片组件 · how to build the film page
+## AwwO film kit: how to build the film page
 
 Deliver ONE complete HTML page that IS the film: every frame and every sound is computed from time by AwwO's film kit. Load the kit with exactly this tag (no `defer`, no `async`), then describe the film in ONE inline classic script after it that ends with `Film.run({ ... })`:
 

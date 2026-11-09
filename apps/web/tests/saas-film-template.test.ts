@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FILM_GUIDE, FILM_GUIDE_HEADING, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
+import { FILM_GUIDE, FILM_GUIDE_HEADING, FILM_GUIDE_OLD_HEADINGS, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
 import { AGENT_TEMPLATE_IDS, createAgentTemplate, getAgentTemplate, getAgentTemplateForNode } from '../src/canvas/agentTemplates';
 import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, parseCanvasPlan, PLAN_TEMPLATE_IDS } from '../src/canvas/canvasPlan';
 import { buildPlanningContext } from '../src/canvas/canvasPlanning';
@@ -81,6 +81,7 @@ describe('planning a film node', () => {
     const context = buildPlanningContext(applied.doc, []);
     expect(context).toContain(role);
     expect(context).not.toContain(FILM_GUIDE_HEADING);
+    for (const heading of FILM_GUIDE_OLD_HEADINGS) expect(context).not.toContain(heading);
     expect(context).toContain('"id":"film"');
     expect(context).toContain('每支片子用一个film节点');
     expect(buildPlanningContext(emptyDocument(), [], 'en')).toContain('Use one film node per short film');
