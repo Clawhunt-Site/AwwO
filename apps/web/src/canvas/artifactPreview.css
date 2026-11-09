@@ -20,6 +20,8 @@
 .awwo-artifact-image { display: block; max-width: 100%; max-height: 72vh; object-fit: contain; margin: auto; }
 .awwo-artifact-source { padding: 16px; margin: 0; min-height: 240px; max-height: 62vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--ios-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 12px; line-height: 1.65; user-select: text; background: var(--bg-card, var(--panel, #fff)); color: var(--text-primary, var(--fg, #263c31)); }
 .awwo-artifact-source > code { font: inherit; }
+/* The pane takes focus with Tab and after a jump to a noted line; its ring is drawn inside, as a drawer clips its sides. */
+.awwo-artifact-source:focus-visible { outline: 2px solid var(--accent, #237562); outline-offset: -2px; }
 .awwo-artifact-markdown { padding: 16px; min-height: 120px; overflow-wrap: anywhere; white-space: normal; line-height: 1.65; }
 .awwo-artifact-markdown p, .awwo-artifact-markdown ul, .awwo-artifact-markdown ol { margin-block: .75em; }
 .awwo-artifact-markdown h1 { font-size: 22px; }

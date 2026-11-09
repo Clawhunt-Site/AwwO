@@ -8,6 +8,7 @@ import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
 import { motionNotes, type MotionNote, type MotionRule } from './motionNotes';
+import { revealLine } from './revealLine';
 import { readPageErrorMessage, reportPageError } from './pageErrors';
 import { LivePage } from './studio/LivePage';
 import type { AssetResolver } from './studio/liveDocument';
@@ -255,12 +256,18 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     const range = document.createRange();
     range.setStart(node, start);
     range.setEnd(node, end < 0 ? value.length : end);
+    const pre = code.parentElement;
+    // Focus goes where the person asked to look (the pressed note can scroll out of the drawer's view): before the
+    // selection, which focusing may clear, and without a scroll of its own, as the reveal below places the line.
+    pre?.focus({ preventScroll: true });
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    const pre = code.parentElement;
-    if (pre && typeof range.getBoundingClientRect === 'function' && typeof pre.scrollBy === 'function') {
-      pre.scrollBy({ top: range.getBoundingClientRect().top - pre.getBoundingClientRect().top - pre.clientHeight / 3 });
+    // The pane, then the drawer around it: a pane taller than the drawer could otherwise leave the line out of sight,
+    // and the line stays in view while the canvas settles the open node around the source (revealLine.ts).
+    // A noted line is never empty: a collapsed range, or text no longer in the page, means the line is gone.
+    if (pre && typeof range.getBoundingClientRect === 'function') {
+      return revealLine(pre, () => (node.isConnected && !range.collapsed ? range.getBoundingClientRect() : null));
     }
   }, [jump, mode]);
   const [motionLead, motionEnd = ''] = text.motionCheck.split('{items}');
@@ -306,6 +313,8 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const showPreview = () => {
     redirects.current = [];
     setNavigation({ notice: false, stopped: false });
+    // A jump answers its own press: the source, opened again from here by any path, starts where the person left it.
+    setJump(null);
     setMode('preview');
   };
   // A running page that fails says so (pageErrors.ts); the canvas may send it back to its node once (pageRepair.ts).
@@ -350,7 +359,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     {tooLarge ? <p className="awwo-artifact-status" role="status">{text.tooLarge}</p>
       : type === 'text' || mode === 'source' ? <>
         {navigation.stopped && <p className="awwo-artifact-status" role="alert">{text.navigationStopped}</p>}
-        <pre className="awwo-artifact-source" aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code ref={sourceRef}>{documentSource}</code></pre>
+        <pre className="awwo-artifact-source" tabIndex={0} aria-label={type === 'html' ? t('deliverable.htmlSource') : type === 'text' ? text.plain : text.markdown}><code ref={sourceRef}>{documentSource}</code></pre>
         {motionLine}
       </>
         : type === 'html' ? <>
