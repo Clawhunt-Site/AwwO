@@ -138,13 +138,18 @@
 
 /* It starts right below the canvas header it opens from, wherever a banner above the header has moved it:
    --awwo-multiplayer-top is the header's bottom edge, which belowHeader.ts measures before the panel is first painted
-   (64px only where nothing measures it: the hosted header, 56px tall in the page's frame 8px in). */
+   (64px only where nothing measures it: the hosted header, 56px tall in the page's frame 8px in). It keeps
+   --mp-panel-floor of height, its head and the first lines of what it holds: a window too short to give it that much
+   below the header raises it over the header as far as that takes, never nearer the window's top than 8px, and a
+   window shorter still gives it its whole height. */
 .awwo-multiplayer-panel {
+  --mp-panel-floor: 200px;
+  --mp-panel-bottom: 12px;
   position: fixed;
   z-index: 45;
-  top: var(--awwo-multiplayer-top, 64px);
+  top: max(8px, min(var(--awwo-multiplayer-top, 64px), calc(100% - var(--mp-panel-bottom) - var(--mp-panel-floor))));
   right: 12px;
-  bottom: 12px;
+  bottom: var(--mp-panel-bottom);
   width: min(360px, calc(100vw - 24px));
   box-sizing: border-box;
   display: flex;
@@ -518,7 +523,7 @@
 .awwo-multiplayer-confirm-actions { display: flex; gap: 6px; }
 
 @media (max-width: 600px) {
-  .awwo-multiplayer-panel { right: 8px; bottom: 8px; left: 8px; width: auto; }
+  .awwo-multiplayer-panel { --mp-panel-bottom: 8px; right: 8px; left: 8px; width: auto; }
 }
 
 /* ── On the board, in world coordinates ───────────────────────────────────────────────────────────────────────── */

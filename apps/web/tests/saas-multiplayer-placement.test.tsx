@@ -142,24 +142,119 @@ describe('the 同屏 panel and the Share dialog start below the canvas header', 
   });
 
   it('starts the panel at the header’s measured bottom, and keeps the phone’s own edges', () => {
-    const css = readFileSync(resolve(process.cwd(), 'src/canvas/multiplayer/multiplayer.css'), 'utf8');
-    const rule = (text: string, selector: string) => text.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
     // Until it is measured (the first paint is after), the place it always had: below a 56px header 8px in. What sets
     // the top edge: top, or an inset shorthand or logical inset that holds it.
-    const top = /(?<![-\w])(?:top|inset(?:-block(?:-start)?)?):[^;]*;/g;
-    expect(rule(css, '.awwo-multiplayer-panel').match(top)).toEqual([`top: var(${PANEL_TOP}, 64px);`]);
-    const phone = css.match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
-    const onPhone = rule(phone, '.awwo-multiplayer-panel');
-    expect(onPhone).toContain('right: 8px; bottom: 8px; left: 8px; width: auto;');
-    expect(onPhone.match(top)).toBeNull();
-    // Nothing else places the panel or the Share dialog (its own class beside the panel's), in any of the web app's
-    // stylesheets: every rule whose selector ends on either element, in a list or a compound, at any width, sets no top
-    // edge but that one.
+    expect(panelRule().match(TOP_EDGE)).toEqual([PANEL_TOP_RULE]);
+    expect(panelRule().match(BOTTOM_EDGE)).toEqual(['bottom: var(--mp-panel-bottom);']);
+    const onPhone = phoneRule();
+    expect(onPhone).toContain('--mp-panel-bottom: 8px; right: 8px; left: 8px; width: auto;');
+    expect(onPhone.match(TOP_EDGE)).toBeNull();
+    expect(onPhone.match(BOTTOM_EDGE)).toBeNull();
+    // Nothing else places the panel or the Share dialog (its own class beside the panel's), or sizes either, in any of
+    // the web app's stylesheets: every rule whose selector ends on either element, in a list or a compound, at any width,
+    // sets no top edge, bottom edge or height but the panel's own.
     const sheets = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
       ? sheets(join(dir, entry.name)) : entry.name.endsWith('.css') ? [readFileSync(join(dir, entry.name), 'utf8')] : []);
-    const tops = sheets(resolve(process.cwd(), 'src')).flatMap(sheet => [...sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    const placing = (edge: RegExp) => sheets(resolve(process.cwd(), 'src')).flatMap(sheet => [...sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .flatMap(([, selectors, body]) => selectors.split(',')
-        .some(selector => /\.awwo-multiplayer-(?:panel|share)(?![-\w])[^\s>+~]*$/.test(selector.trim())) ? body.match(top) ?? [] : []));
-    expect(tops).toEqual([`top: var(${PANEL_TOP}, 64px);`]);
+        .some(selector => /\.awwo-multiplayer-(?:panel|share)(?![-\w])[^\s>+~]*$/.test(selector.trim())) ? body.match(edge) ?? [] : []));
+    expect(placing(TOP_EDGE)).toEqual([PANEL_TOP_RULE]);
+    expect(placing(BOTTOM_EDGE)).toEqual(['bottom: var(--mp-panel-bottom);']);
+  });
+
+  it('keeps the panel and the Share dialog 200px tall on a short window, over the header only as far as that takes', () => {
+    // Where the panel's top edge comes, and how tall it is, in a window `height` px tall below a header whose bottom
+    // edge belowHeader.ts measured at `header`: from its rule, and on a phone the phone's over it.
+    const desk = declarations(panelRule());
+    const phone = { ...desk, ...declarations(phoneRule()) };
+    const place = (rule: Record<string, string>, height: number, header?: number) => {
+      const values = header === undefined ? rule : { ...rule, [PANEL_TOP]: `${header}px` };
+      const top = lengthOf(rule.top, values, height);
+      return { top, height: height - lengthOf(rule.bottom, values, height) - top };
+    };
+    // Room below the header, with a banner above it or without: right below it, down to 12px from the window's bottom.
+    expect(place(desk, 900, 64)).toEqual({ top: 64, height: 824 });
+    expect(place(desk, 900, 172)).toEqual({ top: 172, height: 716 });
+    // Room for just 200px below a header that a banner and a second row moved down.
+    expect(place(desk, 384, 172)).toEqual({ top: 172, height: 200 });
+    // Less: it keeps its 200px, over the header's bottom as far as that takes.
+    expect(place(desk, 360, 172)).toEqual({ top: 148, height: 200 });
+    // A window shorter than that and the panel's edges: all of it, 8px from its top and 12px from its bottom.
+    expect(place(desk, 180, 116)).toEqual({ top: 8, height: 160 });
+    // Where nothing measured a header: below the hosted one, 56px tall 8px in.
+    expect(place(desk, 900)).toEqual({ top: 64, height: 824 });
+    expect(place(desk, 240)).toEqual({ top: 28, height: 200 });
+    // A phone's is 8px from the window's bottom, and keeps its 200px the same way.
+    expect(place(phone, 812, 116)).toEqual({ top: 116, height: 688 });
+    expect(place(phone, 300, 116)).toEqual({ top: 92, height: 200 });
   });
 });
+
+const css = () => readFileSync(resolve(process.cwd(), 'src/canvas/multiplayer/multiplayer.css'), 'utf8');
+const rule = (text: string, selector: string) => text.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+/** The panel's own rule, and the phone's over it. */
+const panelRule = () => rule(css(), '.awwo-multiplayer-panel');
+const phoneRule = () => rule(css().match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/)?.[1] ?? '', '.awwo-multiplayer-panel');
+const TOP_EDGE = /(?<![-\w])(?:top|inset(?:-block(?:-start)?)?):[^;]*;/g;
+const BOTTOM_EDGE = /(?<![-\w])(?:bottom|inset(?:-block(?:-end)?)?|(?:min-|max-)?(?:height|block-size)):[^;]*;/g;
+/** Right below the header, but never so low that the window leaves the panel less than its floor, nor above 8px. */
+const PANEL_TOP_RULE = `top: max(8px, min(var(${PANEL_TOP}, 64px), calc(100% - var(--mp-panel-bottom) - var(--mp-panel-floor))));`;
+/** A rule's declarations by property. */
+const declarations = (body: string): Record<string, string> => Object.fromEntries(body.split(';')
+  .map(part => part.trim()).filter(Boolean).map(part => [part.slice(0, part.indexOf(':')).trim(), part.slice(part.indexOf(':') + 1).trim()]));
+
+/** What a length in the panel's rule comes to, in px, in a window `height` px tall (a fixed box's % is of the window's
+ *  height): px and %, var() with its fallback (its value from `values`), calc() of + and -, min() and max(). Anything
+ *  else throws, so a rule this cannot read fails the test rather than passing it. */
+function lengthOf(expression: string, values: Record<string, string>, height: number): number {
+  const text = expression.trim();
+  let at = 0;
+  const skip = () => { while (text[at] === ' ') at++; };
+  const take = (char: string) => { skip(); if (text[at] !== char) throw new Error(`expected “${char}” at ${at} in ${text}`); at++; };
+  const sum = (): number => {
+    let value = term();
+    for (;;) {
+      skip();
+      const sign = text[at];
+      if (sign !== '+' && sign !== '-') return value;
+      at++;
+      value += (sign === '+' ? 1 : -1) * term();
+    }
+  };
+  const term = (): number => {
+    skip();
+    const call = /^(calc|min|max|var)\(/.exec(text.slice(at));
+    if (call) {
+      at += call[0].length;
+      skip();
+      if (call[1] === 'var') {
+        const name = /^--[\w-]+/.exec(text.slice(at))?.[0];
+        if (!name) throw new Error(`no custom property at ${at} in ${text}`);
+        at += name.length;
+        skip();
+        let fallback: number | undefined;
+        if (text[at] === ',') { at++; fallback = sum(); }
+        take(')');
+        if (values[name] !== undefined) return lengthOf(values[name], values, height);
+        if (fallback === undefined) throw new Error(`${name} is not set`);
+        return fallback;
+      }
+      const args = [sum()];
+      for (skip(); text[at] === ','; skip()) { at++; args.push(sum()); }
+      take(')');
+      if (call[1] === 'calc') {
+        if (args.length !== 1) throw new Error(`calc() of ${args.length} in ${text}`);
+        return args[0];
+      }
+      return call[1] === 'min' ? Math.min(...args) : Math.max(...args);
+    }
+    const length = /^(\d+(?:\.\d+)?)(px|%)/.exec(text.slice(at));
+    if (!length) throw new Error(`cannot read “${text.slice(at)}”`);
+    at += length[0].length;
+    return length[2] === 'px' ? Number(length[1]) : Number(length[1]) * height / 100;
+  };
+  const value = sum();
+  skip();
+  if (at !== text.length) throw new Error(`left over: “${text.slice(at)}”`);
+  return value;
+}
