@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,8 +28,9 @@ import (
 // Motion renders: a member turns an HTML deliverable into a video. The render worker (apps/render-worker) freezes
 // the page at every frame in a fresh headless browser that may reach only the preview's CDN allowlist, and encodes
 // an MP4 (and optionally a GIF and a contact sheet). A page that defines window.renderAt(t) renders exactly; any
-// other page runs on the worker's virtual clock. The videos become artifacts of the canvas, stored and served like
-// generated media. Off unless AWWO_RENDER_URL and AWWO_RENDER_TOKEN are set.
+// other page runs on the worker's virtual clock. A page that defines window.renderAudio (every film made with AwwO's
+// film kit) gets its own sound in the MP4, which the render records (renderSound). The videos become artifacts of the
+// canvas, stored and served like generated media. Off unless AWWO_RENDER_URL and AWWO_RENDER_TOKEN are set.
 
 const (
 	maxRenderHTMLBytes  = 6 << 20
@@ -274,6 +276,40 @@ type renderReply struct {
 	Warnings       []string        `json:"warnings"`
 	PageErrors     []string        `json:"pageErrors"`
 	Outputs        []renderOutput  `json:"outputs"`
+	// The page's own sound in the MP4, or null for a silent video; and, when the page's sound was left out, the
+	// worker's words for why (its warning sound_failed).
+	Sound       *renderSound `json:"sound"`
+	SoundReason string       `json:"soundReason"`
+}
+
+// renderSound is what a video carries of its page's own sound, as the worker made it (render.mjs addPageSound): AAC at
+// 48 kHz in stereo, as long as the picture, levelled to the edit node's -16 LUFS and measured again from the video. A
+// render keeps it only when its video holds exactly one sound track and the record fits it (checkRenderOutputs).
+type renderSound struct {
+	Codec          string          `json:"codec"`
+	SampleRate     int             `json:"sampleRate"`
+	Channels       int             `json:"channels"`
+	Seconds        float64         `json:"seconds"`
+	Loudness       *renderLoudness `json:"loudness"`
+	PageSampleRate int             `json:"pageSampleRate"`
+	Peak           float64         `json:"peak"`
+	Faded          bool            `json:"faded"`
+}
+
+type renderLoudness struct {
+	IntegratedLUFS float64 `json:"integratedLUFS"`
+	TruePeakDB     float64 `json:"truePeakDb"`
+	RangeLU        float64 `json:"rangeLU"`
+}
+
+// fits says whether the record describes the sound a render of `seconds` makes: AAC, 48 kHz, stereo, the picture's own
+// length, a page rate the worker takes (8–48 kHz), some sound (its peak is the page's own, which may pass full scale:
+// the worker clips it), and the loudness measured from the video, readings a sound can have.
+func (s *renderSound) fits(seconds float64) bool {
+	l := s.Loudness
+	return s.Codec == "aac" && s.SampleRate == 48000 && s.Channels == 2 && math.Abs(s.Seconds-seconds) <= 0.001 &&
+		s.PageSampleRate >= 8000 && s.PageSampleRate <= 48000 && s.Peak > 0 && l != nil &&
+		l.IntegratedLUFS >= -70 && l.IntegratedLUFS <= 0 && l.TruePeakDB >= -99 && l.TruePeakDB <= 6 && l.RangeLU >= 0 && l.RangeLU <= 99
 }
 
 type renderStored struct {
@@ -422,7 +458,7 @@ func (a *App) executeRender(stop context.Context, tid, id, canvasID, nodeID, htm
 		a.settleRender(tid, id, "failed", "render_invalid_output", nil)
 		return
 	}
-	files, err := checkRenderOutputs(reply.Outputs)
+	files, err := checkRenderOutputs(reply.Outputs, reply.Sound, float64(p.frames())/float64(p.FPS))
 	if err != nil {
 		a.settleRender(tid, id, "failed", "render_invalid_output", nil)
 		return
@@ -432,6 +468,12 @@ func (a *App) executeRender(stop context.Context, tid, id, canvasID, nodeID, htm
 	}
 	result := map[string]any{"mode": reply.Mode, "frames": reply.Frames, "fps": reply.FPS, "width": reply.Width, "height": reply.Height,
 		"seconds": reply.Seconds, "distinctFrames": reply.DistinctFrames, "elapsedMs": reply.ElapsedMS, "probe": reply.Probe, "warnings": nonNil(reply.Warnings), "pageErrors": nonNil(reply.PageErrors)}
+	// What the video carries of its page's sound, or why it carries none, in the worker's words kept as a refusal's are.
+	if reply.Sound != nil {
+		result["sound"] = reply.Sound
+	} else if reason := renderReason(reply.SoundReason); reason != "" {
+		result["soundReason"] = reason
+	}
 	if err = a.saveRender(ctx, tid, id, canvasID, nodeID, files, result); err != nil {
 		code := "render_storage_failed"
 		var input renderError
@@ -565,8 +607,10 @@ type renderFile struct {
 }
 
 // checkRenderOutputs reads every returned file before any of them is kept: each must match its digest and its own
-// bytes (an MP4 must sniff as MP4, a GIF as GIF, a contact sheet as PNG), and there must be a video.
-func checkRenderOutputs(outputs []renderOutput) ([]renderFile, error) {
+// bytes (an MP4 must sniff as MP4, a GIF as GIF, a contact sheet as PNG), and there must be a video. The video holds a
+// sound track exactly when the worker says it carries its page's sound: then one, which `sound` describes for a render
+// of `seconds` (renderSound.fits); else none.
+func checkRenderOutputs(outputs []renderOutput, sound *renderSound, seconds float64) ([]renderFile, error) {
 	files := []renderFile{}
 	seen := map[string]bool{}
 	for _, out := range outputs {
@@ -592,7 +636,71 @@ func checkRenderOutputs(outputs []renderOutput) ([]renderFile, error) {
 	if !seen["mp4"] {
 		return nil, renderError{0, "render_invalid_output", "the render returned no video"}
 	}
+	tracks := 0
+	for _, f := range files {
+		if f.kind == "mp4" {
+			tracks = mp4SoundTracks(f.data)
+		}
+	}
+	if (sound == nil && tracks != 0) || (sound != nil && (tracks != 1 || !sound.fits(seconds))) {
+		return nil, renderError{0, "render_invalid_output", "render sound does not match the video"}
+	}
 	return files, nil
+}
+
+// mp4Walk calls visit with the type and contents of each ISO base media box at the top level of data, in order, until
+// visit returns false, keeping none of them. A box starts with a 32-bit size and its type; a size of 0 runs to the end,
+// and 1 is followed by a 64-bit size. A box that does not fit where it stands ends the walk, so bytes that are no MP4
+// hold no box.
+func mp4Walk(data []byte, visit func(kind, body []byte) bool) {
+	for len(data) >= 8 {
+		size, header := uint64(binary.BigEndian.Uint32(data)), uint64(8)
+		if size == 1 {
+			if len(data) < 16 {
+				return
+			}
+			size, header = binary.BigEndian.Uint64(data[8:16]), 16
+		} else if size == 0 {
+			size = uint64(len(data))
+		}
+		if size < header || size > uint64(len(data)) || !visit(data[4:8], data[header:size]) {
+			return
+		}
+		data = data[size:]
+	}
+}
+
+// mp4First is the contents of the first box of type kind at the top level of data.
+func mp4First(data []byte, kind string) (body []byte, found bool) {
+	mp4Walk(data, func(k, b []byte) bool {
+		if string(k) == kind {
+			body, found = b, true
+		}
+		return !found
+	})
+	return body, found
+}
+
+// mp4SoundTracks counts the sound tracks of an MP4's first movie box, the one players read: each trak whose media
+// handler (after its version and flags, 4 bytes, and pre_defined, 4) is "soun". It stops at two, the first count that
+// is too many.
+func mp4SoundTracks(data []byte) int {
+	movie, ok := mp4First(data, "moov")
+	if !ok {
+		return 0
+	}
+	sounds := 0
+	mp4Walk(movie, func(kind, track []byte) bool {
+		if string(kind) != "trak" {
+			return true
+		}
+		media, _ := mp4First(track, "mdia")
+		if handler, ok := mp4First(media, "hdlr"); ok && len(handler) >= 12 && string(handler[8:12]) == "soun" {
+			sounds++
+		}
+		return sounds < 2
+	})
+	return sounds
 }
 
 // saveRender keeps the checked files as the canvas's media and completes the render in one transaction: the

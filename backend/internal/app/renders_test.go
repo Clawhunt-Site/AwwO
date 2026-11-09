@@ -1,15 +1,21 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -497,5 +503,243 @@ func TestPostgresRenderKeepsAllOrNothingAndShutdownIsNotCharged(t *testing.T) {
 	}
 	if status != "failed" || code != "interrupted" {
 		t.Fatal("a render stopped by a closing API must be interrupted, not charged", status, code)
+	}
+}
+
+// mp4Box is an ISO base media box of type kind holding parts, for MP4s made in a test.
+func mp4Box(kind string, parts ...[]byte) []byte {
+	body := bytes.Join(parts, nil)
+	return append(append(binary.BigEndian.AppendUint32(nil, uint32(8+len(body))), kind...), body...)
+}
+
+// mp4Track is a track whose media handler is of type handler ("vide", "soun").
+func mp4Track(handler string) []byte {
+	return mp4Box("trak", mp4Box("tkhd", make([]byte, 84)), mp4Box("mdia", mp4Box("mdhd", make([]byte, 24)),
+		mp4Box("hdlr", make([]byte, 8), []byte(handler), make([]byte, 13))))
+}
+
+var (
+	// renderTestFilm is an MP4 with a picture track and a sound track, its movie box first as the worker writes it.
+	renderTestFilm = slices.Concat(mp4Box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2avc1mp41")),
+		mp4Box("moov", mp4Box("mvhd", make([]byte, 100)), mp4Track("vide"), mp4Track("soun")), mp4Box("mdat", []byte("film-bytes")))
+	// renderTestPicture is the same MP4 without its sound track.
+	renderTestPicture = slices.Concat(mp4Box("ftyp", []byte("isom\x00\x00\x02\x00isomiso2avc1mp41")),
+		mp4Box("moov", mp4Box("mvhd", make([]byte, 100)), mp4Track("vide")), mp4Box("mdat", []byte("film-bytes")))
+)
+
+// The worker's record of the sound renderTestFilm carries, for a render of 2 s.
+const renderTestSound = `{"codec":"aac","sampleRate":48000,"channels":2,"seconds":2,"loudness":{"integratedLUFS":-15.83,"truePeakDb":-0.99,"rangeLU":2.1},"pageSampleRate":48000,"peak":0.5794,"faded":false}`
+
+func TestMP4SoundTracksReadTheFirstMovieBoxAlone(t *testing.T) {
+	ftyp := mp4Box("ftyp", []byte("isom"))
+	// A box with a 64-bit size, and one whose size of 0 runs it to the end of the file.
+	large := func(kind string, body []byte) []byte {
+		return append(append(append(binary.BigEndian.AppendUint32(nil, 1), kind...), binary.BigEndian.AppendUint64(nil, uint64(16+len(body)))...), body...)
+	}
+	toEnd := func(box []byte) []byte { return append(make([]byte, 4), box[4:]...) }
+	oversized := mp4Box("moov", mp4Track("soun"))
+	binary.BigEndian.PutUint32(oversized, uint32(len(oversized)+1))
+	for _, c := range []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"a picture and a sound", renderTestFilm, 1},
+		{"a picture", renderTestPicture, 0},
+		{"the movie box after the media", slices.Concat(ftyp, mp4Box("mdat", make([]byte, 64)), mp4Box("moov", mp4Track("vide"), mp4Track("soun"))), 1},
+		{"a media box with a 64-bit size", slices.Concat(ftyp, large("mdat", make([]byte, 40)), mp4Box("moov", mp4Track("soun"))), 1},
+		{"a movie box running to the end", slices.Concat(ftyp, toEnd(mp4Box("moov", mp4Track("soun")))), 1},
+		{"two sounds", slices.Concat(ftyp, mp4Box("moov", mp4Track("soun"), mp4Track("vide"), mp4Track("soun"))), 2},
+		{"three sounds, counted no further than two", slices.Concat(ftyp, mp4Box("moov", mp4Track("soun"), mp4Track("soun"), mp4Track("soun"))), 2},
+		// Players read the first movie box: a sound in a second one is none.
+		{"a sound in a second movie box", slices.Concat(ftyp, mp4Box("moov", mp4Track("vide")), mp4Box("moov", mp4Track("soun"))), 0},
+		{"a movie box larger than the file", slices.Concat(ftyp, oversized), 0},
+		{"a handler box too short to name its type", slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", mp4Box("hdlr", make([]byte, 11)))))), 0},
+		{"a track with no media box", slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("hdlr", make([]byte, 8), []byte("soun"))))), 0},
+		// Only a track's media handler counts, not the one a metadata box (udta/meta) holds.
+		{"a metadata handler", slices.Concat(ftyp, mp4Box("moov", mp4Track("vide"), mp4Box("udta", mp4Box("meta", mp4Box("hdlr", make([]byte, 8), []byte("soun")))))), 0},
+		{"the test video, which has no movie box", renderTestMP4, 0},
+		{"nothing", nil, 0},
+	} {
+		if got := mp4SoundTracks(c.data); got != c.want {
+			t.Errorf("%s: %d sound tracks, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// A malformed video costs the walk no memory of its own: 32 MiB of empty movie boxes, or one movie box of 32 MiB of
+// empty tracks (a cleaner that kept each box took 16 times a file's size for these).
+func TestMP4SoundTracksKeepNoBox(t *testing.T) {
+	ftyp := mp4Box("ftyp", []byte("isom"))
+	movies := slices.Concat(ftyp, bytes.Repeat(mp4Box("moov"), 4<<20))
+	tracks := slices.Concat(ftyp, mp4Box("moov", bytes.Repeat(mp4Box("trak"), 4<<20)), mp4Box("moov", mp4Track("soun")))
+	for name, data := range map[string][]byte{"movie boxes": movies, "tracks": tracks} {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		got := mp4SoundTracks(data)
+		runtime.ReadMemStats(&after)
+		if got != 0 || after.TotalAlloc-before.TotalAlloc > 1<<20 {
+			t.Fatalf("%s: %d sound tracks, %d bytes allocated", name, got, after.TotalAlloc-before.TotalAlloc)
+		}
+	}
+}
+
+// The walk reads the MP4s ffmpeg makes: with a sound track or without, the movie box first (as the worker writes them)
+// or last. Skipped where ffmpeg is not on PATH.
+func TestMP4SoundTracksReadTheFilesFFmpegMakes(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not on PATH")
+	}
+	picture := []string{"-f", "lavfi", "-i", "color=c=blue:s=64x64:r=10:d=0.5"}
+	sound := []string{"-f", "lavfi", "-i", "sine=f=440:d=0.5"}
+	dir := t.TempDir()
+	for _, c := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"film", slices.Concat(picture, sound, []string{"-c:v", "mpeg4", "-c:a", "aac", "-aac_pns", "0", "-movflags", "+faststart"}), 1},
+		{"film-moov-last", slices.Concat(picture, sound, []string{"-c:v", "mpeg4", "-c:a", "aac", "-aac_pns", "0"}), 1},
+		{"picture", slices.Concat(picture, []string{"-c:v", "mpeg4", "-an", "-movflags", "+faststart"}), 0},
+	} {
+		file := filepath.Join(dir, c.name+".mp4")
+		if out, err := exec.Command(ffmpeg, slices.Concat([]string{"-v", "error", "-y"}, c.args, []string{file})...).CombinedOutput(); err != nil {
+			t.Fatalf("%s: ffmpeg %v: %s", c.name, err, out)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := mp4SoundTracks(data); got != c.want {
+			t.Errorf("%s: %d sound tracks, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// A video holds a sound track exactly when the worker says it carries its page's sound, and the record must fit a
+// render of its length: anything else is an invalid output, as a wrong digest is.
+func TestCheckRenderOutputsHoldsTheWorkersSoundToItsVideo(t *testing.T) {
+	sound := func(change func(*renderSound)) *renderSound {
+		var s renderSound
+		if err := json.Unmarshal([]byte(renderTestSound), &s); err != nil {
+			t.Fatal(err)
+		}
+		if change != nil {
+			change(&s)
+		}
+		return &s
+	}
+	twoSounds := slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("moov", mp4Track("vide"), mp4Track("soun"), mp4Track("soun")))
+	output := func(video []byte) []renderOutput {
+		sum := sha256.Sum256(video)
+		return []renderOutput{{Kind: "mp4", ContentType: "video/mp4", Size: int64(len(video)), SHA256: hex.EncodeToString(sum[:]), Data: base64.StdEncoding.EncodeToString(video)}}
+	}
+	for _, c := range []struct {
+		name  string
+		video []byte
+		sound *renderSound
+		ok    bool
+	}{
+		{"a silent video said to be silent", renderTestPicture, nil, true},
+		{"the test video said to be silent", renderTestMP4, nil, true},
+		{"a film with the sound it is said to carry", renderTestFilm, sound(nil), true},
+		{"a page's sound that passed full scale, which the worker clipped", renderTestFilm, sound(func(s *renderSound) { s.Peak = 2e6 }), true},
+		{"a film whose sound the worker does not mention", renderTestFilm, nil, false},
+		{"a silent video said to carry a sound", renderTestPicture, sound(nil), false},
+		{"two sound tracks", twoSounds, sound(nil), false},
+		{"another codec", renderTestFilm, sound(func(s *renderSound) { s.Codec = "mp3" }), false},
+		{"another rate", renderTestFilm, sound(func(s *renderSound) { s.SampleRate = 44100 }), false},
+		{"one channel", renderTestFilm, sound(func(s *renderSound) { s.Channels = 1 }), false},
+		{"another length than the render's", renderTestFilm, sound(func(s *renderSound) { s.Seconds = 2.5 }), false},
+		{"a page rate the worker refuses", renderTestFilm, sound(func(s *renderSound) { s.PageSampleRate = 96000 }), false},
+		{"no sound made", renderTestFilm, sound(func(s *renderSound) { s.Peak = 0 }), false},
+		{"silence measured", renderTestFilm, sound(func(s *renderSound) { s.Loudness.IntegratedLUFS = -80 }), false},
+		{"a loudness past full scale", renderTestFilm, sound(func(s *renderSound) { s.Loudness.IntegratedLUFS = 3 }), false},
+		{"a range below nothing", renderTestFilm, sound(func(s *renderSound) { s.Loudness.RangeLU = -1 }), false},
+		{"no loudness measured", renderTestFilm, sound(func(s *renderSound) { s.Loudness = nil }), false},
+	} {
+		if _, err := checkRenderOutputs(output(c.video), c.sound, 2); (err == nil) != c.ok {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
+
+// A video that carries its page's sound is kept with the worker's record of it (only the record's own fields); one whose
+// page's sound was left out keeps the worker's words for why, cleaned as a refusal's are; and a record its video does not
+// bear out is an invalid output, kept nowhere and counted as the render it was.
+func TestPostgresRenderRecordsTheSoundItsVideoCarries(t *testing.T) {
+	renderer := newFakeRenderer(t)
+	h, tid, cid, owner := renderHarness(t, renderer)
+	h.a.cfg.RendersPerDay = 10
+	base := "/tenants/" + tid + "/canvases/" + cid + "/renders"
+	reply := func(video []byte, extra map[string]any) {
+		renderer.reply = func(w http.ResponseWriter, body map[string]any) {
+			out := map[string]any{"renderId": body["renderId"], "mode": "contract", "frames": 24, "fps": 12, "width": 320, "height": 180, "seconds": 2,
+				"distinctFrames": 24, "elapsedMs": 900, "probe": map[string]any{"frames": 24}, "warnings": []string{}, "pageErrors": []string{},
+				"outputs": []any{renderPayload("mp4", "video/mp4", video)}}
+			for key, value := range extra {
+				out[key] = value
+			}
+			writeJSON(w, 200, out)
+		}
+	}
+	render := func(op, want string) map[string]any {
+		job := h.request(t, owner, "POST", base, map[string]any{"operationId": op, "nodeId": "node-a", "html": renderPage, "width": 320, "height": 180, "fps": 12, "seconds": 2}, 202)
+		return awaitRender(t, h, owner, base+"/"+job["id"].(string), want)
+	}
+	plain := func(value any) any {
+		var out any
+		_ = json.Unmarshal(jsonBytes(value), &out)
+		return out
+	}
+	var record map[string]any
+	_ = json.Unmarshal([]byte(renderTestSound), &record)
+	withExtra := map[string]any{"note": "not a field of the record"}
+	for key, value := range record {
+		withExtra[key] = value
+	}
+
+	reply(renderTestFilm, map[string]any{"sound": withExtra, "warnings": []string{"sound_clipped:3"}})
+	done := render("render-with-sound", "completed")
+	result := done["result"].(map[string]any)
+	if !reflect.DeepEqual(plain(result["sound"]), plain(record)) || result["soundReason"] != nil || !reflect.DeepEqual(result["warnings"], []any{"sound_clipped:3"}) {
+		t.Fatal("the sound the video carries was not recorded as the worker described it", result)
+	}
+	outputs := result["outputs"].([]any)
+	if len(outputs) != 1 {
+		t.Fatal(outputs)
+	}
+	if header, data := h.readRaw(t, owner, "/tenants/"+tid+"/artifacts/"+outputs[0].(map[string]any)["artifactId"].(string)+"/media", 200); header.Get("Content-Type") != "video/mp4" || !bytes.Equal(data, renderTestFilm) {
+		t.Fatal("the film with its sound was not stored as the canvas's video", header)
+	}
+
+	override := string(rune(0x202e))
+	reply(renderTestMP4, map[string]any{"sound": nil, "soundReason": "window.renderAudio failed:\x00 the score is\nnot written" + override + " yet", "warnings": []string{"sound_failed"}})
+	result = render("render-sound-left-out", "completed")["result"].(map[string]any)
+	if _, has := result["sound"]; has || result["soundReason"] != "window.renderAudio failed: the score is not written yet" {
+		t.Fatal("a video whose page's sound was left out must say why in the worker's cleaned words, and carry no sound", result)
+	}
+	reply(renderTestMP4, map[string]any{"sound": nil, "soundReason": "\x00 \n"})
+	if result = render("render-sound-no-words", "completed")["result"].(map[string]any); result["soundReason"] != nil {
+		t.Fatal("words that clean to nothing are not kept", result)
+	}
+
+	for op, rest := range map[string]struct {
+		video []byte
+		extra map[string]any
+	}{
+		"render-sound-not-in-video":  {renderTestPicture, map[string]any{"sound": withExtra}},
+		"render-sound-not-mentioned": {renderTestFilm, map[string]any{}},
+		"render-sound-wrong-record":  {renderTestFilm, map[string]any{"sound": map[string]any{"codec": "aac"}}},
+		"render-sound-not-an-object": {renderTestFilm, map[string]any{"sound": "aac"}},
+	} {
+		reply(rest.video, rest.extra)
+		failed := render(op, "failed")
+		var artifacts int
+		if err := h.db.QueryRow(context.Background(), "SELECT count(*) FROM artifacts WHERE tenant_id=$1 AND run_id=$2", tid, failed["id"]).Scan(&artifacts); err != nil || artifacts != 0 || failed["errorCode"] != "render_invalid_output" {
+			t.Fatal(op, "a sound its video does not bear out must fail as an invalid output and keep nothing", failed, artifacts, err)
+		}
 	}
 }
