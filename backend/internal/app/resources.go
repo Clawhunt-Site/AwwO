@@ -211,6 +211,7 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 		return
 	}
 	a.multiplayer.tokensRevoked(revoked)
+	a.livePresence.forgetMember(tid, id)
 	w.WriteHeader(204)
 }
 
@@ -288,6 +289,7 @@ func (a *App) leaveTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.multiplayer.tokensRevoked(revoked)
+	a.livePresence.forgetMember(tid, uid)
 	w.WriteHeader(204)
 }
 

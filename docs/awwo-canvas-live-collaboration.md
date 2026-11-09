@@ -257,10 +257,13 @@ agent is there while its stream is open or for 90 s after its last request. Its 
 and broadcast to everyone on the canvas:
 
 ```json
-{"selection": ["nodeId"], "focus": "nodeId" | null, "cursor": {"x": 0, "y": 0} | null, "status": "short text" | null}
+{"selection": ["nodeId"], "focus": "nodeId" | null, "cursor": {"x": 0, "y": 0} | null, "status": "short text" | null,
+ "preview": {"nodes": [{"id": "n1", "x": 0, "y": 0}], "resize": {"id": "n2", "x": 0, "y": 0, "w": 300, "h": 200},
+             "wire": {"node": "n3", "port": "result", "side": "output", "from": {"x": 0, "y": 0}, "to": {"x": 9, "y": 9}}} | null,
+ "editing": {"node": "nodeId", "field": "title"} | null, "viewport": {"x": 0, "y": 0, "w": 1440, "h": 900} | null}
 ```
 
-`cursor` is in world coordinates (people; at most 4 updates a second are sent, none while the page's tab is hidden).
+`cursor` is in world coordinates (people; none while the page's tab is hidden).
 `status` is one line an agent shows (「正在写后端接口」), at most 140 characters. AwwO's running node Agents appear as
 `kind: awwo` participants on their nodes, from the runs the server holds. A participant shows a name, never an email
 address. A person is called by the name their session shows them by in the people list, claims, messages, the change
@@ -282,11 +285,30 @@ names their controls for that person by it), the run history as 「由工作区�
 workspace", the token list by leaving out its "made by …", and `canvas_overview`'s `heldBy` as "someone") until the
 person's next request; an account never linked is named by its own name. The account's own name stays as it was.
 
-The API lets readers (只读成员) watch (the stream, role 1) and refuses them messages and claims; in this
-release a reader's page still shows the canvas as it was when it opened, and is not on the canvas for the others (a
-live reader's page is not in this release).
+**The live lane.** What a person is doing and has not saved yet travels in presence, never in the document, the change
+log or anyone's undo steps:
+- `preview`: the nodes being dragged (at most 50, where they are now), one node being resized (its box now), or a wire
+  being drawn (from its port to the pointer). Others draw it until the change itself comes: a dragged card glides there
+  on the glide spring (carried by a CSS translate, so no layout moves and the canvas does not draw again), a resize as
+  the outline of the size it is taking, a wire as a dashed curve. It is gone 2 s after its last update (its page sends
+  it again every second while the gesture lasts, and its drop place before its end) or when its page's stream closes.
+- `editing`: the field a person is typing in, as the node and the page's own name for the field (`title`, `persona`,
+  `form.<field id>.value`…); others' pages mark that field and its node with the person's name.
+- `viewport`: the part of the board the page's screen shows, in world coordinates; someone who follows the person (a
+  click on their avatar) sees it. A page that follows someone sends none (its screen is someone else's to steer), so
+  people who follow each other, or a ring of them, hold still instead of chasing each other's screens.
 
-Colours come from one palette by participant id, so everyone sees a participant in the same colour.
+Only a person who may edit (a member or above) shows a preview or an editing mark: the server drops those parts from a
+reader's post and from a token's, and an agent's pointer and viewport too. Readers (只读成员) are on the canvas live:
+they hold the stream (role 1), are seen by everyone with their pointer and selection, and are refused changes, messages
+and claims. A page says what it runs in when its stream opens (`device`: `browser`, `mac`, `windows`, `phone` or
+`tablet`; shown, never trusted), and a participant's `role` is the one it has now (read again at the stream's 15 s
+check and with each presence post). The pointer, the preview and the editing mark go when the page's last stream
+closes; the rest stays for its 30 s.
+
+**Colours.** Each person (all their pages) and each token wears a colour no one else on the canvas wears while they are
+there, up to twelve: the first one free from their own on (their own comes from one palette by `u_` + user id or `t_`
++ token id, which their messages wear too). It is freed when their last page has left.
 
 ## Wire format
 
@@ -294,7 +316,10 @@ Colours come from one palette by participant id, so everyone sees a participant 
 type CanvasOp = { op: 'set'; path: string[]; value: unknown } | { op: 'del'; path: string[] } | { op: 'order'; path: string[]; ids: string[] };
 interface ChangeActor { kind: 'human' | 'agent' | 'awwo'; userId?: string; tokenId?: string; name: string; clientId: string }
 interface CanvasChange { version: number; actor: ChangeActor; label: string; ops: CanvasOp[]; at: string }
-interface LiveState { selection: string[]; focus: string | null; cursor: { x: number; y: number } | null; status: string | null }
+interface LiveState { selection: string[]; focus: string | null; cursor: { x: number; y: number } | null; status: string | null;
+  preview: LivePreview | null; editing: { node: string; field: string } | null; viewport: { x: number; y: number; w: number; h: number } | null }
+interface LivePreview { nodes?: { id: string; x: number; y: number }[]; resize?: { id: string; x: number; y: number; w: number; h: number };
+  wire?: { node: string; port: string; side: 'input' | 'output'; from: { x: number; y: number }; to: { x: number; y: number } } }
 interface LiveParticipant {
   id: string;            // a page's client id, 't_' + token id, or 'run_' + run id
   kind: 'human' | 'agent' | 'awwo';
@@ -304,6 +329,7 @@ interface LiveParticipant {
   userId?: string;       // the person (for an agent: who made its token)
   role?: 'reader' | 'member' | 'admin' | 'owner';
   model?: string;        // kind awwo: the node's model
+  device?: 'browser' | 'mac' | 'windows' | 'phone' | 'tablet'; // a page's, as it says
   state: LiveState;
   since: string;         // ISO time it came
 }
@@ -329,8 +355,8 @@ an edit token):
 | --- | --- | --- |
 | `PATCH` (the canvas itself) | `{baseVersion, changeId, clientId, ops, label?}` | `{version, results, reasons?, changes}`: `results[i]` is `ok`, `gone`, `claimed`, `node_running` or `forbidden` for `ops[i]`; when any op is refused, `reasons[i]` says in one sentence why (`""` for an op done; see Ports); `changes` holds every change after `baseVersion`; or `{version, results, reasons?, reset: true, document}` when the log no longer reaches back |
 | `GET /changes?after=v` | | `{version, changes}`, or `{version, reset: true, document}` |
-| `GET /live/events?after=v&client=c` | | the live stream |
-| `POST /live/presence` | `{clientId, state}` | 204 |
+| `GET /live/events?after=v&client=c&device=d` | | the live stream (`device` optional) |
+| `POST /live/presence` | `{clientId, state}` (the parts given; at most 128 KiB) | 204; `429 presence_too_fast` (with `Retry-After`) past 10 a second |
 | `POST /live/claims` | `{clientId, nodeIds, ttlSeconds?, note?}` | `{claims, refused: [{nodeId, holder}]}` |
 | `DELETE /live/claims` | `{clientId, nodeIds?}` | `{claims}` |
 | `GET /live/messages?before=id` | | `{items}` (the newest first, 50) |
@@ -352,10 +378,10 @@ catches up with the changes it missed and asks again.
 
 | Event | Data |
 | --- | --- |
-| `hello` | `{you, version, participants, claims, messages}` (the 30 newest messages) |
+| `hello` | `{you, version, participants, claims, messages, presenceParts}` (the 30 newest messages; `presenceParts` the parts of a state `POST /live/presence` takes, so a page sends only those) |
 | `changes` | a `CanvasChange`; one event per version after `after`, in order |
 | `reset` | `{version}`: the changes after `after` are no longer kept; read them with `GET /changes` (which then sends the document) |
-| `presence` | `{participant}` (came or changed) or `{left: id}` |
+| `presence` | `{participant}` (came or changed) or `{left: id}`; one participant at most every 100 ms on each stream (below) |
 | `claims` | `{claims}` (the canvas's whole list, whenever it changes) |
 | `message` | `{message}` |
 | `bye` | `{reason}`: `revoked`, `access`, `deleted` or `restart`; the stream ends |
@@ -377,9 +403,23 @@ to its confirmed version and misses nothing. When the API stops, every stream en
   as many participants (those still in their grace counted: a new page id at the cap takes the place of their own
   oldest page with no stream).
 - A canvas: 10 live tokens; 64 participants.
-- Presence: at most 10 updates a second per participant are taken; a page paces itself below that, sends its pointer
-  at most 4 times a second, and only while someone else is on the canvas and its tab is in view. A selection is
-  carried as at most 100 node ids.
+- Presence: at most 10 updates a second per participant are taken; more are refused (`429 presence_too_fast`) and the
+  page sends its latest state again a moment later. A page sends at most 8 a second (pointer, preview and viewport
+  together), and only while someone else is on the canvas and its stream is live; its pointer only while its tab is in
+  view. A selection is
+  carried as at most 100 node ids, a preview as at most 50.
+- Presence goes out paced: a stream tells of one participant at most every 100 ms, at once when that much has passed
+  since it last told of them, else with their latest state when it has. A page at 8 a second is never held back, a
+  faster burst is merged, and presence never waits in a stream's queue (its 256 places hold claims, messages and
+  byes), so no amount of moving puts a stream behind.
+- A person's session, once a presence post has checked it in full, is trusted for presence posts (and nothing else)
+  for 15 s, the window the stream allows itself; it is forgotten at once when they sign out, end the session from
+  another device, change or reset their password, leave the workspace, are removed or have their role changed, and when
+  an admin updates the workspace (suspends it, changes its limits), each once it is committed. A check still running
+  when one of these happens is not remembered.
+- A page keeps one presence post out at a time (what changes meanwhile goes in the next) and gives one up that has no
+  answer in 5 s. One that fails goes again a second later, twice as long after each failure in a row (up to 16 s), and
+  none goes while its stream is down: the stream's next hello sends everything again.
 - The log keeps what a reader can be sent (the newest 300 changes, about 4 MiB of their stored ops), always the newest
   10, and nothing older than a day beyond those; it is pruned at each write of the canvas.
 

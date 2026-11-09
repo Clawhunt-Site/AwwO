@@ -309,13 +309,17 @@ func (a *App) canvasExists(w http.ResponseWriter, r *http.Request, tid, cid stri
 	return exists
 }
 
+// livePresenceParts are the parts of a state a presence post may send; the stream's hello names them, so a page sends
+// only what the API takes.
+var livePresenceParts = []string{"selection", "focus", "cursor", "status", "preview", "editing", "viewport"}
+
 // canvasLivePresence answers POST .../live/presence: the parts of the caller's state it sends (the others stay).
 func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		ClientID string                     `json:"clientId"`
 		State    map[string]json.RawMessage `json:"state"`
 	}
-	if !a.decode(w, r, &b) {
+	if !a.decodeWithin(w, r, &b, livePresenceBodyBytes) {
 		return
 	}
 	agent := agentOf(r)
@@ -326,7 +330,13 @@ func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "clientId is required")
 		return
 	}
-	update, err := parseLiveState(b.State, agent != nil)
+	// A person's role as their session's check found it (a.tenant, or livePresenceAccess within its trust): only one who
+	// may edit shows edits in progress and the field they type in.
+	role := ""
+	if agent == nil {
+		role = tenantRoleOf(r)
+	}
+	update, err := parseLiveState(b.State, agent != nil, agent == nil && roleLevel(role) >= roleLevel("member"))
 	if err != nil {
 		fail(w, 400, "invalid_input", err.Error())
 		return
@@ -336,23 +346,78 @@ func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 	if agent != nil {
 		a.touchCanvasAgent(r, tid, cid)
 	}
-	a.multiplayer.setState(tid, cid, actor, update)
+	if a.multiplayer.setState(tid, cid, actor, role, update) == liveStateTooFast {
+		w.Header().Set("Retry-After", "1")
+		fail(w, 429, "presence_too_fast", fmt.Sprintf("At most %d presence updates a second: send the latest again in a moment", livePresencePerSecond))
+		return
+	}
 	w.WriteHeader(204)
 }
 
-// parseLiveState reads the parts of a state a participant sends. An agent has no pointer.
-func parseLiveState(state map[string]json.RawMessage, agent bool) (func(*liveState), error) {
+// liveIDOK is what a node or port id in a state looks like: as the selection's.
+func liveIDOK(id string) bool { return id != "" && len(id) <= 200 }
+
+// liveFieldPattern is a field's key in a state's editing: a page's own name for it.
+var liveFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,120}$`)
+
+// parseLivePreview reads an edit in progress: nil for none (null, or nothing in it).
+func parseLivePreview(raw json.RawMessage) (*livePreview, error) {
+	bad := fmt.Errorf("preview is {nodes: [{id, x, y}] (at most %d), resize: {id, x, y, w, h}, wire: {node, port, side, from, to}} or null", livePreviewNodesMax)
+	var p *livePreview
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, bad
+	}
+	if p == nil {
+		return nil, nil
+	}
+	if len(p.Nodes) > livePreviewNodesMax {
+		return nil, bad
+	}
+	seen := map[string]bool{}
+	nodes := make([]livePreviewNode, 0, len(p.Nodes))
+	for _, n := range p.Nodes {
+		if !liveIDOK(n.ID) || !finiteWorld(n.X) || !finiteWorld(n.Y) {
+			return nil, bad
+		}
+		if !seen[n.ID] {
+			seen[n.ID] = true
+			nodes = append(nodes, n)
+		}
+	}
+	p.Nodes = nodes
+	if box := p.Resize; box != nil && (!liveIDOK(box.ID) || !finiteWorld(box.X) || !finiteWorld(box.Y) || !finiteSize(box.W) || !finiteSize(box.H)) {
+		return nil, bad
+	}
+	if wire := p.Wire; wire != nil && (!liveIDOK(wire.Node) || !liveIDOK(wire.Port) || (wire.Side != "input" && wire.Side != "output") ||
+		!finiteWorld(wire.From.X) || !finiteWorld(wire.From.Y) || !finiteWorld(wire.To.X) || !finiteWorld(wire.To.Y)) {
+		return nil, bad
+	}
+	if len(p.Nodes) == 0 && p.Resize == nil && p.Wire == nil {
+		return nil, nil
+	}
+	return p, nil
+}
+
+// finiteSize is a box's width or height on the board: more than nothing, and finite.
+func finiteSize(f float64) bool { return finiteWorld(f) && f > 0 }
+
+// parseLiveState reads the parts of a state a participant sends. An agent has no pointer and no screen. Only a person who
+// may edit (`editor`: a member or above) shows an edit in progress (preview) or the field they type in (editing): from a
+// reader or a token the server drops those parts, whatever they hold, as it drops an agent's pointer; the rest of what
+// they send is kept, so a reader's page is seen on the canvas.
+func parseLiveState(state map[string]json.RawMessage, agent, editor bool) (liveUpdate, error) {
 	var steps []func(*liveState)
+	preview := false
 	for key, raw := range state {
 		switch key {
 		case "selection":
 			var ids []string
 			if json.Unmarshal(raw, &ids) != nil || len(ids) > maxGraphNodes {
-				return nil, fmt.Errorf("selection is a list of at most %d node ids", maxGraphNodes)
+				return liveUpdate{}, fmt.Errorf("selection is a list of at most %d node ids", maxGraphNodes)
 			}
 			for _, id := range ids {
-				if id == "" || len(id) > 200 {
-					return nil, fmt.Errorf("a selected node id is empty or too long")
+				if !liveIDOK(id) {
+					return liveUpdate{}, fmt.Errorf("a selected node id is empty or too long")
 				}
 			}
 			ids = uniqueStrings(ids)
@@ -362,14 +427,14 @@ func parseLiveState(state map[string]json.RawMessage, agent bool) (func(*liveSta
 			steps = append(steps, func(s *liveState) { s.Selection = ids })
 		case "focus":
 			var focus *string
-			if json.Unmarshal(raw, &focus) != nil || (focus != nil && (*focus == "" || len(*focus) > 200)) {
-				return nil, fmt.Errorf("focus is a node id or null")
+			if json.Unmarshal(raw, &focus) != nil || (focus != nil && !liveIDOK(*focus)) {
+				return liveUpdate{}, fmt.Errorf("focus is a node id or null")
 			}
 			steps = append(steps, func(s *liveState) { s.Focus = focus })
 		case "cursor":
 			var point *livePoint
 			if json.Unmarshal(raw, &point) != nil || (point != nil && (!finiteWorld(point.X) || !finiteWorld(point.Y))) {
-				return nil, fmt.Errorf("cursor is {x, y} or null")
+				return liveUpdate{}, fmt.Errorf("cursor is {x, y} or null")
 			}
 			if agent {
 				point = nil
@@ -378,7 +443,7 @@ func parseLiveState(state map[string]json.RawMessage, agent bool) (func(*liveSta
 		case "status":
 			var status *string
 			if json.Unmarshal(raw, &status) != nil || (status != nil && len([]rune(*status)) > maxLiveStatusRunes) {
-				return nil, fmt.Errorf("status is at most %d characters, or null", maxLiveStatusRunes)
+				return liveUpdate{}, fmt.Errorf("status is at most %d characters, or null", maxLiveStatusRunes)
 			}
 			if status != nil {
 				trimmed := strings.TrimSpace(*status)
@@ -388,15 +453,44 @@ func parseLiveState(state map[string]json.RawMessage, agent bool) (func(*liveSta
 				}
 			}
 			steps = append(steps, func(s *liveState) { s.Status = status })
+		case "preview":
+			p, err := parseLivePreview(raw)
+			if err != nil {
+				return liveUpdate{}, err
+			}
+			if agent || !editor {
+				continue
+			}
+			preview = p != nil
+			steps = append(steps, func(s *liveState) { s.Preview = p })
+		case "editing":
+			var editing *liveEditing
+			if json.Unmarshal(raw, &editing) != nil || (editing != nil && (!liveIDOK(editing.Node) || !liveFieldPattern.MatchString(editing.Field))) {
+				return liveUpdate{}, fmt.Errorf("editing is {node, field} or null")
+			}
+			if agent || !editor {
+				continue
+			}
+			steps = append(steps, func(s *liveState) { s.Editing = editing })
+		case "viewport":
+			var viewport *liveViewport
+			if json.Unmarshal(raw, &viewport) != nil || (viewport != nil && (!finiteWorld(viewport.X) || !finiteWorld(viewport.Y) ||
+				!finiteSize(viewport.W) || !finiteSize(viewport.H))) {
+				return liveUpdate{}, fmt.Errorf("viewport is {x, y, w, h} or null")
+			}
+			if agent {
+				continue
+			}
+			steps = append(steps, func(s *liveState) { s.Viewport = viewport })
 		default:
-			return nil, fmt.Errorf("unknown state part %q", key)
+			return liveUpdate{}, fmt.Errorf("unknown state part %q", key)
 		}
 	}
-	return func(s *liveState) {
+	return liveUpdate{apply: func(s *liveState) {
 		for _, step := range steps {
 			step(s)
 		}
-	}, nil
+	}, preview: preview}, nil
 }
 
 func finiteWorld(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) && math.Abs(f) <= 1e7 }
@@ -470,36 +564,50 @@ func liveAwwoAgents(ctx context.Context, q querier, tid, cid string) ([]livePart
 // liveAccess checks again that the caller still reaches the canvas: false with no error is a definite no (the stream
 // says bye access); an error (the database, ClawHunt unreachable) is no answer, and the caller tries again later.
 func (a *App) liveAccess(r *http.Request, tid, cid string) (bool, error) {
+	_, ok, err := a.liveAccessRole(r, tid, cid)
+	return ok, err
+}
+
+// liveAccessRole is liveAccess with a person's role in the workspace now (empty for an agent).
+func (a *App) liveAccessRole(r *http.Request, tid, cid string) (string, bool, error) {
 	ctx := r.Context()
 	var ok bool
 	if agent := agentOf(r); agent != nil {
 		err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM canvas_agent_tokens t JOIN memberships m ON m.tenant_id=t.tenant_id AND m.user_id=t.created_by
 			JOIN canvases c ON c.tenant_id=t.tenant_id AND c.id=t.canvas_id
 			WHERE t.tenant_id=$1 AND t.id=$2 AND t.canvas_id=$3 AND t.revoked_at IS NULL AND t.expires_at>clock_timestamp() AND m.role IN ('owner','admin'))`, tid, agent.TokenID, cid).Scan(&ok)
-		return err == nil && ok, err
+		return "", err == nil && ok, err
 	}
 	c, _ := r.Cookie("awwo_session")
 	if c == nil {
-		return false, nil
+		return "", false, nil
 	}
-	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id JOIN canvases c ON c.tenant_id=m.tenant_id
-		WHERE m.tenant_id=$1 AND m.user_id=$2 AND s.token_hash=$3 AND s.expires_at>now() AND c.id=$4)`, tid, currentUser(r).ID, tokenHash(c.Value), cid).Scan(&ok)
-	if err != nil || !ok {
-		return false, err
+	var role string
+	err := a.db.QueryRow(ctx, `SELECT m.role FROM memberships m JOIN auth_sessions s ON s.user_id=m.user_id JOIN canvases c ON c.tenant_id=m.tenant_id
+		WHERE m.tenant_id=$1 AND m.user_id=$2 AND s.token_hash=$3 AND s.expires_at>now() AND c.id=$4`, tid, currentUser(r).ID, tokenHash(c.Value), cid).Scan(&role)
+	if noRows(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
 	}
 	var issuer, subject string
 	var grant []byte
 	if err = a.db.QueryRow(ctx, "SELECT COALESCE(sso_issuer,''),COALESCE(sso_subject,''),sso_grant FROM auth_sessions WHERE token_hash=$1", tokenHash(c.Value)).Scan(&issuer, &subject, &grant); err != nil {
 		if noRows(err) {
-			return false, nil
+			return "", false, nil
 		}
-		return false, err
+		return "", false, err
 	}
 	valid, err := a.validateClawHuntSession(ctx, tokenHash(c.Value), currentUser(r).ID, issuer, subject, grant)
-	return err == nil && valid, err
+	if err != nil || !valid {
+		return "", false, err
+	}
+	return role, true, nil
 }
 
-// canvasLiveEvents answers GET .../live/events?after=v&client=c: the canvas's live stream.
+// canvasLiveEvents answers GET .../live/events?after=v&client=c&device=d: the canvas's live stream. `device` is what
+// the page says it runs in (liveDevices); it is shown, never trusted.
 func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
 	ctx := r.Context()
@@ -528,12 +636,15 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	role := ""
+	role, device := "", ""
 	if agentOf(r) == nil {
 		_ = a.db.QueryRow(ctx, "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, currentUser(r).ID).Scan(&role)
+		if d := r.URL.Query().Get("device"); liveDevices[d] {
+			device = d
+		}
 	}
 	actor := canvasActorOf(r, clientID)
-	stream, refused := a.multiplayer.open(tid, cid, liveJoin{actor: actor, role: role})
+	stream, refused := a.multiplayer.open(tid, cid, liveJoin{actor: actor, role: role, device: device})
 	if refused == liveTaken {
 		fail(w, 409, "client_taken", "Someone else on this canvas uses this page id: open the canvas again")
 		return
@@ -548,16 +659,18 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
-	send := func(event string, data any) bool {
+	// write puts an event on the stream; send also flushes it.
+	write := func(event string, data any) bool {
 		raw, err := json.Marshal(data)
 		if err != nil {
 			return false
 		}
 		_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
-		if _, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw); err != nil {
-			return false
-		}
-		return controller.Flush() == nil
+		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
+		return err == nil
+	}
+	send := func(event string, data any) bool {
+		return write(event, data) && controller.Flush() == nil
 	}
 	awwoSeen := map[string]liveParticipant{}
 	var awwoAt time.Time
@@ -587,7 +700,7 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 	hello := func(version int64) bool {
-		participants := a.multiplayer.participants(tid, cid)
+		participants, you := a.multiplayer.greet(tid, cid, stream)
 		agents, _ := liveAwwoAgents(ctx, a.db, tid, cid)
 		awwoSeen, awwoAt = map[string]liveParticipant{}, time.Now()
 		for _, p := range agents {
@@ -601,8 +714,38 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return false
 		}
-		you, _ := a.multiplayer.participant(tid, cid, actor.participantID())
-		return send("hello", map[string]any{"you": you, "version": version, "participants": append(participants, agents...), "claims": claims, "messages": messages})
+		return send("hello", map[string]any{"you": you, "version": version, "participants": append(participants, agents...), "claims": claims, "messages": messages,
+			"presenceParts": livePresenceParts})
+	}
+	// Presence goes paced (livePresenceEvery): each who changed, with their latest state, at once or when their time
+	// comes; what is due together goes in one flush.
+	var presenceTimer *time.Timer
+	var presenceDue <-chan time.Time
+	defer func() {
+		if presenceTimer != nil {
+			presenceTimer.Stop()
+		}
+	}()
+	sendPresence := func() bool {
+		if presenceTimer != nil {
+			presenceTimer.Stop()
+			presenceTimer = nil
+		}
+		presenceDue = nil
+		due, wait := a.multiplayer.takePresence(tid, cid, stream, time.Now())
+		for _, data := range due {
+			if !write("presence", data) {
+				return false
+			}
+		}
+		if len(due) > 0 && controller.Flush() != nil {
+			return false
+		}
+		if wait > 0 {
+			presenceTimer = time.NewTimer(wait)
+			presenceDue = presenceTimer.C
+		}
+		return true
 	}
 	if !hello(version) {
 		return
@@ -673,6 +816,14 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 			if !catchUp() {
 				return
 			}
+		case <-stream.nudge:
+			if !sendPresence() {
+				return
+			}
+		case <-presenceDue:
+			if !sendPresence() {
+				return
+			}
 		case event := <-stream.events:
 			switch event.name {
 			case "claims":
@@ -689,7 +840,7 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case <-ping.C:
-			allowed, err := a.liveAccess(r, tid, cid)
+			role, allowed, err := a.liveAccessRole(r, tid, cid)
 			if err != nil {
 				return // no answer (the database, ClawHunt): the page connects again
 			}
@@ -697,6 +848,8 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 				send("bye", map[string]any{"reason": "access"})
 				return
 			}
+			// A role changed since the stream opened shows (a viewer made an editor, an editor a viewer).
+			a.multiplayer.setRole(tid, cid, actor.participantID(), role)
 			a.multiplayer.sweepRoom(tid, cid)
 			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil || controller.Flush() != nil {

@@ -23,35 +23,55 @@ const (
 	liveParticipantsPerCanvas = 64
 	liveStreamsPerUser        = 8
 	liveStreamsPerToken       = 4
-	// liveEventBuffer is how many presence, claims and message events wait for one stream; a stream that falls further
-	// behind is sent everyone again (a fresh hello) instead.
+	// liveEventBuffer is how many claims, message and bye events wait for one stream; a stream that falls further behind
+	// is sent everyone again (a fresh hello) instead. Presence never queues there: see livePresenceEvery.
 	liveEventBuffer = 256
-	// livePresencePerSecond is how many presence updates a participant may send a second; more are dropped.
+	// livePresencePerSecond is how many presence updates a participant may send a second; more are refused (429), and
+	// the page sends its latest state again a moment later. Pages send at most eight a second.
 	livePresencePerSecond = 10
+	// livePresenceEvery is the most often a stream tells of one participant: when they change, their latest state goes
+	// at once if the stream last told of them at least this long ago, else when that time is up, once, however often
+	// they changed meanwhile. A page that sends eight a second is never held back; a faster burst is merged; and since
+	// presence never queues, no amount of it can push a stream behind.
+	livePresenceEvery = 100 * time.Millisecond
+	// livePreviewFor is how long an edit in progress (a drag, a resize, a wire being drawn) stays after its last update:
+	// its page sends it again every second while the gesture lasts, so one whose page went leaves no ghost behind.
+	livePreviewFor = 2 * time.Second
+	// livePreviewNodesMax is how many dragged nodes one preview carries (a larger drag shows its first ones moving).
+	livePreviewNodesMax = 50
 	// canvasTokenRequestsPerMinute is how many requests one canvas agent token may make a minute, and
 	// canvasTokenFailuresPerMinute how many failed token lookups one address may make (as the relay's keys).
 	canvasTokenRequestsPerMinute = 120
 	canvasTokenFailuresPerMinute = 30
 )
 
-// liveParticipantColors are the participants' colours, the same for everyone: one is picked by the participant's id.
+// liveParticipantColors are the participants' colours. Each one's own is picked by their id (liveColor): an author's
+// messages wear it whether they are here or not. On a canvas a person or token wears the first of these free from
+// their own on (canvasRoom.colorLocked), so up to twelve never share one.
 var liveParticipantColors = []string{"#e5484d", "#f76b15", "#ffb224", "#30a46c", "#12a594", "#0090ff", "#3e63dd", "#8e4ec6",
 	"#d6409f", "#978365", "#29a383", "#5b5bd6"}
 
-func liveColor(id string) string {
+func liveColor(id string) string { return liveParticipantColors[liveColorIndex(id)] }
+
+func liveColorIndex(id string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(id))
-	return liveParticipantColors[int(h.Sum32()%uint32(len(liveParticipantColors)))]
+	return int(h.Sum32() % uint32(len(liveParticipantColors)))
 }
 
 type canvasKey struct{ tenant, canvas string }
 
-// liveState is what a participant shows: the nodes it selected, the one it works in, its pointer, and a status line.
+// liveState is what a participant shows: the nodes it selected, the one it works in, its pointer, and a status line;
+// for a person who may edit, the edit they are making and have not saved yet (preview) and the field they are typing
+// in (editing); and the part of the board their screen shows (viewport), which a person who follows them sees.
 type liveState struct {
-	Selection []string   `json:"selection"`
-	Focus     *string    `json:"focus"`
-	Cursor    *livePoint `json:"cursor"`
-	Status    *string    `json:"status"`
+	Selection []string      `json:"selection"`
+	Focus     *string       `json:"focus"`
+	Cursor    *livePoint    `json:"cursor"`
+	Status    *string       `json:"status"`
+	Preview   *livePreview  `json:"preview"`
+	Editing   *liveEditing  `json:"editing"`
+	Viewport  *liveViewport `json:"viewport"`
 }
 
 type livePoint struct {
@@ -59,25 +79,78 @@ type livePoint struct {
 	Y float64 `json:"y"`
 }
 
-// liveParticipant is one presence on a canvas, as the stream sends it.
+// livePreview is an edit in progress, never saved: the nodes being dragged (where they are now), one node being
+// resized (its box now), or a wire being drawn (from its port to the loose end). Others draw it until the change
+// itself comes, it is renewed, or livePreviewFor passes.
+type livePreview struct {
+	Nodes  []livePreviewNode `json:"nodes,omitempty"`
+	Resize *livePreviewBox   `json:"resize,omitempty"`
+	Wire   *livePreviewWire  `json:"wire,omitempty"`
+}
+
+type livePreviewNode struct {
+	ID string  `json:"id"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+}
+
+type livePreviewBox struct {
+	ID string  `json:"id"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+	W  float64 `json:"w"`
+	H  float64 `json:"h"`
+}
+
+// livePreviewWire is a wire being drawn from a node's port (an output, or an input dragged backwards): From is the
+// port's place, To the pointer's, both in world coordinates.
+type livePreviewWire struct {
+	Node string    `json:"node"`
+	Port string    `json:"port"`
+	Side string    `json:"side"`
+	From livePoint `json:"from"`
+	To   livePoint `json:"to"`
+}
+
+// liveEditing is the field a person is typing in: a node's and its field's key (a page's own names, such as "title",
+// "persona" or "form.<field id>.label"), so everyone else's page marks that field with their name.
+type liveEditing struct {
+	Node  string `json:"node"`
+	Field string `json:"field"`
+}
+
+// liveViewport is the part of the board a page's screen shows, in world coordinates.
+type liveViewport struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+// liveParticipant is one presence on a canvas, as the stream sends it: a person's page (one per tab: the pages a page
+// shows of one person are drawn as one avatar), an agent's token, or a run of AwwO's Agents.
 type liveParticipant struct {
-	ID     string    `json:"id"`
-	Kind   string    `json:"kind"` // human, agent or awwo
-	Port   string    `json:"port"` // web, mcp, api or awwo
-	Name   string    `json:"name"`
-	Color  string    `json:"color"`
-	UserID string    `json:"userId,omitempty"`
-	Role   string    `json:"role,omitempty"`
-	Model  string    `json:"model,omitempty"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"` // human, agent or awwo
+	Port   string `json:"port"` // web, mcp, api or awwo
+	Name   string `json:"name"`
+	Color  string `json:"color"`
+	UserID string `json:"userId,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Model  string `json:"model,omitempty"`
+	// Device is what a page says it runs in (browser, mac, windows, phone or tablet), shown and never trusted.
+	Device string    `json:"device,omitempty"`
 	State  liveState `json:"state"`
 	Since  time.Time `json:"since"`
 
 	streams    int
 	tokenID    string // an agent's token; empty for a person
+	colorKey   string // whose colour it wears (colorKey)
 	lastSeen   time.Time
 	goneAt     time.Time // when it leaves, once it has no stream
 	presenceAt time.Time // the second its presence updates are counted in
 	presenceN  int
+	previewAt  time.Time // when its edit in progress last came
 }
 
 // heldBy says whether an actor is this participant: the same person or the same token. A page's id is chosen by the
@@ -86,13 +159,19 @@ func (p *liveParticipant) heldBy(actor canvasActor) bool {
 	return p.Kind == actor.Kind && p.UserID == actor.UserID && p.tokenID == actor.TokenID
 }
 
-func (p *liveParticipant) public() liveParticipant {
+// public is the participant as the stream sends it at a moment: an edit in progress older than livePreviewFor is no
+// longer there. The parts behind pointers are never changed in place (an update replaces them), so the copy is safe
+// to send after the hub's lock is let go.
+func (p *liveParticipant) public(now time.Time) liveParticipant {
 	out := *p
 	out.State.Selection = append([]string{}, p.State.Selection...)
+	if out.State.Preview != nil && now.Sub(p.previewAt) > livePreviewFor {
+		out.State.Preview = nil
+	}
 	return out
 }
 
-// liveEvent is one event a stream sends besides changes: presence, claims (data nil: read them), a message, or bye.
+// liveEvent is one event a stream sends besides changes and presence: claims (data nil: read them), a message, or bye.
 type liveEvent struct {
 	name string
 	data any
@@ -103,21 +182,87 @@ type liveStream struct {
 	participantID string
 	userID        string
 	tokenID       string
-	// waitOnly marks an agent's canvas_wait: woken like a stream, ended by its token's bye, but no participant and in
-	// no stream limit.
+	// waitOnly marks an agent's canvas_wait: woken like a stream, ended by its token's bye, but no participant, in no
+	// stream limit, and told nothing of presence.
 	waitOnly bool
 	// bye is why the stream must end, kept here as well as queued, so a full queue cannot swallow it.
 	bye string
-	// wake is signalled (coalesced) when the canvas's document changed; events carries everything else.
+	// wake is signalled (coalesced) when the canvas's document changed; events carries claims, messages and byes.
 	wake   chan struct{}
 	events chan liveEvent
 	// behind is set when events overflowed: the stream sends a fresh hello.
 	behind bool
+	// pending holds who changed their presence (or left) since the stream last told of them, sentAt when it last told of
+	// each, and nudge is signalled (coalesced) at every change: the stream tells of each at most every livePresenceEvery.
+	pending map[string]struct{}
+	sentAt  map[string]time.Time
+	nudge   chan struct{}
+}
+
+func newLiveStream(participantID string, actor canvasActor, waitOnly bool) *liveStream {
+	return &liveStream{participantID: participantID, userID: actor.UserID, tokenID: actor.TokenID, waitOnly: waitOnly,
+		wake: make(chan struct{}, 1), events: make(chan liveEvent, liveEventBuffer), pending: map[string]struct{}{},
+		sentAt: map[string]time.Time{}, nudge: make(chan struct{}, 1)}
 }
 
 type canvasRoom struct {
 	streams      map[*liveStream]struct{}
 	participants map[string]*liveParticipant
+	// colors is the colour each person or token on the canvas wears, by colorKey, while any page of theirs is here.
+	colors map[string]string
+}
+
+// colorLocked gives the colour a person or token wears on the canvas: the one they already wear, else the first free
+// one from their own (liveColor) on, else their own (more than twelve are here). Call with the hub's lock held.
+func (r *canvasRoom) colorLocked(key string) string {
+	if color, ok := r.colors[key]; ok {
+		return color
+	}
+	worn := make(map[string]bool, len(r.colors))
+	for _, color := range r.colors {
+		worn[color] = true
+	}
+	first := liveColorIndex(key)
+	color := liveParticipantColors[first]
+	for i := range liveParticipantColors {
+		if c := liveParticipantColors[(first+i)%len(liveParticipantColors)]; !worn[c] {
+			color = c
+			break
+		}
+	}
+	r.colors[key] = color
+	return color
+}
+
+// forgetColorsLocked frees the colours of those with no page left on the canvas. Call with the hub's lock held.
+func (r *canvasRoom) forgetColorsLocked() {
+	if len(r.colors) == 0 {
+		return
+	}
+	worn := make(map[string]bool, len(r.participants))
+	for _, p := range r.participants {
+		worn[p.colorKey] = true
+	}
+	for key := range r.colors {
+		if !worn[key] {
+			delete(r.colors, key)
+		}
+	}
+}
+
+// markLocked tells a room's streams that a participant's presence changed (or that it left): each tells of their latest
+// state as soon as livePresenceEvery allows. Call with the hub's lock held.
+func (m *canvasMultiplayer) markLocked(r *canvasRoom, id string) {
+	for s := range r.streams {
+		if s.waitOnly {
+			continue
+		}
+		s.pending[id] = struct{}{}
+		select {
+		case s.nudge <- struct{}{}:
+		default:
+		}
+	}
 }
 
 type canvasMultiplayer struct {
@@ -164,7 +309,7 @@ func (m *canvasMultiplayer) room(key canvasKey) *canvasRoom {
 	}
 	r := m.rooms[key]
 	if r == nil {
-		r = &canvasRoom{streams: map[*liveStream]struct{}{}, participants: map[string]*liveParticipant{}}
+		r = &canvasRoom{streams: map[*liveStream]struct{}{}, participants: map[string]*liveParticipant{}, colors: map[string]string{}}
 		m.rooms[key] = r
 	}
 	return r
@@ -173,14 +318,19 @@ func (m *canvasMultiplayer) room(key canvasKey) *canvasRoom {
 // sweep drops the participants whose grace ran out (telling the room), and the rooms nobody is in. Call with mu held.
 func (m *canvasMultiplayer) sweep(key canvasKey, r *canvasRoom) {
 	now := m.clock()
+	gone := false
 	for id, p := range r.participants {
 		if p.streams > 0 {
 			continue
 		}
 		if !p.goneAt.IsZero() && now.After(p.goneAt) {
 			delete(r.participants, id)
-			m.broadcastLocked(r, liveEvent{"presence", map[string]any{"left": id}})
+			m.markLocked(r, id)
+			gone = true
 		}
+	}
+	if gone {
+		r.forgetColorsLocked()
 	}
 	if len(r.participants) == 0 && len(r.streams) == 0 {
 		delete(m.rooms, key)
@@ -306,7 +456,8 @@ func (m *canvasMultiplayer) leave(tid, cid, id string) {
 		return
 	}
 	delete(r.participants, id)
-	m.broadcastLocked(r, liveEvent{"presence", map[string]any{"left": id}})
+	m.markLocked(r, id)
+	r.forgetColorsLocked()
 	m.sweep(key, r)
 }
 
@@ -317,7 +468,7 @@ func (m *canvasMultiplayer) watch(tid, cid, tokenID string) (*liveStream, func()
 	defer m.mu.Unlock()
 	key := canvasKey{tid, cid}
 	r := m.room(key)
-	s := &liveStream{tokenID: tokenID, waitOnly: true, wake: make(chan struct{}, 1), events: make(chan liveEvent, liveEventBuffer)}
+	s := newLiveStream("", canvasActor{Kind: "agent", TokenID: tokenID}, true)
 	r.streams[s] = struct{}{}
 	return s, func() {
 		m.mu.Lock()
@@ -329,11 +480,16 @@ func (m *canvasMultiplayer) watch(tid, cid, tokenID string) (*liveStream, func()
 	}
 }
 
-// liveJoin is who opens a stream or touches a canvas.
+// liveJoin is who opens a stream or touches a canvas, and for a page what it says it runs in (liveDevices).
 type liveJoin struct {
-	actor canvasActor
-	role  string
+	actor  canvasActor
+	role   string
+	device string
 }
+
+// liveDevices are the devices a page may say it runs in: a browser, the Mac app, AwwO Cloud for Windows, a phone or a
+// tablet. Anything else is no device.
+var liveDevices = map[string]bool{"browser": true, "mac": true, "windows": true, "phone": true, "tablet": true}
 
 // open registers a stream of a participant on a canvas; ok is false when the canvas or the participant has too many.
 // open admits a stream; its refusal is liveFull (a limit) or liveTaken (another person or token holds the id).
@@ -383,19 +539,29 @@ func (m *canvasMultiplayer) open(tid, cid string, who liveJoin) (*liveStream, st
 				return nil, liveFull
 			}
 			delete(r.participants, oldest.ID)
-			m.broadcastLocked(r, liveEvent{"presence", map[string]any{"left": oldest.ID}})
+			m.markLocked(r, oldest.ID)
+			r.forgetColorsLocked()
 		}
 		if len(r.participants) >= liveParticipantsPerCanvas {
 			return nil, liveFull
 		}
-		p = m.newParticipantLocked(who)
+		p = m.newParticipantLocked(r, who)
 		r.participants[id] = p
 	}
 	p.streams++
 	p.goneAt = time.Time{}
 	p.lastSeen = m.clock()
-	s := &liveStream{participantID: id, userID: who.actor.UserID, tokenID: who.actor.TokenID, wake: make(chan struct{}, 1), events: make(chan liveEvent, liveEventBuffer)}
-	m.broadcastLocked(r, liveEvent{"presence", map[string]any{"participant": p.public()}})
+	if who.device != "" {
+		p.Device = who.device
+	}
+	if who.role != "" {
+		p.Role = who.role
+	}
+	if p.dropEditsUnlessEditor() {
+		m.markLocked(r, id)
+	}
+	s := newLiveStream(id, who.actor, false)
+	m.markLocked(r, id)
 	r.streams[s] = struct{}{}
 	return s, ""
 }
@@ -406,15 +572,16 @@ const (
 	liveTaken = "taken"
 )
 
-func (m *canvasMultiplayer) newParticipantLocked(who liveJoin) *liveParticipant {
+func (m *canvasMultiplayer) newParticipantLocked(r *canvasRoom, who liveJoin) *liveParticipant {
 	now := m.clock()
 	id := who.actor.participantID()
 	port := who.actor.Port
 	if port == "" {
 		port = "web"
 	}
-	return &liveParticipant{ID: id, Kind: who.actor.Kind, Port: port, Name: who.actor.Name, Color: liveColor(colorKey(who.actor)), UserID: who.actor.UserID,
-		Role: who.role, State: liveState{Selection: []string{}}, Since: now, tokenID: who.actor.TokenID, lastSeen: now}
+	key := colorKey(who.actor)
+	return &liveParticipant{ID: id, Kind: who.actor.Kind, Port: port, Name: who.actor.Name, Color: r.colorLocked(key), UserID: who.actor.UserID,
+		Role: who.role, Device: who.device, State: liveState{Selection: []string{}}, Since: now, tokenID: who.actor.TokenID, colorKey: key, lastSeen: now}
 }
 
 // colorKey is what picks a participant's colour: a person's account (all their tabs and messages alike), an agent's token.
@@ -444,6 +611,12 @@ func (m *canvasMultiplayer) close(tid, cid string, s *liveStream) {
 				grace = liveAgentGrace
 			}
 			p.goneAt = m.clock().Add(grace)
+			// What only a page with its stream open does ends with its stream: its pointer, the edit it was making and
+			// the field it was typing in (a page that comes back says them again). It stays for its grace otherwise.
+			if p.State.Cursor != nil || p.State.Preview != nil || p.State.Editing != nil {
+				p.State.Cursor, p.State.Preview, p.State.Editing = nil, nil, nil
+				m.markLocked(r, p.ID)
+			}
 		}
 	}
 	m.sweep(key, r)
@@ -479,9 +652,9 @@ func (m *canvasMultiplayer) touch(tid, cid string, who liveJoin) {
 		if len(r.participants) >= liveParticipantsPerCanvas {
 			return
 		}
-		p = m.newParticipantLocked(who)
+		p = m.newParticipantLocked(r, who)
 		r.participants[id] = p
-		m.broadcastLocked(r, liveEvent{"presence", map[string]any{"participant": p.public()}})
+		m.markLocked(r, id)
 	}
 	p.lastSeen = m.clock()
 	if p.streams == 0 {
@@ -489,36 +662,91 @@ func (m *canvasMultiplayer) touch(tid, cid string, who liveJoin) {
 	}
 }
 
-// setState changes an actor's own state (only the parts given) and tells the room. It is false when the actor is not
-// on the canvas (or the id it names is someone else's) or sent too many updates this second (dropped).
-func (m *canvasMultiplayer) setState(tid, cid string, actor canvasActor, update func(*liveState)) bool {
+// liveUpdate is the parts of its state a participant sent (parseLiveState): each part given replaces that part.
+type liveUpdate struct {
+	apply func(*liveState)
+	// preview says it carries an edit in progress, whose time starts again (livePreviewFor).
+	preview bool
+}
+
+// What setState did with an update.
+const (
+	liveStateSet     = iota
+	liveStateAbsent  // the actor is not on the canvas, or the id it names is someone else's: nothing moves
+	liveStateTooFast // more than livePresencePerSecond this second: refused, to be sent again
+)
+
+// setState changes an actor's own state (only the parts given) and tells the room. `role` is the actor's role as the
+// request found it (empty for an agent): a page's participant shows the role it has now, not the one its stream
+// opened with.
+func (m *canvasMultiplayer) setState(tid, cid string, actor canvasActor, role string, update liveUpdate) int {
 	id := actor.participantID()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := canvasKey{tid, cid}
 	r := m.rooms[key]
 	if r == nil {
-		return false
+		return liveStateAbsent
 	}
 	p := r.participants[id]
 	if p == nil || !p.heldBy(actor) {
-		return false
+		return liveStateAbsent
+	}
+	// A page with no stream open is on its way out (or back, when it says everything again at its hello): what it says
+	// now would outlive it.
+	if p.Kind == "human" && p.streams == 0 {
+		return liveStateAbsent
 	}
 	now := m.clock()
 	if now.Sub(p.presenceAt) >= time.Second {
 		p.presenceAt, p.presenceN = now, 0
 	}
 	if p.presenceN >= livePresencePerSecond {
-		return false
+		return liveStateTooFast
 	}
 	p.presenceN++
 	p.lastSeen = now
 	if p.streams == 0 && p.Kind == "agent" {
 		p.goneAt = now.Add(liveAgentGrace)
 	}
-	update(&p.State)
-	m.broadcastLocked(r, liveEvent{"presence", map[string]any{"participant": p.public()}})
+	if role != "" {
+		p.Role = role
+	}
+	update.apply(&p.State)
+	if update.preview {
+		p.previewAt = now
+	}
+	p.dropEditsUnlessEditor()
+	m.markLocked(r, id)
+	return liveStateSet
+}
+
+// dropEditsUnlessEditor takes away the edit in progress and the editing mark of a person who may no longer edit (their
+// role went down while they had one): a reader's post cannot say them, nor take them back.
+func (p *liveParticipant) dropEditsUnlessEditor() bool {
+	if p.Kind != "human" || roleLevel(p.Role) >= roleLevel("member") || (p.State.Preview == nil && p.State.Editing == nil) {
+		return false
+	}
+	p.State.Preview, p.State.Editing = nil, nil
 	return true
+}
+
+// setRole is a participant's role as its stream's check of access found it again (it may have changed since the stream
+// opened); the room is told when it changed.
+func (m *canvasMultiplayer) setRole(tid, cid, id, role string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.rooms[canvasKey{tid, cid}]
+	if r == nil || role == "" {
+		return
+	}
+	if p := r.participants[id]; p != nil {
+		changed := p.Role != role
+		p.Role = role
+		if p.dropEditsUnlessEditor() || changed {
+			m.markLocked(r, id)
+		}
+	}
 }
 
 // participants lists a canvas's participants (people and agents), the oldest first.
@@ -530,10 +758,15 @@ func (m *canvasMultiplayer) participants(tid, cid string) []liveParticipant {
 	if r == nil {
 		return []liveParticipant{}
 	}
+	return m.participantsLocked(key, r)
+}
+
+func (m *canvasMultiplayer) participantsLocked(key canvasKey, r *canvasRoom) []liveParticipant {
 	m.sweep(key, r)
+	now := m.clock()
 	out := make([]liveParticipant, 0, len(r.participants))
 	for _, p := range r.participants {
-		out = append(out, p.public())
+		out = append(out, p.public(now))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].Since.Equal(out[j].Since) {
@@ -544,6 +777,73 @@ func (m *canvasMultiplayer) participants(tid, cid string) []liveParticipant {
 	return out
 }
 
+// greet gives what a stream's hello says of the canvas's presence (everyone, and the stream's own participant) and
+// forgets what it had still to send: the hello says how things are now. One lock, so nothing that changes after the
+// hello was read can be forgotten.
+func (m *canvasMultiplayer) greet(tid, cid string, s *liveStream) ([]liveParticipant, liveParticipant) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(s.pending)
+	clear(s.sentAt)
+	key := canvasKey{tid, cid}
+	r := m.rooms[key]
+	if r == nil {
+		return []liveParticipant{}, liveParticipant{}
+	}
+	participants := m.participantsLocked(key, r)
+	var you liveParticipant
+	for _, p := range participants {
+		if p.ID == s.participantID {
+			you = p
+		}
+	}
+	return participants, you
+}
+
+// takePresence gives what a stream tells of the canvas's presence at `at` (the stream's own clock), and forgets it: for
+// each participant who changed since it last told of them, their latest state if it last told of them at least
+// livePresenceEvery ago, or that they left (at once); and how long until the next of those held back is due (0: none
+// is).
+func (m *canvasMultiplayer) takePresence(tid, cid string, s *liveStream, at time.Time) ([]map[string]any, time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(s.pending) == 0 {
+		return nil, 0
+	}
+	r := m.rooms[canvasKey{tid, cid}]
+	var ids []string
+	var wait time.Duration
+	for id := range s.pending {
+		if r != nil && r.participants[id] != nil {
+			if last, told := s.sentAt[id]; told {
+				if left := livePresenceEvery - at.Sub(last); left > 0 {
+					if wait == 0 || left < wait {
+						wait = left
+					}
+					continue
+				}
+			}
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	now := m.clock()
+	out := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		delete(s.pending, id)
+		if r != nil {
+			if p := r.participants[id]; p != nil {
+				out = append(out, map[string]any{"participant": p.public(now)})
+				s.sentAt[id] = at
+				continue
+			}
+		}
+		out = append(out, map[string]any{"left": id})
+		delete(s.sentAt, id)
+	}
+	return out, wait
+}
+
 // participant gives one participant of a canvas, if it is there.
 func (m *canvasMultiplayer) participant(tid, cid, id string) (liveParticipant, bool) {
 	m.mu.Lock()
@@ -552,7 +852,7 @@ func (m *canvasMultiplayer) participant(tid, cid, id string) (liveParticipant, b
 	if r == nil || r.participants[id] == nil {
 		return liveParticipant{}, false
 	}
-	return r.participants[id].public(), true
+	return r.participants[id].public(m.clock()), true
 }
 
 // takeBehind says whether a stream fell behind (and clears it): it must send a fresh hello.

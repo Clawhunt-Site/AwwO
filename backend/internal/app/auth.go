@@ -267,6 +267,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.clawHuntSessions.forget(tokenHash(c.Value))
+		a.livePresence.forget(tokenHash(c.Value))
 	}
 	a.sessionCookie(w, "", -1)
 	if logoutURL != "" {

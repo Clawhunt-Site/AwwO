@@ -115,6 +115,8 @@ type App struct {
 	// multiplayer is the live state of the canvases people and agents have open: the streams to wake, who is on each
 	// canvas and the canvas agent tokens' limits (canvas_live_hub.go).
 	multiplayer canvasMultiplayer
+	// livePresence trusts a checked session for presence posts for a moment (canvas_live_presence.go).
+	livePresence presenceSessions
 }
 type rateEntry struct {
 	start time.Time
@@ -394,7 +396,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("PATCH /api/v1/tenants/{tenantId}/canvases/{id}", a.canvasAccess(a.patchCanvas, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/changes", a.canvasAccess(a.canvasChanges, 1))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/live/events", a.canvasAccess(a.canvasLiveEvents, 1))
-	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/presence", a.canvasAccess(a.canvasLivePresence, 1))
+	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/presence", a.livePresenceAccess(a.canvasLivePresence))
 	m.HandleFunc("POST /api/v1/tenants/{tenantId}/canvases/{id}/live/claims", a.canvasAccess(a.canvasLiveClaim, 2))
 	m.HandleFunc("DELETE /api/v1/tenants/{tenantId}/canvases/{id}/live/claims", a.canvasAccess(a.canvasLiveRelease, 2))
 	m.HandleFunc("GET /api/v1/tenants/{tenantId}/canvases/{id}/live/messages", a.canvasAccess(a.canvasLiveMessages, 1))

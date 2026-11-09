@@ -105,6 +105,8 @@ func (a *App) adminTenant(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Committed: a workspace suspended (or limited) is trusted for presence posts no longer (canvas_live_presence.go).
+	a.livePresence.forgetTenant(id)
 	for _, rid := range ids {
 		a.notifyRunEvent(rid)
 		a.cancelExecution(rid)

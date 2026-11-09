@@ -28,6 +28,7 @@ func (a *App) revokeAuthSession(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	a.livePresence.forget(hash)
 	c, _ := r.Cookie("awwo_session")
 	if tokenHash(c.Value) == hash {
 		a.sessionCookie(w, "", -1)
@@ -96,6 +97,8 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Committed: the person's sessions are gone, and so is any trust of them for presence posts.
+	a.livePresence.forgetUser(uid)
 	a.multiplayer.tokensRevoked(revoked)
 	a.sessionCookie(w, "", -1)
 	w.WriteHeader(204)
@@ -255,6 +258,8 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// Committed: the person's sessions are gone, and so is any trust of them for presence posts.
+	a.livePresence.forgetUser(uid)
 	a.multiplayer.tokensRevoked(revoked)
 	a.sessionCookie(w, "", -1)
 	w.WriteHeader(204)
