@@ -85,6 +85,17 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
       [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE, EDIT_ROLE, EDIT_ROLE], [EDIT_ROLE]],
     deliverable: 'Episode I: a film in three acts with dialogue, score, subtitles and end cards',
   },
+  // A film made with AwwO's one motion language (2026-11-09; a recorded canvas): a motion brief turns each moving thing
+  // into the language's numbers before any code, a film node builds the page with AwwO's film kit, a motion reviewer
+  // checks it line by line (motion-review: its findings as JSON), a fix node takes the code and the findings, a second
+  // review checks the fix, and the edit node renders the page's picture and sound, with no model.
+  {
+    id: 'words-into-motion', kind: 'film', recording: true, excerpt: true, footage: 'words-into-motion-real',
+    title: 'Words into motion',
+    brief: 'A film made with AwwO’s one motion language: five words a designer uses for motion, heavy, light, lands, glides and playful, each turned into one of its springs or curves before any code was written, built in code by agents that carry the language, checked line by line by a motion reviewer whose findings a fixer took up, and passed by a second review.',
+    stages: [['Motion brief'], ['Film'], ['Motion review'], ['Fix'], ['Editor', 'Second review'], [EDIT_ROLE]],
+    deliverable: 'An 18-second film with its sound, made with the motion language',
+  },
   // The films written as code (2026-10-26; recorded canvases too): each answers an Opus 5.5 video prompt from YouMind's
   // collection. A Director writes the brief and the timing sheet, builders in sandbox computers write the kernel, the
   // scenes and the sound, an assembly pastes them into one page with no model, a tester checks it, an editor cuts it

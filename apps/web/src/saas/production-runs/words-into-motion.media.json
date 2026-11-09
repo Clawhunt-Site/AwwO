@@ -1,0 +1,50 @@
+{
+ "edit/still-001.jpg": {
+  "src": "/showcase/media/words-into-motion/7eb98085cc7e892c.jpg",
+  "type": "image/jpeg",
+  "bytes": 14488,
+  "sha256": "7eb98085cc7e892c16fbfa03e339f6e24d3458169c66bfa24084602e01a38c99"
+ },
+ "edit/still-002.jpg": {
+  "src": "/showcase/media/words-into-motion/bb465a24911742e2.jpg",
+  "type": "image/jpeg",
+  "bytes": 14251,
+  "sha256": "bb465a24911742e22c6281b318c8382f1ab9d7d113144901677e2fd61214621e"
+ },
+ "edit/still-003.jpg": {
+  "src": "/showcase/media/words-into-motion/1b9cf1f8748183ea.jpg",
+  "type": "image/jpeg",
+  "bytes": 13825,
+  "sha256": "1b9cf1f8748183eae9afec7cda9680e62ad16e0ea4e3fcdef29a5eeb5e03ca12"
+ },
+ "edit/still-004.jpg": {
+  "src": "/showcase/media/words-into-motion/dac8de45a89d757f.jpg",
+  "type": "image/jpeg",
+  "bytes": 14720,
+  "sha256": "dac8de45a89d757fdc6bcb4ced9a5610521860b7a47a23718e1fcbbcd876eb4d"
+ },
+ "edit/still-005.jpg": {
+  "src": "/showcase/media/words-into-motion/c9875ca3cdf8ceed.jpg",
+  "type": "image/jpeg",
+  "bytes": 15438,
+  "sha256": "c9875ca3cdf8ceed96a76448c00bcdb504981996eb1f5a526c5fe6b0da623644"
+ },
+ "edit/still-006.jpg": {
+  "src": "/showcase/media/words-into-motion/df0c2bdd4ba390c3.jpg",
+  "type": "image/jpeg",
+  "bytes": 24328,
+  "sha256": "df0c2bdd4ba390c3ebf16e1b7c4ad4472bed7998177f48965a12814643e4a8e4"
+ },
+ "edit/words-into-motion.mp4": {
+  "src": "/showcase/staged/words-into-motion/fa752d8b0bc6d7ad.mp4",
+  "type": "video/mp4",
+  "bytes": 732798,
+  "sha256": "fa752d8b0bc6d7ad3396b1104dfcf7fc56b9197894d30a4b7f3fdb728768e84e",
+  "staged": true,
+  "original": {
+   "src": "/showcase/staged/words-into-motion/720eedbb88ae534f.mp4",
+   "bytes": 1053805,
+   "sha256": "720eedbb88ae534f0dc753dff9eea06f1e50261f6c25b6efe928b4731ff1c545"
+  }
+ }
+}

@@ -36,7 +36,12 @@ it('shows only the kind pressed, then all again', () => {
   expect(film).toHaveAttribute('aria-pressed', 'true');
   expect(group.getByRole('button', { name: `All ${PRODUCTION_CASES.length}` })).toHaveAttribute('aria-pressed', 'false');
   expect(cards()).toHaveLength(count('film'));
-  for (const card of cards()) expect(within(card).getByText('Film')).toBeVisible();
+  // The card's kind label itself: a film's team may have an agent called Film too (Words into motion).
+  for (const card of cards()) {
+    const label = card.querySelector('.production-kind');
+    expect(label?.textContent).toBe('Film');
+    expect(label).toBeVisible();
+  }
   fireEvent.click(group.getByRole('button', { name: `Digital twin ${count('twin')}` }));
   expect(cards()).toHaveLength(count('twin'));
   fireEvent.click(group.getByRole('button', { name: `All ${PRODUCTION_CASES.length}` }));

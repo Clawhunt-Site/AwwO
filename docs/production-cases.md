@@ -103,4 +103,8 @@ was checked before publishing says what the operator looked at.
 - **Copy.** A sandbox agent stays in its sandbox computer and takes the chosen model only when the sandbox offers it, as
   a flagship's copy does; the copy dialog says the first run writes every module, the page and the timeline again.
 
+### A film made with the motion language
+
+Words into motion (2026-11-09) is a recorded canvas of the same kind, built on the product's own nodes: a Motion brief, two Code film nodes (the film and its fix) and two Delivery review nodes, each of these five carrying the built-in motion-language or motion-review skill, then an Editor (no skill) and the edit; every agent works in a sandbox computer. The reviews' findings are a JSON array in their issues field, so the dialog shows them as the agents wrote them. Unlike the eight films above, its second review is published: it reads the fixed page beside the Editor, both after the Fix, off the film's chain, and shows whether the fix resolved the first review's findings.
+
 Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-copy`, `saas-production-cases` (and `saas-production-film`, which pins a film case's record, stored canvas, files and dialog, and `saas-staged-showcase`, the dev server's staged files), `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.
