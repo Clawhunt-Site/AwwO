@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // AwwO 云端: a personal connection of the local edition whose models the hosted AwwO runs (its relay, relay.go), with a
@@ -55,17 +58,42 @@ type cloudModel struct {
 const cloudModelNameBytes = 160
 
 // cloudModelName is the name the hosted site publishes for a model (relayModels: its worker's catalog name, such as
-// Claude Opus 5.5), as a picker may show it: trimmed, at most 80 characters, as modelIdentity takes a name, and
-// cloudModelNameBytes bytes, with no line break, tab or replacement character and nothing that shows as nothing or
-// reorders text (invisible). "" for none, or for one that is not such a name: the model then goes by its id, as before.
+// Claude Opus 5.5), as a picker may show it: in one composed form (NFC) and with no line break, tab or replacement
+// character and nothing that shows as nothing or reorders text (invisible); its spaces as a page shows them, trimmed and
+// each run as one (so two names that look alike are alike, distinctCloudNames); then at most 80 characters, as
+// modelIdentity takes a name, and cloudModelNameBytes bytes, and without " · ", which joins a label's parts
+// (personalRuntime), nor a " ·" it would end in: the model rail takes the label's first part as the model's name
+// (apps/web ModelPersonaShelf.tsx). "" for none, or for one that is not such a name: the model then goes by its id, as
+// before.
 func cloudModelName(name string) string {
-	name = strings.TrimSpace(name)
-	if len(name) > cloudModelNameBytes || utf8.RuneCountInString(name) > 80 || strings.ContainsFunc(name, func(r rune) bool {
-		return r == '\n' || r == '\t' || r == utf8.RuneError || invisible(r)
-	}) {
+	name = norm.NFC.String(strings.TrimSpace(name))
+	if strings.ContainsFunc(name, func(r rune) bool { return r == '\n' || r == '\t' || r == utf8.RuneError || invisible(r) }) {
+		return ""
+	}
+	name = strings.Join(strings.Fields(name), " ")
+	if len(name) > cloudModelNameBytes || utf8.RuneCountInString(name) > 80 || strings.Contains(name+" ", " · ") {
 		return ""
 	}
 	return name
+}
+
+// distinctCloudNames leaves a name only to the models no other model of the list would be shown as: two models that
+// went by one name (their names, or the id of one that has none) could not be told apart, so each goes by its id. Until
+// none do, since a model that now goes by its id may go by another's name: each round takes a name away or ends it.
+func distinctCloudNames(ids []string, models map[string]cloudModel) {
+	for alike := true; alike; {
+		alike = false
+		shown := map[string]int{}
+		for _, id := range ids {
+			shown[cmp.Or(models[id].Name, id)]++
+		}
+		for _, id := range ids {
+			if m := models[id]; m.Name != "" && shown[m.Name] > 1 {
+				m.Name, alike = "", true
+				models[id] = m
+			}
+		}
+	}
 }
 
 // cloudBudget is how much of a hosted model's window a run here may fill: what the hosted worker takes (the window less
@@ -149,6 +177,7 @@ func (a *App) discoverCloudModels(ctx context.Context, key string) ([]string, ma
 	if len(ids) == 0 {
 		return nil, nil, errCloudNoModels
 	}
+	distinctCloudNames(ids, models)
 	return ids, models, nil
 }
 

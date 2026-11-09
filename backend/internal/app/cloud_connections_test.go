@@ -265,10 +265,47 @@ func TestCloudModelsGoByTheNamesTheHostedSitePublishes(t *testing.T) {
 	}
 }
 
+// Two models a list would show alike could not be told apart: each goes by its id. A name like another model's id
+// counts where that model is shown by its id, and only there, including once it goes by its id because its own name
+// was another's.
+func TestCloudModelsShownAlikeGoByTheirIds(t *testing.T) {
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"object":"list","data":[
+			{"id":"bedrock.claude-opus-5-5","name":"Claude Opus 5.5","context_window":200000,"max_output_tokens":32000},
+			{"id":"bedrock.claude-opus-5-5-preview","name":"Claude  Opus 5.5","context_window":200000,"max_output_tokens":32000},
+			{"id":"bedrock.gemma-3-27b","name":"bedrock.claude-opus-5-5","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.glm-5","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.kimi-k3","name":"bedrock.glm-5","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.llama-4-scout","name":"Llama 4 Scout","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.nova-pro","name":"bedrock.llama-4-scout","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.deepseek-r1","name":"DeepSeek R1","context_window":128000,"max_output_tokens":16000}]}`)
+	}))
+	defer cloud.Close()
+	c := testConfig()
+	c.Edition, c.UserCredentials, c.CredentialKey, c.LocalCloudOrigin = editionLocal, true, bytes.Repeat([]byte{8}, 32), cloud.URL
+	ids, models, e := New(nil, c).discoverCloudModels(context.Background(), cloudKey)
+	if e != nil || len(ids) != 8 {
+		t.Fatal("every model offered", ids, e)
+	}
+	want := map[string]string{"bedrock.llama-4-scout": "Llama 4 Scout", "bedrock.nova-pro": "bedrock.llama-4-scout", "bedrock.deepseek-r1": "DeepSeek R1"}
+	for _, id := range ids {
+		if models[id].Name != want[id] {
+			t.Errorf("%s: name %q, want %q", id, models[id].Name, want[id])
+		}
+	}
+}
+
 func TestCloudModelNameIsOneAPickerCanShow(t *testing.T) {
 	for name, want := range map[string]string{
 		"Claude Opus 5.5": "Claude Opus 5.5", "  GLM-5\u00a0": "GLM-5", "通义千问 Qwen3 32B": "通义千问 Qwen3 32B",
 		"": "", " \t ": "",
+		// Not the separator a label's parts are joined with; a dot alone is a name's own.
+		"Claude Opus 5.5 · Preview": "", "Claude ·": "", "Kimi·K3": "Kimi·K3", "· Kimi": "· Kimi", "Claude  ·  Opus": "",
+		// One composed form (NFC): an e and its accent as one é.
+		"Cafe" + string(rune(0x301)) + " 1": "Caf" + string(rune(0xe9)) + " 1",
+		// Spaces as a page shows them: each run is one. A tab or line break at either end is trimmed, as any space is.
+		"\tClaude Opus 5.5\n": "Claude Opus 5.5",
+		"Claude  Opus   5.5":  "Claude Opus 5.5", "Claude Opus" + string(rune(0xa0)) + "5.5": "Claude Opus 5.5",
 		// At most 80 characters and 160 bytes.
 		strings.Repeat("a", 80): strings.Repeat("a", 80), strings.Repeat("a", 81): "",
 		strings.Repeat("名", 53) + "x": strings.Repeat("名", 53) + "x", strings.Repeat("名", 53) + "xy": "", strings.Repeat("名", 80): "",
@@ -480,11 +517,12 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 		opus.MaxOutputTokens != 32000 || glm.MaxContextTextBytes != glmBudget || glm.ProseBytesPerToken != 1 {
 		t.Fatal("a hosted model's limits", opus, glm)
 	}
-	// Each goes by the name the hosted site publishes for it, the GLM model, which it names not, by its id; their selectors,
-	// labels and the models they run as are the hosted site's ids, as before. A run is told the name too.
+	// Each goes by the name the hosted site publishes for it, label and all, then its connection's; the GLM model, which it
+	// names not, by its id, as before. Their selectors and the models they run as are the hosted site's ids. A run is told
+	// the name too.
 	if opus.Name != "Claude Opus 5.5" || glm.Name != "bedrock.glm-5" || opus.ID != connectionModelID(id, "bedrock.claude-opus-5-5") ||
-		opus.ProviderModel != "bedrock.claude-opus-5-5" || opus.Label != "bedrock.claude-opus-5-5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] ||
-		glm.Label != "bedrock.glm-5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] {
+		opus.ProviderModel != "bedrock.claude-opus-5-5" || opus.Label != "Claude Opus 5.5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] ||
+		glm.Label != "bedrock.glm-5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] || glm.ProviderModel != "bedrock.glm-5" {
 		t.Fatal("a hosted model's name", opus, glm)
 	}
 	if note := h.a.modelIdentity(catalog, opus.ID); !strings.Contains(note, "you run on Claude Opus 5.5 (AwwO model id "+opus.ID+")") {
@@ -586,7 +624,8 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	cloud.status.Store(200)
 	cloud.opusName.Store("Claude Opus 5.5 renamed")
 	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
-	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || catalog.Models[0].Name != "Claude Opus 5.5 renamed" {
+	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || catalog.Models[0].Name != "Claude Opus 5.5 renamed" ||
+		catalog.Models[0].Label != "Claude Opus 5.5 renamed · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] {
 		t.Fatal("refreshed", catalog, e)
 	}
 	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)

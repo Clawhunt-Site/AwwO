@@ -597,7 +597,9 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 			if !personalTextModel(model) {
 				continue
 			}
-			label := model + " · " + c.name + " · " + c.provider + " / " + c.id[max(0, len(c.id)-6):]
+			// A model's label is the name it goes by and then its connection's, so two connections offering one model can be
+			// told apart.
+			connection := " · " + c.name + " · " + c.provider + " / " + c.id[max(0, len(c.id)-6):]
 			protocol := connectionProtocol(c.provider, runtime, model)
 			// The capability needs all three: the deployment switch, the worker's own claim and
 			// a provider that enforces the schema. It is omitted when false and the runtime
@@ -605,18 +607,18 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 			// claim) the catalogue, and every snapshot frozen from it, serializes exactly as
 			// before and nothing can be frozen for a worker that would refuse it.
 			structured := a.cfg.StructuredContracts && workerStructured && runtime == runtimeOpenAIAgents && providerStructuredOutput(c.provider, protocol)
-			m := piModel{ID: connectionModelID(c.id, model), Name: model, Label: label, Provider: c.provider, ProviderModel: model, Protocol: protocol, Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32, StructuredOutput: structured}
+			m := piModel{ID: connectionModelID(c.id, model), Name: model, Label: model + connection, Provider: c.provider, ProviderModel: model, Protocol: protocol, Runtime: runtime, MaxContextTextBytes: 28416, MessageOverheadBytes: 32, StructuredOutput: structured}
 			if cloud != nil {
 				limits, offered := cloud[model]
 				if !offered {
 					continue
 				}
 				m.MaxContextTextBytes, m.ProseBytesPerToken, m.MaxOutputTokens = cloudBudget(limits), limits.ProseBytesPerToken, limits.MaxOutputTokens
-				// It goes by the name the hosted site publishes for it (Claude Opus 5.5), as there, not by the hosted site's
-				// own id for it (bedrock.claude-opus-5-5), which names the service it is reached through; by its id where the
-				// hosted site gives no name it can show (cloudModelName). Its selector and label stay as they are.
+				// It goes by the name the hosted site publishes for it (Claude Opus 5.5), as there, its label too, not by the
+				// hosted site's own id for it (bedrock.claude-opus-5-5), which names the service it is reached through; by its id
+				// where the hosted site gives no name it can show (cloudModelName). Its selector stays as it is.
 				if limits.Name != "" {
-					m.Name = limits.Name
+					m.Name, m.Label = limits.Name, limits.Name+connection
 				}
 			}
 			h.Models = append(h.Models, m)
