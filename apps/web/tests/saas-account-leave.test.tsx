@@ -1,7 +1,7 @@
 // 设置 → 成员与工作区 for a person invited into a workspace (account/AccountWorkspacePanel.tsx with the hosted app's account
 // API, saas/accountApi.ts): the members list gives them names, never ids where emails are left out (tenant_pagination.go
 // shows emails to owners and admins only), and they can leave the workspace, which its owner cannot (resources.go
-// leaveTenant). Every id, name and email here is made up.
+// leaveTenant); its invitations are asked for by its owners and admins only. Every id, name and email here is made up.
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountWorkspacePanel } from '../src/account/AccountWorkspacePanel';
@@ -95,5 +95,76 @@ describe('a person invited into a workspace', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Leave this workspace' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Leave “Team A”? You can no longer open any of its canvases, and you need a new invitation to come back.');
     expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Leave the workspace' })).toBeInTheDocument();
+  });
+});
+
+// A workspace's invitations are listed to its owners and admins only (GET …/invites, a suspended workspace's too): anyone
+// else's panel asks for none, so no refused request is logged in the browser's console.
+describe('the invitations a workspace has made', () => {
+  const INVITE = { id: 'inv-1', role: 'member', status: 'active', expiresAt: '2026-11-12T10:00:00Z', email: 'cy@example.test', canvasId: null, canvasName: null };
+  // `role` may change between reads: the account as the server has it then.
+  function serveAs(role: string | (() => string), status = 'active') {
+    const roleNow = () => typeof role === 'function' ? role() : role;
+    const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
+      const path = new URL(url, 'http://localhost').pathname;
+      if (path.endsWith('/auth/me')) return json({ ...me(roleNow()), tenants: me(roleNow()).tenants.map(item => ({ ...item, status })) });
+      if (path.endsWith('/members')) return json({ items: NAMES, nextCursor: null });
+      if (path.endsWith('/invites')) return json({ items: [INVITE], nextCursor: null });
+      return json({ items: [] });
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  }
+  const reads = (fetch: ReturnType<typeof serveAs>, suffix: string) => fetch.mock.calls
+    .filter(([url, init]) => new URL(String(url), 'http://localhost').pathname.endsWith(suffix) && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET')
+    .map(([url]) => new URL(String(url), 'http://localhost').pathname);
+
+  it('are never asked for by a member or a reader, whose panel still lists the people', async () => {
+    for (const role of ['member', 'reader']) {
+      const fetch = serveAs(role);
+      panel();
+      expect(await screen.findByText('Olive')).toBeInTheDocument();
+      expect(reads(fetch, '/members')).toEqual(['/api/v1/tenants/team-a/members']);
+      expect(reads(fetch, '/invites')).toEqual([]);
+      expect(screen.queryByText('已创建的邀请')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('answer a member as the server would, and leave a workspace this account does not hold to the server', async () => {
+    const fetch = serveAs('member');
+    const api = createSaaSAccountApi(() => {});
+    await expect(api.listInvites('team-a')).rejects.toMatchObject({ status: 403 });
+    expect(reads(fetch, '/invites')).toEqual([]);
+    await expect(api.listInvites('team-gone')).resolves.toMatchObject({ invites: [INVITE] });
+    expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-gone/invites']);
+  });
+
+  it('read the account again before they are refused, so a person made an admin since gets them at once', async () => {
+    let role = 'member';
+    const fetch = serveAs(() => role);
+    const api = createSaaSAccountApi(() => {});
+    await expect(api.listMembers('team-a')).resolves.toMatchObject({ access: { canManageMembers: false } });
+    await expect(api.listInvites('team-a')).rejects.toMatchObject({ status: 403 });
+    role = 'admin';
+    await expect(api.listInvites('team-a')).resolves.toMatchObject({ invites: [INVITE] });
+    expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-a/invites']);
+    // The members list read after it goes by the account read again.
+    await expect(api.listMembers('team-a')).resolves.toMatchObject({ access: { canManageMembers: true } });
+    // An admin's next read asks the server straight away.
+    const accountReads = reads(fetch, '/auth/me').length;
+    await api.listInvites('team-a');
+    expect(reads(fetch, '/auth/me')).toHaveLength(accountReads);
+  });
+
+  it('are read and listed for an owner and an admin, a suspended workspace’s too, in either language', async () => {
+    for (const [role, status, locale] of [['owner', 'active', 'zh'], ['admin', 'active', 'en'], ['owner', 'suspended', 'zh']] as const) {
+      const fetch = serveAs(role, status);
+      panel(vi.fn(), locale);
+      expect(await screen.findByText(locale === 'zh' ? '已创建的邀请' : 'Created invitations')).toBeInTheDocument();
+      expect(reads(fetch, '/invites')).toEqual(['/api/v1/tenants/team-a/invites']);
+      cleanup();
+    }
   });
 });

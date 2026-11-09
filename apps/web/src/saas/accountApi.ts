@@ -8,6 +8,9 @@ import { listPage } from './listPage';
 type Member = { userId: string; name: string; email?: string; role: HumanCompanyRole };
 const profile = (user: { id: string; email?: string | null; name: string }): AccountProfile => ({ ...user, email: user.email ?? null, image: null });
 const canManage = (tenant?: Tenant) => tenant?.status === 'active' && ['owner', 'admin'].includes(tenant.role);
+/** Whom the server lists a workspace's invitations to (GET …/invites, owners and admins; a suspended workspace's too, as
+ *  every read): anyone else is refused, 403. */
+const readsInvites = (tenant?: Tenant) => tenant?.role === 'owner' || tenant?.role === 'admin';
 const roles = (tenant?: Tenant): HumanCompanyRole[] => canManage(tenant) ? tenant?.role === 'owner' ? ['reader', 'member', 'admin'] : ['reader', 'member'] : [];
 
 /** Translate the existing account panel's data contract at its HTTP boundary. No external identity is used. */
@@ -61,7 +64,19 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
     },
     listMembers,
     listUserDirectory: async id => ({ users: (await listMembers(id)).members.map(item => ({ principalId: item.principalId, status: 'active' as const, user: item.user })) }),
-    listInvites: async (id, options) => { const result = await page<WorkspaceInviteSummary>(tenantPath(id, '/invites'), options?.cursor); return { invites: result.items, nextOffset: null, nextCursor: result.nextCursor ?? null }; },
+    listInvites: async (id, options) => {
+      // A member or a reader is refused the list: the panel asks for it beside the members, so it is answered here as the
+      // server would answer, without a request (a refused one is logged in the browser's console). The account is read
+      // again first, so a person made an owner or admin since the page read it gets the list at once (and the members
+      // list read after it says so). A workspace this account does not hold is still asked, and answers as the server says.
+      if (!readsInvites(await tenant(id))) {
+        identityRequest = undefined;
+        const actor = await tenant(id);
+        if (actor && !readsInvites(actor)) throw new AccountApiError(403, saasErrorMessage(new SaaSApiError(403, 'forbidden', 'Insufficient workspace permissions'), readInitialLocale()));
+      }
+      const result = await page<WorkspaceInviteSummary>(tenantPath(id, '/invites'), options?.cursor);
+      return { invites: result.items, nextOffset: null, nextCursor: result.nextCursor ?? null };
+    },
     createHumanInvite: async (id, role) => {
       const invite = await request<{ id: string; role: HumanCompanyRole; token: string; inviteUrl: string; expiresAt: string }>(tenantPath(id, '/invites'), { method: 'POST', body: JSON.stringify({ role }) });
       return { ...invite, allowedJoinTypes: 'human', humanRole: invite.role };
