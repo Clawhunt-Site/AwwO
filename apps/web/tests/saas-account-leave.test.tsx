@@ -47,6 +47,30 @@ describe('a person invited into a workspace', () => {
     expect(olive.querySelectorAll('.account-member-identity > span')).toHaveLength(0);
   });
 
+  // An account linked to ClawHunt with no name kept yet is named by nothing (tenant_pagination.go, shownUserName).
+  it('calls a member the server names by nothing 有人 as the canvas does, never by their id', async () => {
+    serve('member', [...NAMES, { userId: 'user-kite', name: '', role: 'member' }]);
+    panel();
+    const kite = (await screen.findByText('有人')).closest('article')!;
+    expect(within(kite).queryByText('user-kite')).toBeNull();
+    expect(kite.querySelectorAll('.account-member-identity > span')).toHaveLength(0);
+    cleanup();
+    serve('reader', [...NAMES, { userId: 'user-kite', name: '  ', role: 'member' }]);
+    panel(vi.fn(), 'en');
+    expect(within((await screen.findByText('Someone')).closest('article')!).queryByText('user-kite')).toBeNull();
+  });
+
+  it('shows its owner such a member by the email once, which names its controls', async () => {
+    serve('owner', [{ userId: 'user-bea', name: 'Bea', email: 'bea@example.test', role: 'owner' },
+      { userId: 'user-kite', name: '', email: 'kite@example.test', role: 'member' }]);
+    panel();
+    const kite = (await screen.findByText('kite@example.test')).closest('article')!;
+    expect(within(kite).getAllByText('kite@example.test')).toHaveLength(1);
+    expect(within(kite).getByRole('combobox', { name: 'kite@example.test 的角色' })).toBeInTheDocument();
+    // A named member keeps their email under the name.
+    expect(within((await screen.findByText('Bea')).closest('article')!).getByText('bea@example.test')).toBeInTheDocument();
+  });
+
   it('leaves the workspace once confirmed, and the page goes on from there', async () => {
     const fetch = serve('member');
     const left = panel();

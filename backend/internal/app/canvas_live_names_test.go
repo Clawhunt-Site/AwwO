@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -225,6 +226,132 @@ func TestPostgresCanvasNamesWithoutClawHuntAreTheAccounts(t *testing.T) {
 	lt.h.request(t, lt.owner, "PATCH", "/auth/profile", map[string]any{"name": "Renamed"}, 200)
 	if item := lt.h.request(t, lt.member, "GET", lt.prefix+"/live/messages", nil, 200)["items"].([]any)[0].(map[string]any); item["name"] != "Renamed" {
 		t.Fatalf("a message after its author's profile changed: %v", item)
+	}
+}
+
+// Who started a run, and who is in a workspace, are named as the canvas names them: the run history's 「由 … 启动」 /
+// "Started by …" (a run's and a canvas run's startedBy) and the members list the Share dialog and Settings show, its
+// owners' and admins' view with emails too (found after the shown names were released on 2026-11-09: both still read the
+// account's own name).
+func TestPostgresRunStartersAndMembersAreNamedAsTheCanvasNamesThem(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	// A workspace made before ClawHunt, whose owner was never linked, with two members made with passwords: kite, named
+	// accountName at sign-up and linked to ClawHunt below, and wren, never linked.
+	owner, tid, ownerID := h.register(t, "starters-owner@example.test")
+	_, kiteID := joinAs(t, h, owner, tid, "kite@example.invalid", "member")
+	_, wrenID := joinAs(t, h, owner, tid, "starters-wren@example.test", "member")
+	execSQL(t, h, "UPDATE users SET name=$2 WHERE id=$1", kiteID, accountName)
+	execSQL(t, h, "UPDATE users SET name='Wren' WHERE id=$1", wrenID)
+	// Each of the two starts a run (one going on per node session) and a canvas run.
+	p := "/tenants/" + tid
+	cid, doc := graphFixture(t, h, owner, tid)
+	graphs := p + "/canvases/" + cid + "/graph-runs"
+	run, canvasRun := map[string]string{}, map[string]string{}
+	for _, id := range []string{kiteID, wrenID} {
+		_, _, sid := h.fixture(t, owner, tid)
+		run[id] = seedRun(t, h, tid, sid, id)
+		canvasRun[id], _ = seedUnprojectedGraph(t, h, tid, cid, id, doc, map[string]string{"a": "running"})
+	}
+
+	// kite links the account to ClawHunt, which shows them as "kite", and signs in through it.
+	f := newIdentityFixture(t, h, "kite@example.invalid", "kite-subject")
+	f.id.Name = "kite"
+	first := completeIdentity(t, h, f, "")
+	if link, err := url.Parse(first.Header.Get("Location")); err != nil || link.Query().Get("sso") != "link" {
+		t.Fatalf("kite's account was not asked to link: %v %v", link, err)
+	}
+	h.request(t, responseCookie(t, first, identityCookie), "POST", "/auth/clawhunt/link", map[string]string{"password": "Strong password 123!"}, 200)
+	kite := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	h.a.clawHuntSessions.reuse = 0
+
+	// read is what c is told, by person: their entry in the members list, and what each answer that names who started
+	// their run and canvas run says (each one's own read, and its entry in the run list and in the canvas's run list).
+	type told struct {
+		members  map[string]map[string]any
+		starters map[string]map[string]any // by person, then by answer: its startedBy
+	}
+	answers := []string{"the run", "the run list", "the canvas run", "the canvas's run list"}
+	read := func(c *http.Cookie) told {
+		t.Helper()
+		out := told{map[string]map[string]any{}, map[string]map[string]any{}}
+		answer := func(path string) map[string]any {
+			v := h.request(t, c, "GET", path, nil, 200)
+			mustNotName(t, path, v)
+			return v
+		}
+		startersOf := func(path string) map[string]any {
+			by := map[string]any{}
+			for _, item := range answer(path)["items"].([]any) {
+				m := item.(map[string]any)
+				by[m["id"].(string)] = m["startedBy"]
+			}
+			return by
+		}
+		for _, item := range answer(p + "/members")["items"].([]any) {
+			m := item.(map[string]any)
+			out.members[m["userId"].(string)] = m
+		}
+		runs, canvasRuns := startersOf(p+"/runs"), startersOf(graphs)
+		for _, id := range []string{kiteID, wrenID} {
+			out.starters[id] = map[string]any{
+				"the run": answer(p + "/runs/" + run[id])["startedBy"], "the run list": runs[run[id]],
+				"the canvas run": answer(graphs + "/" + canvasRun[id])["startedBy"], "the canvas's run list": canvasRuns[canvasRun[id]],
+			}
+		}
+		return out
+	}
+	// want checks what a reader was told against the names each person should go by.
+	want := func(who string, got told, names map[string]string, emails bool) {
+		t.Helper()
+		if len(got.members) != len(names) {
+			t.Fatalf("%s: the members list %v", who, got.members)
+		}
+		for id, name := range names {
+			m := got.members[id]
+			if m == nil || m["name"] != name || m["role"] == nil {
+				t.Fatalf("%s: the members list names %s %v, want %q", who, id, m, name)
+			}
+			if _, has := m["email"]; has != emails {
+				t.Fatalf("%s: emails shown %v: %v", who, has, m)
+			}
+		}
+		for _, id := range []string{kiteID, wrenID} {
+			for _, what := range answers {
+				by, _ := got.starters[id][what].(map[string]any)
+				if by == nil || by["id"] != id || by["name"] != names[id] {
+					t.Fatalf("%s: %s says %s's run was started by %v, want %q", who, what, id, got.starters[id][what], names[id])
+				}
+			}
+		}
+	}
+
+	// kite, a member: ClawHunt's name for them; the others by their own names (never linked).
+	names := map[string]string{ownerID: "Test", kiteID: "kite", wrenID: "Wren"}
+	want("kite, a member", read(kite), names, false)
+	// kite made an admin: the same names beside the emails, never the account's own.
+	execSQL(t, h, "UPDATE memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2", tid, kiteID)
+	want("kite, an admin", read(kite), names, true)
+
+	// Someone else reads it: another person signed in through ClawHunt, put in the workspace as a member. (The stand-in
+	// ClawHunt answers every session with one identity, so kite's session is not used again.) kite is named by the name
+	// their last request kept, while they are away.
+	f.id.Subject, f.id.Email, f.id.Name = "starters-other-subject", "starters-other@example.invalid", "Other"
+	other := responseCookie(t, completeIdentity(t, h, f, ""), "awwo_session")
+	otherID := h.request(t, other, "GET", "/auth/me", nil, 200)["user"].(map[string]any)["id"].(string)
+	execSQL(t, h, "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,'member')", tid, otherID)
+	names[otherID] = "Other"
+	want("another member", read(other), names, false)
+	// An account linked to ClawHunt with no name kept (linked before migration 058, or by an older API) is named by
+	// nothing until the person's next request, never by its own name: on its runs, and in the members list, its owners'
+	// and admins' view too.
+	execSQL(t, h, "UPDATE users SET display_name=NULL WHERE id=$1", kiteID)
+	names[kiteID] = ""
+	want("another member, before kite's next request", read(other), names, false)
+	execSQL(t, h, "UPDATE memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2", tid, otherID)
+	want("another admin, before kite's next request", read(other), names, true)
+	var stored string
+	if err := h.db.QueryRow(context.Background(), "SELECT name FROM users WHERE id=$1", kiteID).Scan(&stored); err != nil || stored != accountName {
+		t.Fatalf("kite's own name became %q: %v", stored, err)
 	}
 }
 

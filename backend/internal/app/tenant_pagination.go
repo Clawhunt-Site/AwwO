@@ -21,10 +21,13 @@ func pageEnds(count, size, next, limit int) bool {
 }
 
 // membersJSON is a member as a workspace's owners and admins list them; membersNamesJSON as everyone else does, without
-// their email.
+// their email. Both name a person as the canvas does (shownUserName), the owners' and admins' list too: one person goes
+// by one name there and on the canvas (the Share dialog lists the people beside who is on the canvas), and the own name
+// of an account linked to ClawHunt is one its person no longer sees (their sessions show ClawHunt's) and cannot change.
+// The email says who an account is.
 const (
-	membersJSON      = "jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name',u.name,'role',m.role)"
-	membersNamesJSON = "jsonb_build_object('id',u.id,'userId',u.id,'name',u.name,'role',m.role)"
+	membersJSON      = "jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name'," + shownUserName + ",'role',m.role)"
+	membersNamesJSON = "jsonb_build_object('id',u.id,'userId',u.id,'name'," + shownUserName + ",'role',m.role)"
 )
 
 type tenantPageSource struct {

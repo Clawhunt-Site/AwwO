@@ -58,6 +58,9 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const listed = items.find(item => item.id === selected) || items[0];
+  // Its starter's name as the canvas's people list takes one: trimmed, and none for a starter the server names by nothing
+  // (an account linked to ClawHunt with no name kept yet), whom the sentences below call someone in the workspace.
+  const starterName = typeof listed?.startedBy?.name === 'string' ? listed.startedBy.name.trim() : '';
   const viewer = useViewer(tenantId, open && !readOnly && Boolean(listed && graphIsActive(listed) && listed.startedBy !== undefined));
   const current = listed && shown?.id === listed.id ? shown : undefined;
   const node = current?.nodes.find(item => item.nodeId === nodeId) || current?.nodes.find(item => item.runId) || current?.nodes[0];
@@ -121,8 +124,8 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
           {items.map(item => <option value={item.id} key={item.id}>{new Date(item.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')} · {status(item.status)}</option>)}
         </select></label>
         <div className="saas-graph-summary"><strong role="status">{status(listed.status)}</strong><span>{listed.nodes.filter(item => item.state === 'done').length}/{listed.scope?.length || listed.nodes.filter(item => item.state !== 'cached').length} {t('节点完成', 'nodes completed')}</span>
-          {listed.startedBy && <span>{listed.startedBy.name
-            ? t(`由 ${listed.startedBy.name} 启动`, `Started by ${listed.startedBy.name}`)
+          {listed.startedBy && <span>{starterName
+            ? t(`由 ${starterName} 启动`, `Started by ${starterName}`)
             : t('由工作区里的一个人启动', 'Started by someone in the workspace')}</span>}
           {!readOnly && graphIsActive(listed) && <button disabled={busy || !mayStopRun(listed, viewer)} aria-describedby={mayStopRun(listed, viewer) ? undefined : `${listed.id}-stop-why`} onClick={async () => {
             setBusy(true);
@@ -131,8 +134,8 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
           }}>{t('停止整个任务', 'Stop entire task')}</button>}
         </div>
         {/* Who may stop it, as the server judges (runs.go stopsOthersRuns): its starter, or a workspace owner or admin. */}
-        {!readOnly && graphIsActive(listed) && !mayStopRun(listed, viewer) && <p id={`${listed.id}-stop-why`}>{listed.startedBy?.name
-          ? t(`只有 ${listed.startedBy.name} 或工作区的所有者、管理员能停止它。`, `Only ${listed.startedBy.name} or a workspace owner or admin can stop it.`)
+        {!readOnly && graphIsActive(listed) && !mayStopRun(listed, viewer) && <p id={`${listed.id}-stop-why`}>{starterName
+          ? t(`只有 ${starterName} 或工作区的所有者、管理员能停止它。`, `Only ${starterName} or a workspace owner or admin can stop it.`)
           : listed.startedBy
             ? t('只有启动它的人或工作区的所有者、管理员能停止它。', 'Only the person who started it or a workspace owner or admin can stop it.')
             : t('只有工作区的所有者或管理员能停止这次运行。', 'Only a workspace owner or admin can stop this run.')}</p>}

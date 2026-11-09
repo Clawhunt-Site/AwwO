@@ -170,6 +170,37 @@ describe('the Share dialog', () => {
     expect(await row.findByRole('alert')).toHaveTextContent('没能移除 Rui：连不上 AwwO，请检查网络后重试。');
   });
 
+  // An account linked to ClawHunt with no name kept yet is named by nothing (tenant_pagination.go, shownUserName).
+  it('calls people the server names by nothing 有人, and names their controls by the email an owner sees', async () => {
+    const kite: ShareMember = { userId: 'user-kite', name: '', role: 'member', email: 'kite@example.test' };
+    const wren: ShareMember = { userId: 'user-wren', name: '  ', role: 'reader', email: 'wren@example.test' };
+    const everyone = [...PEOPLE, kite, wren];
+    const { container } = render(<ShareDialog {...shareProps({ members: { items: everyone, loading: false, error: null },
+      onRemove: vi.fn(async () => { throw new TypeError('Failed to fetch'); }) })} />);
+    for (const person of [kite, wren]) {
+      const row = within(memberRow(container, person.userId));
+      expect(row.getByText('有人')).toBeInTheDocument();
+      expect(row.getByText(person.email!)).toBeInTheDocument();
+      expect(row.getByRole('combobox', { name: `${person.email} 的权限` })).toBeInTheDocument();
+    }
+    // Their email typed to invite them points to their access, by it.
+    fireEvent.change(screen.getByRole('textbox', { name: '邮箱（可选）' }), { target: { value: 'wren@example.test' } });
+    expect(screen.getByText('wren@example.test 已经在这个工作区里：在下面调整权限即可。')).toBeInTheDocument();
+    const row = within(memberRow(container, kite.userId));
+    fireEvent.click(row.getByRole('button', { name: '把 kite@example.test 移出工作区' }));
+    expect(row.getByRole('group', { name: '把 kite@example.test 移出工作区' })).toHaveTextContent('把 kite@example.test 移出工作区「Studio」？');
+    fireEvent.click(within(row.getByRole('group')).getByRole('button', { name: '移除' }));
+    expect(await row.findByRole('alert')).toHaveTextContent('没能移除 kite@example.test：连不上 AwwO，请检查网络后重试。');
+    cleanup();
+    // A member, who sees no emails, sees 有人 and no controls; an owner or admin named by nothing is left out of who invites.
+    const withoutEmails = everyone.map(person => ({ ...person, email: undefined, ...(person === OWNER ? { name: '' } : {}) }));
+    const { container: asMember } = render(<ShareDialog {...shareProps({ role: 'member', selfUserId: MEMBER.userId,
+      invites: { items: [], loading: false, error: null }, members: { items: withoutEmails, loading: false, error: null } })} />);
+    expect(within(memberRow(asMember, kite.userId)).getByText('有人')).toBeInTheDocument();
+    expect(asMember.querySelectorAll('li[data-member] select')).toHaveLength(0);
+    expect(screen.getByText('只有工作区的所有者和管理员能邀请人：Ada。')).toBeInTheDocument();
+  });
+
   it('starts a new link as not copied yet', async () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => undefined) } });
     let made = 0;

@@ -208,7 +208,7 @@ function InvitePeople({ role, members, invites, canvasId, onCreate, onRevoke }: 
       <label className="awwo-multiplayer-label" htmlFor={emailId}>{t('share.email')}</label>
       <input id={emailId} className="awwo-multiplayer-field" type="email" autoComplete="off" value={email} maxLength={320}
         aria-describedby={hintId} onChange={event => setEmail(event.target.value)} />
-      <p id={hintId} className="awwo-multiplayer-hint">{already ? t('share.emailMember', { name: already.name || already.email || '' }) : t('share.emailHint')}</p>
+      <p id={hintId} className="awwo-multiplayer-hint">{already ? t('share.emailMember', { name: already.name.trim() || already.email || '' }) : t('share.emailHint')}</p>
       <label className="awwo-multiplayer-label" htmlFor={accessId}>{t('share.access')}</label>
       <select id={accessId} className="awwo-multiplayer-field" value={access} onChange={event => setAccess(event.target.value as ShareRole)}>
         {roles.map(value => <option key={value} value={value}>{shareRoleLabel(locale, value)}</option>)}
@@ -305,11 +305,14 @@ function MemberRow({ member, self, workspace, here, color, editable, roles, onCh
   const removeButton = useRef<HTMLButtonElement>(null);
   const name = member.name.trim() || t('someone');
   const shown = self ? t('self.name', { name }) : name;
+  // Whom its controls and messages name: the person's name, else (one the server names by nothing, tenant_pagination.go)
+  // the email an owner or admin sees, so two such people's controls are told apart; 「有人」 / "Someone" with neither.
+  const target = member.name.trim() || member.email?.trim() || name;
   const act = async (action: () => Promise<void>, failed: MultiplayerTextKey, done?: () => void) => {
     setBusy(true);
     setError('');
     try { await action(); setConfirming(false); done?.(); }
-    catch (failure) { setError(t(failed, { name, detail: failureDetail(locale, failure) })); }
+    catch (failure) { setError(t(failed, { name: target, detail: failureDetail(locale, failure) })); }
     finally { setBusy(false); }
   };
   // The confirmation goes with the focus in it: back to this person's 移除.
@@ -322,8 +325,8 @@ function MemberRow({ member, self, workspace, here, color, editable, roles, onCh
       <span className="awwo-multiplayer-person-name">{shown}</span>
       {member.email && <span className="awwo-multiplayer-hint">{member.email}</span>}
       {here && <span className="awwo-multiplayer-share-here"><span className="awwo-multiplayer-dot" data-status="live" aria-hidden="true" />{t('share.here')}</span>}
-      {confirming && <div className="awwo-multiplayer-confirm" role="group" aria-label={t('share.removeLabel', { name })}>
-        <p>{t('share.removeConfirm', { name, workspace })}</p>
+      {confirming && <div className="awwo-multiplayer-confirm" role="group" aria-label={t('share.removeLabel', { name: target })}>
+        <p>{t('share.removeConfirm', { name: target, workspace })}</p>
         <div className="awwo-multiplayer-confirm-actions">
           {/* Removed, this row goes once the list is read again: the section's title takes the focus. */}
           <button type="button" className="awwo-multiplayer-small-button is-danger" disabled={busy} onClick={() => { void act(() => onRemove(member.userId), 'share.removeFailed', onRemoved); }}>
@@ -335,12 +338,12 @@ function MemberRow({ member, self, workspace, here, color, editable, roles, onCh
       {error && <p className="awwo-multiplayer-error" role="alert">{error}</p>}
     </div>
     {editable ? <div className="awwo-multiplayer-share-controls">
-      <select className="awwo-multiplayer-field" aria-label={t('share.roleFor', { name })} value={member.role} disabled={busy}
+      <select className="awwo-multiplayer-field" aria-label={t('share.roleFor', { name: target })} value={member.role} disabled={busy}
         onChange={event => { const next = event.target.value as ShareRole; if (next !== member.role) void act(() => onChangeRole(member.userId, next), 'share.changeFailed'); }}>
         {roles.includes(member.role) ? null : <option value={member.role}>{shareRoleLabel(locale, member.role)}</option>}
         {roles.map(value => <option key={value} value={value}>{shareRoleLabel(locale, value)}</option>)}
       </select>
-      <button type="button" ref={removeButton} className="awwo-multiplayer-small-button is-danger" aria-label={t('share.removeLabel', { name })} aria-expanded={confirming}
+      <button type="button" ref={removeButton} className="awwo-multiplayer-small-button is-danger" aria-label={t('share.removeLabel', { name: target })} aria-expanded={confirming}
         disabled={busy} onClick={() => setConfirming(was => !was)}>{t('share.remove')}</button>
     </div> : <span className="awwo-multiplayer-port">{shareRoleLabel(locale, member.role)}</span>}
   </li>;

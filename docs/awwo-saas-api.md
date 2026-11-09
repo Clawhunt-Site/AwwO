@@ -62,7 +62,7 @@
 | GET /auth/me | 无 | user{id,email,name,platformRole}, tenants[] |
 | GET /tenants | 无 | 当前用户的租户列表 |
 | POST /tenants | name | 201，创建租户，当前用户成为 owner；`AWWO_MAX_OWNED_WORKSPACES`>0 时，非平台管理员已拥有不少于该数量的工作区则 403 / workspace_limit（注册与首次 ClawHunt 登录自动创建的工作区不受此限） |
-| GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`，每项 `{id,userId,name,role}`；reader 以上；只有 owner/admin 看到每项的 `email`，其他成员看不到 |
+| GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`，每项 `{id,userId,name,role}`；reader 以上；只有 owner/admin 看到每项的 `email`，其他成员看不到；`name` 与画布上一样，是这个人的会话显示的名字（见「多人同屏」一节的名字一段），owner/admin 看到的也是 |
 | GET /tenants/{tenantId}/route-usage | 无 | reader 以上；今日（UTC）额度 `{limited,daily:{limit,used},routes?:{gate|bedrock|media:{limit,used}},planner?:{limit,used},interested,resetsAt}`；每日总数与本工作区的路由次数按准入的算法计数（`not_incurred` 不占路由次数但占每日次数）；画布助手在运营方规划模型上的改画布调用不占每日次数（免费版与套餐都一样），单独计入 `planner`（本工作区今日已用 / `AWWO_PLANNER_PER_WORKSPACE_PER_DAY`，默认 20；未配置规划模型时不返回）；不含全站上限、每个工作区与全站的媒体生成上限以及模型清单，准入仍可能拒绝；没有 routeLimits 或 routeLimits 为 `{}`（且所有者没有套餐）的工作区 `limited:false` 且无 `routes`；活动期间（`AWWO_PROMO_UNTIL` 之前）被活动抬高的免费工作区另返回 `promo{until,daily,routes?}`（活动的下限；`daily`/`routes` 已包含活动与今日签到），member 以上且可签到时另返回 `checkin{available,checkedIn,taken?,elsewhere?,bonus{daily,media},today?{daily,media},streak,endsAt}`（`taken`=本工作区今天已由其他成员签到，`elsewhere`=本人今天已在其他工作区签到，`today`=本工作区今天签到加上的次数，`streak`=本人连续签到天数）；所有者有付费套餐的工作区返回 `plan{id,credits{granted,spent,carried,remaining}}`（carried 为上一个计费期超出点数的部分、从本期扣除，实时计算，上期迟结算的调用仍算回上期；没有 routeLimits 的旧工作区不走套餐）（所有者另见 `periodEnd`、`cancelAtPeriodEnd`；reader 不返回 plan）、无 `routes`，`daily` 为整个账号今日默认模型的调用次数与套餐的每日次数；设置了 `AWWO_FREE_PLAN_UNTIL` 时（见下文「免费版结束」），它约束的工作区（有 routeLimits、所有者没有有效套餐、不归平台管理员所有）对每个能读这里的人（reader 也一样）另返回 `freePlan{until,ended}`：`until` 为结束时刻（UTC 的 RFC 3339），`ended` 为按 API 的时钟是否已到；其他工作区、没设置时不返回（`promo` 与 `checkin` 照旧，活动结束时消失） |
 | GET /billing | `?refresh=1` | 已登录；套餐目录 `catalog[{id,priceUsd,credits,dailyCalls,concurrentAgents,workspaces,mediaPerDay}]`、`checkoutEnabled`、本账号套餐 `plan{id,status,periodStart,periodEnd,cancelAtPeriodEnd,entitled}`（无订阅为 null）、本期点数 `credits{granted,spent,carried,remaining}`（有权益时）、`stale`；套餐由 ClawHunt 经后台通道告知（`paid` 为本期已付款发票按套餐计的美分，点数 = 实付金额换算，期中升级按补差价加点；续费未付款时保留上一个已付款的计费期，宽限 1 天；本期全额退款或被争议时点数为 0；ClawHunt 说已无订阅时套餐结束、记录保留为 `canceled`），超过 5 分钟或 `refresh=1` 时先向 ClawHunt 查询，查不到时显示已存的套餐并 `stale:true`；ClawHunt 说授权已结束则 401 并退出；另有后台同步按 subject 在续费前后、每小时以及结账/门户之后 24 小时内重读套餐 |
 | POST /billing/checkout | `{plan}` | 已登录（ClawHunt 账号）；plan=pro/max；开关 `AWWO_BILLING_CHECKOUT_ENABLED` 关闭时 403 `checkout_closed`；ClawHunt 开 Stripe Checkout，200 `{url}`（只放行 `https://checkout.stripe.com/`）；已有订阅（含未付款完成的）409 `already_subscribed`；同一账号正在打开另一个结账 429 `rate_limited`；密码账号 404；ClawHunt 不可用 503 |
@@ -163,7 +163,7 @@ SaaS 属性面板的“保存并准备运行”先完成画布保存，再调用
 | GET /sessions/{id}/messages | 无 | items[{id,sessionId,runId,role,content,createdAt}]；runId 关联原运行与团队过程 |
 | POST /runs | sessionId, prompt, operationId | 202；prompt 最多 128000 个 UTF-16 码元（中文一字一个，与 worker 的传输上限同一计法），operationId 必须 8–200 字节，也可用 Idempotency-Key header |
 | GET /runs | 可选 sessionId、operationId、active、limit、cursor | 运行列表，用于恢复受理结果不确定的请求与查询活动运行 |
-| GET /runs/{id} | 无 | status/output/terminal/error 等；`startedBy` 为启动它的人 `{id,name}`（没有记下的为 null）；运行列表与创建的回答也带 |
+| GET /runs/{id} | 无 | status/output/terminal/error 等；`startedBy` 为启动它的人 `{id,name}`（没有记下的为 null；`name` 与成员列表的同为这个人当前会话显示的名字）；运行列表与创建的回答也带 |
 | GET /runs/{id}/turns | 无 | `{items}`，按 ordinal 排序的团队成员回合；含成员、模型、状态、输出及输入审计，详见下文；单 Agent 返回空列表 |
 | GET /runs/{id}/events | Last-Event-ID 或 after 查询参数 | text/event-stream，持久事件重放 |
 | POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准；进行中的运行只有启动它的人或工作区 owner/admin 能停（没有记下启动人的只有 owner/admin），其他成员 403 / run_not_yours，已结束的照旧回答（沙箱电脑的任务仍只有它的人能停，403 / computer_owner_required） |
@@ -367,7 +367,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | POST /agent-tokens | `{name, days?, scope?}` | admin 以上（会话，按 IP 限速；迁移 059 起 member 不能生成）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
 | DELETE /agent-tokens/{tokenId} | | 创建人或工作区 admin/owner；204，令牌的流立刻 `bye: revoked`，其认领放开 |
 
-参与者、认领、消息、变更记录、令牌列表的创建人，以及 Agent 读到的每个回答，都用一个人当前会话显示的名字称呼他：
+参与者、认领、消息、变更记录、令牌列表的创建人、运行与整图运行的启动人（`startedBy`）、工作区成员列表（owner/admin 带邮箱的那份也是），以及 Agent 读到的每个回答，都用一个人当前会话显示的名字称呼他：
 经 ClawHunt 登录的账号用 ClawHunt 当前的名字，从不用账号自己存的名字（`users.name`：先注册后绑定 ClawHunt 的账号是注册时填的那个，
 ClawHunt 建的账号是当时的名字）。这个名字记在账号上（`users.display_name`，migration 058，2026-11-08）：登录时写入，会话显示的名字
 变了的请求会改写（会话对 ClawHunt 的核验沿用 1 分钟，ClawHunt 不可用时至多 5 分钟；不经 ClawHunt 的会话不记），所以这个人

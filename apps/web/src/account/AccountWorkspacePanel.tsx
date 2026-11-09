@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, ExternalLink, Gauge, RefreshCw, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useLocalEdition } from '../saas/edition';
+import { mt } from '../canvas/multiplayer/multiplayerText';
 import { accountApi, AccountApiError } from './accountApi';
 import type {
   AccountApi,
@@ -199,6 +200,13 @@ function isForbidden(error: unknown): boolean {
 
 function identityLabel(profile: AccountProfile | null, fallback: string): string {
   return profile?.name?.trim() || profile?.email?.trim() || fallback;
+}
+
+/** A member as the list names them: by name, else by the email owners and admins see. A person the server names by
+ *  nothing (an account linked to ClawHunt with no name kept yet, tenant_pagination.go) is 「有人」 / "Someone", as the
+ *  canvas's people list says it, never their id; only a member with no profile at all is shown by its principal. */
+function memberLabel(member: CompanyMember, locale: AccountLocale, unknown: string): string {
+  return identityLabel(member.user, member.user ? mt(locale, 'someone') : member.principalId || unknown);
 }
 
 function initials(value: string): string {
@@ -660,7 +668,9 @@ export function AccountWorkspacePanel({
 
           <div className="account-member-list">
             {members.map((member) => {
-              const label = identityLabel(member.user, member.principalId || text.unknownUser);
+              const label = memberLabel(member, locale, text.unknownUser);
+              // Under the name, the email; not again where it is the label (a member the server names by nothing).
+              const detail = member.user ? member.user.email : member.principalId;
               const editable = Boolean(team.members?.access.canManageMembers) && member.editable !== false;
               return (
                 <article className="account-member-row" key={member.id}>
@@ -668,7 +678,7 @@ export function AccountWorkspacePanel({
                   <div className="account-member-identity">
                     <strong>{label}</strong>
                     {/* A member sees other members' names only (their emails are for owners and admins): no id in their place. */}
-                    {(member.user ? member.user.email : member.principalId) ? <span>{member.user ? member.user.email : member.principalId}</span> : null}
+                    {detail && detail.trim() !== label ? <span>{detail}</span> : null}
                     {!member.removal?.canArchive && member.removal?.reason ? <small>{text.ownerProtected}</small> : null}
                   </div>
                   {editable ? (
@@ -732,7 +742,7 @@ export function AccountWorkspacePanel({
               <button type="button" disabled={memberBusyId !== null} onClick={() => setLeaving(false)}>{locale === 'zh' ? '取消' : 'Cancel'}</button>
             </div> : <button type="button" className="account-secondary-button" disabled={memberBusyId !== null} onClick={() => setLeaving(true)}>{locale === 'zh' ? '离开这个工作区' : 'Leave this workspace'}</button>}
           </div>}
-          {removeTarget && <div className="account-notice" role="alert"><p>{locale === 'zh' ? `确认移除 ${identityLabel(removeTarget.user, removeTarget.principalId)}？` : `Remove ${identityLabel(removeTarget.user, removeTarget.principalId)}?`}</p><button type="button" disabled={memberBusyId !== null} onClick={() => void memberAction(() => api.removeMember!(activeCompanyId!, removeTarget.principalId))}>{locale === 'zh' ? '确认移除' : 'Confirm removal'}</button><button type="button" onClick={() => setRemoveTarget(null)}>{locale === 'zh' ? '取消' : 'Cancel'}</button></div>}
+          {removeTarget && <div className="account-notice" role="alert"><p>{locale === 'zh' ? `确认移除 ${memberLabel(removeTarget, locale, text.unknownUser)}？` : `Remove ${memberLabel(removeTarget, locale, text.unknownUser)}?`}</p><button type="button" disabled={memberBusyId !== null} onClick={() => void memberAction(() => api.removeMember!(activeCompanyId!, removeTarget.principalId))}>{locale === 'zh' ? '确认移除' : 'Confirm removal'}</button><button type="button" onClick={() => setRemoveTarget(null)}>{locale === 'zh' ? '取消' : 'Cancel'}</button></div>}
 
           {/* AwwO 本地版 takes no new accounts: an invitation would have no one to accept it. */}
           {local ? <div className="account-invite-panel">

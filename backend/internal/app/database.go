@@ -263,11 +263,12 @@ const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'
 const sessionJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'canvasId',canvas_id,'nodeId',node_id,'agentId',agent_id,'title',title,'createdAt',created_at)`
 
 // runStartedByJSON is who started a run ({id, name}; null for none recorded, or an account deleted since): the people on a
-// canvas see who started each run, and only they or a workspace owner or admin stop it (runs.go stopsOthersRuns).
-// graphStartedByJSON is the same for a canvas run (graph_runs g).
+// canvas see who started each run, and only they or a workspace owner or admin stop it (runs.go stopsOthersRuns). The
+// name is the one the person is shown by (shownUserName, which reads the account as u), never their account's own where
+// the two differ. graphStartedByJSON is the same for a canvas run (graph_runs g).
 const (
-	runStartedByJSON   = `(SELECT jsonb_build_object('id',starter.id,'name',starter.name) FROM users starter WHERE starter.id=actor_id)`
-	graphStartedByJSON = `(SELECT jsonb_build_object('id',starter.id,'name',starter.name) FROM users starter WHERE starter.id=g.actor_id)`
+	runStartedByJSON   = `(SELECT jsonb_build_object('id',u.id,'name',` + shownUserName + `) FROM users u WHERE u.id=actor_id)`
+	graphStartedByJSON = `(SELECT jsonb_build_object('id',u.id,'name',` + shownUserName + `) FROM users u WHERE u.id=g.actor_id)`
 )
 
 const runJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'sessionId',session_id,'operationId',operation_id,'status',status,'output',output,'outputAvailable',length(output)>0,'terminal',status NOT IN ('queued','running'),'error',error,'createdAt',created_at,'updatedAt',updated_at,'startedBy',` + runStartedByJSON + `)`

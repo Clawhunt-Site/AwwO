@@ -2,7 +2,7 @@
 // allows it (runs.go stopsOthersRuns): to its starter and to the workspace's owners and admins; to anyone else it is
 // held, saying who may stop it. Every id and name here is made up.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, getDefaultNormalizer, render, screen, waitFor } from '@testing-library/react';
 import { createSessionNode, emptyDocument } from '../src/canvas/canvasDoc';
 import { GraphRunPanel, mayStopRun } from '../src/saas/GraphRunPanel';
 import type { GraphRunSnapshot } from '../src/saas/graphRuns';
@@ -72,6 +72,22 @@ describe('who started a canvas run', () => {
 
   it('says who may stop a run whose starter has no name', async () => {
     serve(run({ id: 'user-bea', name: '' }), { id: 'user-cy', role: 'member' });
+    await open(/运行记录/);
+    expect(await screen.findByText('由工作区里的一个人启动')).toBeInTheDocument();
+    expect(await screen.findByText('只有启动它的人或工作区的所有者、管理员能停止它。')).toBeInTheDocument();
+  });
+
+  // The server names by nothing a starter whose account is linked to ClawHunt with no name kept yet; a name is taken as
+  // the canvas's people list takes one, trimmed.
+  it('trims the starter\'s name, and takes one of only spaces for none', async () => {
+    serve(run({ id: 'user-bea', name: ' Bea ' }), { id: 'user-cy', role: 'member' });
+    await open(/运行记录/);
+    // Matched exactly: the default matcher trims and collapses spaces, so an untrimmed name would pass it.
+    const exact = { normalizer: getDefaultNormalizer({ trim: false, collapseWhitespace: false }) };
+    expect(await screen.findByText('由 Bea 启动', exact)).toBeInTheDocument();
+    expect(await screen.findByText('只有 Bea 或工作区的所有者、管理员能停止它。', exact)).toBeInTheDocument();
+    cleanup(); vi.unstubAllGlobals();
+    serve(run({ id: 'user-bea', name: '   ' }), { id: 'user-cy', role: 'member' });
     await open(/运行记录/);
     expect(await screen.findByText('由工作区里的一个人启动')).toBeInTheDocument();
     expect(await screen.findByText('只有启动它的人或工作区的所有者、管理员能停止它。')).toBeInTheDocument();
