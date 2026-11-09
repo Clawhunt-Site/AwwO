@@ -1109,6 +1109,12 @@ const EN = {
   'surface.nodeBusyEdit': 'This component is running. Its settings and wires can change once it finishes; other components stay editable.',
   'surface.undoKeptOthers': 'Undone, except what someone else has changed since: that stays as they left it.',
   'surface.redoKeptOthers': 'Redone, except what someone else has changed since: that stays as they left it.',
+  // A session taking its first deliverable form keeps its wires on the form's ports (deliverableWires.ts); these name the
+  // ones it could not carry, and the label an input made for a wire takes when its source has no title.
+  'surface.deliverableWireDroppedOne': 'The deliverable form cannot carry one of this component’s wires, so it was removed: {wires}. Undo brings it back.',
+  'surface.deliverableWiresDroppedMany': 'The deliverable form cannot carry {count} of this component’s wires, so they were removed: {wires}. Undo brings them back.',
+  'surface.deliverableWiresSeparator': ', ',
+  'contract.contextInputLabel': 'Context',
   'surface.nodeAlreadyRunning': 'This component is already running. Other components can run alongside it.',
   'surface.runWaitOthers': 'Wait for the components that are running: a whole-canvas run, a review loop or a collaboration runs on its own.',
   'surface.runLanesFull': 'Four components are already running at once. Start this one when one of them finishes.',
@@ -2038,6 +2044,10 @@ const ZH: Record<CanvasTextKey, string> = {
   'surface.nodeBusyEdit': '这个组件正在运行，完成后才能改它的设置和连线；其他组件照常可以编辑。',
   'surface.undoKeptOthers': '已撤销；之后被他人改过的部分保留了他们的修改。',
   'surface.redoKeptOthers': '已重做；之后被他人改过的部分保留了他们的修改。',
+  'surface.deliverableWireDroppedOne': '交付要求接不上这个组件的一条连线，已移除：{wires}。撤销可以恢复。',
+  'surface.deliverableWiresDroppedMany': '交付要求接不上这个组件的 {count} 条连线，已移除：{wires}。撤销可以恢复。',
+  'surface.deliverableWiresSeparator': '、',
+  'contract.contextInputLabel': '上下文',
   'surface.nodeAlreadyRunning': '这个组件已经在运行了。其他组件可以同时运行。',
   'surface.runWaitOthers': '请等正在运行的组件完成：运行整张画布、评审循环或协作互审需要单独进行。',
   'surface.runLanesFull': '已有 4 个组件在同时运行，等其中一个完成后再运行这个。',

@@ -114,6 +114,7 @@ import {
   type Waypoint,
 } from './canvasDoc';
 import { boundsOfNodes, canConnect, edgeId, portsFor, reconcileEdges, type PortRef, type DataType } from './ports';
+import { carryWiresIntoContract, droppedWiresNote } from './deliverableWires';
 import { nextIn, orderNodes, type WorldRect } from './spatialOrder';
 import { preflightGraphIssue, runGraph, serializeFormOutput, validateNodeOutput, type RunNodeStatus } from './runGraph';
 import { createGatewayExecutor, cancelConversationRunViaGateway } from './runTransport';
@@ -3253,19 +3254,29 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
         const errors = validateNodeOutput(next, next.lastOutput!.text, locale);
         if (errors.length) { setHandoffNote(errors.join(locale === 'zh' ? '；' : ' ')); return; }
       }
+      // A session taking its first deliverable form keeps its wires on the form's ports (deliverableWires.ts); one the
+      // form cannot carry goes, and is named.
+      let dropped: CanvasEdge[] = [];
+      const unsaved = docRef.current;
       patchDoc(prev => {
-        const nodes = prev.nodes.map(n => n.id === next.id ? { ...next, x: n.x, y: n.y, w: n.w, h: n.h } : n);
+        const live = prev.nodes.find(n => n.id === next.id);
+        const placed = live ? { ...next, x: live.x, y: live.y, w: live.w, h: live.h } : next;
+        const carried = live ? carryWiresIntoContract(prev.nodes, prev.edges, live, placed, tLatest.current('contract.contextInputLabel'))
+          : { node: placed, edges: prev.edges, dropped: [] };
+        dropped = carried.dropped;
+        const nodes = prev.nodes.map(n => n.id === next.id ? carried.node : n);
         // A field deleted or retyped here takes its wires with it, as the board already shows: a wire left in the
         // document is not drawn, cannot be disconnected, and would make every later plan fail.
-        return { ...prev, nodes, edges: reconcileEdges(nodes, prev.edges) };
+        return { ...prev, nodes, edges: reconcileEdges(nodes, carried.edges) };
       }, { label: `config:${next.id}` });
+      const droppedNote = docRef.current !== unsaved && dropped.length ? droppedWiresNote(tLatest.current, docRef.current.nodes, unsaved.nodes, dropped) : '';
       if (current?.kind === 'session' && next.kind === 'session' && (JSON.stringify(current.team) !== JSON.stringify(next.team)
         || JSON.stringify(current.taskFrame) !== JSON.stringify(next.taskFrame) || JSON.stringify(current.skills ?? []) !== JSON.stringify(next.skills ?? []))) {
         const affected = new Set(downstreamClosure([next.id]));
         setAllRuns(previous => withoutBadges(previous, affected));
         setRunSummary(null);
       }
-      setHandoffNote('');
+      setHandoffNote(droppedNote);
     },
     [canEditStructure, patchDoc, downstreamClosure, locale],
   );

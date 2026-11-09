@@ -677,9 +677,10 @@ CHANGELOG entry "treg for a person's own Agent".
   names and a claim's badge centred over it, the badge above the names; the host passes the icon's plate with `round`.
 - **Saving**: a page sends only what it changed (`PATCH`), at autosave's pace. 已同步 means the server holds every edit
   of this page.
-- **A person's steps keep the agents' work.** Only a person picks a node's model, often after the agents have handed
-  results in. A model picked for a node that never ran takes back nothing they made below it (found recording the
-  tutorial on 2026-11-07, when one did); the bounds are below:
+- **A person's steps keep the agents' work.** Only a person picks a node's model and adds its deliverables, often after
+  the agents have wired the node and handed results in. A model picked for a node that never ran takes back nothing
+  they made below it, and a deliverable keeps every wire its form can carry (found recording the tutorial on
+  2026-11-07, when both steps undid their work); the bounds are below:
   - A change of a node's settings makes stale only its own result and, if it takes one back, what was made from it
     (`invalidateOutputs`). A node that never ran made nothing, so a model, task or deliverable picked for it takes
     nothing back below it. Two things still reach the nodes it feeds: an image, video, audio, 3D or edit node that made
@@ -698,6 +699,13 @@ CHANGELOG entry "treg for a person's own Agent".
     a run's result, and Undo brings it back. On a node already bound, another runtime, model or effort opens a new
     conversation, as it always has (its notice says a new Session opened), and so does another conversation opened on
     any node: it starts with no result; the earlier conversation keeps the one it had, and only Undo publishes it again.
+  - A session taking its first deliverable form keeps its wires (`deliverableWires.ts`): each wire into its `context`
+    becomes an input of the form of its own, named after its source and not required; each wire out of its `result`
+    comes from the form's first output its reader can take. While the session has no result, the nodes it feeds keep
+    theirs: they could not have run on it. A wire the form cannot carry (a file a text input cannot read) goes, as does
+    every wire of an image, video, audio or 3D node, which the API still runs as a generation from its `context`,
+    `reference` and `audio` wires. What a reader made over a wire that goes goes with it, as with any wire removed; the
+    page says which wires went, and Undo brings them back.
 
 ## Release and fallback
 
