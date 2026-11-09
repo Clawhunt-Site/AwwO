@@ -6,9 +6,15 @@ import { useCanvasI18n, type CanvasTextKey } from './i18n';
 import { MAX_NODE_SKILLS } from './canvasDoc';
 import { currentSaaSCanvas } from '../saas/canvasBridge';
 import { cachedSkillCatalog, skillDescription, skillTitle, type SkillCatalog, type SkillSummary } from '../saas/skillsApi';
+import { skillPromptUnits, type NodePromptSize } from './skillFit';
 import './node-skills.css';
 
-interface Props { value: readonly string[] | undefined; disabled?: boolean; onChange: (skills: string[]) => void }
+interface Props {
+  value: readonly string[] | undefined; disabled?: boolean; onChange: (skills: string[]) => void;
+  /** The node's own text and kind (canvasPlan.ts nodePromptSize): with it, a skill that would take the node's runs past
+   *  the system prompt's limit is refused, and a set that is already past it is flagged (skillFit.ts). */
+  prompt?: NodePromptSize;
+}
 
 const CATEGORY_KEYS: Record<string, CanvasTextKey> = {
   video: 'skills.category.video', design: 'skills.category.design', research: 'skills.category.research', writing: 'skills.category.writing',
@@ -17,7 +23,7 @@ const CATEGORY_KEYS: Record<string, CanvasTextKey> = {
 /** The server's limit on the skill text one call carries (skills.go maxNodeSkillBytes), when the catalog has none. */
 const DEFAULT_NODE_SKILL_BYTES = 20 << 10;
 
-export function NodeSkillsEditor({ value, disabled = false, onChange }: Props) {
+export function NodeSkillsEditor({ value, disabled = false, onChange, prompt }: Props) {
   const { t, locale } = useCanvasI18n();
   const tenantId = currentSaaSCanvas()?.tenant.id ?? null;
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
@@ -58,8 +64,17 @@ export function NodeSkillsEditor({ value, disabled = false, onChange }: Props) {
   if (!tenantId) return null;
   const bytesOf = (list: readonly string[]) => list.reduce((sum, ref) => sum + (byRef.get(ref)?.bytes ?? 0), 0);
   const usedBytes = bytesOf(refs);
-  // A skill fits when the node has room for one more and the texts together still fit in one call.
-  const fits = (list: readonly string[], item: SkillSummary | undefined) => list.length < max && bytesOf(list) + (item?.bytes ?? 0) <= maxBytes;
+  const bytesFit = (list: readonly string[], item: SkillSummary | undefined) => bytesOf(list) + (item?.bytes ?? 0) <= maxBytes;
+  // With the node's own text, the skills and the notes a run adds still within its system prompt's limit.
+  const unitsFit = (list: readonly string[], item: SkillSummary | undefined) => {
+    const size = prompt && skillPromptUnits(prompt, catalog, item ? [...list, item.ref] : list);
+    return !size || size.used <= size.max;
+  };
+  // A skill fits when the node has room for one more, the texts together still fit in one call, and the node's runs
+  // still fit what one call can carry.
+  const fits = (list: readonly string[], item: SkillSummary | undefined) => list.length < max && bytesFit(list, item) && unitsFit(list, item);
+  const promptUsed = prompt && skillPromptUnits(prompt, catalog, refs);
+  const count = (units: number) => units.toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN');
   const toggle = (ref: string) => {
     const current = latest.current;
     const next = current.includes(ref) ? current.filter(entry => entry !== ref) : fits(current, byRef.get(ref)) ? [...current, ref] : null;
@@ -89,6 +104,7 @@ export function NodeSkillsEditor({ value, disabled = false, onChange }: Props) {
     </ul>}
     {refs.some(ref => catalog && !byRef.has(ref)) && <p className="awwo-node-skills-warning" role="alert">{t('skills.missing', { ref: refs.filter(ref => !byRef.has(ref)).join(', ') })}</p>}
     {catalog && usedBytes > maxBytes && <p className="awwo-node-skills-warning" role="alert">{t('skills.overBudget', { used: kb(usedBytes), max: kb(maxBytes) })}</p>}
+    {promptUsed && promptUsed.used > promptUsed.max && <p className="awwo-node-skills-warning" role="alert">{t('skills.overPrompt', { used: count(promptUsed.used), max: count(promptUsed.max) })}</p>}
     {failed ? <p className="awwo-node-skills-warning" role="alert">{t('skills.loadFailed')} <button type="button" className="canvas-inspector-link" onClick={() => setAttempt(count => count + 1)}>{t('skills.retry')}</button></p>
       : !catalog ? <p className="canvas-inspector-hint" role="status">{t('skills.loading')}</p>
       : !open ? <button ref={addRef} type="button" className="awwo-node-skills-add" disabled={disabled || refs.length >= max} title={refs.length >= max ? t('skills.limit', { max }) : undefined} onClick={() => setOpen(true)}><Plus size={14} aria-hidden="true" />{t('skills.add')}</button>
@@ -103,6 +119,7 @@ export function NodeSkillsEditor({ value, disabled = false, onChange }: Props) {
             const attached = refs.includes(item.ref);
             const room = attached || fits(refs, item);
             const tooLarge = !room && refs.length < max;
+            const reason = !tooLarge ? undefined : bytesFit(refs, item) ? t('skills.tooLongForNode') : t('skills.tooLarge', { max: kb(maxBytes) });
             return <li key={item.ref} className={attached ? 'is-attached' : undefined}>
               <div className="awwo-node-skills-item-text">
                 <strong>{skillTitle(item, locale)}</strong>
@@ -110,7 +127,7 @@ export function NodeSkillsEditor({ value, disabled = false, onChange }: Props) {
                 <p>{skillDescription(item, locale)}</p>
               </div>
               <button type="button" disabled={disabled || !room} aria-pressed={attached}
-                title={tooLarge ? t('skills.tooLarge', { max: kb(maxBytes) }) : undefined} onClick={() => toggle(item.ref)}>
+                title={reason} onClick={() => toggle(item.ref)}>
                 {attached ? t('skills.attached') : t('skills.attach')}
               </button>
             </li>;

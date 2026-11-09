@@ -16,6 +16,7 @@ import { automaticEntry, computerRuntime } from './nodeRuntime';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, inheritingRuntime, newTeamRuntime, nodeTeamRuntimeLabel, validateNodeTeam, type NodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
 import { choiceModelName, listedModelName, PLAN_TAG, unnamedModelText } from './modelNames';
+import { skillPromptKind, type NodePromptSize } from './skillFit';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
  *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
@@ -88,6 +89,15 @@ export function nodePromptUnits(node: SessionNode): number {
     required: field.required, type: field.type }));
   return units(node.persona) + (isTaskFrame(node.taskFrame) ? units(node.taskFrame) : 0)
     + (outputs.length ? units(fields) + units(Object.fromEntries(outputs.map(field => [field.id, policyExample(field)]))) : 0);
+}
+/** What the skill picker counts of a node (skillFit.ts): its own text, the kind of its outputs, and whether its task
+ *  requirements have an entry, the only case in which the API writes their sentences (taskFrameSystemPrompt). A team
+ *  node gets no count: its members' turns are framed apart (team_context.go), and a member may carry its brief again. */
+export function nodePromptSize(node: SessionNode): NodePromptSize | undefined {
+  if (node.team) return undefined;
+  const frame = isTaskFrame(node.taskFrame) ? cleanTaskFrame(node.taskFrame) : null;
+  return { ownUnits: nodePromptUnits(node), kind: skillPromptKind(node.contract?.outputs),
+    taskFrame: Boolean(frame && (frame.constraints.length || frame.acceptanceCriteria.length)) };
 }
 /** The skills a plan gives the nodes it adds, each with the room the node's own text may take beside them and the note
  *  that says a node lost them: a page's design skills, on any node carrying exactly the two, and a film's motion

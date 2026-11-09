@@ -1,0 +1,39 @@
+{
+  "promptUnits": {
+    "max": 32768,
+    "notes": {
+      "file": 3625,
+      "html": 4381,
+      "htmlFile": 5000,
+      "none": 1983,
+      "text": 3347
+    },
+    "taskFrame": 746
+  },
+  "skills": [
+    {
+      "ref": "builtin:film-looks",
+      "name": "film-looks",
+      "title": "Film looks: drawn looks for code films, with their numbers",
+      "version": 1,
+      "bytes": 4907,
+      "units": 5039
+    },
+    {
+      "ref": "builtin:film-sound",
+      "name": "film-sound",
+      "title": "Film sound: score, effects and one room for a film made in code",
+      "version": 1,
+      "bytes": 3679,
+      "units": 3816
+    },
+    {
+      "ref": "builtin:motion-language",
+      "name": "motion-language",
+      "title": "Motion language: one vocabulary for everything that moves",
+      "version": 1,
+      "bytes": 4363,
+      "units": 4499
+    }
+  ]
+}

@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
-	"unicode/utf16"
 )
 
 // filmGuide is the film kit's guide (apps/web/src/canvas/filmKit/film-guide.md), which a film node (代码影片) carries in
@@ -22,65 +20,53 @@ func filmGuide(t *testing.T) string {
 	return string(guide)
 }
 
-// The film skills ride on a film node, whose persona already carries the kit guide: both together must fit one node
-// and leave a run the room its task frame, lessons and notes take, so a member who attaches them is never refused.
+// Three skills are made for a film node, whose persona already carries the kit guide: film-looks, film-sound and the
+// motion language (the one a film the canvas assistant plans gets, canvasPlan.ts HOSTED_FILM_SKILLS). The skill picker
+// (NodeSkillsEditor.tsx) adds a node's own text, each skill's units and the notes a usual run adds (skillPromptRoom,
+// which TestSkillPromptRoomIsWhatARunSends checks against the prompt a run sends). Any two of the three fit one film
+// node and leave room for task requirements as long as a plan writes, so the picker lets a member attach them; all
+// three pass the system prompt's line even without requirements (a film node with them had every run refused on
+// 2026-11-09), so the picker refuses the third. The skills README and the CHANGELOG say so; if all three ever fit,
+// drop the last check and those lines with it.
 func TestFilmSkillsFitAFilmNode(t *testing.T) {
 	// The film template's role, steps, checklist and evidence policy come before the guide (agentTemplates.ts and
 	// agentTemplates.en.ts): 1,313 units in English and 437 in Chinese on 2026-11-08. Count 1,600 for either language.
 	persona := strings.Repeat("x", 1600) + "\n\n" + filmGuide(t)
-	node := graphNode{ID: "film", Kind: "session", Title: "A film", Contract: &graphContract{Version: 1,
-		Inputs:  []graphField{{ID: "idea", Label: "Film idea", Type: "markdown", Required: true}, {ID: "style", Label: "Look and sound", Type: "markdown"}},
-		Outputs: []graphField{{ID: "film", Label: "Film", Type: "html", Required: true, Help: "Play it in Results with its sound, render it to video, or download it as one web page."}}}}
-	skills := &skillContext{Items: []frozenSkill{}}
-	total := 0
-	for _, name := range []string{"film-looks", "film-sound"} {
-		s, ok := builtinSkill(name)
-		if !ok {
-			t.Fatalf("no built-in skill %s", name)
+	outputs := []graphField{{ID: "film", Label: "Film", Type: "html", Required: true, Help: "Play it in Results with its sound, render it to video, or download it as one web page."}}
+	room := skillPromptRoom()
+	own := nodeOwnPromptUnits(persona, nil, outputs) + room.Notes[skillPromptKind(outputs)]
+	size := func(names ...string) (bytes, units int) {
+		for _, name := range names {
+			s, ok := builtinSkill(name)
+			if !ok {
+				t.Fatalf("no built-in skill %s", name)
+			}
+			bytes, units = bytes+s.Bytes, units+s.Units
 		}
-		total += len(s.Body)
-		skills.Items = append(skills.Items, frozenSkill{Ref: s.Ref, Name: s.Name, Title: s.Title, Version: s.Version, Source: s.Source, ContentHash: s.ContentHash, Body: s.Body})
+		return bytes, units
 	}
-	if total > maxNodeSkillBytes {
-		t.Fatalf("the film skills add %d bytes, more than a node takes (%d)", total, maxNodeSkillBytes)
-	}
-	note := modelIdentityNote("Claude Opus 5.5", "bedrock.claude-opus-5-5", time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
-	system := withPromptNote(skillsSystemPrompt(graphSystemPrompt(persona, graphOutputPolicy(node)), skills), note)
-	units := len(utf16.Encode([]rune(system)))
-	if spare := 32768 - units; spare < 4096 {
-		t.Fatalf("a film node with both film skills uses %d of 32,768 system prompt units, leaving %d; keep at least 4,096", units, spare)
-	}
-	t.Logf("film node with film-looks + film-sound: %d skill bytes, %d system prompt units (%d spare)", total, units, 32768-units)
-}
-
-// A film the canvas assistant plans carries the motion language (canvasPlan.ts HOSTED_FILM_SKILLS); a member may add one
-// of the film skills beside it and still leave a run the room its task frame and notes take. Both film skills beside the
-// motion language pass 32,768 units: a member who adds both has chosen three skills, and the run is refused as
-// context_limit until one comes off (the API drops only the planner's own set, as for a page). The skills README and
-// the CHANGELOG say so; if all three ever fit, drop the last check and those lines with it.
-func TestAPlannedFilmTakesOneFilmSkillBesideTheMotionLanguage(t *testing.T) {
-	persona := strings.Repeat("x", 1600) + "\n\n" + filmGuide(t)
-	node := graphNode{ID: "film", Kind: "session", Title: "A film", Contract: &graphContract{Version: 1,
-		Outputs: []graphField{{ID: "film", Label: "Film", Type: "html", Required: true, Help: "Play it in Results with its sound, render it to video, or download it as one web page."}}}}
-	note := modelIdentityNote("Claude Opus 5.5", "bedrock.claude-opus-5-5", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
-	units := func(names ...string) int {
-		skills, err := freezeSkillContext(t.Context(), nil, "", names)
-		if err != nil {
-			t.Fatal(err)
+	// The JSON of the task requirements a plan writes for a film: the request it was given and a few checks.
+	const requirements = 1024
+	for _, pair := range [][]string{{"film-looks", "film-sound"}, {"film-looks", "motion-language"}, {"film-sound", "motion-language"}} {
+		bytes, units := size(pair...)
+		if bytes > maxNodeSkillBytes {
+			t.Errorf("%v add %d bytes, more than a node takes (%d)", pair, bytes, maxNodeSkillBytes)
 		}
-		return len(utf16.Encode([]rune(withPromptNote(skillsSystemPrompt(graphSystemPrompt(persona, graphOutputPolicy(node)), skills), note))))
-	}
-	for _, extra := range []string{"builtin:film-looks", "builtin:film-sound"} {
-		used := units("builtin:motion-language", extra)
-		if spare := 32768 - used; spare < 2048 {
-			t.Errorf("a planned film with %s beside the motion language uses %d of 32,768 system prompt units, leaving %d; keep at least 2,048", extra, used, spare)
+		if spare := room.Max - own - units - room.TaskFrame; spare < requirements {
+			t.Errorf("a film node with %v comes to %d of %d system prompt units with task requirements' sentences, leaving %d for their JSON; keep at least %d",
+				pair, own+units+room.TaskFrame, room.Max, spare, requirements)
+		} else {
+			t.Logf("a film node with %v: %d skill bytes, %d units without requirements (%d spare)", pair, bytes, own+units, room.Max-own-units)
 		}
-		t.Logf("a planned film with %s: %d units (%d spare)", extra, used, 32768-used)
 	}
-	if all := units("builtin:motion-language", "builtin:film-looks", "builtin:film-sound"); all <= 32768 {
-		t.Errorf("all three skills on a planned film now fit (%d units): drop this check and the lines that say they do not", all)
+	bytes, units := size("film-looks", "film-sound", "motion-language")
+	if bytes > maxNodeSkillBytes {
+		t.Fatalf("the three add %d bytes, which the picker refuses before their units (%d)", bytes, maxNodeSkillBytes)
+	}
+	if own+units <= room.Max {
+		t.Errorf("all three skills now fit a film node without task requirements (%d of %d units): the picker lets them be attached; drop this check and the lines that say it refuses the third", own+units, room.Max)
 	} else {
-		t.Logf("with both film skills too: %d units, over 32,768", all)
+		t.Logf("a film node with all three: %d units without requirements, over %d", own+units, room.Max)
 	}
 }
 

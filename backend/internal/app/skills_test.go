@@ -209,6 +209,19 @@ func TestPostgresWorkspaceSkillsLifecycleAndIsolation(t *testing.T) {
 	if items := catalog["items"].([]any); len(items) < 12 || items[0].(map[string]any)["body"] != nil {
 		t.Fatal("catalogue should list built-ins without bodies", len(items))
 	}
+	// The skill picker's numbers (skill_fit.go): each skill's units, and what a run adds beside a node's own text.
+	room := skillPromptRoom()
+	if fit, _ := catalog["promptUnits"].(map[string]any); fit["max"] != float64(maxSystemPromptUnits) || fit["taskFrame"] != float64(room.TaskFrame) ||
+		fit["notes"].(map[string]any)["html"] != float64(room.Notes["html"]) {
+		t.Fatal("the catalogue does not give the skill picker the system prompt's room", catalog["promptUnits"])
+	}
+	for _, item := range catalog["items"].([]any) {
+		if s := item.(map[string]any); s["ref"] == "builtin:film-looks" {
+			if looks, _ := builtinSkill("film-looks"); s["units"] != float64(looks.Units) || looks.Units <= looks.Bytes {
+				t.Fatal("a built-in skill is listed without the units its block adds", s)
+			}
+		}
+	}
 	critic := h.request(t, owner, "GET", base+"/builtin:critic", nil, 200)
 	if !strings.Contains(critic["body"].(string), "Merge rubric") {
 		t.Fatal("built-in body missing", critic)
@@ -218,11 +231,25 @@ func TestPostgresWorkspaceSkillsLifecycleAndIsolation(t *testing.T) {
 	if created["ref"] != "workspace:"+id || created["title"] != "brand-voice" || created["version"] != float64(1) {
 		t.Fatal("import produced the wrong record", created)
 	}
+	if want := utf16Len(skillBlock("brand-voice", "brand-voice", 1, skillSourceWorkspace, "Short sentences. No exclamation marks.\n")); created["units"] != float64(want) {
+		t.Fatal("a new workspace skill does not carry its units", created["units"], want)
+	}
 	h.request(t, owner, "POST", base, map[string]any{"name": "brand-voice", "title": "Again", "description": "dup", "body": "x"}, 409)
 	h.request(t, owner, "POST", base, map[string]any{"name": "bad", "title": "Bad", "description": "x", "body": "hidden \u202e text"}, 400)
-	updated := h.request(t, owner, "PUT", base+"/"+id, map[string]any{"version": 1, "title": "Brand voice", "description": "Use for copy in our brand voice", "body": "Short sentences.\n"}, 200)
+	updated := h.request(t, owner, "PUT", base+"/"+id, map[string]any{"version": 1, "title": "Our brand voice", "description": "Use for copy in our brand voice", "body": "Short sentences.\n"}, 200)
 	if updated["version"] != float64(2) || updated["body"] != "Short sentences.\n" {
 		t.Fatal("update did not create a new version", updated)
+	}
+	// The units follow the new title (four characters longer), version and body, in the reply and in the list.
+	want := float64(utf16Len(skillBlock("brand-voice", "Our brand voice", 2, skillSourceWorkspace, "Short sentences.\n")))
+	listed := 0.0
+	for _, item := range h.request(t, owner, "GET", base, nil, 200)["items"].([]any) {
+		if s := item.(map[string]any); s["ref"] == "workspace:"+id {
+			listed = s["units"].(float64)
+		}
+	}
+	if updated["units"] != want || listed != want {
+		t.Fatal("an edited workspace skill's units are stale", updated["units"], listed, want)
 	}
 	h.request(t, owner, "PUT", base+"/"+id, map[string]any{"version": 1, "title": "Stale", "description": "x", "body": "y"}, 409)
 	var revisions int

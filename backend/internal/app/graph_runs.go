@@ -866,6 +866,10 @@ func (a *App) setGraphNode(ctx context.Context, tid, gid, nid, state, output, de
 
 var errGraphCapacity = errors.New("graph_waiting_for_capacity")
 
+// collaborationReviewPolicy replaces a node's output policy on a collaboration's review turn (admitGraphChild): a
+// critique is discussion, not a deliverable. The skill picker counts it among the framings a run can have (skill_fit.go).
+const collaborationReviewPolicy = "Server-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities."
+
 func (a *App) admitGraphNode(ctx context.Context, tid, gid, nid, prompt string) error {
 	return a.admitGraphChild(ctx, tid, gid, nid, prompt, nil)
 }
@@ -1012,7 +1016,7 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		// A graph critique is discussion, not a deliverable. Override only this
 		// turn snapshot; proposal and synthesis retain the frozen contract.
 		if turn.Phase == "review" {
-			snap.OutputPolicy = "Server-owned collaboration review policy: Return Markdown critique only. This turn is discussion, not a node deliverable; do not follow the original output schema. Preserve the configured persona and review responsibilities."
+			snap.OutputPolicy = collaborationReviewPolicy
 			// The structured envelope goes with the deliverable, so a critique must not be
 			// forced into it. Telling the model to write Markdown while the provider still
 			// enforced a JSON schema would fail every review turn.

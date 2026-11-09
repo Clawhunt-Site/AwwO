@@ -70,8 +70,11 @@ type skillRecord struct {
 	Source        string   `json:"source"`
 	Attribution   string   `json:"attribution,omitempty"`
 	Bytes         int      `json:"bytes"`
-	ContentHash   string   `json:"contentHash"`
-	Body          string   `json:"body,omitempty"`
+	// Units: the UTF-16 code units the skill adds to a node's system prompt (skillBlock), which a run may not take past
+	// maxSystemPromptUnits; set wherever its version is known (withUnits).
+	Units       int    `json:"units"`
+	ContentHash string `json:"contentHash"`
+	Body        string `json:"body,omitempty"`
 }
 
 // frozenSkill is what a run snapshot keeps: enough to resend the exact text and to cite it.
@@ -222,7 +225,7 @@ func loadBuiltinSkills() ([]skillRecord, error) {
 			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
 		}
 		s.Ref = skillRefBuiltinPrefix + s.Name
-		skills = append(skills, s)
+		skills = append(skills, s.withUnits())
 	}
 	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 	return skills, nil
@@ -264,7 +267,7 @@ func scanWorkspaceSkill(row pgx.Row) (skillRecord, error) {
 	if s.Applies == nil {
 		s.Applies = []string{}
 	}
-	return s, nil
+	return s.withUnits(), nil
 }
 
 func (a *App) listSkills(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +299,8 @@ func (a *App) listSkills(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "limits": map[string]int{"maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes, "maxSkillBodyBytes": maxSkillBodyBytes, "maxWorkspaceSkills": maxWorkspaceSkills}})
+	writeJSON(w, 200, map[string]any{"items": items, "limits": map[string]int{"maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes, "maxSkillBodyBytes": maxSkillBodyBytes, "maxWorkspaceSkills": maxWorkspaceSkills},
+		"promptUnits": skillPromptRoom()})
 }
 
 func (a *App) getSkill(w http.ResponseWriter, r *http.Request) {
@@ -447,7 +451,7 @@ func insertWorkspaceSkill(ctx context.Context, tx pgx.Tx, tid, actor string, s s
 		s.ID, tid, s.Name, s.Title, s.Description, s.Category, s.Applies, s.Body, s.ContentHash, actor, attribution); err != nil {
 		return s, 0, err
 	}
-	return s, 201, insertSkillRevision(ctx, tx, tid, actor, s)
+	return s.withUnits(), 201, insertSkillRevision(ctx, tx, tid, actor, s)
 }
 
 func (a *App) updateSkill(w http.ResponseWriter, r *http.Request) {
@@ -489,7 +493,7 @@ func (a *App) updateSkill(w http.ResponseWriter, r *http.Request) {
 			tid, s.ID, s.Name, s.Title, s.Description, s.Category, s.Applies, s.Body, s.ContentHash, s.Version, actor); err != nil {
 			return s, 0, err
 		}
-		return s, 200, insertSkillRevision(r.Context(), tx, tid, actor, s)
+		return s.withUnits(), 200, insertSkillRevision(r.Context(), tx, tid, actor, s)
 	})
 }
 
@@ -718,8 +722,21 @@ func skillsSystemPrompt(instructions string, value *skillContext) string {
 		b.WriteString(skillsBoundary)
 	}
 	for _, s := range value.Items {
-		fmt.Fprintf(&b, "\n\n<skill name=%q title=%q version=\"%d\" source=%q>\n%s\n</skill>", s.Name, s.Title, s.Version, s.Source,
-			skillCloseTag.ReplaceAllString(strings.TrimRight(s.Body, "\n"), `<\/$1`))
+		b.WriteString(skillBlock(s.Name, s.Title, s.Version, s.Source, s.Body))
 	}
 	return b.String()
+}
+
+// skillBlock is one skill as a node's system prompt carries it, after the skills' boundary (skillsSystemPrompt). Its
+// length is the skill's units (skillRecord.Units), so the skill picker counts what a run sends.
+func skillBlock(name, title string, version int64, source, body string) string {
+	return fmt.Sprintf("\n\n<skill name=%q title=%q version=\"%d\" source=%q>\n%s\n</skill>", name, title, version, source,
+		skillCloseTag.ReplaceAllString(strings.TrimRight(body, "\n"), `<\/$1`))
+}
+
+// withUnits is s with the UTF-16 code units its block adds to a node's system prompt, for its name, title, version and
+// body as they are now.
+func (s skillRecord) withUnits() skillRecord {
+	s.Units = utf16Len(skillBlock(s.Name, s.Title, s.Version, s.Source, s.Body))
+	return s
 }

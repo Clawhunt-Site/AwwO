@@ -29,6 +29,7 @@ import { NodeTeamEditor } from './NodeTeamEditor';
 import { PersonaPicker } from './PersonaPicker';
 import { TaskFrameEditor } from './TaskFrameEditor';
 import { NodeSkillsEditor } from './NodeSkillsEditor';
+import { nodePromptSize } from './canvasPlan';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
 import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamModelOverrides, type NodeTeam, type NodeTeamMember, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
@@ -725,7 +726,7 @@ export function InspectorPanel({
             <TaskFrameEditor value={sessionDraft.taskFrame} disabled={busy}
               onChange={taskFrame => editDraft({ ...sessionDraft, taskFrame })} />
 
-            {!marketRef && <NodeSkillsEditor value={sessionDraft.skills} disabled={busy}
+            {!marketRef && <NodeSkillsEditor value={sessionDraft.skills} disabled={busy} prompt={nodePromptSize(sessionDraft)}
               onChange={skills => editDraft({ ...sessionDraft, skills })} />}
 
             {market && !marketRef && marketPublishable(sessionDraft) && sessionDraft.persona.trim() ? <div className="canvas-inspector-hint">

@@ -1,16 +1,22 @@
 // Skills on canvas nodes (canvasDoc.ts, inspectorSave.ts, NodeSkillsEditor.tsx) and rendering a delivered page as a
 // video (studio/RenderVideoPanel.tsx), both against a stubbed cloud API.
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createSessionNode, sanitizeDocument, type SessionNode } from '../src/canvas/canvasDoc';
+import { nodePromptSize } from '../src/canvas/canvasPlan';
+import { createNodeTeam } from '../src/canvas/nodeTeam';
 import { LocaleProvider } from '../src/canvas/i18n';
 import { inspectorSavedNode } from '../src/canvas/inspectorSave';
 import { NodeSkillsEditor } from '../src/canvas/NodeSkillsEditor';
+import { skillPromptKind, skillPromptUnits } from '../src/canvas/skillFit';
 import { RenderVideoPanel, useRenderCapability } from '../src/canvas/studio/RenderVideoPanel';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
-import { forgetSkillCatalog } from '../src/saas/skillsApi';
+import { forgetSkillCatalog, type SkillCatalog, type SkillPromptUnits } from '../src/saas/skillsApi';
 
 const tenant = '/api/v1/tenants/tenant-a';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -112,6 +118,130 @@ describe('skills on a node', () => {
     expect(changes.at(-1)).toEqual(['builtin:code-motion', 'builtin:critic', 'builtin:copy-editor']);
     fireEvent.click(within(picker).getByRole('button', { name: '完成' }));
     expect(screen.getByRole('button', { name: '添加技能' })).toHaveFocus();
+  });
+});
+
+// What the API serves the skill picker and the sizes of the three skills a film node takes, kept by the API's own test
+// (skill_fit_test.go TestSkillFitVectorsAreWhatTheAPIServes), so these run the picker on a real film node.
+const vectors: { promptUnits: SkillPromptUnits; skills: { ref: string; name: string; title: string; version: number; bytes: number; units: number }[] } =
+  JSON.parse(readFileSync(resolve(process.cwd(), '../../backend/internal/app/testdata/skill_fit_vectors.json'), 'utf8'));
+const [LOOKS, SOUND, MOTION] = ['builtin:film-looks', 'builtin:film-sound', 'builtin:motion-language'];
+const filmCatalog = {
+  ...catalog,
+  items: [...catalog.items.map(item => ({ ...item, units: item.bytes + 120 })), ...vectors.skills.map(skill => ({
+    ...skill, title: skill.name, titleZh: skill.name, description: skill.title, category: 'video', applies: ['html'], source: 'builtin', contentHash: skill.name }))],
+  promptUnits: vectors.promptUnits,
+};
+
+describe('skills a node’s runs can send', () => {
+  function Harness({ initial, node, onChange }: { initial: string[]; node: SessionNode; onChange?: (next: string[]) => void }) {
+    const [refs, setRefs] = useState(initial);
+    return <NodeSkillsEditor value={refs} prompt={nodePromptSize(node)} onChange={next => { onChange?.(next); setRefs(next); }} />;
+  }
+  const stub = (served: unknown) => vi.stubGlobal('fetch', vi.fn(async (url: string) => url === `${tenant}/skills` ? json(served) : json({}, 404)));
+  const attachButton = (picker: HTMLElement, name: string) => within(within(picker).getByText(name).closest('li')!).getByRole('button');
+
+  it.each(['zh', 'en'] as const)('lets a film node (%s) take any two of its three skills and refuses the third', async locale => {
+    scope();
+    stub(filmCatalog);
+    const film = createAgentTemplate('film', { x: 0, y: 0 }, locale);
+    // With what the API counts, any two leave room and all three do not (film_skills_test.go keeps both true).
+    const size = nodePromptSize(film)!;
+    const total = (refs: string[]) => skillPromptUnits(size, filmCatalog as SkillCatalog, refs)!.used;
+    // The sum is the node's own text, the html notes and the three skills' units, as the vectors give them.
+    expect(size).toMatchObject({ kind: 'html', taskFrame: false });
+    expect(total([LOOKS, SOUND, MOTION])).toBe(size.ownUnits + vectors.promptUnits.notes.html + vectors.skills.reduce((sum, skill) => sum + skill.units, 0));
+    for (const pair of [[LOOKS, SOUND], [LOOKS, MOTION], [SOUND, MOTION]]) expect(total(pair)).toBeLessThanOrEqual(vectors.promptUnits.max);
+    expect(total([LOOKS, SOUND, MOTION])).toBeGreaterThan(vectors.promptUnits.max);
+
+    const changes: string[][] = [];
+    render(<LocaleProvider locale={locale}><Harness initial={[MOTION]} node={film} onChange={next => changes.push(next)} /></LocaleProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: locale === 'en' ? 'Add skill' : '添加技能' }));
+    const picker = screen.getByRole('group', { name: locale === 'en' ? 'Choose skills for this node' : '为这个节点选择技能' });
+    expect(attachButton(picker, 'film-sound')).toBeEnabled();
+    fireEvent.click(attachButton(picker, 'film-looks'));
+    expect(changes.at(-1)).toEqual([MOTION, LOOKS]);
+    const third = attachButton(picker, 'film-sound');
+    expect(third).toBeDisabled();
+    expect(third).toHaveAttribute('title', locale === 'en'
+      ? 'Too long to add here: with it, this node’s instructions and skills would be more than one call can carry.'
+      : '这里加不下了：加上它，这个节点的说明和技能会超出一次调用能带的量。');
+    // Bytes alone would have let it on: the three come to well under a node's 20 KB.
+    expect(vectors.skills.reduce((sum, skill) => sum + skill.bytes, 0)).toBeLessThan(filmCatalog.limits.maxNodeSkillBytes);
+    // A small skill still fits beside the two, and taking one of them off makes room for the third again.
+    expect(attachButton(picker, locale === 'en' ? 'Critic' : '批判审稿')).toBeEnabled();
+    fireEvent.click(attachButton(picker, 'film-looks'));
+    expect(changes.at(-1)).toEqual([MOTION]);
+    expect(attachButton(picker, 'film-sound')).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('counts a node’s task requirements and the sentences the API writes with them', async () => {
+    scope();
+    stub(filmCatalog);
+    const film = createAgentTemplate('film', { x: 0, y: 0 }, 'en');
+    // Requirements whose JSON fills the room left beside motion-language and film-looks, but for one unit.
+    const free = vectors.promptUnits.max - skillPromptUnits(nodePromptSize(film)!, filmCatalog as SkillCatalog, [MOTION, LOOKS])!.used - vectors.promptUnits.taskFrame;
+    const frame = (length: number) => ({ version: 1 as const, source: 'manual' as const, constraints: ['x'.repeat(length)], acceptanceCriteria: [] });
+    const base = nodePromptSize({ ...film, taskFrame: frame(0) })!.ownUnits - nodePromptSize(film)!.ownUnits;
+    const fits = { ...film, taskFrame: frame(free - base) };
+    const over = { ...film, taskFrame: frame(free - base + 1) };
+    expect(nodePromptSize(fits)!.taskFrame).toBe(true);
+    expect(skillPromptUnits(nodePromptSize(fits)!, filmCatalog as SkillCatalog, [MOTION, LOOKS])!.used).toBe(vectors.promptUnits.max);
+    const { unmount } = render(<Harness initial={[MOTION]} node={fits} />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加技能' }));
+    expect(attachButton(screen.getByRole('group', { name: '为这个节点选择技能' }), 'film-looks')).toBeEnabled();
+    unmount();
+    render(<Harness initial={[MOTION]} node={over} />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加技能' }));
+    expect(attachButton(screen.getByRole('group', { name: '为这个节点选择技能' }), 'film-looks')).toBeDisabled();
+    // Blank requirements add no sentences: the API drops them.
+    expect(nodePromptSize({ ...film, taskFrame: { ...frame(0), constraints: [' '], acceptanceCriteria: ['\n'] } })!.taskFrame).toBe(false);
+  });
+
+  it('flags a node whose skills are already more than its runs can send, until one comes off', async () => {
+    scope();
+    stub(filmCatalog);
+    const film = createAgentTemplate('film', { x: 0, y: 0 }, 'en');
+    const used = skillPromptUnits(nodePromptSize(film)!, filmCatalog as SkillCatalog, [LOOKS, SOUND, MOTION])!.used;
+    render(<LocaleProvider locale="en"><Harness initial={[LOOKS, SOUND, MOTION]} node={film} /></LocaleProvider>);
+    expect(await screen.findByRole('alert')).toHaveTextContent(`This node’s instructions and these skills come to about ${used.toLocaleString('en-US')} characters with what a run adds, `
+      + 'more than the 32,768 one call can carry. Remove a skill or shorten the instructions, or its runs can be refused.');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove skill film-sound' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps to the byte limit alone where the skill list has no sizes to count', async () => {
+    scope();
+    const { promptUnits: _room, ...older } = filmCatalog;
+    for (const served of [older, { ...filmCatalog, promptUnits: { ...vectors.promptUnits, notes: { html: 1 } } }]) {
+      forgetSkillCatalog('tenant-a');
+      stub(served);
+      const { unmount } = render(<Harness initial={[MOTION, LOOKS]} node={createAgentTemplate('film', { x: 0, y: 0 }, 'zh')} />);
+      fireEvent.click(await screen.findByRole('button', { name: '添加技能' }));
+      expect(attachButton(screen.getByRole('group', { name: '为这个节点选择技能' }), 'film-sound')).toBeEnabled();
+      expect(screen.queryByRole('alert')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('gives a team node no count: its members’ turns are framed apart', async () => {
+    scope();
+    stub(filmCatalog);
+    const film = createAgentTemplate('film', { x: 0, y: 0 }, 'zh');
+    const team = { ...film, team: createNodeTeam(film) };
+    expect(nodePromptSize(team)).toBeUndefined();
+    render(<Harness initial={[MOTION, LOOKS]} node={team} />);
+    fireEvent.click(await screen.findByRole('button', { name: '添加技能' }));
+    expect(attachButton(screen.getByRole('group', { name: '为这个节点选择技能' }), 'film-sound')).toBeEnabled();
+  });
+
+  it('names a node’s outputs the way the API frames them', () => {
+    expect(skillPromptKind(undefined)).toBe('none');
+    expect(skillPromptKind([{ type: 'markdown' }, { type: 'number' }])).toBe('text');
+    expect(skillPromptKind([{ type: 'html' }, { type: 'markdown' }])).toBe('html');
+    expect(skillPromptKind([{ type: 'file' }])).toBe('file');
+    expect(skillPromptKind([{ type: 'file' }, { type: 'html' }])).toBe('htmlFile');
   });
 });
 

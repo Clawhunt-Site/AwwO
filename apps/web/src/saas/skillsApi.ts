@@ -6,10 +6,18 @@ export type SkillSource = 'builtin' | 'workspace';
 export interface SkillSummary {
   ref: string; id?: string; name: string; title: string; titleZh?: string; description: string; descriptionZh?: string;
   category: string; applies: string[]; version: number; source: SkillSource; attribution?: string; bytes: number; contentHash: string;
+  /** The UTF-16 units the skill adds to a node's system prompt (skills.go skillBlock); missing from an older API. */
+  units?: number;
 }
 export interface Skill extends SkillSummary { body: string }
 export interface SkillLimits { maxNodeSkills: number; maxNodeSkillBytes: number; maxSkillBodyBytes: number; maxWorkspaceSkills: number }
-export interface SkillCatalog { items: SkillSummary[]; limits: SkillLimits }
+/** The kinds of outputs a node's runs frame differently (skill_fit.go skillPromptKinds). */
+export type SkillPromptKind = 'html' | 'htmlFile' | 'file' | 'text' | 'none';
+/** What a run's system prompt may take and the most a run of a node run by one agent adds beside the node's own text
+ *  and its skills, in UTF-16 units (skill_fit.go skillPromptFit): `notes` by the kind of the node's outputs, `taskFrame`
+ *  for task requirements. */
+export interface SkillPromptUnits { max: number; notes: Record<SkillPromptKind, number>; taskFrame: number }
+export interface SkillCatalog { items: SkillSummary[]; limits: SkillLimits; promptUnits?: SkillPromptUnits }
 export interface SkillInput { name?: string; title?: string; description?: string; body?: string; category?: string; applies?: string[]; markdown?: string; version?: number }
 
 /** builtin:<name> or workspace:<id>, as the server accepts on a node. */
@@ -36,9 +44,18 @@ function checked<T>(value: unknown, check: (x: unknown) => x is T): T {
   return value;
 }
 
+const count = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 0;
+const PROMPT_KINDS: readonly SkillPromptKind[] = ['html', 'htmlFile', 'file', 'text', 'none'];
+function promptUnits(x: unknown): x is SkillPromptUnits {
+  return object(x) && count(x.max) && x.max > 0 && count(x.taskFrame) && object(x.notes) && PROMPT_KINDS.every(kind => count((x.notes as Record<string, unknown>)[kind]));
+}
+
 export async function readSkillCatalog(tenantId: string, signal?: AbortSignal): Promise<SkillCatalog> {
-  return checked(await api<unknown>(tenantPath(tenantId, '/skills'), { signal }), (x): x is SkillCatalog => object(x) && Array.isArray(x.items)
+  const catalog = checked(await api<unknown>(tenantPath(tenantId, '/skills'), { signal }), (x): x is SkillCatalog => object(x) && Array.isArray(x.items)
     && x.items.every(summary) && object(x.limits) && Number.isSafeInteger(x.limits.maxNodeSkills));
+  // The size check is extra help: a catalog whose numbers are missing or malformed is kept without it.
+  const { promptUnits: room, ...rest } = catalog;
+  return promptUnits(room) && rest.items.every(item => item.units === undefined || count(item.units)) ? { ...rest, promptUnits: room } : rest;
 }
 export async function readSkill(tenantId: string, ref: string, signal?: AbortSignal): Promise<Skill> {
   return checked(await api<unknown>(tenantPath(tenantId, `/skills/${encodeURIComponent(ref)}`), { signal }), (x): x is Skill => summary(x) && text((x as { body?: unknown }).body) && x.ref === ref);

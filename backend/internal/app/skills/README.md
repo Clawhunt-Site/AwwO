@@ -25,7 +25,10 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 - `category`: one of video, design, research, writing, engineering, business, data.
 - `applies`: any of html, motion, video, image, research, writing, code, review, design, data, plan.
 - `version`: a positive integer. Raise it whenever the body changes meaningfully; runs record the version they used.
-- Body: at most 8,192 bytes. A node takes at most 4 skills and 20 KiB of skill text in one call.
+- Body: at most 8,192 bytes. A node takes at most 4 skills and 20 KiB of skill text in one call, and its runs' system
+  prompt (its own text, its skills and the most a run adds) at most 32,768 UTF-16 units: the skill list gives each
+  skill's `units` and that room (`skill_fit.go`), and a node's Configure panel refuses a skill past either limit.
+  Growing a body can stop a set that fits today: measure the sets it joins first.
 - LF line endings, UTF-8 without a BOM, no control characters other than newline and tab, and no zero-width,
   bidirectional or tag characters (they can hide instructions from a reviewer). No emoji.
 
@@ -58,6 +61,7 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
    on personal keys, a page the canvas assistant plans gets `design-craft` and `anti-ai-slop` and a film it plans
    (代码影片) gets `motion-language`, where they fit (`canvasPlan.ts` `HOSTED_PAGE_SKILLS` and `HOSTED_FILM_SKILLS`,
    checked by `design_skills_test.go`, which also fails when their bodies grow past the room it keeps for a planned
-   page or film; `film_skills_test.go` keeps room for one film skill beside `motion-language`, while a film with both
-   film skills beside it is refused for its size): renaming or removing any of them stops those nodes from running
-   until someone takes it off the node. Every other node the assistant plans carries none until someone attaches them.
+   page or film; `film_skills_test.go` keeps room for any two of `film-looks`, `film-sound` and `motion-language` on a
+   film node, and the Configure panel refuses the third: with the longest framing a film node's run can have, the
+   three pass the line): renaming or removing any of them stops those nodes from running until someone takes it off
+   the node. Every other node the assistant plans carries none until someone attaches them.

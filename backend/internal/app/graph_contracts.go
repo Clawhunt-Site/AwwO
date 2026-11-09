@@ -591,16 +591,13 @@ const previewLibraryTag = `<script src="https://cdnjs.cloudflare.com/ajax/libs/t
 // equal.
 const previewModulesImportMap = `<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"}}</script>`
 
-// Generate format instructions from the same frozen fields used by validation.
-// Saved values are never prompt examples: they may be stale prior deliverables.
-func graphOutputPolicy(n graphNode) string {
-	if n.Contract == nil || len(n.Contract.Outputs) == 0 {
-		return ""
-	}
-	fields := make([]map[string]any, 0, len(n.Contract.Outputs))
+// graphOutputFields is what the output policy writes of a contract's outputs, as JSON: their fields, and an example of
+// their shape. They are a node's own text (canvasPlan.ts nodePromptUnits counts them), the rest of the policy is not.
+func graphOutputFields(outputs []graphField) (fields, shape []byte) {
+	list := make([]map[string]any, 0, len(outputs))
 	example := map[string]any{}
-	for _, f := range n.Contract.Outputs {
-		fields = append(fields, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
+	for _, f := range outputs {
+		list = append(list, map[string]any{"id": f.ID, "label": f.Label, "type": f.Type, "required": f.Required, "help": f.Help, "placeholder": f.Placeholder})
 		switch f.Type {
 		case "number":
 			example[f.ID] = 0
@@ -614,8 +611,18 @@ func graphOutputPolicy(n graphNode) string {
 			example[f.ID] = "<actual " + f.ID + " content>"
 		}
 	}
-	encoded, _ := json.Marshal(fields)
-	shape, _ := json.Marshal(example)
+	fields, _ = json.Marshal(list)
+	shape, _ = json.Marshal(example)
+	return fields, shape
+}
+
+// Generate format instructions from the same frozen fields used by validation.
+// Saved values are never prompt examples: they may be stale prior deliverables.
+func graphOutputPolicy(n graphNode) string {
+	if n.Contract == nil || len(n.Contract.Outputs) == 0 {
+		return ""
+	}
+	encoded, shape := graphOutputFields(n.Contract.Outputs)
 	policy := "Frozen graph output contract (server-owned serialization policy):\n" + string(encoded) +
 		"\nThis contract governs the final delivery format and takes precedence over any conflicting node or member instruction about response format. " +
 		"Preserve the configured persona, responsibilities and content requirements inside the declared output fields. "
