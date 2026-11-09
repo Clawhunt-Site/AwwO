@@ -37,6 +37,7 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 | AWWO-LAW-027 | Canvas | A canvas change changes only the paths its ops name, in the server's order |
 | AWWO-LAW-028 | Canvas | Every write of a canvas document is logged under its version before it is streamed |
 | AWWO-LAW-029 | Tenancy | A canvas agent token reaches only its own canvas, and never more than its maker may |
+| AWWO-LAW-030 | Tenancy | An invitation bound to an email is accepted only by the account whose email matches it |
 
 ## Tenancy
 
@@ -82,6 +83,26 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 - **Evidence.** `backend/internal/app/canvas_access.go` (`canvasAccess`, `admitCanvasToken`, `canvasWriteRole`);
   `backend/internal/app/canvas_live_test.go` (`TestPostgresCanvasAgentTokensActWithinTheirRules`,
   `TestPostgresCanvasLiveStreamCarriesEverything`).
+
+### AWWO-LAW-030: An invitation bound to an email is accepted only by the account whose email matches it
+
+- **Law.** An invitation made for an email MUST be accepted only by an account whose email at the moment of acceptance
+  equals it, with A to Z in any case: for a ClawHunt sign-in, the email ClawHunt gives when asked for that acceptance
+  (never one kept from an earlier request; an issuer that cannot be asked refuses, `sso_unavailable`), and for a password
+  account its own. Only ASCII addresses are bound, and only A to Z are folded: a look-alike letter (the Kelvin sign that
+  Go lowers to k) never matches. Any other account MUST be refused (`invite_wrong_account`) with nothing written, so the
+  invitation stays usable. A bound invitation's link is kept under a hash of its own, so an API that predates the law
+  finds no such invitation. Whether the email was ever verified is not asked: the binding is a match, not a proof.
+  Someone who holds the link and registers the invitee's address on ClawHunt first is let in; that is the owner's
+  accepted trade-off of 2026-11-08, not a gap to close here.
+- **Why.** A link travels further than its sender meant (a forwarded chat, a shared screen); binding it to the person it
+  was sent to keeps a link that got away from adding the wrong account to a workspace that holds every canvas, memory
+  and Agent in it. Verification cannot be the rule: ClawHunt sends most accounts as unverified (owner's decision of
+  2026-11-08), so a verified-only rule would lock out the people being invited.
+- **Evidence.** `backend/internal/app/invitations.go` (`acceptInvite`, `accountNow`, `inviteEmailMatches`,
+  `inviteTokenHash`); `backend/internal/app/people_sharing_test.go` (`TestPostgresBoundInvitationsGoToTheirOwnAccount`,
+  `TestPostgresAClawHuntAccountMatchesItsBoundInvitationUnverified`, `TestPostgresABoundInvitationAsksClawHuntForTheEmailNow`,
+  `TestInvitationEmailsAreKeptMatchedAndMasked`).
 
 ## Runs
 

@@ -119,10 +119,110 @@ const inviteStatusSQL = `CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHE
 func (a *App) listInvites(w http.ResponseWriter, r *http.Request) {
 	a.tenantList(w, r, "invites")
 }
+
+// inviteEmail is an invitation's bound email as it is kept: trimmed and in lower case, "" for none; ok is false for one
+// that is no email address, or one with any letter outside ASCII. Only A to Z are lowered: strings.ToLower would also
+// fold other letters into them (the Kelvin sign U+212A into k), so an account at a look-alike address would match.
+func inviteEmail(raw string) (string, bool) {
+	email := strings.TrimSpace(raw)
+	if email == "" {
+		return "", true
+	}
+	for i := 0; i < len(email); i++ {
+		if email[i] >= utf8.RuneSelf {
+			return "", false
+		}
+	}
+	email = asciiLower(email) // graph_assemble.go: A to Z only
+	return email, len(email) >= 3 && validEmail(email)
+}
+
+// inviteEmailMatches says whether the account is the one a bound invitation names (AWWO-LAW-030): its email (for an
+// acceptance, as accountNow reads it now) is the bound one, in any case of A to Z; an address with a letter outside
+// ASCII never matches, as none is bound. Whether the address was ever verified is not asked: ClawHunt sends most
+// accounts as unverified.
+func inviteEmailMatches(bound string, u User) bool {
+	return bound != "" && asciiLower(strings.TrimSpace(u.Email)) == bound
+}
+
+// inviteTokenHash is how an invitation's token is kept. A bound one's is kept apart, its token hashed behind a fixed
+// prefix: an API from before AWWO-LAW-030 (a rollback), which knows nothing of the email, looks the plain hash up, finds
+// no invitation and answers not found, so it never lets another account take one. Every lookup asks for both and takes
+// a row only by the hash of its own kind (inviteLookupSQL).
+func inviteTokenHash(token string, bound bool) string {
+	if bound {
+		return tokenHash("awwo-bound-invite\x00" + token)
+	}
+	return tokenHash(token)
+}
+
+// inviteLookupSQL finds an invitation by its link, $1 the plain hash and $2 the bound one (inviteTokenHash).
+const inviteLookupSQL = `((i.token_hash=$1 AND i.email IS NULL) OR (i.token_hash=$2 AND i.email IS NOT NULL))`
+
+// accountNow is the signed-in account with its email as it is now, for a bound invitation's match (AWWO-LAW-030). A
+// ClawHunt sign-in's is asked of the issuer itself: not the verification a.auth may reuse for a minute (an email changed
+// on ClawHunt since would still match), and with no outage grace (an issuer that cannot be asked refuses, 503
+// sso_unavailable, and one that says the sign-in is over signs this browser out). A password account's is its own, read
+// with the session. Nothing is locked while the issuer is asked. ok is false once the answer has been written.
+func (a *App) accountNow(w http.ResponseWriter, r *http.Request) (User, bool) {
+	u := currentUser(r)
+	if linked, _ := r.Context().Value(clawHuntSessionKey{}).(bool); !linked {
+		return u, true
+	}
+	c, err := r.Cookie("awwo_session")
+	if err != nil {
+		fail(w, 401, "unauthorized", "Sign in required")
+		return u, false
+	}
+	hash := tokenHash(c.Value)
+	var issuer, subject string
+	var sealed []byte
+	err = a.db.QueryRow(r.Context(), "SELECT COALESCE(sso_issuer,''),COALESCE(sso_subject,''),sso_grant FROM auth_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>now()", hash, u.ID).Scan(&issuer, &subject, &sealed)
+	if noRows(err) {
+		fail(w, 401, "unauthorized", "Session expired")
+		return u, false
+	}
+	if err != nil {
+		a.dbError(w, err)
+		return u, false
+	}
+	if len(sealed) == 0 {
+		a.endedSession(w, hash)
+		return u, false
+	}
+	id, valid, err := a.checkClawHuntSession(r.Context(), hash, u.ID, issuer, subject, sealed, false)
+	if err != nil {
+		fail(w, 503, "sso_unavailable", "ClawHunt session verification is unavailable")
+		return u, false
+	}
+	if !valid {
+		a.endedSession(w, hash)
+		return u, false
+	}
+	u.Name, u.Email = id.Name, id.Email
+	return u, true
+}
+
+// maskedEmail shows a bound email to whoever holds the link without giving it whole: the first character of its name,
+// then *** and its domain (l***@example.com); a name of one character is not shown (***@example.com).
+func maskedEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at < 1 {
+		return "***"
+	}
+	first, size := utf8.DecodeRuneInString(email)
+	if size >= at {
+		return "***" + email[at:]
+	}
+	return string(first) + "***" + email[at:]
+}
+
 func (a *App) createInvite(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Role  string `json:"role"`
-		Hours *int   `json:"expiresInHours"`
+		Role     string `json:"role"`
+		Hours    *int   `json:"expiresInHours"`
+		Email    string `json:"email"`
+		CanvasID string `json:"canvasId"`
 	}
 	if !a.decode(w, r, &b) {
 		return
@@ -133,6 +233,11 @@ func (a *App) createInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if (b.Role != "reader" && b.Role != "member" && b.Role != "admin") || hours < 1 || hours > 168 {
 		fail(w, 400, "invalid_input", "Role must be reader, member or admin; expiry must be 1–168 hours")
+		return
+	}
+	email, valid := inviteEmail(b.Email)
+	if !valid || len(b.CanvasID) > 200 {
+		fail(w, 400, "invalid_input", "The email must be one address in ASCII letters, and the canvas one of this workspace's")
 		return
 	}
 	tx, e := a.db.Begin(r.Context())
@@ -150,9 +255,26 @@ func (a *App) createInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "forbidden", "Only owners may invite administrators")
 		return
 	}
+	// The canvas it is sent from, which the person opens once they have joined: one of this workspace's, else not found,
+	// as for one that does not exist (AWWO-LAW-001).
+	var canvasID, canvasName, bound any
+	if b.CanvasID != "" {
+		var name string
+		if e = tx.QueryRow(r.Context(), "SELECT name FROM canvases WHERE tenant_id=$1 AND id=$2", tid, b.CanvasID).Scan(&name); noRows(e) {
+			fail(w, 404, "not_found", "Canvas not found")
+			return
+		} else if e != nil {
+			a.dbError(w, e)
+			return
+		}
+		canvasID, canvasName = b.CanvasID, name
+	}
+	if email != "" {
+		bound = email
+	}
 	id, token := randomID(), randomID()+randomID()
 	var expires time.Time
-	e = tx.QueryRow(r.Context(), `INSERT INTO tenant_invites(id,tenant_id,created_by,role,token_hash,expires_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+make_interval(hours=>$6)) RETURNING expires_at`, id, tid, currentUser(r).ID, b.Role, tokenHash(token), hours).Scan(&expires)
+	e = tx.QueryRow(r.Context(), `INSERT INTO tenant_invites(id,tenant_id,created_by,role,token_hash,expires_at,email,canvas_id) VALUES($1,$2,$3,$4,$5,clock_timestamp()+make_interval(hours=>$6),$7,$8) RETURNING expires_at`, id, tid, currentUser(r).ID, b.Role, inviteTokenHash(token, email != ""), hours, bound, canvasID).Scan(&expires)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -165,7 +287,8 @@ func (a *App) createInvite(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, 201, map[string]any{"id": id, "role": b.Role, "expiresAt": expires, "token": token, "inviteUrl": a.cfg.PublicOrigin + "/?invite=" + url.QueryEscape(token)})
+	writeJSON(w, 201, map[string]any{"id": id, "role": b.Role, "expiresAt": expires, "token": token, "inviteUrl": a.cfg.PublicOrigin + "/?invite=" + url.QueryEscape(token),
+		"email": bound, "canvasId": canvasID, "canvasName": canvasName})
 }
 func (a *App) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	tx, e := a.db.Begin(r.Context())
@@ -214,18 +337,62 @@ func (a *App) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// previewInvite tells whoever holds a link what it is: the workspace, the access, until when, its state, the canvas it
+// opens, and for a bound one its email masked and whether it is this account's.
 func (a *App) previewInvite(w http.ResponseWriter, r *http.Request) {
 	if len(r.PathValue("token")) > 256 {
 		fail(w, 404, "not_found", "Invitation not found")
 		return
 	}
-	v, e := oneJSON(r.Context(), a.db, `SELECT jsonb_build_object('tenantId',t.id,'tenantName',t.name,'role',i.role,'expiresAt',i.expires_at,'status',`+inviteStatusSQL+`) FROM tenant_invites i JOIN tenants t ON t.id=i.tenant_id LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by WHERE i.token_hash=$1`, tokenHash(r.PathValue("token")))
-	a.replyOne(w, v, e, 200)
+	var tid, tenantName, role, status string
+	var expires time.Time
+	var email, canvasID, canvasName *string
+	token := r.PathValue("token")
+	e := a.db.QueryRow(r.Context(), `SELECT t.id,t.name,i.role,i.expires_at,`+inviteStatusSQL+`,i.email,c.id,c.name FROM tenant_invites i JOIN tenants t ON t.id=i.tenant_id
+		LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by LEFT JOIN canvases c ON c.tenant_id=i.tenant_id AND c.id=i.canvas_id
+		WHERE `+inviteLookupSQL, inviteTokenHash(token, false), inviteTokenHash(token, true)).Scan(&tid, &tenantName, &role, &expires, &status, &email, &canvasID, &canvasName)
+	if noRows(e) {
+		fail(w, 404, "not_found", "Resource not found")
+		return
+	}
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	out := map[string]any{"tenantId": tid, "tenantName": tenantName, "role": role, "expiresAt": expires, "status": status}
+	// A bound link that reached another account (a forwarded or leaked one) does not tell it the canvas's name.
+	matches := email == nil || inviteEmailMatches(*email, currentUser(r))
+	if canvasID != nil && canvasName != nil && matches {
+		out["canvasId"], out["canvasName"] = *canvasID, *canvasName
+	}
+	if email != nil {
+		out["email"], out["emailMatches"] = maskedEmail(*email), matches
+	}
+	writeJSON(w, 200, out)
 }
 func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
-	if len(r.PathValue("token")) > 256 {
+	token := r.PathValue("token")
+	if len(token) > 256 {
 		fail(w, 404, "not_found", "Invitation not found")
 		return
+	}
+	plain, bound := inviteTokenHash(token, false), inviteTokenHash(token, true)
+	// A bound invitation still open is matched against the account's email as it is now (accountNow), asked before the
+	// transaction so the issuer is never waited on with the workspace locked. An invitation's email never changes and an
+	// open one only closes, so one found closed here is closed below too.
+	account, checked := currentUser(r), false
+	var open bool
+	if e := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM tenant_invites WHERE token_hash=$1 AND email IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>clock_timestamp())", bound).Scan(&open); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if open {
+		var ok bool
+		if account, ok = a.accountNow(w, r); !ok {
+			return
+		}
+		checked = true
 	}
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -233,9 +400,8 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	hash := tokenHash(r.PathValue("token"))
-	var tid string
-	e = tx.QueryRow(r.Context(), "SELECT tenant_id FROM tenant_invites WHERE token_hash=$1", hash).Scan(&tid)
+	var id, tid string
+	e = tx.QueryRow(r.Context(), "SELECT i.id,i.tenant_id FROM tenant_invites i WHERE "+inviteLookupSQL, plain, bound).Scan(&id, &tid)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Invitation not found")
 		return
@@ -247,16 +413,16 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	if !a.lockTenant(w, r, tx, tid) {
 		return
 	}
-	var id, role, issuer string
-	var acceptedBy *string
+	var role, issuer string
+	var acceptedBy, email *string
 	var revoked *time.Time
 	var expired bool
-	e = tx.QueryRow(r.Context(), "SELECT id,role,created_by,accepted_by,revoked_at,expires_at<=clock_timestamp() FROM tenant_invites WHERE token_hash=$1 FOR UPDATE", hash).Scan(&id, &role, &issuer, &acceptedBy, &revoked, &expired)
+	e = tx.QueryRow(r.Context(), "SELECT role,created_by,accepted_by,revoked_at,expires_at<=clock_timestamp(),email FROM tenant_invites WHERE id=$1 FOR UPDATE", id).Scan(&role, &issuer, &acceptedBy, &revoked, &expired, &email)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	uid := currentUser(r).ID
+	uid := account.ID
 	if acceptedBy != nil && *acceptedBy != uid {
 		fail(w, 409, "invite_used", "Invitation has already been accepted")
 		return
@@ -268,6 +434,12 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		}
 		if expired {
 			fail(w, 410, "invite_expired", "Invitation has expired")
+			return
+		}
+		// A bound invitation is for the account with its email now (AWWO-LAW-030). Any other is refused, and the invitation
+		// stays as it was for its person: nothing has been written yet.
+		if email != nil && (!checked || !inviteEmailMatches(*email, account)) {
+			fail(w, 403, "invite_wrong_account", "This invitation is for another account: sign in with the email it was sent to")
 			return
 		}
 		var issuerRole string
@@ -302,9 +474,19 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// The canvas it was sent from, while it still exists (deleting it clears it): the page opens it.
+	var canvasID *string
+	if e = tx.QueryRow(r.Context(), "SELECT c.id FROM tenant_invites i JOIN canvases c ON c.tenant_id=i.tenant_id AND c.id=i.canvas_id WHERE i.id=$1", id).Scan(&canvasID); e != nil && !noRows(e) {
+		a.dbError(w, e)
+		return
+	}
 	if e = tx.Commit(r.Context()); e != nil {
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, 200, map[string]string{"tenantId": tid, "role": role})
+	out := map[string]any{"tenantId": tid, "role": role}
+	if canvasID != nil {
+		out["canvasId"] = *canvasID
+	}
+	writeJSON(w, 200, out)
 }

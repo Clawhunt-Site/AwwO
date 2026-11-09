@@ -21,11 +21,15 @@ type capabilitySettings struct {
 	// connects to the sites directly. No proxy variable is ever read.
 	WebReaderProxy       string
 	SkillRegistryEnabled bool
-	RenderURL            string
-	RenderToken          string
-	RendersPerDay        int
-	RendersSitePerDay    int
-	RenderTimeout        time.Duration
+	// PeopleSharing (AWWO_PEOPLE_SHARING=on) offers inviting people from a canvas (the capability multiplayer.people,
+	// which the page's Share dialog asks for). The server takes bound and canvas invitations either way: the switch is
+	// when the canvas starts offering them, so it can wait until the canvas is safe for more people at once.
+	PeopleSharing     bool
+	RenderURL         string
+	RenderToken       string
+	RendersPerDay     int
+	RendersSitePerDay int
+	RenderTimeout     time.Duration
 	// An edit may wait EditQueueWait for the worker (a render or another edit holds it) and render for EditTimeout.
 	EditsPerDay      int
 	EditsTotalPerDay int
@@ -59,6 +63,13 @@ func (c *Config) capabilityFromEnv() error {
 		c.SkillRegistryEnabled = true
 	default:
 		return errors.New("AWWO_SKILL_REGISTRY must be on or off")
+	}
+	switch os.Getenv("AWWO_PEOPLE_SHARING") {
+	case "", "off":
+	case "on":
+		c.PeopleSharing = true
+	default:
+		return errors.New("AWWO_PEOPLE_SHARING must be on or off")
 	}
 	var err error
 	if c.WebReadsPerDay, err = positiveEnvInt("AWWO_WEB_READS_PER_DAY", 30, 10000); err != nil {

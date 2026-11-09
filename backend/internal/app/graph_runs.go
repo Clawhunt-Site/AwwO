@@ -35,7 +35,7 @@ func (a *App) graphRunJSON(document bool) string {
 	if document {
 		frozen = `'document',g.document,`
 	}
-	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,` + frozen + `'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log,'startedAt',CASE WHEN n.state<>'waiting' OR g.collaboration IS NOT NULL THEN tm.started END,'endedAt',CASE WHEN n.state IN ('done','failed','cancelled') AND NOT tm.live THEN tm.ended END) ORDER BY n.ordinal) FROM graph_run_nodes n LEFT JOIN LATERAL (SELECT min(r.created_at) AS started,max(r.updated_at) AS ended,COALESCE(bool_or(r.status IN ('queued','running')),false) AS live FROM (SELECT n.run_id AS id UNION ALL SELECT t.run_id FROM graph_collaboration_turns t WHERE t.graph_id=n.graph_id AND t.node_id=n.node_id) ids JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=ids.id) tm ON true WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
+	return `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,` + frozen + `'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'startedBy',` + graphStartedByJSON + `,'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object('nodeId',n.node_id,'state',n.state,'output',n.output,'detail',n.detail,'runId',n.run_id,'sessionId',n.session_id,'partial',g.collaboration IS NOT NULL AND (g.status<>'completed' OR n.node_id<>g.collaboration->>'synthesizerNodeId'),'attempts',n.attempts,'attemptLog',n.attempt_log,'startedAt',CASE WHEN n.state<>'waiting' OR g.collaboration IS NOT NULL THEN tm.started END,'endedAt',CASE WHEN n.state IN ('done','failed','cancelled') AND NOT tm.live THEN tm.ended END) ORDER BY n.ordinal) FROM graph_run_nodes n LEFT JOIN LATERAL (SELECT min(r.created_at) AS started,max(r.updated_at) AS ended,COALESCE(bool_or(r.status IN ('queued','running')),false) AS live FROM (SELECT n.run_id AS id UNION ALL SELECT t.run_id FROM graph_collaboration_turns t WHERE t.graph_id=n.graph_id AND t.node_id=n.node_id) ids JOIN runs r ON r.tenant_id=n.tenant_id AND r.id=ids.id) tm ON true WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb),'nodeRetries',CASE WHEN g.collaboration IS NULL THEN ` + strconv.Itoa(a.graphNodeRetries()) + ` ELSE 0 END) || CASE WHEN g.collaboration IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('collaboration',` + collaborationJSON + `) END`
 }
 
 // graphSummaryJSON is a graph run as the canvas's run list reads it (GET .../graph-runs): what the run is and how it
@@ -50,7 +50,7 @@ func (a *App) graphRunJSON(document bool) string {
 // a new run, after a wait no poll need see, so a retried node carries its attempts too (none while it has none). Nor
 // does the list read each node's run for its times (graphJSON's lateral join): only the timeline draws them, from a
 // run's own read.
-const graphSummaryJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'nodes',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('nodeId',n.node_id,'state',n.state,'attempts',NULLIF(n.attempts,0))) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb))`
+const graphSummaryJSON = `jsonb_build_object('id',g.id,'canvasId',g.canvas_id,'operationId',g.operation_id,'documentVersion',g.document_version,'scope',g.scope,'status',g.status,'error',g.error,'createdAt',g.created_at,'updatedAt',g.updated_at,'startedBy',` + graphStartedByJSON + `,'nodes',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('nodeId',n.node_id,'state',n.state,'attempts',NULLIF(n.attempts,0))) ORDER BY n.ordinal) FROM graph_run_nodes n WHERE n.tenant_id=g.tenant_id AND n.graph_id=g.id),'[]'::jsonb))`
 
 func (a *App) listGraphRuns(w http.ResponseWriter, r *http.Request) {
 	v, e := rowsJSON(r.Context(), a.db, "SELECT "+graphSummaryJSON+" FROM graph_runs g WHERE g.tenant_id=$1 AND g.canvas_id=$2 AND ($3='' OR g.operation_id=$3) ORDER BY g.created_at DESC,g.id DESC LIMIT 50", r.PathValue("tenantId"), r.PathValue("canvasId"), r.URL.Query().Get("operationId"))
@@ -1174,17 +1174,23 @@ func (a *App) cancelGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	role, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
-	var status string
-	e = tx.QueryRow(r.Context(), "SELECT status FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 FOR UPDATE", tid, cid, id).Scan(&status)
+	var status, starter string
+	e = tx.QueryRow(r.Context(), "SELECT status,actor_id FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 FOR UPDATE", tid, cid, id).Scan(&status, &starter)
 	if noRows(e) {
 		fail(w, 404, "not_found", "Graph run not found")
 		return
 	}
 	if e != nil {
 		a.dbError(w, e)
+		return
+	}
+	// A canvas run going on is stopped by the person who started it, or by an owner or admin (runs.go stopsOthersRuns).
+	if (status == "queued" || status == "running") && starter != currentUser(r).ID && !stopsOthersRuns(role) {
+		runNotYours(w)
 		return
 	}
 	ids := []string{}
@@ -1309,7 +1315,8 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	role, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
 	var canvas string
@@ -1322,13 +1329,19 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if _, e = tx.Exec(r.Context(), "INSERT INTO graph_operation_cancellations(tenant_id,canvas_id,operation_id,actor_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", tid, cid, op, currentUser(r).ID); e != nil {
+	gid, status, starter := "", "cancelled", ""
+	e = tx.QueryRow(r.Context(), "SELECT id,status,actor_id FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND operation_id=$3 FOR UPDATE", tid, cid, op).Scan(&gid, &status, &starter)
+	if e != nil && !noRows(e) {
 		a.dbError(w, e)
 		return
 	}
-	gid, status := "", "cancelled"
-	e = tx.QueryRow(r.Context(), "SELECT id,status FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND operation_id=$3 FOR UPDATE", tid, cid, op).Scan(&gid, &status)
-	if e != nil && !noRows(e) {
+	// The run the operation admitted, still going on, is its starter's to stop or an owner's or admin's (cancelGraphRun).
+	// One not admitted yet is known only to the page that sent it, which the tombstone below keeps from starting.
+	if gid != "" && (status == "queued" || status == "running") && starter != currentUser(r).ID && !stopsOthersRuns(role) {
+		runNotYours(w)
+		return
+	}
+	if _, e = tx.Exec(r.Context(), "INSERT INTO graph_operation_cancellations(tenant_id,canvas_id,operation_id,actor_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", tid, cid, op, currentUser(r).ID); e != nil {
 		a.dbError(w, e)
 		return
 	}

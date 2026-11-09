@@ -128,7 +128,9 @@ func TestPostgresDeletionSchemaReferencesArePinned(t *testing.T) {
 			"canvas_auto_evolution apply_by users n", "canvas_auto_evolution rerun_by users n",
 			"canvas_changes actor_id users n", "canvas_claims user_id users c", "canvas_evolution_log actor_id users n",
 			"canvas_experiences tenant_id tenants c", "canvas_lessons tenant_id tenants c",
-			"canvas_live_messages user_id users c", "canvases tenant_id tenants a",
+			"canvas_live_messages user_id users c",
+			// A canvas the person made stays, with no maker recorded: only an owner or admin deletes it then (migration 059).
+			"canvases created_by users n", "canvases tenant_id tenants a",
 			"computer_responses tenant_id tenants a", "edit_jobs tenant_id tenants c", "external_identities user_id users c",
 			"graph_operation_cancellations actor_id users a", "graph_runs actor_id users a",
 			"knowledge_documents tenant_id tenants a", "knowledge_events tenant_id tenants a",

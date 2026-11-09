@@ -299,7 +299,10 @@ func (lt liveTeam) token(t *testing.T, who *http.Cookie, name, scope string) (st
 
 func TestPostgresCanvasAgentTokensActWithinTheirRules(t *testing.T) {
 	lt := newLiveTeam(t)
-	token, id := lt.token(t, lt.member, "Claude Code", "edit")
+	// Owners and admins make tokens (migration 059): a member makes none.
+	lt.h.request(t, lt.member, "POST", lt.prefix+"/agent-tokens", map[string]any{"name": "Claude Code", "scope": "edit", "days": 7}, 403)
+	admin, adminID := joinAs(t, lt.h, lt.owner, lt.tid, "live-admin@example.test", "admin")
+	token, id := lt.token(t, admin, "Claude Code", "edit")
 	list := lt.h.request(t, lt.owner, "GET", lt.prefix+"/agent-tokens", nil, 200)["items"].([]any)
 	if len(list) != 1 || strings.Contains(fmt.Sprint(list), token) || list[0].(map[string]any)["prefix"] != "awwo_ct_"+id {
 		t.Fatalf("the list never holds the secret: %v", list)
@@ -358,26 +361,22 @@ func TestPostgresCanvasAgentTokensActWithinTheirRules(t *testing.T) {
 	patch(reader, []map[string]any{set([]string{"nodes", "n2", "title"}, "x")}, 403)
 	lt.bearer(t, reader, "GET", lt.prefix+"/changes?after=1", nil, 200, "")
 	// Only its maker or a workspace admin revokes a token; revoked, it ends at once and its claims go.
-	secondID := lt.h.request(t, lt.owner, "GET", lt.prefix+"/agent-tokens", nil, 200)["items"].([]any)
-	for _, item := range secondID {
-		if item.(map[string]any)["name"] == "Codex" {
-			lt.h.request(t, lt.member, "DELETE", lt.prefix+"/agent-tokens/"+item.(map[string]any)["id"].(string), nil, 403)
-		}
+	for _, item := range lt.h.request(t, lt.owner, "GET", lt.prefix+"/agent-tokens", nil, 200)["items"].([]any) {
+		lt.h.request(t, lt.member, "DELETE", lt.prefix+"/agent-tokens/"+item.(map[string]any)["id"].(string), nil, 403)
 	}
-	lt.h.request(t, lt.member, "DELETE", lt.prefix+"/agent-tokens/"+id, nil, 204)
+	lt.h.request(t, admin, "DELETE", lt.prefix+"/agent-tokens/"+id, nil, 204)
 	lt.bearer(t, token, "GET", lt.prefix, nil, 401, "")
 	if err := lt.h.db.QueryRow(context.Background(), "SELECT count(*) FROM canvas_claims WHERE tenant_id=$1 AND token_id=$2", lt.tid, id).Scan(&claimed); err != nil || claimed != 0 {
 		t.Fatalf("the revoked token's claims: %d %v", claimed, err)
 	}
-	// A member made a reader loses their tokens; so does a password change.
-	third, _ := lt.token(t, lt.member, "Cursor", "edit")
-	members := lt.h.request(t, lt.owner, "GET", "/tenants/"+lt.tid+"/members", nil, 200)["items"].([]any)
-	for _, m := range members {
-		if m.(map[string]any)["email"] == "live-member@example.test" {
-			lt.h.request(t, lt.owner, "PATCH", "/tenants/"+lt.tid+"/members/"+m.(map[string]any)["id"].(string), map[string]string{"role": "reader"}, 204)
-		}
-	}
+	// An admin made a member, or a reader, loses their tokens; so does a password change.
+	third, _ := lt.token(t, admin, "Cursor", "edit")
+	lt.h.request(t, lt.owner, "PATCH", "/tenants/"+lt.tid+"/members/"+adminID, map[string]string{"role": "member"}, 204)
 	lt.bearer(t, third, "GET", lt.prefix, nil, 401, "")
+	lt.h.request(t, lt.owner, "PATCH", "/tenants/"+lt.tid+"/members/"+adminID, map[string]string{"role": "admin"}, 204)
+	fourth, _ := lt.token(t, admin, "Cursor", "edit")
+	lt.h.request(t, lt.owner, "PATCH", "/tenants/"+lt.tid+"/members/"+adminID, map[string]string{"role": "reader"}, 204)
+	lt.bearer(t, fourth, "GET", lt.prefix, nil, 401, "")
 }
 
 // liveEvents reads a live stream's events.

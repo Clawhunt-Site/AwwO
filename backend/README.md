@@ -297,6 +297,8 @@ What happens (the owner, 2026-10-19: shared work is kept, without the person's n
   - The changes they made to canvases stay in the canvases' change logs without their name (`canvas_changes.actor_id`
     becomes NULL, migration 056); their canvas agent tokens, their claims and their live messages go with their account
     (below).
+  - The canvases they made stay, with no maker recorded (`canvases.created_by` becomes NULL, migration 059): only an
+    owner or admin of the workspace deletes them then.
   - Their membership goes.
 - **A deleted workspace** goes with its canvases, runs (and the thumbs people gave them), file rows, agents, knowledge,
   skills, memory notes, the lessons its canvas runs taught and the reasons its refused plans recorded (migration 047),

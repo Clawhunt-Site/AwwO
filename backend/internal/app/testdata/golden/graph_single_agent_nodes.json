@@ -106,6 +106,10 @@
         "research",
         "report"
       ],
+      "startedBy": {
+        "id": "<user:graph-owner>",
+        "name": "Test"
+      },
       "status": "queued",
       "updatedAt": "<timestamp>"
     },
@@ -218,6 +222,10 @@
         "research",
         "report"
       ],
+      "startedBy": {
+        "id": "<user:graph-owner>",
+        "name": "Test"
+      },
       "status": "completed",
       "updatedAt": "<timestamp>"
     },

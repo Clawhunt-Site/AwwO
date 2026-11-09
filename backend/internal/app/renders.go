@@ -683,7 +683,19 @@ func (a *App) cancelRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	role, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
+		return
+	}
+	// A render going on is stopped by the person who started it, or by an owner or admin (runs.go stopsOthersRuns).
+	var starter, status string
+	err = tx.QueryRow(r.Context(), "SELECT COALESCE(actor_id,''),status FROM render_jobs WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3 FOR UPDATE", tid, cid, id).Scan(&starter, &status)
+	if err != nil && !noRows(err) {
+		a.dbError(w, err)
+		return
+	}
+	if err == nil && (status == "queued" || status == "running") && starter != currentUser(r).ID && !stopsOthersRuns(role) {
+		runNotYours(w)
 		return
 	}
 	value, err := oneJSON(r.Context(), tx, "UPDATE render_jobs AS j SET status=CASE WHEN status IN ('queued','running') THEN 'cancelled' ELSE status END,finished_at=CASE WHEN status IN ('queued','running') THEN clock_timestamp() ELSE finished_at END WHERE j.tenant_id=$1 AND j.canvas_id=$2 AND j.id=$3 RETURNING "+renderJSON, tid, cid, id)

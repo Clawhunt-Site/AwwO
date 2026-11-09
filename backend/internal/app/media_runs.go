@@ -378,7 +378,8 @@ func (a *App) createMediaRun(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 	}
 	id := randomID()
 	task, _ := json.Marshal(map[string]string{"provider": snapshot.Media.Provider, "model": snapshot.Model})
-	v, e := oneJSON(ctx, tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,media_task) VALUES($1,$2,$3,$4,$5,$6,'queued',$7) RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt, task)
+	// Its starter with it from the first row, so the answer names who started it (runJSON); saveRunSnapshot writes the same.
+	v, e := oneJSON(ctx, tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,media_task,actor_id) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8) RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt, task, currentUser(r).ID)
 	if e != nil {
 		a.dbError(w, e)
 		return

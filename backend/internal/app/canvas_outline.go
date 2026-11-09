@@ -21,4 +21,4 @@ const canvasOutlineSQL = `(SELECT jsonb_build_object('nodes',COALESCE(nd.boxes,'
 	` AND e.value->>'fromNode'=ANY(nd.ids) AND e.value->>'toNode'=ANY(nd.ids)) ed)`
 
 const canvasSummaryJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'outline',` + canvasOutlineSQL +
-	`,'version',version,'createdAt',created_at,'updatedAt',updated_at)`
+	`,'version',version,'createdAt',created_at,'updatedAt',updated_at,'createdBy',created_by)`

@@ -123,6 +123,12 @@ func (a *App) admitCanvasToken(w http.ResponseWriter, r *http.Request, token str
 		fail(w, 429, "rate_limited", "This token made too many requests; try again in a minute")
 		return nil, false
 	}
+	// Its maker no longer an owner or admin: a downgrade revokes their tokens (changeMember), so this is one read in the
+	// moment between, refused as a revoked token is (but not counted as a guess).
+	if roleLevel(role) < roleLevel("admin") {
+		fail(w, 401, "invalid_token", "Canvas agent token not recognised, expired or revoked")
+		return nil, false
+	}
 	if min(roleLevel(role), canvasTokenScopeLevel(agent.Scope)) < minRole {
 		fail(w, 403, "forbidden", "This token may not do that")
 		return nil, false
@@ -150,6 +156,11 @@ func (a *App) canvasWriteRole(w http.ResponseWriter, r *http.Request, tx pgx.Tx,
 	agent := agentOf(r)
 	if agent == nil {
 		return role, true
+	}
+	// A token works only while its maker is an owner or admin of the workspace (canvas_agent_tokens.go).
+	if roleLevel(role) < roleLevel("admin") {
+		fail(w, 401, "invalid_token", "Canvas agent token expired or revoked")
+		return "", false
 	}
 	var scope string
 	e := tx.QueryRow(r.Context(), "SELECT scope FROM canvas_agent_tokens WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp()", tid, agent.TokenID).Scan(&scope)

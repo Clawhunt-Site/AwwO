@@ -354,8 +354,18 @@ func (a *App) tenant(next http.HandlerFunc, minRole int) http.HandlerFunc {
 			fail(w, 403, "tenant_suspended", "Workspace is suspended")
 			return
 		}
-		next(w, r)
+		next(w, r.WithContext(context.WithValue(r.Context(), tenantRoleKey{}, role)))
 	})
+}
+
+type tenantRoleKey struct{}
+
+// tenantRoleOf is the caller's role in the request's workspace as a.tenant read it before the handler ran: for what a
+// read shows them (the members' emails). A write checks the role again inside its transaction (mutationRole,
+// AWWO-LAW-003), never by this.
+func tenantRoleOf(r *http.Request) string {
+	role, _ := r.Context().Value(tenantRoleKey{}).(string)
+	return role
 }
 func roleLevel(role string) int {
 	return map[string]int{"reader": 1, "member": 2, "admin": 3, "owner": 4}[role]

@@ -351,7 +351,7 @@ func TestPostgresGraphRunListLeavesOutTheFrozenDocumentAndOutputs(t *testing.T) 
 				keys = append(keys, key)
 			}
 			sort.Strings(keys)
-			if got := strings.Join(keys, ","); got != "canvasId,createdAt,documentVersion,error,id,nodes,operationId,scope,status,updatedAt" {
+			if got := strings.Join(keys, ","); got != "canvasId,createdAt,documentVersion,error,id,nodes,operationId,scope,startedBy,status,updatedAt" {
 				t.Fatalf("%s: a listed run carries %s", id, got)
 			}
 			for _, key := range keys {

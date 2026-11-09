@@ -13,15 +13,17 @@
 | 方法与路径（省略 /api/v1） | 输入 | 结果与权限 |
 | --- | --- | --- |
 | PATCH /auth/profile | `{name}`，trim 后 1–120 Unicode 字符 | 200，当前登录者资料 `{id,email,name,isPlatformAdmin}`；不接受其他用户 ID；写入审计 |
-| GET /tenants/{tenantId}/invites | limit?, cursor? | admin/owner 可查 `{items:[{id,role,createdBy,createdAt,expiresAt,status,acceptedBy,acceptedAt,revokedAt}],nextCursor,snapshot}`；后三项未发生时为 null；不返回 token/hash |
-| POST /tenants/{tenantId}/invites | `{role,expiresInHours?}` | role=reader/member/admin；仅 owner 可授 admin；默认 72 小时，整数 1–168；201 `{id,role,expiresAt,inviteUrl,token}` |
+| GET /tenants/{tenantId}/invites | limit?, cursor? | admin/owner 可查 `{items:[{id,role,createdBy,createdAt,expiresAt,status,acceptedBy,acceptedAt,revokedAt,email,canvasId,canvasName}],nextCursor,snapshot}`；acceptedBy、acceptedAt、revokedAt 未发生时为 null；email 为绑定的邮箱（未绑定为 null），canvasId/canvasName 为发出邀请的画布（没有或画布已删为 null）；不返回 token/hash |
+| POST /tenants/{tenantId}/invites | `{role,expiresInHours?,email?,canvasId?}` | role=reader/member/admin；仅 owner 可授 admin；默认 72 小时，整数 1–168；email 可选，只能是一个只含 ASCII 字符的邮箱地址，存为去空格、A–Z 改小写的形式（不是这样的邮箱 400 / invalid_input），绑定后只有这个邮箱的账号能接受（AWWO-LAW-030）；canvasId 可选，须是本工作区的画布，否则 404 / not_found（与不存在的画布相同，AWWO-LAW-001），对方加入后打开这张画布；201 `{id,role,expiresAt,inviteUrl,token,email,canvasId,canvasName}` |
 | DELETE /tenants/{tenantId}/invites/{id} | 无 | 204，admin/owner 撤销邀请；只有 owner 可撤销 admin 邀请；已撤销重试幂等，已消费返回 409 / invite_used |
-| GET /invites/{token} | 登录态 | `{tenantId,tenantName,role,expiresAt,status}`，供加入前确认；不通过 GET 消费 |
-| POST /invites/{token}/accept | 登录态 | `{tenantId,role}`；单次领取，同领取者重试幂等；已有成员保留已有角色 |
+| GET /invites/{token} | 登录态 | `{tenantId,tenantName,role,expiresAt,status}`，供加入前确认；从画布发出、画布还在时另有 `canvasId,canvasName`（绑定了别的邮箱时不给，链接转到别人手里也不泄露画布名）；绑定了邮箱时另有 `email`（遮住名字，如 `l***@example.com`；名字只有一个字符时整个遮住，如 `***@example.com`）与 `emailMatches`（当前账号的邮箱是不是它）；不通过 GET 消费 |
+| POST /invites/{token}/accept | 登录态 | `{tenantId,role}`，从画布发出、画布还在时另有 `canvasId`；单次领取，同领取者重试幂等；已有成员保留已有角色；绑定了邮箱而当前账号的邮箱不是它时 403 / invite_wrong_account，什么也不写，邀请照旧可用（已过期、已撤销的先按 410 回答）；ClawHunt 登录的账号接受绑定邀请时当场向 ClawHunt 读一次邮箱，读不到 503 / sso_unavailable，ClawHunt 说登录已结束则 401 并退出登录，邀请都照旧可用 |
 
 `PATCH /auth/profile` 使用 `isPlatformAdmin:boolean`，而 `/auth/me` 的 user 仍使用 `platformRole:'user'|'admin'`。原账户面板的 SaaS 适配器仅合并成功返回的 name，不将这两种字段混为同一响应。
 
 邀请 URL 为 `AWWO_PUBLIC_ORIGIN + /?invite=TOKEN`。注册或登录保留 URL 参数，但不会自动领取。新用户注册仍创建自己的工作区，之后再确认加入受邀工作区。数据库仅保存 token 哈希，明文只在创建响应及复制链接中出现，列表不能重新找回原链接；浏览器不将邀请码写入 localStorage。没有邮件投递。
+
+**绑定邮箱的邀请**（迁移 059，AWWO-LAW-030）：账号的邮箱以接受那一刻的为准：ClawHunt 登录的账号当场向 ClawHunt 读（不用一分钟内的缓存，ClawHunt 上刚改的邮箱也算数），密码账号是它自己的；A–Z 不区分大小写，与绑定的相同才能接受。只绑定 ASCII 邮箱、只把 A–Z 当作同一个字母，形似的字母（如 Go 会小写成 k 的开尔文符号 U+212A）不算相同。不要求邮箱已验证，因为 ClawHunt 把大多数账号的邮箱标为未验证；也因此，拿到链接的人若抢先用被邀请人的邮箱注册了 ClawHunt，就能接受它，这是 2026-11-08 业主接受的取舍。未绑定的邀请照旧由第一个接受的账号领取。绑定邀请的令牌哈希另成一类（`inviteTokenHash`），回退到迁移 059 之前的 API 时它找不到这些邀请、答 404，不会让别的账号接受；回退期间新建的邀请都不绑定邮箱。
 
 预览 GET 不消费凭据：已知 token 返回 200 与 `status=active|expired|revoked|accepted|unavailable|suspended`；未知 token 返回 404。`unavailable` 表示发行者当前已无权授予该角色。领取 POST 对未消费的过期/撤销邀请分别返回 410 / invite_expired、invite_revoked，他人已领取返回 409 / invite_used，发行者失权返回 403 / invite_unavailable，暂停租户返回 403 / tenant_suspended。有效领取返回数据库中的当前 role，已有成员不被提升或降级。同领取者仍有成员资格时重试幂等，即使邀请后来已过期；若该用户已被移出工作区则返回 409 / invite_membership_removed，旧链接不能重新赋权。
 
@@ -60,7 +62,7 @@
 | GET /auth/me | 无 | user{id,email,name,platformRole}, tenants[] |
 | GET /tenants | 无 | 当前用户的租户列表 |
 | POST /tenants | name | 201，创建租户，当前用户成为 owner；`AWWO_MAX_OWNED_WORKSPACES`>0 时，非平台管理员已拥有不少于该数量的工作区则 403 / workspace_limit（注册与首次 ClawHunt 登录自动创建的工作区不受此限） |
-| GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`；reader 以上 |
+| GET /tenants/{tenantId}/members | limit?, cursor? | `{items,nextCursor,snapshot}`，每项 `{id,userId,name,role}`；reader 以上；只有 owner/admin 看到每项的 `email`，其他成员看不到 |
 | GET /tenants/{tenantId}/route-usage | 无 | reader 以上；今日（UTC）额度 `{limited,daily:{limit,used},routes?:{gate|bedrock|media:{limit,used}},planner?:{limit,used},interested,resetsAt}`；每日总数与本工作区的路由次数按准入的算法计数（`not_incurred` 不占路由次数但占每日次数）；画布助手在运营方规划模型上的改画布调用不占每日次数（免费版与套餐都一样），单独计入 `planner`（本工作区今日已用 / `AWWO_PLANNER_PER_WORKSPACE_PER_DAY`，默认 20；未配置规划模型时不返回）；不含全站上限、每个工作区与全站的媒体生成上限以及模型清单，准入仍可能拒绝；没有 routeLimits 或 routeLimits 为 `{}`（且所有者没有套餐）的工作区 `limited:false` 且无 `routes`；活动期间（`AWWO_PROMO_UNTIL` 之前）被活动抬高的免费工作区另返回 `promo{until,daily,routes?}`（活动的下限；`daily`/`routes` 已包含活动与今日签到），member 以上且可签到时另返回 `checkin{available,checkedIn,taken?,elsewhere?,bonus{daily,media},today?{daily,media},streak,endsAt}`（`taken`=本工作区今天已由其他成员签到，`elsewhere`=本人今天已在其他工作区签到，`today`=本工作区今天签到加上的次数，`streak`=本人连续签到天数）；所有者有付费套餐的工作区返回 `plan{id,credits{granted,spent,carried,remaining}}`（carried 为上一个计费期超出点数的部分、从本期扣除，实时计算，上期迟结算的调用仍算回上期；没有 routeLimits 的旧工作区不走套餐）（所有者另见 `periodEnd`、`cancelAtPeriodEnd`；reader 不返回 plan）、无 `routes`，`daily` 为整个账号今日默认模型的调用次数与套餐的每日次数；设置了 `AWWO_FREE_PLAN_UNTIL` 时（见下文「免费版结束」），它约束的工作区（有 routeLimits、所有者没有有效套餐、不归平台管理员所有）对每个能读这里的人（reader 也一样）另返回 `freePlan{until,ended}`：`until` 为结束时刻（UTC 的 RFC 3339），`ended` 为按 API 的时钟是否已到；其他工作区、没设置时不返回（`promo` 与 `checkin` 照旧，活动结束时消失） |
 | GET /billing | `?refresh=1` | 已登录；套餐目录 `catalog[{id,priceUsd,credits,dailyCalls,concurrentAgents,workspaces,mediaPerDay}]`、`checkoutEnabled`、本账号套餐 `plan{id,status,periodStart,periodEnd,cancelAtPeriodEnd,entitled}`（无订阅为 null）、本期点数 `credits{granted,spent,carried,remaining}`（有权益时）、`stale`；套餐由 ClawHunt 经后台通道告知（`paid` 为本期已付款发票按套餐计的美分，点数 = 实付金额换算，期中升级按补差价加点；续费未付款时保留上一个已付款的计费期，宽限 1 天；本期全额退款或被争议时点数为 0；ClawHunt 说已无订阅时套餐结束、记录保留为 `canceled`），超过 5 分钟或 `refresh=1` 时先向 ClawHunt 查询，查不到时显示已存的套餐并 `stale:true`；ClawHunt 说授权已结束则 401 并退出；另有后台同步按 subject 在续费前后、每小时以及结账/门户之后 24 小时内重读套餐 |
 | POST /billing/checkout | `{plan}` | 已登录（ClawHunt 账号）；plan=pro/max；开关 `AWWO_BILLING_CHECKOUT_ENABLED` 关闭时 403 `checkout_closed`；ClawHunt 开 Stripe Checkout，200 `{url}`（只放行 `https://checkout.stripe.com/`）；已有订阅（含未付款完成的）409 `already_subscribed`；同一账号正在打开另一个结账 429 `rate_limited`；密码账号 404；ClawHunt 不可用 503 |
@@ -70,6 +72,8 @@
 | POST /tenants/{tenantId}/members | 已注册用户 email, role | admin 以上；只有 owner 可任命 admin |
 | PATCH /tenants/{tenantId}/members/{userId} | role | 204；不允许通过此 API 改动 owner |
 | DELETE /tenants/{tenantId}/members/{userId} | 无 | 204；受保护角色不能被低权限成员移除 |
+| POST /tenants/{tenantId}/leave | 无 | 204；当前登录者离开这个工作区（reader 以上，暂停的工作区也可以），同时撤销他在这里的本机版连接密钥与画布 Agent 令牌；他做的画布、运行和改动留在工作区；owner 不能离开 409 / owner_cannot_leave；不是成员 404 |
+| 本机版连接密钥与画布 Agent 令牌 | | 只有 owner/admin 能生成和持有（工作区所有者的套餐为它们的调用付费）：一个人被移出、离开或降为 member/reader 时，他在这个工作区的密钥和令牌随之撤销；迁移 059 撤销了 member 与 reader 当时持有的 |
 
 **免费版结束**（`AWWO_FREE_PLAN_UNTIL`，RFC 3339，`free_plan.go`；不设则免费版一直有效）：到了这个时刻（按 API 的时钟，与活动结束同一判断），有 routeLimits（含 `{}`）、所有者没有有效套餐、也不归平台管理员所有的工作区不能再开始任何新的工作，直到所有者订阅 Pro 或 Max：创建运行（`POST /runs`，节点、团队以及图片、视频、3D 生成都走这里）、画布规划（`POST /canvases/{id}/plan`）、知识整理（`POST /canvases/{id}/knowledge-compile`）、直接执行（`POST /canvases/{id}/computer-runs`）、整图运行（`POST /canvases/{canvasId}/graph-runs`，整张拒绝）以及本机版中转的每次调用，一律 402 `free_plan_ended`（`The free trial has ended: this workspace runs again once its owner subscribes to Pro or Max.`），在预扣、计数和启动任何东西之前（中转的同时带 `x-should-retry: false`）；同一 operationId 的重试仍返回已受理的那次。画布助手的分流不再为它调用路由模型（直接交给规划，规划随即拒绝），自动学习也跳过它的运行；签到也不再提供（`route-usage` 不带 `checkin`，`POST /checkin` 回 409 `checkin_unavailable`），即使活动比免费版结束得晚：它已用不上加的次数。在这个时刻之前已受理的工作照常跑完：已受理运行之后的模型调用、已受理整图之后的节点都不再检查。套餐一到账（同一事务里读到的所有者套餐），下一次受理就放行。登录、读取、编辑与保存画布、导出、删除、账单（结账、门户、同步）、邀请、浏览市场、网页读取导入、`route-usage` 与 `upgrade-interest` 照常可用；动效渲染（不调用模型，按自己的每日上限）、TypeSafe 评估与 OpenMaus 桥（都只对运营方逐个开通的工作区，各有自己的上限）也不受它影响。需要 `AWWO_CREDENTIAL_MODE=operator` 并开启 ClawHunt 登录（套餐来自 ClawHunt），否则启动时拒绝，所以个人密钥部署与本机版不会被关闭；已过去的时刻也接受（免费版立即结束）。
 
@@ -85,11 +89,11 @@
 | --- | --- | --- |
 | GET /canvases | limit?, cursor?, view? | 当前租户画布，`{items,nextCursor,snapshot}`；`view=summary` 时每项以 `outline` 代替 `document` |
 | POST /canvases | name, document | 创建画布，201 |
-| GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt |
+| GET /canvases/{id} | 无 | id, tenantId, name, document, version, createdAt, updatedAt, createdBy（创建它的人的 id；迁移 059 之前的画布取自它的 `canvas.created` 审计行，查不到或账号已删为 null；列表的两种视图也带） |
 | PUT /canvases/{id} | name, document, version | version 必须是上次读取值；成功递增，陈旧值 409（AWWO-LAW-026，多人同屏之前的页面用它）；每次保存都记进画布的变更记录（label `save`），正在看这张画布的页面和 Agent 收到它 |
 | PATCH /canvases/{id} | baseVersion, changeId, clientId, ops, label? | 多人同屏的保存：只发改了的字段，按到达服务端的先后合进最新的画布（见下文「多人同屏」） |
 | POST /canvases/{id}/initialize | documentVersion, scope? | 根据已保存文档准备节点 Agent / Session，200 返回完整 canonical 画布；不执行模型 |
-| DELETE /canvases/{id} | 无 | 成功 204；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
+| DELETE /canvases/{id} | 无 | 成功 204；只有创建它的人或工作区 owner/admin 能删（没有记下创建人的只有 owner/admin），其他成员 403 / canvas_not_yours，在删除的事务里按当时的角色判断（AWWO-LAW-003）；关联节点或规划 run 为 queued/running 时 409 / resource_in_use，拒绝时不改运行、事件或审计 |
 | POST /canvases/{id}/plan | prompt, context, operationId | 202，创建持久规划 run；空画布也可使用，共享运行限额和 SSE。context 超过 120000 个 UTF-16 码元（中文一字一个，与 worker 的传输上限同一计法）、连同请求超过 128000 个码元、或超过所选模型的保守预算时返回 413 `context_limit`（模型预算按 worker 在 `/health` 公布的 `proseBytesPerToken` 估算 token 计：中文、普通文字和代码按该模型实测的每 token 字节数，数字、长串（base64、URL、压缩代码）、标点和符号（中文和全角的除外）、超过 32 个的连续空白和其他文字仍按一字节一 token；没公布的模型仍按字节），`error.details.contextRoom` 为同一请求的 context 最多可占的字节数（按该 context 自身每估算 token 的字节数换算；为因长度被省略的个性化设置留出空间，创建 run 时的长度与预算检查也为因长度被省略的节点上限留出，读取节点上限之前的码元检查不留；只因输入超过 `AWWO_PLANNER_MAX_INPUT_BYTES` 而没用上运营方规划模型时（该模型当天的工作区与部署次数都还有余，先于长度检查；且工作区可以使用它：DeepSeek 规划模型须在工作区的模型清单里），取能换用该模型的长度与默认模型长度中较大者；0 表示请求本身、它附带的文件或选中的资料已占满，再短的 context 也放不下）；页面据此发送更短的画布视图，不创建 run、不计次（首次规划时创建的规划会话照常保留）。服务端在 context 之后、个性化设置和请求之前加一段 `Node limits`（2026-10-22 起，`planning_limits.go`）：工作区可用的每个模型单次回答最多的输出 token 数（含思考；取 openai-agents 与 Pi 两个 worker 在 `/health` 公布的 `maxOutputTokens`，两个都提供该模型时取较小者，因为绑定工作区 Agent 的节点沿用该 Agent 的运行时；提供该模型却没公布上限、或公布的不是整数的 worker 按规划指令自己的假定算 16000，这一段随之写明；至多写 100 个模型，其余的只写它们中最小的上限，作为其余每个模型该取的上限）、未选模型的节点所用的工作区默认模型（`"default"`，取 openai-agents 的）和单次运行的时限；页面读到画布的模型目录和读者的选择之后（`AssistantExecutionHost.componentModelRead`），另起一行写明规划新增、未用 `set_model` 的 Agent 节点将使用的模型（读者为画布助手选的模型，DeepSeek 也写；这些节点用工作区默认模型时写 `"default"`；读到之前，例如从首页转来的请求，以及没有模型目录的桌面版，不写），这些节点随后使用规划所依据的那个模型（`assistantModel.ts` `planComponentModel`）：规划帧的 `newNodeModel` 取自其 run 所依据的、保存的请求的 context，续接的规划、或另一个标签页发起的规划也一样，而不是读者之后改选的；`"default"` 让它们留在默认模型；请求没写（本次发布之前保存的，或在上述读取之前发出的），或写的模型现在用不了（不再提供、没有就绪的运行时，或工作区套餐不再包含）时，用规划完成时读者的选择；只有用户能选的模型（DeepSeek）只在规划完成时读者仍选着它才用，因为隐私条款只在选了 DeepSeek 时才把请求发给它。这些只在请求通过权限检查后才读取 worker；它在请求哈希之后加入，上限变了以后的重试仍是同一规划；完整的一段会让请求超出提示长度上限、或仅因它而超出运营方规划模型的输入上限（`AWWO_PLANNER_MAX_INPUT_BYTES`）时，改用简短的一段（默认模型的上限，也按它自己的 id 写出；上限比它低的模型，至多 12 个、从小到大；其余模型中最小的上限，作为其余每个模型该取的上限；没有默认模型时只写所有模型中最小的上限，作为每个模型该取的上限），连这段也放不下时不加；两个 worker 都一个上限也没公布时也不加。规划指令据此把每个节点的交付控制在其模型上限的一半以内（代码六分之一，只拼接现成部分的节点三分之二），更大的任务按章节、模块或批次拆成并行的部分节点，每部分写明范围和它在用户总量里的份额，并保持在规划的操作数上限内；前端节点自身的代码超过其模型上限的六分之一时，拆成代码模块节点和一个只拼接的组装节点 |
 | POST /canvases/{id}/ui-events | `{name}` | member 以上，暂停的工作区 403；记一次按钮点击，供运营统计：name 只能是 `review.next_steps`（运行完成提示里的「看下一步」）、`review.open_report`（「接下来」里的「查看验收报告」）或 `assistant.local_answer`（画布助手在页面上直接回答、没用调用的提问），其他名字或多余字段 400；不是本工作区的画布 404；每次点击写一条审计事件（action `ui.<name>`，resourceId 为画布 id，不带画布内容和 metadata），平台管理员在 `/admin/audit` 可见；同一人 2 秒内在同一画布重复点同一按钮只记一次，写入时成员身份已失效也不记；200 `{recorded}` |
 | GET /canvases/{id}/artifacts | cursor? | 画布已存的交付文件（不含字节，上传与工作区快照除外），新的在前，每页至多 500 个：`{items,truncated,nextCursor}`。`truncated` 为真表示后面还有，带 `cursor=nextCursor` 读下一页，直到 `truncated` 为假、`nextCursor=null`。游标签名绑定当前账号、租户、这张画布和首页的读取时刻：之后存入的文件比已列出的都新，不进这次列表的后续页。列表不是表的快照：列表进行中再次存入的文本交付物、或列表开始前就已开始的事务存入的文件，可能不在这次列表里，重新列一次即可看到。首页仍是最新的 500 个，只是同一时刻存入的文件改按 id 降序，页尾落在其中时取到的可能是其中另几个；空值、重复、伪造、别的账号或别的画布的 cursor 返回 400 / invalid_cursor，无法解析的查询返回 400 / invalid_pagination |
@@ -159,10 +163,10 @@ SaaS 属性面板的“保存并准备运行”先完成画布保存，再调用
 | GET /sessions/{id}/messages | 无 | items[{id,sessionId,runId,role,content,createdAt}]；runId 关联原运行与团队过程 |
 | POST /runs | sessionId, prompt, operationId | 202；prompt 最多 128000 个 UTF-16 码元（中文一字一个，与 worker 的传输上限同一计法），operationId 必须 8–200 字节，也可用 Idempotency-Key header |
 | GET /runs | 可选 sessionId、operationId、active、limit、cursor | 运行列表，用于恢复受理结果不确定的请求与查询活动运行 |
-| GET /runs/{id} | 无 | status/output/terminal/error 等 |
+| GET /runs/{id} | 无 | status/output/terminal/error 等；`startedBy` 为启动它的人 `{id,name}`（没有记下的为 null）；运行列表与创建的回答也带 |
 | GET /runs/{id}/turns | 无 | `{items}`，按 ordinal 排序的团队成员回合；含成员、模型、状态、输出及输入审计，详见下文；单 Agent 返回空列表 |
 | GET /runs/{id}/events | Last-Event-ID 或 after 查询参数 | text/event-stream，持久事件重放 |
-| POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准 |
+| POST /runs/{id}/cancel | 无 | 幂等取消；状态以回读运行记录为准；进行中的运行只有启动它的人或工作区 owner/admin 能停（没有记下启动人的只有 owner/admin），其他成员 403 / run_not_yours，已结束的照旧回答（沙箱电脑的任务仍只有它的人能停，403 / computer_owner_required） |
 
 同一个 operationId 与同样 session/prompt 返回既有 run；相同 key 换内容返回 409，不启动第二次模型执行。不同 operationId 对同一活跃 session 返回 session_busy。首行恰为 `AwwO page repair · field "<字段 id>"`（可带 ` · still`）并以换行结束的 prompt，是画布自动发出的页面修复（`apps/web/src/canvas/pageRepair.ts`；人手写成这样的首行也算；没有声明交付字段的会话交回的整份结果是一个完整 HTML 文档时，字段 id 为 `result`，见 `resultPage.ts`）：节点 Session 最近一次运行已是同类修复，或最近两次运行都是修复时，返回 409 `page_repair_chained`，不受理、不计费。也就是同类修复不连续两次，连续两次修复（两类各一次）之后不再自动修复；其间这个节点只要有过别的运行（有人发消息、画布运行或自动重跑，不论是否交出了新页面），页面就可以再各自动修复一次。服务端只知道运行的先后，不认是哪一版页面，也没有单独的每日上限；只检查 Agent 节点的 Session，图片、视频、3D 与音频节点收不到页面修复，不做此检查（`page_repair.go`）。租户每日调用数和并发上限由后端检查；团队每一次实际成员模型调用都单独占用和核算额度。运行接收时冻结节点团队配置，后续编辑不改变已受理运行。
 
@@ -229,8 +233,8 @@ SSE 的 `id` 是数据库事件序号，`data` JSON 中的 type 包括 queued、
 | POST /canvases/{id}/graph-runs | operationId, documentVersion?, scope? | 新建 202，幂等回放 200；前端先保存并提交确认的 documentVersion，版本陈旧 409。受理会先冻结范围内每个媒体节点的模型与参数，若因某个节点自身已保存的状态被拒（`media_params_invalid`、`node_setup_required`、`model_unavailable`、`model_not_allowed`），`error.details.nodeId` 给出该节点 id，供前端指明是哪个节点；部署自身的拒绝（未配置生成、无存储空间）不给节点，节点标题属用户内容、不出现在接口错误里。整图运行的时间在受理时（拿到锁之后）取，画布的运行按受理先后排。operationId 为 `autorerun:<运行 id>` 的是画布的自动重跑（见下文「自动进化」），受理时先记下保存的画布已做成的调整，再在画布行锁下按它的规则认领，不符合时 409：`auto_rerun_off`（没开自动重跑）、`auto_rerun_stale`（不是画布最近一次、已失败并写完经验、在开启之后结束的运行）、`auto_rerun_chained`（它自己就是自动重跑）、`auto_rerun_done`（已重跑过）、`auto_rerun_pending`（它结束时的调整还没处理完）、`auto_rerun_limit`（24 小时内已 3 次）、`auto_rerun_scope`（范围不是它没完成的节点）；运行 id 不成形或是协作 400 |
 | GET /canvases/{id}/graph-runs | operationId? | `{items}`，最近 50 个运行的摘要（状态、范围、时间与各节点 state，重试过的节点另带 attempts；不含受理时的 document 与节点输出）；可按操作 ID 找回响应丢失的提交，再按 graphId 读取整图 |
 | GET /canvases/{id}/graph-runs/{graphId} | document? | 权威整图状态、受理时 document/documentVersion/scope 和 nodes；`?document=false` 时只省去受理时冻结的 document，其余不变（document 受理后不再改写，已读过它的读者如画布对进行中运行的轮询、运行记录面板的重读只需读一次），`true` 同默认，其他取值、重复给出或查询串无法解析时 400 |
-| POST /canvases/{id}/graph-runs/{graphId}/cancel | 空对象 | 幂等取消；保留已完成及部分输出，回读确认最终状态 |
-| POST /canvases/{id}/graph-runs/operations/{operationId}/cancel | 空对象 | 写入取消墓碑并与创建互斥；即使创建响应丢失也可阻止延迟提交，返回 confirmed/status 及可选 graphId |
+| POST /canvases/{id}/graph-runs/{graphId}/cancel | 空对象 | 幂等取消；保留已完成及部分输出，回读确认最终状态；进行中的整图运行只有启动它的人或工作区 owner/admin 能停，其他成员 403 / run_not_yours（整图运行的回答与列表都带 `startedBy`） |
+| POST /canvases/{id}/graph-runs/operations/{operationId}/cancel | 空对象 | 写入取消墓碑并与创建互斥；即使创建响应丢失也可阻止延迟提交，返回 confirmed/status 及可选 graphId；这个 operation 已受理的整图运行还在进行时，同上只有启动人或 owner/admin 能停（403 / run_not_yours，不写墓碑） |
 
 整图状态为 queued、running、completed、failed、cancelled、interrupted；节点状态为 waiting、running、done、failed、blocked、cancelled、cached。节点记录含 nodeId、runId、sessionId、output、detail；使用 runId 读取成员回合。成员模型调用通过 `model_invocations` 记录，失败、取消及重启均释放活跃占用。终态数据库写入的短暂故障只重试数据库事务，不重发模型请求。
 
@@ -242,7 +246,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 
 | 方法与后缀 | 请求 / 查询 | 说明 |
 | --- | --- | --- |
-| GET /capabilities | 无 | `{skills,skillRegistry,memory,webReader,render,edit,market,multiplayer}`：各项 enabled、上限，以及 webReader/render/edit 今日已用次数；`market` 另有 `payouts,feeBps,maxPrice,holdDays`，设置了官方 Agent 的价格时再加 `officialPrice`（点数）与 `officialPriceFrom`（开始时刻，UTC 的 RFC 3339；没设开始时刻则不返回，价格立即生效），见「Agent 市场」 |
+| GET /capabilities | 无 | `{skills,skillRegistry,memory,webReader,render,edit,market,multiplayer}`：各项 enabled、上限，以及 webReader/render/edit 今日已用次数；`market` 另有 `payouts,feeBps,maxPrice,holdDays`，设置了官方 Agent 的价格时再加 `officialPrice`（点数）与 `officialPriceFrom`（开始时刻，UTC 的 RFC 3339；没设开始时刻则不返回，价格立即生效），见「Agent 市场」；`multiplayer` 有 `enabled,maxChangeOps,people`：`people` 为真时画布提供「分享」（从画布邀请成员，邀请可绑定邮箱、打开发出它的画布），由 `AWWO_PEOPLE_SHARING=on` 开启，默认关闭（关闭时画布照旧，服务端仍接受上面的邀请字段） |
 | GET /skills | 无 | `{items,limits}`：40 个内置技能（`builtin:<name>`）与本工作区技能（`workspace:<id>`）的摘要，不含正文 |
 | GET /skills/{ref} | 无 | 一个技能的全文；已归档或属于其他工作区的技能统一 404 |
 | POST /skills | name, title, description, body, category?, applies? 或 markdown（SKILL.md） | 201；正文 ≤ 12 KiB，名称在工作区内唯一（`skill_name_conflict`），最多 100 个（`skill_limit`）；隐藏字符一律拒绝 |
@@ -259,7 +263,7 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | GET /canvases/{id}/renders | nodeId? | `{items}`：最近 30 次渲染 |
 | POST /canvases/{id}/renders | operationId, nodeId, html, width, height, fps, seconds, loop?, gif?, contact? | 202 受理；同一 operationId 只属于一个画布，幂等回放同一渲染；每个工作区同时只能有一个（`render_busy`）、每日次数（`render_quota`）、页面 ≤ 6 MiB（`render_too_large`） |
 | GET /canvases/{id}/renders/{renderId} | 无 | status（queued/running/completed/failed/cancelled）、errorCode、result（mode、frames、distinctFrames、warnings、outputs）；渲染器因页面的 renderAt 在等它自己的时钟而拒绝时，errorCode 为 `render_page_waits_on_timers`，result.reason 是渲染器的原话（单行纯文本，至多 500 字） |
-| POST /canvases/{id}/renders/{renderId}/cancel | 空对象 | 幂等取消 |
+| POST /canvases/{id}/renders/{renderId}/cancel | 空对象 | 幂等取消；进行中的渲染只有启动它的人或工作区 owner/admin 能停，其他成员 403 / run_not_yours |
 
 **技能** 写在节点的 `document.nodes[].skills`（最多 4 个引用，合计 ≤ 20 KiB）。受理运行时，服务器把每个技能的全文、版本和内容 hash 冻结进执行快照，放在节点指令之后、带边界说明的系统提示里（正文中的 `</skill` 被转义）；之后修改技能只影响新的运行。没有技能的节点请求逐字节不变。
 
@@ -360,10 +364,10 @@ Go 负责依赖就绪、分支并行、汇合和下游执行。关闭网页后�
 | GET /live/messages?before=id | | 实时消息，新的在前，每页 50 条；每张画布保留最近 200 条 |
 | POST /live/messages | `{clientId, text, nodeId?}` | member 以上或 edit 令牌；1–2000 字；`{message}` |
 | GET /agent-tokens | | member 以上（会话）；`{items}`，不含密钥 |
-| POST /agent-tokens | `{name, days?, scope?}` | member 以上（会话，按 IP 限速）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
+| POST /agent-tokens | `{name, days?, scope?}` | admin 以上（会话，按 IP 限速；迁移 059 起 member 不能生成）；1–60 字的名字，1–90 天（默认 30），`edit` 或 `read`；一张画布至多 10 个有效令牌（409 `agent_token_limit`）；201 `{token, item}`，密钥只此一次 |
 | DELETE /agent-tokens/{tokenId} | | 创建人或工作区 admin/owner；204，令牌的流立刻 `bye: revoked`，其认领放开 |
 
-令牌随创建人离开工作区或降为只读成员、修改或重置密码而失效（与本机版连接密钥相同）。`POST /initialize` 也记它的变更（label
+令牌随创建人离开工作区、不再是它的 owner/admin（迁移 059 起）、修改或重置密码而失效（与本机版连接密钥相同）。`POST /initialize` 也记它的变更（label
 `setup`）；可选的 `clientId` 写进这条变更。
 
 MCP：`POST /api/v1/mcp`（Streamable HTTP，JSON 应答，令牌放在 Bearer 头），工具 `canvas_overview`、`canvas_read_node`、`canvas_wait`、
@@ -379,7 +383,7 @@ AwwO 本地版可以让线上站点替它调用线上提供的模型，每次调
 | 方法与路径（省略 /api/v1） | 请求 | 说明 |
 | --- | --- | --- |
 | GET /auth/relay-keys | 无 | 登录会话。`{items,limit}`：本账号的有效密钥与最近撤销的 20 个（id、name、prefix、tenant、createdAt、expiresAt、lastUsedAt、revokedAt），不含密钥本身 |
-| POST /auth/relay-keys | name?（≤ 80 字，默认「AwwO 本地版」）, tenantId | 登录会话。201 `{key,item}`：密钥（`awwo_rk_` 加 43 个字符）只在这次返回，只保存其 SHA-256，90 天后失效；须是该工作区的成员、管理员或所有者，工作区正常（否则 404 `tenant_not_found`）；每个账号最多 5 个有效密钥（409 `relay_key_limit`）；会话在此期间结束（例如密码刚被修改）时 401 |
+| POST /auth/relay-keys | name?（≤ 80 字，默认「AwwO 本地版」）, tenantId | 登录会话。201 `{key,item}`：密钥（`awwo_rk_` 加 43 个字符）只在这次返回，只保存其 SHA-256，90 天后失效；须是该工作区的成员且工作区正常（否则 404 `tenant_not_found`），并且是它的所有者或管理员（工作区所有者的套餐为密钥的调用付费；member 与 reader 403 `forbidden`，迁移 059 起）；用的时候也要求密钥的人仍是所有者或管理员，否则 403 `relay_key_forbidden`；每个账号最多 5 个有效密钥（409 `relay_key_limit`）；会话在此期间结束（例如密码刚被修改）时 401 |
 | DELETE /auth/relay-keys/{id} | 无 | 204 撤销；不是本账号的或已撤销的 404 |
 | GET /relay/v1/models | `Authorization: Bearer <密钥>` | `{object:"list",data}`：工作区可用的模型（按其 entitlement），每个带 `context_window`、`max_output_tokens`、`prose_bytes_per_token`、`max_request_bytes`（504 KiB）和空的 `reasoning_efforts` |
 | POST /relay/v1/chat/completions | Chat Completions，`stream:true` | SSE：开头一行 `: awwo relay`，模型工作时每 15 秒一行 `: keep-alive`，然后答复块、用量块与 `[DONE]`；失败时一个 `error` 帧，只说明类别 |

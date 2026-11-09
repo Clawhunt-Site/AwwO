@@ -136,6 +136,10 @@
         "author",
         "reviewer"
       ],
+      "startedBy": {
+        "id": "<user:collaboration-owner>",
+        "name": "Test"
+      },
       "status": "queued",
       "updatedAt": "<timestamp>"
     },
@@ -278,6 +282,10 @@
         "author",
         "reviewer"
       ],
+      "startedBy": {
+        "id": "<user:collaboration-owner>",
+        "name": "Test"
+      },
       "status": "completed",
       "updatedAt": "<timestamp>"
     },

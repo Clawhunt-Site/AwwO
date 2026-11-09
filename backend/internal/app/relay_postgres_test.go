@@ -328,24 +328,25 @@ func TestPostgresAKeyWhoseCallsKeepBeingRefusedIsHeldOff(t *testing.T) {
 
 func TestPostgresRelayKeysEndWithTheirMembershipAndPassword(t *testing.T) {
 	h, _, owner, tid, _ := relayHarness(t)
+	// Only owners and admins make keys (migration 059): the owner's plan pays for every call one makes.
 	member, _, _ := h.register(t, "relay-member@example.test")
-	h.request(t, owner, "POST", "/tenants/"+tid+"/members", map[string]any{"email": "relay-member@example.test", "role": "member"}, 201)
+	h.request(t, owner, "POST", "/tenants/"+tid+"/members", map[string]any{"email": "relay-member@example.test", "role": "admin"}, 201)
 	var memberID string
 	h.db.QueryRow(context.Background(), "SELECT id FROM users WHERE email='relay-member@example.test'").Scan(&memberID)
 	key := h.request(t, member, "POST", "/auth/relay-keys", map[string]any{"tenantId": tid}, 201)["key"].(string)
 	if status, _ := sendRelay(t, h, key, "GET", relayModelsRoute, ""); status != 200 {
-		t.Fatal("a member's key", status)
+		t.Fatal("an admin's key", status)
 	}
-	// Only reading now, then a member again: the key stays revoked.
-	h.request(t, owner, "PATCH", "/tenants/"+tid+"/members/"+memberID, map[string]any{"role": "reader"}, 204)
+	// A member now, then an admin again: the key stays revoked.
 	h.request(t, owner, "PATCH", "/tenants/"+tid+"/members/"+memberID, map[string]any{"role": "member"}, 204)
+	h.request(t, owner, "PATCH", "/tenants/"+tid+"/members/"+memberID, map[string]any{"role": "admin"}, 204)
 	if status, body := sendRelay(t, h, key, "GET", relayModelsRoute, ""); status != 401 || !strings.Contains(body, "relay_key_invalid") {
-		t.Fatal("a member's key after reading only", status, body)
+		t.Fatal("an admin's key after being a member", status, body)
 	}
 	key = h.request(t, member, "POST", "/auth/relay-keys", map[string]any{"tenantId": tid}, 201)["key"].(string)
 	h.request(t, owner, "DELETE", "/tenants/"+tid+"/members/"+memberID, nil, 204)
 	if h.relayCount(t, "SELECT count(*) FROM relay_keys WHERE user_id=$1 AND revoked_at IS NULL", memberID) != 0 {
-		t.Fatal("a member who leaves loses the workspace's keys")
+		t.Fatal("a person who leaves loses the workspace's keys")
 	}
 	// A password changed revokes every key of the account.
 	ownKey := h.request(t, owner, "POST", "/auth/relay-keys", map[string]any{"tenantId": tid}, 201)["key"].(string)

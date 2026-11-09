@@ -329,7 +329,8 @@ func liveAwwoAgents(ctx context.Context, q querier, tid, cid string) ([]livePart
 }
 
 // liveAccess says whether a stream's caller may still read the canvas: a person's session (with ClawHunt's) and
-// membership, or a token's liveness and its maker's membership; and the canvas is still there.
+// membership, or a token's liveness and its maker's membership as an owner or admin (who alone hold tokens:
+// admitCanvasToken); and the canvas is still there.
 // liveAccess checks again that the caller still reaches the canvas: false with no error is a definite no (the stream
 // says bye access); an error (the database, ClawHunt unreachable) is no answer, and the caller tries again later.
 func (a *App) liveAccess(r *http.Request, tid, cid string) (bool, error) {
@@ -338,7 +339,7 @@ func (a *App) liveAccess(r *http.Request, tid, cid string) (bool, error) {
 	if agent := agentOf(r); agent != nil {
 		err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM canvas_agent_tokens t JOIN memberships m ON m.tenant_id=t.tenant_id AND m.user_id=t.created_by
 			JOIN canvases c ON c.tenant_id=t.tenant_id AND c.id=t.canvas_id
-			WHERE t.tenant_id=$1 AND t.id=$2 AND t.canvas_id=$3 AND t.revoked_at IS NULL AND t.expires_at>clock_timestamp())`, tid, agent.TokenID, cid).Scan(&ok)
+			WHERE t.tenant_id=$1 AND t.id=$2 AND t.canvas_id=$3 AND t.revoked_at IS NULL AND t.expires_at>clock_timestamp() AND m.role IN ('owner','admin'))`, tid, agent.TokenID, cid).Scan(&ok)
 		return err == nil && ok, err
 	}
 	c, _ := r.Cookie("awwo_session")

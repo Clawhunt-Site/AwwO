@@ -38,8 +38,9 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		// The Agent market (market.go).
 		"market": a.marketCapability(),
 		// 多人同屏 (docs/awwo-canvas-live-collaboration.md): a page saves by changes (PATCH) and opens the canvas's live
-		// stream only where this says so; a page reading a server older than it keeps whole-document saves.
-		"multiplayer": map[string]any{"enabled": true, "maxChangeOps": maxCanvasChangeOps},
+		// stream only where this says so; a page reading a server older than it keeps whole-document saves. people: the
+		// canvas offers sharing it with people (invitations bound to an email, sent from the canvas; capability_config.go).
+		"multiplayer": map[string]any{"enabled": true, "maxChangeOps": maxCanvasChangeOps, "people": a.cfg.PeopleSharing},
 	})
 }
 

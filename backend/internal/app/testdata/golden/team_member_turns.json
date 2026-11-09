@@ -10,6 +10,10 @@
         "output": "openai-agents reply 3 from oa-default",
         "outputAvailable": true,
         "sessionId": "<session:node-a>",
+        "startedBy": {
+          "id": "<user:team-owner>",
+          "name": "Test"
+        },
         "status": "completed",
         "tenantId": "<tenant:team-owner>",
         "terminal": true,
@@ -27,6 +31,10 @@
         "output": "openai-agents reply 6 from oa-default",
         "outputAvailable": true,
         "sessionId": "<session:node-a>",
+        "startedBy": {
+          "id": "<user:team-owner>",
+          "name": "Test"
+        },
         "status": "completed",
         "tenantId": "<tenant:team-owner>",
         "terminal": true,

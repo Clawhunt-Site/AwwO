@@ -290,8 +290,9 @@ func (a *App) openRelayGate(ctx context.Context, tx pgx.Tx, caller relayCaller, 
 		g.plan, e = ownerPlan(ctx, tx, caller.tenantID, false)
 	}
 	if e == nil {
+		// A key works while its maker is an owner or admin of its workspace: the owner's plan pays for its calls (relay.go).
 		e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM relay_keys k JOIN memberships m ON m.tenant_id=k.tenant_id AND m.user_id=k.user_id
-			WHERE k.id=$1 AND k.revoked_at IS NULL AND k.expires_at>clock_timestamp() AND m.role IN ('owner','admin','member'))`, caller.keyID).Scan(&live)
+			WHERE k.id=$1 AND k.revoked_at IS NULL AND k.expires_at>clock_timestamp() AND m.role IN ('owner','admin'))`, caller.keyID).Scan(&live)
 	}
 	if e != nil {
 		return g, e

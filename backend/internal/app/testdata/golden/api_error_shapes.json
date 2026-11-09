@@ -203,6 +203,10 @@
       "scope": [
         "image-graph"
       ],
+      "startedBy": {
+        "id": "<user:errors-owner>",
+        "name": "Test"
+      },
       "status": "queued",
       "updatedAt": "<timestamp>"
     },
@@ -251,6 +255,10 @@
       "scope": [
         "image-graph"
       ],
+      "startedBy": {
+        "id": "<user:errors-owner>",
+        "name": "Test"
+      },
       "status": "completed",
       "updatedAt": "<timestamp>"
     },
@@ -265,6 +273,10 @@
       "output": "",
       "outputAvailable": false,
       "sessionId": "<session:image-manual>",
+      "startedBy": {
+        "id": "<user:errors-owner>",
+        "name": "Test"
+      },
       "status": "queued",
       "tenantId": "<tenant:errors-owner>",
       "terminal": false,
@@ -282,6 +294,10 @@
       "output": "pi reply 1 from test-model",
       "outputAvailable": true,
       "sessionId": "<session:image-manual>",
+      "startedBy": {
+        "id": "<user:errors-owner>",
+        "name": "Test"
+      },
       "status": "completed",
       "tenantId": "<tenant:errors-owner>",
       "terminal": true,

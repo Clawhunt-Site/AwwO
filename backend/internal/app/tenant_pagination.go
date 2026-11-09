@@ -20,6 +20,13 @@ func pageEnds(count, size, next, limit int) bool {
 	return count == limit || (count > 0 && size+next > maxListPageBytes)
 }
 
+// membersJSON is a member as a workspace's owners and admins list them; membersNamesJSON as everyone else does, without
+// their email.
+const (
+	membersJSON      = "jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name',u.name,'role',m.role)"
+	membersNamesJSON = "jsonb_build_object('id',u.id,'userId',u.id,'name',u.name,'role',m.role)"
+)
+
 type tenantPageSource struct {
 	table, projection, tenant, timestamp, id, predicate string
 	filters                                             []string
@@ -29,13 +36,19 @@ type tenantPageSource struct {
 // must not move it across the cursor and hide or repeat it in a later page.
 func (a *App) tenantList(w http.ResponseWriter, r *http.Request, kind string) {
 	s := map[string]tenantPageSource{
-		"members":  {"memberships m JOIN users u ON u.id=m.user_id", "jsonb_build_object('id',u.id,'userId',u.id,'email',u.email,'name',u.name,'role',m.role)", "m.tenant_id", "m.created_at", "m.user_id", "", nil},
+		"members":  {"memberships m JOIN users u ON u.id=m.user_id", membersJSON, "m.tenant_id", "m.created_at", "m.user_id", "", nil},
 		"canvases": {"canvases", canvasJSON, "tenant_id", "created_at", "id", "", nil},
 		"agents":   {"agents", agentJSON, "tenant_id", "created_at", "id", "NOT internal AND engine='worker' AND market_agent_id IS NULL", nil},
 		"sessions": {"node_sessions", sessionJSON, "tenant_id", "created_at", "id", "kind='node'", []string{"canvasId", "sessionId"}},
 		"runs":     {"runs", runJSON, "tenant_id", "created_at", "id", "", []string{"sessionId", "operationId", "active"}},
-		"invites":  {"tenant_invites i JOIN tenants t ON t.id=i.tenant_id LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by", "jsonb_build_object('id',i.id,'role',i.role,'createdBy',i.created_by,'createdAt',i.created_at,'expiresAt',i.expires_at,'status'," + inviteStatusSQL + ",'acceptedBy',i.accepted_by,'acceptedAt',i.accepted_at,'revokedAt',i.revoked_at)", "i.tenant_id", "i.created_at", "i.id", "", nil},
+		// An invitation's bound email and the canvas it opens are for the owners and admins who list them (role 3).
+		"invites": {"tenant_invites i JOIN tenants t ON t.id=i.tenant_id LEFT JOIN memberships m ON m.tenant_id=i.tenant_id AND m.user_id=i.created_by LEFT JOIN canvases c ON c.tenant_id=i.tenant_id AND c.id=i.canvas_id",
+			"jsonb_build_object('id',i.id,'role',i.role,'createdBy',i.created_by,'createdAt',i.created_at,'expiresAt',i.expires_at,'status'," + inviteStatusSQL + ",'acceptedBy',i.accepted_by,'acceptedAt',i.accepted_at,'revokedAt',i.revoked_at,'email',i.email,'canvasId',c.id,'canvasName',c.name)", "i.tenant_id", "i.created_at", "i.id", "", nil},
 	}[kind]
+	// A workspace's members see who else is in it by name; their emails are for its owners and admins.
+	if kind == "members" && roleLevel(tenantRoleOf(r)) < roleLevel("admin") {
+		s.projection = membersNamesJSON
+	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		fail(w, 400, "invalid_pagination", "Invalid list query")

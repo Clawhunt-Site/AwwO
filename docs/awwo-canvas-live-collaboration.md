@@ -282,10 +282,13 @@ to its confirmed version and misses nothing. When the API stops, every stream en
 
 ### Tokens
 
-A member (or above) makes a canvas agent token in the canvas's 同屏 panel (邀请 Agent), names it after the agent ("Claude
-Code") and copies it once. A token is `awwo_ct_<16 hex id>_<43 characters>`; the database keeps only its SHA-256 and its
-prefix `awwo_ct_<id>`. A token reaches one canvas of one workspace, expires (1 to 90 days, 30 by default), and is revoked
-from the same panel, when its maker leaves the workspace or becomes a reader, and when its maker's password changes.
+An owner or admin of the workspace (since migration 059: the owner's decision of 2026-11-08 for people sharing a
+workspace) makes a canvas agent token in the canvas's 同屏 panel (邀请 Agent; where the canvas offers sharing with people,
+under 分享 → 高级：连接 Agent 或程序), names it after the agent ("Claude Code") and copies it once. A token is
+`awwo_ct_<16 hex id>_<43 characters>`; the database keeps only its SHA-256 and its prefix `awwo_ct_<id>`. A token
+reaches one canvas of one workspace, expires (1 to 90 days, 30 by default), and is revoked from the same panel, when its
+maker leaves the workspace or is no longer an owner or admin of it, and when its maker's password changes; migration
+059 revoked the ones members and readers held, and a token whose maker is not an owner or admin is refused as revoked.
 
 A token acts for the person who made it and never beyond what they may do now: their membership is checked again on
 every request, and at most their role. It cannot start runs, spend credits, read other canvases, change settings or make

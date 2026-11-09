@@ -198,6 +198,9 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if e = applyIdentifiedMigration(ctx, tx, 56, "migrations/056_canvas_live.sql"); e != nil {
 		return e
 	}
+	if e = applyIdentifiedMigration(ctx, tx, 59, "migrations/059_people_sharing.sql"); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
@@ -248,7 +251,17 @@ const tenantJSON = `jsonb_build_object('id',t.id,'name',t.name,'status',t.status
 // never shown an id that cannot actually be selected.
 const adminTenantJSON = tenantJSON + `||jsonb_build_object('allowedModels',to_jsonb(t.allowed_models),'routeLimits',t.route_limits)`
 
-const canvasJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'document',document,'version',version,'createdAt',created_at,'updatedAt',updated_at)`
+// createdBy is the canvas's maker (null when unknown): they, or a workspace owner or admin, delete it.
+const canvasJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'document',document,'version',version,'createdAt',created_at,'updatedAt',updated_at,'createdBy',created_by)`
 const agentJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'name',name,'status','active','model',model,'role',role,'title',title,'instructions',instructions,'runtime',runtime,'effort',effort,'adapterType',runtime,'adapterConfig',jsonb_build_object('model',model,'effort',effort),'createdAt',created_at)`
 const sessionJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'canvasId',canvas_id,'nodeId',node_id,'agentId',agent_id,'title',title,'createdAt',created_at)`
-const runJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'sessionId',session_id,'operationId',operation_id,'status',status,'output',output,'outputAvailable',length(output)>0,'terminal',status NOT IN ('queued','running'),'error',error,'createdAt',created_at,'updatedAt',updated_at)`
+
+// runStartedByJSON is who started a run ({id, name}; null for none recorded, or an account deleted since): the people on a
+// canvas see who started each run, and only they or a workspace owner or admin stop it (runs.go stopsOthersRuns).
+// graphStartedByJSON is the same for a canvas run (graph_runs g).
+const (
+	runStartedByJSON   = `(SELECT jsonb_build_object('id',starter.id,'name',starter.name) FROM users starter WHERE starter.id=actor_id)`
+	graphStartedByJSON = `(SELECT jsonb_build_object('id',starter.id,'name',starter.name) FROM users starter WHERE starter.id=g.actor_id)`
+)
+
+const runJSON = `jsonb_build_object('id',id,'tenantId',tenant_id,'sessionId',session_id,'operationId',operation_id,'status',status,'output',output,'outputAvailable',length(output)>0,'terminal',status NOT IN ('queued','running'),'error',error,'createdAt',created_at,'updatedAt',updated_at,'startedBy',` + runStartedByJSON + `)`

@@ -854,7 +854,8 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		snapshot.PlanNewNodeModel = plannerNewNodeModel(r)
 	}
 	id := randomID()
-	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status) VALUES($1,$2,$3,$4,$5,$6,'queued') RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt)
+	// Its starter with it from the first row, so the answer names who started it (runJSON); saveRunSnapshot writes the same.
+	v, e := oneJSON(r.Context(), tx, "INSERT INTO runs(id,tenant_id,session_id,operation_id,request_hash,prompt,status,actor_id) VALUES($1,$2,$3,$4,$5,$6,'queued',$7) RETURNING "+runJSON, id, tid, b.SessionID, b.OperationID, hash, b.Prompt, currentUser(r).ID)
 	if e != nil {
 		a.dbError(w, e)
 		return
@@ -1716,6 +1717,18 @@ func settleExecutionRecords(ctx context.Context, tx pgx.Tx, tid, id, status stri
 	}
 	return settleAbandonedInvocations(ctx, tx, tid, id, status)
 }
+
+// stopsOthersRuns says whether a workspace role may stop a run someone else started: an owner's or an admin's. Anyone
+// else stops the runs they started (runNotYours), as a computer's task is stopped only by its own person
+// (computer_owner_required). A run with no person recorded (one from before runs kept who started them) is an owner's
+// or admin's to stop.
+func stopsOthersRuns(role string) bool { return roleLevel(role) >= roleLevel("admin") }
+
+// runNotYours refuses to stop another person's run, saying who may.
+func runNotYours(w http.ResponseWriter) {
+	fail(w, 403, "run_not_yours", "Only the person who started this run, or a workspace owner or admin, can stop it")
+}
+
 func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	tx, e := a.db.Begin(r.Context())
@@ -1724,17 +1737,18 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	role, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
-	var exists bool
-	e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM runs WHERE tenant_id=$1 AND id=$2)", tid, id).Scan(&exists)
+	var starter, status string
+	e = tx.QueryRow(r.Context(), "SELECT COALESCE(actor_id,''),status FROM runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tid, id).Scan(&starter, &status)
+	if noRows(e) {
+		fail(w, 404, "not_found", "Run not found")
+		return
+	}
 	if e != nil {
 		a.dbError(w, e)
-		return
-	}
-	if !exists {
-		fail(w, 404, "not_found", "Run not found")
 		return
 	}
 	var computerOtherOwner bool
@@ -1744,6 +1758,11 @@ func (a *App) cancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if computerOtherOwner {
 		fail(w, 403, "computer_owner_required", "Only the task owner can cancel this execution")
+		return
+	}
+	// Someone else's run going on is theirs to stop, or an owner's or admin's; one that has ended answers as it is.
+	if (status == "queued" || status == "running") && starter != currentUser(r).ID && !stopsOthersRuns(role) {
+		runNotYours(w)
 		return
 	}
 	tag, e := tx.Exec(r.Context(), "UPDATE runs SET status='cancelled',error='',updated_at=now() WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')", tid, id)

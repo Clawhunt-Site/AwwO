@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -191,20 +192,94 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 	} else {
 		_, e = tx.Exec(r.Context(), "UPDATE memberships SET role=$3 WHERE tenant_id=$1 AND user_id=$2", tid, id, role)
 	}
-	// A member who leaves the workspace, or may only read it now, loses their AwwO 本地版 keys for it (relay.go), and their
-	// canvas agent tokens there (canvas_agent_tokens.go).
+	// A person removed from the workspace, or no longer an owner or admin of it, loses their AwwO 本地版 keys for it
+	// (relay.go) and their canvas agent tokens there (canvas_agent_tokens.go): only owners and admins hold them.
 	var revoked []revokedCanvasToken
-	if e == nil && (role == "" || role == "reader") {
-		_, e = tx.Exec(r.Context(), revokeRelayKeysSQL, id, tid)
-		if e == nil {
-			revoked, e = revokeCanvasAgentTokens(r.Context(), tx, id, tid)
-		}
+	if e == nil && (role == "" || roleLevel(role) < roleLevel("admin")) {
+		revoked, e = revokeAdministeredAccess(r.Context(), tx, id, tid)
 	}
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
 	if e = audit(r.Context(), tx, currentUser(r).ID, tid, action, id); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	a.multiplayer.tokensRevoked(revoked)
+	w.WriteHeader(204)
+}
+
+// revokeAdministeredAccess revokes what only a workspace's owners and admins hold there, for a person ($uid) who is no
+// longer one of them: their AwwO 本地版 keys for it and their canvas agent tokens on its canvases (with their claims).
+func revokeAdministeredAccess(ctx context.Context, tx pgx.Tx, uid, tid string) ([]revokedCanvasToken, error) {
+	if _, err := tx.Exec(ctx, revokeRelayKeysSQL, uid, tid); err != nil {
+		return nil, err
+	}
+	return revokeCanvasAgentTokens(ctx, tx, uid, tid)
+}
+
+// leaveTenant lets a person leave a workspace they were invited to (POST …/leave): their membership goes, and with it what
+// they held there (revokeAdministeredAccess); their canvases, runs and changes stay the workspace's. An owner cannot
+// leave: a workspace keeps its owner, who pays for it. A suspended workspace can be left too.
+func (a *App) leaveTenant(w http.ResponseWriter, r *http.Request) {
+	tid, uid := r.PathValue("tenantId"), currentUser(r).ID
+	// Its route is a.auth's, not a.tenant's: a member of a suspended workspace may leave it too. Anyone not a member is
+	// answered not found, as for a workspace that does not exist (AWWO-LAW-001), before any row is locked.
+	var member bool
+	if e := a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM memberships WHERE tenant_id=$1 AND user_id=$2)", tid, uid).Scan(&member); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if !member {
+		fail(w, 404, "not_found", "Workspace not found")
+		return
+	}
+	tx, e := a.db.Begin(r.Context())
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	// The account's row first, as a password change (account_security.go) and a key's making (relay.go) take it before
+	// they revoke or count its keys: leaving revokes them too, and the audit row's key check waits on that row, so taking
+	// it last would deadlock with a password change. FOR NO KEY UPDATE lets other writes naming the account proceed.
+	// Then the workspace row, as every membership change takes it (lockTenantRow), then the membership, read again here
+	// (AWWO-LAW-003).
+	if _, e = tx.Exec(r.Context(), "SELECT 1 FROM users WHERE id=$1 FOR NO KEY UPDATE", uid); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if _, ok := a.lockTenantRow(w, r, tx, tid); !ok {
+		return
+	}
+	var role string
+	e = tx.QueryRow(r.Context(), "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2 FOR UPDATE", tid, uid).Scan(&role)
+	if noRows(e) {
+		fail(w, 404, "not_found", "Workspace not found")
+		return
+	}
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if role == "owner" {
+		fail(w, 409, "owner_cannot_leave", "A workspace's owner cannot leave it")
+		return
+	}
+	if _, e = tx.Exec(r.Context(), "DELETE FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, uid); e != nil {
+		a.dbError(w, e)
+		return
+	}
+	revoked, e := revokeAdministeredAccess(r.Context(), tx, uid, tid)
+	if e == nil {
+		e = audit(r.Context(), tx, uid, tid, "member.left", uid)
+	}
+	if e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -323,8 +398,9 @@ func (a *App) createCanvas(w http.ResponseWriter, r *http.Request) {
 		a.skillFailure(w, err)
 		return
 	}
+	// Its maker is kept: they, or a workspace owner or admin, delete it (deleteObject).
 	a.mutateObject(w, r, "canvas.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
-		return oneJSON(r.Context(), tx, "INSERT INTO canvases(id,tenant_id,name,document) VALUES($1,$2,$3,$4) RETURNING "+canvasJSON, id, r.PathValue("tenantId"), b.Name, b.Document)
+		return oneJSON(r.Context(), tx, "INSERT INTO canvases(id,tenant_id,name,document,created_by) VALUES($1,$2,$3,$4,$5) RETURNING "+canvasJSON, id, r.PathValue("tenantId"), b.Name, b.Document, currentUser(r).ID)
 	})
 }
 func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
@@ -574,20 +650,37 @@ func (a *App) deleteObject(w http.ResponseWriter, r *http.Request, table, action
 	defer tx.Rollback(r.Context())
 	tid, id := r.PathValue("tenantId"), r.PathValue("id")
 	var exists string
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	role, ok := a.mutationRole(w, r, tx, tid, 2)
+	if !ok {
 		return
 	}
-	filter := ""
+	filter, maker := "", ""
 	if table == "agents" {
 		filter = " AND NOT internal"
 	}
-	e = tx.QueryRow(r.Context(), "SELECT id FROM "+table+" WHERE tenant_id=$1 AND id=$2"+filter+" FOR UPDATE", tid, id).Scan(&exists)
+	if table == "canvases" {
+		maker = ",COALESCE(created_by,'')"
+	}
+	var madeBy string
+	row := tx.QueryRow(r.Context(), "SELECT id"+maker+" FROM "+table+" WHERE tenant_id=$1 AND id=$2"+filter+" FOR UPDATE", tid, id)
+	if table == "canvases" {
+		e = row.Scan(&exists, &madeBy)
+	} else {
+		e = row.Scan(&exists)
+	}
 	if noRows(e) {
 		fail(w, 404, "not_found", "Resource not found")
 		return
 	}
 	if e != nil {
 		a.dbError(w, e)
+		return
+	}
+	// A canvas is deleted by its maker or by a workspace owner or admin; one whose maker is unknown (made before 059 and
+	// never logged, or its maker's account deleted) by an owner or admin only. Checked here, against the role read inside
+	// this transaction (AWWO-LAW-003); the canvas is this workspace's, so the refusal tells nothing of another's.
+	if table == "canvases" && roleLevel(role) < roleLevel("admin") && madeBy != currentUser(r).ID {
+		fail(w, 403, "canvas_not_yours", "Only the person who made this canvas, or a workspace owner or admin, can delete it")
 		return
 	}
 	var busy bool

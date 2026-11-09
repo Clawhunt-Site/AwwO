@@ -15,7 +15,8 @@ import (
 // The cloud relay: AwwO 本地版 has this site make its model calls (owner 2026-10-24: 「本地连接云端服务器再发送到
 // bedrock」). A local install cannot reach every model itself (Anthropic's on Bedrock refuse streamed calls from some
 // countries, and this site's AWS credentials work from its own host alone), so it sends each call here with a key its
-// member made on 设置 → 本机版连接 for one of their workspaces. The call runs on this site's relay worker (a Pi worker
+// person made on 设置 → 本机版连接 for one of the workspaces they own or administer (since 2026-11-08: members spent the
+// owner's plan through them). The call runs on this site's relay worker (a Pi worker
 // whose catalog is the models offered: AWWO_RELAY_WORKER_URL) through its managed-call route, and is admitted, recorded
 // and charged as one of that workspace's model calls: its owner's plan and credits, or its free allowance and paid-route
 // allowances, as the owner chose (「计入线上账号」). Nothing of a call's words is kept: the ledger records its usage, as
@@ -125,8 +126,9 @@ func (a *App) listRelayKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": items, "limit": relayKeyLimit})
 }
 
-// createRelayKey makes a key for one of the member's workspaces, one it may run calls in (as a member, an admin or its
-// owner, while it is active). The key itself is in this answer alone.
+// createRelayKey makes a key for one of the account's workspaces, one it administers (as an admin or its owner, while it is
+// active): the workspace owner's plan pays for every call the key makes, so its members do not make keys (the owner's
+// 2026-11-08 decision for people sharing a workspace). The key itself is in this answer alone.
 func (a *App) createRelayKey(w http.ResponseWriter, r *http.Request) {
 	if !a.relayAvailable(w) {
 		return
@@ -161,6 +163,7 @@ func (a *App) createRelayKey(w http.ResponseWriter, r *http.Request) {
 	// account's keys (account_security.go), and a key made now would outlive it.
 	var session, member bool
 	var live int
+	var role string
 	token := ""
 	if cookie, missing := r.Cookie("awwo_session"); missing == nil {
 		token = cookie.Value
@@ -172,7 +175,8 @@ func (a *App) createRelayKey(w http.ResponseWriter, r *http.Request) {
 		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM auth_sessions WHERE token_hash=$3 AND user_id=$2 AND expires_at>now()),
 			EXISTS(SELECT 1 FROM memberships m JOIN tenants t ON t.id=m.tenant_id
 			WHERE m.tenant_id=$1 AND m.user_id=$2 AND m.role IN ('owner','admin','member') AND t.status='active'),
-			(SELECT count(*) FROM relay_keys WHERE user_id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp())`, b.TenantID, uid, tokenHash(token)).Scan(&session, &member, &live)
+			COALESCE((SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2),''),
+			(SELECT count(*) FROM relay_keys WHERE user_id=$2 AND revoked_at IS NULL AND expires_at>clock_timestamp())`, b.TenantID, uid, tokenHash(token)).Scan(&session, &member, &role, &live)
 	}
 	if e != nil {
 		a.dbError(w, e)
@@ -184,6 +188,10 @@ func (a *App) createRelayKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if !member {
 		fail(w, 404, "tenant_not_found", "Workspace not found")
+		return
+	}
+	if roleLevel(role) < roleLevel("admin") {
+		fail(w, 403, "forbidden", "Only a workspace's owners and admins make AwwO 本地版 keys for it")
 		return
 	}
 	if live >= relayKeyLimit {
@@ -294,7 +302,7 @@ func (a *App) relayAuthenticate(w http.ResponseWriter, r *http.Request) (relayCa
 		relayRateLimited(w)
 	case expired:
 		fail(w, 401, "relay_key_expired", "This connection key has expired: make a new one on 设置 → 本机版连接")
-	case roleLevel(role) < roleLevel("member"):
+	case roleLevel(role) < roleLevel("admin"):
 		fail(w, 403, "relay_key_forbidden", "This key's account can no longer run calls in its workspace")
 	case status != "active":
 		fail(w, 403, "tenant_suspended", "Workspace is suspended")

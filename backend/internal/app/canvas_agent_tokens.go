@@ -13,9 +13,10 @@ import (
 )
 
 // Canvas agent tokens (docs/awwo-canvas-live-collaboration.md, Tokens): the secret that lets one agent into one canvas,
-// made by a person who may edit it, shown once and kept only as its SHA-256. A token acts for its maker and never beyond
-// them (canvas_access.go); it ends when it expires, when it is revoked, when its maker leaves the workspace or becomes a
-// reader, and when its maker's password changes (as the relay keys).
+// made by an owner or admin of its workspace (since 2026-11-08: the owner's decision for people sharing a workspace, as
+// for the relay keys), shown once and kept only as its SHA-256. A token acts for its maker and never beyond them
+// (canvas_access.go); it ends when it expires, when it is revoked, when its maker leaves the workspace or is no longer
+// an owner or admin of it, and when its maker's password changes (as the relay keys).
 
 const (
 	maxCanvasAgentTokens     = 10
@@ -111,7 +112,7 @@ func (a *App) createCanvasAgentToken(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	tid, cid := r.PathValue("tenantId"), r.PathValue("id")
-	if _, ok := a.mutationRole(w, r, tx, tid, 2); !ok {
+	if _, ok := a.mutationRole(w, r, tx, tid, roleLevel("admin")); !ok {
 		return
 	}
 	var live int
