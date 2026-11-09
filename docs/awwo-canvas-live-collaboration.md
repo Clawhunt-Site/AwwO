@@ -702,10 +702,12 @@ CHANGELOG entry "treg for a person's own Agent".
   - A session taking its first deliverable form keeps its wires (`deliverableWires.ts`): each wire into its `context`
     becomes an input of the form of its own, named after its source and not required; each wire out of its `result`
     comes from the form's first output its reader can take. While the session has no result, the nodes it feeds keep
-    theirs: they could not have run on it. A wire the form cannot carry (a file a text input cannot read) goes, as does
-    every wire of an image, video, audio or 3D node, which the API still runs as a generation from its `context`,
-    `reference` and `audio` wires. What a reader made over a wire that goes goes with it, as with any wire removed; the
-    page says which wires went, and Undo brings them back.
+    theirs: they could not have run on it. A wire the form cannot carry (a file a text input cannot read) goes. An
+    image, video, audio or 3D node is offered no deliverable: the API runs it as a generation (unless a text Agent was
+    set up for it) from its `context`, `reference` and `audio` wires whatever form it holds, so a form would leave it
+    only ports that run reads nothing from; one given a form another way (its inputs, in the developer view) loses every
+    wire. What a reader made over a wire that goes goes with it, as with any wire removed; the page says which wires
+    went, and Undo brings them back.
 
 ## Release and fallback
 

@@ -45,6 +45,23 @@ describe('node deliverables', () => {
     expect(screen.queryByText('添加交付要求')).toBeNull();
   });
 
+  it('offers no deliverable on an image, video, 3D or audio node, which runs as a generation whatever form it holds', () => {
+    // A form would give the node its ports, from which that run reads nothing (the API's graphMediaNode).
+    for (const kind of ['image', 'video', 'model3d', 'audio'] as const) {
+      const { unmount } = render(<NodeDeliverables node={{ ...createSessionNode(kind, { x: 0, y: 0 }), id: kind }} readOnly={false} onUpdateNode={vi.fn()} />);
+      expect(screen.queryByText('添加交付要求')).toBeNull();
+      expect(screen.queryByText('编辑输出表单')).toBeNull();
+      unmount();
+    }
+    // One given a form before keeps its editor, to change or empty it, and is offered no other.
+    const update = vi.fn();
+    render(<NodeDeliverables node={{ ...createSessionNode('image', { x: 0, y: 0 }), id: 'picture', contract: { version: 1, inputs: [], outputs: [field()] } }}
+      readOnly={false} onUpdateNode={update} />);
+    expect(screen.queryByText('添加交付要求')).toBeNull();
+    fireEvent.click(screen.getByText('编辑输出表单'));
+    expect(screen.getByDisplayValue('尚未发布的草稿')).toBeVisible();
+  });
+
   it('previews a malformed legacy single-field result without changing its source', () => {
     const original = '{"result":"完成内容：\\n回答"可见顺序"。\\n第二步"}';
     render(<NodeDeliverables node={node({

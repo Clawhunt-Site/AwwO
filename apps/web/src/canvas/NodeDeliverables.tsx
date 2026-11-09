@@ -162,6 +162,11 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   const media = output && !contract.outputs.length && session && mediaKindOf(session.agentKind) ? parseMediaOutput(output.text) : null;
   // A malformed or legacy result remains visible as evidence, without manufacturing fields.
   const showRawOutput = output && !media && (!shown.outputs.length || Boolean(parsed?.errors.length) || !publishedFields.length);
+  // An image, video, 3D or audio node runs as a generation whatever form it holds (the API's graphMediaNode, unless a
+  // text Agent was set up for it), while a form gives it the form's ports, from which that run reads nothing: no
+  // deliverable is offered on it, and the output form's editor is there only for a form it holds already, to change or
+  // empty.
+  const generation = Boolean(session && mediaKindOf(session.agentKind));
 
   // Without onChangeOutputs each change builds on the ones made since this render (files landing in two fields at once),
   // until the render that draws the owner's answer (asked for with each change, as SessionTile's writeNode does).
@@ -210,7 +215,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
 
   return <div className="awwo-deliverables">
     {deliverableTitle && !result ? <h3 className="awwo-deliverables-title">{deliverableTitle}</h3> : null}
-    {session && !locked && !result && <details className="awwo-deliverables-editor">
+    {session && !generation && !locked && !result && <details className="awwo-deliverables-editor">
       <summary>{locale === 'zh' ? '添加交付要求' : 'Add a deliverable'}</summary>
       <label>{locale === 'zh' ? '交付形式' : 'Deliverable type'}
         <select value={deliveryProfile} onChange={event => setDeliveryProfile(event.target.value as DeliveryProfileId)}>
@@ -328,7 +333,7 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
       </div>}
     </>}
     {/* An assemble node delivers what its template makes; there is no hand publication to edit. */}
-    {session && !result && <details ref={editor} className="awwo-deliverables-editor" open={editorOpen || undefined}>
+    {session && !result && (!generation || session.contract) && <details ref={editor} className="awwo-deliverables-editor" open={editorOpen || undefined}>
       <summary>{t('deliverable.editForm')}</summary>
       <ContractFields fields={contract.outputs} label={t('deliverable.outputLabel')} readOnly={locked} onChange={updateFields} />
       <div className="awwo-output-publish">
