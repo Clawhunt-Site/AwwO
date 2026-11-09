@@ -83,6 +83,12 @@
   background: var(--bg-card, #ffffff);
 }
 
+/* A page that pads all of its buttons (the hosted app's settings: 8px 14px) must not pad this one: a 36px button
+   would keep 6px for its icon and squeeze it to a sliver. Two classes outrank such a page rule (one class and a tag). */
+.account-workspace-panel .account-icon-button {
+  padding: 0;
+}
+
 .account-primary-button {
   border-color: var(--account-accent);
   color: #ffffff;
