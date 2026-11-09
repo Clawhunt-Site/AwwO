@@ -181,6 +181,9 @@ button.saas-primary:not(:disabled):active, :is(.saas-login, .saas-dashboard, .sa
 .saas-action-menu .saas-preferences { padding: 2px 2px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--saas-hairline); }
 .saas-action-menu .saas-preferences button { min-height: 32px; border-radius: var(--saas-radius-sm); }
 .saas-action-menu .saas-danger-action, .saas-action-menu .saas-danger-action svg { color: var(--saas-danger); }
+/* An action held for this person (a member's Delete on a canvas someone else made), with the line under it saying who may. */
+.saas-action-menu > button:disabled, .saas-action-menu > button:disabled:hover { background: transparent; opacity: .5; cursor: not-allowed; }
+.saas-action-menu > .saas-action-menu-note { margin: -2px 0 2px; padding: 0 12px; color: var(--saas-muted); font-size: var(--saas-text-xs); line-height: 1.5; }
 
 .saas-table-wrap { border-color: var(--saas-border); border-radius: var(--saas-radius); background: var(--saas-card); box-shadow: var(--saas-shadow-xs); }
 .saas-table-wrap th, .saas-table-wrap td { padding: 12px 16px; border-bottom-color: var(--saas-hairline); }

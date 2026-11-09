@@ -9,6 +9,7 @@ import { useSaaSPreferences } from './preferences';
 import { CANVAS_SEARCH_MAX_LENGTH, readCanvasListView, saveCanvasListView } from './canvasListView';
 import { forgetCanvasStorage } from '../canvas/canvasStorage';
 import { forgetDeletedCanvasStorage } from './canvasStorageEviction';
+import { canvasDeleteHold, canvasDeleteHoldText } from './canvasDeletion';
 
 const updatedAt = (canvas: CanvasListItem) => Date.parse(canvas.updatedAt) || 0;
 /** Most recently touched first; canvases touched at the same time keep the server's order. */
@@ -108,11 +109,16 @@ function ScopedCanvasList({ tenant, onOpen, recentLimit, userId, onViewAll, grou
     const shape = canvasShape(drawn);
     const nodes = nodeCountOf(canvas, shape.boxes.length);
     const Name = grouped ? 'h4' : 'h3';
+    // A member deletes only the canvases they made; anyone may rename (canvasDeletion.ts).
+    const hold = canvasDeleteHold(tenant.role, userId, canvas);
+    const holdId = `${listId}-${canvas.id}-delete-hold`;
     return <article key={canvas.id} className="saas-canvas-card">
       <button className="saas-canvas-open" onClick={() => onOpen(canvas.id)}><CanvasThumbnail document={drawn} /><span className="saas-canvas-card-body"><Name>{canvas.name}</Name><span className="saas-canvas-card-meta"><time dateTime={canvas.updatedAt} title={new Date(canvas.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}>{t('更新于', 'Updated')} {relativeTime(canvas.updatedAt, locale)}</time><span>{nodes ? t(`${nodes} 个节点`, `${nodes} ${nodes === 1 ? 'node' : 'nodes'}`) : t('空白画布', 'Blank')}</span></span></span></button>
       {!readOnly && <div className="saas-canvas-actions"><ActionMenu label={t(`画布选项：${canvas.name}`, `Canvas options: ${canvas.name}`)}>{close => <>
         <button onClick={() => { close(); setEditing({ canvas, action: 'rename' }); }}>{t('改名', 'Rename')}</button>
-        <button className="saas-danger-action" onClick={() => { close(); setEditing({ canvas, action: 'delete' }); }}>{t('删除', 'Delete')}</button>
+        <button className="saas-danger-action" disabled={hold !== null} aria-describedby={hold ? holdId : undefined}
+          onClick={() => { close(); setEditing({ canvas, action: 'delete' }); }}>{t('删除', 'Delete')}</button>
+        {hold && <p id={holdId} className="saas-action-menu-note">{canvasDeleteHoldText(hold, t)}</p>}
       </>}</ActionMenu></div>}
     </article>;
   };

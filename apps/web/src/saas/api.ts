@@ -79,7 +79,10 @@ export type Identity = { user: { id: string; email: string; name: string; platfo
   edition?: 'hosted' | 'local';
   /** The hosted site offers AwwO 本地版 its models, with keys made in 设置 → 本机版连接 (settings/relay.tsx). */
   relay?: boolean };
-export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string };
+/** `createdBy`: the account that made the canvas, who may delete it besides a workspace's owners and admins (null when no
+ *  maker is recorded; absent from a server older than migration 059). See canvasDeletion.ts. */
+export type CanvasRecord = { id: string; tenantId: string; name: string; document: unknown; version: number; createdAt: string; updatedAt: string;
+  createdBy?: string | null };
 /** A canvas as a list shows it. The summary view (`?view=summary`) sends its outline, its nodes' boxes and its edges for
  * the card's thumbnail, instead of its document, so a list never downloads every node's output; an API without that
  * view sends the document. Never a canvas to edit or save: read the canvas itself for that. */
