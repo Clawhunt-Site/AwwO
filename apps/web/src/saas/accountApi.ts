@@ -4,8 +4,9 @@ import { api, SaaSApiError, saasErrorMessage, tenantPath, type Identity, type Te
 import { readInitialLocale } from '../locale';
 import { listPage } from './listPage';
 
-type Member = { userId: string; name: string; email: string; role: HumanCompanyRole };
-const profile = (user: { id: string; email: string; name: string }): AccountProfile => ({ ...user, image: null });
+/** A member as the members list gives them: their email only to the workspace's owners and admins (tenant_pagination.go). */
+type Member = { userId: string; name: string; email?: string; role: HumanCompanyRole };
+const profile = (user: { id: string; email?: string | null; name: string }): AccountProfile => ({ ...user, email: user.email ?? null, image: null });
 const canManage = (tenant?: Tenant) => tenant?.status === 'active' && ['owner', 'admin'].includes(tenant.role);
 const roles = (tenant?: Tenant): HumanCompanyRole[] => canManage(tenant) ? tenant?.role === 'owner' ? ['reader', 'member', 'admin'] : ['reader', 'member'] : [];
 
@@ -68,6 +69,8 @@ export function createSaaSAccountApi(onProfile: (name: string) => void): Account
     revokeInvite: async (id, inviteId) => { await request(tenantPath(id, `/invites/${encodeURIComponent(inviteId)}`), { method: 'DELETE' }); },
     addMember: async (id, input) => { await request(tenantPath(id, '/members'), { method: 'POST', body: JSON.stringify(input) }); },
     removeMember: async (id, userId) => { await request(tenantPath(id, `/members/${encodeURIComponent(userId)}`), { method: 'DELETE' }); },
+    // A person leaves a workspace they were invited to (resources.go leaveTenant); its owner cannot.
+    leaveWorkspace: async id => { await request(tenantPath(id, '/leave'), { method: 'POST' }); identityRequest = undefined; },
     updateMember: async (id, userId, input) => {
       if (!input.membershipRole || input.status !== undefined) throw new AccountApiError(400, 'Unsupported member update');
       const existing = displayedMembers.get(id)?.find(item => item.userId === userId);

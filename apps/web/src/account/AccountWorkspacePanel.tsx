@@ -39,6 +39,8 @@ export interface AccountWorkspacePanelProps {
   workspaceOnly?: boolean;
   /** When SaaS SSO owns profile changes, show current values without a local save action. */
   externalProfile?: { url?: string; plansUrl?: string };
+  /** After the person left a workspace (api.leaveWorkspace): where the page goes then. The workspace home by default. */
+  onLeftWorkspace?: (companyId: string) => void;
 }
 
 type Copy = ReturnType<typeof accountCopy>;
@@ -291,9 +293,11 @@ export function AccountWorkspacePanel({
   api = accountApi,
   workspaceOnly = false,
   externalProfile,
+  onLeftWorkspace = () => window.location.assign('/'),
 }: AccountWorkspacePanelProps) {
   const text = accountCopy(locale);
   const local = useLocalEdition();
+  const [leaving, setLeaving] = useState(false);
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapVersion, setBootstrapVersion] = useState(0);
@@ -362,7 +366,7 @@ export function AccountWorkspacePanel({
   const changePage = (kind: 'members' | 'invites', cursors: Array<string | null>) => {
     setPages(current => ({ companyId: activeCompanyId, members: current.companyId === activeCompanyId ? current.members : [null], invites: current.companyId === activeCompanyId ? current.invites : [null], [kind]: cursors }));
   };
-  useEffect(() => { setInvite(null); setInviteCopied(false); setRemoveTarget(null); setNewMemberEmail(''); setMemberBusyId(null); setInviteBusy(false); }, [activeCompanyId]);
+  useEffect(() => { setInvite(null); setInviteCopied(false); setRemoveTarget(null); setNewMemberEmail(''); setMemberBusyId(null); setInviteBusy(false); setLeaving(false); }, [activeCompanyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -503,6 +507,14 @@ export function AccountWorkspacePanel({
     try { await action(); if (activeScope.current !== scope) return; setNewMemberEmail(''); setRemoveTarget(null); changePage('members', [null]); setTeamVersion(value => value + 1); }
     catch (error) { if (activeScope.current === scope) setTeam(current => ({ ...current, error: messageFor(error) })); }
     finally { if (activeScope.current === scope) setMemberBusyId(null); }
+  }
+
+  // Leaving: on success the page goes on (onLeftWorkspace) and nothing of the workspace just left is read again (its
+  // members would answer not found); the buttons stay held until then.
+  async function leaveWorkspace(left: string) {
+    setMemberBusyId('$action'); setTeam(current => ({ ...current, error: null }));
+    try { await api.leaveWorkspace!(left); onLeftWorkspace(left); }
+    catch (error) { if (activeScope.current === left) { setTeam(current => ({ ...current, error: messageFor(error) })); setMemberBusyId(null); } }
   }
 
   async function revokeInvite(id: string) {
@@ -655,7 +667,8 @@ export function AccountWorkspacePanel({
                   <IdentityAvatar label={label} image={member.user?.image} />
                   <div className="account-member-identity">
                     <strong>{label}</strong>
-                    <span>{member.user?.email ?? member.principalId}</span>
+                    {/* A member sees other members' names only (their emails are for owners and admins): no id in their place. */}
+                    {(member.user ? member.user.email : member.principalId) ? <span>{member.user ? member.user.email : member.principalId}</span> : null}
                     {!member.removal?.canArchive && member.removal?.reason ? <small>{text.ownerProtected}</small> : null}
                   </div>
                   {editable ? (
@@ -711,6 +724,14 @@ export function AccountWorkspacePanel({
           }}><p>{locale === 'zh' ? '可直接添加已注册邮箱；新用户可使用下方邀请链接。' : 'Add a registered email directly, or invite a new user with a link below.'}</p><label><span>{text.email}</span><input type="email" aria-label={locale === 'zh' ? '成员邮箱' : 'Member email'} required value={newMemberEmail} onChange={event => setNewMemberEmail(event.target.value)} /></label>
             <label><span>{text.role}</span><select aria-label={locale === 'zh' ? '新成员角色' : 'New member role'} value={inviteRole} onChange={event => setInviteRole(event.target.value as HumanCompanyRole)}>{assignableRoles.map(role => <option key={role} value={role}>{roleLabel(role, locale)}</option>)}</select></label>
             <button type="submit" className="account-primary-button" disabled={memberBusyId !== null}>{locale === 'zh' ? '添加成员' : 'Add member'}</button></form>}
+          {/* Leaving a workspace one was invited to: its owner keeps it (resources.go leaveTenant). */}
+          {api.leaveWorkspace && !local && team.members?.access.currentUserRole && team.members.access.currentUserRole !== 'owner' && <div className="account-leave">
+            {leaving ? <div className="account-notice" role="alert">
+              <p>{locale === 'zh' ? `确认离开「${bootstrap.companies.find(company => company.id === activeCompanyId)?.name ?? ''}」？离开后你打不开其中任何画布，要重新受邀才能回来。` : `Leave “${bootstrap.companies.find(company => company.id === activeCompanyId)?.name ?? ''}”? You can no longer open any of its canvases, and you need a new invitation to come back.`}</p>
+              <button type="button" disabled={memberBusyId !== null} onClick={() => { if (activeCompanyId) void leaveWorkspace(activeCompanyId); }}>{locale === 'zh' ? '确认离开' : 'Leave the workspace'}</button>
+              <button type="button" disabled={memberBusyId !== null} onClick={() => setLeaving(false)}>{locale === 'zh' ? '取消' : 'Cancel'}</button>
+            </div> : <button type="button" className="account-secondary-button" disabled={memberBusyId !== null} onClick={() => setLeaving(true)}>{locale === 'zh' ? '离开这个工作区' : 'Leave this workspace'}</button>}
+          </div>}
           {removeTarget && <div className="account-notice" role="alert"><p>{locale === 'zh' ? `确认移除 ${identityLabel(removeTarget.user, removeTarget.principalId)}？` : `Remove ${identityLabel(removeTarget.user, removeTarget.principalId)}?`}</p><button type="button" disabled={memberBusyId !== null} onClick={() => void memberAction(() => api.removeMember!(activeCompanyId!, removeTarget.principalId))}>{locale === 'zh' ? '确认移除' : 'Confirm removal'}</button><button type="button" onClick={() => setRemoveTarget(null)}>{locale === 'zh' ? '取消' : 'Cancel'}</button></div>}
 
           {/* AwwO 本地版 takes no new accounts: an invitation would have no one to accept it. */}

@@ -62,7 +62,11 @@ export interface GraphRunSnapshot {
   collaboration?: GraphCollaborationSnapshot | null;
   /** How many times a node of this graph may run again by itself after a transient failure. */
   nodeRetries?: number;
+  /** Who started it (graph_runs.go); absent from a server older than people sharing a canvas. */
+  startedBy?: GraphRunStarter | null;
 }
+/** The person who started a run: they, or a workspace owner or admin, stop it (runs.go stopsOthersRuns). */
+export interface GraphRunStarter { id: string; name: string }
 /** A node of a run as the run list reads it: where it stands, not what it made, and its attempts once it has been retried
  *  (a retry takes it from running back to running, with a new run). */
 export interface GraphNodeSummary { nodeId: string; state: RunNodeState; attempts?: number }
@@ -80,6 +84,7 @@ export interface GraphRunSummary {
   createdAt: string;
   updatedAt?: string;
   error?: string;
+  startedBy?: GraphRunStarter | null;
 }
 
 /** A retry count the server sent, or nothing: retries run from 1 to 5. */

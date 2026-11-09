@@ -136,4 +136,6 @@ export interface AccountApi {
   addMember?(companyId: string, input: { email: string; role: HumanCompanyRole }): Promise<void>;
   removeMember?(companyId: string, userId: string): Promise<void>;
   revokeInvite?(companyId: string, inviteId: string): Promise<void>;
+  /** The signed-in person leaves the workspace (not its owner). */
+  leaveWorkspace?(companyId: string): Promise<void>;
 }

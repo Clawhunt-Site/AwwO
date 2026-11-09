@@ -10,7 +10,7 @@ import { SettingsCard, SettingsIntro } from './general';
  * 设置 → 本机版连接: the keys AwwO 本地版 makes its model calls on this site with (backend relay.go). A key belongs to
  * one of the person's workspaces, and each call it makes counts there as any of the workspace's calls does: its free
  * calls and paid-route allowances, or its owner's plan and credits. The key is shown once, when it is made; it works
- * for 90 days, until it is revoked, or while its person may run calls in its workspace.
+ * for 90 days, until it is revoked, or while its person owns or administers its workspace (the owner's plan pays).
  */
 export type RelayKey = {
   id: string; name: string; prefix: string; tenant: { id: string; name: string };
@@ -92,7 +92,9 @@ function KeyRow({ item, busy, onRevoke }: { item: RelayKey; busy: boolean; onRev
 
 export function RelaySettings({ identity }: { identity: Identity }) {
   const { t, locale } = useSaaSPreferences();
-  const usable = identity.tenants.filter(item => item.status === 'active' && item.role !== 'reader');
+  // The workspaces a key can be made for: those this person owns or administers, as the workspace owner's plan pays for
+  // the key's calls (relay.go createRelayKey).
+  const usable = identity.tenants.filter(item => item.status === 'active' && (item.role === 'owner' || item.role === 'admin'));
   const [keys, setKeys] = useState<{ items: RelayKey[]; limit: number } | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [error, setError] = useState<unknown>(null);
@@ -143,7 +145,7 @@ export function RelaySettings({ identity }: { identity: Identity }) {
         {/* Keyed by the key, so a second key made meanwhile is drawn afresh, never as the first one's "Copied". */}
         {created && <NewKey key={created} value={created} onDone={() => setCreated('')} />}
         {usable.length === 0
-          ? <p role="status">{t('你还没有可以运行任务的工作区：需要是某个正常工作区的成员、管理员或所有者。', 'You have no workspace you can run tasks in: you need to be a member, an admin or the owner of an active one.')}</p>
+          ? <p role="status">{t('你还没有可以生成密钥的工作区：需要是某个正常工作区的所有者或管理员，因为密钥的调用记在工作区所有者的套餐上。', 'You have no workspace you can make a key for: you need to be the owner or an admin of an active one, as the workspace owner’s plan pays for a key’s calls.')}</p>
           : <form className="saas-settings-form" onSubmit={create}>
             <label>{t('名称', 'Name')}
               <input value={name} maxLength={MAX_NAME} placeholder={t('AwwO 本地版', 'AwwO Local')} onChange={event => setName(event.target.value)} />

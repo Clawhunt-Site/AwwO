@@ -11,6 +11,7 @@ const tenants = [
   { id: 'team-r', name: 'Read only', status: 'active', role: 'reader' },
   { id: 'team-s', name: 'Paused', status: 'suspended', role: 'owner' },
   { id: 'team-m', name: 'Team M', status: 'active', role: 'member' },
+  { id: 'team-d', name: 'Team D', status: 'active', role: 'admin' },
 ];
 const hosted = { user: { id: 'user-1', name: 'Ada', email: 'ada@example.test', platformRole: 'user' }, tenants, authentication: 'clawhunt',
   clawhuntSiteURL: 'https://clawhunt.example', personalCredentialsRequired: false, relay: true } as unknown as Identity;
@@ -87,14 +88,15 @@ it('lists the keys with their state, makes one for a workspace the person can ru
   expect(within(rows[1]).getByText('已过期')).toBeTruthy();
   expect(within(rows[2]).getByText('已撤销')).toBeTruthy();
   expect(within(rows[2]).queryByRole('button', { name: '撤销' })).toBeNull();
-  // Only the workspaces the person can run calls in: not one they only read, not a suspended one.
+  // Only the workspaces the person owns or administers (the owner's plan pays for a key's calls): not one they are a
+  // member of or only read, not a suspended one.
   const select = screen.getByLabelText('计入的工作区') as HTMLSelectElement;
-  expect([...select.options].map(option => option.value)).toEqual(['team-a', 'team-m']);
-  fireEvent.change(select, { target: { value: 'team-m' } });
+  expect([...select.options].map(option => option.value)).toEqual(['team-a', 'team-d']);
+  fireEvent.change(select, { target: { value: 'team-d' } });
   fireEvent.change(screen.getByLabelText('名称'), { target: { value: '  Desk  ' } });
   fireEvent.click(screen.getByRole('button', { name: '生成密钥' }));
   const shown = await screen.findByText(KEY);
-  expect(JSON.parse(String((calls(fetch, 'POST')[0][1] as RequestInit).body))).toEqual({ name: 'Desk', tenantId: 'team-m' });
+  expect(JSON.parse(String((calls(fetch, 'POST')[0][1] as RequestInit).body))).toEqual({ name: 'Desk', tenantId: 'team-d' });
   expect(shown.closest('[role="status"]')?.textContent).toContain('只显示这一次');
   // The list is read again, with the new key in it, and never shows the key itself.
   await waitFor(() => expect(within(screen.getByRole('list', { name: '连接密钥' })).getAllByRole('listitem')).toHaveLength(4));
@@ -178,8 +180,8 @@ it('holds the button at the limit, and says what the API refused or could not be
 
 it('says so when the person has no workspace to count calls in', async () => {
   server({ items: [] });
-  open('relay', { ...hosted, tenants: [tenants[1], tenants[2]] } as unknown as Identity);
-  expect(await screen.findByText(/你还没有可以运行任务的工作区/)).toBeTruthy();
+  open('relay', { ...hosted, tenants: [tenants[1], tenants[2], tenants[3]] } as unknown as Identity);
+  expect(await screen.findByText(/你还没有可以生成密钥的工作区：需要是某个正常工作区的所有者或管理员/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '生成密钥' })).toBeNull();
 });
 

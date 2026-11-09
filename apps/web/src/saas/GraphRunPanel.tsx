@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, saasErrorMessage } from './api';
+import { api, saasErrorMessage, type Identity } from './api';
 import { runFailureText } from './canvasErrors';
 import { graphPath, graphIsActive, publishGraphRuns, readGraphRun, validGraphRunList, type GraphRunSnapshot, type GraphRunSummary, type GraphCollaborationPhase } from './graphRuns';
 import { TeamRunDetails } from './TeamRunDetails';
@@ -13,6 +13,32 @@ import './graph-runs.css';
 type GraphRunPanelProps = { tenantId: string; canvasId: string; readOnly?: boolean };
 export function GraphRunPanel(props: GraphRunPanelProps) {
   return <GraphRunPanelView key={JSON.stringify([props.tenantId, props.canvasId])} {...props} />;
+}
+
+/** Who reads the panel: their account and their role in the workspace (null until read). Read once, and only once it is
+ *  `needed` (a run going on names its starter): the panel's polls stay its own. */
+type Viewer = { id: string; role: string };
+function useViewer(tenantId: string, needed: boolean): Viewer | null {
+  const [viewer, setViewer] = useState<Viewer | null>(null);
+  const asked = needed || viewer !== null;
+  useEffect(() => {
+    if (!asked) return undefined;
+    const controller = new AbortController();
+    api<Identity>('/auth/me', { signal: controller.signal }).then(me => {
+      if (controller.signal.aborted || typeof me?.user?.id !== 'string' || !Array.isArray(me.tenants)) return;
+      setViewer({ id: me.user.id, role: me.tenants.find(item => item.id === tenantId)?.role ?? '' });
+    }, () => undefined);
+    return () => controller.abort();
+  }, [tenantId, asked]);
+  return viewer;
+}
+
+/** Whether a reader may stop a run, as the server judges it (runs.go stopsOthersRuns): its starter, or a workspace owner or
+ *  admin; a run with no starter recorded is an owner's or admin's. Unknown (a server older than that, or the reader not
+ *  read yet): the server decides. */
+export function mayStopRun(run: Pick<GraphRunSummary, 'startedBy'>, viewer: Viewer | null): boolean {
+  if (!viewer || run.startedBy === undefined) return true;
+  return viewer.role === 'owner' || viewer.role === 'admin' || (run.startedBy !== null && run.startedBy.id === viewer.id);
 }
 function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPanelProps) {
   const { locale, t } = useSaaSPreferences();
@@ -31,6 +57,7 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const listed = items.find(item => item.id === selected) || items[0];
+  const viewer = useViewer(tenantId, open && !readOnly && Boolean(listed && graphIsActive(listed) && listed.startedBy !== undefined));
   const current = listed && shown?.id === listed.id ? shown : undefined;
   const node = current?.nodes.find(item => item.nodeId === nodeId) || current?.nodes.find(item => item.runId) || current?.nodes[0];
   const active = items.some(graphIsActive);
@@ -93,12 +120,21 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
           {items.map(item => <option value={item.id} key={item.id}>{new Date(item.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')} · {status(item.status)}</option>)}
         </select></label>
         <div className="saas-graph-summary"><strong role="status">{status(listed.status)}</strong><span>{listed.nodes.filter(item => item.state === 'done').length}/{listed.scope?.length || listed.nodes.filter(item => item.state !== 'cached').length} {t('节点完成', 'nodes completed')}</span>
-          {!readOnly && graphIsActive(listed) && <button disabled={busy} onClick={async () => {
+          {listed.startedBy && <span>{listed.startedBy.name
+            ? t(`由 ${listed.startedBy.name} 启动`, `Started by ${listed.startedBy.name}`)
+            : t('由工作区里的一个人启动', 'Started by someone in the workspace')}</span>}
+          {!readOnly && graphIsActive(listed) && <button disabled={busy || !mayStopRun(listed, viewer)} aria-describedby={mayStopRun(listed, viewer) ? undefined : `${listed.id}-stop-why`} onClick={async () => {
             setBusy(true);
             try { await api(`${graphPath(tenantId, canvasId)}/${encodeURIComponent(listed.id)}/cancel`, { method: 'POST', body: '{}' }); setRefresh(refresh + 1); }
             catch (error) { setError(error); } finally { setBusy(false); }
           }}>{t('停止整个任务', 'Stop entire task')}</button>}
         </div>
+        {/* Who may stop it, as the server judges (runs.go stopsOthersRuns): its starter, or a workspace owner or admin. */}
+        {!readOnly && graphIsActive(listed) && !mayStopRun(listed, viewer) && <p id={`${listed.id}-stop-why`}>{listed.startedBy?.name
+          ? t(`只有 ${listed.startedBy.name} 或工作区的所有者、管理员能停止它。`, `Only ${listed.startedBy.name} or a workspace owner or admin can stop it.`)
+          : listed.startedBy
+            ? t('只有启动它的人或工作区的所有者、管理员能停止它。', 'Only the person who started it or a workspace owner or admin can stop it.')
+            : t('只有工作区的所有者或管理员能停止这次运行。', 'Only a workspace owner or admin can stop this run.')}</p>}
         <GraphEvidenceDownload tenantId={tenantId} canvasId={canvasId} graphId={listed.id} />
         {listed.error && <p role="alert">{status(listed.error)}</p>}
         {!current ? error === null && <p aria-live="polite">{t('正在读取这次运行…', 'Reading this run…')}</p> : <>
