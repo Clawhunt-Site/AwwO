@@ -81,6 +81,42 @@ describe('canvas run document recovery', () => {
     expect(recovered.nodes[1].lastOutput).not.toHaveProperty('partial');
   });
 
+  // A node's first result takes back what it feeds wherever it lands (invalidateOutputs), a cloud run's included: a
+  // review handed in before the build it reviews existed is not shown as done once the build is there (多人同屏).
+  it.each([
+    ['handed in', { text: 'Checklist by the agent', at: 5, source: 'manual' as const }],
+    ['copied with a case', { text: 'Recorded review', at: 5, source: 'case' as const }],
+  ])('takes back a result %s below a first result, and lays the run’s own results over', (_label, below) => {
+    const original = graph();
+    original.nodes = original.nodes.map(node => node.id === 'c' ? { ...node, lastOutput: below } : { ...node, lastOutput: null });
+    const recovered = applyRecoveredDocument(original, journal(original));
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['new-a', 'new-b', null]);
+  });
+
+  it('takes nothing back below a first run that failed: its evidence is no result', () => {
+    // b never ran and runs alone; it times out with half an answer; c holds what an agent handed in.
+    const original = graph();
+    original.nodes = original.nodes.map(node => node.id === 'c' ? { ...node, lastOutput: { text: 'Checklist by the agent', at: 5, source: 'manual' as const } }
+      : node.id === 'b' ? { ...node, lastOutput: null } : node);
+    const failed = { ...journal(original), scope: ['b'] };
+    failed.nodes = { b: { ...failed.nodes.b, state: 'failed', output: 'half an answer' } };
+    failed.inputFingerprint = runInputFingerprint(original, failed.scope);
+    const recovered = applyRecoveredDocument(original, failed);
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['old-a', 'half an answer', 'Checklist by the agent']);
+    expect(recovered.nodes[1].lastOutput).toMatchObject({ partial: true });
+  });
+
+  it('takes nothing back below a result the canvas already shows', () => {
+    const original = graph();
+    original.nodes = original.nodes.map(node => node.id === 'a' ? { ...node, lastOutput: { text: 'new-a', at: 100, source: 'run' as const } }
+      : node.id === 'b' ? { ...node, lastOutput: null } : node);
+    const saved = { ...journal(original), scope: ['a'] };
+    delete (saved.nodes as Record<string, unknown>).b;
+    saved.inputFingerprint = runInputFingerprint(original, ['a']);
+    const recovered = applyRecoveredDocument(original, saved);
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['new-a', null, 'old-c']);
+  });
+
   it('never auto-publishes a recovered manual reply', () => {
     const original = graph();
     const recovered = applyRecoveredDocument(original, journal(original, true));

@@ -677,6 +677,27 @@ CHANGELOG entry "treg for a person's own Agent".
   names and a claim's badge centred over it, the badge above the names; the host passes the icon's plate with `round`.
 - **Saving**: a page sends only what it changed (`PATCH`), at autosave's pace. 已同步 means the server holds every edit
   of this page.
+- **A person's steps keep the agents' work.** Only a person picks a node's model, often after the agents have handed
+  results in. A model picked for a node that never ran takes back nothing they made below it (found recording the
+  tutorial on 2026-11-07, when one did); the bounds are below:
+  - A change of a node's settings makes stale only its own result and, if it takes one back, what was made from it
+    (`invalidateOutputs`). A node that never ran made nothing, so a model, task or deliverable picked for it takes
+    nothing back below it. Two things still reach the nodes it feeds: an image, video, audio, 3D or edit node that made
+    nothing gives them a note naming it, so a change of its title or kind does; and a node whose result stays through
+    a change (a case recording, a hand-in) passes on a change of what they are given besides that text (its name and
+    kind, the fields they read out of it and which are required, a market Agent's framing). Its first result takes
+    back what it feeds when this page lays it down: on this device, or from a cloud run or a review loop
+    (`applyRecoveredDocument`). A failed run's evidence is no result, and a result an agent hands in arrives as the
+    agent's own change, which takes nothing back. A replaced result reaches everything below it, a wire into a node
+    takes the node's result back whatever its source (a wire changes what the node is given), and a form always has its
+    fields to give.
+  - A result handed in (`source: "manual"`, an agent's or a person's) on a node while it is not bound to an Agent (an
+    agent's new node is not, until it is set up or run) stays through the node's runtime, model, effort and the Agent it
+    is first bound to, which only say how AwwO would answer. What the node is asked (its title, task, kind,
+    deliverables or task frame), a wire into it, or a result it stood on changing still takes it back, as it takes back
+    a run's result, and Undo brings it back. On a node already bound, another runtime, model or effort opens a new
+    conversation, as it always has (its notice says a new Session opened), and so does another conversation opened on
+    any node: it starts with no result; the earlier conversation keeps the one it had, and only Undo publishes it again.
 
 ## Release and fallback
 

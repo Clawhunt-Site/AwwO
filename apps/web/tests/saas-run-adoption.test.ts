@@ -255,6 +255,18 @@ describe('how an ended run lands on a canvas', () => {
     expect(output(runLanding(ran, since, tenantId, none, touched)!.document, 'b')?.text).toBe('B by the run');
   });
 
+  it('takes a failed step’s evidence for no change of what lies after it: no reader is given it', () => {
+    // a → c, b on its own; the run covered a and b. a failed with half an answer; b is done; c holds a hand-in.
+    const edges = [wire('a', 'c')];
+    const ran: GraphRunSnapshot = { ...run(canvas({}, edges), ['a', 'b'], { a: 'failed' }),
+      nodes: [{ nodeId: 'a', state: 'failed', output: 'Half an answer', sessionId: 'session-a' }, { nodeId: 'b', state: 'done', output: 'B by the run', sessionId: 'session-b' }] };
+    const during = canvas({ c: byHand('C by hand', ENDED - 5_000) }, edges);
+    const landing = runLanding(ran, during, tenantId, none, none);
+    expect(output(landing!.document, 'b')?.text).toBe('B by the run');
+    expect(output(landing!.document, 'c')?.text).toBe('C by hand');
+    expect(landing?.ops.some(op => op.path[1] === 'c')).toBe(false);
+  });
+
   it('counts nothing missing on a finished collaboration whose proposals the canvas shows partial, as the run left them', () => {
     const collaboration = { goal: 'Ship', rounds: 1, synthesizerNodeId: 'b', maxModelCalls: 5, phase: 'synthesis' as const, round: 1, turns: [] };
     const done: GraphRunSnapshot = { ...run(canvas(), ['a', 'b']), status: 'completed', collaboration,
