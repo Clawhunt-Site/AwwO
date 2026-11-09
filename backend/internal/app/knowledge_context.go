@@ -89,16 +89,9 @@ func freezeKnowledgeContext(ctx context.Context, q querier, tid string, revision
 			return nil, knowledgeInvalid("Knowledge revision identities must be nonempty and unique")
 		}
 		seen[id] = true
-		var item knowledgeContextItem
-		e := q.QueryRow(ctx, `SELECT d.id,v.id,v.title,d.kind,v.content_hash,v.content,v.source_uri,v.provenance FROM knowledge_revisions v JOIN knowledge_documents d ON d.tenant_id=v.tenant_id AND d.id=v.document_id WHERE v.tenant_id=$1 AND v.id=$2`, tid, id).Scan(&item.DocumentID, &item.RevisionID, &item.Title, &item.Kind, &item.ContentHash, &item.Content, &item.SourceURI, &item.Provenance)
-		if noRows(e) {
-			return nil, knowledgeMissing()
-		}
+		item, e := readKnowledgeContextItem(ctx, q, tid, id)
 		if e != nil {
 			return nil, e
-		}
-		if tokenHash(item.Content) != item.ContentHash {
-			return nil, knowledgeInvalid("Knowledge content hash mismatch")
 		}
 		value.Items = append(value.Items, item)
 	}
@@ -111,6 +104,22 @@ func freezeKnowledgeContext(ctx context.Context, q querier, tid string, revision
 	}
 	value.Text = "Quoted knowledge evidence (immutable revisions, JSON):\n" + string(raw)
 	return value, nil
+}
+
+// readKnowledgeContextItem reads one revision as a task quotes it, its content checked against its hash.
+func readKnowledgeContextItem(ctx context.Context, q querier, tid, id string) (knowledgeContextItem, error) {
+	var item knowledgeContextItem
+	e := q.QueryRow(ctx, `SELECT d.id,v.id,v.title,d.kind,v.content_hash,v.content,v.source_uri,v.provenance FROM knowledge_revisions v JOIN knowledge_documents d ON d.tenant_id=v.tenant_id AND d.id=v.document_id WHERE v.tenant_id=$1 AND v.id=$2`, tid, id).Scan(&item.DocumentID, &item.RevisionID, &item.Title, &item.Kind, &item.ContentHash, &item.Content, &item.SourceURI, &item.Provenance)
+	if noRows(e) {
+		return item, knowledgeMissing()
+	}
+	if e != nil {
+		return item, e
+	}
+	if tokenHash(item.Content) != item.ContentHash {
+		return item, knowledgeInvalid("Knowledge content hash mismatch")
+	}
+	return item, nil
 }
 
 func knowledgeSystemPrompt(instructions string, value *knowledgeContext) string {

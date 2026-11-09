@@ -81,7 +81,7 @@ func TestPostgresWebImportCreatesAGovernedKnowledgeSource(t *testing.T) {
 	}
 	capabilities := h.request(t, owner, "GET", "/tenants/"+tid+"/capabilities", nil, 200)
 	reader := capabilities["webReader"].(map[string]any)
-	if reader["enabled"] != true || reader["usedToday"] != float64(3) || capabilities["render"].(map[string]any)["enabled"] != false {
+	if reader["enabled"] != true || reader["usedToday"] != float64(3) || reader["fit"] != true || capabilities["render"].(map[string]any)["enabled"] != false {
 		t.Fatal("capabilities wrong", capabilities)
 	}
 	h.a.cfg.WebReaderEnabled = false
@@ -141,5 +141,29 @@ func TestPostgresWebImportReadsAnOperationOnce(t *testing.T) {
 	var status, code string
 	if err = h.db.QueryRow(context.Background(), "SELECT status,error_code FROM web_reads WHERE id='left-started'").Scan(&status, &code); err != nil || status != "failed" || code != "interrupted" {
 		t.Fatal("a read left started must be settled as interrupted", status, code, err)
+	}
+}
+
+// An address that is read longer than a source keeps (percent-encoded past 2,000 bytes) is refused before it is read,
+// so the refusal counts nothing.
+func TestPostgresAnAddressReadLongerThanASourceKeepsIsRefusedBeforeItIsRead(t *testing.T) {
+	serveWebSite(t, http.NewServeMux())
+	h := newHarness(t, "http://127.0.0.1:1")
+	h.a.cfg.WebReaderEnabled, h.a.cfg.WebReadsPerDay, h.a.cfg.WebReadsSitePerDay = true, 5, 100
+	owner, tid, _ := h.register(t, "web-long-address@example.test")
+	path := "/tenants/" + tid + "/knowledge/sources/web"
+	head := "http://site.test/"
+	// 2,000 characters as written; the last one is percent-encoded into six bytes, so the address read is 2,005.
+	long := head + strings.Repeat("a", 2000-len(head)-1) + "é"
+	refused := h.request(t, owner, "POST", path, map[string]any{"url": long, "operationId": "web-long-address"}, 400)
+	if refused["error"].(map[string]any)["code"] != "invalid_url" {
+		t.Fatal("an address read past 2,000 bytes must be refused as invalid_url", refused)
+	}
+	var reads int
+	if err := h.db.QueryRow(context.Background(), "SELECT count(*) FROM web_reads WHERE tenant_id=$1", tid).Scan(&reads); err != nil || reads != 0 {
+		t.Fatal("a refused address must count no read", reads, err)
+	}
+	if webSourceURILimit != 2000 {
+		t.Fatal("the limit must be validKnowledgeText's", webSourceURILimit)
 	}
 }

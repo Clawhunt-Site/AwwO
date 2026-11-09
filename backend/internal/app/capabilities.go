@@ -29,7 +29,9 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		"skills":        map[string]any{"enabled": true, "maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes},
 		"skillRegistry": map[string]any{"enabled": a.cfg.SkillRegistryEnabled, "source": "skills.sh"},
 		"memory":        map[string]any{"enabled": true, "maxRunItems": maxMemoryRunItems, "maxRunBytes": maxMemoryRunBytes, "maxPerScope": maxMemoryPerScope},
-		"webReader":     map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": a.cfg.WebReadsPerDay, "usedToday": reads},
+		// fit: POST …/knowledge/sources/web cuts a page to its share of a task's quoted knowledge, which reading the pages
+		// a message names needs; a page meeting a server without it reads none of them (and sends it no fit).
+		"webReader": map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": a.cfg.WebReadsPerDay, "usedToday": reads, "fit": true},
 		"render": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": a.cfg.RendersPerDay, "usedToday": renders,
 			"limits": map[string]any{"maxSeconds": maxRenderSeconds, "maxFps": 60, "maxWidth": 1920, "maxHeight": 1920, "maxFrames": maxRenderFrames, "maxHtmlBytes": maxRenderHTMLBytes}},
 		// Edit nodes (edits.go) render on the same worker.
