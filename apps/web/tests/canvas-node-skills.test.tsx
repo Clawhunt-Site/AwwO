@@ -420,4 +420,53 @@ describe('rendering a page as a video', () => {
     render(<RenderVideoPanel nodeId="node-a" pageName="hero.html" capability={{ ...capability, usedToday: 20 }} documentOf={() => '<html></html>'} onClose={() => {}} />);
     expect(screen.getByRole('button', { name: '开始渲染' })).toBeDisabled();
   });
+
+  // What a finished video carries of its page's sound (a page that defines window.renderAudio), as the server keeps it.
+  const film = { codec: 'aac', sampleRate: 48000, channels: 2, seconds: 6, loudness: { integratedLUFS: -15.83, truePeakDb: -0.99, rangeLU: 2.1 }, pageSampleRate: 48000, peak: 0.58, faded: false };
+  /** The panel showing this page's finished render, whose result has `result` besides a video. */
+  async function finished(result: Record<string, unknown>, locale?: 'en') {
+    scope();
+    const page = '<!doctype html><html><body>film</body></html>';
+    const hash = createHash('sha256').update(page).digest('hex');
+    const done = job({ status: 'completed', htmlSha256: hash, result: { mode: 'contract', frames: 180, distinctFrames: 180, warnings: [], pageErrors: [],
+      outputs: [{ kind: 'mp4', artifactId: 'aVideoArtifact01', name: 'motion.mp4', contentType: 'video/mp4', size: 1000 }], ...result } });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('/renders?nodeId=') ? json({ items: [done] }) : json({}, 500)));
+    const panel = <RenderVideoPanel nodeId="node-a" pageName="film.html" capability={capability} documentOf={() => page} onClose={() => {}} />;
+    render(locale ? <LocaleProvider locale={locale}>{panel}</LocaleProvider> : panel);
+    await screen.findByText(locale ? 'Rendered 180 frames (render contract).' : '已渲染 180 帧（渲染约定）。');
+    return screen.getByRole('status');
+  }
+
+  it('says the video carries the page’s own sound, and how loud', async () => {
+    expect(within(await finished({ sound: film })).getByText('视频带有页面自己的声音，响度 −15.8 LUFS。')).toBeVisible();
+    cleanup();
+    expect(within(await finished({ sound: film }, 'en')).getByText('The video carries the page’s own sound, at −15.8 LUFS.')).toBeVisible();
+    cleanup();
+    expect(within(await finished({ sound: { ...film, loudness: null } }, 'en')).getByText('The video carries the page’s own sound.')).toBeVisible();
+  });
+
+  it('says a video is silent because its page’s sound could not be made, in the renderer’s words, and not again among the notes', async () => {
+    const words = 'window.renderAudio failed: the score is not written yet';
+    const result = await finished({ warnings: ['sound_failed', 'sound_page_errors:2'], soundReason: words }, 'en');
+    const said = within(result).getByText(words);
+    expect(said).toHaveAttribute('lang', 'en');
+    expect(said.parentElement).toHaveTextContent(`The page’s sound could not be made, so the video is silent. The renderer said: ${words}`);
+    expect(within(result).getByText('Notes from the renderer: The page reported 2 errors while its sound was made.')).toBeVisible();
+    expect(within(result).queryByText(/sound_failed/)).toBeNull();
+    cleanup();
+    // Without words kept, it still says why the video is silent.
+    expect(within(await finished({ warnings: ['sound_failed'] })).getByText('页面的声音没能生成，所以视频没有声音。')).toBeVisible();
+    cleanup();
+    // What a page threw in its own language is not marked as English.
+    const thrown = 'window.renderAudio failed: 乐谱还没写好';
+    expect(within(await finished({ warnings: ['sound_failed'], soundReason: thrown })).getByText(thrown)).not.toHaveAttribute('lang');
+  });
+
+  it('says a page’s silent sound left the video silent, and nothing of sound for a page without one', async () => {
+    const hushed = await finished({ warnings: ['sound_silent'] });
+    expect(within(hushed).getByText('页面的声音是一片静音，所以视频不带声音。')).toBeVisible();
+    expect(within(hushed).queryByText(/渲染器提示/)).toBeNull();
+    cleanup();
+    expect(within(await finished({})).queryByText(/声音/)).toBeNull();
+  });
 });

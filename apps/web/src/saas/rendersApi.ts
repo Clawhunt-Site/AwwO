@@ -3,11 +3,21 @@ import { api, SaaSApiError, tenantPath } from './api';
 /** Turning a delivered page into a video (renders.go): the server's render worker freezes the page at every frame. */
 export interface RenderParams { width: number; height: number; fps: number; seconds: number; loop: boolean; gif: boolean; contact: boolean }
 export interface RenderOutput { kind: 'mp4' | 'gif' | 'contact'; artifactId: string; name: string; contentType: string; size: number }
+/** What a video carries of its page's own sound (a page that defines window.renderAudio): AAC, levelled to −16 LUFS
+ *  as an edit's film is, and measured again from the video. `faded`: the render cut the page's sound and faded it out. */
+export interface RenderSound {
+  codec: 'aac'; sampleRate: number; channels: number; seconds: number; loudness: { integratedLUFS: number; truePeakDb: number; rangeLU: number };
+  pageSampleRate: number; peak: number; faded: boolean;
+}
 export interface RenderJob {
   id: string; canvasId: string; nodeId: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   params: RenderParams; htmlBytes: number; htmlSha256?: string; errorCode: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
   result: { mode?: 'contract' | 'virtual-time'; frames?: number; distinctFrames?: number; seconds?: number; fps?: number; width?: number; height?: number;
     elapsedMs?: number; warnings?: string[]; pageErrors?: string[]; outputs?: RenderOutput[];
+    /** A completed render's: the page's own sound in its video; absent when the video is silent. */
+    sound?: RenderSound;
+    /** A completed render's: why its page's sound was left out (warning sound_failed), in the renderer's own words, plain text. */
+    soundReason?: string;
     /** A failed render's: the renderer's own words for a page it refused, plain text (render_page_waits_on_timers). */
     reason?: string };
 }

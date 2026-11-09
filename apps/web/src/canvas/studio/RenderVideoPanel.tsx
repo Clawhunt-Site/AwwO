@@ -1,10 +1,11 @@
 // 渲染为视频 — turns the page the studio is showing into an MP4 (with a GIF and a contact sheet if asked) on the
 // server's render worker (renders.go, apps/render-worker). What is sent is the document the studio built and runs,
-// with the page's files inlined, so the video shows what is on screen. A cloud canvas only, for members of a
+// with the page's files inlined, so the video shows what is on screen; a page that defines window.renderAudio (every
+// Code film does) gives the video its own sound, and the panel says so. A cloud canvas only, for members of a
 // workspace whose server enables rendering; the finished files are the canvas's own media and download like any other.
 import { useEffect, useRef, useState } from 'react';
 import { Clapperboard, Download, Loader2, Square, X } from 'lucide-react';
-import { useCanvasI18n, type CanvasTextKey } from '../i18n';
+import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from '../i18n';
 import { SaaSApiError, saasErrorMessage } from '../../saas/api';
 import { currentSaaSCanvas, storedMediaUrl } from '../../saas/canvasBridge';
 import { readCapabilities, type WorkspaceCapabilities } from '../../saas/capabilitiesApi';
@@ -20,7 +21,11 @@ const ERROR_CODES = new Set(['render_busy', 'render_quota', 'render_unavailable'
   'render_invalid_output', 'render_rejected', 'render_page_waits_on_timers', 'cancelled', 'interrupted', 'media_storage_full', 'render_failed',
   'render_storage_failed', 'render_too_large', 'invalid_render']);
 const WARNING_CODES = new Set(['gif_too_large', 'gif_fps_reduced', 'contact_too_large', 'gif_failed', 'contact_failed', 'ready_timeout', 'fonts_timeout',
-  'timer_limit', 'network_blocked', 'page_errors', 'still_too_large', 'probe_frames']);
+  'timer_limit', 'network_blocked', 'page_errors', 'still_too_large', 'probe_frames', 'sound_clipped', 'sound_not_finite', 'sound_page_errors', 'sound_network_blocked']);
+/** Warnings a line of their own says (renderStatic, and the video's sound): left out of the renderer's notes. */
+const OWN_LINE = new Set(['static_page', 'sound_failed', 'sound_silent']);
+/** "−15.8" for a loudness in LUFS: one decimal at most, a true minus sign. */
+const lufs = (value: number) => { const rounded = Math.round(value * 10) / 10; return `${rounded < 0 ? '−' : ''}${Math.abs(rounded)}`; };
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 const active = (job: RenderJob | null) => job?.status === 'queued' || job?.status === 'running';
 /** SHA-256 of the page as the server hashes it (its UTF-8 bytes), to tell which page a stored render was made from. */
@@ -154,6 +159,8 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
   // They are English whatever the UI's language, so they are marked so inside the line that frames them.
   const reason = job?.status === 'failed' && typeof job.result.reason === 'string' ? job.result.reason : '';
   const [reasonBefore, reasonAfter = ''] = t('studio.renderReason').split('{reason}');
+  const notes = job?.status === 'completed' ? (job.result.warnings ?? []).filter(item => !OWN_LINE.has(item.split(':')[0])) : [];
+  const sound = soundLine(job, t);
 
   return <section className="awwo-studio-render" aria-label={t('studio.renderTitle')}>
     <header><Clapperboard size={15} aria-hidden="true" /><h3>{t('studio.renderTitle')}</h3>
@@ -185,9 +192,10 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
           <p>{t('studio.renderDone', { frames: jobFrames, mode })}</p>
           {job.result.distinctFrames !== undefined && job.result.distinctFrames <= 1 && <p className="awwo-studio-render-problem">{t('studio.renderStatic')}</p>}
           {videoUrl && <video src={videoUrl} controls playsInline loop={job.params.loop} preload="metadata" />}
+          {sound}
           <ul>{outputs.map(item => { const url = storedMediaUrl(item.artifactId); return url && <li key={item.artifactId}>
             <a href={url} download={`${pageName.replace(/\.[^.]+$/, '')}-${item.name}`}><Download size={13} aria-hidden="true" />{t('studio.renderDownload', { name: item.name })}</a></li>; })}</ul>
-          {!!job.result.warnings?.filter(item => item !== 'static_page').length && <p className="awwo-studio-render-note">{t('studio.renderWarnings', { notes: job.result.warnings.filter(item => item !== 'static_page').map(warning).join(' ') })}</p>}
+          {!!notes.length && <p className="awwo-studio-render-note">{t('studio.renderWarnings', { notes: notes.map(warning).join(' ') })}</p>}
           {!!job.result.pageErrors?.length && <p className="awwo-studio-render-note">{t('studio.renderPageErrors', { errors: job.result.pageErrors.join('; ') })}</p>}
         </>
         : <>
@@ -198,4 +206,27 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
         </>}
     </div>}
   </section>;
+}
+
+/** What a finished video carries of its page's sound: the page's own sound and its loudness; that it is silent because
+ *  the page's sound could not be made (with the renderer's English words, marked so) or was silence; or nothing at all
+ *  for a page without window.renderAudio, which stays silent as it always has. */
+function soundLine(job: RenderJob | null, t: CanvasTranslate) {
+  if (job?.status !== 'completed') return null;
+  const { sound, warnings = [] } = job.result;
+  if (sound && typeof sound === 'object') {
+    const level = sound.loudness?.integratedLUFS;
+    return <p className="awwo-studio-render-note">{typeof level === 'number' && Number.isFinite(level) ? t('studio.renderSound', { level: lufs(level) }) : t('studio.renderSoundPlain')}</p>;
+  }
+  if (warnings.includes('sound_failed')) {
+    const words = typeof job.result.soundReason === 'string' ? job.result.soundReason : '';
+    if (!words) return <p className="awwo-studio-render-note">{t('studio.renderSoundFailed')}</p>;
+    const [before, after = ''] = t('studio.renderSoundFailedReason').split('{reason}');
+    // The renderer's own words are English; words that carry other writing (what the page threw, in the page's own
+    // language) are left in the language around them. One inline run, as the refusal's reason is: the result's
+    // paragraphs are flex rows.
+    const english = /^[\x20-\x7e]*$/.test(words);
+    return <p className="awwo-studio-render-note"><span>{before}<span lang={english ? 'en' : undefined}>{words}</span>{after}</span></p>;
+  }
+  return warnings.includes('sound_silent') ? <p className="awwo-studio-render-note">{t('studio.renderSoundSilent')}</p> : null;
 }
