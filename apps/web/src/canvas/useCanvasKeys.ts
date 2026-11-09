@@ -80,7 +80,8 @@ export interface CanvasKeyHandlers {
   onDeleteSelection?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onEscape?: () => void;
+  /** Escape, from anywhere; the event says whether something else took it already (defaultPrevented). */
+  onEscape?: (event: KeyboardEvent) => void;
   onSaveWaypoint?: (slot: number) => void;
   onRecallWaypoint?: (slot: number) => void;
   /** ⌘G: the whole canvas drawn as one live icon, or as its cards again. */
@@ -115,7 +116,7 @@ export function useCanvasKeys(handlers: CanvasKeyHandlers, enabled = true): Canv
 
       if (e.key === 'Escape') {
         // Allowed from anywhere — including a composer — because it is the escape hatch.
-        h.onEscape?.();
+        h.onEscape?.(e);
         return;
       }
       if (typing) return; // every binding below would otherwise eat real typing

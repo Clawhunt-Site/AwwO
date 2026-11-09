@@ -10,8 +10,36 @@ export interface ChangeActor { kind: 'human' | 'agent' | 'awwo'; userId?: string
 /** One numbered step of a canvas: `version` is the canvas's version after it; `ops` are its effective ops. */
 export interface CanvasChange { version: number; actor: ChangeActor; label: string; ops: CanvasOp[]; at: string }
 
-/** A participant's state, as `POST …/live/presence` sends it. `cursor` is in world coordinates. */
-export interface LiveState { selection: string[]; focus: string | null; cursor: { x: number; y: number } | null; status: string | null }
+/** A participant's state, as `POST …/live/presence` sends it. Every place is in world coordinates. `preview` is an edit
+ *  in progress (never saved), `editing` the field a person is typing in, `viewport` the part of the board their screen
+ *  shows (a person who follows them sees it): an API from before the live lane sends none of the three. */
+export interface LiveState {
+  selection: string[];
+  focus: string | null;
+  cursor: { x: number; y: number } | null;
+  status: string | null;
+  preview?: LivePreview | null;
+  editing?: LiveEditing | null;
+  viewport?: LiveViewport | null;
+}
+
+/** An edit in progress: the nodes being dragged (where they are now), one node being resized (its box now), or a wire
+ *  being drawn from a node's port to the pointer. */
+export interface LivePreview {
+  nodes?: { id: string; x: number; y: number }[];
+  resize?: { id: string; x: number; y: number; w: number; h: number };
+  wire?: { node: string; port: string; side: 'input' | 'output'; from: { x: number; y: number }; to: { x: number; y: number } };
+}
+
+/** The field a person is typing in: its node, and the page's own name for the field (`title`, `persona`,
+ *  `form.<field id>.value`…). */
+export interface LiveEditing { node: string; field: string }
+
+/** The part of the board a page's screen shows. */
+export interface LiveViewport { x: number; y: number; w: number; h: number }
+
+/** What a page runs in, as it says (shown, never trusted). */
+export type LiveDevice = 'browser' | 'mac' | 'windows' | 'phone' | 'tablet';
 
 export interface LiveParticipant {
   /** A page's client id, 't_' + token id, or 'run_' + run id. */
@@ -26,6 +54,8 @@ export interface LiveParticipant {
   role?: 'reader' | 'member' | 'admin' | 'owner';
   /** kind awwo: the node's model. */
   model?: string;
+  /** A page's: what it runs in. */
+  device?: LiveDevice;
   state: LiveState;
   /** ISO time it came. */
   since: string;

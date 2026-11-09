@@ -160,14 +160,15 @@ describe('the words of 多人同屏', () => {
 });
 
 describe('the people bar', () => {
-  it('puts this page first, marked as you, with each one’s port and status in its title', () => {
+  it('puts this page first, marked as you, with each one’s devices (an Agent’s port) and status in its title', () => {
     const onOpen = vi.fn();
     const { container } = render(<MultiplayerBar participants={[ADA, CLAUDE, SELF]} selfId={SELF.id} status="live" onOpen={onOpen} />);
     const button = screen.getByRole('button', { name: '同屏 · 3 人在线' });
     const avatars = [...container.querySelectorAll<HTMLElement>('.awwo-multiplayer-avatar')];
     expect(avatars.map(avatar => avatar.dataset.participant)).toEqual([SELF.id, ADA.id, CLAUDE.id]);
     expect(avatars[0]).toHaveAttribute('data-self', 'true');
-    expect(avatars[0]).toHaveAttribute('title', 'Leon（你） · 网页');
+    // A person by the devices their pages run in (a page that says none is a browser's); an Agent by its port.
+    expect(avatars[0]).toHaveAttribute('title', 'Leon（你） · 浏览器');
     expect(avatars[0]).toHaveTextContent('L');
     expect(avatars[2]).toHaveAttribute('title', 'Claude Code · MCP · 正在写后端接口');
     expect(avatars[2]).toHaveTextContent('CC');
@@ -195,7 +196,7 @@ describe('the people bar', () => {
     const { rerender } = english(<MultiplayerBar participants={[SELF, ADA, CLAUDE]} selfId={SELF.id} status="live" onOpen={() => {}} open={false} />);
     const button = screen.getByRole('button', { name: 'Multiplayer · 3 here' });
     expect(button).toHaveAttribute('aria-expanded', 'false');
-    expect(button.querySelector('.awwo-multiplayer-avatar')).toHaveAttribute('title', 'Leon (you) · Web');
+    expect(button.querySelector('.awwo-multiplayer-avatar')).toHaveAttribute('title', 'Leon (you) · Browser');
     rerender(<LocaleProvider locale="en"><MultiplayerBar participants={[SELF]} selfId={SELF.id} status="connecting" onOpen={() => {}} /></LocaleProvider>);
     expect(screen.getByRole('button', { name: 'Multiplayer · connecting' })).toBeInTheDocument();
     rerender(<MultiplayerBar participants={[SELF]} selfId={SELF.id} status="offline" onOpen={() => {}} />);
@@ -259,7 +260,7 @@ describe('the 同屏 panel', () => {
     expect(row(container, SELF.id)).toHaveTextContent('Leon（你）');
 
     const ada = row(container, ADA.id);
-    expect(ada).toHaveTextContent('网页');
+    expect(ada).toHaveTextContent('浏览器');
     expect(ada).toHaveTextContent('选中了');
     fireEvent.click(within(ada).getByRole('button', { name: '后端接口' }));
     expect(props.onFocusNode).toHaveBeenLastCalledWith('n1');
@@ -1160,5 +1161,100 @@ describe('a change in one line', () => {
     const human = activityItem(change([], { actor: { kind: 'human', userId: 'user-0002', name: 'Ada Lovelace', clientId: ADA.id } }), nodeTitle, 'en', [ADA]);
     expect(human.color).toBe(ADA.color);
     expect(activityItem(change([]), nodeTitle, 'en', []).color).toBeUndefined();
+  });
+});
+
+describe('the live lane on the board and in the people bar', () => {
+  it('draws the wire someone is drawing, and names who is typing in a node', () => {
+    const editors = new Map([['n1', [{ participantId: ADA.id, name: 'Ada Lovelace', color: '#f59e0b', field: 'title' }]]]);
+    const wires = [{ participantId: ADA.id, name: 'Ada Lovelace', color: '#f59e0b', from: { x: 10, y: 20 }, to: { x: 210, y: 120 } }];
+    const { container } = render(<MultiplayerBoardLayer participants={[SELF, ADA]} selfId={SELF.id} claims={[]} flashes={[]} now={0} scale={1}
+      nodes={[{ id: 'n1', x: 0, y: 0, w: 200, h: 100 }]} wires={wires} editors={editors} />);
+    const wire = container.querySelector<SVGPathElement>(`.awwo-multiplayer-wire[data-participant="${ADA.id}"]`)!;
+    expect(wire.getAttribute('d')).toBe('M 10 20 C 110 20, 110 120, 210 120');
+    expect(wire.style.getPropertyValue('--mp-color')).toBe('#f59e0b');
+    const tag = container.querySelector(`.awwo-multiplayer-tag[data-participant="${ADA.id}"]`)!;
+    expect(tag).toHaveAttribute('data-editing');
+    expect(tag).toHaveTextContent('Ada Lovelace 正在编辑');
+  });
+
+  it('takes a card’s marks along with someone else’s move, and outlines the size a resize is taking', () => {
+    const moves = new Map([['n1', { x: 300, y: 40, color: '#f59e0b' }], ['n2', { x: 10, y: 20, w: 400, h: 300, color: '#f59e0b', resize: true as const }]]);
+    const ringed = { ...ADA, state: state({ selection: ['n1'] }) };
+    const { container } = render(<MultiplayerBoardLayer participants={[SELF, ringed]} selfId={SELF.id} claims={[]} flashes={[]} now={0} scale={1}
+      nodes={[{ id: 'n1', x: 0, y: 0, w: 200, h: 100 }, { id: 'n2', x: 10, y: 20, w: 200, h: 100 }]} moves={moves} />);
+    expect(container.querySelector<HTMLElement>('.awwo-multiplayer-mark[data-node="n1"]')!.style.transform).toBe('translate(300px, 40px)');
+    const outline = container.querySelector<SVGRectElement>('.awwo-multiplayer-resize[data-node="n2"]')!;
+    expect([outline.getAttribute('x'), outline.getAttribute('y'), outline.getAttribute('width'), outline.getAttribute('height')]).toEqual(['10', '20', '400', '300']);
+  });
+
+  it('carries marks by the offset the cards are carried by, an icon’s plate too, none where this page leaves a card alone', () => {
+    const moves = new Map([['n1', { x: 300, y: 40 }], ['icon', { x: 500, y: 0 }], ['open', { x: 900, y: 0 }],
+      ['n2', { x: 10, y: 20, w: 400, h: 300, resize: true as const }], ['chat', { x: 0, y: 400, w: 500, h: 500, resize: true as const }],
+      ['drag', { x: 0, y: 700 }]]);
+    const drawn = new Map([['n1', { x: 0, y: 0 }], ['icon', { x: 100, y: 0 }], ['open', { x: 0, y: 0 }], ['n2', { x: 10, y: 20 }],
+      ['chat', { x: 0, y: 400 }], ['drag', { x: 0, y: 600 }]]);
+    const carry = { drawn, excluded: (id: string) => id === 'open', ownSize: (id: string) => id !== 'chat' };
+    const ringed = { ...ADA, state: state({ selection: ['n1', 'icon', 'open'] }) };
+    const { container } = render(<MultiplayerBoardLayer participants={[SELF, ringed]} selfId={SELF.id} claims={[]} flashes={[]} now={0} scale={1}
+      nodes={[{ id: 'n1', x: 0, y: 0, w: 200, h: 100 }, { id: 'icon', x: 120, y: 10, w: 64, h: 64, round: true }, { id: 'open', x: 0, y: 0, w: 900, h: 700 },
+        { id: 'n2', x: 10, y: 20, w: 200, h: 100 }, { id: 'chat', x: 0, y: 400, w: 260, h: 128 }, { id: 'drag', x: 0, y: 600, w: 200, h: 100 }]}
+      moves={moves} carry={carry} />);
+    const at = (id: string) => container.querySelector<HTMLElement>(`.awwo-multiplayer-mark[data-node="${id}"]`)!.style.transform;
+    expect(at('n1')).toBe('translate(300px, 40px)');
+    // The icon's plate goes by the icon's own offset (400 to the right of where it is drawn).
+    expect(at('icon')).toBe('translate(520px, 10px)');
+    // The node this page has open stays where it is drawn, its marks with it.
+    expect(at('open')).toBe('translate(0px, 0px)');
+    // Only a resize is outlined, and only on a card drawn at its own size (not a conversation's compact card).
+    expect([...container.querySelectorAll('.awwo-multiplayer-resize')].map(rect => rect.getAttribute('data-node'))).toEqual(['n2']);
+  });
+
+  it('draws a pointer where it is first heard, then glides it after each place on the glide spring', () => {
+    let queue: FrameRequestCallback[] = [];
+    let time = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { queue.push(callback); return queue.length; });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    const step = (count: number) => { for (let i = 0; i < count; i += 1) { time += 16; const due = queue; queue = []; for (const callback of due) callback(time); } };
+    try {
+      const at = (x: number, y: number) => ({ ...ADA, state: state({ cursor: { x, y } }) });
+      const board = (participant: LiveParticipant) => <MultiplayerBoardLayer participants={[SELF, participant]} selfId={SELF.id} claims={[]} flashes={[]} now={0} scale={1} nodes={[]} />;
+      const { container, rerender } = render(board(at(100, 100)));
+      const cursor = () => container.querySelector<HTMLElement>('.awwo-multiplayer-cursor')!;
+      expect(cursor().style.transform).toBe('translate(100px, 100px)');
+      rerender(board(at(300, 100)));
+      step(1);
+      const first = Number(/translate\(([-\d.]+)px/.exec(cursor().style.transform)![1]);
+      expect(first).toBeGreaterThan(100);
+      expect(first).toBeLessThan(300);
+      // A re-render with nothing new leaves the glide where it is.
+      rerender(board(at(300, 100)));
+      expect(cursor().style.transform).toBe(`translate(${first}px, 100px)`);
+      step(150);
+      expect(cursor().style.transform).toBe('translate(300px, 100px)');
+      expect(queue).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('marks a viewer with an eye, and follows a person from their avatar, a second click stopping', () => {
+    const viewer = person('page-viewer-01', 'Grace', '#30a46c', 'user-viewer', { role: 'reader', device: 'tablet' });
+    const onFollow = vi.fn();
+    const { rerender, container } = render(<MultiplayerBar participants={[SELF, ADA, viewer, CLAUDE]} selfId={SELF.id} status="live" onOpen={() => {}} onFollow={onFollow} />);
+    const grace = container.querySelector<HTMLElement>(`.awwo-multiplayer-avatar[data-participant="${viewer.id}"]`)!;
+    expect(grace).toHaveAttribute('data-viewer', 'true');
+    expect(grace.querySelector('.awwo-multiplayer-viewer-mark')).not.toBeNull();
+    expect(grace).toHaveAttribute('title', 'Grace · 平板 · 可查看');
+    // An Agent is shown, not followed: it has no screen.
+    expect(screen.queryByRole('button', { name: '跟随 Claude Code' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '跟随 Ada Lovelace' }));
+    expect(onFollow).toHaveBeenLastCalledWith('u_user-0002');
+    rerender(<MultiplayerBar participants={[SELF, ADA, viewer, CLAUDE]} selfId={SELF.id} status="live" onOpen={() => {}} onFollow={onFollow} following="u_user-0002" />);
+    const stop = screen.getByRole('button', { name: '停止跟随（Esc）' });
+    expect(stop).toHaveAttribute('aria-pressed', 'true');
+    expect(stop).toHaveAttribute('data-following');
+    fireEvent.click(stop);
+    expect(onFollow).toHaveBeenLastCalledWith(null);
   });
 });

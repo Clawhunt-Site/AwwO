@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { CanvasSurface } from '../src/canvas/CanvasSurface';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
 import { readComposerDraft } from '../src/canvas/composerDrafts';
+import { readDrawerChoices } from '../src/canvas/drawerChoices';
 import { activeNodeThread, activeThreadId, createNodeThread, getNodeThreads, rebindNodeThread, selectNodeThread, sessionStoreKey, updateNodeDraft } from '../src/canvas/nodeThreads';
 import { loadRunJournal } from '../src/canvas/runJournal';
 import * as sessions from '../src/canvas/sessions';
@@ -159,21 +160,26 @@ it('retargets the open inspector to the selected Session before saving configura
   expect(getNodeThreads(saved)).toHaveLength(2);
 });
 
-it('persists delivery expansion as one idempotent view change without moving or resizing the node or adding undo steps', () => {
-  // The drawer takes a share of an opened node's width (2026-10-15): it no longer widens or moves the saved node.
+it('keeps delivery expansion as one idempotent choice on this device, never in the document, without moving or resizing the node or adding undo steps', () => {
+  // The drawer takes a share of an opened node's width (2026-10-15): it no longer widens or moves the saved node. It is
+  // the reader's own view of the node (drawerChoices.ts, 2026-11-09): kept on their device, never a change of the
+  // document everyone shares.
   const first = prepare();
   render(<CanvasSurface />);
   fireEvent.click(screen.getByText('Open delivery drawer'));
   fireEvent.click(screen.getByText('Open delivery drawer'));
   let saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved).toMatchObject({ deliverablesOpen: true, w: first.w, x: first.x });
+  expect(saved).toMatchObject({ w: first.w, x: first.x });
+  expect(saved).not.toHaveProperty('deliverablesOpen');
+  expect(readDrawerChoices().get(first.id)).toBe(true);
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
   cleanup(); render(<CanvasSurface />);
   fireEvent.click(screen.getByText('Open delivery drawer'));
-  saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved).toMatchObject({ deliverablesOpen: true, w: first.w, x: first.x });
+  expect(readDrawerChoices().get(first.id)).toBe(true);
   fireEvent.click(screen.getByText('Close delivery drawer'));
   saved = loadDocumentWithStatus().doc.nodes[0] as SessionNode;
-  expect(saved).toMatchObject({ deliverablesOpen: false, w: first.w, x: first.x });
+  expect(saved).toMatchObject({ w: first.w, x: first.x });
+  expect(saved).not.toHaveProperty('deliverablesOpen');
+  expect(readDrawerChoices().get(first.id)).toBe(false);
   expect(screen.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
 });

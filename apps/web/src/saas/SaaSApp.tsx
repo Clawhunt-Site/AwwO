@@ -412,6 +412,9 @@ function downloadDocument(value: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url);
 }
+/** A viewer's canvas (只读成员): live where the server offers 多人同屏, as an editor's is (others' changes arrive, their
+ *  pointers, selections and edits in progress are drawn, the people bar and the 同屏 panel are in the header, and this
+ *  person is on the canvas for everyone, marked 可查看), with nothing to edit, save or run. */
 function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Identity; tenant: Tenant; canvasId: string; controls: React.ReactNode }) {
   const { locale, t, uiMode } = useSaaSPreferences();
   // A viewer can review the canvas's tasks in the assistant but not start or answer one.
@@ -421,9 +424,17 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const runtimeReader = useRef(createCanvasRuntimeReader()).current;
+  // The live connection (useCanvasMultiplayer.tsx): this page's copy of the server's document moves with every change;
+  // a viewer sends no change, so nothing is ever out or held.
+  const current = useRef<CanvasRecord | null>(null);
+  const scopedStorage = useRef<ReturnType<typeof canvasStorage> | null>(null);
+  const [multiplayerOn, setMultiplayerOn] = useState(false);
+  const multiplayer = useCanvasMultiplayer({ tenantId: tenant.id, canvasId, userId: identity.user.id, enabled: Boolean(record) && multiplayerOn,
+    current, storage: scopedStorage, busy: () => false, confirmed: () => {} });
   useEffect(() => {
     const controller = new AbortController(); configureSaaSCanvasSave(null);
-    api<CanvasRecord>(tenantPath(tenant.id, '/canvases/' + encodeURIComponent(canvasId)), { signal: controller.signal }).then(value => {
+    Promise.all([api<CanvasRecord>(tenantPath(tenant.id, '/canvases/' + encodeURIComponent(canvasId)), { signal: controller.signal }),
+      readMultiplayer(tenant.id, controller.signal)]).then(([value, live]) => {
       if (controller.signal.aborted) return;
       // A separate viewer cache never overwrites the same user's editable draft after a role change. A reader's copy is
       // only the server's document handed to the surface, so it stays in this page's memory: it takes no browser storage.
@@ -432,21 +443,25 @@ function ReadOnlyCanvas({ identity, tenant, canvasId, controls }: { identity: Id
       // A reader-only account opens no editable canvas: move what earlier releases left from here too.
       void canvasStoreUsable().then(usable => { if (usable) sweepLegacyCanvasStorage(canvasStoragePrefix(identity.user.id, tenant.id, canvasId + '/read-only')); });
       canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(sanitizeDocument(value.document)));
-      configureSaaSCanvas({ tenant, canvasId }); setRecord(value);
+      scopedStorage.current = canvasStorage();
+      current.current = value;
+      configureSaaSCanvas({ tenant, canvasId }); setMultiplayerOn(live); setRecord(value);
     }).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
-    return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); };
+    return () => { controller.abort(); clearSaaSCanvas(); configureSaaSCanvasSave(null); current.current = null; scopedStorage.current = null; };
   }, [identity.user.id, tenant.id, canvasId]);
   if (!record) return error
     ? <main className="saas-dashboard"><CanvasPageHeader tenantId={tenant.id} controls={controls} /><p role="alert">{saasErrorMessage(error, locale)}</p></main>
     : <main className="saas-canvas-loading"><BootSurface canvas text={t('正在加载云端画布…', 'Loading cloud canvas…')} /><CanvasPageHeader tenantId={tenant.id} controls={controls} /></main>;
   return <div className="saas-canvas-shell">
-    <CanvasSurface readOnly storageMode="cloud" workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
+    <CanvasSurface readOnly storageMode="cloud" multiplayer={multiplayer.host} workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onOpenSettings={() => setSettingsOpen(true)}
       headerTitle={<CanvasTitle tenant={tenant} name={record.name} tone="readonly" status={<><Eye size={12} aria-hidden="true" /><span title={t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}>{t('只读', 'Read-only')}</span><span className="saas-visually-hidden">{t('只读视图：可浏览原画布及会话，不能编辑或运行。', 'Read-only: browse the original canvas and conversations. Editing and execution are disabled.')}</span></>} />}
       canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} readOnly extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} readOnly /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} readOnly /></>} />
         : <CanvasLessons tenantId={tenant.id} canvasId={canvasId} readOnly />}
       assistantExecution={executionHost(execution)}
       results={resultsView}
-      headerActions={<div className="saas-canvas-doc-actions"><UiModeSwitch variant="pill" />{uiMode === 'developer' && <><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></>}</div>} />
+      headerActions={<div className="saas-canvas-doc-actions"><MultiplayerHeader multiplayer={multiplayer} tenantId={tenant.id} canvasId={canvasId} canWrite={false} role={tenant.role} workspaceName={tenant.name}
+        nodeTitle={id => readableConfirmed(current.current?.document).nodes.find(node => node.id === id)?.title} onFocusNode={multiplayer.focusNode} />
+        <UiModeSwitch variant="pill" />{uiMode === 'developer' && <><GraphRunPanel tenantId={tenant.id} canvasId={canvasId} readOnly /><button type="button" className="saas-icon-action" aria-label={t('导出画布 JSON', 'Export canvas JSON')} title={t('导出画布 JSON', 'Export canvas JSON')} onClick={() => downloadDocument(current.current?.document ?? record.document, record.name + '.json')}><Download size={16} aria-hidden="true" /></button></>}</div>} />
     {settingsOpen && <RuntimeSettings tenantId={tenant.id} personalCredentialsRequired={identity.personalCredentialsRequired === true} onClose={() => setSettingsOpen(false)} />}
   </div>;
 }

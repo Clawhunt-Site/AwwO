@@ -1,4 +1,5 @@
 import type { CanvasEdge, CanvasNode } from './canvasDoc';
+import { drawerChoice } from './drawerChoices';
 import { mediaKindOf } from './mediaCatalog';
 
 export const COMPACT_SESSION_SIZE = { w: 260, h: 128 } as const;
@@ -19,13 +20,14 @@ export function openContentOf(node: CanvasNode): OpenContent {
   return node.lastOutput ? 'delivery' : 'chat';
 }
 
-/** Whether an opened node shows its delivery drawer: as the reader left it, or else once it has delivered in full,
+/** Whether an opened node shows its delivery drawer: as the reader left it (their choice on this device, drawerChoices.ts,
+ *  else the document's own default: a case copy opens it), or else once it has delivered in full,
  *  what it made being most of what opening it is for (owner request 2026-10-15) — never for a picture, clip or 3D
  *  model, which its own view shows, nor for a partial delivery a failure left, beside which the failure note must stay
  *  in view, nor where the drawer would cover the conversation instead of sitting beside it (`beside`). */
 export function deliverablesShown(node: CanvasNode, beside = true): boolean {
   if (node.kind !== 'session') return false;
-  return node.deliverablesOpen ?? (beside && Boolean(node.lastOutput && !node.lastOutput.partial) && !mediaKindOf(node.agentKind));
+  return drawerChoice(node.id) ?? node.deliverablesOpen ?? (beside && Boolean(node.lastOutput && !node.lastOutput.partial) && !mediaKindOf(node.agentKind));
 }
 /** The narrowest an opened node (its frame, the tile's outer width) holds its delivery drawer beside its conversation.
  *  The container query in awwo-node.css lays the drawer over the conversation while the workbench is under 740 px, and

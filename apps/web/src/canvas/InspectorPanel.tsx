@@ -49,6 +49,9 @@ import { automaticChoices } from './userChosenModels';
 import { MarketAgentBox } from './MarketAgentBox';
 import { useMarketModelLocked } from './MarketAgentChip';
 import { marketPublishable, marketUsable, withMarketAgent, withoutMarketAgent, type InspectorMarket } from './marketAgents';
+import type { LaneEditor } from './multiplayer/liveLane';
+import { participantColorStyle } from './multiplayer/MultiplayerBar';
+import { mt } from './multiplayer/multiplayerText';
 import {
   isMarketReference,
   type AgentKind,
@@ -70,6 +73,9 @@ const CONFLICT_FIELDS: ReadonlySet<string> = new Set(['title', 'agentKind', 'run
 
 export interface InspectorPanelProps {
   node: CanvasNode;
+  /** 多人同屏: who else is typing in a field of this node now (multiplayer/liveLane.ts). The panel says so, and marks the
+   *  field with their name and colour; it changes nothing they or this person write. */
+  editors?: readonly LaneEditor[];
   /** LIVE companies a bind can target ({id,name}). Empty → binding disabled with an honest hint. */
   liveCompanies: ReadonlyArray<{ id: string; name: string }>;
   /** Paperclip front-door base (canvasHire's same-origin/loopback guard applies). */
@@ -205,6 +211,7 @@ function followNode(team: NodeTeam, previous: SessionNode, runtime: string): Nod
 
 export function InspectorPanel({
   node,
+  editors,
   liveCompanies,
   apiBase,
   readJson,
@@ -543,9 +550,18 @@ export function InspectorPanel({
     await completeBinding({ node: bound, outcome: 'created', status: outcome.status });
   };
 
+  // Someone else typing in one of this node's fields: their name over the panel, and on the field (data-live-field
+  // names each field for the live lane, as this page's own typing is sent: CanvasSurface).
+  const someoneEditing = editors?.find(editor => editor.name.trim()) ?? editors?.[0];
+  const editorOf = (field: string) => editors?.find(editor => editor.field === field);
+  const fieldMark = (field: string) => {
+    const editor = editorOf(field);
+    return editor ? { 'data-editing': '', title: mt(locale, 'editing.field', { name: editor.name.trim() || mt(locale, 'someone') }), style: participantColorStyle(editor.color) } : {};
+  };
   return (
     <aside
       className="canvas-inspector"
+      data-live-node={node.id}
       role="dialog"
       aria-label={t('inspector.dialog', { title: node.title })}
       style={{ ...DOCK_STYLE, ...style }}
@@ -562,6 +578,9 @@ export function InspectorPanel({
 
       <div className="canvas-inspector-body">
         {readOnly ? <div className="canvas-inspector-hint" role="status">{readOnlyMessage || t('inspector.readOnly')}</div> : null}
+        {someoneEditing ? <div className="canvas-inspector-editing" role="status" style={participantColorStyle(someoneEditing.color)}>
+          {mt(locale, 'editing.inspector', { name: someoneEditing.name.trim() || mt(locale, 'someone') })}
+        </div> : null}
         {view.conflicts.length && !readOnly ? (
           <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.conflicts')}>
             {view.conflicts.map(key => {
@@ -582,6 +601,8 @@ export function InspectorPanel({
         <input
           id="cv-cfg-title"
           className="canvas-inspector-input"
+          data-live-field="title"
+          {...fieldMark('title')}
           aria-label={t('inspector.name')}
           value={draft.title}
           disabled={busy}
@@ -713,6 +734,8 @@ export function InspectorPanel({
             <textarea
               id="cv-cfg-persona"
               className="canvas-inspector-persona"
+              data-live-field="persona"
+              {...fieldMark('persona')}
               aria-label={t('inspector.persona')}
               aria-describedby="cv-cfg-persona-hint"
               rows={10}
@@ -813,6 +836,8 @@ export function InspectorPanel({
               <div key={field.id} className="canvas-inspector-field-row">
                 <input
                   className="canvas-inspector-input canvas-inspector-field-label"
+                  data-live-field={`form.${field.id}.label`}
+                  {...fieldMark(`form.${field.id}.label`)}
                   aria-label={t('inspector.fieldName', { count: index + 1 })}
                   placeholder={t('inspector.fieldNamePlaceholder')}
                   value={field.label}
@@ -821,6 +846,8 @@ export function InspectorPanel({
                 />
                 <input
                   className="canvas-inspector-input canvas-inspector-field-value"
+                  data-live-field={`form.${field.id}.value`}
+                  {...fieldMark(`form.${field.id}.value`)}
                   aria-label={t('inspector.fieldValue', { count: index + 1 })}
                   placeholder={t('inspector.valuePlaceholder')}
                   value={field.value}

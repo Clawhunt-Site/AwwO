@@ -7,10 +7,12 @@
 //     a background press disarms.
 //   - drag-to-wire: press a port and drag (>4px Manhattan) — a live preview bezier follows the
 //     cursor in WORLD space; release over a port of the opposite polarity connects.
-//   - leak-proof teardown: every move/up/cancel listener is attached to the PORT BUTTON itself
-//     with pointer capture (no window listeners to leak), `pointercancel` aborts the gesture, and
-//     the current teardown is held in a ref so component unmount tears it down too. A leaked
-//     listener would trail a ghost preview and could fire a phantom connection.
+//   - leak-proof teardown: the PORT BUTTON captures the pointer, and the gesture's move/up/cancel
+//     listeners are on the window, in its capture phase, filtered by that pointer: the button can
+//     go mid-gesture (its card culled as the board pans) and the lift must still end it. The one
+//     teardown removes all three, `pointercancel` aborts the gesture, and the current teardown is
+//     held in a ref so component unmount tears it down too. A leaked listener would trail a ghost
+//     preview and could fire a phantom connection.
 //   - `canConnect` (./ports) is the ONLY authority on validity — self-node, occupied input, type
 //     mismatch. This file never re-implements that judgement.
 //   - `onConnect` carries the SOURCE port's REAL dataType, read from `portsFor` at connect time.
@@ -36,6 +38,7 @@ import {
   portsFor,
 } from './ports';
 import type { ViewportState } from './viewport';
+import { cardPressAllowed, holdCardGesture } from './cardGesture';
 import { useCanvasI18n, type CanvasTextKey } from './i18n';
 
 export interface WireDrag {
@@ -96,6 +99,16 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
   // unmount can both tear it down — the gesture must never outlive the pointer or the component.
   const wireTeardownRef = useRef<(() => void) | null>(null);
   useEffect(() => () => wireTeardownRef.current?.(), []);
+  // The port a wire gesture was pressed on, from its press (before it draws anything): when that port goes (its node
+  // deleted, or the field it was removed, here or by someone else), the gesture ends, and with it the canvas's gesture
+  // it holds (cardGesture.ts): a wire has nowhere to start from a port that is gone.
+  const pressedPortRef = useRef<PortRef | null>(null);
+  useEffect(() => {
+    const pressed = pressedPortRef.current;
+    if (!pressed) return;
+    const node = nodes.find(candidate => candidate.id === pressed.nodeId);
+    if (!node || !portsFor(node).some(port => port.id === pressed.portId)) wireTeardownRef.current?.();
+  }, [nodes]);
 
   const clearPending = useCallback(() => setPendingPort(null), []);
   const cancelWiring = useCallback(() => { wireTeardownRef.current?.(); setWireDrag(null); setPendingPort(null); }, []);
@@ -131,6 +144,9 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
       // Never let a port press start a tile drag or a background pan.
       e.stopPropagation();
       if (!onConnectRef.current || e.button !== 0) return;
+      // While another pointer holds the canvas's gesture (cardGesture.ts), a port's press is a press: its click still
+      // arms or ends a wire, but it draws none by dragging.
+      if (!cardPressAllowed(e)) return;
       wireTeardownRef.current?.(); // never run two wire gestures at once
       const toWorld = (cx: number, cy: number) => {
         const vp = rootRef.current?.querySelector('.canvas-viewport');
@@ -138,8 +154,10 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
         const v = viewRef.current;
         return r ? { x: (cx - r.left - v.x) / v.scale, y: (cy - r.top - v.y) / v.scale } : { x: 0, y: 0 };
       };
-      // Capture the pointer to THIS port button so every subsequent move/up/cancel is delivered to
-      // it even if the cursor leaves the window — no window listeners to leak.
+      // Capture the pointer to THIS port button, so its moves and its lift reach the page even where the cursor leaves
+      // the window. They are heard on the window, though, in its capture phase (before any element can stop them),
+      // never on the button alone: the button can go while the gesture runs (its card culled as the board pans, or
+      // made an icon), and a gesture heard only there would never end. The teardown removes them.
       const btn = e.currentTarget as HTMLElement;
       btn.setPointerCapture?.(e.pointerId);
       let moved = false;
@@ -149,15 +167,22 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
       const teardown = () => {
         if (done) return;
         done = true;
-        btn.removeEventListener('pointermove', move);
-        btn.removeEventListener('pointerup', up);
-        btn.removeEventListener('pointercancel', cancel);
-        btn.releasePointerCapture?.(e.pointerId);
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', up, true);
+        window.removeEventListener('pointercancel', cancel, true);
         wireTeardownRef.current = null;
+        pressedPortRef.current = null;
         setWireDrag(null);
+        release();
+        // Last, and never throwing: a browser refuses to release the capture of a pointer that is no longer down (a
+        // lift the page never heard), and a gone button holds none.
+        try { if (btn.hasPointerCapture?.(e.pointerId)) btn.releasePointerCapture(e.pointerId); } catch { /* nothing held */ }
       };
       const move = (pe: PointerEvent) => {
         if (pe.pointerId !== e.pointerId) return;
+        // A mouse or a pen that moves with no button held was let go where this page never heard it: the gesture
+        // ended then, as a card's does, with no wire.
+        if ((pe.pointerType === 'mouse' || pe.pointerType === 'pen') && pe.buttons === 0) { teardown(); return; }
         if (Math.abs(pe.clientX - sx) + Math.abs(pe.clientY - sy) > 4) moved = true;
         if (moved) setWireDrag({ from: { nodeId, portId: p.id }, side: p.side, world: toWorld(pe.clientX, pe.clientY) });
       };
@@ -184,10 +209,12 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
         // canConnect is the authority (self-node, occupied input, type mismatch).
         if (canConnect(nodesRef.current, edgesRef.current, from, to)) emit(from, to);
       };
-      btn.addEventListener('pointermove', move);
-      btn.addEventListener('pointerup', up);
-      btn.addEventListener('pointercancel', cancel);
+      const release = holdCardGesture(e, teardown);
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+      window.addEventListener('pointercancel', cancel, true);
       wireTeardownRef.current = teardown;
+      pressedPortRef.current = { nodeId, portId: p.id };
     },
     [rootRef, emit],
   );

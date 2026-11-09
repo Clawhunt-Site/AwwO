@@ -32,6 +32,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { AlertCircle, ArrowDownToLine, BookOpen, Bot, Box, ChevronRight, Clapperboard, Clock, Code2, FileText, Image, Layers, Loader2, Maximize2, MessageSquare, Minimize2, MonitorPlay, MoreHorizontal, Music, PanelLeftClose, PanelLeftOpen, PanelRight, Play, Plus, Settings2, Square, SquareArrowOutUpRight, Trash2, Video, X } from 'lucide-react';
 import { displayText } from './displayCopy';
+import { cardPressAllowed, holdCardGesture, holdPassivePress, type CardPress } from './cardGesture';
 import { parseMediaOutput } from './mediaOutput';
 import { deliveryJsonSource } from './deliveryJson';
 import { mediaOutputCount, mediaOutputSummaryKey } from './MediaResult';
@@ -350,6 +351,9 @@ export interface SessionTileProps {
   sendUnavailableReason?: string;
   onFitNode?: (nodeId: string) => void;
   onToggleDeliverables?: (nodeId: string, open: boolean) => void;
+  /** This person's choice for the drawer on this device (drawerChoices.ts), which deliverablesShown reads: a new one
+   *  draws the tile again. */
+  drawerChoice?: boolean;
   /** Told while this tile holds its delivery drawer where the drawer's rule (deliverablesShown) closes it, as an edit of
    *  its form does once it has taken the delivery back (open, or closed during a run, which keeps its place), and when it
    *  no longer does: the canvas counts that drawer as shown for a close and keeps its room. */
@@ -680,19 +684,34 @@ export const SessionTile = memo(function SessionTile({
   // into an icon, say) never goes on moving or resizing its node from listeners left on the window.
   const gestureEnds = useRef(new Set<() => void>());
   useEffect(() => () => { for (const end of [...gestureEnds.current]) end(); }, []);
-  /** Listens on the window for one gesture until it ends (its pointer is lifted or cancelled, or the tile goes). */
-  const listenForGesture = useCallback((move: (event: PointerEvent) => void, up: () => void) => {
+  /** Listens on the window for one gesture until it ends (its pointer is lifted or cancelled, or the tile goes). The
+   *  gesture is its press's pointer's (`press`): another finger's moves and lifts are not its own. Held (`hold`), it is
+   *  the canvas's one gesture while it lasts (cardGesture.ts); not held, it is a passive press, ended too when its
+   *  pointer presses again. A mouse or a pen that moves with no button held was let go where this page never heard it:
+   *  the gesture ended then, as at a lift (a passive press's without its lift's selection), and that move moves
+   *  nothing. */
+  const listenForGesture = useCallback((move: (event: PointerEvent) => void, up: () => void, press: CardPress = {}, hold = true) => {
+    const pointerId = press.pointerId;
+    const own = (event: PointerEvent) => pointerId === undefined || event.pointerId === pointerId;
+    const moved = (event: PointerEvent) => {
+      if (!own(event)) return;
+      if ((event.pointerType === 'mouse' || event.pointerType === 'pen') && event.buttons === 0) { if (hold) finish(); else end(); return; }
+      move(event);
+    };
+    const lifted = (event: PointerEvent) => { if (own(event)) finish(); };
     const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('pointermove', moved);
+      window.removeEventListener('pointerup', lifted);
+      window.removeEventListener('pointercancel', lifted);
       gestureEnds.current.delete(end);
+      release();
     };
     const finish = () => { up(); end(); };
     gestureEnds.current.add(end);
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('pointercancel', finish);
+    const release = hold ? holdCardGesture(press, end) : holdPassivePress(press, end);
+    window.addEventListener('pointermove', moved);
+    window.addEventListener('pointerup', lifted);
+    window.addEventListener('pointercancel', lifted);
   }, []);
 
   // Drag-to-move. Window listeners (so the drag survives the pointer leaving the tile) and the
@@ -703,6 +722,8 @@ export const SessionTile = memo(function SessionTile({
       // reach the viewport would setPointerCapture there and retarget this tile's own
       // click/dblclick to the background in a real browser.
       if (e.button === 0) e.stopPropagation();
+      // While another pointer holds a card (cardGesture.ts), this press is a press (it selects), never a drag.
+      const mayDrag = e.button !== 0 || cardPressAllowed(e);
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
       onSelect?.(nodeId, additive ? 'additive' : 'preserve');
       if (viewOnlyRef.current || e.button !== 0 || !onMove) return;
@@ -721,11 +742,13 @@ export const SessionTile = memo(function SessionTile({
         if (!dragged && (Math.abs(pe.clientX - px) > DRAG_THRESHOLD_PX || Math.abs(pe.clientY - py) > DRAG_THRESHOLD_PX)) {
           dragged = true;
         }
-        if (viewOnlyRef.current || !dragged) return;
+        // Another pointer's press is a press: past the threshold it is no click (it selects nothing at its lift), but it
+        // moves nothing either.
+        if (viewOnlyRef.current || !dragged || !mayDrag) return;
         const s = scaleRef.current || 1;
         onMove(nodeId, ox + (pe.clientX - px) / s, oy + (pe.clientY - py) / s);
       };
-      listenForGesture(move, () => { if (!dragged && !additive) onSelect?.(nodeId, 'only'); });
+      listenForGesture(move, () => { if (!dragged && !additive) onSelect?.(nodeId, 'only'); }, e, mayDrag);
     },
     [nodeId, node.x, node.y, onMove, onSelect, listenForGesture],
   );
@@ -733,7 +756,7 @@ export const SessionTile = memo(function SessionTile({
   const onResizePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.stopPropagation();
-      if (viewOnlyRef.current || e.button !== 0 || !onResizeNode) return;
+      if (viewOnlyRef.current || e.button !== 0 || !onResizeNode || !cardPressAllowed(e)) return;
       const px = e.clientX;
       const py = e.clientY;
       const ow = frame.w;
@@ -747,7 +770,7 @@ export const SessionTile = memo(function SessionTile({
           Math.max(MIN_TILE_H, oh + (pe.clientY - py) / s),
         );
       };
-      listenForGesture(move, () => {});
+      listenForGesture(move, () => {}, e);
     },
     [nodeId, frame.w, frame.h, onResizeNode, listenForGesture],
   );
@@ -756,7 +779,7 @@ export const SessionTile = memo(function SessionTile({
   const onCardResizePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.stopPropagation();
-      if (e.button !== 0 || !onResizeCard) return;
+      if (e.button !== 0 || !onResizeCard || !cardPressAllowed(e)) return;
       e.preventDefault();
       const px = e.clientX;
       const py = e.clientY;
@@ -766,7 +789,7 @@ export const SessionTile = memo(function SessionTile({
         const s = scaleRef.current || 1;
         onResizeCard(nodeId, ow + (pe.clientX - px) / s, oh + (pe.clientY - py) / s);
       };
-      listenForGesture(move, () => {});
+      listenForGesture(move, () => {}, e);
     },
     [nodeId, frame.w, frame.h, onResizeCard, listenForGesture],
   );
@@ -1114,8 +1137,9 @@ export const SessionTile = memo(function SessionTile({
     // A close the canvas hears ends a hold (the canvas, counting the drawer as shown, records it unless it refuses edits
     // now); an open reaches it too, and once recorded the drawer's rule shows the drawer and the hold ends with that.
     if (!next) setDrawerHeld(false);
-    if (onToggleDeliverables) onToggleDeliverables(nodeId, next);
-    else writeNode(current => ({ ...current, deliverablesOpen: next }));
+    // The drawer is the reader's own (the canvas keeps the choice on their device, drawerChoices.ts): without a canvas to
+    // hear it, it stays this tile's, never a change of the document everyone shares.
+    onToggleDeliverables?.(nodeId, next);
   };
   // The guide's 编辑 buttons close the guide, which unmounts the button pressed, and open another part in the same
   // commit. So they cannot hand the focus over before closing as closeTemplate does — the control to receive it is

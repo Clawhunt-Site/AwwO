@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import type { UiLocale } from '../../locale';
 import { SaaSApiError, saasErrorMessage } from '../../saas/api';
 import { useCanvasI18n } from '../i18n';
+import type { LiveDevice } from './types';
 
 const EN = {
   'mode.name': 'Multiplayer',
@@ -238,6 +239,22 @@ const EN = {
   'share.canvasLinkHint': 'People in the workspace open this canvas with it.',
   'share.advanced': 'Advanced: connect an Agent or a program (MCP / API)',
   'share.advancedMembers': 'Only the workspace’s owner and admins connect Agents and programs to its canvases.',
+  // The live lane: what a person's pages run in, following them, viewers and editing marks.
+  'device.browser': 'Browser',
+  'device.mac': 'Mac',
+  'device.windows': 'Windows',
+  'device.phone': 'Phone',
+  'device.tablet': 'Tablet',
+  'devices.join': ', ',
+  'avatar.person': '{name} · {devices}',
+  'avatar.personViewer': '{name} · {devices} · can view',
+  'viewer.mark': 'Can view',
+  'follow.start': 'Follow {name}',
+  'follow.chip': 'Following {name}',
+  'follow.stop': 'Stop following (Esc)',
+  'editing.board': '{name} · editing',
+  'editing.field': '{name} is typing here',
+  'editing.inspector': '{name} is editing this component',
 } as const;
 
 export type MultiplayerTextKey = keyof typeof EN;
@@ -463,6 +480,21 @@ const ZH: Record<MultiplayerTextKey, string> = {
   'share.canvasLinkHint': '工作区里的人用这个链接直接打开这张画布。',
   'share.advanced': '高级：连接 Agent 或程序（MCP / API）',
   'share.advancedMembers': '只有工作区的所有者和管理员能把 Agent 或程序接进它的画布。',
+  'device.browser': '浏览器',
+  'device.mac': 'Mac',
+  'device.windows': 'Windows',
+  'device.phone': '手机',
+  'device.tablet': '平板',
+  'devices.join': '、',
+  'avatar.person': '{name} · {devices}',
+  'avatar.personViewer': '{name} · {devices} · 可查看',
+  'viewer.mark': '可查看',
+  'follow.start': '跟随 {name}',
+  'follow.chip': '正在跟随 {name}',
+  'follow.stop': '停止跟随（Esc）',
+  'editing.board': '{name} 正在编辑',
+  'editing.field': '{name} 正在这里输入',
+  'editing.inspector': '{name} 正在编辑这个组件',
 };
 
 /** Both tables, for the parity check (tests/saas-multiplayer-ui.test.tsx). */
@@ -495,6 +527,14 @@ export function portLabel(locale: UiLocale, port: string): string {
 
 export function kindLabel(locale: UiLocale, kind: string): string {
   return Object.hasOwn(KIND_KEYS, kind) ? mt(locale, KIND_KEYS[kind as LiveKind]) : kind;
+}
+
+const DEVICE_KEYS: Record<LiveDevice, MultiplayerTextKey> = { browser: 'device.browser', mac: 'device.mac', windows: 'device.windows', phone: 'device.phone', tablet: 'device.tablet' };
+
+/** A person's devices in one phrase: 浏览器、手机 / Browser, Phone. None: a browser. */
+export function devicesLabel(locale: UiLocale, devices: readonly LiveDevice[]): string {
+  const named = devices.filter(device => Object.hasOwn(DEVICE_KEYS, device)).map(device => mt(locale, DEVICE_KEYS[device]));
+  return named.length ? named.join(mt(locale, 'devices.join')) : mt(locale, 'device.browser');
 }
 
 /** At most this many characters of a node's title go into one line; the rest is an ellipsis. */

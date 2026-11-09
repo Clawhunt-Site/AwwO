@@ -1011,8 +1011,12 @@ describe('an opened node’s inputs', () => {
     // The message goes on the device (composerDrafts.ts), and the node keeps the file.
     ['a keystroke in the message box', () => fireEvent.change(screen.getByTestId('composer-input'), { target: { value: '先看参考资料' } }),
       (saved: SessionNode) => expect(readComposerDraft(saved.id, activeThreadId(saved))).toBe('先看参考资料')],
+    // The drawer is the reader's own (drawerChoices.ts): the tile shows it open, and the node never holds it.
     ['the delivery drawer opened', () => fireEvent.click(screen.getByRole('button', { name: '展开交付物' })),
-      (saved: SessionNode) => expect(saved.deliverablesOpen).toBe(true)],
+      (saved: SessionNode) => {
+        expect(saved.deliverablesOpen).not.toBe(true);
+        expect(screen.queryByRole('button', { name: '展开交付物' })).toBeNull();
+      }],
   ])('keep a file that lands in the inputs as %s before its render, where the canvas does not handle it itself', async (_what, act2, check) => {
     // TileHost passes neither onDraftChange nor onToggleDeliverables: the tile writes the draft and the drawer itself.
     render(<TileHost initial={templated()} />);

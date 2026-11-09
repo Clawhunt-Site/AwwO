@@ -36,7 +36,7 @@ import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionR
 //   * a superseded run's trailing callbacks can never repaint the current run's badges;
 //   * the corrupt-document backup and the empty-first-run rule are inherited from canvasDoc.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type DragEvent, type FocusEvent as ReactFocusEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type DragEvent, type FocusEvent as ReactFocusEvent } from 'react';
 import { Maximize2, Minus, Plus, Redo2, Undo2, Map, Play, LayoutGrid, MousePointer2, MonitorPlay, Orbit, Bot } from 'lucide-react';
 import { SelectionCollaboration, CollaborationFlow, CollaborationStatus } from './SelectionCollaboration';
 import { AgentWorkspace } from './AgentWorkspace';
@@ -114,7 +114,7 @@ import {
   type SessionNode,
   type Waypoint,
 } from './canvasDoc';
-import { boundsOfNodes, canConnect, edgeId, portsFor, reconcileEdges, type PortRef, type DataType } from './ports';
+import { boundsOfNodes, canConnect, edgeId, portAnchorWorld, portsFor, reconcileEdges, type PortRef, type DataType } from './ports';
 import { carryWiresIntoContract, droppedWiresNote } from './deliverableWires';
 import { nextIn, orderNodes, type WorldRect } from './spatialOrder';
 import { preflightGraphIssue, runGraph, serializeFormOutput, validateNodeOutput, type RunNodeStatus } from './runGraph';
@@ -159,6 +159,13 @@ import { loadIconView, nodeIconBox, saveIconView, withIconGeometry } from './nod
 import { NodeIconTile } from './NodeIconTile';
 import type { CanvasMultiplayerHost, CanvasMultiplayerRebase } from './multiplayer/host';
 import { withOthersEdits, withOthersPaths, type OthersPaths } from './multiplayer/history';
+import { participantColorStyle } from './multiplayer/MultiplayerBar';
+import type { LaneEditor, LaneFollowed } from './multiplayer/liveLane';
+import { LaneCards, LaneWires, laneOffset, useLaneMovedIds } from './multiplayer/LaneLayer';
+import { cardGestureHeld, endCardGesture, endPassivePress, onCardGesture, pressReplaces } from './cardGesture';
+import { glideArrived, glideToward, reducedMotion, TUNE, type Glide } from './multiplayer/laneMotion';
+import type { LivePreview, LiveViewport } from './multiplayer/types';
+import { heldDrawerChoices, installDrawerChoices, readDrawerChoices, uninstallDrawerChoices, withDrawerChoice, writeDrawerChoices, type DrawerChoices } from './drawerChoices';
 import { DeliverableStudio } from './studio/DeliverableStudio';
 import { studioGroups } from './studio/studioModel';
 import { DisplayLinks, DisplayTile, type DisplayChoice } from './DisplayTile';
@@ -529,6 +536,21 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
+// 多人同屏's live lane (multiplayer/liveLane.ts): an edit made with no pointer held (a key that moves a node) is shown
+// this long after its last step; a preview carries at most this many dragged nodes (the server's livePreviewNodesMax).
+const PREVIEW_IDLE_MS = 250;
+const PREVIEW_NODES_MAX = 50;
+const noLane = () => () => {};
+const NO_EDITORS: ReadonlyMap<string, readonly LaneEditor[]> = new globalThis.Map();
+const noEditors = () => NO_EDITORS;
+const noFollowed = (): LaneFollowed | null => null;
+
+/** The camera that shows a world rectangle on a stage: as large as fits, centred (the followed person's screen). */
+function viewOfWorldRect(rect: LiveViewport, stage: { w: number; h: number }): ViewportState {
+  const scale = Math.min(4, Math.max(0.05, Math.min(stage.w / rect.w, stage.h / rect.h)));
+  return { scale, x: stage.w / 2 - (rect.x + rect.w / 2) * scale, y: stage.h / 2 - (rect.y + rect.h / 2) * scale };
+}
+
 export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpected = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, readMessagePages, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
@@ -736,6 +758,27 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     return loadDocumentWithStatus().doc;
   });
   const nodes = doc.nodes;
+  // ---- this person's view of the canvas on this device (drawerChoices.ts) -----------------------------------------
+  // The delivery drawers they opened or closed: never in the document, read by every layout path (deliverablesShown),
+  // so it is installed as the canvas draws, before any card asks.
+  const [drawerChoices, setDrawerChoices] = useState<DrawerChoices>(() => readDrawerChoices());
+  const drawerOwner = useRef({}).current;
+  installDrawerChoices(drawerChoices, drawerOwner);
+  useEffect(() => () => uninstallDrawerChoices(drawerOwner), [drawerOwner]);
+  const chooseDrawer = useCallback((nodeId: string, open: boolean) => setDrawerChoices(previous => {
+    const next = withDrawerChoice(previous, nodeId, open);
+    if (next !== previous) writeDrawerChoices(next);
+    return next;
+  }), []);
+  // A deleted node's choice goes with it (never while the canvas is still empty: it may not have loaded yet).
+  useEffect(() => {
+    if (!nodes.length) return;
+    setDrawerChoices(previous => {
+      const next = heldDrawerChoices(previous, new Set(nodes.map(node => node.id)));
+      if (next !== previous) writeDrawerChoices(next);
+      return next;
+    });
+  }, [nodes]);
   // canvasPlanRevision hashes a document's whole canonical text, megabytes for a large canvas. It reads four fields, so
   // it is worked out once for each state of them, not on every render (each camera frame and each tile's update).
   const revisionCache = useRef<{ of: Pick<CanvasDocument, 'version' | 'nodes' | 'edges' | 'execution'>; revision: string } | null>(null);
@@ -1039,13 +1082,18 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     glide.current = null;
     glideTarget.current = null;
   }, []);
+  // Following someone (below) moves the camera by itself; any other move of it ends the following first.
+  const stopFollowingRef = useRef<() => void>(() => {});
   const moveCamera = useCallback((next: ViewportState | ((previous: ViewportState) => ViewportState)) => {
+    stopFollowingRef.current();
     stopGlide();
     setView(next);
   }, [stopGlide]);
   /** Glides to `target`; the world point `anchor` travels in a straight line on screen while the zoom
    *  changes geometrically (a node's corner, so the card stays under the eye). */
   const glideTo = useCallback((target: ViewportState, anchor: { x: number; y: number }) => {
+    // Every glide is a move of this person's camera (opening a node, 收敛, a step to a node): it ends following.
+    stopFollowingRef.current();
     stopGlide();
     const from = viewRef.current;
     const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -1207,8 +1255,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // lanes exist, below them): the host lands it (saas/runAdoption.ts) as a change no page of its own made.
   const canLandRef = useRef<(operationId: string, nodes: readonly string[]) => boolean>(() => false);
   const landedRef = useRef<(nodes: readonly string[], say: boolean) => void>(() => {});
+  // A viewer's page takes others' changes too (it is live): it makes none of its own.
   useEffect(() => {
-    if (!multiplayer || readOnly) return;
+    if (!multiplayer) return;
     multiplayer.connect({ rebase: multiplayerRebase, ready: () => !setupRequest.current && !outdatedObserver.current,
       focus: nodeId => focusNodeRef.current(nodeId), document: () => docRef.current,
       canLand: (operationId, nodes) => canLandRef.current(operationId, nodes), landed: (nodes, say = true) => landedRef.current(nodes, say) });
@@ -1217,6 +1266,122 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // This page's selection and open node, for everyone else on the canvas; its pointer goes from the board below.
   useEffect(() => { multiplayer?.presence({ selection }); }, [multiplayer, selection]);
   useEffect(() => { multiplayer?.presence({ focus: focusedId }); }, [multiplayer, focusedId]);
+  // ---- 多人同屏's live lane (multiplayer/liveLane.ts) -------------------------------------------------------------
+  // This page's edit in progress (a drag, a resize, a wire being drawn) goes in presence while it lasts, never into the
+  // document by this: the others draw it until the change itself arrives. It ends as its pointer is lifted.
+  const lane = multiplayer?.lane ?? null;
+  const ownPreview = useRef<{ kind: 'nodes' | 'resize' | 'wire'; ids: ReadonlySet<string> } | null>(null);
+  // Counts each change of the cards this page leaves alone (its own gesture's): the layers that carry others' moves
+  // (LaneCards, LaneWires, the board's marks) draw again by laneExcluded's new identity.
+  const [exclusion, setExclusion] = useState(0);
+  // This page's own drag or resize of cards (moveNode, resizeNode), from its first step to the pointer's lift: the card
+  // grabbed, and how far another person's edit carried each card it took over then (see carriedOffset).
+  const ownGesture = useRef<{ kind: 'nodes' | 'resize'; nodeId: string; ids: readonly string[]; offsets: ReadonlyMap<string, { dx: number; dy: number }> } | null>(null);
+  const previewEnd = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const endPreview = useCallback(() => {
+    clearTimeout(previewEnd.current);
+    if (!ownPreview.current) return;
+    ownPreview.current = null;
+    setExclusion(count => count + 1);
+    multiplayerRef.current?.presence({ preview: null });
+  }, []);
+  const sendPreview = useCallback((kind: 'nodes' | 'resize' | 'wire', preview: LivePreview, ids: readonly string[]) => {
+    if (!multiplayerRef.current || readOnlyRef.current) return;
+    stopFollowingRef.current();
+    const held = ownPreview.current;
+    const next = new Set(ids);
+    if (!held || held.kind !== kind || held.ids.size !== next.size || [...next].some(id => !held.ids.has(id))) setExclusion(count => count + 1);
+    ownPreview.current = { kind, ids: next };
+    multiplayerRef.current.presence({ preview });
+    clearTimeout(previewEnd.current);
+    // Made with no pointer holding the canvas's gesture (a key that moves a node): it ends with its last step.
+    if (!cardGestureHeld() && kind !== 'wire') previewEnd.current = setTimeout(endPreview, PREVIEW_IDLE_MS);
+  }, [endPreview]);
+  // The canvas's one gesture (cardGesture.ts) is the one record of who holds the canvas: when it is let go, however it
+  // ends (its lift, its cancel, a lift the page never heard, its card gone, a press that replaces it), this page's own
+  // edit in progress ends with it, for the others too (a wire's ends with its wire, below).
+  useEffect(() => onCardGesture(released => {
+    if (!released) return;
+    ownGesture.current = null;
+    if (ownPreview.current && ownPreview.current.kind !== 'wire') endPreview();
+  }), [endPreview]);
+  useEffect(() => {
+    // A press that replaces the held gesture (pressReplaces) ends it wherever it lands (the board, a control), as a
+    // card's own press does; and any press ends its pointer's last passive press, whose lift never came.
+    const down = (event: PointerEvent) => {
+      endPassivePress(event.pointerId);
+      if (event.button !== 0) return;
+      const current = cardGestureHeld();
+      if (current && pressReplaces(event, current)) endCardGesture();
+    };
+    window.addEventListener('pointerdown', down, true);
+    return () => {
+      window.removeEventListener('pointerdown', down, true);
+      endPreview();
+    };
+  }, [endPreview]);
+  /** Says where a move put the nodes it moved. */
+  const previewMoved = useCallback((ids: readonly string[]) => {
+    const byId = new globalThis.Map(docRef.current.nodes.map(node => [node.id, node]));
+    const moved = ids.map(id => byId.get(id)).filter((node): node is CanvasNode => Boolean(node)).slice(0, PREVIEW_NODES_MAX)
+      .map(node => ({ id: node.id, x: Math.round(node.x), y: Math.round(node.y) }));
+    // The preview carries the first PREVIEW_NODES_MAX; every node moved is this page's own while it lasts (laneExcluded).
+    if (moved.length) sendPreview('nodes', { nodes: moved }, ids);
+  }, [sendPreview]);
+  // The field this page types in (one marked data-live-field, in a node's or the Configure panel's data-live-node or a
+  // card's data-node-id), for the others' marks; none once the focus leaves the canvas's fields.
+  useEffect(() => {
+    if (!multiplayer) return;
+    const fieldOf = (target: EventTarget | null): { node: string; field: string } | null => {
+      if (!(target instanceof HTMLElement)) return null;
+      const typing = target instanceof HTMLTextAreaElement || target.isContentEditable
+        || (target instanceof HTMLInputElement && ['text', 'search', 'url', 'email', 'number', ''].includes(target.type));
+      if (!typing) return null;
+      const field = target.closest<HTMLElement>('[data-live-field]')?.dataset.liveField;
+      const node = target.closest<HTMLElement>('[data-live-node]')?.dataset.liveNode ?? target.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+      return field && node ? { node, field } : null;
+    };
+    // A field taken away with the focus in it (someone deleted it, the panel closed) sends no focusout in WebKit or
+    // Firefox: while a field is said, the focus is looked at again each second, and a field gone is said gone.
+    let said = false;
+    let check: ReturnType<typeof setInterval> | null = null;
+    const say = (editing: { node: string; field: string } | null) => {
+      said = editing !== null;
+      multiplayer.presence({ editing });
+      if (said && check === null) {
+        check = setInterval(() => { if (!fieldOf(document.activeElement)) say(null); }, 1000);
+      } else if (!said && check !== null) { clearInterval(check); check = null; }
+    };
+    const focusin = (event: FocusEvent) => { const editing = fieldOf(event.target); if (editing) say(editing); };
+    const focusout = (event: FocusEvent) => { if (fieldOf(event.target) && !fieldOf(event.relatedTarget)) say(null); };
+    document.addEventListener('focusin', focusin);
+    document.addEventListener('focusout', focusout);
+    return () => {
+      document.removeEventListener('focusin', focusin);
+      document.removeEventListener('focusout', focusout);
+      if (check !== null) clearInterval(check);
+      multiplayer.presence({ editing: null });
+    };
+  }, [multiplayer]);
+  // What the others are doing: who types where, the person followed (where their edits in progress put nodes is drawn by
+  // LaneCards and LaneWires, below, so it never draws the whole canvas again).
+  const laneEditors = useSyncExternalStore(lane ? lane.subscribe : noLane, lane ? lane.editors : noEditors, noEditors);
+  const followed = useSyncExternalStore(lane ? lane.subscribe : noLane, lane ? lane.followed : noFollowed, noFollowed);
+  // The part of the board this page's screen shows, for whoever follows this person. A page that follows someone says
+  // none: its screen is someone else's to steer, so two people who follow each other (or a ring of them) never chase
+  // each other's screens; whoever follows it holds still until it stops.
+  const followingSomeone = followed !== null;
+  useEffect(() => {
+    if (!multiplayer) return;
+    if (followingSomeone) { multiplayer.presence({ viewport: null }); return; }
+    if (!size.w || !size.h || !(view.scale > 0)) return;
+    const scale = view.scale;
+    multiplayer.presence({ viewport: { x: Math.round(-view.x / scale), y: Math.round(-view.y / scale), w: Math.round(size.w / scale), h: Math.round(size.h / scale) } });
+  }, [multiplayer, view, size.w, size.h, followingSomeone]);
+  // The cards others move stay drawn wherever their own place is: a drag may carry one into view (visibleIds).
+  const laneMoved = useLaneMovedIds(lane);
+  // A node another person let go of waits for its change: the lane looks again whenever the document changes.
+  useEffect(() => { lane?.documentChanged(); }, [lane, nodes]);
   // An opened node takes as much of the stage as its content can use (openFrameFor), less the Configure panel's room
   // while that floats beside it. Its frame and the camera that shows it come from one measurement of the stage
   // (openPlacement), so the card drawn is the card the camera framed, even before the stage's own measurement arrives;
@@ -1258,7 +1423,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     });
     drawnNodes.current = kept;
     return stable;
-  }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact, focusHeld]);
+  }, [nodes, focusedId, focusNarrow, cardFrames, focusedOpenFrame, focusExact, focusHeld, drawerChoices]);
   const renderNodeById = useMemo(() => new globalThis.Map(renderNodes.map(node => [node.id, node])), [renderNodes]);
   // The board as drawn with converged groups: their members' cards give way to one icon each, and the wires that cross
   // a group's edge end on its icon (convergedGroups.ts). renderNodes stays the geometry every card is drawn from.
@@ -2224,8 +2389,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
           const leadId = next.collaboration.synthesizerNodeId;
           const result = docRef.current.nodes.find(node => node.id === leadId);
           if (result?.kind === 'session' && result.lastOutput && !result.lastOutput.partial) {
-            const opened = { ...docRef.current, nodes: docRef.current.nodes.map(node => node.id === leadId ? { ...node, deliverablesOpen: true } : node) };
-            if (saveLocalDocument(opened)) { docRef.current = opened; setDoc(opened); }
+            // Its drawer opens for the person who ran it, on this device: everyone else's stays as they have it.
+            chooseDrawer(leadId, true);
             // Someone watching the 成果 view already sees the result there; it stays open.
             if (stageViewRef.current !== 'results') focusNode(leadId);
           }
@@ -3100,17 +3265,102 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     const shown = target?.kind === 'session' && deliverablesShown(target, drawerBeside(narrow, drawn?.w ?? target.w));
     if (!target || target.kind !== 'session' || hasStreamingConversation([target])
       || (open ? shown : shown || heldDrawersRef.current.has(nodeId)) === open) return;
-    patchDoc(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId && node.kind === 'session' ? { ...node, deliverablesOpen: open } : node) }),
-      { silent: true });
+    // This person's choice, on this device (drawerChoices.ts): the document, everyone's, keeps its own default.
+    chooseDrawer(nodeId, open);
     const fit = openFitRef.current;
     if (!fit || fit.id !== nodeId || !fit.frame) requestAnimationFrame(() => focusNodeRef.current(nodeId));
-  }, [canEditStructure, patchDoc]);
+  }, [canEditStructure, chooseDrawer]);
 
   // ---- 预览展示 windows (displayNodes.ts) ---------------------------------------------------------
   // Each change is an ordinary document edit (an undo step, a cloud save) beside the graph. It touches no node, so a
   // display moves, resizes and switches what it shows while components run, and no run ever sees it.
   const renderNodesRef = useRef(renderNodes);
   renderNodesRef.current = renderNodes;
+  // Following someone (their avatar in the people bar): this page's camera shows what their screen shows. It glides
+  // there on the language's glide spring (laneMotion.ts), the world point at the stage's middle and the zoom (in its
+  // logarithm, so it changes geometrically) each keeping their speed as the followed screen moves; reduced motion cuts
+  // to the followed screen once it has rested. Any camera move of this person's own, a drag of their own, Esc, or
+  // opening a node stops it.
+  const followFrame = useRef<{ target: ViewportState; frame: number | null; last: number; cx: Glide; cy: Glide; zoom: Glide } | null>(null);
+  const followCut = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stopFollowFrame = useCallback(() => {
+    clearTimeout(followCut.current);
+    const running = followFrame.current;
+    if (running?.frame != null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(running.frame);
+    followFrame.current = null;
+  }, []);
+  const followRect = followed?.viewport ?? null;
+  useEffect(() => {
+    if (!followRect || !size.w || !size.h) { stopFollowFrame(); return undefined; }
+    const target = viewOfWorldRect(followRect, size);
+    stopGlide();
+    if (reducedMotion() || typeof requestAnimationFrame !== 'function') {
+      // One cut per place: the board never steps eight times a second after a moving screen.
+      stopFollowFrame();
+      followCut.current = setTimeout(() => { viewRef.current = target; setView(target); }, TUNE.restMs);
+      return undefined;
+    }
+    // A glide under way takes the new place up with the speed it has; one that came to rest starts again from there.
+    const running = followFrame.current;
+    if (running && running.frame !== null) { running.target = target; return undefined; }
+    const stage = sizeRef.current;
+    const from = viewRef.current;
+    const state = { target, frame: null as number | null, last: 0, cx: { at: (stage.w / 2 - from.x) / from.scale, speed: 0 },
+      cy: { at: (stage.h / 2 - from.y) / from.scale, speed: 0 }, zoom: { at: Math.log(from.scale), speed: 0 } };
+    followFrame.current = state;
+    const step = (time: number) => {
+      if (followFrame.current !== state) return;
+      // Reduced motion asked for while it glides (MOTION.md: scripts follow the query): no more movement, the screen cut to.
+      if (reducedMotion()) { viewRef.current = state.target; setView(state.target); state.frame = null; return; }
+      const dt = state.last ? Math.max(0, time - state.last) / 1000 : 1 / 60;
+      state.last = time;
+      const to = state.target;
+      const box = sizeRef.current;
+      const tx = (box.w / 2 - to.x) / to.scale, ty = (box.h / 2 - to.y) / to.scale, tz = Math.log(to.scale);
+      state.cx = glideToward(state.cx, tx, dt);
+      state.cy = glideToward(state.cy, ty, dt);
+      state.zoom = glideToward(state.zoom, tz, dt);
+      const scale = Math.exp(state.zoom.at);
+      // Within half a pixel on screen, and a thousandth of the zoom, it is there.
+      const arrived = glideArrived(state.cx, tx, 0.5 / scale) && glideArrived(state.cy, ty, 0.5 / scale) && glideArrived(state.zoom, tz, 0.001);
+      const next = arrived ? to : { scale, x: box.w / 2 - state.cx.at * scale, y: box.h / 2 - state.cy.at * scale };
+      viewRef.current = next;
+      setView(next);
+      state.frame = arrived ? null : requestAnimationFrame(step);
+    };
+    state.frame = requestAnimationFrame(step);
+    return undefined;
+  }, [followRect, size, stopGlide, stopFollowFrame]);
+  useEffect(() => stopFollowFrame, [stopFollowFrame]);
+  const stopFollowing = useCallback(() => {
+    if (!lane?.following()) return;
+    lane.follow(null);
+    stopFollowFrame();
+  }, [lane, stopFollowFrame]);
+  stopFollowingRef.current = stopFollowing;
+  // The cards others move, carried to their place, but never one this page moves itself or has open.
+  // A new identity whenever what it says changes (exclusion counts this page's own gestures; focusedId the node open),
+  // so every layer that reads it draws again together.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const laneExcluded = useCallback((id: string) => Boolean(ownPreview.current?.ids.has(id)) || id === focusedRef.current, [exclusion, focusedId]);
+  // The board's marks go as the cards go (MultiplayerBoardLayer.tsx): by the same places, left alone where the cards
+  // are, and a resize outlined only on a card drawn at its own size (a conversation's card is compact, an icon round).
+  const laneCarry = useMemo(() => ({ drawn: renderNodeById, excluded: laneExcluded,
+    ownSize: (id: string) => { const node = renderNodeById.get(id); return !!node && node.kind !== 'session' && !iconIds.has(id); } }),
+  [renderNodeById, laneExcluded, iconIds]);
+  // A gesture of this page's own on a card someone else's edit carries goes on from where the card is drawn, so it
+  // never leaps under the hand: its first step makes the carry the card's own place (moveNode, resizeNode).
+  const carriedOffset = useCallback((id: string) => {
+    if (id === focusedRef.current) return null;
+    const move = multiplayerRef.current?.lane?.moves().get(id);
+    return move ? laneOffset(move, renderNodesRef.current.find(node => node.id === id)) : null;
+  }, []);
+  // Opening or closing a node of this person's own takes the camera too.
+  const followedFocus = useRef(focusedId);
+  useEffect(() => {
+    if (followedFocus.current !== focusedId) stopFollowing();
+    followedFocus.current = focusedId;
+  }, [focusedId, stopFollowing]);
   const patchDisplays = useCallback((label: string, update: (list: ReadonlyArray<DisplayNode>) => ReadonlyArray<DisplayNode>) => {
     patchDoc(prev => {
       const current = prev.displays ?? NO_DISPLAYS;
@@ -3217,28 +3467,49 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   const moveNode = useCallback(
     (nodeId: string, x: number, y: number) => {
       if (!canEditStructure(false, [])) return;
+      // The gesture's first step takes the cards it moves (the grabbed one first: a preview carries the first
+      // PREVIEW_NODES_MAX of a large selection) and takes over those someone else's edit carries, each going on from
+      // where it is drawn. A selection that changes meanwhile (another pointer's press) changes nothing of the drag.
+      const taking = !(ownGesture.current?.kind === 'nodes' && ownGesture.current.nodeId === nodeId);
+      if (taking) {
+        const sel = selectionRef.current;
+        const took = sel.length > 1 && sel.includes(nodeId) ? [nodeId, ...sel.filter(id => id !== nodeId)] : [nodeId];
+        const found = new globalThis.Map<string, { dx: number; dy: number }>();
+        for (const id of took) { const offset = carriedOffset(id); if (offset) found.set(id, offset); }
+        ownGesture.current = { kind: 'nodes', nodeId, ids: took, offsets: found };
+      }
+      const ids = ownGesture.current?.kind === 'nodes' && ownGesture.current.nodeId === nodeId ? ownGesture.current.ids : [nodeId];
+      const offsets = ownGesture.current?.nodeId === nodeId ? ownGesture.current.offsets : null;
+      const own = offsets?.get(nodeId);
+      const nx = x + (own?.dx ?? 0);
+      const ny = y + (own?.dy ?? 0);
       patchDoc(
         (prev) => {
           const target = prev.nodes.find((n) => n.id === nodeId);
           if (!target) return prev;
-          const dx = x - target.x;
-          const dy = y - target.y;
-          if (dx === 0 && dy === 0) return prev;
-          const sel = selectionRef.current;
-          const group = sel.length > 1 && sel.includes(nodeId) ? new Set(sel) : null;
-          return {
-            ...prev,
-            nodes: prev.nodes.map((n) => {
-              if (n.id === nodeId) return { ...n, x, y };
-              if (group?.has(n.id)) return { ...n, x: n.x + dx, y: n.y + dy };
-              return n;
-            }),
-          };
+          const dx = nx - target.x;
+          const dy = ny - target.y;
+          const group = ids.length > 1 ? new Set(ids) : null;
+          let changed = false;
+          const nodes = prev.nodes.map((n) => {
+            const x = n.id === nodeId ? nx : group?.has(n.id) ? n.x + dx + (taking ? (offsets?.get(n.id)?.dx ?? 0) - (own?.dx ?? 0) : 0) : n.x;
+            const y = n.id === nodeId ? ny : group?.has(n.id) ? n.y + dy + (taking ? (offsets?.get(n.id)?.dy ?? 0) - (own?.dy ?? 0) : 0) : n.y;
+            // One taken over along with the grabbed card goes on from its own carry, not the grabbed card's (even on a
+            // first step that leaves the grabbed card where it is drawn).
+            if (x === n.x && y === n.y) return n;
+            changed = true;
+            return { ...n, x, y };
+          });
+          return changed ? { ...prev, nodes } : prev;
         },
         { label: `move:${nodeId}` },
       );
+      // Taken over, the other person's edit no longer carries them here, nor again from where it had them (liveLane.ts):
+      // every node the gesture holds, whether its carry moved it or not.
+      if (taking) multiplayerRef.current?.lane?.release(ids);
+      previewMoved(ids);
     },
-    [canEditStructure, patchDoc],
+    [canEditStructure, patchDoc, previewMoved, carriedOffset],
   );
 
   /** Selection change from a tile press — see SessionTile's SelectMode. */
@@ -3265,11 +3536,18 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
         setOpenFit({ ...fit, frame: { w: Math.max(FOCUSED_SESSION_MIN_SIZE.w, Math.round(w)), h: Math.max(FOCUSED_SESSION_MIN_SIZE.h, Math.round(h)) }, resized: true });
         return;
       }
-      patchDoc((prev) => ({ ...prev, nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, w, h } : n)) }), {
+      // A card someone else's edit carries is taken over where it is drawn, as moveNode does: by the resize's first step.
+      const taking = !(ownGesture.current?.kind === 'resize' && ownGesture.current.nodeId === nodeId);
+      const taken = taking ? carriedOffset(nodeId) : null;
+      if (taking) ownGesture.current = { kind: 'resize', nodeId, ids: [nodeId], offsets: new globalThis.Map(taken ? [[nodeId, taken]] : []) };
+      patchDoc((prev) => ({ ...prev, nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, ...(taken ? { x: n.x + taken.dx, y: n.y + taken.dy } : {}), w, h } : n)) }), {
         label: `resize:${nodeId}`,
       });
+      if (taking) multiplayerRef.current?.lane?.release([nodeId]);
+      const resized = docRef.current.nodes.find(n => n.id === nodeId);
+      if (resized) sendPreview('resize', { resize: { id: nodeId, x: Math.round(resized.x), y: Math.round(resized.y), w: Math.round(resized.w), h: Math.round(resized.h) } }, [nodeId]);
     },
-    [canEditStructure, patchDoc],
+    [canEditStructure, patchDoc, sendPreview, carriedOffset],
   );
 
   const deleteNodes = useCallback(
@@ -3434,8 +3712,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     if (inspectorId) ids.add(inspectorId);
     // So is the icon with the keyboard's focus, which the camera may move off screen (⌘[ ], a pan).
     if (keyIcon && iconIds.has(keyIcon)) ids.add(keyIcon);
+    // And a card someone else is moving, which their drag may carry into view (multiplayer/LaneLayer.tsx).
+    for (const id of laneMoved) if (!convergedView.hidden.has(id)) ids.add(id);
     return ids;
-  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured, convergedView, keyIcon, iconIds]);
+  }, [renderNodes, view, size, focusedId, inspectorId, stageMeasured, convergedView, keyIcon, iconIds, laneMoved]);
   // Stable tile callbacks: SessionTile is memoised, and an inline arrow recreated on every
   // render would defeat it — every keystroke in one tile's composer would re-render the
   // rest of the canvas.
@@ -3745,7 +4025,28 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // would be shown a graph that no longer matches the timeline describing the run. Omitting
   // onConnect leaves the ports visible but inert (they are the graph's structure, not a control).
   const wiring = useWiring({ nodes: renderNodes, edges, onConnect: readOnly || exclusiveNow || initializing || simple ? undefined : onConnect, rootRef, view });
+  // The wire this page draws, from its port to the pointer, for the others (it ends with the gesture).
+  const wireDrag = wiring.wireDrag;
+  useEffect(() => {
+    if (!wireDrag) {
+      if (ownPreview.current?.kind === 'wire') endPreview();
+      return;
+    }
+    const node = renderNodesRef.current.find(candidate => candidate.id === wireDrag.from.nodeId);
+    const anchor = node ? portAnchorWorld(node, wireDrag.from.portId) : null;
+    // No port to draw from (it went): nothing to show the others.
+    if (!anchor) { if (ownPreview.current?.kind === 'wire') endPreview(); return; }
+    sendPreview('wire', { wire: { node: wireDrag.from.nodeId, port: wireDrag.from.portId, side: wireDrag.side,
+      from: { x: Math.round(anchor.x), y: Math.round(anchor.y) }, to: { x: Math.round(wireDrag.world.x), y: Math.round(wireDrag.world.y) } } }, [wireDrag.from.nodeId]);
+  }, [wireDrag, sendPreview, endPreview]);
   cancelWiringRef.current = wiring.cancelWiring;
+  // A wire being drawn from a port that is gone (its node deleted, or the field it was removed, here or by someone else)
+  // ends: the port, which held the gesture, went, and the others' drawing of it would otherwise be renewed for good.
+  useEffect(() => {
+    if (!wireDrag) return;
+    const node = renderNodes.find(candidate => candidate.id === wireDrag.from.nodeId);
+    if (!node || !portAnchorWorld(node, wireDrag.from.portId)) wiring.cancelWiring();
+  }, [wireDrag, renderNodes, wiring]);
   const marquee = useMarquee({
     enabled: selectionTool,
     // Only cards the board draws: a member inside an icon is never selected (and so never deleted or run) unseen. In the
@@ -3785,13 +4086,15 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     } : {}),
     onSaveWaypoint: readOnly ? undefined : saveWaypoint,
     onRecallWaypoint: recallWaypoint,
-    onEscape: () => {
+    onEscape: (event) => {
       // Unwind outermost-first so one Escape never closes two things at once.
       if (addMenu) setAddMenu(null);
       else if (barMode) setBarMode(null);
       else if (selectionTool) setSelectionTool(false);
       else if (inspectorId) { if (!inspectorCloseLocked.current) setInspectorId(null); }
       else if (focusedId) unfocus();
+      // Following someone (多人同屏) ends next, unless a dialog, a panel or a field outside the canvas took the key.
+      else if (lane?.following()) { if (!event.defaultPrevented && !event.isComposing) stopFollowing(); }
       // A selected converged icon is let go first; Escape never expands it.
       else if (selectedIconId) setSelectedIconId(null);
       else setSelection([]);
@@ -5584,6 +5887,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
 
   const renderInspector = (node: CanvasNode, inline = false) => (
     <InspectorPanel key={!canInitialize && node.kind === 'session' ? `${node.id}:${activeThreadId(node)}` : node.id} node={node} liveCompanies={companies} apiBase={paperclipApiBase()}
+      editors={laneEditors.get(node.id)}
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
       editFiles={node.kind === 'edit' ? editWiredFiles(node, nodes, edges) : undefined}
@@ -5692,11 +5996,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
         }
       >
         {/* What the board holds appears with its tiles, once the stage has measured itself: wires never float without them. */}
-        {stageMeasured && <WirePlane nodes={iconWireNodes} edges={convergedView.wireEdges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
+        {stageMeasured && <LaneWires lane={lane} nodes={iconWireNodes} drawn={renderNodeById} excluded={laneExcluded}>{wireNodes => <WirePlane nodes={wireNodes} edges={convergedView.wireEdges} runs={collaborationJournal ? {} : runs} running={running && !collaborationJournal} round={doc.execution ? reviewRound : 0} scale={view.scale}
           selectedEdgeId={selectedEdgeId ?? undefined} onSelectEdge={readOnly || exclusiveNow || initializing || simple ? undefined : setSelectedEdgeId}
           // A wire is never previewed from a card the board does not draw (its anchor would be the icon's).
           preview={wiring.wireDrag && !convergedView.hidden.has(wiring.wireDrag.from.nodeId) ? wiring.wireDrag : null}
-          onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}
+          onDisconnect={readOnly || exclusiveNow || initializing || simple ? undefined : disconnect} />}</LaneWires>}
         {stageMeasured && <CollaborationFlow nodes={shownBoxes} collaboration={collaborationJournal?.collaboration} running={running} scale={view.scale} />}
         {stageMeasured && <DisplayLinks displays={displays} boxes={linkBoxes} />}
         {displays.map(display => visibleDisplayIds.has(display.id) && (
@@ -5764,6 +6068,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
             onPreview={readOnly ? undefined : persistPreview}
             onDraftChange={readOnly ? undefined : persistDraft}
             onToggleDeliverables={readOnly ? undefined : toggleDeliverables}
+            drawerChoice={drawerChoices.get(node.id)}
             onHoldDeliverables={readOnly ? undefined : holdDeliverables}
             interactionLocked={busyNow.has(node.id) || exclusiveNow || initializing || bindingLocked}
             onMove={readOnly || exclusiveNow || initializing ? undefined : moveNode}
@@ -5816,9 +6121,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
             this board (the wires' stand-in for it is the icon's middle, its face), so none of its marks is drawn there;
             the 同屏 panel still says who is on it, and naming it there draws its cards with their marks. In the icon view
             a component's marks ring its icon (its round plate). */}
-        {stageMeasured && multiplayer?.boardLayer?.(shownBoxes, view.scale)}
+        {stageMeasured && <LaneCards lane={lane} drawn={renderNodeById} excluded={laneExcluded} />}
+        {stageMeasured && multiplayer?.boardLayer?.(shownBoxes, view.scale, laneCarry)}
         <Marquee rect={marquee.rect as WorldRect | null} />
       </CanvasViewport>
+      {followed && <div className="awwo-multiplayer-follow-frame" style={participantColorStyle(followed.color)} aria-hidden="true" />}
 
       {!running && !simple && <SelectionCollaboration key={`selection:${JSON.stringify(selection)}`} nodes={nodes.filter(node => selection.includes(node.id))}
         disabled={readOnly || initializing || bindingLocked || Boolean(runUnavailableReason)} available={Boolean(cloudScope)}

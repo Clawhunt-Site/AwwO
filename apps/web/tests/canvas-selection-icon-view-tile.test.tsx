@@ -15,6 +15,7 @@ import type { RunView } from '../src/canvas/RunTimeline';
 import { appendTurn, getSnapshot, resetAllSessions } from '../src/canvas/sessions';
 import { compactSessionPreview } from '../src/canvas/SessionTile';
 import type { WiringApi } from '../src/canvas/TilePorts';
+import { holdCardGesture } from '../src/canvas/cardGesture';
 import { CanvasUiModeProvider } from '../src/canvas/uiMode';
 
 const zh = (key: Parameters<typeof canvasText>[1], values?: Record<string, string | number>) => canvasText('zh', key, values);
@@ -398,6 +399,27 @@ describe('a press and a drag', () => {
     act(() => { vi.advanceTimersByTime(10); });
     fireEvent.click(tile.hit(), { detail: 1 });
     expect(tile.onToggleFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes a press while another pointer holds a card as a press, never a drag', () => {
+    const tile = draw(agent());
+    const release = holdCardGesture({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, () => release());
+    fireEvent.pointerDown(tile.hit(), { button: 0, pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 50, clientY: 50 });
+    expect(tile.onSelect).toHaveBeenCalledWith('a', 'preserve');
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 2, pointerType: 'touch', clientX: 90, clientY: 50 });
+    expect(tile.onMove).not.toHaveBeenCalled();
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' });
+    // The hold is still the first pointer's: a third pointer's press drags nothing either.
+    fireEvent.pointerDown(tile.hit(), { button: 0, pointerId: 3, pointerType: 'touch', isPrimary: false, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 3, pointerType: 'touch', clientX: 90, clientY: 50 });
+    expect(tile.onMove).not.toHaveBeenCalled();
+    fireEvent.pointerUp(window, { pointerId: 3, pointerType: 'touch' });
+    release();
+    // Once the card is let go, the same finger drags the icon.
+    fireEvent.pointerDown(tile.hit(), { button: 0, pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 2, pointerType: 'touch', clientX: 90, clientY: 50 });
+    expect(tile.onMove).toHaveBeenCalled();
+    fireEvent.pointerUp(window, { pointerId: 2, pointerType: 'touch' });
   });
 
   it('takes a pen\'s tap as a tap too, and lets only the latest press end the press', () => {

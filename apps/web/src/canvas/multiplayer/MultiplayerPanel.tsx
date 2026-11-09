@@ -11,9 +11,10 @@ import type { LiveClaim, LiveMessage, LiveParticipant } from './types';
 import type { ActivityItem } from './activity';
 import { AgentInvite, type AgentInviteProps } from './AgentInvite';
 import { useBelowHeader } from './belowHeader';
-import { hereCount, isParticipantColor, ParticipantAvatar, participantColorStyle, participantName, participantStatus, selfFirst, type MultiplayerStatus } from './MultiplayerBar';
-import { clockTime, failureDetail, kindLabel, portLabel, shownTitle, timeLeft, useMultiplayerText } from './multiplayerText';
+import { isParticipantColor, ParticipantAvatar, participantColorStyle, participantName, participantStatus, type MultiplayerStatus } from './MultiplayerBar';
+import { clockTime, devicesLabel, failureDetail, kindLabel, portLabel, shownTitle, timeLeft, useMultiplayerText } from './multiplayerText';
 import { useEnterToSend } from '../composerKeys';
+import { peopleCount, peopleOf, type LivePerson } from './people';
 import './multiplayer.css';
 
 /** The longest live message the server takes. */
@@ -66,6 +67,11 @@ export interface MultiplayerPanelProps {
   /** Opens the Share dialog, where the server offers sharing with people: the panel puts people first, and alone on the
    *  canvas it asks to share it (邀请 Agent is then the Share dialog's, under 高级). */
   onShare?: () => void;
+  /** When this page last heard of each participant: a person's tabs are listed as one, by the one heard from last. */
+  heard?: ReadonlyMap<string, number>;
+  /** Follows a person (their key, people.ts), or stops (null); absent, nobody can be followed from the panel. */
+  onFollow?: (key: string | null) => void;
+  following?: string | null;
 }
 
 /** The 同屏 panel: closed, nothing. */
@@ -95,7 +101,7 @@ function useFocusReturn(panel: RefObject<HTMLElement | null>) {
 }
 
 function PanelBody({ onClose, participants, selfId, claims, messages, activity, canWrite, canInvite, nodeTitle, onFocusNode, onSend,
-  onRelease, invite, messageNodeId = null, status, now, modelNames = NO_MODEL_NAMES, onShare }: MultiplayerPanelProps) {
+  onRelease, invite, messageNodeId = null, status, now, modelNames = NO_MODEL_NAMES, onShare, heard, onFollow, following = null }: MultiplayerPanelProps) {
   const { t } = useMultiplayerText();
   const headingId = useId();
   const panelRef = useRef<HTMLElement>(null);
@@ -127,7 +133,7 @@ function PanelBody({ onClose, participants, selfId, claims, messages, activity, 
     if (target instanceof HTMLTextAreaElement && target.value.trim()) { headingRef.current?.focus({ preventScroll: true }); return; }
     onClose();
   };
-  const count = hereCount(participants, selfId);
+  const count = peopleCount(peopleOf(participants, selfId));
   const live = !status || status === 'live';
   return <aside className="awwo-multiplayer-panel" ref={panelRef} role="dialog" aria-labelledby={headingId} onKeyDown={onKeyDown}
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
@@ -145,7 +151,7 @@ function PanelBody({ onClose, participants, selfId, claims, messages, activity, 
     {!live && <p className="awwo-multiplayer-panel-status" role="status">{t(status === 'connecting' ? 'status.connecting' : 'status.offline')}</p>}
     <div className="awwo-multiplayer-panel-body">
       <Participants participants={participants} selfId={selfId} canInvite={canInvite} live={live} nodeTitle={nodeTitle} onFocusNode={onFocusNode}
-        modelNames={modelNames} onShare={onShare} />
+        modelNames={modelNames} onShare={onShare} heard={heard} onFollow={onFollow} following={following} />
       <Claims claims={claims} selfId={selfId} byId={byId} nodeTitle={nodeTitle} onFocusNode={onFocusNode} onRelease={onRelease} now={now} />
       <Messages messages={messages} participants={participants} self={self} canWrite={canWrite} nodeTitle={nodeTitle} onFocusNode={onFocusNode}
         onSend={onSend} messageNodeId={messageNodeId} />
@@ -187,24 +193,26 @@ function Who({ color, agent, children }: { color: string | undefined; agent: boo
 
 // ── Who is here ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocusNode, modelNames, onShare }: {
+function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocusNode, modelNames, onShare, heard, onFollow, following }: {
   participants: readonly LiveParticipant[]; selfId: string; canInvite: boolean; live: boolean;
   nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void; modelNames: ModelNameSources; onShare?: () => void;
+  heard?: ReadonlyMap<string, number>; onFollow?: (key: string | null) => void; following?: string | null;
 }) {
   const { t } = useMultiplayerText();
-  const ordered = selfFirst(participants, selfId);
+  // One row per person (all their pages), by the page heard from last; an Agent's and each AwwO run's are their own.
+  const people = peopleOf(participants, selfId, heard);
   const groups = [
-    { kind: 'human', title: 'section.people', members: ordered.filter(participant => participant.kind === 'human') },
-    { kind: 'agent', title: 'section.agents', members: ordered.filter(participant => participant.kind === 'agent') },
-    { kind: 'awwo', title: 'section.awwo', members: ordered.filter(participant => participant.kind === 'awwo') },
+    { kind: 'human', title: 'section.people', members: people.filter(person => person.kind === 'human') },
+    { kind: 'agent', title: 'section.agents', members: people.filter(person => person.kind === 'agent') },
+    { kind: 'awwo', title: 'section.awwo', members: people.filter(person => person.kind === 'awwo') },
   ] as const;
   // Said only while connected: offline, the list is the last one the stream sent.
-  const alone = live && ordered.every(participant => participant.id === selfId);
+  const alone = live && people.every(person => person.self);
   return <>
     {groups.map(group => group.members.length > 0 && <Section key={group.kind} title={t(group.title, { count: group.members.length })} className="awwo-multiplayer-people">
       <ul className="awwo-multiplayer-list">
-        {group.members.map(participant => <ParticipantRow key={participant.id} participant={participant} self={participant.id === selfId}
-          nodeTitle={nodeTitle} onFocusNode={onFocusNode} modelNames={modelNames} />)}
+        {group.members.map(person => <ParticipantRow key={person.key} participant={person.lead} self={person.self} person={person}
+          nodeTitle={nodeTitle} onFocusNode={onFocusNode} modelNames={modelNames} onFollow={onFollow} following={following} />)}
       </ul>
     </Section>)}
     {alone && (onShare ? <div className="awwo-multiplayer-share-ask">
@@ -214,9 +222,9 @@ function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocu
   </>;
 }
 
-function ParticipantRow({ participant, self, nodeTitle, onFocusNode, modelNames }: {
-  participant: LiveParticipant; self: boolean; nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void;
-  modelNames: ModelNameSources;
+function ParticipantRow({ participant, self, person, nodeTitle, onFocusNode, modelNames, onFollow, following }: {
+  participant: LiveParticipant; self: boolean; person?: LivePerson; nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void;
+  modelNames: ModelNameSources; onFollow?: (key: string | null) => void; following?: string | null;
 }) {
   const { locale, t } = useMultiplayerText();
   const status = participantStatus(locale, participant, modelNames);
@@ -230,8 +238,15 @@ function ParticipantRow({ participant, self, nodeTitle, onFocusNode, modelNames 
     <div className="awwo-multiplayer-person-main">
       <div className="awwo-multiplayer-person-head">
         <span className="awwo-multiplayer-person-name">{participantName(locale, participant, self)}</span>
-        <span className="awwo-multiplayer-port" data-port={participant.port} title={kindLabel(locale, participant.kind)}>{portLabel(locale, participant.port)}</span>
+        {/* A person by the devices their pages run in (浏览器、手机); an Agent by its port. */}
+        {participant.kind === 'human' && person
+          ? <span className="awwo-multiplayer-port" data-devices={person.devices.join(' ')} title={kindLabel(locale, participant.kind)}>{devicesLabel(locale, person.devices)}</span>
+          : <span className="awwo-multiplayer-port" data-port={participant.port} title={kindLabel(locale, participant.kind)}>{portLabel(locale, participant.port)}</span>}
         {participant.role === 'reader' && <span className="awwo-multiplayer-reader">{t('role.reader')}</span>}
+        {person && !self && participant.kind === 'human' && onFollow && <button type="button" className="awwo-multiplayer-follow"
+          aria-pressed={following === person.key} onClick={() => onFollow(following === person.key ? null : person.key)}>
+          {following === person.key ? t('follow.stop') : t('follow.start', { name: participantName(locale, participant, false) })}
+        </button>}
       </div>
       {status && <p className="awwo-multiplayer-person-status">{status}</p>}
       {showFocus && <p className="awwo-multiplayer-person-nodes">

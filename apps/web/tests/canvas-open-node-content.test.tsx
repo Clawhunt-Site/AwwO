@@ -1709,7 +1709,8 @@ describe('an opened node that has delivered', () => {
     expect(second.saved.lastOutput).toBeNull();
     expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
     fireEvent.click(drawerOf().getByRole('button', { name: '关闭交付物' }));
-    expect(second.saved.deliverablesOpen).toBe(false);
+    // The close is the reader's own (drawerChoices.ts): the document's default stays as it was.
+    expect(second.saved.deliverablesOpen).toBe(true);
     expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
     expect(recorded).not.toHaveBeenCalled();
     second.unmount();
@@ -2010,16 +2011,16 @@ describe('an opened node that has delivered', () => {
     expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
     refused.unmount();
     // A node with no delivery to take back starts no edit: the drawer the reader then opens by hand has a conversation's
-    // share, and an undo (the document from before, without the drawer's flag) closes it again, as it did before.
+    // share. It is the reader's own (drawerChoices.ts), so an undo of the document leaves it as the reader left it.
     const empty = agent({ contract: { ...contract(), inputs: inputFields } });
     const blank = hosted(empty);
     openInputs();
     typeInput('三段关卡');
     fireEvent.click(screen.getByRole('button', { name: '展开交付物' }));
-    expect(blank.saved.deliverablesOpen).toBe(true);
+    expect(blank.saved.deliverablesOpen).toBeUndefined();
     expect(share()).toEqual(['chat', '38%']);
     blank.put(empty);
-    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
   });
 
   it('holds no share for a drawer that is not shown, closed by the reader or behind Configure', () => {

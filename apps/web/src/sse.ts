@@ -12,6 +12,9 @@
 export async function readSseFrames(
   body: ReadableStream<Uint8Array>,
   onEvent: (event: string, data: any) => void,
+  /** Called with every chunk that arrives, comments (a server's pings) included: a reader can tell a stream that went
+   *  quiet from one that still lives. */
+  onActivity?: () => void,
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -20,6 +23,7 @@ export async function readSseFrames(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      onActivity?.();
       buffer += decoder.decode(value, { stream: true });
       let sep: number;
       while ((sep = buffer.indexOf('\n\n')) !== -1) {

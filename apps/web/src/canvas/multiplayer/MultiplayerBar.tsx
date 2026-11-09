@@ -1,12 +1,14 @@
 // The people bar of 多人同屏 in the canvas header (docs/awwo-canvas-live-collaboration.md, The canvas page): who is on
-// the canvas, people and Agents, each in their colour; a click opens the 同屏 panel. Controlled: it shows what it is
-// given and talks to no server. Also the avatar and the colour rules the panel and the board share.
+// the canvas, one avatar per person (all their tabs and devices) and per Agent, each in their colour, a viewer with an
+// eye. The dot and this page's own avatar open the 同屏 panel; another person's avatar follows them. Controlled: it
+// shows what it is given and talks to no server. Also the avatar and the colour rules the panel and the board share.
 import { memo, type CSSProperties } from 'react';
-import { Bot } from 'lucide-react';
+import { Bot, Eye } from 'lucide-react';
 import type { UiLocale } from '../../locale';
 import { shownChatModelName, type ModelNameSources } from '../modelNames';
 import type { LiveParticipant } from './types';
-import { mt, participantInitials, portLabel, useMultiplayerText } from './multiplayerText';
+import { devicesLabel, mt, participantInitials, portLabel, useMultiplayerText } from './multiplayerText';
+import { peopleCount, peopleOf, type LivePerson } from './people';
 import './multiplayer.css';
 
 /** A participant without a usable colour (the server always sends '#rrggbb'). */
@@ -85,25 +87,30 @@ export function participantTitle(locale: UiLocale, participant: LiveParticipant,
   return status ? mt(locale, 'avatar.titleStatus', { name, port, status }) : mt(locale, 'avatar.title', { name, port });
 }
 
-/** A participant's circle: their initials on their colour, an Agent mark for an Agent (a token's or AwwO's own). */
+/** A person's line for a tooltip: their name and the devices their pages run in, and 可查看 for a viewer. */
+export function personTitle(locale: UiLocale, person: LivePerson, modelNames: ModelNameSources = NO_MODEL_NAMES): string {
+  if (person.kind !== 'human') return participantTitle(locale, person.lead, person.self, modelNames);
+  const name = participantName(locale, person.lead, person.self);
+  const devices = devicesLabel(locale, person.devices);
+  return mt(locale, person.lead.role === 'reader' ? 'avatar.personViewer' : 'avatar.person', { name, devices });
+}
+
+/** A participant's circle: their initials on their colour, an Agent mark for an Agent (a token's or AwwO's own), an eye
+ *  for a person who can only view. */
 export const ParticipantAvatar = memo(function ParticipantAvatar({ participant, self = false, title, size = 'md' }: {
   participant: LiveParticipant; self?: boolean; title?: string; size?: 'sm' | 'md';
 }) {
+  const viewer = participant.kind === 'human' && participant.role === 'reader';
   return <span className={`awwo-multiplayer-avatar awwo-multiplayer-avatar--${size}`} data-participant={participant.id} data-kind={participant.kind}
-    data-self={self || undefined} title={title} style={participantColorStyle(participant.color)}>
+    data-self={self || undefined} data-viewer={viewer || undefined} title={title} style={participantColorStyle(participant.color)}>
     <span className="awwo-multiplayer-initials" aria-hidden="true">{participantInitials(participant.name)}</span>
     {participant.kind !== 'human' && <span className="awwo-multiplayer-agent-mark" aria-hidden="true"><Bot size={size === 'sm' ? 8 : 10} strokeWidth={2.4} /></span>}
+    {viewer && <span className="awwo-multiplayer-viewer-mark" aria-hidden="true"><Eye size={size === 'sm' ? 8 : 10} strokeWidth={2.4} /></span>}
   </span>;
 });
 
 /** At most this many avatars; the rest is a "+N". */
 export const BAR_AVATARS = 5;
-
-/** This page's own presence first, then everyone else as given. */
-export function selfFirst(participants: readonly LiveParticipant[], selfId: string): LiveParticipant[] {
-  const self = participants.filter(participant => participant.id === selfId).slice(0, 1);
-  return [...self, ...participants.filter(participant => participant.id !== selfId)];
-}
 
 export type MultiplayerStatus = 'live' | 'connecting' | 'offline';
 
@@ -119,30 +126,44 @@ export interface MultiplayerBarProps {
   /** What names a running AwwO Agent's model: the workspace's models (absent, a chat model goes by a name read from its
    *  selector). */
   modelNames?: ModelNameSources;
+  /** When this page last heard of each participant: a person's tabs are shown by the one heard from last. */
+  heard?: ReadonlyMap<string, number>;
+  /** Follows a person (their key, people.ts), or stops (null). Absent, no avatar follows anyone. */
+  onFollow?: (key: string | null) => void;
+  /** The person this page follows now. */
+  following?: string | null;
 }
 
-/** How many are on the canvas: a page with its stream open is one of them even before the server lists it. */
-export function hereCount(participants: readonly LiveParticipant[], selfId: string): number {
-  return participants.some(participant => participant.id === selfId) ? participants.length : participants.length + 1;
-}
-
-/** The canvas header's avatar stack, which opens the 同屏 panel. */
-export const MultiplayerBar = memo(function MultiplayerBar({ participants, selfId, status, onOpen, open, modelNames = NO_MODEL_NAMES }: MultiplayerBarProps) {
+/** The canvas header's people: the 同屏 button (the dot and this page's own avatar), which opens the panel, then one
+ *  avatar for each other person and Agent; a person's avatar follows them, a second click (or Esc) stops. */
+export const MultiplayerBar = memo(function MultiplayerBar({ participants, selfId, status, onOpen, open, modelNames = NO_MODEL_NAMES, heard, onFollow,
+  following = null }: MultiplayerBarProps) {
   const { locale, t } = useMultiplayerText();
-  const ordered = selfFirst(participants, selfId);
-  const shown = ordered.slice(0, BAR_AVATARS);
-  const more = ordered.length - shown.length;
-  const label = status === 'live' ? t('bar.live', { count: hereCount(participants, selfId) }) : t(status === 'connecting' ? 'bar.connecting' : 'bar.offline');
-  // The button shows a dot and avatars only: its name (同屏 · N 人在线) is its tooltip too, so a person the treg advice
-  // sends to 「同屏」 can confirm it on hover.
-  return <button type="button" className="awwo-multiplayer-bar" data-status={status} aria-label={label} title={label} aria-haspopup="dialog"
-    aria-expanded={open === undefined ? undefined : open} onClick={onOpen}>
-    <span className="awwo-multiplayer-dot" data-status={status} aria-hidden="true"
-      title={t(status === 'live' ? 'status.live' : status === 'connecting' ? 'status.connecting' : 'status.offline')} />
-    <span className="awwo-multiplayer-stack">
-      {shown.map(participant => <ParticipantAvatar key={participant.id} participant={participant} self={participant.id === selfId}
-        title={participantTitle(locale, participant, participant.id === selfId, modelNames)} />)}
-      {more > 0 && <span className="awwo-multiplayer-more" title={t('bar.more', { count: more })}>{t('more.count', { count: more })}</span>}
-    </span>
-  </button>;
+  const people = peopleOf(participants, selfId, heard);
+  const shown = people.slice(0, BAR_AVATARS);
+  const more = people.length - shown.length;
+  const label = status === 'live' ? t('bar.live', { count: peopleCount(people) }) : t(status === 'connecting' ? 'bar.connecting' : 'bar.offline');
+  const avatar = (person: LivePerson) => <ParticipantAvatar participant={person.lead} self={person.self} title={personTitle(locale, person, modelNames)} />;
+  // The button shows a dot and this page's avatar only: its name (同屏 · N 人在线) is its tooltip too, so a person the
+  // treg advice sends to 「同屏」 can confirm it on hover.
+  return <span className="awwo-multiplayer-people" data-status={status}>
+    <button type="button" className="awwo-multiplayer-bar" data-status={status} aria-label={label} title={label} aria-haspopup="dialog"
+      aria-expanded={open === undefined ? undefined : open} onClick={onOpen}>
+      <span className="awwo-multiplayer-dot" data-status={status} aria-hidden="true"
+        title={t(status === 'live' ? 'status.live' : status === 'connecting' ? 'status.connecting' : 'status.offline')} />
+      <span className="awwo-multiplayer-stack">
+        {shown.filter(person => person.self).map(person => <span key={person.key} className="awwo-multiplayer-face">{avatar(person)}</span>)}
+      </span>
+    </button>
+    {shown.filter(person => !person.self).map(person => {
+      const name = participantName(locale, person.lead, false);
+      return onFollow && person.kind === 'human'
+        ? <button key={person.key} type="button" className="awwo-multiplayer-face" data-following={following === person.key || undefined}
+          aria-pressed={following === person.key} aria-label={following === person.key ? t('follow.stop') : t('follow.start', { name })}
+          onClick={() => onFollow(following === person.key ? null : person.key)}>{avatar(person)}</button>
+        : <span key={person.key} className="awwo-multiplayer-face">{avatar(person)}</span>;
+    })}
+    {more > 0 && <button type="button" className="awwo-multiplayer-more" title={t('bar.more', { count: more })} aria-label={t('bar.more', { count: more })}
+      onClick={onOpen}>{t('more.count', { count: more })}</button>}
+  </span>;
 });

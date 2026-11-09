@@ -17,13 +17,16 @@ import { canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../canvas/multiplayer/host';
 import type { ModelNameSources } from '../canvas/modelNames';
 import type { CanvasChange, CanvasChangeResponse, CanvasOp, LiveParticipant } from '../canvas/multiplayer/types';
-import { UserPlus } from 'lucide-react';
+import { UserPlus, X } from 'lucide-react';
 import { MultiplayerBar } from '../canvas/multiplayer/MultiplayerBar';
 import { MultiplayerPanel } from '../canvas/multiplayer/MultiplayerPanel';
 import { ShareDialog } from '../canvas/multiplayer/ShareDialog';
 import type { AgentTokenScope } from '../canvas/multiplayer/AgentInvite';
 import { useMultiplayerText } from '../canvas/multiplayer/multiplayerText';
 import { boardBoxOf, MultiplayerBoardLayer, type BoardFlash } from '../canvas/multiplayer/MultiplayerBoardLayer';
+import { createLiveLane, type CanvasLiveLane } from '../canvas/multiplayer/liveLane';
+import { useLaneMoves, type LaneCarry } from '../canvas/multiplayer/LaneLayer';
+import { participantColorStyle } from '../canvas/multiplayer/MultiplayerBar';
 import { activityItem, actorParticipantId, type ActivityItem } from '../canvas/multiplayer/activity';
 import type { AgentTokenItem } from '../canvas/multiplayer/types';
 import { useCanvasSharing, usePeopleSharing } from './useCanvasSharing';
@@ -97,6 +100,8 @@ export interface CanvasMultiplayer {
   /** What the canvas surface names models by (the workspace's chat models and media catalogue, as its model picker has
    *  them): the people bar and the 同屏 panel name a running AwwO Agent's model by it. */
   modelNames: ValueStore<ModelNameSources>;
+  /** The live lane (liveLane.ts): others' edits in progress and editing marks, and the person this page follows. */
+  lane: CanvasLiveLane | null;
 }
 
 /** The node a page has open, and its selection. */
@@ -136,6 +141,7 @@ export function useCanvasMultiplayer(options: {
   const drainTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [live, setLive] = useState<CanvasLive | null>(null);
+  const [lane, setLane] = useState<CanvasLiveLane | null>(null);
   const liveRef = useRef<CanvasLive | null>(null);
   const [recent, setRecent] = useState<readonly RecentChange[]>([]);
   const flashes = useRef<ValueStore<readonly BoardFlash[]>>(createValueStore<readonly BoardFlash[]>([])).current;
@@ -242,13 +248,21 @@ export function useCanvasMultiplayer(options: {
       reset: () => { void catchUp().catch(() => undefined); },
     }, clientId);
     liveRef.current = connection;
+    // The live lane reads the connection; a glide starts where this page's own document holds the node.
+    const liveLane = createLiveLane(connection, clientId, id => {
+      const node = surface.current?.document().nodes.find(candidate => candidate.id === id);
+      return node ? { x: node.x, y: node.y, w: node.w, h: node.h } : null;
+    });
     setLive(connection);
+    setLane(liveLane);
     connection.start();
     configureSaaSCanvasCatchUp(catchUp);
     return () => {
+      liveLane.stop();
       connection.stop();
       liveRef.current = null;
       setLive(null);
+      setLane(null);
       configureSaaSCanvasCatchUp(null);
       clearTimeout(drainTimer.current);
       clearTimeout(baselineTimer.current);
@@ -348,7 +362,7 @@ export function useCanvasMultiplayer(options: {
       }
       live.setPresence(update);
     },
-    boardLayer: (nodes, scale) => <MultiplayerBoard live={live} nodes={nodes} flashes={flashes} scale={scale} />,
+    boardLayer: (nodes, scale, carry) => <MultiplayerBoard live={live} lane={lane} nodes={nodes} flashes={flashes} scale={scale} carry={carry} />,
     busyNodes: () => {
       const busy = new Set<string>();
       // Read when asked (an edit), not subscribed to: presence must not draw the whole canvas again.
@@ -359,17 +373,36 @@ export function useCanvasMultiplayer(options: {
     },
     landEnded: graphRunId => optionsRef.current.handOver?.(graphRunId),
     modelNames: sources => { if (sources !== modelNames.get()) modelNames.set(sources); },
-  } : undefined, [live, drain, flashes, attention, modelNames]);
+    ...(lane ? { lane } : {}),
+  } : undefined, [live, lane, drain, flashes, attention, modelNames]);
 
   const focusNode = useCallback((nodeId: string) => surface.current?.focus(nodeId), []);
   const canLand = useCallback((operationId: string, nodes: readonly string[]) => Boolean(surface.current?.canLand?.(operationId, nodes)), []);
   const landed = useCallback((nodes: readonly string[], say = true) => surface.current?.landed?.(nodes, say), []);
-  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames }),
-    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames]);
+  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames, lane }),
+    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention, modelNames, lane]);
 }
 
-const OFFLINE: LiveSnapshot = { status: 'offline', ended: null, you: null, participants: [], claims: [], messages: [] };
+const OFFLINE: LiveSnapshot = { status: 'offline', ended: null, you: null, participants: [], claims: [], messages: [], heard: new Map() };
 const noSubscription = () => () => {};
+const NO_LANE_WIRES: ReturnType<CanvasLiveLane['wires']> = [];
+const NO_LANE_EDITORS: ReturnType<CanvasLiveLane['editors']> = new Map();
+
+/** The wires others are drawing and who types where, kept current in a component. */
+function useLaneMarks(lane: CanvasLiveLane | null) {
+  const subscribe = lane ? lane.subscribe : noSubscription;
+  const wires = useSyncExternalStore(subscribe, lane ? lane.wires : () => NO_LANE_WIRES, () => NO_LANE_WIRES);
+  const editors = useSyncExternalStore(subscribe, lane ? lane.editors : () => NO_LANE_EDITORS, () => NO_LANE_EDITORS);
+  return { wires, editors };
+}
+
+/** The person this page follows, kept current in a component. */
+export function useFollowing(lane: CanvasLiveLane | null) {
+  const subscribe = lane ? lane.subscribe : noSubscription;
+  const following = useSyncExternalStore(subscribe, lane ? lane.following : () => null, () => null);
+  const followed = useSyncExternalStore(subscribe, lane ? lane.followed : () => null, () => null);
+  return { following, followed };
+}
 
 /** The live connection's snapshot, kept current in a component. */
 export function useLiveSnapshot(live: CanvasLive | null): LiveSnapshot {
@@ -389,15 +422,19 @@ function useNow(active: boolean, every = 500): number {
   return now;
 }
 
-function MultiplayerBoard({ live, nodes, flashes, scale }: { live: CanvasLive; nodes: ReadonlyArray<CanvasNode & { round?: boolean }>; flashes: ValueStore<readonly BoardFlash[]>; scale: number }) {
+function MultiplayerBoard({ live, lane, nodes, flashes, scale, carry }: { live: CanvasLive; lane: CanvasLiveLane | null;
+  nodes: ReadonlyArray<CanvasNode & { round?: boolean }>; flashes: ValueStore<readonly BoardFlash[]>; scale: number; carry?: LaneCarry }) {
   const snapshot = useLiveSnapshot(live);
+  const { wires, editors } = useLaneMarks(lane);
+  const moves = useLaneMoves(lane);
   const glows = useSyncExternalStore(flashes.subscribe, flashes.get, flashes.get);
   const glowing = glows.some(f => f.until > Date.now());
   // Claims end with no event: the board's clock moves while any is drawn, so one past its end goes.
   const now = useNow(glowing || snapshot.claims.length > 0, glowing ? 200 : 1000);
   // An icon of the icon view comes round: its marks ring its plate.
   const boxes = useMemo(() => nodes.map(boardBoxOf), [nodes]);
-  return <MultiplayerBoardLayer participants={snapshot.participants} selfId={live.clientId} claims={snapshot.claims} nodes={boxes} flashes={glows} now={now} scale={scale} />;
+  return <MultiplayerBoardLayer participants={snapshot.participants} selfId={live.clientId} claims={snapshot.claims} nodes={boxes} flashes={glows} now={now} scale={scale}
+    wires={wires} editors={editors} moves={moves} carry={carry} />;
 }
 
 /** The people bar, the 分享 button and the 同屏 panel of the canvas header. Where the server offers sharing with people
@@ -411,6 +448,8 @@ export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, r
 }) {
   const live = multiplayer.live;
   const snapshot = useLiveSnapshot(live);
+  const { following, followed } = useFollowing(multiplayer.lane);
+  const follow = useCallback((key: string | null) => multiplayer.lane?.follow(key), [multiplayer.lane]);
   const [open, setOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const people = usePeopleSharing(tenantId);
@@ -447,8 +486,19 @@ export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, r
   };
   const openShare = () => { setOpen(false); setSharing(true); };
   return <>
-    <MultiplayerBar participants={snapshot.participants} selfId={live.clientId} status={snapshot.status} open={open}
+    <MultiplayerBar participants={snapshot.participants} selfId={live.clientId} status={snapshot.status} open={open} heard={snapshot.heard}
+      onFollow={multiplayer.lane ? follow : undefined} following={following}
       onOpen={() => { setSharing(false); setOpen(value => !value); if (!open && !people) void loadTokens(); }} modelNames={modelNames} />
+    {/* Following someone: their name in their colour, and a way out besides Esc and a pan of one's own. */}
+    {followed && <span className="awwo-multiplayer-following" role="status" style={participantColorStyle(followed.color)}>
+      <span>{t('follow.chip', { name: followed.name.trim() || t('someone') })}</span>
+      <button type="button" aria-label={t('follow.stop')} title={t('follow.stop')} onClick={event => {
+        // The chip goes with the following: the focus goes to the 同屏 button beside it, not to the page.
+        const bar = event.currentTarget.closest('.awwo-multiplayer-following')?.parentElement?.querySelector<HTMLElement>('button.awwo-multiplayer-bar');
+        follow(null);
+        bar?.focus();
+      }}><X size={12} aria-hidden="true" /></button>
+    </span>}
     {people && <button type="button" className="awwo-multiplayer-share-button" aria-haspopup="dialog" aria-expanded={sharing}
       aria-label={t('share.buttonLabel')} title={t('share.buttonLabel')} onClick={() => { if (sharing) setSharing(false); else openShare(); }}>
       <UserPlus size={14} aria-hidden="true" /><span>{t('share.button')}</span>
@@ -458,7 +508,7 @@ export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, r
       nodeTitle={nodeTitle} onFocusNode={onFocusNode} status={snapshot.status} now={now} messageNodeId={messageNodeId} modelNames={modelNames}
       onSend={async (text, nodeId) => { await live.say(text, nodeId); }}
       onRelease={async nodeIds => { await live.release(nodeIds); }}
-      onShare={people ? openShare : undefined} invite={invite} />
+      onShare={people ? openShare : undefined} invite={invite} heard={snapshot.heard} onFollow={multiplayer.lane ? follow : undefined} following={following} />
     {people && <ShareDialog open={sharing} onClose={() => setSharing(false)} workspaceName={share.workspaceName || workspaceName} role={share.role}
       selfUserId={share.userId} canvasId={canvasId} canvasUrl={`${origin}/?tenant=${encodeURIComponent(tenantId)}&canvas=${encodeURIComponent(canvasId)}`}
       members={share.members} invites={share.invites} here={here} onCreateInvite={share.createInvite} onRevokeInvite={share.revokeInvite}

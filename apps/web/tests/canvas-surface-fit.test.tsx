@@ -23,6 +23,7 @@ import type { AssistantExecutionHost } from '../src/canvas/assistantRouting';
 import { CANVAS_STORAGE_KEY, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
+import { readDrawerChoices } from '../src/canvas/drawerChoices';
 import { PLANNING_STORAGE_KEY, savePlanningConversation, type requestCanvasPlan } from '../src/canvas/canvasPlanning';
 import type { CanvasPlan } from '../src/canvas/canvasPlan';
 import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
@@ -2225,6 +2226,8 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     return { world: document.querySelector('.canvas-world') as HTMLElement, tile: screen.getByTestId('canvas-tile-s1') };
   };
   const saved = () => (JSON.parse(canvasStorage().getItem(CANVAS_STORAGE_KEY)!) as CanvasDocument).nodes[0] as ReturnType<typeof createSessionNode>;
+  // The reader's drawer is theirs, on this device (drawerChoices.ts): the shared document never holds it.
+  const chosen = () => readDrawerChoices().get(saved().id);
 
   it('remembers a delivery drawer closed after it opened by itself, without moving, resizing or refitting the node', async () => {
     canvasStorage().setItem(CANVAS_STORAGE_KEY, JSON.stringify(delivered()));
@@ -2234,7 +2237,7 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     const camera = world.style.transform;
     fireEvent.click(within(tile).getByRole('button', { name: '关闭交付物' }));
     await settle();
-    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await waitFor(() => expect(chosen()).toBe(false));
     expect([saved().x, saved().y, saved().w, saved().h]).toEqual([before.x, before.y, before.w, before.h]);
     expect(world.style.transform).toBe(camera);
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
@@ -2362,7 +2365,7 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(saved()).not.toHaveProperty('deliverablesOpen');
     // Closing it is remembered as closing a drawer that opened by itself is, and the node takes a conversation's width.
     fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
-    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await waitFor(() => expect(chosen()).toBe(false));
     await settle();
     await glideDone();
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
@@ -2399,7 +2402,7 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(world.style.transform).toBe(before.camera);
     // Its close is remembered as for a drawer the drawer's form kept open, and the node takes a conversation's width.
     fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
-    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await waitFor(() => expect(chosen()).toBe(false));
     await settle();
     await glideDone();
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
@@ -2413,14 +2416,14 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     const { tile, drawer } = await editHeld({ w: 1600, h: 1000 }, bound);
     expect(within(tile).getByRole('region', { name: '交付物' })).toBe(drawer);
     fireEvent.click(within(drawer).getByRole('button', { name: '关闭交付物' }));
-    await waitFor(() => expect(saved().deliverablesOpen).toBe(false));
+    await waitFor(() => expect(chosen()).toBe(false));
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
     runNode(tile);
     await waitFor(() => expect(finishes).toHaveLength(1));
     await act(async () => { finishes[0]('{"result":"## 关卡规格（第三版）"}'); });
     await waitFor(() => expect(saved().lastOutput).toMatchObject({ text: '{"result":"## 关卡规格（第三版）"}', source: 'run' }), { timeout: 3000 });
     await settle();
-    expect(saved().deliverablesOpen).toBe(false);
+    expect(chosen()).toBe(false);
     expect(within(screen.getByTestId('canvas-tile-s1')).queryByRole('region', { name: '交付物' })).toBeNull();
     expect(within(screen.getByTestId('canvas-tile-s1')).getByRole('button', { name: '展开交付物' })).toBeTruthy();
   });
@@ -2463,7 +2466,7 @@ describe('CanvasSurface keeps an opened node as the reader left it', () => {
     expect(within(tile).queryByRole('region', { name: '交付物' })).toBeNull();
     expect(tile.style.width).toBe('840px');
     fireEvent.click(within(tile).getByRole('button', { name: '展开交付物' }));
-    await waitFor(() => expect(saved().deliverablesOpen).toBe(true));
+    await waitFor(() => expect(chosen()).toBe(true));
     await settle();
     await glideDone();
     expect(within(tile).getByRole('region', { name: '交付物' })).toBeTruthy();

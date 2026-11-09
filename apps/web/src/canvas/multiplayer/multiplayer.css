@@ -610,7 +610,7 @@
   100% { opacity: 0; }
 }
 /* The place eases between a person's updates (5 a second); the drawing inside keeps its size on screen. */
-.awwo-multiplayer-cursor { position: absolute; top: 0; left: 0; transition: transform 200ms linear; }
+.awwo-multiplayer-cursor { position: absolute; top: 0; left: 0; }
 .awwo-multiplayer-cursor-body { display: flex; align-items: flex-start; scale: var(--mp-inv); transform-origin: 0 0; }
 .awwo-multiplayer-pointer { display: block; flex: 0 0 auto; filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 30%)); }
 .awwo-multiplayer-pointer path { fill: var(--mp-color); stroke: var(--mp-ink); stroke-width: 1.2; stroke-linejoin: round; }
@@ -667,8 +667,121 @@
 
 @media (prefers-reduced-motion: reduce) {
   .awwo-multiplayer-dot[data-status='connecting'] { animation: none; }
-  .awwo-multiplayer-cursor { transition: none; }
   /* A still glow, gone when it runs out. */
   .awwo-multiplayer-flash { animation: none; opacity: 0.7; }
   .awwo-multiplayer-chevron { transition: none; }
 }
+
+/* ── The live lane (people.ts, liveLane.ts): one avatar per person, following, viewers, edits in progress, editing
+   marks. The words for these parts' own colours, where the variables above are not in scope. ─────────────────────── */
+.awwo-multiplayer-people,
+.awwo-multiplayer-following,
+.awwo-multiplayer-follow-frame,
+.canvas-inspector-editing {
+  --mp-card: var(--saas-card, var(--card, #ffffff));
+  --mp-field: var(--saas-field, var(--soft, #f5fbfc));
+  --mp-text: var(--saas-text, var(--text, #0e1c2c));
+  --mp-muted: var(--saas-muted, var(--muted, #4f6477));
+  --mp-hairline: var(--saas-hairline, var(--line, #cfe6e8));
+  --mp-focus: var(--saas-focus, var(--blue, #3f7ff5));
+}
+/* The header's people: the 同屏 button, then one avatar per other person and Agent (a person's follows them). */
+.awwo-multiplayer-people { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.awwo-multiplayer-face { position: relative; display: inline-flex; flex: 0 0 auto; }
+button.awwo-multiplayer-face { padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+button.awwo-multiplayer-face:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+button.awwo-multiplayer-face .awwo-multiplayer-avatar { transition: box-shadow var(--dur-fast) var(--ease-enter); }
+button.awwo-multiplayer-face:hover .awwo-multiplayer-avatar { box-shadow: 0 0 0 2px var(--mp-card), 0 0 0 3px var(--mp-hairline); }
+/* The person followed wears a ring of their own colour. */
+.awwo-multiplayer-face[data-following] .awwo-multiplayer-avatar,
+button.awwo-multiplayer-face[data-following]:hover .awwo-multiplayer-avatar { box-shadow: 0 0 0 2px var(--mp-card), 0 0 0 4px var(--mp-color); }
+.awwo-multiplayer-people > .awwo-multiplayer-more { border: 0; font: inherit; font-size: 11px; cursor: pointer; }
+.awwo-multiplayer-people > .awwo-multiplayer-more:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+/* A person who can only view: an eye at the foot of their circle. */
+.awwo-multiplayer-viewer-mark {
+  position: absolute;
+  left: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  box-shadow: 0 0 0 1.5px var(--mp-hairline);
+}
+/* Following someone: their name in their colour beside the people, and a frame of their colour round the board. */
+.awwo-multiplayer-following {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 3px 0 10px;
+  border: 1px solid var(--mp-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mp-color) 12%, var(--mp-card));
+  color: var(--mp-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.awwo-multiplayer-following > span { overflow: hidden; text-overflow: ellipsis; }
+.awwo-multiplayer-following > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--mp-muted);
+  cursor: pointer;
+}
+.awwo-multiplayer-following > button:hover { color: var(--mp-text); background: color-mix(in srgb, var(--mp-text) 8%, transparent); }
+.awwo-multiplayer-following > button:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 1px; }
+.awwo-multiplayer-follow-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 3px var(--mp-color);
+  animation: awwo-multiplayer-follow-in var(--dur-base) var(--ease-enter);
+}
+@keyframes awwo-multiplayer-follow-in { from { opacity: 0; } to { opacity: 1; } }
+/* The 同屏 panel's 跟随 on a person's row. */
+.awwo-multiplayer-follow {
+  margin-left: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--mp-hairline);
+  border-radius: 999px;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.awwo-multiplayer-follow[aria-pressed='true'] { border-color: var(--mp-focus); }
+.awwo-multiplayer-follow:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+/* A wire someone is drawing, and the size someone is resizing a card to: dashed, in their colour, as thick on screen
+   at any zoom. */
+.awwo-multiplayer-wires { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.awwo-multiplayer-wire { fill: none; stroke: var(--mp-color); stroke-width: 2; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; opacity: 0.9; }
+.awwo-multiplayer-resize { fill: none; stroke: var(--mp-color); stroke-width: 2; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
+/* Someone typing in this component's fields (the Configure panel): who, over the panel, and on the field. */
+.canvas-inspector-editing {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--mp-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--mp-color) 10%, transparent);
+  color: var(--mp-text);
+  font-size: 12px;
+}
+.canvas-inspector [data-editing] { outline: 2px solid var(--mp-color); outline-offset: 1px; }

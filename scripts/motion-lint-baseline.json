@@ -440,12 +440,6 @@
       "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
     },
     {
-      "rule": "raw-duration",
-      "text": "transition: transform 200ms linear",
-      "count": 1,
-      "where": "apps/web/src/canvas/multiplayer/multiplayer.css"
-    },
-    {
       "rule": "off-language-curve",
       "text": "0% { translate: 0 0; animation-timing-function: cubic-bezier(.61, 1, .88, 1); }",
       "count": 1,

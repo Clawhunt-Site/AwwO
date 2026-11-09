@@ -90,7 +90,7 @@ describe('read-only delivery disclosure during execution', () => {
     expect(onUpdateNode).not.toHaveBeenCalled();
   });
 
-  it('keeps the standalone idle update path while avoiding that write during a run', () => {
+  it('keeps a standalone tile’s drawer its own, during a run and after it, never a write of the node', () => {
     const node = deliveryNode();
     const onUpdateNode = vi.fn();
     const { rerender } = render(<SessionTile node={node} scale={1} focused run={{ state: 'running' }} onUpdateNode={onUpdateNode} />);
@@ -98,6 +98,8 @@ describe('read-only delivery disclosure during execution', () => {
     expect(onUpdateNode).not.toHaveBeenCalled();
     rerender(<SessionTile node={node} scale={1} focused run={{ state: 'done' }} onUpdateNode={onUpdateNode} />);
     fireEvent.click(screen.getByRole('button', { name: '关闭交付物', exact: true }));
-    expect(onUpdateNode).toHaveBeenLastCalledWith({ ...node, deliverablesOpen: false });
+    // The drawer is the reader's own (drawerChoices.ts): with no canvas to keep the choice, it stays the tile's.
+    expect(onUpdateNode).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '展开交付物', exact: true })).toBeTruthy();
   });
 });

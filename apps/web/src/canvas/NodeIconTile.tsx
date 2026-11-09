@@ -26,6 +26,7 @@ import { mediaComposerInfo } from './TileComposer';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { useSimpleCanvas } from './uiMode';
 import { WorkingTimer } from './WorkingIndicator';
+import { cardPressAllowed, holdCardGesture, holdPassivePress } from './cardGesture';
 import './converged-icon.css';
 import './node-icon.css';
 
@@ -216,6 +217,9 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
     // Claimed like a card's left press: the board must not pan, and the double-click must reach this icon. A middle
     // press is the board's (it pans).
     if (event.button === 0) event.stopPropagation();
+    // While another pointer holds a card (cardGesture.ts), this press is a press (it selects, a tap opens), never a
+    // drag: it moves nothing, and the cards' one gesture stays that pointer's.
+    const mayDrag = event.button !== 0 || cardPressAllowed(event);
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
     const wasSole = soleSelected;
     onSelect?.(node.id, additive ? 'additive' : 'preserve');
@@ -235,7 +239,7 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
     const py = event.clientY;
     const ox = node.x;
     const oy = node.y;
-    const canDrag = !readOnly && Boolean(onMove) && !onControl;
+    const canDrag = !readOnly && Boolean(onMove) && !onControl && mayDrag;
     let dragged = false;
     const move = (pe: PointerEvent) => {
       if (pe.pointerId !== pointerId) return;
@@ -252,6 +256,7 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
       gestureEnds.current.delete(end);
+      release();
       // The press is over once its click (if any: a drag let go elsewhere has none) has been handled: a focus or a click
       // after that is no press's.
       setTimeout(() => { if (pressCount.current === press) { pointerPress.current = false; tapOpens.current = false; } }, tapping ? TAP_CLICK_MS : 0);
@@ -267,6 +272,7 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
     };
     const cancel = (pe: PointerEvent) => { if (pe.pointerId === pointerId) end(); };
     gestureEnds.current.add(end);
+    const release = mayDrag ? holdCardGesture(event, end) : holdPassivePress(event, end);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', cancel);

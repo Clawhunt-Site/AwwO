@@ -66,7 +66,8 @@ const PRESSES: Array<[CanvasKeyAction, KeyboardEventInit, keyof CanvasKeyHandler
   ['redo', { key: 'Z', code: 'KeyZ', ctrlKey: true, shiftKey: true }, 'onRedo', []],
   ['save-waypoint', { key: '(', code: 'Digit9', ctrlKey: true, shiftKey: true }, 'onSaveWaypoint', [9]],
   ['recall-waypoint', { key: '1', code: 'Digit1', ctrlKey: true }, 'onRecallWaypoint', [1]],
-  ['escape', { key: 'Escape', code: 'Escape' }, 'onEscape', []],
+  // Escape hands its event over: the canvas leaves following alone for a key something else took (defaultPrevented).
+  ['escape', { key: 'Escape', code: 'Escape' }, 'onEscape', [expect.any(KeyboardEvent)]],
 ];
 const HANDLERS: Array<keyof CanvasKeyHandlers> = ['onFocusToggle', 'onCycle', 'onPalette', 'onSearch', 'onFitAll',
   'onDeleteSelection', 'onUndo', 'onRedo', 'onEscape', 'onSaveWaypoint', 'onRecallWaypoint', 'onConvergeToggle'];

@@ -252,12 +252,13 @@ async function othersArrive(view: ReturnType<typeof openLive>) {
   await act(async () => view.streams[0].push({ event: 'hello', data: { you: self, version: 3, participants: [self, opus, gpt, cloud, agent], claims, messages } }));
 }
 
-const avatarTitle = (id: string) => document.querySelector(`.awwo-multiplayer-bar .awwo-multiplayer-avatar[data-participant="${id}"]`)?.getAttribute('title');
+// The people bar: the 同屏 button with this page's own avatar, and beside it an avatar for each other person and Agent.
+const avatarTitle = (id: string) => document.querySelector(`.awwo-multiplayer-people[data-status] .awwo-multiplayer-avatar[data-participant="${id}"]`)?.getAttribute('title');
 const rowStatus = (id: string) => document.querySelector(`.awwo-multiplayer-panel .awwo-multiplayer-person[data-participant="${id}"] .awwo-multiplayer-person-status`)?.textContent;
 
 /** Every word the people bar and the 同屏 panel show or say: their text and every attribute a person reads or hears. */
 function shownWords(): string {
-  const roots = [...document.querySelectorAll<HTMLElement>('.awwo-multiplayer-bar, .awwo-multiplayer-panel')];
+  const roots = [...document.querySelectorAll<HTMLElement>('.awwo-multiplayer-people[data-status], .awwo-multiplayer-panel')];
   expect(roots.length).toBe(2);
   const words: string[] = [];
   for (const root of roots) {
