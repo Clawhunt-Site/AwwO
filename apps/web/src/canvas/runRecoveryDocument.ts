@@ -450,6 +450,27 @@ export function runInputFingerprint(doc: CanvasDocument, scope: ReadonlyArray<st
   return `v1:${JSON.stringify({ scope: scoped, nodes, edges, orderedInputs, ...(doc.execution ? { execution: doc.execution } : {}) })}`;
 }
 
+/**
+ * One step's own inputs in a run of `scope`, as the run reads them: the step's settings, the wires into it in their order,
+ * and each wired source's settings, with its result where the source lies outside the scope (a step of the run feeds it
+ * the run's own, which this leaves out). Where a run's fingerprint no longer matches, this tells which of its steps were
+ * changed since; a source's own sources are runInputFingerprint's.
+ */
+export function runStepInputs(doc: CanvasDocument, scope: ReadonlyArray<string>, id: string): string {
+  const scopeSet = new Set(scope);
+  const executableEdges = reconcileEdges(doc.nodes, doc.edges);
+  const byId = new Map(doc.nodes.map(node => [node.id, node] as const));
+  const node = byId.get(id);
+  const into = executableEdges.filter(edge => edge.toNode === id);
+  const sources = [...new Set(into.map(edge => edge.fromNode))].sort(lexical).map(source => {
+    const from = byId.get(source);
+    return from ? nodeInput(from, scopeSet.has(source)) : { id: source, missing: true };
+  });
+  const order = incomingOrder(doc.nodes, executableEdges, new Set([id]));
+  return JSON.stringify({ node: node ? nodeInput(node, true) : null, edges: into.map(edgeInput).sort((a, b) => lexical(JSON.stringify(a), JSON.stringify(b))),
+    order, sources, ...(doc.execution ? { execution: doc.execution } : {}) });
+}
+
 /** Build and persist this snapshot before any native dispatch can begin. */
 export function prepareRunDocument(
   doc: CanvasDocument,
@@ -623,5 +644,17 @@ export function applyRecoveredDocument(
     if (shown) return next.lastOutput === shown ? next : { ...next, lastOutput: shown };
     return { ...next, lastOutput: delivery };
   });
-  return nodes.some((node, index) => node !== doc.nodes[index]) ? { ...invalidated, nodes } : invalidated;
+  const merged = nodes.some((node, index) => node !== doc.nodes[index]) ? { ...invalidated, nodes } : invalidated;
+  if (journal.manual) return merged;
+  // A canvas run's results make stale what lies after each step whose result they change, as a step's result does when
+  // it lands live (patchDoc): the pass above saw only the results it cleared, so a step that showed none and gets one
+  // left what follows it as it was. Results alone count (issue ids are server evidence); the run's own steps keep what
+  // it delivered, and a revision keeps its place.
+  const resultsOnly = { ...doc, nodes: doc.nodes.map((node, index) => merged.nodes[index].lastOutput === node.lastOutput ? node
+    : { ...node, lastOutput: merged.nodes[index].lastOutput }) };
+  const stale = invalidateOutputs(doc, resultsOnly);
+  if (stale === resultsOnly) return merged;
+  const fresh = merged.nodes.map((node, index) => selected.has(node.id) || revised.has(node.id) || node.lastOutput == null
+    || stale.nodes[index].lastOutput != null ? node : { ...node, lastOutput: null });
+  return fresh.some((node, index) => node !== merged.nodes[index]) ? { ...merged, nodes: fresh } : merged;
 }

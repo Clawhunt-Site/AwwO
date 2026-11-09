@@ -580,6 +580,18 @@ describe('recovering a run the canvas already shows', () => {
     expect(recovered.nodes[2].lastOutput ?? null).toBeNull();
   });
 
+  it('makes stale what lies after a step that showed no result and gets one, as the step landing live would', () => {
+    // a → b → c; the run covered a alone, which showed nothing; b showed a result from before.
+    const before = { ...graph(), nodes: graph().nodes.map(node => node.id === 'a' ? { ...node, lastOutput: null } : node) as CanvasNode[] };
+    const ran = journal(before);
+    const onlyA = { ...ran, scope: ['a'], nodes: { a: ran.nodes.a }, inputFingerprint: runInputFingerprint(before, ['a']) };
+    const recovered = applyRecoveredDocument(before, onlyA);
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['new-a', null, null]);
+    // The session it got is no change of what lies after it: a run that delivers nothing leaves b as it is.
+    const failed = { ...onlyA, nodes: { a: { ...onlyA.nodes.a, state: 'failed' as const, output: '' } } };
+    expect(applyRecoveredDocument(before, failed).nodes.map(node => node.lastOutput?.text ?? null)).toEqual([null, 'old-b', 'old-c']);
+  });
+
   it('keeps what was published downstream since, while a changed step still invalidates it', () => {
     // a → b → c; the run covered a and b, and c was published by hand afterwards.
     const ran = shownAt(applyRecoveredDocument(graph(), journal(graph())), 97);

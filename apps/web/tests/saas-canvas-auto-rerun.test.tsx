@@ -105,6 +105,31 @@ it('names a run it started that another tab finished first', async () => {
   expect(ended.mock.calls.flatMap(([event]) => event.graphIds ?? [])).toEqual(['g2']);
 });
 
+// 多人同屏: the page's host lands a run whose journal another tab let go (saas/useRunLanding.ts); one this page started is
+// still named at its end.
+it('names a run it started that another tab finished first, where the page’s host lands it', async () => {
+  const base = vi.mocked(fetch).getMockImplementation()!;
+  let read = false;
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init: RequestInit = {}) => {
+    if (String(input).includes('/graph-runs/g2') && !read) {
+      // The other tab, which took the run over, has handed it over and let its journal go.
+      read = true;
+      clearRunJournal(request.operationId);
+    }
+    return base(input as string, init);
+  }));
+  const landEnded = vi.fn();
+  const settled = vi.fn();
+  const ended = vi.fn();
+  render(<CanvasSurface storageMode="cloud" multiplayer={{ connect: () => {}, presence: () => {}, landEnded }} runtimeReadJson={reader}
+    autoRun={request} onAutoRunSettled={settled} onWorkSettled={ended} />);
+  await waitFor(() => expect(settled).toHaveBeenCalledWith('autorun:1', { started: true }));
+  await waitFor(() => expect(landEnded).toHaveBeenCalledWith('g2'), { timeout: 10000 });
+  await waitFor(() => expect(ended).toHaveBeenCalled(), { timeout: 10000 });
+  expect(read).toBe(true);
+  expect(ended.mock.calls.flatMap(([event]) => event.graphIds ?? [])).toEqual(['g2']);
+});
+
 // A run found in a journal may recover for the whole of the page's own run: the page's run is still named at its end.
 it('names a run it started while a restored run recovered the whole time', async () => {
   saveRunJournal({ version: 1, id: 'old-operation', startedAt: Date.now() - 60_000, scope: ['brief'], serverGraph: { id: 'old', tenantId: tenant.id, canvasId: 'canvas' },
@@ -151,6 +176,40 @@ it('names a run it started whose admission answer was lost, finished by another 
   await waitFor(() => expect(settled).toHaveBeenCalled(), { timeout: 8000 });
   await waitFor(() => expect(ended).toHaveBeenCalled(), { timeout: 15000 });
   expect(lists).toBeGreaterThanOrEqual(2);
+  expect(ended.mock.calls.flatMap(([event]) => event.graphIds ?? [])).toEqual(['g2']);
+}, 30000);
+
+// 多人同屏: the same, where the page's host lands the run, and the lookup by its operation takes a moment.
+it('names a run it started whose admission answer was lost, finished by another tab, where the page’s host lands it', async () => {
+  const base = vi.mocked(fetch).getMockImplementation()!;
+  let lists = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url.endsWith('/graph-runs') && init.method === 'POST') {
+      await base(url, init);
+      throw new TypeError('Failed to fetch');
+    }
+    if (url.includes('/graph-runs?operationId=')) {
+      lists += 1;
+      // The other tab, which took the run over, has finished it and let its journal go.
+      if (lists === 1) clearRunJournal(request.operationId);
+      // Answered after a moment, as over a network (a read the page lets go is not answered).
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 300);
+        init.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('aborted', 'AbortError')); });
+      });
+      return new Response(JSON.stringify({ items: [{ id: 'g2', operationId: request.operationId, status: 'completed' }] }));
+    }
+    return base(url, init);
+  }));
+  const landEnded = vi.fn();
+  const settled = vi.fn();
+  const ended = vi.fn();
+  render(<CanvasSurface storageMode="cloud" multiplayer={{ connect: () => {}, presence: () => {}, landEnded }} runtimeReadJson={reader}
+    autoRun={request} onAutoRunSettled={settled} onWorkSettled={ended} />);
+  await waitFor(() => expect(settled).toHaveBeenCalled(), { timeout: 8000 });
+  await waitFor(() => expect(landEnded).toHaveBeenCalledWith('g2'), { timeout: 15000 });
+  await waitFor(() => expect(ended).toHaveBeenCalled(), { timeout: 15000 });
   expect(ended.mock.calls.flatMap(([event]) => event.graphIds ?? [])).toEqual(['g2']);
 }, 30000);
 

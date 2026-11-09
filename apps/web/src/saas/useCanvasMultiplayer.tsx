@@ -53,6 +53,11 @@ const FLASH_MS = 1_600;
 const ACTIVITY_KEPT = 40;
 /** A save that met a dropped connection or a busy server goes again (with the same change id) this many times. */
 const SAVE_RETRIES = 3;
+/** How long one read of a catch-up waits for its answer (a reset brings the whole canvas, megabytes for a film). */
+const CATCH_UP_TIMEOUT_MS = 120_000;
+let catchUpTimeoutMs = CATCH_UP_TIMEOUT_MS;
+/** Tests let a catch-up's read go sooner; null puts the usual deadline back. */
+export function setCatchUpTimeoutForTests(ms: number | null): void { catchUpTimeoutMs = ms ?? CATCH_UP_TIMEOUT_MS; }
 
 export interface CanvasMultiplayer {
   /** For the canvas surface: undefined until the canvas is open. */
@@ -80,6 +85,12 @@ export interface CanvasMultiplayer {
   recent: readonly RecentChange[];
   /** Shows a node on the canvas. */
   focusNode(nodeId: string): void;
+  /** Whether the results of a run another page started may land on the canvas now (the surface's canLand,
+   *  runAdoption.ts): false before the canvas is open. */
+  canLand(operationId: string, nodes: readonly string[]): boolean;
+  /** Has the canvas say (`say`) that a run's results the server took are on it, and read again the loaded conversations
+   *  of the run's nodes. */
+  landed(nodes: readonly string[], say?: boolean): void;
   /** The node this page has open and the nodes it has selected: a message in the panel is about the one in view. */
   attention: ValueStore<Attention>;
 }
@@ -103,6 +114,8 @@ export function useCanvasMultiplayer(options: {
   busy: () => boolean;
   /** The page's confirmed document changed (the lessons and the canvas's evolution read it). */
   confirmed: (document: unknown) => void;
+  /** The surface hands over a canvas run that had ended before it took it up (runAdoption.ts lands it). */
+  handOver?: (graphRunId: string) => void;
 }): CanvasMultiplayer {
   const { tenantId, canvasId, enabled } = options;
   const optionsRef = useRef(options);
@@ -173,20 +186,22 @@ export function useCanvasMultiplayer(options: {
 
   const catchUp = useCallback(async () => {
     if (catching.current) return catching.current;
+    // Each read has a deadline: one that never answers would hold every later catch-up, which joins it.
+    const signal = () => AbortSignal.timeout(catchUpTimeoutMs);
     const run = (async () => {
       // Not while a save or node setup is out: its answer moves the page's copy, and the two would race.
       for (let waited = 0; optionsRef.current.busy() && waited < 300; waited += 1) await new Promise(resolve => setTimeout(resolve, 100));
       const record = optionsRef.current.current.current;
       if (!record) return;
       const answer = await api<{ version: number; changes?: CanvasChange[]; reset?: boolean; document?: unknown }>(
-        `/tenants/${encodeURIComponent(tenantId)}/canvases/${encodeURIComponent(canvasId)}/changes?after=${record.version}`);
+        `/tenants/${encodeURIComponent(tenantId)}/canvases/${encodeURIComponent(canvasId)}/changes?after=${record.version}`, { signal: signal() });
       const now = optionsRef.current.current.current;
       if (!now || now.version >= answer.version) return;
       if (answer.reset) { adopt(answer.version, answer.document, [], []); return; }
       const moved = advanceConfirmed({ version: now.version, document: now.document }, answer.changes ?? []);
       if (moved.unreadable) {
         // A change this page cannot apply: reading the changes again would stop at it again, so the canvas is read whole.
-        const fresh = await api<CanvasRecord>(`/tenants/${encodeURIComponent(tenantId)}/canvases/${encodeURIComponent(canvasId)}`);
+        const fresh = await api<CanvasRecord>(`/tenants/${encodeURIComponent(tenantId)}/canvases/${encodeURIComponent(canvasId)}`, { signal: signal() });
         const latest = optionsRef.current.current.current;
         if (latest && fresh.version > latest.version) adopt(fresh.version, fresh.document, [], []);
         return;
@@ -337,11 +352,14 @@ export function useCanvasMultiplayer(options: {
       }
       return busy;
     },
+    landEnded: graphRunId => optionsRef.current.handOver?.(graphRunId),
   } : undefined, [live, drain, flashes, attention]);
 
   const focusNode = useCallback((nodeId: string) => surface.current?.focus(nodeId), []);
-  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, attention }),
-    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, attention]);
+  const canLand = useCallback((operationId: string, nodes: readonly string[]) => Boolean(surface.current?.canLand?.(operationId, nodes)), []);
+  const landed = useCallback((nodes: readonly string[], say = true) => surface.current?.landed?.(nodes, say), []);
+  return useMemo(() => ({ host, live, clientId, saves, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention }),
+    [host, live, clientId, unsent, sendable, holding, working, save, settle, catchUp, recent, focusNode, canLand, landed, attention]);
 }
 
 const OFFLINE: LiveSnapshot = { status: 'offline', ended: null, you: null, participants: [], claims: [], messages: [] };

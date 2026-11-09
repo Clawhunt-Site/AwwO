@@ -155,6 +155,92 @@ and its results (`lastOutput`, `preview`, `issueId`, a conversation's `lastOutpu
 and a contract whose only change is its outputs' values), which every page watching the run publishes alike. A wire into
 a fenced node is fenced with it. An op the fence refuses is answered `node_running`; the rest of the change stays.
 
+### A run whose starter's page closed
+
+A canvas run's results reach the canvas through a page: the one that started it publishes them as they come, and a page
+that opens the canvas later takes up the runs still going (its own page's recovery). A run whose starter closed their page
+before it ended would otherwise end with no result on the canvas while others work on it, and nothing after it could run,
+until someone opened the canvas again. So an editor's open page lands it (`apps/web/src/saas/useRunLanding.ts`,
+`runAdoption.ts`):
+
+- It looks at the canvas's runs every 15 s while its tab is in view, at each that ended at least 10 s ago (the starter's
+  page, when open, publishes at once): within the last 30 minutes and since five minutes before the page opened (by the
+  page's clock), or, however long ago, one left to it (below). It looks only at runs the run list names (the newest 50),
+  and lands one only while the list read last for its landing still names it: one the list no longer names is left as
+  the canvas shows it, since a newer run over its steps could not be seen. A run is read without the canvas it froze
+  first, once; only one that may hold a result the canvas does not show, its standing included, is read whole. One that
+  holds none on the canvas as the page has it is looked at again once that canvas, or the newer runs over its steps,
+  have changed (a page behind may find one missing once it catches up); one left to it is let go then, where the
+  server's log since the canvas it decided on names none of the run's steps (on a page behind, a result like the run's
+  may be an earlier run's), else once the page has caught up. A look whose reads go unanswered is let go after 60 s, and
+  each read of a catch-up after 120 s.
+- A landing is decided on reads made at once: the canvas as the server holds it, its change log, and, read last, its
+  runs as they are then. What changed since the run ended comes from the log, by the server's clock and order, read back
+  from the server's own version a step at a time (its newest 20 changes, then 80, then 290, or all since the run's
+  admission where that is nearer) until it reaches the run's end. A step whose result anyone changed since (published by
+  hand, handed in by an Agent, a chat's reply or conversation, another run's, cleared, the node added again) stays as the
+  canvas shows it where the run would change its result, its issue or its conversations, whatever the run made of it, a
+  step it left without output included (one that shows the run's own result already stays in the run); so does a step
+  a newer run holds or remade, started even after the page last looked; so does a step whose own inputs changed since
+  the run (its settings or its wires: its brief edited to run it again, say); and so do the run's steps after any of
+  these, which were made from a result of the run the canvas does not show. The rest of the run lands, unless it is a
+  collaboration (whole or not at all), the canvas no longer holds the inputs the rest was made from, or the landing
+  would change a result, an issue or a conversation anyone changed since the run ended anywhere on the canvas (a step it
+  publishes lies upstream of it, and the freshness rules would clear it): then nothing lands. What lies after a step the
+  landing gives a result goes stale as when that step's result lands live, a step that showed none included, and is
+  cleared with it (a result published while the run went too); the session a step got is no change of it. The starter's
+  own page's recovery does the same. Nothing lands either where
+  no step gets a result it does not show, its standing included (the same text shown partial where the run's own result
+  is complete counts as missing). Where the log does not reach back to the run's end (pruned, or too long to send), a
+  step whose result's own time is after the run's end (its writer's clock; the server's for an Agent's hand-in) counts as
+  changed too, besides those the changes read name.
+- The landing is a whole-document `PUT` built from the canvas the server sent, carrying its version, and decided while
+  this page holds that version too (a page behind catches up first): the server takes it only if the canvas has not
+  changed since (AWWO-LAW-026), so nothing anyone did meanwhile is written over, and a second editor's page landing the
+  same run is refused (`409 version_conflict`) and finds it landed at its next look. It writes the results alone (a
+  node's `lastOutput`, its issue and its conversations'), never while the page has an edit of its own not sent yet, nor
+  on a node a run, a chat or node setup of this page holds or someone else's run holds. While it is out (at most 30 s)
+  the page's own saves wait.
+- The server records a `PUT`'s change with no page id, so every page, the lander's own included, takes it in as someone
+  else's change: it is carried over every undo and redo step, and no one's undo or redo takes it back. The lander does
+  not apply it itself; it comes by the live stream, or the change read after the save. Its page then says
+  「已从后台恢复运行结果。」, and nothing when the server did not take it; once it holds the version the landing made, it
+  reads again the conversations of the landed steps it had loaded, which the run's turns joined. A run left to the page
+  that it does not land (another tab or page landed it, or nothing of it lands) has those conversations read again too.
+  The change names the person whose page landed it (the 同屏 panel tells it as their results update) and its audit row
+  is theirs.
+- Nothing is written where another tab or a later opening of the canvas would take the run for this person's own: no run
+  lane, journal or observer. The page stays as it was (no timeline, no camera move, no run summary, no badges, no
+  collaboration's synthesis opened), save for a run of this person's own (below).
+- With 多人同屏 no ended canvas run is landed through a lane, which lands seconds after it is taken up, over whatever came
+  in meanwhile. The opening leaves its latest ended run, where that may hold a result the canvas lacks, to the open page,
+  which looks at it at once. A page that reopens a canvas whose run it started, with that run's journal still on this
+  device, applies nothing of the journal before the server has answered for the run, by its id or, where the page never
+  heard it (the admission's answer was lost), by its operation (it asks again until it does); when that answer finds the
+  run ended, the page shows how it ended (its badges and summary) and hands its results over the same way; so it does
+  for a journal another tab put in place of one it had read. So does a page whose journal another tab of this person
+  lets go (that tab handed the run over, or landed it): it takes no tab's copy of the canvas, as the live changes keep
+  the page in step and a copy behind them would go back as an edit of its own; it finds the run by its operation where
+  it never heard the run's id (asking again while that fails), names a run it started (its host hears the run ended),
+  and only then lets the run go, its badges with it, unless a journal came into the lane meanwhile (Stop here, another
+  tab's run), which it follows. Either waits for the canvas's live connection, which comes a moment
+  after the canvas opens. A run that ends while the page watches
+  it lands through the lane as it always has. A page alone (a server without 多人同屏) takes an ended run up whole, at
+  once, only where none of its steps must stay as the canvas shows it (the same rule, on the log, or on a result's own
+  time where the API has no log); else it leaves the run.
+- Limits: a node's chat turn (not a canvas run) whose page closed still lands when that page opens again; a run left
+  because its inputs changed is left without a word, as is one the run list no longer names; a journal whose run was
+  never admitted (its admission's answer lost, and no run found by its operation) keeps its page asking until Stop, as
+  before, and Stop then lets it go, applying nothing of it; a tab whose journal another tab let go shows none of the run's badges, and its run-ended notice cannot say a
+  step failed, as before; on a canvas that changes
+  faster than a landing's round trip (someone dragging without pause) the page asks less and less often (up to every 2
+  minutes), and leaves the run to the next opening after twelve such tries, eight refused saves or, for a run it found
+  itself, its 30 minutes. A run left to the page is kept in that page's memory only: a page closed before it lands it
+  leaves it to the next opening, which looks at the canvas's latest run alone. A newer run over the same nodes that
+  starts and ends while a landing is out, after its runs are read and before the server takes its save (the save's
+  upload included: up to 30 s for a large canvas on a slow link), is not seen: closing that needs the server to check the
+  canvas's runs in the save itself.
+
 ### Claims
 
 - A claim holds one node for one participant until it expires (15 s to 10 min; claiming again renews it) or is let go.

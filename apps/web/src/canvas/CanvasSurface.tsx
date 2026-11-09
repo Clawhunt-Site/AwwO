@@ -381,6 +381,9 @@ export interface CanvasSurfaceProps {
   /** 多人同屏: the host's live connection (multiplayer/host.ts): others' changes come in through it, this page's
    *  selection, open node and pointer go out, and others' rings, claims and pointers are drawn over the board. */
   multiplayer?: CanvasMultiplayerHost;
+  /** 多人同屏 is on for this canvas: its host (`multiplayer`) connects a moment after the canvas opens, and a canvas run's
+   *  journal this page finds ended, or another tab let go, waits for it (the host lands such a run). */
+  multiplayerExpected?: boolean;
   workspaceName?: string;
   workspaceCaption?: string;
   /** Storage destination shown in the footer; the host owns cloud sync status. */
@@ -516,7 +519,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpected = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -1108,6 +1111,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
   // whatever their edit made stale came with it. What is gone is no longer selected, open or configured.
   const multiplayerRef = useRef(multiplayer);
   multiplayerRef.current = multiplayer;
+  const multiplayerExpectedRef = useRef(multiplayerExpected);
+  multiplayerExpectedRef.current = multiplayerExpected;
   const multiplayerRebase = useCallback((rebase: CanvasMultiplayerRebase) => {
     const prev = docRef.current;
     const next = rebase.working(prev);
@@ -1138,10 +1143,15 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     setFocusedId(previous => previous && !kept.has(previous) ? null : previous);
     setInspectorId(previous => previous && !kept.has(previous) ? null : previous);
   }, [showAdopted]);
+  // Whether a run another page started may land its results here now, and the line that says it did (both set once the
+  // lanes exist, below them): the host lands it (saas/runAdoption.ts) as a change no page of its own made.
+  const canLandRef = useRef<(operationId: string, nodes: readonly string[]) => boolean>(() => false);
+  const landedRef = useRef<(nodes: readonly string[], say: boolean) => void>(() => {});
   useEffect(() => {
     if (!multiplayer || readOnly) return;
     multiplayer.connect({ rebase: multiplayerRebase, ready: () => !setupRequest.current && !outdatedObserver.current,
-      focus: nodeId => focusNodeRef.current(nodeId), document: () => docRef.current });
+      focus: nodeId => focusNodeRef.current(nodeId), document: () => docRef.current,
+      canLand: (operationId, nodes) => canLandRef.current(operationId, nodes), landed: (nodes, say = true) => landedRef.current(nodes, say) });
     return () => multiplayer.connect(null);
   }, [multiplayer, multiplayerRebase, readOnly]);
   // This page's selection and open node, for everyone else on the canvas; its pointer goes from the board below.
@@ -1791,6 +1801,31 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     active: anyLaneActive, exclusive: exclusiveLaneActive,
   };
   laneGuardLaneActive.current = laneActive;
+  // 多人同屏: a run another page started, which ended with results no page published (saas/runAdoption.ts), lands only
+  // where nothing here holds what it writes: never a run a lane of this page holds, nor beside a run that holds the whole
+  // canvas, nor on nodes a lane here runs (a start not yet accepted too), someone else's run holds or a chat is talking
+  // on, nor while node setup rewrites the document or the page is out of date.
+  canLandRef.current = (operationId, nodes) => {
+    if (readOnlyRef.current || outdatedObserver.current || setupRequest.current || !mounted.current || exclusiveLaneActive()) return false;
+    if (RUN_LANES.some(lane => laneJournal(lane)?.id === operationId)) return false;
+    const busy = busyNodeIds(undefined, true);
+    for (const id of multiplayerRef.current?.busyNodes?.() ?? []) busy.add(id);
+    if (nodes.some(id => busy.has(id))) return false;
+    return !hasStreamingConversation(docRef.current.nodes.filter(node => nodes.includes(node.id)));
+  };
+  // Its results are on the canvas (the host's save was taken): the page says so, and reads again the conversations of its
+  // nodes this page has loaded and is not talking in, which the run's turns joined (as a lane does when it lands one).
+  landedRef.current = (nodes, say) => {
+    if (say) setHandoffNote(surfaceNotice(t, 'graph_recovery_complete'));
+    for (const node of docRef.current.nodes) {
+      if (node.kind !== 'session' || !nodes.includes(node.id)) continue;
+      const storeKey = sessionStoreKey(node);
+      const session = getSessionSnapshot(storeKey);
+      if (session.history !== 'loaded' || session.streaming) continue;
+      forgetNode(storeKey);
+      void restoreHistory({ gatewayBase: gatewayApiBase(), node, signal: AbortSignal.timeout(15000) }).catch(() => undefined);
+    }
+  };
   // A collaboration runs alone, so at most one lane holds one.
   const collaborationJournal = RUN_LANES.map(lane => laneList[lane].journal.current).find(item => item?.collaboration) ?? null;
   // What the board locks this render: the nodes lanes execute, or everything while a review/collaboration runs.
@@ -1853,6 +1888,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
     // A server graph's run is read whole at this observer's first poll, which keeps the canvas it froze at admission, and
     // without that canvas at every poll after (observeCloudGraph): a film's is about a megabyte, polled every 2.5 s.
     const observation: GraphObservation = {};
+    // The journals (by id) whose runs the server has answered for to this observer: a canvas run already ended at its
+    // journal's first answer, here or after another tab put that journal in place of one read before, is landed by the
+    // host (below), which, where 多人同屏 is on, connects a moment after the canvas opens: it is waited for.
+    const answeredJournals = new Set<string>();
     const capturedDocumentKey = canvasStorageKey(CANVAS_STORAGE_KEY);
     const observerIsActive = () => !controller.signal.aborted && !outdatedObserver.current && mounted.current
       && currentSaaSCanvas() === cloudScope && canvasStorageKey(CANVAS_STORAGE_KEY) === capturedDocumentKey;
@@ -1894,6 +1933,40 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
       if (preparing()) { timer = setTimeout(() => void poll(), 600); return; }
       const durable = loadRunJournal();
       if (!durable) {
+        // 多人同屏: a canvas run whose journal another tab let go (it handed the run over to its host, or finished it) is
+        // this page's host's to land too (a run landed already is found landed there, and the conversations of its steps
+        // loaded here are read again). No tab's copy of the canvas is taken: the live changes keep this page's in step,
+        // and a copy behind it would go back as an edit of its own. The host connects a moment after the canvas opens.
+        const left = journal.current;
+        const canvasRun = Boolean(left?.serverGraph && !left.manual);
+        if (canvasRun && !multiplayerRef.current?.landEnded && multiplayerExpectedRef.current) {
+          timer = setTimeout(() => void poll(), 500); return;
+        }
+        const takeOver = multiplayerRef.current?.landEnded;
+        if (left?.serverGraph && canvasRun && takeOver) {
+          // A run whose admission answer this page never heard is found by its operation first (a lookup that fails is
+          // asked again at the next look; one that finds none, a run never admitted, hands nothing over). Both reads end
+          // before the lane goes: letting it go stops this observer, and its reads with it.
+          let id = left.serverGraph.id;
+          if (!id) {
+            try { id = await graphIdOfOperation(left.serverGraph, left.id, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)])); }
+            catch {
+              if (observerIsActive()) timer = setTimeout(() => void poll(), 2500);
+              return;
+            }
+            if (!observerIsActive()) return;
+          }
+          // A run this page started is named as it ends here, as ever.
+          if (id) await nameOwnedGraph({ ...left, serverGraph: { ...left.serverGraph, id } }, controller.signal);
+          if (!observerIsActive()) return;
+          if (id) takeOver(id);
+          // A journal put in the lane meanwhile (Stop here, another tab's run) is this lane's to follow: looked at again.
+          if (journal.current !== left || loadRunJournal()) { timer = setTimeout(() => void poll(), 2500); return; }
+          // Its badges here are the run's as it went, and it is over: they go, as when another tab finishes a run.
+          journal.current = null; setRecovering(false); setRunning(false); setRuns({}); setReviewRound(0);
+          setHandoffNote(previous => previous === surfaceNotice(t, 'recovering_run') ? '' : previous);
+          return;
+        }
         if (!hasNoUnsavedSourceEdits()) { pauseOutdatedObserver(); return; }
         // The tab that owned execution already persisted its final document and cleared the
         // journal. Its transcript store is not shared with this tab: even a loaded history
@@ -1950,6 +2023,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
       if (!journal.current) return;
       const observed = journal.current;
       const reconciled = await reconcileRunJournal(observed, docRef.current.nodes, gatewayApiBase(), controller.signal, observation);
+      // The journal itself comes back when the server did not answer for its run.
+      const answered = reconciled !== observed;
       if (!observerIsActive()) return;
       // A Stop confirmation may have landed while this read was in flight. Never overwrite it
       // with a response based on the old snapshot; reconcile the new journal in the next pass.
@@ -1982,6 +2057,38 @@ export function CanvasSurface({ readOnly = false, multiplayer, workspaceName, wo
         return;
       }
       if (!canWriteRecovery()) return;
+      // 多人同屏: a canvas run that had ended before this page took it up from its journal (a reopening) lands by the host's
+      // versioned save (saas/useRunLanding.ts), which leaves what others published since it ended: this page's own write
+      // of it would clear that. Its journal goes, and the host lands it or leaves the canvas as it is. One this page
+      // started, or saw going, lands here as it always has.
+      const handOver = multiplayerRef.current?.landEnded;
+      const ended = !Object.values(next.nodes).some(node => node.state === 'running' || node.state === 'waiting');
+      // A run the server never admitted (Stop found none by its operation) has nothing to land: its journal goes, applied
+      // nowhere (applied, it would clear what anyone published on its steps since), whichever page started it.
+      if (answered && ended && !next.manual && next.serverGraph && !next.serverGraph.id) {
+        clearRunJournal(next.id); journal.current = null; startedJournals.current.delete(next.id); setRuns({}); setReviewRound(0);
+        setRecovering(false); setRunning(false);
+        setHandoffNote(previous => previous === surfaceNotice(t, 'recovering_run') ? '' : previous);
+        return;
+      }
+      if (!answeredJournals.has(next.id) && !next.manual && next.serverGraph && !startedJournals.current.has(next.id)) {
+        // Nothing of a canvas run's journal is applied before the server has answered for its run once (by its id, or by
+        // its operation where the page never heard the id): a page closed while it went stored its steps as running, and
+        // applied as they are they would clear what the canvas shows.
+        if (!answered || (ended && !handOver && multiplayerExpectedRef.current)) {
+          timer = setTimeout(() => void poll(), answered ? 500 : 2500); return;
+        }
+        if (ended && handOver && next.serverGraph.id) {
+          // Its outcome shows here (each step's badge, the run's summary); its results are the host's to land.
+          clearRunJournal(next.id); journal.current = null;
+          setRuns(prev => timelineRuns(prev, next.nodes, Date.now())); setRunSummary(journalSummary(next));
+          setRecovering(false); setRunning(false);
+          setHandoffNote(previous => previous === surfaceNotice(t, 'recovering_run') ? '' : previous);
+          handOver(next.serverGraph.id);
+          return;
+        }
+      }
+      answeredJournals.add(next.id);
       if (!saveRunJournal(next)) {
         setHandoffNote(surfaceNotice(t, 'storage_write_failed'));
         timer = setTimeout(() => void poll(), 2500); return;

@@ -18,9 +18,8 @@ import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../ca
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { MAX_RUN_LANES, laneStorage, loadLaneJournals, withLaneOwnership } from '../canvas/runLanes';
 import { withCanvasRunOwnership } from '../canvas/runOwnership';
-import { supersededGraphNodes } from '../canvas/followupDelivery';
-import { recoverableOutput, runInputFingerprint } from '../canvas/runRecoveryDocument';
 import { graphPath, graphIsActive, graphRecoveryJournal, readGraphRun, type GraphRunSummary } from './graphRuns';
+import { endedRunOnOpening, useRunLanding } from './useRunLanding';
 import { GraphRunPanel } from './GraphRunPanel';
 import { createCanvasRuntimeReader } from '../canvasRuntimeReader';
 import { CanvasAccountControl } from '../CanvasAccountControl';
@@ -512,10 +511,18 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   // 多人同屏 (useCanvasMultiplayer.tsx): the canvas's live connection, saving by changes, others' edits coming in, where
   // the server offers it (its capabilities, read as the canvas opens).
   const [multiplayerOn, setMultiplayerOn] = useState(false);
+  // 多人同屏: a run whose starter's page closed before it ended lands here while the canvas is open and live
+  // (useRunLanding.ts), and so does one left to this page (deferredRuns): by the opening, or by the surface, which hands
+  // over a canvas run that had ended before it took it up from this device's journal.
+  const deferredRuns = useRef(new Set<string>());
+  const landNow = useRef<() => void>(() => {});
+  const handOver = useCallback((graphRunId: string) => { deferredRuns.current.add(graphRunId); landNow.current(); }, []);
   const multiplayer = useCanvasMultiplayer({ tenantId: tenant.id, canvasId, userId: identity.user.id, enabled: Boolean(record) && !recovery && multiplayerOn,
-    current, storage: scopedStorage, busy: () => saving.current, confirmed: lessonCanvasSaved });
+    current, storage: scopedStorage, busy: () => saving.current, confirmed: lessonCanvasSaved, handOver });
   const multiplayerRef = useRef(multiplayer);
   multiplayerRef.current = multiplayer;
+  useRunLanding({ enabled: Boolean(record) && !recovery && multiplayerOn, tenantId: tenant.id, canvasId, current, multiplayer: multiplayerRef,
+    saving, unsaved: () => Boolean(pending.current || draft.current || failed.current), deferred: deferredRuns, poke: landNow });
   const localDocumentSaveFailed = useCallback((document: CanvasDocument) => {
     pending.current = document;
     failed.current = true;
@@ -660,21 +667,16 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
             for (const graph of reads) {
               if (controller.signal.aborted) break;
               const document = sanitizeDocument(value.document);
-              const recovered = graphRecoveryJournal(graph, tenant.id, document);
-              const inputsMatch = recovered.inputFingerprint === runInputFingerprint(document, recovered.scope);
-              // Only a result the recovery would publish counts. Outside a collaboration the server records every
-              // waiting, blocked or reused step with an empty output; counting that as missing re-recovered an
-              // applied run on every open.
-              const superseded = supersededGraphNodes(document, graph);
-              const unpublished = recovered.scope.some(id => {
-                const item = recovered.nodes[id];
-                const output = item ? recoverableOutput(recovered, item) : null;
-                const shown = document.nodes.find(node => node.id === id)?.lastOutput;
-                // This graph was admitted from a version that did not include the revision.
-                if (superseded.has(id)) return false;
-                return output !== null && shown?.text !== output;
-              });
-              if (!graphIsActive(graph) && !(inputsMatch && unpublished)) continue;
+              // A run still going is taken up as it is. 多人同屏: one that ended with a result the canvas may lack is left to
+              // this page once it is open, which lands it by a save on the version it decides on (useRunLanding.ts), so
+              // nothing someone publishes meanwhile is cleared. A page alone (no 多人同屏) takes one up whole only with a
+              // result the canvas lacks, inputs it still holds and nothing written since it ended that its landing would
+              // change (runAdoption.ts runLanding: a waiting, blocked or reused step counts as no missing result, and a
+              // result published by hand, handed in or answered by a chat since it ended stays).
+              const recovered = graphIsActive(graph) ? graphRecoveryJournal(graph, tenant.id, document)
+                : await endedRunOnOpening(graph, { version: value.version, document }, items, tenant.id, canvasId, live, controller.signal);
+              if (recovered === 'defer') { deferredRuns.current.add(graph.id); continue; }
+              if (!recovered) continue;
               const lane = nextLane++;
               await withLaneOwnership(lane, async () => {
                 // Another tab may have started a newer operation while discovery was pending.
@@ -1051,7 +1053,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   return <div className="saas-canvas-shell">
     {error && <div className="saas-error-banner" role="alert">{saasErrorMessage(error, locale)}<button onClick={exportLocal}>{t('导出本地副本', 'Export local copy')}</button><button onClick={() => window.location.reload()}>{t('重新加载', 'Reload')}</button></div>}
     {runtime && executionUnavailableReason && <div className="saas-runtime-note" role="status"><span>{t('执行尚未就绪：', 'Execution is not ready: ')}{executionUnavailableReason}{' '}{identity.personalCredentialsRequired && <a data-onboarding="engine-link" href={accountURL('engines')}>{t('我的引擎', 'My engines')}</a>}{' '}{t('画布编辑仍可使用。', 'Canvas editing remains available.')}</span><button type="button" disabled={runtimeChecking} onClick={() => void recheckRuntime()}>{runtimeChecking ? t('正在检查…', 'Checking…') : t('重新检查', 'Check again')}</button></div>}
-    <CanvasSurface storageMode="cloud" multiplayer={multiplayer.host} personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
+    <CanvasSurface storageMode="cloud" multiplayer={multiplayer.host} multiplayerExpected={multiplayerOn} personalCredentialsRequired={identity.personalCredentialsRequired === true} onLocalDocumentSaveFailed={localDocumentSaveFailed}
       executionUnavailableReason={executionUnavailableReason} initialPlan={initialPlan}
       taskDraft={knowledgeTaskDraft} evolution={lessonEvolutions.evolution} onEvolutionSettled={evolutionTaken}
       autoRun={evolutionDriver.autoRun} onAutoRunSettled={evolutionDriver.autoRunSettled}

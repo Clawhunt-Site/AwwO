@@ -9,6 +9,7 @@ import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, co
 import { graphRecoveryJournal, type GraphRunSnapshot } from '../src/saas/graphRuns';
 import { resetAllSessions } from '../src/canvas/sessions';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import type { CanvasMultiplayerHost } from '../src/canvas/multiplayer/host';
 import { graphRunWithoutDocument } from './saas-graph-run-summary-fixture';
 
 const tenant = { id: 'observer-workspace', name: 'Observer workspace', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 100 };
@@ -70,6 +71,23 @@ it('reads an observed run whole at its first poll and without its frozen canvas 
   expect(screen.queryByText(/Historical results were retained|This page has an older canvas/)).toBeNull();
   expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
+
+// 多人同屏 (the hosted page says it is on): the page's host connects a moment after the canvas opens. A canvas run whose
+// journal another tab let go before then is still the host's to land, and no tab's copy of the canvas is taken meanwhile.
+it('waits for its 多人同屏 host before it lets go of a canvas run whose journal another tab let go', async () => {
+  const doc = document(); seed(doc); saveRunJournal(journalFor(doc));
+  const fetcher = fetchGraph(async () => json({ ...snapshot(doc), status: 'running', nodes: ['a', 'b'].map(nodeId => ({ nodeId, state: 'running' })) }));
+  const surface = (multiplayer?: CanvasMultiplayerHost) => <SaaSPreferencesProvider><CanvasSurface storageMode="cloud" multiplayerExpected multiplayer={multiplayer} /></SaaSPreferencesProvider>;
+  const view = render(surface());
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => runRead(url))).toBe(true));
+  // Another tab lets the run's journal go; this page's host connects after the page's next look.
+  act(() => { canvasStorage().removeItem(CANVAS_RUN_JOURNAL_KEY); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 3600)); });
+  const landEnded = vi.fn();
+  view.rerender(surface({ connect: () => {}, presence: () => {}, landEnded }));
+  await waitFor(() => expect(landEnded).toHaveBeenCalledWith('graph-a'), { timeout: 5000 });
+  expect(screen.queryByText('Run results restored. Run pending downstream nodes separately to continue.')).toBeNull();
+}, 20000);
 
 it('keeps a stale empty tab from poisoning or clearing another tab’s run, even after the owner finishes', async () => {
   seed(sanitizeDocument(emptyDocument()));
