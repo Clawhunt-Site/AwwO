@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,61 @@ func TestFilmSkillsNameWhatTheKitHas(t *testing.T) {
 		base := line[strings.Index(line, "[")+1 : strings.Index(line, "]")]
 		if !strings.Contains(guide, "'"+base+"'") {
 			t.Errorf("film-looks starts a look from %q, which is not a kit family: %s", base, line)
+		}
+	}
+}
+
+// A film node with the motion language reads two vocabularies: the skill's script names (MOTION.dur, MOTION.film,
+// MOTION.ease with its curves, MOTION.spring with its presets) and the film kit's own MOTION helpers. In an A/B of four
+// films on 2026-11-09 one page read MOTION.film.m from the kit's MOTION, which has no film, and threw before Film.run.
+// The guide now says the kit's MOTION has only its helpers, that the skill's curves map to the kit's eases, and that its
+// MOTION.film, .dur and spring presets go in TUNE. So: every member of the kit's MOTION (any top-level key of the
+// object, a method or a value as well as an arrow) is one the guide lists; the guide keeps that sentence; the kit's
+// MOTION has no film, dur or ease to read the skill's tables from, and its spring is a function, not a table of presets;
+// and the skill still prints all four names the sentence answers.
+func TestFilmGuideKeepsTheMotionLanguageOffTheKitsMotion(t *testing.T) {
+	guide := filmGuide(t)
+	kit, err := os.ReadFile(filepath.Join("..", "..", "..", "apps", "web", "src", "canvas", "filmKit", "film-kit.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := regexp.MustCompile(`(?s)\nconst MOTION = \{\n(.*?)\n\};`).FindSubmatch(kit)
+	if block == nil {
+		t.Fatal("film-kit.js no longer declares const MOTION = { ... } as this test reads it")
+	}
+	// The object's own keys are written two spaces in, one per line; a body's lines are deeper.
+	members := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^  ([A-Za-z_$][\w$]*)\s*(:\s*|\()(.?)`).FindAllSubmatch(block[1], -1) {
+		members[string(m[1])] = string(m[2]) + string(m[3])
+	}
+	if len(members) < 5 {
+		t.Fatalf("read only %d members of the kit's MOTION: %v", len(members), members)
+	}
+	for name := range members {
+		if !strings.Contains(guide, "`MOTION."+name+"(") {
+			t.Errorf("the kit's MOTION has %s, which the guide does not list", name)
+		}
+	}
+	const bridge = "`MOTION` has only these: motion-language's curves map to these eases, its `MOTION.film`, `.dur` and spring presets go in `TUNE`."
+	if !strings.Contains(guide, bridge) {
+		t.Fatalf("the guide no longer says that the kit's MOTION has only its helpers:\n%s", bridge)
+	}
+	for _, name := range []string{"film", "dur", "ease"} {
+		if _, has := members[name]; has {
+			t.Errorf("the kit's MOTION now has %s: the guide's sentence about motion-language's names is wrong", name)
+		}
+	}
+	// An arrow with parameters (`spring: (tau, ...) =>`) or a method (`spring(tau, ...)`): a function, never a table.
+	if spring, has := members["spring"]; !has || (spring != ": (" && !strings.HasPrefix(spring, "(")) || !strings.Contains(guide, "`MOTION.spring(") {
+		t.Errorf("the kit's MOTION.spring is no longer a function the guide shows (read %q): the sentence's spring presets need another home", spring)
+	}
+	skill, ok := builtinSkill("motion-language")
+	if !ok {
+		t.Fatal("motion-language is missing")
+	}
+	for _, name := range []string{"film", "dur", "ease", "spring"} {
+		if !strings.Contains(skill.Body, "`MOTION."+name+"`") {
+			t.Errorf("motion-language no longer names MOTION.%s, which the guide's sentence answers", name)
 		}
 	}
 }
