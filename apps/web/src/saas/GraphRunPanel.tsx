@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useBelowHeader } from '../canvas/multiplayer/belowHeader';
 import { api, saasErrorMessage, type Identity } from './api';
 import { runFailureText } from './canvasErrors';
 import { graphPath, graphIsActive, publishGraphRuns, readGraphRun, validGraphRunList, type GraphRunSnapshot, type GraphRunSummary, type GraphCollaborationPhase } from './graphRuns';
@@ -165,7 +166,15 @@ function GraphRunPanelView({ tenantId, canvasId, readOnly = false }: GraphRunPan
         </>}
       </>}
     </section>}
+    {open && <BelowHeader target={panel} />}
   </div>;
+}
+
+/** Keeps the open panel right below the canvas header it opens from, wherever a banner above the header has moved it,
+ *  as the 同屏 panel is (belowHeader.ts). It mounts after the panel, so the header is measured as the panel opens. */
+function BelowHeader({ target }: { target: RefObject<HTMLElement | null> }) {
+  useBelowHeader(target);
+  return null;
 }
 
 /** Whether the run the panel shows, as last read, may be behind what the list now says of it. A node's output, run and

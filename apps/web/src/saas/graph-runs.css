@@ -1,6 +1,9 @@
 .saas-graph-control { display: inline-flex; }
 .saas-graph-control > button { border: 1px solid var(--saas-border); border-radius: 5px; background: var(--saas-card); color: var(--saas-text); padding: 3px 7px; cursor: pointer; font: inherit; }
-.saas-graph-panel { box-sizing: border-box; position: fixed; z-index: 180; top: 60px; right: 16px; width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - 80px); overflow: auto; padding: 20px; background: var(--saas-card); color: var(--saas-text); border: 1px solid var(--saas-border); border-radius: 16px; box-shadow: 0 18px 64px #0007; font-size: 14px; }
+/* Right below the canvas header it opens from, wherever a banner above the header has moved it: --awwo-multiplayer-top is
+   the header's bottom edge as GraphRunPanel measures it (belowHeader.ts); 60px only where nothing measures it. A phone
+   keeps its own sheet (below). */
+.saas-graph-panel { box-sizing: border-box; position: fixed; z-index: 180; top: var(--awwo-multiplayer-top, 60px); right: 16px; width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - var(--awwo-multiplayer-top, 60px) - 20px); overflow: auto; padding: 20px; background: var(--saas-card); color: var(--saas-text); border: 1px solid var(--saas-border); border-radius: 16px; box-shadow: 0 18px 64px #0007; font-size: 14px; }
 .saas-graph-panel header, .saas-graph-summary, .saas-team-turn > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .saas-graph-panel h2 { margin: 0; font-size: 18px; }
 .saas-graph-panel p { line-height: 1.6; white-space: normal; }
