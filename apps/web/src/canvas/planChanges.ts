@@ -51,10 +51,18 @@ export function describePlanChanges(before: CanvasDocument, after: CanvasDocumen
   const removed = before.nodes.filter(node => !later.has(node.id));
   const lines: string[] = [];
   if (added.length) lines.push(t('planning.changeAdded', { count: added.length, names: names(locale, t, added) }));
-  // Skills the plan put on nodes it adds, which no one chose (canvasPlan.ts HOSTED_PAGE_SKILLS): each run sends them.
+  // Skills the plan put on nodes it adds, which no one chose (canvasPlan.ts HOSTED_PAGE_SKILLS, HOSTED_FILM_SKILLS): each
+  // run sends them. The nodes given the same skills share a line, so a page and a film are each named with their own.
   const skilled = added.filter((node): node is SessionNode => node.kind === 'session' && Boolean(node.skills?.length));
-  if (skilled.length) lines.push(t('planning.changeSkills', { names: names(locale, t, skilled),
-    skills: [...new Set(skilled.flatMap(node => node.skills!.map(ref => ref.replace(/^builtin:/, ''))))].join(locale === 'zh' ? '、' : ', ') }));
+  const bySkills = new Map<string, { count: number; nodes: SessionNode[] }>();
+  for (const node of skilled) {
+    const unique = [...new Set(node.skills!.map(ref => ref.replace(/^builtin:/, '')))];
+    const skills = unique.join(locale === 'zh' ? '、' : ', ');
+    bySkills.set(skills, { count: unique.length, nodes: [...(bySkills.get(skills)?.nodes ?? []), node] });
+  }
+  for (const [skills, { count, nodes }] of bySkills) {
+    lines.push(t(count === 1 ? 'planning.changeSkill' : 'planning.changeSkills', { names: names(locale, t, nodes), skills }));
+  }
   if (removed.length) lines.push(t('planning.changeRemoved', { names: names(locale, t, removed) }));
   const persona: CanvasNode[] = [], acceptance: CanvasNode[] = [], constraints: CanvasNode[] = [], inputs: CanvasNode[] = [], fields: CanvasNode[] = [], prompts: CanvasNode[] = [];
   const modelLines: string[] = [];

@@ -109,15 +109,30 @@ func TestDesignPageSetLeavesRoomInTheSystemPrompt(t *testing.T) {
 // contract, every note a run can add and that much text of its own, the system prompt must still fit the 32,768 units
 // graph_runs.go allows. The examples nodePromptUnits counts must be the ones the policy writes.
 func TestPlannedPageSkillsFitTheSystemPrompt(t *testing.T) {
+	plannedSkillsFitTheSystemPrompt(t, "page", "HOSTED_PAGE_SKILLS", "HOSTED_PAGE_SKILL_ROOM", plannerPageSkillRefs)
+}
+
+// A film node the canvas assistant plans (代码影片) runs with HOSTED_FILM_SKILLS, the motion language, on the same terms:
+// while its own text (the role and the film kit's guide in its persona, its task requirements and its fields) takes at
+// most HOSTED_FILM_SKILL_ROOM units, the system prompt fits 32,768 with every note a run can add.
+func TestPlannedFilmSkillsFitTheSystemPrompt(t *testing.T) {
+	plannedSkillsFitTheSystemPrompt(t, "film", "HOSTED_FILM_SKILLS", "HOSTED_FILM_SKILL_ROOM", plannerFilmSkillRefs)
+}
+
+// plannedSkillsFitTheSystemPrompt reads one of canvasPlan.ts's planned skill lists and its room (listName, roomName),
+// checks that the API takes the list as the planner's (api) and ships every skill in it, and fails when a node with them
+// and that room of its own text could send a system prompt over 32,768 units.
+func plannedSkillsFitTheSystemPrompt(t *testing.T, label, listName, roomName string, api []string) {
+	t.Helper()
 	source, err := os.ReadFile(filepath.Join("..", "..", "..", "apps", "web", "src", "canvas", "canvasPlan.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(source)
-	list := regexp.MustCompile(`export const HOSTED_PAGE_SKILLS: readonly string\[\] = \[([^\]]*)\];`).FindStringSubmatch(text)
-	room := regexp.MustCompile(`export const HOSTED_PAGE_SKILL_ROOM = ([0-9]+);`).FindStringSubmatch(text)
+	list := regexp.MustCompile(`export const ` + listName + `: readonly string\[\] = \[([^\]]*)\];`).FindStringSubmatch(text)
+	room := regexp.MustCompile(`export const ` + roomName + ` = ([0-9]+);`).FindStringSubmatch(text)
 	if list == nil || room == nil {
-		t.Fatal("canvasPlan.ts no longer declares HOSTED_PAGE_SKILLS and HOSTED_PAGE_SKILL_ROOM as this test reads them")
+		t.Fatalf("canvasPlan.ts no longer declares %s and %s as this test reads them", listName, roomName)
 	}
 	htmlExample := regexp.MustCompile(`const POLICY_EXAMPLE_HTML = '([^']*)';`).FindStringSubmatch(text)
 	fileExample := regexp.MustCompile(`const POLICY_EXAMPLE_FILE = \{ name: '([^']*)', content: '([^']*)' \};`).FindStringSubmatch(text)
@@ -144,26 +159,27 @@ func TestPlannedPageSkillsFitTheSystemPrompt(t *testing.T) {
 	}
 	raw, _ := json.Marshal(refs)
 	if _, err := parseNodeSkillRefs(raw); err != nil || len(refs) == 0 {
-		t.Fatalf("a planned page's skills %v are not a list a node takes: %v", refs, err)
+		t.Fatalf("a planned %s's skills %v are not a list a node takes: %v", label, refs, err)
 	}
-	// The API knows them as the planner's, which a run they would not let fit goes without (plannerPageSkills).
-	if sorted, api := slices.Sorted(slices.Values(refs)), slices.Sorted(slices.Values(plannerPageSkillRefs)); !slices.Equal(sorted, api) {
-		t.Fatalf("canvasPlan.ts gives a planned page %v, but the API takes %v as the planner's", refs, plannerPageSkillRefs)
+	// The API knows them as the planner's, which a run they would not let fit goes without (plannerSkills).
+	if sorted, taken := slices.Sorted(slices.Values(refs)), slices.Sorted(slices.Values(api)); !slices.Equal(sorted, taken) {
+		t.Fatalf("canvasPlan.ts gives a planned %s %v, but the API takes %v as the planner's", label, refs, api)
 	}
 	skills, err := freezeSkillContext(t.Context(), nil, "", refs)
 	if err != nil {
-		t.Fatalf("a planned page's skills %v would refuse its run: %v", refs, err)
+		t.Fatalf("a planned %s's skills %v would refuse its run: %v", label, refs, err)
 	}
 	limit, _ := strconv.Atoi(room[1])
-	// The page's own text here is one character of brief and one of requirement, counted as the API writes them (JSON).
+	// The node's own text here is one character of brief and one of requirement, counted as the API writes them (JSON).
 	persona := "x"
 	frame := &taskFrame{Version: 1, Source: "manual", Constraints: []string{"x"}, AcceptanceCriteria: []string{}}
 	personaJSON, _ := json.Marshal(persona)
 	frameJSON, _ := json.Marshal(frame)
-	// The planned page's own contract, a text-only one, and one with every kind of output (the html, file and text
-	// sentences of the policy, and its JSON-only branch).
+	// A planned page's and a planned film's own contracts, a text-only one, and one with every kind of output (the html,
+	// file and text sentences of the policy, and its JSON-only branch).
 	contracts := [][]graphField{
 		{{ID: "page", Label: "网页", Type: "html", Required: true, Help: "一页完整的 HTML，打开就能使用。"}},
+		{{ID: "film", Label: "Film", Type: "html", Required: true, Help: "Play it in Results with its sound, render it to video, or download it as one web page."}},
 		{{ID: "notes", Label: "Notes", Type: "markdown", Required: true}},
 		{{ID: "page", Label: "Page", Type: "html", Required: true}, {ID: "bundle", Label: "Bundle", Type: "file"},
 			{ID: "count", Label: "Count", Type: "number"}, {ID: "ok", Label: "OK", Type: "boolean"},
@@ -194,8 +210,9 @@ func TestPlannedPageSkillsFitTheSystemPrompt(t *testing.T) {
 		}
 	}
 	if worst+limit > 32768 {
-		t.Fatalf("a node with the planned page's skills and %d units of its own text would send a %d-unit system prompt, over 32,768: lower HOSTED_PAGE_SKILL_ROOM to %d at most", limit, worst+limit, 32768-worst)
+		t.Fatalf("a node with the planned %s's skills and %d units of its own text would send a %d-unit system prompt, over 32,768: lower %s to %d at most", label, limit, worst+limit, roomName, 32768-worst)
 	}
+	t.Logf("a planned %s: %d units beside its own text at most, %s %d, %d to spare", label, worst, roomName, limit, 32768-worst-limit)
 }
 
 // apps/web/tests/saas-plan-orchestration.test.ts pins what nodePromptUnits counts for these strings and contracts; the

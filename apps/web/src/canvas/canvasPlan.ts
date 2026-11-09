@@ -52,6 +52,16 @@ export const HOSTED_PAGE_SKILLS: readonly string[] = ['builtin:design-craft', 'b
  *  API refuses a run whose system prompt passes 32,768 units (graph_runs.go), and the skills, the rest of the output
  *  policy and every note a run can add leave about 15,800. design_skills_test.go pins this. */
 export const HOSTED_PAGE_SKILL_ROOM = 14000;
+/** The built-in skill a film node the plan adds (代码影片) runs with where a page runs with the design skills: AwwO's one
+ *  motion language (MOTION.md), so the films the canvas's agents make share the timings, curves and springs of everything
+ *  else in AwwO that moves (owner request 2026-11-08: every future video by that method). The film kit's guide says how
+ *  its helpers draw them. The API takes it alone on a film node as the planner's, as it takes the page pair
+ *  (skills.go plannerSkills), and refuses a node naming a skill it does not have (design_skills_test.go checks it). */
+export const HOSTED_FILM_SKILLS: readonly string[] = ['builtin:motion-language'];
+/** The units a film node's own text may take (nodePromptUnits) for it to keep that skill: its persona already carries
+ *  the film kit's guide (about 16,000 units with the role), so most of this room is the guide's. design_skills_test.go
+ *  pins it, as it pins HOSTED_PAGE_SKILL_ROOM. */
+export const HOSTED_FILM_SKILL_ROOM = 20000;
 /** The example of an output's shape the API's output policy writes beside its fields (graphOutputPolicy);
  *  design_skills_test.go checks these against the policy. */
 const POLICY_EXAMPLE_HTML = '<html><head></head><body>Actual result</body></html>';
@@ -78,9 +88,20 @@ export function nodePromptUnits(node: SessionNode): number {
   return units(node.persona) + (isTaskFrame(node.taskFrame) ? units(node.taskFrame) : 0)
     + (outputs.length ? units(fields) + units(Object.fromEntries(outputs.map(field => [field.id, policyExample(field)]))) : 0);
 }
-/** Whether a node carries exactly the design skills a planned page is given (in any order). */
-const carriesPageSkills = (node: SessionNode) => node.skills?.length === HOSTED_PAGE_SKILLS.length
-  && HOSTED_PAGE_SKILLS.every(ref => node.skills!.includes(ref));
+/** The skills a plan gives the nodes it adds, each with the room the node's own text may take beside them and the note
+ *  that says a node lost them: a page's design skills, on any node carrying exactly the two, and a film's motion
+ *  language, on a film node only (that one skill alone on another node is a member's choice). */
+const PLANNED_SKILLS = [
+  { refs: HOSTED_PAGE_SKILLS, room: HOSTED_PAGE_SKILL_ROOM, filmOnly: false,
+    zh: (title: string) => `「${title}」不再带设计技能（design-craft、anti-ai-slop）：带上它们，这个节点的说明、任务要求和交付字段会超出一次调用能发给模型的量`,
+    en: (title: string) => `“${title}” no longer carries the design skills (design-craft, anti-ai-slop): with them, its brief, task requirements and output fields would be more than one call can send its model` },
+  { refs: HOSTED_FILM_SKILLS, room: HOSTED_FILM_SKILL_ROOM, filmOnly: true,
+    zh: (title: string) => `「${title}」不再带动效语言技能（motion-language）：带上它，这个节点的说明、任务要求和交付字段会超出一次调用能发给模型的量`,
+    en: (title: string) => `“${title}” no longer carries the motion language skill (motion-language): with it, its brief, task requirements and output fields would be more than one call can send its model` },
+] as const;
+/** The planned skills a node carries exactly (in any order), if any. */
+const plannedSkillsOf = (node: SessionNode) => PLANNED_SKILLS.find(set => (!set.filmOnly || node.templateId === 'film')
+  && node.skills?.length === set.refs.length && set.refs.every(ref => node.skills!.includes(ref)));
 /** The parts of a node nodePromptUnits counts, to tell whether a plan changed them (task requirements without the blank
  *  entries the API drops). */
 const promptText = (node: SessionNode) => JSON.stringify([node.persona, isTaskFrame(node.taskFrame) ? cleanTaskFrame(node.taskFrame) : null,
@@ -762,11 +783,12 @@ export const DEFAULT_MODEL_REFERENCE = 'default';
 
 /** Validate against a private clone, then return one complete document. No partial writes: an operation that
  *  cannot apply as written is either repaired or left out, and each such case is listed in `adjustments`. On a
- *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs), and where `pageSkills`
- *  it runs with the design skills while they fit (HOSTED_PAGE_SKILLS). A set_team applies only where the host runs node
- *  teams (`teams`) and the request the plan was made from offered set_team (planOffersTeams). */
+ *  `hosted` canvas a frontend node the plan adds delivers one html page (hostedPageOutputs), and where `plannedSkills`
+ *  it runs with the design skills while they fit (HOSTED_PAGE_SKILLS), a film node the plan adds with the motion
+ *  language (HOSTED_FILM_SKILLS). A set_team applies only where the host runs node teams (`teams`) and the request the
+ *  plan was made from offered set_team (planOffersTeams). */
 export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: UiLocale = 'zh', originalRequest = '', media?: CanvasPlanMedia,
-  models?: CanvasPlanModels, hosted = false, pageSkills = hosted, teams = false): AppliedCanvasPlan {
+  models?: CanvasPlanModels, hosted = false, plannedSkills = hosted, teams = false): AppliedCanvasPlan {
   const plan = parseCanvasPlan(value);
   const teamsOffered = planOffersTeams(value);
   // Every note is kept, so the count the panel gives of those it does not show is true.
@@ -880,8 +902,10 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         if (hosted && op.templateId === HOSTED_PAGE_TEMPLATE_ID && node.contract) {
           node.contract = { ...node.contract, outputs: hostedPageOutputs(locale) };
           node.persona = hostedPagePersona(locale);
-          if (pageSkills) node.skills = [...HOSTED_PAGE_SKILLS];
+          if (plannedSkills) node.skills = [...HOSTED_PAGE_SKILLS];
         }
+        // A film the plan adds speaks AwwO's motion language wherever a page gets the design skills.
+        if (hosted && plannedSkills && op.templateId === 'film') node.skills = [...HOSTED_FILM_SKILLS];
         // A new node never takes text copied from one the plan's context showed only in part; what it is added
         // without is said under the name it gets.
         if (copied(op.title)) copiedAdjust(node, '名称', 'title', adjust, true);
@@ -1231,18 +1255,18 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
   checkGraph(draft);
   checkExecution(draft);
   const added = new Set(addedNodeIds);
-  // A node with the design skills whose own text, as this plan leaves it, would leave its system prompt too little room
-  // runs without them rather than be refused for its size: a page the plan adds, or one whose brief, task or fields it
-  // changed. A node already saved loses them only by an empty list (the server keeps a node's skills for a save that
-  // leaves the list out).
+  // A node with the planned skills (a page's design skills, a film's motion language) whose own text, as this plan leaves
+  // it, would leave its system prompt too little room runs without them rather than be refused for its size: a node the
+  // plan adds, or one whose brief, task or fields it changed. A node already saved loses them only by an empty list (the
+  // server keeps a node's skills for a save that leaves the list out).
   const before = new Map(doc.nodes.flatMap(node => node.kind === 'session' ? [[node.id, promptText(node)] as const] : []));
   for (const node of draft.nodes) {
-    if (node.kind !== 'session' || !carriesPageSkills(node) || nodePromptUnits(node) <= HOSTED_PAGE_SKILL_ROOM) continue;
+    const planned = node.kind === 'session' ? plannedSkillsOf(node) : undefined;
+    if (node.kind !== 'session' || !planned || nodePromptUnits(node) <= planned.room) continue;
     if (added.has(node.id)) { delete node.skills; continue; }
     if (before.get(node.id) === promptText(node)) continue;
     node.skills = [];
-    adjust(`「${titleOf(node)}」不再带设计技能（design-craft、anti-ai-slop）：带上它们，这个节点的说明、任务要求和交付字段会超出一次调用能发给模型的量`,
-      `“${titleOf(node)}” no longer carries the design skills (design-craft, anti-ai-slop): with them, its brief, task requirements and output fields would be more than one call can send its model`);
+    adjust(planned.zh(titleOf(node)), planned.en(titleOf(node)));
   }
   const survivors = draft.nodes.filter(node => added.has(node.id));
   const oldNodes = draft.nodes.filter(node => !added.has(node.id));

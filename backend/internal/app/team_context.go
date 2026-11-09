@@ -97,11 +97,11 @@ func prepareTeamInput(snap executionSnapshot, m teamMember, input teamTurnInput,
 
 // prepareTeamInputWith is prepareTeamInput for a system prompt that gains noteUnits UTF-16 code units after it (the
 // note naming the member's model, teams.go): its history leaves them within the worker's transport limit too. The
-// planner's page skills are a default for a page's one call (plannerPageSkillRefs): a turn they would not let fit goes
+// planner's skills are a default for a page's or a film's one call (plannerSkills): a turn they would not let fit goes
 // without them.
 func prepareTeamInputWith(snap executionSnapshot, m teamMember, input teamTurnInput, budget, overhead, noteUnits int) (string, string, []json.RawMessage, teamContextAudit, error) {
 	prompt, system, history, audit, err := prepareTeamTurn(snap, m, input, budget, overhead, noteUnits)
-	if err != nil && err.Error() == "context_limit" && plannerPageSkills(snap.Skills) {
+	if err != nil && err.Error() == "context_limit" && plannerSkills(snap.Skills) {
 		snap.Skills = nil
 		return prepareTeamTurn(snap, m, input, budget, overhead, noteUnits)
 	}

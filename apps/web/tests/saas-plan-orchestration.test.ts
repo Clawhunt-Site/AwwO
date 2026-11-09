@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAgentTemplate } from '../src/canvas/agentTemplates';
 import { createFormNode, createSessionNode, emptyDocument, type CanvasDocument, type SessionNode } from '../src/canvas/canvasDoc';
-import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, condensedMark, HOSTED_PAGE_SKILL_ROOM, HOSTED_PAGE_SKILLS, hostedPagePersona,
-  markPlanContextCondensed, nodePromptUnits, parseCanvasPlan, PLAN_NOTES_SHOWN, sharedRequirements, type CanvasPlanModels } from '../src/canvas/canvasPlan';
+import { applyCanvasPlan, CANVAS_PLAN_PROTOCOL, condensedMark, HOSTED_FILM_SKILL_ROOM, HOSTED_FILM_SKILLS, HOSTED_PAGE_SKILL_ROOM, HOSTED_PAGE_SKILLS,
+  hostedPagePersona, markPlanContextCondensed, nodePromptUnits, parseCanvasPlan, PLAN_NOTES_SHOWN, sharedRequirements, type CanvasPlanModels } from '../src/canvas/canvasPlan';
+import { filmPersona } from '../src/canvas/filmKit/filmKit';
 import type { ContractField } from '../src/canvas/nodeContracts';
 import type { TaskFrame } from '../src/canvas/taskFrame';
 import { buildPlanningContext } from '../src/canvas/canvasPlanning';
@@ -484,12 +485,13 @@ describe('a page on a hosted canvas', () => {
     const renamed = applyCanvasPlan(doc(existing), plan({ type: 'update_node', nodeId: 'old', title: 'Shop' }), 'en', REQUEST, undefined, undefined, true);
     expect(session(renamed.doc, 'old').contract!.outputs.map(field => field.id)).toEqual(['delivery', 'preview', 'checks']);
     expect(session(renamed.doc, 'old').skills).toBeUndefined();
-    // A figure page keeps its own kit, whose guide already fills most of its system prompt; so does a film page.
+    // A figure page keeps its own kit, whose guide already fills most of its system prompt, and no design skills; a film
+    // page gets the motion language instead (the next block).
     const figure = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'fig', templateId: 'figure' }), 'en', REQUEST, undefined, undefined, true);
     expect((figure.doc.nodes[0] as SessionNode).skills).toBeUndefined();
     const film = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film' }), 'en', REQUEST, undefined, undefined, true);
     expect((film.doc.nodes[0] as SessionNode).contract!.outputs.map(field => field.id)).toEqual(['film']);
-    expect((film.doc.nodes[0] as SessionNode).skills).toBeUndefined();
+    expect((film.doc.nodes[0] as SessionNode).skills).toEqual([...HOSTED_FILM_SKILLS]);
   });
 
   // The API refuses a run whose system prompt passes 32,768 UTF-16 units; the skills take about 11,400 of them, and
@@ -601,5 +603,74 @@ describe('a page on a hosted canvas', () => {
     const local = buildPlanningContext(doc(), [], 'en');
     expect(local).not.toContain('"id":"page","label":"Page"');
     expect(local).toContain('{"id":"delivery"');
+  });
+});
+
+// A film node the plan adds (代码影片) speaks AwwO's one motion language where a page gets the design skills: the owner
+// asked on 2026-11-08 that every future video follow it, the films the canvas's own agents make among them.
+describe('a film on a hosted canvas', () => {
+  const film = (request: string, ...more: unknown[]) => {
+    const applied = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film', title: 'Opening' }, ...more), 'en', request, undefined, undefined, true);
+    return applied.doc.nodes.find(node => node.id === applied.addedNodeIds[0]) as SessionNode;
+  };
+
+  it('gives a film the plan adds the motion language where a page gets the design skills, and nowhere else', () => {
+    const cut = film(REQUEST);
+    expect(cut.skills).toEqual(['builtin:motion-language']);
+    expect(cut.skills).not.toBe(HOSTED_FILM_SKILLS);
+    // The skill rides beside the role and the kit's guide, which stay the template's.
+    expect(cut.persona).toBe(filmPersona(createAgentTemplate('film', { x: 0, y: 0 }, 'en').persona));
+    expect(cut.contract!.outputs.map(field => field.id)).toEqual(['film']);
+    // Every model on personal keys (plannedSkills off, as CanvasSurface passes it there), a canvas that is not hosted, and
+    // a film already on the canvas: none.
+    const own = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film' }), 'en', REQUEST, undefined, undefined, true, false);
+    expect((own.doc.nodes[0] as SessionNode).skills).toBeUndefined();
+    const local = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film' }), 'en', REQUEST);
+    expect((local.doc.nodes[0] as SessionNode).skills).toBeUndefined();
+    const existing = { ...createAgentTemplate('film', { x: 0, y: 0 }, 'en'), id: 'old' } as SessionNode;
+    const renamed = applyCanvasPlan(doc(existing), plan({ type: 'update_node', nodeId: 'old', title: 'Trailer' }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(renamed.doc, 'old').skills).toBeUndefined();
+    // A page and a film in one plan each get their own; a reviewer beside them gets none.
+    const both = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'page', templateId: 'frontend' }, { type: 'add_node', ref: 'cut', templateId: 'film' },
+      { type: 'add_node', ref: 'check', templateId: 'review' }), 'zh', REQUEST, undefined, undefined, true);
+    expect(both.addedNodeIds.map(id => session(both.doc, id).skills)).toEqual([[...HOSTED_PAGE_SKILLS], [...HOSTED_FILM_SKILLS], undefined]);
+    expect(both.adjustments).toEqual([]);
+  });
+
+  // The kit's guide is most of a film node's own text; the room leaves it a request and checks of its own beside it.
+  // design_skills_test.go pins the room against the API's system prompt (TestPlannedFilmSkillsFitTheSystemPrompt).
+  it('keeps the motion language on a film while its guide, request and fields, as the API writes them, leave room for it', () => {
+    for (const locale of ['zh', 'en'] as const) {
+      expect(HOSTED_FILM_SKILL_ROOM - nodePromptUnits(createAgentTemplate('film', { x: 0, y: 0 }, locale))).toBeGreaterThan(3000);
+    }
+    const letters = film('a'.repeat(2000));
+    expect(nodePromptUnits(letters)).toBeLessThan(HOSTED_FILM_SKILL_ROOM);
+    expect(letters.skills).toEqual([...HOSTED_FILM_SKILLS]);
+    // The same length of markup does not fit: the API escapes each <, > or & in six units.
+    const markup = film('<>'.repeat(1000));
+    expect(nodePromptUnits(markup)).toBeGreaterThan(HOSTED_FILM_SKILL_ROOM);
+    expect(markup.skills).toBeUndefined();
+    // Checks the same plan writes count as well.
+    expect(film(REQUEST, { type: 'set_task', nodeId: 'cut', acceptanceCriteria: ['&'.repeat(1500)] }).skills).toBeUndefined();
+  });
+
+  it('takes the motion language off a film a later plan changes past the room, and says so; on another node it is a member’s', () => {
+    const first = applyCanvasPlan(doc(), plan({ type: 'add_node', ref: 'cut', templateId: 'film', title: 'Opening' }), 'en', REQUEST, undefined, undefined, true);
+    const id = first.addedNodeIds[0];
+    const step = plan({ type: 'set_task', nodeId: id, acceptanceCriteria: ['&'.repeat(1500)] });
+    const later = applyCanvasPlan(first.doc, step, 'en', 'Change it', undefined, undefined, true);
+    // An empty list, not a missing one: the server keeps a saved node's skills for a save that leaves the list out.
+    expect(session(later.doc, id).skills).toEqual([]);
+    expect(later.adjustments).toEqual(['“Opening” no longer carries the motion language skill (motion-language): with it, its brief, task requirements and output fields would be more than one call can send its model']);
+    expect(applyCanvasPlan(first.doc, step, 'zh', '改一下', undefined, undefined, true).adjustments)
+      .toEqual(['「Opening」不再带动效语言技能（motion-language）：带上它，这个节点的说明、任务要求和交付字段会超出一次调用能发给模型的量']);
+    // A film over the room that this plan does not change keeps it (a member's own edit put it there).
+    const edited = { ...session(first.doc, id), taskFrame: frame([REQUEST], ['&'.repeat(1500)]) };
+    const other = applyCanvasPlan(doc(edited), plan({ type: 'add_node', ref: 'check', templateId: 'review' }), 'en', REQUEST, undefined, undefined, true);
+    expect(session(other.doc, id).skills).toEqual([...HOSTED_FILM_SKILLS]);
+    // The motion language alone on a node that is not a film was a member's choice: a plan never takes it off.
+    const chosen = agent('writer', { skills: ['builtin:motion-language'] });
+    const kept = applyCanvasPlan(doc(chosen), plan({ type: 'update_node', nodeId: 'writer', persona: '<'.repeat(4000) }), 'en', REQUEST, undefined, undefined, true);
+    expect([session(kept.doc, 'writer').skills, kept.adjustments]).toEqual([['builtin:motion-language'], []]);
   });
 });

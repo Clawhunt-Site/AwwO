@@ -389,6 +389,96 @@ func TestPostgresPlannedPageSkillsGiveWayWhereTheyWouldNotFit(t *testing.T) {
 	}
 }
 
+// A film the canvas assistant plans carries the motion language as its default (canvasPlan.ts HOSTED_FILM_SKILLS): a
+// run it would push past its model's budget goes without it, on the film's own run and in a canvas run alike, while the
+// same skill alone on a node that is not a film is a member's choice and stops the run as before; with room, it is sent.
+func TestPostgresPlannedFilmSkillGivesWayWhereItWouldNotFit(t *testing.T) {
+	skills := []string{"builtin:motion-language"}
+	for _, tc := range []struct {
+		name  string
+		bytes int // the worker's budget for its model, in bytes (no prose rate)
+		fits  bool
+	}{{"tight", 4000, false}, {"roomy", 200000, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan observedPiCall, 8)
+			pi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					writeJSON(w, 200, map[string]any{"ready": true, "model": "test-model", "provider": "test",
+						"limits": map[string]any{"maxContextTextBytes": tc.bytes, "messageOverheadBytes": 32}})
+					return
+				}
+				if r.Method == "DELETE" {
+					w.WriteHeader(202)
+					return
+				}
+				var body observedPiCall
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				seen <- body
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(200)
+				completePi(w, `{"result":"done"}`)
+			}))
+			defer pi.Close()
+			h := newHarness(t, pi.URL)
+			owner, tid, _ := h.register(t, "planned-film-"+tc.name+"@example.test")
+			execSQL(t, h, `UPDATE tenants SET max_runs_per_day=100,max_concurrent_runs=10 WHERE id=$1`, tid)
+			cid, aid, sid := h.fixture(t, owner, tid)
+			base := "/tenants/" + tid
+			node := func(template string) map[string]any {
+				n := map[string]any{"id": "node-a", "kind": "session", "title": "Film", "runtime": runtimePI,
+					"binding": map[string]string{"companyId": tid, "agentId": aid}, "issueId": sid, "skills": skills}
+				if template != "" {
+					n["templateId"] = template
+				}
+				return n
+			}
+			// A node's own run, as a film and as a node that is not one.
+			put := func(template string) {
+				canvas := h.request(t, owner, "GET", base+"/canvases/"+cid, nil, 200)
+				h.request(t, owner, "PUT", base+"/canvases/"+cid, map[string]any{"name": "film", "version": canvas["version"],
+					"document": map[string]any{"nodes": []any{node(template)}, "edges": []any{}}}, 200)
+			}
+			put("film")
+			run := h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the film", "operationId": "film-" + tc.name}, 202)
+			h.awaitRun(t, owner, tid, run["id"].(string), "completed")
+			if call := <-seen; strings.Contains(call.SystemPrompt, skillsBoundary) != tc.fits {
+				t.Fatalf("a film's own run sent the motion language: %v, want %v", strings.Contains(call.SystemPrompt, skillsBoundary), tc.fits)
+			}
+			put("")
+			if tc.fits {
+				run = h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the film", "operationId": "plain-" + tc.name}, 202)
+				h.awaitRun(t, owner, tid, run["id"].(string), "completed")
+				if call := <-seen; !strings.Contains(call.SystemPrompt, skillsBoundary) {
+					t.Fatal("a node's own run with room lost the skill a member chose")
+				}
+			} else if refused := h.request(t, owner, "POST", base+"/runs", map[string]any{"sessionId": sid, "prompt": "Make the film", "operationId": "plain-" + tc.name}, 413); refused["error"].(map[string]any)["code"] != "context_limit" {
+				t.Fatal("the motion language a member gave a node that is not a film was dropped instead of the run refused", refused)
+			}
+			// A canvas run: the film's mark goes with its stored snapshot to the node's admission.
+			graph := func(template string) string {
+				n := node(template)
+				delete(n, "issueId")
+				n["contract"] = map[string]any{"version": 1, "inputs": []any{}, "outputs": []any{map[string]any{"id": "result", "type": "text", "required": true}}}
+				gid := h.request(t, owner, "POST", base+"/canvases", map[string]any{"name": "Graph " + template, "document": map[string]any{"nodes": []any{n}, "edges": []any{}}}, 201)["id"].(string)
+				path := base + "/canvases/" + gid + "/graph-runs"
+				accepted := h.request(t, owner, "POST", path, map[string]string{"operationId": "graph-" + tc.name + "-" + template}, 202)
+				return path + "/" + accepted["id"].(string)
+			}
+			awaitGraph(t, h, owner, graph("film"), "completed")
+			if call := <-seen; strings.Contains(call.SystemPrompt, skillsBoundary) != tc.fits {
+				t.Fatalf("a canvas run of a film sent the motion language: %v, want %v", strings.Contains(call.SystemPrompt, skillsBoundary), tc.fits)
+			}
+			if tc.fits {
+				return
+			}
+			failed := awaitGraph(t, h, owner, graph("frontend"), "failed")
+			if n := failed["nodes"].([]any)[0].(map[string]any); n["detail"] != "context_limit" {
+				t.Fatalf("a canvas node that is not a film, with the motion language a member gave it, ended %v", n["detail"])
+			}
+		})
+	}
+}
+
 // A team member's turn of a page with the planner's page skills goes without them where they would not let it fit;
 // skills a member chose refuse the turn as before, and with room the planner's are sent.
 func TestTeamTurnLetsThePlannersPageSkillsGiveWay(t *testing.T) {

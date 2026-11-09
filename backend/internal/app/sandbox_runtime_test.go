@@ -123,7 +123,7 @@ func TestPostgresSandboxNodeRunsInItsWorkerAndPlainNodesStayPlain(t *testing.T) 
 			!strings.HasSuffix(request.SystemPrompt, "work from what the user tells you about it.") {
 			t.Errorf("sandbox system prompt %q", request.SystemPrompt)
 		}
-		// The planner's page skills are for a page's one call: a sandbox run goes without them (plannerPageSkills).
+		// The planner's page skills are for a page's one call: a sandbox run goes without them (plannerSkills).
 		if strings.Contains(request.SystemPrompt, skillsBoundary) {
 			t.Error("a sandbox run was sent the planner's page skills")
 		}

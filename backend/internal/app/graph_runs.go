@@ -1069,13 +1069,14 @@ func (a *App) admitGraphChild(ctx context.Context, tid, gid, nid, prompt string,
 		snap.Lessons = nil
 		framedInstructions = framed()
 	}
-	// The planner's page skills are a default for a page's one call (plannerPageSkillRefs): a run they would not let fit
+	// The planner's skills are a default for a page's or a film's one call (plannerSkills): a run they would not let fit
 	// goes without them, and so does a sandbox run, whose worker keeps room for its workspace that this check cannot see.
-	if snap.Market == nil && plannerPageSkills(snap.Skills) && !promptTooLarge && (snap.Workspace != nil || tooLargeForModel()) {
+	if snap.Market == nil && plannerSkills(snap.Skills) && !promptTooLarge && (snap.Workspace != nil || tooLargeForModel()) {
+		note := plannerSkillsNote(snap.Skills)
 		snap.Skills = nil
 		framedInstructions = framed()
 		if !tooLargeForModel() {
-			a.log.Info("a planned page runs without its design skills", "tenant", tid, "node", nid, "sandbox", snap.Workspace != nil)
+			a.log.Info(note, "tenant", tid, "node", nid, "sandbox", snap.Workspace != nil)
 		}
 		// Lessons left out for room that leaving the skills out then made come back where they fit now.
 		if lessons != nil && snap.Lessons == nil {

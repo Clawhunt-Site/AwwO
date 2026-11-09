@@ -10,6 +10,7 @@ import type { AssistantExecutionHost } from '../src/canvas/assistantRouting';
 import { CANVAS_STORAGE_KEY, emptyDocument, loadDocumentWithStatus, type SessionNode } from '../src/canvas/canvasDoc';
 import { markPlanNewNodeModel, type CanvasPlan } from '../src/canvas/canvasPlan';
 import type { requestCanvasPlan } from '../src/canvas/canvasPlanning';
+import { FILM_GUIDE_HEADING } from '../src/canvas/filmKit/filmKit';
 import { canvasStorage, configureCanvasStorage } from '../src/canvas/canvasStorage';
 import { readModelPalette } from '../src/canvas/modelPalette';
 import { resetAllSessions } from '../src/canvas/sessions';
@@ -208,4 +209,20 @@ it.each([[false, ['builtin:design-craft', 'builtin:anti-ai-slop']], [true, undef
     // The reply says so, since no one chose them and each of the page's runs sends them.
     await screen.findByText(/新增 1 个节点/);
     expect(screen.queryByText(/给 「网页」 加上了技能 design-craft、anti-ai-slop，放得下时使用，可在节点的配置里移除/) !== null).toBe(!personal);
+  });
+
+// A film a plan adds runs with AwwO's motion language on the same terms (canvasPlan.ts HOSTED_FILM_SKILLS), its persona
+// still the role and the film kit's guide.
+it.each([[false, ['builtin:motion-language']], [true, undefined]] as const)(
+  'gives a film the plan adds the motion language unless every model runs on personal keys (personal keys: %s)', async (personal, skills) => {
+    const request = vi.fn<typeof requestCanvasPlan>(async () => ({ version: 1, summary: '已添加影片。',
+      operations: [{ type: 'add_node', ref: 'f', templateId: 'film', title: '影片' }] }) as CanvasPlan);
+    render(<CanvasSurface storageMode="cloud" runtimeReadJson={runtimeReader} assistantExecution={host(qwen)} routeAssistant={router}
+      planRequest={request} personalCredentialsRequired={personal} />);
+    await ask();
+    const node = await added();
+    expect([node.templateId, node.contract!.outputs.map(field => field.id), node.skills]).toEqual(['film', ['film'], skills]);
+    expect(node.persona).toContain(FILM_GUIDE_HEADING);
+    await screen.findByText(/新增 1 个节点/);
+    expect(screen.queryByText(/给 「影片」 加上了技能 motion-language，放得下时使用，可在节点的配置里移除/) !== null).toBe(!personal);
   });

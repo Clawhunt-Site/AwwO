@@ -54,8 +54,10 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 1. Add `<name>.md` with the frontmatter above.
 2. Run `go test ./internal/app -run 'TestBuiltinSkills'` from `backend/`.
 3. Mention it in the CHANGELOG. The skill library and a node's Configure panel list it automatically. The
-   planner never names skills (`planning.go` knows nothing of them), but a page the canvas assistant plans on a
-   hosted canvas gets `design-craft` and `anti-ai-slop` where they fit, unless every model runs on personal keys
-   (`canvasPlan.ts` `HOSTED_PAGE_SKILLS`, checked by `design_skills_test.go`, which also fails when their bodies
-   grow past the room it keeps for a planned page): renaming or removing either stops those pages from running
+   planner never names skills (`planning.go` knows nothing of them), but on a hosted canvas, unless every model runs
+   on personal keys, a page the canvas assistant plans gets `design-craft` and `anti-ai-slop` and a film it plans
+   (代码影片) gets `motion-language`, where they fit (`canvasPlan.ts` `HOSTED_PAGE_SKILLS` and `HOSTED_FILM_SKILLS`,
+   checked by `design_skills_test.go`, which also fails when their bodies grow past the room it keeps for a planned
+   page or film; `film_skills_test.go` keeps room for one film skill beside `motion-language`, while a film with both
+   film skills beside it is refused for its size): renaming or removing any of them stops those nodes from running
    until someone takes it off the node. Every other node the assistant plans carries none until someone attaches them.

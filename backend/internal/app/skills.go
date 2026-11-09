@@ -89,6 +89,8 @@ type skillContext struct {
 	Items []frozenSkill `json:"items"`
 	// Market: a market Agent's author attached these skills, not the workspace (marketSkillsBoundary).
 	Market bool `json:"market,omitempty"`
+	// FilmNode: frozen from a film node (代码影片, templateId film), whose planned skill is plannerFilmSkillRefs.
+	FilmNode bool `json:"filmNode,omitempty"`
 }
 
 type skillError struct {
@@ -533,21 +535,32 @@ func parseNodeSkillRefs(raw json.RawMessage) ([]string, error) {
 }
 
 func savedNodeSkillRefs(raw []byte, nodeID string) ([]string, error) {
+	refs, _, err := savedNodeSkills(raw, nodeID)
+	return refs, err
+}
+
+// savedNodeSkills is a saved node's skill references and its template id (planTemplateIDs; "" for none).
+func savedNodeSkills(raw []byte, nodeID string) ([]string, string, error) {
 	var document struct {
 		Nodes []struct {
-			ID     string          `json:"id"`
-			Skills json.RawMessage `json:"skills"`
+			ID         string          `json:"id"`
+			Skills     json.RawMessage `json:"skills"`
+			TemplateID json.RawMessage `json:"templateId"`
 		} `json:"nodes"`
 	}
 	if json.Unmarshal(raw, &document) != nil {
-		return nil, skillInvalid("Invalid canvas")
+		return nil, "", skillInvalid("Invalid canvas")
 	}
 	for _, node := range document.Nodes {
 		if node.ID == nodeID {
-			return parseNodeSkillRefs(node.Skills)
+			refs, err := parseNodeSkillRefs(node.Skills)
+			// A template id that is not a string is no template: the node is read as one made without one.
+			var template string
+			_ = json.Unmarshal(node.TemplateID, &template)
+			return refs, template, err
 		}
 	}
-	return nil, nil
+	return nil, "", nil
 }
 
 // validateCanvasSkills checks only this additive field's shape at save; whether each skill still exists is decided
@@ -642,25 +655,49 @@ func (a *App) freezeNodeSkills(ctx context.Context, q querier, tid string, docum
 	if nodeID == "" {
 		return nil, nil
 	}
-	refs, err := savedNodeSkillRefs(document, nodeID)
+	refs, template, err := savedNodeSkills(document, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	return freezeSkillContext(ctx, q, tid, refs)
+	value, err := freezeSkillContext(ctx, q, tid, refs)
+	if value != nil && template == "film" {
+		value.FilmNode = true
+	}
+	return value, err
 }
 
-// plannerPageSkillRefs are the skills the canvas assistant gives a page it plans (canvasPlan.ts HOSTED_PAGE_SKILLS;
-// TestPlannedPageSkillsFitTheSystemPrompt keeps the two lists the same). They are its default, not a member's choice,
-// so a run they would push past what its model takes goes without them instead of being refused (plannerPageSkills).
-var plannerPageSkillRefs = []string{"builtin:design-craft", "builtin:anti-ai-slop"}
+// plannerPageSkillRefs are the skills the canvas assistant gives a page it plans (canvasPlan.ts HOSTED_PAGE_SKILLS),
+// plannerFilmSkillRefs the one it gives a film node it plans (HOSTED_FILM_SKILLS); TestPlannedPageSkillsFitTheSystemPrompt
+// and TestPlannedFilmSkillsFitTheSystemPrompt keep each pair of lists the same. They are its defaults, not a member's
+// choice, so a run they would push past what its model takes goes without them instead of being refused (plannerSkills).
+var (
+	plannerPageSkillRefs = []string{"builtin:design-craft", "builtin:anti-ai-slop"}
+	plannerFilmSkillRefs = []string{"builtin:motion-language"}
+)
 
-// plannerPageSkills reports whether a run's frozen skills are exactly the planner's page skills, in any order: a member
-// who attaches another skill, or takes one of the two off, has chosen the node's skills.
-func plannerPageSkills(value *skillContext) bool {
-	if value == nil || len(value.Items) != len(plannerPageSkillRefs) {
+// plannerSkills reports whether a run's frozen skills are exactly the planner's default for its node, in any order: the
+// page skills on any node, or the motion language on a film node. A member who attaches another skill, or takes one off,
+// has chosen the node's skills; so has one who gives any other node the motion language alone. The API cannot tell the
+// planner's set from the same set a member attached by hand (the page pair on any node, the motion language alone on a
+// film): either goes without them where they would not fit, and on a sandbox run, instead of being refused.
+func plannerSkills(value *skillContext) bool {
+	return frozenSkillsAre(value, plannerPageSkillRefs) || (value != nil && value.FilmNode && frozenSkillsAre(value, plannerFilmSkillRefs))
+}
+
+// plannerSkillsNote is the log line for a run that goes without the planner's default skills.
+func plannerSkillsNote(value *skillContext) string {
+	if value != nil && value.FilmNode && frozenSkillsAre(value, plannerFilmSkillRefs) {
+		return "a planned film runs without its motion language"
+	}
+	return "a planned page runs without its design skills"
+}
+
+// frozenSkillsAre reports whether a run's frozen skills are exactly refs, in any order.
+func frozenSkillsAre(value *skillContext, refs []string) bool {
+	if value == nil || len(value.Items) != len(refs) {
 		return false
 	}
-	for _, ref := range plannerPageSkillRefs {
+	for _, ref := range refs {
 		if !slices.ContainsFunc(value.Items, func(s frozenSkill) bool { return s.Ref == ref }) {
 			return false
 		}

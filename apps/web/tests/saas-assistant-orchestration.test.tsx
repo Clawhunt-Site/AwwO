@@ -103,6 +103,26 @@ describe('what a plan changed, said under its reply', () => {
     const emptied = { ...plain, taskFrame: { version: 1 as const, source: 'manual' as const, constraints: [], acceptanceCriteria: [] } };
     expect(describePlanChanges(doc(plain), doc(emptied), 'zh', t, name)).toEqual([]);
   });
+
+  // A page gets the design skills and a film the motion language (canvasPlan.ts): each node is named with its own.
+  it('names the skills a plan gave its new nodes, each set with the nodes that got it', () => {
+    const page = agent('网页', { skills: ['builtin:design-craft', 'builtin:anti-ai-slop'] });
+    const shop = agent('商店', { skills: ['builtin:design-craft', 'builtin:anti-ai-slop'] });
+    const film = { ...createAgentTemplate('film', { x: 0, y: 0 }, 'zh'), id: '影片', title: '影片', skills: ['builtin:motion-language'] } as SessionNode;
+    const check = agent('验收');
+    const lines = describePlanChanges(doc(), doc(page, film, shop, check), 'zh', t, name);
+    expect(lines).toEqual([
+      zh('planning.changeAdded', { count: 4, names: '「网页」、「影片」、「商店」、「验收」' }),
+      zh('planning.changeSkills', { names: '「网页」、「商店」', skills: 'design-craft、anti-ai-slop' }),
+      zh('planning.changeSkill', { names: '「影片」', skills: 'motion-language' }),
+    ]);
+    expect(lines[2]).toBe('给 「影片」 加上了技能 motion-language，放得下时使用，可在节点的配置里移除');
+    expect(describePlanChanges(doc(), doc(page), 'en', (key, values) => canvasText('en', key, values), name)[1])
+      .toBe('Gave “网页” the skills design-craft, anti-ai-slop, used where they fit; you can remove them in the node’s Configure');
+    expect(describePlanChanges(doc(), doc(film), 'en', (key, values) => canvasText('en', key, values), name)).toEqual([
+      'Added 1 node(s): “影片”', 'Gave “影片” the skill motion-language, used where it fits; you can remove it in the node’s Configure',
+    ]);
+  });
 });
 
 // On the canvas: 「运行」 runs it without asking the planner, and the 接下来 card's assistant steps send the assistant a

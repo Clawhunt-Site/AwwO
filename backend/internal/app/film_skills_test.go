@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,6 +51,37 @@ func TestFilmSkillsFitAFilmNode(t *testing.T) {
 		t.Fatalf("a film node with both film skills uses %d of 32,768 system prompt units, leaving %d; keep at least 4,096", units, spare)
 	}
 	t.Logf("film node with film-looks + film-sound: %d skill bytes, %d system prompt units (%d spare)", total, units, 32768-units)
+}
+
+// A film the canvas assistant plans carries the motion language (canvasPlan.ts HOSTED_FILM_SKILLS); a member may add one
+// of the film skills beside it and still leave a run the room its task frame and notes take. Both film skills beside the
+// motion language pass 32,768 units: a member who adds both has chosen three skills, and the run is refused as
+// context_limit until one comes off (the API drops only the planner's own set, as for a page). The skills README and
+// the CHANGELOG say so; if all three ever fit, drop the last check and those lines with it.
+func TestAPlannedFilmTakesOneFilmSkillBesideTheMotionLanguage(t *testing.T) {
+	persona := strings.Repeat("x", 1600) + "\n\n" + filmGuide(t)
+	node := graphNode{ID: "film", Kind: "session", Title: "A film", Contract: &graphContract{Version: 1,
+		Outputs: []graphField{{ID: "film", Label: "Film", Type: "html", Required: true, Help: "Play it in Results with its sound, render it to video, or download it as one web page."}}}}
+	note := modelIdentityNote("Claude Opus 5.5", "bedrock.claude-opus-5-5", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC))
+	units := func(names ...string) int {
+		skills, err := freezeSkillContext(t.Context(), nil, "", names)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(utf16.Encode([]rune(withPromptNote(skillsSystemPrompt(graphSystemPrompt(persona, graphOutputPolicy(node)), skills), note))))
+	}
+	for _, extra := range []string{"builtin:film-looks", "builtin:film-sound"} {
+		used := units("builtin:motion-language", extra)
+		if spare := 32768 - used; spare < 2048 {
+			t.Errorf("a planned film with %s beside the motion language uses %d of 32,768 system prompt units, leaving %d; keep at least 2,048", extra, used, spare)
+		}
+		t.Logf("a planned film with %s: %d units (%d spare)", extra, used, 32768-used)
+	}
+	if all := units("builtin:motion-language", "builtin:film-looks", "builtin:film-sound"); all <= 32768 {
+		t.Errorf("all three skills on a planned film now fit (%d units): drop this check and the lines that say they do not", all)
+	} else {
+		t.Logf("with both film skills too: %d units, over 32,768", all)
+	}
 }
 
 // The film skills name the kit's own vocabulary: the fonts it can load and the families it has, and no curve
@@ -134,5 +166,59 @@ func TestFilmGuideKeepsTheMotionLanguageOffTheKitsMotion(t *testing.T) {
 		if !strings.Contains(skill.Body, "`MOTION."+name+"`") {
 			t.Errorf("motion-language no longer names MOTION.%s, which the guide's sentence answers", name)
 		}
+	}
+}
+
+// The API takes the motion language alone as the planner's only on a film node (canvasPlan.ts HOSTED_FILM_SKILLS): alone
+// on any other node a member chose it, and beside another skill on a film a member chose the set. The film's mark is
+// frozen with its skills, so it reaches a canvas run's node admission through the stored snapshot.
+func TestPlannerSkillsTakeTheMotionLanguageOnlyOnAFilm(t *testing.T) {
+	freeze := func(template any, refs ...string) *skillContext {
+		t.Helper()
+		node := map[string]any{"id": "n", "kind": "session", "skills": refs}
+		if template != nil {
+			node["templateId"] = template
+		}
+		doc, _ := json.Marshal(map[string]any{"nodes": []any{node}})
+		value, err := (&App{}).freezeNodeSkills(t.Context(), nil, "", doc, "n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	film, page := "a planned film runs without its motion language", "a planned page runs without its design skills"
+	for _, tc := range []struct {
+		name     string
+		template any
+		refs     []string
+		note     string // "" when the skills are a member's choice
+	}{
+		{"a film with the motion language", "film", []string{"builtin:motion-language"}, film},
+		{"a page with the design skills", "frontend", []string{"builtin:anti-ai-slop", "builtin:design-craft"}, page},
+		{"the design skills on any node, as before", "film", []string{"builtin:design-craft", "builtin:anti-ai-slop"}, page},
+		{"the motion language alone on a page", "frontend", []string{"builtin:motion-language"}, ""},
+		{"the motion language on a node with no template", nil, []string{"builtin:motion-language"}, ""},
+		{"a template id that is not a string", 7, []string{"builtin:motion-language"}, ""},
+		{"a film with another skill too", "film", []string{"builtin:motion-language", "builtin:film-looks"}, ""},
+		{"a film the member left without skills", "film", nil, ""},
+	} {
+		value := freeze(tc.template, tc.refs...)
+		if got := plannerSkills(value); got != (tc.note != "") {
+			t.Errorf("%s: taken as the planner's %v, want %v", tc.name, got, tc.note != "")
+		} else if got && plannerSkillsNote(value) != tc.note {
+			t.Errorf("%s: logged %q, want %q", tc.name, plannerSkillsNote(value), tc.note)
+		}
+	}
+	raw, _ := json.Marshal(executionSnapshot{Skills: freeze("film", "builtin:motion-language")})
+	var stored executionSnapshot
+	if err := json.Unmarshal(raw, &stored); err != nil || !plannerSkills(stored.Skills) || !strings.Contains(string(raw), `"filmNode":true`) {
+		t.Fatalf("a film's mark does not survive its stored snapshot (%v; filmNode written: %v)", err, strings.Contains(string(raw), `"filmNode":true`))
+	}
+	// A page's snapshot carries no mark: the field is left out, as before.
+	if raw, _ = json.Marshal(executionSnapshot{Skills: freeze("frontend", "builtin:design-craft")}); strings.Contains(string(raw), "filmNode") {
+		t.Fatalf("a snapshot that is no film's carries the mark: %s", raw)
+	}
+	if plannerSkills(nil) {
+		t.Fatal("no skills are taken as the planner's")
 	}
 }
