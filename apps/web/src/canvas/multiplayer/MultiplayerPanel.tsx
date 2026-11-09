@@ -1,6 +1,7 @@
 // The 同屏 panel of 多人同屏 (docs/awwo-canvas-live-collaboration.md, The canvas page): who is here (people, Agents and
 // AwwO's running Agents, each with their port, status and what they have selected), the claims, the live messages and
-// a box to write one, the latest changes, and 邀请 Agent. Controlled: it shows what it is given and hands every action
+// a box to write one, the latest changes, and 邀请 Agent (where people share canvases, the Share dialog holds it, and the
+// panel asks a person alone on the canvas to share it). Controlled: it shows what it is given and hands every action
 // to its callbacks; it talks to no server. Closed, it renders nothing, and the state it held (a draft, a token just
 // made) goes with it. It takes the keyboard's focus as it opens and gives it back as it closes, to what had it then.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -60,6 +61,9 @@ export interface MultiplayerPanelProps {
   now?: number;
   /** What names a running AwwO Agent's model (the workspace's models); absent, a chat model goes by its selector. */
   modelNames?: ModelNameSources;
+  /** Opens the Share dialog, where the server offers sharing with people: the panel puts people first, and alone on the
+   *  canvas it asks to share it (邀请 Agent is then the Share dialog's, under 高级). */
+  onShare?: () => void;
 }
 
 /** The 同屏 panel: closed, nothing. */
@@ -89,7 +93,7 @@ function useFocusReturn(panel: RefObject<HTMLElement | null>) {
 }
 
 function PanelBody({ onClose, participants, selfId, claims, messages, activity, canWrite, canInvite, nodeTitle, onFocusNode, onSend,
-  onRelease, invite, messageNodeId = null, status, now, modelNames = NO_MODEL_NAMES }: MultiplayerPanelProps) {
+  onRelease, invite, messageNodeId = null, status, now, modelNames = NO_MODEL_NAMES, onShare }: MultiplayerPanelProps) {
   const { t } = useMultiplayerText();
   const headingId = useId();
   const panelRef = useRef<HTMLElement>(null);
@@ -138,7 +142,7 @@ function PanelBody({ onClose, participants, selfId, claims, messages, activity, 
     {!live && <p className="awwo-multiplayer-panel-status" role="status">{t(status === 'connecting' ? 'status.connecting' : 'status.offline')}</p>}
     <div className="awwo-multiplayer-panel-body">
       <Participants participants={participants} selfId={selfId} canInvite={canInvite} live={live} nodeTitle={nodeTitle} onFocusNode={onFocusNode}
-        modelNames={modelNames} />
+        modelNames={modelNames} onShare={onShare} />
       <Claims claims={claims} selfId={selfId} byId={byId} nodeTitle={nodeTitle} onFocusNode={onFocusNode} onRelease={onRelease} now={now} />
       <Messages messages={messages} participants={participants} self={self} canWrite={canWrite} nodeTitle={nodeTitle} onFocusNode={onFocusNode}
         onSend={onSend} messageNodeId={messageNodeId} />
@@ -180,9 +184,9 @@ function Who({ color, agent, children }: { color: string | undefined; agent: boo
 
 // ── Who is here ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocusNode, modelNames }: {
+function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocusNode, modelNames, onShare }: {
   participants: readonly LiveParticipant[]; selfId: string; canInvite: boolean; live: boolean;
-  nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void; modelNames: ModelNameSources;
+  nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void; modelNames: ModelNameSources; onShare?: () => void;
 }) {
   const { t } = useMultiplayerText();
   const ordered = selfFirst(participants, selfId);
@@ -200,7 +204,10 @@ function Participants({ participants, selfId, canInvite, live, nodeTitle, onFocu
           nodeTitle={nodeTitle} onFocusNode={onFocusNode} modelNames={modelNames} />)}
       </ul>
     </Section>)}
-    {alone && <p className="awwo-multiplayer-hint">{t(canInvite ? 'participants.alone' : 'participants.aloneBare')}</p>}
+    {alone && (onShare ? <div className="awwo-multiplayer-share-ask">
+      <p className="awwo-multiplayer-hint">{t('participants.aloneShare')}</p>
+      <button type="button" className="awwo-multiplayer-primary" onClick={onShare}>{t('share.button')}</button>
+    </div> : <p className="awwo-multiplayer-hint">{t(canInvite ? 'participants.alone' : 'participants.aloneBare')}</p>)}
   </>;
 }
 

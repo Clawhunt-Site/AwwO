@@ -348,6 +348,12 @@ function serviceCodes(): Record<string, [string, string]> {
     invite_revoked: ['邀请已撤销，请索取新邀请。', 'This invitation was revoked. Request a new one.'],
     invite_unavailable: ['邀请已失效，请联系工作区所有者。', 'This invitation is no longer valid. Contact the workspace owner.'],
     invite_membership_removed: ['原成员身份已移除，请索取新邀请。', 'Your membership was removed. Request a new invitation.'],
+    // People sharing a workspace (migration 059): an invitation bound to an email, and who deletes a canvas or stops a run.
+    invite_wrong_account: ['这个邀请是发给另一个邮箱的：请用收到邀请的那个邮箱的账号登录，再打开链接。', 'This invitation was sent to another email: sign in with the account of the email it was sent to, then open the link again.'],
+    canvas_not_yours: ['只有创建这张画布的人，或工作区的所有者和管理员，能删除它。', 'Only the person who made this canvas, or a workspace owner or admin, can delete it.'],
+    run_not_yours: ['只有启动这次运行的人，或工作区的所有者和管理员，能停止它。', 'Only the person who started this run, or a workspace owner or admin, can stop it.'],
+    graph_busy: ['这些组件里有的已经在这张画布上运行，请等它们结束，或只运行其他组件。', 'Some of these components are already running on this canvas. Wait for them to finish, or run other components.'],
+    owner_cannot_leave: ['工作区的所有者不能离开自己的工作区。', 'A workspace’s owner cannot leave it.'],
   };
   return codes;
 }

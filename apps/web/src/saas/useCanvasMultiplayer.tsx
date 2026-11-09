@@ -16,11 +16,16 @@ import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument, type CanvasN
 import { canvasStorage, canvasStorageKey } from '../canvas/canvasStorage';
 import type { CanvasMultiplayerHost, CanvasMultiplayerSurface } from '../canvas/multiplayer/host';
 import type { CanvasChange, CanvasChangeResponse, CanvasOp, LiveParticipant } from '../canvas/multiplayer/types';
+import { UserPlus } from 'lucide-react';
 import { MultiplayerBar } from '../canvas/multiplayer/MultiplayerBar';
 import { MultiplayerPanel } from '../canvas/multiplayer/MultiplayerPanel';
+import { ShareDialog } from '../canvas/multiplayer/ShareDialog';
+import type { AgentTokenScope } from '../canvas/multiplayer/AgentInvite';
+import { useMultiplayerText } from '../canvas/multiplayer/multiplayerText';
 import { boardBoxOf, MultiplayerBoardLayer, type BoardFlash } from '../canvas/multiplayer/MultiplayerBoardLayer';
 import { activityItem, actorParticipantId, type ActivityItem } from '../canvas/multiplayer/activity';
 import type { AgentTokenItem } from '../canvas/multiplayer/types';
+import { useCanvasSharing, usePeopleSharing } from './useCanvasSharing';
 import { useSaaSPreferences } from './preferences';
 import '../canvas/multiplayer/multiplayer.css';
 
@@ -371,43 +376,66 @@ function MultiplayerBoard({ live, nodes, flashes, scale }: { live: CanvasLive; n
   return <MultiplayerBoardLayer participants={snapshot.participants} selfId={live.clientId} claims={snapshot.claims} nodes={boxes} flashes={glows} now={now} scale={scale} />;
 }
 
-/** The people bar and the 同屏 panel of the canvas header. */
-export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, nodeTitle, onFocusNode }: {
-  multiplayer: CanvasMultiplayer; tenantId: string; canvasId: string; canWrite: boolean;
+/** The people bar, the 分享 button and the 同屏 panel of the canvas header. Where the server offers sharing with people
+ *  (usePeopleSharing), 分享 opens the Share dialog, which holds 邀请 Agent under 高级, and the 同屏 panel puts people first;
+ *  elsewhere the panel is as it was. Agents are connected by a workspace's owners and admins only: `role` is this
+ *  person's in the workspace as the page read it, known before the live stream says hello (and in a tab whose stream
+ *  never connects), and `workspaceName` its name, which the Share dialog reads again as it opens. */
+export function MultiplayerHeader({ multiplayer, tenantId, canvasId, canWrite, role, workspaceName, nodeTitle, onFocusNode }: {
+  multiplayer: CanvasMultiplayer; tenantId: string; canvasId: string; canWrite: boolean; role: string; workspaceName: string;
   nodeTitle: (id: string) => string | undefined; onFocusNode: (id: string) => void;
 }) {
   const live = multiplayer.live;
   const snapshot = useLiveSnapshot(live);
   const [open, setOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const people = usePeopleSharing(tenantId);
+  const share = useCanvasSharing(tenantId, canvasId, people && sharing);
+  const { t } = useMultiplayerText();
   const [tokens, setTokens] = useState<{ items: readonly AgentTokenItem[]; loading: boolean; error: unknown }>({ items: [], loading: false, error: null });
   const now = useNow(open && snapshot.claims.length > 0, 1000);
   const attention = useSyncExternalStore(multiplayer.attention.subscribe, multiplayer.attention.get, multiplayer.attention.get);
   const messageNodeId = attention.focus ?? (attention.selection.length === 1 ? attention.selection[0] : null);
+  // An owner or admin connects Agents (canvas_agent_tokens.go); the server judges again with every token it makes.
+  const connectsAgents = canWrite && (role === 'owner' || role === 'admin');
   const loadTokens = useCallback(async () => {
-    if (!live || !canWrite) return;
+    if (!live || !connectsAgents) return;
     setTokens(previous => ({ ...previous, loading: true, error: null }));
     try { setTokens({ items: await live.listTokens(), loading: false, error: null }); }
     // The refusal itself, so the panel words it by its code in the page's language.
     catch (error) { setTokens(previous => ({ ...previous, loading: false, error })); }
-  }, [live, canWrite]);
+  }, [live, connectsAgents]);
   const { locale } = useSaaSPreferences();
   // Worded now, in the page's language now (a change kept from before a language switch reads in the new one).
   const activity = useMemo<readonly ActivityItem[]>(() => multiplayer.recent.map(({ change, participants }) =>
     activityItem(change, nodeTitle, locale, participants)), [multiplayer.recent, nodeTitle, locale]);
+  // The people on this canvas now, by account, with their colour.
+  const here = useMemo(() => new Map(snapshot.participants.filter(participant => participant.kind === 'human' && participant.userId)
+    .map(participant => [participant.userId as string, participant.color] as const)), [snapshot.participants]);
   if (!live) return null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const invite = {
+    tokens, mcpUrl: `${origin}${API_BASE}/mcp`, apiBase: `${origin}${API_BASE}`, tenantId, canvasId, onOpen: () => void loadTokens(),
+    onCreate: async (name: string, days: number, scope: AgentTokenScope) => { const created = await live.createToken(name, days, scope); void loadTokens(); return created; },
+    onRevoke: async (id: string) => { await live.revokeToken(id); await loadTokens(); },
+  };
+  const openShare = () => { setOpen(false); setSharing(true); };
   return <>
     <MultiplayerBar participants={snapshot.participants} selfId={live.clientId} status={snapshot.status} open={open}
-      onOpen={() => { setOpen(value => !value); if (!open) void loadTokens(); }} />
+      onOpen={() => { setSharing(false); setOpen(value => !value); if (!open && !people) void loadTokens(); }} />
+    {people && <button type="button" className="awwo-multiplayer-share-button" aria-haspopup="dialog" aria-expanded={sharing}
+      aria-label={t('share.buttonLabel')} title={t('share.buttonLabel')} onClick={() => { if (sharing) setSharing(false); else openShare(); }}>
+      <UserPlus size={14} aria-hidden="true" /><span>{t('share.button')}</span>
+    </button>}
     <MultiplayerPanel open={open} onClose={() => setOpen(false)} participants={snapshot.participants} selfId={live.clientId}
-      claims={snapshot.claims} messages={snapshot.messages} activity={activity} canWrite={canWrite} canInvite={canWrite}
+      claims={snapshot.claims} messages={snapshot.messages} activity={activity} canWrite={canWrite} canInvite={!people && connectsAgents}
       nodeTitle={nodeTitle} onFocusNode={onFocusNode} status={snapshot.status} now={now} messageNodeId={messageNodeId}
       onSend={async (text, nodeId) => { await live.say(text, nodeId); }}
       onRelease={async nodeIds => { await live.release(nodeIds); }}
-      invite={{
-        tokens, mcpUrl: `${origin}${API_BASE}/mcp`, apiBase: `${origin}${API_BASE}`, tenantId, canvasId, onOpen: () => void loadTokens(),
-        onCreate: async (name, days, scope) => { const created = await live.createToken(name, days, scope); void loadTokens(); return created; },
-        onRevoke: async id => { await live.revokeToken(id); await loadTokens(); },
-      }} />
+      onShare={people ? openShare : undefined} invite={invite} />
+    {people && <ShareDialog open={sharing} onClose={() => setSharing(false)} workspaceName={share.workspaceName || workspaceName} role={share.role}
+      selfUserId={share.userId} canvasId={canvasId} canvasUrl={`${origin}/?tenant=${encodeURIComponent(tenantId)}&canvas=${encodeURIComponent(canvasId)}`}
+      members={share.members} invites={share.invites} here={here} onCreateInvite={share.createInvite} onRevokeInvite={share.revokeInvite}
+      onChangeRole={share.changeRole} onRemove={share.remove} agents={connectsAgents ? invite : undefined} />}
   </>;
 }

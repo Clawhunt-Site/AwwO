@@ -42,6 +42,8 @@ export interface AgentInviteProps {
   /** Told the 「已保存，关闭」 button while a token just made is on screen, and null once it is not: closing whatever holds
    *  this section would destroy the only copy of the secret, so a holder keeps a stray key from doing it. */
   onSecretShown?: (done: HTMLButtonElement | null) => void;
+  /** The disclosure's name: 邀请 Agent in the 同屏 panel, the advanced option's name in the Share dialog. */
+  label?: string;
 }
 
 /** The expiries a token can be made with, in days; 30 unless chosen. */
@@ -139,7 +141,7 @@ export function AgentInvite(props: AgentInviteProps) {
   return <section className="awwo-multiplayer-section awwo-multiplayer-invite" data-open={open || undefined}>
     <h3 className="awwo-multiplayer-section-title">
       <button type="button" className="awwo-multiplayer-disclosure" aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={() => setOpen(was => !was)}>
-        <UserPlus size={15} aria-hidden="true" /><span>{t('invite.toggle')}</span><ChevronDown size={14} aria-hidden="true" className="awwo-multiplayer-chevron" />
+        <UserPlus size={15} aria-hidden="true" /><span>{props.label ?? t('invite.toggle')}</span><ChevronDown size={14} aria-hidden="true" className="awwo-multiplayer-chevron" />
       </button>
     </h3>
     {open && <InviteBody id={bodyId} {...props} />}
@@ -326,8 +328,8 @@ function ScopeChoice({ name, scope, onChange }: { name: string; scope: AgentToke
   </>;
 }
 
-/** One line to copy, as it is, with its copy button. */
-function CopyBlock({ label, value }: { label: string; value: string }) {
+/** One line to copy, as it is, with its copy button (the Share dialog's links too). */
+export function CopyBlock({ label, value }: { label: string; value: string }) {
   const { t } = useMultiplayerText();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const shown = useRef<HTMLPreElement>(null);

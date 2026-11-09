@@ -20,8 +20,9 @@ export interface WorkspaceCapabilities {
     /** When officialPrice starts (RFC 3339). Absent: it applies already. */
     officialPriceFrom?: string };
   /** 多人同屏 (docs/awwo-canvas-live-collaboration.md): changes, the live stream and canvas agent tokens. Absent from a
-   *  server older than it, whose canvases the page then saves whole. */
-  multiplayer?: { enabled: boolean; maxChangeOps: number };
+   *  server older than it, whose canvases the page then saves whole. `people`: the canvas offers sharing it with people
+   *  (the Share dialog; AWWO_PEOPLE_SHARING), absent from a server older than that. */
+  multiplayer?: { enabled: boolean; maxChangeOps: number; people?: boolean };
 }
 
 /** Whether this server takes canvas changes and streams them (多人同屏): false for any answer that does not say so. */

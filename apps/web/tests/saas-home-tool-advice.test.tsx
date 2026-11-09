@@ -1,7 +1,7 @@
 // treg's advice under the home's composer (home/ToolAdvice.tsx): the live data a request names (canvas/liveDataNeed.ts),
 // and the card that recommends pairing treg with the person's own Agent, its steps and lines, and 不需要.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { liveDataNeed, LIVE_DATA_NEEDS } from '../src/canvas/liveDataNeed';
 import { tregSnippets } from '../src/canvas/multiplayer/AgentInvite';
 import { WorkspaceHome } from '../src/saas/WorkspaceHome';
@@ -142,5 +142,46 @@ describe('the advice under the composer', () => {
     expect(within(card).getByRole('button', { name: 'Copy: Claude Code' })).toBeVisible();
     fireEvent.click(within(card).getByRole('button', { name: 'Not needed' }));
     expect(advice()).toBeNull();
+  });
+});
+
+// Where the canvas offers sharing with people (capabilities multiplayer.people), the person's own Agent is connected
+// under the Share dialog's 高级, and only a workspace's owners and admins connect one (canvas_agent_tokens.go).
+describe('the advice where people share canvases', () => {
+  const sharing = (people: boolean) => vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const path = new URL(input, 'http://localhost').pathname;
+    if (path.endsWith('/capabilities')) return json({ skills: { enabled: true }, memory: { enabled: true }, webReader: { enabled: false }, render: { enabled: false }, multiplayer: { enabled: true, maxChangeOps: 500, people } });
+    return json(path.endsWith('/runtime') ? { available: true, configured: true, plannerAvailable: true, models: [{ id: 'model' }] } : { items: [], nextCursor: null });
+  }));
+  const homeAs = (role: string) => render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={{ ...tenant, role }} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+
+  it('sends the person to Share → Advanced, and asks the server only once a request names live data', async () => {
+    sharing(true);
+    homeAs('owner');
+    const asked = () => (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([url]) => String(url).endsWith('/capabilities')).length;
+    await act(async () => { await Promise.resolve(); });
+    expect(asked()).toBe(0);
+    fireEvent.change(box(), { target: { value: '调研竞品在小红书上的爆款笔记，做一份周报' } });
+    await waitFor(() => expect(advice()).toHaveTextContent('点画布右上角的「分享」，打开「高级：连接 Agent 或程序」'));
+    expect(advice()).not.toHaveTextContent('邀请 Agent');
+    expect(advice()).not.toHaveTextContent('所有者或管理员');
+    fireEvent.click(within(advice()!).getByRole('button', { name: '怎么接入' }));
+    expect(within(advice()!).getByText(/生成画布后，点画布右上角的「分享」，打开「高级：连接 Agent 或程序」，生成画布令牌/)).toBeInTheDocument();
+  });
+
+  it('tells a member to ask an owner or admin for a canvas token, in either language', async () => {
+    sharing(false);
+    homeAs('member');
+    fireEvent.change(box(), { target: { value: '调研竞品在小红书上的爆款笔记，做一份周报' } });
+    expect(advice()).toHaveTextContent('生成画布后，请工作区的所有者或管理员点画布右上角的「同屏」按钮（一个圆点和你的头像），打开「邀请 Agent」，生成一个画布令牌交给你，你用它接入自己的 Claude Code 或 Codex');
+    fireEvent.click(within(advice()!).getByRole('button', { name: '怎么接入' }));
+    expect(within(advice()!).getByText(/请工作区的所有者或管理员.*生成画布令牌交给你，再按那里的命令接入你自己的 Claude Code 或 Codex/)).toBeInTheDocument();
+    cleanup();
+    localStorage.setItem('superclaw_locale', 'en');
+    sharing(true);
+    homeAs('member');
+    fireEvent.change(box(), { target: { value: 'Find prospects and their competitors' } });
+    await waitFor(() => expect(advice()).toHaveTextContent('click Share at its top right and open Advanced: connect an Agent or a program'));
+    expect(advice()).toHaveTextContent('ask an owner or admin of the workspace to click Share at its top right and open Advanced: connect an Agent or a program and make you a canvas token');
   });
 });

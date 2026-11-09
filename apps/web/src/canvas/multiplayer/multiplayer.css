@@ -11,6 +11,7 @@
    own `.awwo-workspace button` resets. */
 
 .awwo-multiplayer-bar,
+.awwo-multiplayer-share-button,
 .awwo-multiplayer-panel,
 .awwo-multiplayer-board {
   --mp-surface: var(--saas-raised, var(--panel, #ffffff));
@@ -618,6 +619,43 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── 分享 / Share (ShareDialog.tsx): the header's button beside the people bar, and the dialog, which takes the 同屏
+   panel's place on the right. ─────────────────────────────────────────────────────────────────────────────────── */
+
+.awwo-multiplayer-share-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 34px;
+  min-height: 34px;
+  margin-left: 6px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mp-primary);
+  color: var(--mp-on-primary);
+  font: 600 13px/1 var(--mp-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-enter);
+}
+.awwo-multiplayer-share-button:hover { background: var(--mp-primary-hover); }
+.awwo-multiplayer-share-button:focus-visible { outline: 2px solid var(--mp-focus); outline-offset: 2px; }
+.awwo-multiplayer-share-ask { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 0 0; }
+.awwo-multiplayer-share-row { display: flex; align-items: flex-start; gap: 10px; }
+.awwo-multiplayer-share-row > .awwo-multiplayer-avatar { margin-top: 1px; box-shadow: none; }
+.awwo-multiplayer-share-row[data-self] > .awwo-multiplayer-avatar { box-shadow: 0 0 0 2px var(--mp-surface), 0 0 0 3.5px var(--mp-text); }
+.awwo-multiplayer-share-row > .awwo-multiplayer-port,
+.awwo-multiplayer-share-row > .awwo-multiplayer-small-button { margin-left: auto; }
+.awwo-multiplayer-share-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-left: auto; }
+.awwo-multiplayer-panel .awwo-multiplayer-share-controls .awwo-multiplayer-field { width: auto; min-height: 30px; padding: 4px 8px; }
+.awwo-multiplayer-share-here { display: inline-flex; align-items: center; gap: 5px; color: var(--mp-muted); font-size: 12px; }
+.awwo-multiplayer-share-created,
+.awwo-multiplayer-share-pending { display: flex; flex-direction: column; gap: 6px; }
+.awwo-multiplayer-share-created { padding: 8px; border-radius: 10px; background: var(--mp-accent-soft); }
 
 @media (prefers-reduced-motion: reduce) {
   .awwo-multiplayer-dot[data-status='connecting'] { animation: none; }

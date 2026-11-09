@@ -335,7 +335,7 @@ function PromptHome({ identity, tenant, onOpen, section, onSection }: SectionPro
       <small id={disclaimerId} className="saas-home-disclaimer" title={text('composer.disclaimerFull')}>
         <span aria-hidden="true">{text('composer.disclaimer')}</span><span className="sr-only">{text('composer.disclaimerFull')}</span>
       </small>
-      <ToolAdvice text={draft} scope={scope} />
+      <ToolAdvice text={draft} scope={scope} connects={tenant.role === 'owner' || tenant.role === 'admin'} />
       <div className="saas-home-quick-starts" role="group" aria-label={t('快速填写需求', 'Start with a prompt')}>
         {['product-site-trial', 'weekly-sales-report', 'competitor-research'].map(id => {
           const item = STARTER_CASES.find(candidate => candidate.id === id)!;
