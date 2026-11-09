@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PersonalEngineGate } from '../src/saas/PersonalAccount';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { AccountPreferencesProvider, emptyAccountPreferences, readAccountPreferences, type AccountPreferences } from '../src/saas/accountPreferences';
@@ -347,6 +347,141 @@ it('opens the centre from the workspace menu', async () => {
   fireEvent.click(await screen.findByRole('button', { name: '更多选项' }));
   expect(await screen.findByRole('link', { name: '设置' })).toHaveAttribute('href', '/?account=general');
 });
+
+// On a phone the list is one row that scrolls sideways, centred on the open page's entry. 我的 Agent joins it only once
+// the workspace's market answers, which moves every entry after it along: the row is centred again then, and only the
+// row scrolls, never the page (2026-11-08: 成员与工作区 sat cut at the row's right edge).
+it('centres the open page’s entry in the phone’s row again once 我的 Agent joins it, scrolling only the row', async () => {
+  const row = phoneRow();
+  const page = pageScrolls();
+  try {
+    open('about');
+    const nav = await screen.findByRole('navigation', { name: '设置' });
+    const centre = () => { const entry = within(nav).getByRole('link', { name: '关于 AwwO' }).getBoundingClientRect(); return entry.left + entry.width / 2; };
+    await waitFor(() => expect(centre()).toBe(20 + 348 / 2));
+    expect(within(nav).queryByRole('link', { name: '我的 Agent' })).toBeNull();
+    row.answerMarket();
+    expect(await within(nav).findByRole('link', { name: '我的 Agent' })).toBeVisible();
+    await waitFor(() => expect(centre()).toBe(20 + 348 / 2));
+    page.expectUntouched();
+  } finally {
+    page.restore();
+  }
+});
+
+// The scroll position moves only for the person once they have moved it (MOTION.md: what never moves).
+it('leaves the phone’s row where the person scrolled it when 我的 Agent joins later', async () => {
+  const row = phoneRow();
+  const page = pageScrolls();
+  try {
+    open('about');
+    const nav = await screen.findByRole('navigation', { name: '设置' });
+    await waitFor(() => expect(nav.scrollLeft).toBeGreaterThan(0));
+    nav.scrollLeft = 40;
+    row.answerMarket();
+    expect(await within(nav).findByRole('link', { name: '我的 Agent' })).toBeVisible();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(nav.scrollLeft).toBe(40);
+    page.expectUntouched();
+  } finally {
+    page.restore();
+  }
+});
+
+/** A phone's settings row in jsdom, which draws nothing: 348px wide, 20px from the left, its entries 100px apart and
+ *  90px wide, moved by its scroll; the workspace's market answers (and 我的 Agent joins the list) when the test says. */
+function phoneRow() {
+  let answer: (value: Response) => void = () => {};
+  const capabilities = new Promise<Response>(resolve => { answer = resolve; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => /\/tenants\/team-a\/capabilities$/.test(url) ? capabilities
+    : json({ error: { code: 'not_found', message: 'Not found' } }, 404)));
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, x: left, y: top, right: left + width, bottom: top + height, toJSON: () => ({}) }) as DOMRect;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const list = this.closest<HTMLElement>('.saas-settings-nav');
+    if (!list) return rect(0, 0, 0, 0);
+    if (this === list) return rect(20, 66, 348, 58);
+    const index = [...list.querySelectorAll('a, button')].indexOf(this);
+    return index < 0 ? rect(0, 0, 0, 0) : rect(30 + 100 * index - list.scrollLeft, 76, 90, 36);
+  });
+  return {
+    answerMarket: () => answer(json({ skills: { enabled: true }, memory: { enabled: false }, webReader: { enabled: false },
+      render: { enabled: false }, market: { enabled: true, payouts: false, feeBps: 2500, maxPrice: 500, holdDays: 14 } })),
+  };
+}
+
+// On a wider screen the list is a column that scrolls inside its box when the window is short, and its last lines fade
+// while more is below (settings-center.css). An open page whose entry is below the column's view is brought into it
+// above the fade: the column's scroll padding keeps that room. Only the column scrolls.
+it('brings the open page’s entry into the column’s view above its fade, scrolling only the column', async () => {
+  server();
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, x: left, y: top, right: left + width, bottom: top + height, toJSON: () => ({}) }) as DOMRect;
+  const isList = (element: Element) => element.classList.contains('saas-settings-nav');
+  // jsdom draws nothing: a column at 92px with a 1px border and 650px inside it, its entries 60px apart (关于 AwwO the
+  // twelfth, below the view), moved by its scroll; its scroll padding as the stylesheet sets it.
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const column = this.closest<HTMLElement>('.saas-settings-nav');
+    if (!column) return rect(0, 0, 0, 0);
+    if (this === column) return rect(120, 92, 232, 652);
+    const index = [...column.querySelectorAll('a, button')].indexOf(this);
+    return index < 0 ? rect(0, 0, 0, 0) : rect(133, 109 + 60 * index - column.scrollTop, 206, 36);
+  });
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return isList(this) ? 650 : 0; });
+  vi.spyOn(Element.prototype, 'clientTop', 'get').mockImplementation(function (this: Element) { return isList(this) ? 1 : 0; });
+  vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return isList(this) ? 885 : 0; });
+  const style = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) => {
+    const real = style(element, pseudo);
+    if (!isList(element) || pseudo) return real;
+    return new Proxy(real, { get: (target, name) => {
+      if (name === 'scrollPaddingBottom') return '48px';
+      const value = Reflect.get(target, name, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  });
+  const page = pageScrolls();
+  try {
+    const view = open('about');
+    const nav = await screen.findByRole('navigation', { name: '设置' });
+    const entry = (name: string) => within(nav).getByRole('link', { name }).getBoundingClientRect();
+    // Its view ends 48px above the inside of the column's bottom edge: 92 + 1 + 650 - 48.
+    await waitFor(() => expect(entry('关于 AwwO').bottom).toBe(695));
+    // Another page opened in the list scrolled down: its entry, now above the view, comes to the view's top (92 + 1).
+    const again = () => view.rerender(<SaaSPreferencesProvider><AccountPreferencesProvider userId={identity.user.id}>
+      <PersonalEngineGate identity={identity}><p>workspace</p></PersonalEngineGate></AccountPreferencesProvider></SaaSPreferencesProvider>);
+    history.replaceState(null, '', '/?account=security');
+    again();
+    await waitFor(() => expect(entry('账号安全').top).toBe(93));
+    // One already in view leaves the column where it is.
+    const scrolled = nav.scrollTop;
+    history.replaceState(null, '', '/?account=general');
+    again();
+    await waitFor(() => expect(within(nav).getByRole('link', { name: '通用' })).toHaveAttribute('aria-current', 'page'));
+    expect(nav.scrollTop).toBe(scrolled);
+    page.expectUntouched();
+  } finally {
+    page.restore();
+  }
+});
+
+/** What would scroll the page rather than the list: an element's scrollIntoView (jsdom has none, so it is stubbed
+ *  here), the window's own scrolls, and the document's scroll offsets. */
+function pageScrolls() {
+  const intoView = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true, value: intoView });
+  const to = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  const by = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  return {
+    expectUntouched() {
+      expect(intoView).not.toHaveBeenCalled();
+      expect(to).not.toHaveBeenCalled();
+      expect(by).not.toHaveBeenCalled();
+      expect([document.documentElement.scrollTop, document.body.scrollTop, document.documentElement.scrollLeft]).toEqual([0, 0, 0]);
+    },
+    restore() { delete (Element.prototype as Partial<Element>).scrollIntoView; },
+  };
+}
 
 it('reads what the server stored, and every missing or malformed part as its default', () => {
   expect(readAccountPreferences(null)).toEqual(emptyAccountPreferences());

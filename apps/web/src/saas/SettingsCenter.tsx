@@ -78,15 +78,33 @@ function SettingsNav({ identity, section }: { identity: Identity; section: Setti
   const [error, setError] = useState('');
   // The market is the service's: any of the account's workspaces says whether this server offers it.
   const market = useMarketSettings(identity.tenants.find(tenant => tenant.status === 'active')?.id);
+  const listsMarket = Boolean(market) || section === 'agents';
   const nav = useRef<HTMLElement>(null);
-  // On a phone the list is one scrolling row: bring the open page's entry into it.
+  // Where this placed the list last: a list the person has scrolled since stays where they put it.
+  const placed = useRef<{ left: number; top: number } | null>(null);
+  // On a phone the list is one scrolling row: centre the open page's entry in it. In the column of a wider screen, bring
+  // it into the list's view, clear of the fade its scroll padding keeps at the bottom (settings-center.css). Again once
+  // 我的 Agent joins the list (it waits for the workspace's market), which moves the entries after it, unless the person
+  // has scrolled the list by then. Only the list scrolls, never the page: by then the reader may have scrolled it.
   useEffect(() => {
-    const current = nav.current?.querySelector<HTMLElement>('[aria-current="page"]');
-    if (current && typeof current.scrollIntoView === 'function') current.scrollIntoView({ block: 'nearest', inline: 'center' });
-  }, [section]);
+    const list = nav.current;
+    const current = list?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!list || !current) return;
+    if (placed.current && (list.scrollLeft !== placed.current.left || list.scrollTop !== placed.current.top)) return;
+    const box = list.getBoundingClientRect();
+    const entry = current.getBoundingClientRect();
+    list.scrollLeft += entry.left + entry.width / 2 - (box.left + box.width / 2);
+    if (list.scrollHeight > list.clientHeight) {
+      const top = box.top + list.clientTop;
+      const bottom = top + list.clientHeight - (parseFloat(getComputedStyle(list).scrollPaddingBottom) || 0);
+      if (entry.bottom > bottom) list.scrollTop += entry.bottom - bottom;
+      else if (entry.top < top) list.scrollTop -= top - entry.top;
+    }
+    placed.current = { left: list.scrollLeft, top: list.scrollTop };
+  }, [section, listsMarket]);
   return <nav ref={nav} className="saas-settings-nav" aria-label={t('设置', 'Settings')}>
     <a className="saas-settings-back" href={home()}><ArrowLeft size={15} aria-hidden="true" />{t('返回工作区', 'Back to workspace')}</a>
-    {navigation(identity, Boolean(market) || section === 'agents').map(group => <div key={group.en} className="saas-settings-group">
+    {navigation(identity, listsMarket).map(group => <div key={group.en} className="saas-settings-group">
       <span className="saas-settings-group-label">{t(group.zh, group.en)}</span>
       <div className="saas-settings-group-items">{group.items.map(item =>
         <a key={item.id} href={accountURL(item.id)} aria-current={item.id === section ? 'page' : undefined}>

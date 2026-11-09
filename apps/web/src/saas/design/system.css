@@ -494,6 +494,9 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   overflow: hidden; color: color-mix(in oklab, var(--saas-bio) 55%, var(--saas-text)); font: 640 var(--saas-text-sm)/1 var(--saas-font); text-overflow: ellipsis; white-space: nowrap;
 }
 .saas-home-workspace::before { content: ''; width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--saas-bio); box-shadow: 0 0 8px var(--saas-bio); }
+/* The name is the flex item that gives way: a long one ends in an ellipsis inside the pill, not under its edge. Its own
+   line is tall enough for descenders, which its clipping would cut at the pill's line-height of 1. */
+.saas-home-workspace > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
 .saas-home-hero h1 { max-width: 16ch; margin: 0; font-size: clamp(36px, 4.4vw, 58px); line-height: var(--saas-display-leading, 1); font-weight: 690; font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
 /* Chinese titles are short runs of square glyphs: the Latin line-length cap would split them mid-phrase
    (or strand the question mark on a line of its own). */
@@ -737,7 +740,9 @@ a.saas-buy-link, .saas-personal a.saas-primary.saas-buy-link { align-items: cent
   .saas-runtime-note.saas-personal-notice { justify-content: flex-start; padding: 10px 16px; }
   .saas-dashboard .saas-account-actions .canvas-auth-chip-user { width: 34px; padding: 0; justify-content: center; font-size: 0; gap: 0; }
   .saas-dashboard .saas-account-actions .canvas-auth-chip-user svg { width: 17px; height: 17px; }
-  .saas-dashboard .saas-account-actions > select { max-width: 150px; }
+  /* The workspace switcher gives way, so the row's last button (更多选项) does not wrap onto a row of its own: it takes
+     what the buttons leave, up to 150px, and the row breaks only below 56px of it (a phone narrower than about 305px). */
+  .saas-dashboard .saas-account-actions > select { flex: 1 1 0; min-width: 56px; max-width: 150px; }
   .saas-home-hero { margin: 32px 0 8px; }
   .saas-home-hero h1 { font-size: 34px; }
   /* Two classes: saas.html's .awwo-boot-head sets 96 px, and must not win by coming later in the page. */

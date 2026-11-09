@@ -7,8 +7,10 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { PlanVoucher } from '../src/saas/PlanVoucher';
+import { WorkspaceHome } from '../src/saas/WorkspaceHome';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import type { CatalogPlan } from '../src/saas/billing';
+import type { Identity, Tenant } from '../src/saas/api';
 
 // vitest runs with cwd = apps/web.
 const SRC = resolve(process.cwd(), 'src');
@@ -90,6 +92,8 @@ function specificity(selector: string): Spec {
   rest.replace(/(^|[\s>+~(])([a-zA-Z][\w-]*)/g, () => { spec[2] += 1; return ''; });
   return spec;
 }
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 beforeEach(() => { localStorage.clear(); history.replaceState(null, '', '/'); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); history.replaceState(null, '', '/'); });
@@ -222,5 +226,31 @@ describe('用量与计费’s cards', () => {
     const plans = read('saas/plans.css');
     expect(declared(settings, '.saas-settings-usage', 'margin-bottom')).toBe(declared(plans, '.saas-plans', 'gap'));
     expect(declared(plans, '.saas-plans', 'max-width')).toBeUndefined();
+  });
+});
+
+// On a phone the home's header wrapped 更多选项 onto a row of its own, and its workspace chip ran a long name under its
+// edge (a flex box's bare text takes no ellipsis). The settings row is in saas-settings-center.test.tsx.
+describe('a phone’s home', () => {
+  it('lets the workspace switcher give way, so 更多选项 stays in the header’s row', () => {
+    const phone = /@media \(max-width: 760px\) \{([\s\S]*?)\n\}/.exec(read('saas/design/system.css'))?.[1] ?? '';
+    const select = /\.saas-dashboard \.saas-account-actions > select \{([^}]*)\}/.exec(phone)?.[1] ?? '';
+    // It takes what the buttons leave (no basis of its own decides the row's break), down to 56px.
+    expect(select).toMatch(/flex:\s*1 1 0;/);
+    expect(select).toMatch(/min-width:\s*56px/);
+  });
+
+  it('ends a long workspace name in an ellipsis inside its chip', () => {
+    const system = read('saas/design/system.css');
+    expect(declared(system, '.saas-home-workspace > span', 'text-overflow')).toBe('ellipsis');
+    expect(declared(system, '.saas-home-workspace > span', 'min-width')).toBe('0');
+    const tenant: Tenant = { id: 'tenant-p', name: 'A workspace with a very long name that runs past a phone · AwwO', role: 'owner', status: 'active', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
+    const identity: Identity = { user: { id: 'user-p', name: 'Pia', email: 'p@example.test', platformRole: 'user' }, tenants: [tenant] };
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => json(new URL(input, 'http://localhost').pathname.endsWith('/runtime')
+      ? { available: true, configured: true, plannerAvailable: true, models: [{ id: 'model' }] } : { items: [], nextCursor: null })));
+    const { container } = render(<SaaSPreferencesProvider><WorkspaceHome identity={identity} tenant={tenant} onOpen={vi.fn()} /></SaaSPreferencesProvider>);
+    // The name is the chip's own flex item.
+    expect(container.querySelector('.saas-home-workspace > span')).toHaveTextContent(tenant.name);
+    expect(container.querySelector('.saas-home-workspace')?.childNodes).toHaveLength(1);
   });
 });

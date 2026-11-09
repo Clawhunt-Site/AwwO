@@ -300,7 +300,7 @@ function PromptHome({ identity, tenant, onOpen, section, onSection }: SectionPro
     {section === 'overview' && <>
     <section className="saas-home-hero" aria-labelledby={titleId}>
       <HomeHead />
-      <p className="saas-home-workspace">{tenant.name}</p>
+      <p className="saas-home-workspace"><span>{tenant.name}</span></p>
       <h1 id={titleId}>{text('assistant.title')}</h1>
       <p className="saas-home-lead">{t('描述你想交付的成果。先确认分工，再开始执行。', 'Describe what you want to deliver. Review the plan, then run it.')}</p>
       <form className={`saas-home-composer${files.dragging ? ' is-dropping' : ''}`} data-onboarding="canvas-create" aria-labelledby={titleId}
