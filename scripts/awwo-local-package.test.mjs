@@ -11,7 +11,7 @@ import {
   missingImports, nodeFilter, nodeMayLoad, outsideSettingsRemoved, peImports, prepareBuild, privateFiles, privateName, prunePackages,
   pruneUnloadedBuilds, relativeImports, replaceableOut, unmetImports, unusedAtRunTime, vcRuntimeNeeded, workerFilter, chooseVcRuntime, postgresLeftOut,
   collectCrateLicences, forThisMachine, pruneOtherPlatforms, pruneLeftOut, goNoticeGaps, collectNpmLicences, collectPostgresLicences,
-  MANIFEST_FORMAT, keptPayloadProblem, testInstallerName, libdirGaps, PACKAGED_WORKERS,
+  MANIFEST_FORMAT, keptPayloadProblem, testInstallerName, nsisProblem, libdirGaps, PACKAGED_WORKERS,
 } from './awwo-local-package.mjs';
 import { repoRoot } from './awwo-local-lib.mjs';
 import { linkedCrates } from './awwo-crate-licences.mjs';
@@ -483,6 +483,28 @@ test('an earlier payload is built into an installer only when this packager made
   assert.match(keptPayloadProblem(made, { ...here, source: { head: 'abc', dirty: true } }), /abc with changes/);
   // A build to test's installer is named apart from the one to publish.
   assert.equal(testInstallerName('D:\\t\\AwwO Local_0.1.0_x64-setup.exe'), 'D:\\t\\AwwO Local_0.1.0_x64-setup-TEST.exe');
+});
+
+test('an installer makensis did not finish is refused, though Tauri reports the bundle built', () => {
+  // NSIS's first header: flags, 0xDEADBEEF, "NullsoftInst", the header's length, the length of the data from it on.
+  const header = following => {
+    const bytes = Buffer.alloc(28);
+    bytes.writeUInt32LE(0xDEADBEEF, 4);
+    bytes.write('NullsoftInst', 8, 'latin1');
+    bytes.writeUInt32LE(100, 20);
+    bytes.writeUInt32LE(following, 24);
+    return bytes;
+  };
+  const stub = Buffer.alloc(1024, 0x4d);
+  const whole = Buffer.concat([stub, header(4096), Buffer.alloc(4096 - 28, 7)]);
+  assert.equal(nsisProblem(whole), null);
+  assert.equal(nsisProblem(Buffer.concat([whole, Buffer.alloc(300, 1)])), null, 'a signature after the data');
+  assert.match(nsisProblem(whole.subarray(0, whole.length - 10)), /10 bytes short of the 5120/);
+  // A full disk stopped makensis before it wrote the lengths: they stay 0 (the 92 MB file of 2026-11-09).
+  assert.match(nsisProblem(Buffer.concat([stub, header(0), Buffer.alloc(9000, 7)])), /never filled in/);
+  assert.match(nsisProblem(stub), /no NSIS data header/);
+  // The header counts only at a 512-byte boundary, where the installer's own program looks for it.
+  assert.match(nsisProblem(Buffer.concat([Buffer.alloc(100), header(4096), Buffer.alloc(5000)])), /no NSIS data header/);
 });
 
 test('a worker\'s packages built for another system or machine are left out, as npm leaves such an optional one out', () => {

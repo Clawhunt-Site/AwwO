@@ -919,8 +919,24 @@ export const INSTALLER_RESOURCES = Object.freeze({ bundle: { resources: { payloa
  *  publish, is never a build to test. */
 export const testInstallerName = file => file.replace(/\.exe$/i, '-TEST.exe');
 
+/** What keeps an NSIS installer from being whole, or null. makensis writes its data after the program's stub, beginning
+ *  with a first header at a 512-byte boundary (flags, 0xDEADBEEF, "NullsoftInst", the header's length, then the length
+ *  of all the data from that header on, its CRC included); with solid compression it fills in that total only once it
+ *  has written the rest. A makensis that stopped part way (a full disk: "deflateToFile fwrite failed") leaves the total
+ *  0 or the file short of it, and Tauri still reports the bundle finished (2026-11-09: a 92 MB file of a 141 MB
+ *  installer). Anything after the data (a signature) is allowed, as the installer's own program allows it. */
+export function nsisProblem(bytes) {
+  for (let at = 0; at + 28 <= bytes.length; at += 512) {
+    if (bytes.readUInt32LE(at + 4) !== 0xDEADBEEF || bytes.toString('latin1', at + 8, at + 20) !== 'NullsoftInst') continue;
+    const whole = at + bytes.readUInt32LE(at + 24);
+    if (whole < at + 28) return 'makensis did not finish it: its data header was never filled in';
+    return bytes.length < whole ? `it is ${whole - bytes.length} bytes short of the ${whole} its data header gives` : null;
+  }
+  return 'it holds no NSIS data header';
+}
+
 /** Builds the NSIS installer in a build folder and returns it, with its size and SHA-256; a build to test's under its
- *  own name (testInstallerName). */
+ *  own name (testInstallerName). One makensis did not finish is refused (nsisProblem). */
 function buildInstaller(build, { testBuild = false } = {}) {
   const cli = path.join(repoRoot, 'apps', 'desktop', 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
   if (!existsSync(cli)) throw new Error('The Tauri CLI is missing: npm ci --prefix apps/desktop');
@@ -933,9 +949,16 @@ function buildInstaller(build, { testBuild = false } = {}) {
     { cwd: build, stdio: 'inherit', env: { ...process.env, CARGO_TARGET_DIR: target } });
   if (result.status !== 0) throw new Error(`the installer build failed (${result.status})`);
   if (!existsSync(file) || statSync(file).mtimeMs < started - 2000) throw new Error(`The installer build made no new ${file}`);
+  const bytes = readFileSync(file);
+  const problem = nsisProblem(bytes);
+  if (problem) {
+    // This run wrote it (its time says so): it goes, so the name of the installer to publish never holds a broken one.
+    rmSync(file, { force: true });
+    throw new Error(`The installer ${file} is not whole: ${problem}. Is the disk full? Free some space and build again`);
+  }
   const made = testBuild ? testInstallerName(file) : file;
   if (testBuild) renameSync(file, made);
-  return { file: made, bytes: statSync(made).size, sha256: sha256(readFileSync(made)) };
+  return { file: made, bytes: bytes.length, sha256: sha256(bytes) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
