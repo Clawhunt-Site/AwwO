@@ -47,7 +47,7 @@ export function PlanVoucher({ plan, smallest, current, action, fine }: {
         </p>
         <p className="saas-voucher-face-note">{t('每月到账 · 1 点 = 1 美分', 'Every month · 1 credit = 1 cent')}</p>
         <ul className="saas-voucher-perks">{perks.map(text => <li key={text}><Check size={15} aria-hidden="true" />{text}</li>)}</ul>
-        <p className="saas-voucher-serial" aria-hidden="true">AWWO · {name.toUpperCase()} · {plan.credits}</p>
+        <p className="saas-voucher-serial" aria-hidden="true">AwwO · {name.toUpperCase()} · {plan.credits}</p>
       </div>
       <div className="saas-voucher-stub">
         <p className="saas-voucher-price"><strong>${plan.priceUsd}</strong>{t(' / 月', ' / month')}</p>

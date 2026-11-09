@@ -369,7 +369,7 @@ export function ConnectionSettings({
           </div>
         </form>
         {cloud ? <aside className="saas-card saas-gate-card" data-provider={CLOUD_PROVIDER}>
-          <span className="saas-eyebrow">{t("AwwO 云端", "AWWO CLOUD")}</span>
+          <span className="saas-eyebrow">{t("AwwO 云端", "AwwO Cloud")}</span>
           <h2>{t("使用线上 AwwO 的模型", "Use the online AwwO’s models")}</h2>
           <p>{t(
             "在线上 AwwO 生成一个连接密钥，粘贴到这里。每次调用都计入密钥所属的线上工作区，和在线上使用一样：用套餐的点数，或免费试用期间的免费次数（试用结束后要有套餐）。",

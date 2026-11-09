@@ -240,8 +240,9 @@
 .awwo-account-dialog .account-workspace-header h1 { max-width: none; color: var(--saas-text); font: 690 var(--saas-text-3xl)/var(--saas-display-leading, 1.1) var(--saas-font-display); font-stretch: var(--saas-display-stretch); letter-spacing: var(--saas-display-track); }
 .awwo-account-dialog .account-workspace-header p { margin-top: 8px; color: var(--saas-muted); font-size: var(--saas-text-md); line-height: 1.6; }
 .awwo-account-dialog .account-section-heading h2 { color: var(--saas-text); font: 650 17px/1.35 var(--saas-font); letter-spacing: 0; }
-/* Labels say which account or workspace a panel belongs to: quiet, in sentence case. */
-.awwo-account-dialog :is(.account-eyebrow, .account-section-heading span) { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: 0; text-transform: none; }
+/* Labels say which account or workspace a panel belongs to: quiet, in sentence case (so AwwO keeps its own casing), in
+   this dialog and where 设置 → 成员与工作区 shows the same panel. */
+:is(.awwo-account-dialog, .saas-settings-members) :is(.account-eyebrow, .account-section-heading span) { color: var(--saas-muted); font: 500 var(--saas-text-xs)/1.4 var(--saas-font); letter-spacing: 0; text-transform: none; }
 .awwo-account-dialog .account-section-heading { margin-bottom: 16px; color: var(--saas-subtle); }
 .awwo-account-dialog :is(.account-identity-card, .account-section) { border: 1px solid var(--saas-hairline); border-radius: var(--saas-radius-xl); background: var(--saas-card); box-shadow: none; }
 .awwo-account-dialog .account-identity-grid { gap: 14px; margin-bottom: 14px; }

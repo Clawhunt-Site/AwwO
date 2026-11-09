@@ -4,7 +4,11 @@
 // does), with their specificity where a page-wide rule competes; the rest is rendered.
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render } from '@testing-library/react';
+import { PlanVoucher } from '../src/saas/PlanVoucher';
+import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import type { CatalogPlan } from '../src/saas/billing';
 
 // vitest runs with cwd = apps/web.
 const SRC = resolve(process.cwd(), 'src');
@@ -87,6 +91,9 @@ function specificity(selector: string): Spec {
   return spec;
 }
 
+beforeEach(() => { localStorage.clear(); history.replaceState(null, '', '/'); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); history.replaceState(null, '', '/'); });
+
 // The account panel (the header's 账号与工作区 dialog, and 设置 → 成员与工作区, which shows the same panel) cut a long
 // display name or email mid-letter: its fields' text-overflow was clip.
 describe('the account panel’s name and email', () => {
@@ -123,5 +130,38 @@ describe('the account panel’s refresh button', () => {
     // The rule that squeezed it (design/system.css), so this check cannot pass by finding none.
     expect(padding).toContainEqual({ file: 'saas/design/system.css', selector: ':is(.saas-login, .saas-dashboard, .saas-notice) button' });
     for (const rule of padding) expect(compare(specificity(own!.selector), specificity(rule.selector)), `${rule.file}: ${rule.selector}`).toBeGreaterThan(0);
+  });
+});
+
+// Uppercase labels spelled the brand AWWO: the account panel's (account.css; the hosted app's dialog alone set them in
+// sentence case, so 成员与工作区 and the native app's panel kept the capitals) and the plans' vouchers; a voucher's
+// serial and the engines page's English wrote it so.
+describe('the brand, AwwO', () => {
+  const pro: CatalogPlan = { id: 'pro', priceUsd: 20, credits: 2000, dailyCalls: 1000, concurrentAgents: 5, workspaces: 3, mediaPerDay: 20 };
+
+  it('keeps its casing in the account panel’s labels, wherever the panel is shown', () => {
+    const account = read('account/account.css');
+    const quiet = ':is(.awwo-account-dialog, .saas-settings-members) :is(.account-eyebrow, .account-section-heading span)';
+    for (const label of ['.account-eyebrow', '.account-section-heading span']) {
+      expect(declared(account, label, 'text-transform')).toBeUndefined();
+      expect(declared(account, label, 'letter-spacing')).toBeUndefined();
+      // On 成员与工作区 the labels take the dialog's quiet look, over the panel's own.
+      expect(compare(specificity(quiet), specificity(label))).toBeGreaterThan(0);
+    }
+    expect(declared(read('saas/design/surfaces.css'), quiet, 'text-transform')).toBe('none');
+  });
+
+  it('is printed AwwO on a voucher: its label in its own casing, and its serial', () => {
+    // The label's words were always AwwO in the page; its uppercase made them AWWO (jsdom draws no case).
+    expect(declared(read('saas/plan-voucher.css'), '.saas-voucher-kicker', 'text-transform')).toBeUndefined();
+    localStorage.setItem('superclaw_locale', 'en');
+    const { container } = render(<SaaSPreferencesProvider><PlanVoucher plan={pro} smallest={pro} current={false} action={null} /></SaaSPreferencesProvider>);
+    expect(container.querySelector('.saas-voucher-serial')).toHaveTextContent('AwwO · PRO · 2000');
+  });
+
+  it('is named AwwO Cloud in the engines page’s English, as 本机版连接 does', () => {
+    const source = readFileSync(join(SRC, 'saas/PersonalAccount.tsx'), 'utf8');
+    expect(source).toContain('t("AwwO 云端", "AwwO Cloud")');
+    expect(source).not.toMatch(/\bAWWO\b(?![-_])/);
   });
 });
