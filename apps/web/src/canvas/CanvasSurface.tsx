@@ -5838,7 +5838,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       {/* Same guard as the minimap: the view tools never paint over the opaque welcome overlay of a
           fresh canvas. An empty canvas that still has something to undo or redo keeps them, or a
           deleted last node or an undone plan could only come back through a keyboard shortcut. */}
-      {viewToolsShown && <div ref={viewToolsRef} className={`awwo-view-tools${simple ? ' is-simple' : ''}`} role="toolbar" aria-label={viewText.toolbar}
+      {viewToolsShown && <div ref={viewToolsRef} className={`awwo-view-tools${simple ? ' is-simple' : ''}`} role="toolbar" aria-label={viewText.toolbar} data-feedback-avoid="above"
         style={viewToolsCover.x ? { marginLeft: viewToolsCover.x, ...(viewToolsCover.y ? { marginBottom: viewToolsCover.y } : {}) } : undefined}>
         {!simple && <><button type="button" aria-label={locale === 'zh' ? '框选组件' : 'Select components'} title={locale === 'zh' ? '框选组件（也可按住 Shift 拖动）' : 'Select components (or Shift + drag)'} aria-pressed={selectionTool}
           onClick={() => setSelectionTool(value => !value)}><MousePointer2 size={16} /></button>

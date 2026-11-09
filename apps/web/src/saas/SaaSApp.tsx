@@ -29,6 +29,7 @@ import { SaaSPreferencesProvider, useSaaSPreferences, PreferenceControls, UiMode
 import { BootSurface } from './BootSurface';
 import { navigateTo } from './navigation';
 import { StaleBuildNotice } from './StaleBuildNotice';
+import { FeedbackAssistant } from './FeedbackAssistant';
 import { noteLoadFailure } from './staleBuild';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
@@ -102,8 +103,9 @@ function CanvasPageHeader({ tenantId, controls }: { tenantId: string; controls: 
   return <header className="saas-canvas-page-header"><div className="saas-canvas-page-navigation"><a href="/" className="saas-logo">AwwO</a><CanvasBackLink tenantId={tenantId} /></div>{controls}</header>;
 }
 // Every page, signed in or not, can say that AwwO was updated after it opened and part of it is gone (staleBuild.ts),
-// and can open the Academy, its tutorial videos (Academy.tsx).
-export function SaaSApp() { return <SaaSPreferencesProvider><AcademyProvider><AuthenticatedApp /><StaleBuildNotice /></AcademyProvider></SaaSPreferencesProvider>; }
+// can open the Academy, its tutorial videos (Academy.tsx), and has the feedback assistant in its bottom-left corner
+// (FeedbackAssistant.tsx), which a person who cannot sign in needs most.
+export function SaaSApp() { return <SaaSPreferencesProvider><AcademyProvider><AuthenticatedApp /><StaleBuildNotice /><FeedbackAssistant /></AcademyProvider></SaaSPreferencesProvider>; }
 function AuthenticatedApp() {
   const { locale, t } = useSaaSPreferences();
   const [ssoReturn, setSSOReturn] = useState<SSOReturn | null>(() => readSSOReturn(location.search));

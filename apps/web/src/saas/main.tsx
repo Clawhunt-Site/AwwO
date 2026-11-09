@@ -7,6 +7,7 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { SaaSApp } from './SaaSApp';
 import { installNavigationFeedback } from './navigation';
 import { installStaleBuildWatch } from './staleBuild';
+import { installFeedbackDiagnostics } from './feedbackDiagnostics';
 import '../canvas/ios-theme.css';
 // The hosted app's design system, after the shared sheets it refines: tokens first, then components.
 import './design/tokens.css';
@@ -21,4 +22,6 @@ import './design/transitions.css';
 
 installNavigationFeedback();
 installStaleBuildWatch();
+// What the feedback assistant sends with a report: the script errors this page meets (FeedbackAssistant.tsx).
+installFeedbackDiagnostics();
 createRoot(document.getElementById('root')!).render(<React.StrictMode><ErrorBoundary><SaaSApp /></ErrorBoundary></React.StrictMode>);

@@ -1,6 +1,7 @@
 import { api, type Identity } from './api';
 import { trustedClawHuntLogoutURL } from './clawhuntAuth';
 import { forgetPendingInvite } from './pendingInvite';
+import { forgetFeedbackConversation } from './feedbackApi';
 
 /**
  * Signs out of AwwO, and for a ClawHunt account out of the main site too. Resolves with an error message to show
@@ -8,6 +9,8 @@ import { forgetPendingInvite } from './pendingInvite';
  */
 export async function signOut(identity: Identity, t: (zh: string, en: string) => string): Promise<string | null> {
   forgetPendingInvite();
+  // A feedback conversation in progress is this person's: the next one at this computer starts with none.
+  forgetFeedbackConversation();
   try {
     const result = await api<null | { logoutURL: string }>('/auth/logout', { method: 'POST' });
     if (identity.authentication === 'clawhunt') {

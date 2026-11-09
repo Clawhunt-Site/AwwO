@@ -48,8 +48,12 @@ type App struct {
 	authSlots   chan struct{}
 	reauthEvery time.Duration
 	sendReset   func(context.Context, string, string) error
-	mailSlots   chan struct{}
-	runEvents   runEventNotifier
+	// sendFeedback replaces the relay for the feedback assistant's reports in tests (feedback.go); nil sends by SMTP.
+	sendFeedback func(ctx context.Context, from, to string, message []byte) error
+	// feedbackLimits bounds the feedback assistant's answers and reports per person and deployment (feedback.go).
+	feedbackLimits feedbackLimiter
+	mailSlots      chan struct{}
+	runEvents      runEventNotifier
 	// clawHuntSessions holds recent issuer verifications of signed-in sessions.
 	clawHuntSessions *clawHuntSessionCache
 	// inviteReads bounds each account's invite-code reads (clawhunt_invites.go).
@@ -321,6 +325,10 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/billing/checkout", a.auth(a.billingCheckout))
 	m.HandleFunc("POST /api/v1/billing/portal", a.auth(a.billingPortal))
 	m.HandleFunc("GET /api/v1/auth/options", a.authOptions)
+	// The feedback assistant in every page's corner, signed in or not (feedback.go): its state, its answers, a report sent.
+	m.HandleFunc("GET /api/v1/feedback", a.feedbackStatus)
+	m.HandleFunc("POST /api/v1/feedback", a.submitFeedback)
+	m.HandleFunc("POST /api/v1/feedback/assistant", a.feedbackAssistant)
 	m.HandleFunc("GET /api/v1/appearance", a.auth(a.appearance))
 	m.HandleFunc("PUT /api/v1/appearance", a.auth(a.updateAppearance))
 	m.HandleFunc("GET /api/v1/appearance/export", a.auth(a.exportAppearance))

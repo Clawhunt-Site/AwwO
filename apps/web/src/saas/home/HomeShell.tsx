@@ -38,10 +38,13 @@ export function HomeShell({ identity, tenant, onOpen }: { identity: Identity; te
     toTop();
     focusHeading(panel.current);
   }, [moves]);
+  // The rail keeps a place at its foot for the feedback assistant's button (FeedbackAssistant.tsx, feedbackPlacement.ts):
+  // the bottom-left corner the button takes on every page, under the account card rather than over it.
   return <div className="saas-home-layout">
-    <div className="saas-home-rail">
+    <div className="saas-home-rail" data-feedback-avoid="beside">
       <HomeNav sections={member ? MEMBER_SECTIONS : READER_SECTIONS} section={section} onSection={go} />
       <HomeAccountCard identity={identity} tenant={tenant} usage={usage} onUsage={setUsage} />
+      <div className="saas-home-feedback-slot" data-feedback-slot aria-hidden="true" />
     </div>
     <div className="saas-home-content">
       <TrialBanner usage={usage} userId={identity.user.id} tenantId={tenant.id} owner={tenant.role === 'owner'} onDismiss={() => focusHeading(panel.current)} />

@@ -71,6 +71,9 @@
 }
 .saas-home-account a.saas-home-account-link:hover { color: var(--saas-link-hover); text-decoration: underline; text-underline-offset: 3px; }
 
+/* The place the feedback assistant's button docks in, under the account card (HomeShell.tsx): as tall as the button. */
+.saas-home-feedback-slot { flex: none; height: 40px; }
+
 /* ── The content: the trial banner over the section shown ── */
 .saas-home-content { min-width: 0; container: saas-home / inline-size; }
 .saas-home-panel { min-width: 0; }
@@ -163,6 +166,8 @@
   .saas-home-account { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px 16px; margin-top: 0; padding: 12px; }
   .saas-home-account-plan { padding-top: 0; border-top: 0; }
   .saas-home-account a.saas-home-account-link { grid-column: 1 / -1; }
+  /* The rail is a row at the top here: the button floats in the window's corner instead. */
+  .saas-home-feedback-slot { display: none; }
 }
 @media (max-width: 760px) { .saas-dashboard.saas-home { padding-inline: 20px; } }
 @media (prefers-reduced-motion: reduce) { .saas-home-tile-go { transition: none; } }

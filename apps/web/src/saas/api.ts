@@ -1,3 +1,5 @@
+import { noteFeedbackRequest } from './feedbackDiagnostics';
+
 export const API_BASE = '/api/v1';
 export class SaaSApiError extends Error {
   /** `details`: the API's machine-readable details of the refusal (no user content), such as a plan's contextRoom. */
@@ -58,6 +60,8 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
       payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : `请求失败（${response.status}）`),
       details && typeof details === 'object' && !Array.isArray(details) ? details : {});
     if (error.status === 401 && error.code === 'unauthorized') endSession(sentUnder);
+    // The feedback assistant sends the last few with a report (feedbackDiagnostics.ts): method, path, status and code.
+    noteFeedbackRequest(method, path, error.status, error.code);
     throw error;
   }
   return payload as T;

@@ -261,6 +261,14 @@ func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) sendResetEmail(ctx context.Context, email, link string) error {
 	cfg := a.cfg
+	return a.smtpSend(ctx, cfg.SMTPFrom, email, []byte("From: "+cfg.SMTPFrom+"\r\nTo: "+email+"\r\nSubject: Reset your AwwO password\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nUse this link within 30 minutes to reset your AwwO password:\r\n"+link+"\r\n\r\nIf you did not request this, ignore this email.\r\n"))
+}
+
+// smtpSend hands one message for one recipient to the configured relay, over TLS only (465 is TLS from the start; 587
+// must offer STARTTLS), within 12 seconds of connecting or the context's deadline, whichever comes first. Its errors
+// name the step that failed, never an address or the message (password recovery and feedback.go both send through it).
+func (a *App) smtpSend(ctx context.Context, from, to string, message []byte) error {
+	cfg := a.cfg
 	address := net.JoinHostPort(cfg.SMTPHost, cfg.SMTPPort)
 	dialer := &net.Dialer{Timeout: 8 * time.Second}
 	var conn net.Conn
@@ -275,7 +283,11 @@ func (a *App) sendResetEmail(ctx context.Context, email, link string) error {
 		return errors.New("mail unavailable")
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(12 * time.Second))
+	deadline := time.Now().Add(12 * time.Second)
+	if until, ok := ctx.Deadline(); ok && until.Before(deadline) {
+		deadline = until
+	}
+	_ = conn.SetDeadline(deadline)
 	client, err := smtp.NewClient(conn, cfg.SMTPHost)
 	if err != nil {
 		return errors.New("mail unavailable")
@@ -291,22 +303,25 @@ func (a *App) sendResetEmail(ctx context.Context, email, link string) error {
 			return errors.New("mail authentication failed")
 		}
 	}
-	if err = client.Mail(cfg.SMTPFrom); err != nil {
+	if err = client.Mail(from); err != nil {
 		return errors.New("mail sender rejected")
 	}
-	if err = client.Rcpt(email); err != nil {
+	if err = client.Rcpt(to); err != nil {
 		return errors.New("mail recipient rejected")
 	}
 	out, err := client.Data()
 	if err != nil {
 		return errors.New("mail unavailable")
 	}
-	_, err = out.Write([]byte("From: " + cfg.SMTPFrom + "\r\nTo: " + email + "\r\nSubject: Reset your AwwO password\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nUse this link within 30 minutes to reset your AwwO password:\r\n" + link + "\r\n\r\nIf you did not request this, ignore this email.\r\n"))
+	_, err = out.Write(message)
 	if err != nil {
 		return errors.New("mail delivery failed")
 	}
 	if err = out.Close(); err != nil {
 		return errors.New("mail delivery failed")
 	}
-	return client.Quit()
+	// The relay took the message with its answer to the closing dot: a QUIT that fails after it changes nothing that was
+	// sent, and must not make the caller send the message again.
+	_ = client.Quit()
+	return nil
 }

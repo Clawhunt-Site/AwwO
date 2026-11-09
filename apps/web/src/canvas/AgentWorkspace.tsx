@@ -282,7 +282,7 @@ export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption
 
   return <div className={`awwo-workspace${simple ? ' is-simple' : ''}${sidebarOpen ? ' is-sidebar-open' : ''}${modelLibraryOpen ? ' is-model-library-open' : ''}${modernRails ? ' has-model-library' : navExpanded ? '' : ' is-nav-compact'}`}>
     {(sidebarOpen || modelLibraryOpen) && <button className="awwo-sidebar-scrim" aria-label={t('workspace.closeNavigation')} onClick={() => { setSidebarOpen(false); setModelLibraryOpen(false); }} />}
-    {modelShelf && <aside data-onboarding="models" ref={modelSidebarRef} className="awwo-model-sidebar" aria-label={locale === 'zh' ? '模型库' : 'Model library'} onPointerDown={() => setSidebarOpen(false)}>
+    {modelShelf && <aside data-onboarding="models" data-feedback-avoid="beside" ref={modelSidebarRef} className="awwo-model-sidebar" aria-label={locale === 'zh' ? '模型库' : 'Model library'} onPointerDown={() => setSidebarOpen(false)}>
       <div className="awwo-brand"><span className="awwo-brand-mark" aria-hidden="true"><GitBranch size={23} /></span><span>AwwO</span><button type="button" className="awwo-icon-button awwo-mobile-menu" aria-label={locale === 'zh' ? '关闭模型库' : 'Close model library'} onClick={() => setModelLibraryOpen(false)}><X size={18} /></button></div>
       <div className="awwo-workspace-name"><span className="awwo-workspace-avatar"><FolderOpen size={16} /></span><div><strong>{workspaceName || t('workspace.name')}</strong><small>{locale === 'zh' ? '模型与编排' : 'Models & orchestration'}</small></div></div>
       {modelShelf}
@@ -301,7 +301,8 @@ export function AgentWorkspace({ simple = false, workspaceName, workspaceCaption
           onClick={() => { if (view !== item) onViewChange(item); }}>{t(item === 'canvas' ? 'results.viewCanvas' : 'results.viewResults')}</button>)}
       </div> : null}{onToggleAssistant && (nodes.length > 0 || assistantOpen || assistantAvailable) ? <button className={`awwo-assistant-toggle${assistantHint && !assistantOpen ? ' has-hint' : ''}`} type="button" aria-label={t('workspace.assistant')} title={assistantHint && !assistantOpen ? t('workspace.assistantHint') : undefined} aria-expanded={assistantOpen} onClick={onToggleAssistant}><MessageSquare size={15} /><span>{t('workspace.assistant')}</span>{assistantHint && !assistantOpen ? <i className="awwo-assistant-toggle-dot" aria-hidden="true" /> : null}</button> : null}{canvasTools}{!headerTitle && <div className="awwo-canvas-tab"><GitBranch size={16} /><span>{t('workspace.collaborationCanvas')}</span></div>}<div className="awwo-run-slot">{toolbar}</div></div>
       <section className="awwo-stage" aria-label={t('workspace.stage')}>
-        {assistant ? <aside className="awwo-planner-sidebar" aria-label={t('workspace.assistant')} hidden={assistantStowed} style={assistantStowed ? { display: 'none' } : undefined}>{assistant}</aside> : null}
+        {/* data-feedback-avoid: the hosted app's feedback button keeps clear of the assistant's composer (saas/feedbackPlacement.ts). */}
+        {assistant ? <aside className="awwo-planner-sidebar" data-feedback-avoid="beside" aria-label={t('workspace.assistant')} hidden={assistantStowed} style={assistantStowed ? { display: 'none' } : undefined}>{assistant}</aside> : null}
         <div data-onboarding="canvas-stage" className="awwo-stage-canvas" onDragOver={onModelDragOver} onDrop={onModelDrop}
           style={stageCover > 0 ? { '--awwo-stage-cover': `${stageCover}px` } as CSSProperties : undefined}>{children}
         {view === 'results' && results}

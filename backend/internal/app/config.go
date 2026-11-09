@@ -39,9 +39,13 @@ type Config struct {
 	// PlatformProviders are the operator destinations a Gate-only API admits workers
 	// for: always llmgate, plus bedrock and deepseek where AWWO_PLATFORM_PROVIDERS names
 	// them. Personal connections stay Gate-only either way.
-	PlatformProviders                                                                     []string
-	CredentialKey                                                                         []byte
-	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom                              string
+	PlatformProviders                                        []string
+	CredentialKey                                            []byte
+	SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom string
+	// SupportEmail is the inbox the feedback assistant's reports go to (feedback.go, AWWO_SUPPORT_EMAIL; production's
+	// default is support@clawhunt.store, elsewhere none unless set), and FeedbackModel the model its assistant asks
+	// (AWWO_FEEDBACK_MODEL; empty: the operator's planner model, else the worker's free default).
+	SupportEmail, FeedbackModel                                                           string
 	MetricsEnabled, OTelEnabled                                                           bool
 	MetricsListenAddr, OTelEndpoint, OTelServiceName, OTelResourceAttributes, OTelSampler string
 	OTelSampleRatio                                                                       float64
@@ -217,6 +221,9 @@ func ConfigFromEnv() (Config, error) {
 	c.SMTPUsername = os.Getenv("AWWO_SMTP_USERNAME")
 	c.SMTPPassword = os.Getenv("AWWO_SMTP_PASSWORD")
 	c.SMTPFrom = os.Getenv("AWWO_SMTP_FROM")
+	if err := c.feedbackFromEnv(); err != nil {
+		return c, err
+	}
 	c.PIAdmissionWait = 5 * time.Second
 	c.OpenAIAgentsURL, c.OpenAIAgentsToken = os.Getenv("AWWO_OPENAI_AGENTS_URL"), os.Getenv("AWWO_OPENAI_AGENTS_TOKEN")
 	c.SandboxAgentsURL, c.SandboxAgentsToken = os.Getenv("AWWO_SANDBOX_AGENTS_URL"), os.Getenv("AWWO_SANDBOX_AGENTS_TOKEN")
