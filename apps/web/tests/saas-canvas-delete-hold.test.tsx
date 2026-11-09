@@ -60,22 +60,37 @@ describe('the canvas list’s 删除', () => {
     let actions = await menu('别人的画布');
     // Renaming is anyone's who edits; deleting is the maker's, or an owner's or admin's.
     expect(actions.getByRole('button', { name: '改名' })).toBeEnabled();
-    expect(actions.getByRole('button', { name: '删除' })).toBeDisabled();
-    expect(actions.getByRole('button', { name: '删除' })).toHaveAccessibleDescription('只有创建这张画布的人，或工作区的所有者和管理员，能删除它。');
-    fireEvent.click(actions.getByRole('button', { name: '删除' }));
+    let held = actions.getByRole('button', { name: '删除' });
+    expect(held).toHaveAttribute('aria-disabled', 'true');
+    expect(held).toHaveAccessibleDescription('只有创建这张画布的人，或工作区的所有者和管理员，能删除它。');
+    // Held, not disabled: Tab reaches it after 改名, so the line saying who may is read as it takes the focus.
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    expect(actions.getByRole('button', { name: '改名' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    expect(held).toHaveFocus();
+    // Pressed, it does nothing: no confirmation, and the menu stays open with the focus on it.
+    fireEvent.click(held);
     expect(screen.queryByRole('dialog', { name: '确认删除画布' })).toBeNull();
+    expect(held).toHaveFocus();
     fireEvent.keyDown(screen.getByRole('dialog', { name: /别人的画布/ }), { key: 'Escape' });
     actions = await menu('没记下创建者');
-    expect(actions.getByRole('button', { name: '删除' })).toBeDisabled();
-    expect(actions.getByRole('button', { name: '删除' })).toHaveAccessibleDescription('这张画布没有记下创建者，只有工作区的所有者和管理员能删除它。');
+    held = actions.getByRole('button', { name: '删除' });
+    expect(held).toHaveAttribute('aria-disabled', 'true');
+    expect(held).toHaveAccessibleDescription('这张画布没有记下创建者，只有工作区的所有者和管理员能删除它。');
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    expect(held).toHaveFocus();
+    fireEvent.click(held);
+    expect(screen.queryByRole('dialog', { name: '确认删除画布' })).toBeNull();
     fireEvent.keyDown(screen.getByRole('dialog', { name: /没记下创建者/ }), { key: 'Escape' });
     // A server older than createdBy decides for itself.
     actions = await menu('旧服务器的画布');
     expect(actions.getByRole('button', { name: '删除' })).toBeEnabled();
+    expect(actions.getByRole('button', { name: '删除' })).not.toHaveAttribute('aria-disabled');
     expect(actions.queryByText(/能删除它/)).toBeNull();
     fireEvent.keyDown(screen.getByRole('dialog', { name: /旧服务器的画布/ }), { key: 'Escape' });
     actions = await menu('我的画布');
     expect(actions.getByRole('button', { name: '删除' })).toBeEnabled();
+    expect(actions.getByRole('button', { name: '删除' })).not.toHaveAttribute('aria-disabled');
     expect(actions.getByRole('button', { name: '删除' })).not.toHaveAttribute('aria-describedby');
     fireEvent.click(actions.getByRole('button', { name: '删除' }));
     fireEvent.click(within(screen.getByRole('dialog', { name: '确认删除画布' })).getByRole('button', { name: '确认删除' }));
@@ -89,6 +104,7 @@ describe('the canvas list’s 删除', () => {
       for (const canvas of CANVASES) {
         const actions = await menu(canvas.name);
         expect(actions.getByRole('button', { name: '删除' })).toBeEnabled();
+        expect(actions.getByRole('button', { name: '删除' })).not.toHaveAttribute('aria-disabled');
         expect(actions.queryByText(/能删除它/)).toBeNull();
         fireEvent.keyDown(screen.getByRole('dialog', { name: new RegExp(canvas.name) }), { key: 'Escape' });
       }
@@ -101,14 +117,17 @@ describe('the canvas list’s 删除', () => {
     show('member', ME);
     let actions = await menu('别人的画布');
     expect(actions.getByRole('button', { name: 'Rename' })).toBeEnabled();
-    expect(actions.getByRole('button', { name: 'Delete' })).toBeDisabled();
+    expect(actions.getByRole('button', { name: 'Delete' })).toHaveAttribute('aria-disabled', 'true');
     expect(actions.getByRole('button', { name: 'Delete' })).toHaveAccessibleDescription('Only the person who made this canvas, or a workspace owner or admin, can delete it.');
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    expect(actions.getByRole('button', { name: 'Delete' })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole('dialog', { name: /别人的画布/ }), { key: 'Escape' });
     actions = await menu('没记下创建者');
     expect(actions.getByRole('button', { name: 'Delete' })).toHaveAccessibleDescription('No maker is recorded for this canvas, so only a workspace owner or admin can delete it.');
     fireEvent.keyDown(screen.getByRole('dialog', { name: /没记下创建者/ }), { key: 'Escape' });
     actions = await menu('我的画布');
     expect(actions.getByRole('button', { name: 'Delete' })).toBeEnabled();
+    expect(actions.getByRole('button', { name: 'Delete' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('still gives a reader no menu at all', async () => {
