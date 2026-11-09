@@ -263,6 +263,18 @@
 .saas-settings-usage .saas-route-usage {
   max-width: 100%;
 }
+/* 今天的用量 stands above the plans with their own gap between cards (plans.css .saas-plans). */
+.saas-settings-usage {
+  margin-bottom: 16px;
+}
+/* The meter's chips take their icon-and-label row from the header's button rules; here, outside the header, they
+   take it from this card, with the gap they have in the home's account card. */
+.saas-settings-usage :is(.saas-checkin-trigger, .saas-route-usage-trigger) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
 /* 本机 (settings/local.tsx): a folder or file path with its copy button, and the computer's optional services. */
 .saas-local-path {
   display: flex;

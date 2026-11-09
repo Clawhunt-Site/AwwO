@@ -2,7 +2,6 @@
 .saas-plans {
   display: grid;
   gap: 16px;
-  max-width: 920px;
 }
 .saas-plans-notice {
   margin: 0;

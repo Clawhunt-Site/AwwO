@@ -210,3 +210,17 @@ describe('设置’s list', () => {
     expect(phone).toMatch(/\.saas-settings-nav::after \{\s*content: none;\s*\}/);
   });
 });
+
+// 用量与计费's 今天的用量 card: its chips had no gap between icon and label (they take it from the header's button
+// rules), and the card touched 当前套餐 below it and stood 16px wider than the plans.
+describe('用量与计费’s cards', () => {
+  it('give 今天的用量’s chips a gap, and line the card up with the plans below it', () => {
+    const settings = read('saas/settings/settings-center.css');
+    const chips = '.saas-settings-usage :is(.saas-checkin-trigger, .saas-route-usage-trigger)';
+    expect(declared(settings, chips, 'display')).toBe('inline-flex');
+    expect(declared(settings, chips, 'gap')).toBe('8px');
+    const plans = read('saas/plans.css');
+    expect(declared(settings, '.saas-settings-usage', 'margin-bottom')).toBe(declared(plans, '.saas-plans', 'gap'));
+    expect(declared(plans, '.saas-plans', 'max-width')).toBeUndefined();
+  });
+});
