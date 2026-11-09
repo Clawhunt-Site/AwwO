@@ -4,6 +4,7 @@
 import type { ReactNode } from 'react';
 import type { CanvasDocument } from './canvasDoc';
 import type { PlanningMessage } from './canvasPlanning';
+import type { MessagePagesStep } from './messagePages';
 
 export type AssistantRoute = 'plan' | 'execute';
 
@@ -21,10 +22,11 @@ export interface AssistantRouteDecision { route: AssistantRoute; redirect?: bool
 
 export type RouteAssistant = (request: AssistantRouteRequest, signal: AbortSignal) => Promise<AssistantRouteDecision>;
 
-/** What a message being handled waits for before it joins the conversation. */
-export type AssistantPendingPhase = 'routing' | 'starting' | 'stopping';
-/** `operationId`: the submission identity a task being started is sent under. */
-export interface AssistantPending { id: string; prompt: string; phase: AssistantPendingPhase; operationId?: string }
+/** What a message being handled waits for before it joins the conversation: the web pages it names being read
+ *  (messagePages.ts), the server routing it, its task starting, or the task it replaces stopping. */
+export type AssistantPendingPhase = 'reading' | 'routing' | 'starting' | 'stopping';
+/** `operationId`: the submission identity a task being started is sent under. `reading`: the page being read now. */
+export interface AssistantPending { id: string; prompt: string; phase: AssistantPendingPhase; operationId?: string; reading?: MessagePagesStep }
 
 /** Thrown by `start` when the service did not say whether the task was created: the host offers to reconcile it,
  *  and the message must not be sent again meanwhile. */

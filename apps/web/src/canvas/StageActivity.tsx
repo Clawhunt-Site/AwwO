@@ -16,7 +16,7 @@ export type StageActivityState =
   | { kind: 'task' }
   | { kind: 'empty' };
 
-const PENDING: Record<AssistantPendingPhase, CanvasTextKey> = { routing: 'assistant.routing', starting: 'assistant.starting', stopping: 'assistant.stopping' };
+const PENDING: Record<AssistantPendingPhase, CanvasTextKey> = { reading: 'assistant.reading', routing: 'assistant.routing', starting: 'assistant.starting', stopping: 'assistant.stopping' };
 
 export interface StageActivityProps {
   state: StageActivityState;

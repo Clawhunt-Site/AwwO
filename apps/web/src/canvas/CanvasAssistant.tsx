@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, Loader2, Square, Undo2, X } from 'lucide-react';
+import { ArrowUp, Globe, Loader2, Square, Undo2, X } from 'lucide-react';
 import './canvas-assistant.css';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { getAgentTemplates } from './agentTemplates';
@@ -9,6 +9,7 @@ import type { AssistantPending, AssistantPendingPhase, AssistantRoute } from './
 import type { UiLocale } from '../locale';
 import { AttachButton, AttachmentTray, MessageWithAttachments, useComposerAttachments } from './ComposerAttachments';
 import { ComposerNotes } from './ComposerNotes';
+import { byHand, pasteEdit, pasteInput, selectionBefore, selectionEdit, webAddress, type MessagePage, type SelectionBefore, type TypedEdit } from './messagePages';
 
 export interface CanvasAssistantMessage {
   id: string;
@@ -17,6 +18,8 @@ export interface CanvasAssistantMessage {
   status?: 'applied' | 'error' | 'stale' | 'unconfirmed';
   route?: AssistantRoute;
   taskId?: string;
+  /** A user turn's web pages, as read before it was handled (messagePages.ts). */
+  pages?: MessagePage[];
 }
 
 /** A host that can also do tasks: one conversation whose messages the server routes (assistantRouting.ts). */
@@ -42,6 +45,10 @@ export interface CanvasAssistantProps {
   messages: CanvasAssistantMessage[];
   draft: string;
   onDraftChange: (value: string) => void;
+  /** Each edit the person makes in the box, from the words it showed to the words they made: what they type or paste
+   *  is theirs (`typed`; not an undo or a redo), as against words put in for them (an example, a canvas's fix request),
+   *  whose addresses are not read. */
+  onTyped?: (previous: string, next: string, typed: boolean, edit?: TypedEdit) => void;
   busy: boolean;
   error?: string;
   onSend: () => void;
@@ -96,7 +103,7 @@ export interface AssistantNextSteps {
 
 // What a message being handled is waiting for, said in the composer.
 const PENDING_HEADLINE: Record<AssistantPendingPhase, CanvasTextKey> = {
-  routing: 'assistant.routing', starting: 'assistant.starting', stopping: 'assistant.stopping',
+  reading: 'assistant.reading', routing: 'assistant.routing', starting: 'assistant.starting', stopping: 'assistant.stopping',
 };
 
 /** The four observable steps of a plan. They advance only on events the run reported. */
@@ -119,6 +126,22 @@ export function PlanSteps({ stage, label }: { stage: PlanProgress['stage'] | und
       <i aria-hidden="true" /><span>{t(label)}</span>
     </span>)}
   </div>;
+}
+
+/** Under a user's message: the web pages it named, each read (its title, opening the page in a new tab) or not, with
+ *  why. A page cut to fit the task says so. */
+export function MessagePageList({ pages }: { pages: ReadonlyArray<MessagePage> }) {
+  const { t } = useCanvasI18n();
+  return <ul className="awwo-message-pages" aria-label={t('assistant.pagesRead')}>
+    {pages.map(page => <li key={page.url} className={`awwo-message-page${page.error ? ' is-unread' : ''}`}>
+      <Globe size={13} aria-hidden="true" />
+      {page.error || !webAddress(page.url) ? <span className="awwo-message-page-title">{page.error ? page.host : page.title || page.host}</span>
+        : <a className="awwo-message-page-title" href={page.url} target="_blank" rel="noopener noreferrer">{page.title || page.host}</a>}
+      {!page.error && page.title ? <span className="awwo-message-page-host">{page.host}</span> : null}
+      {page.error ? <span className="awwo-message-page-note">{t('assistant.pageNotRead', { reason: page.error })}</span>
+        : page.truncated ? <span className="awwo-message-page-note">{t('assistant.pageShortened')}</span> : null}
+    </li>)}
+  </ul>;
 }
 
 // A stage that has lasted this long gets a line saying what the wait usually means, so the
@@ -200,7 +223,7 @@ function nextActionControl(action: AssistantNextAction): ReactNode {
 }
 
 /** Presentation only: the host owns requests, applying changes, drafts and undo history. */
-export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, error, onSend, onCancel,
+export function CanvasAssistant({ mode, messages, draft, onDraftChange, onTyped, busy, error, onSend, onCancel,
   onClose, onUndo, canUndo = false, runtimeControls, progress, expectedSeconds, submitLabel, submitDisabled = false, recovery, unified, nextSteps, costNote,
   focusBack = true }: CanvasAssistantProps) {
   const { locale, t } = useCanvasI18n();
@@ -216,8 +239,47 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   const canSend = !busy && !routing && !recovery && !submitDisabled && Boolean(draft.trim());
   const waitingForReply = busy || routing;
   const attach = useComposerAttachments({ value: draft, onChange: onDraftChange, disabled: waitingForReply || Boolean(unified?.readOnly) });
+  // A paste says where it went (messagePages.ts TypedEdit): the edit that follows it is that paste, all of it the
+  // reader's, even where it repeats the words it replaced; the same words pasted over themselves change nothing the
+  // box reports, so they are said at once.
+  const pasted = useRef<{ previous: string; edit: TypedEdit } | null>(null);
+  const notePaste = (box: HTMLTextAreaElement, event: { clipboardData: DataTransfer | null; defaultPrevented: boolean }, shown: string) => {
+    const edit = pasteEdit(box, event);
+    pasted.current = null;
+    if (!edit) return;
+    if (shown.slice(edit.start, edit.end) === edit.text) onTyped?.(shown, shown, true, edit);
+    else pasted.current = { previous: shown, edit };
+  };
+  const pastedHere = (shown: string, input: Event) => {
+    const paste = pasted.current;
+    pasted.current = null;
+    return paste && paste.previous === shown && pasteInput(input) ? paste.edit : undefined;
+  };
+  // Typing and deleting say where they were too: the selection as the browser begins the edit (messagePages.ts
+  // selectionEdit), so a deletion never leaves the marks of the words it took on words it left.
+  const began = useRef<SelectionBefore | null>(null);
+  useEffect(() => {
+    const box = input.current;
+    if (!box) return undefined;
+    const note = (event: Event) => { began.current = selectionBefore(box, event); };
+    box.addEventListener('beforeinput', note);
+    return () => box.removeEventListener('beforeinput', note);
+  });
+  const selectedHere = (shown: string, next: string, change: Event) => {
+    const record = began.current;
+    began.current = null;
+    return selectionEdit(record, shown, next, change);
+  };
   // The request itself is bounded at 8 000 characters, file lines included.
   const bodyLimit = Math.max(0, 8000 - (draft.length - attach.body.length));
+  const noteChange = (next: string, change: Event) => {
+    const paste = pastedHere(attach.body, change);
+    const selected = selectedHere(attach.body, next, change);
+    // A change that leaves the box at its limit may be one the browser cut to fit (a paste, or an input method's
+    // composition, which can run past the limit until it is committed): not the person's, so no address it cut is.
+    const full = next.length >= bodyLimit;
+    onTyped?.(attach.body, next, byHand(change) && !full, full ? undefined : paste ?? selected);
+  };
   const lastMessage = messages.at(-1);
   const duplicateLastError = lastMessage?.role === 'assistant' && lastMessage.status === 'error' && lastMessage.content === error;
   useEffect(() => {
@@ -268,7 +330,9 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
   let status: ReactNode = null;
   if (pending && !busy) {
     status = <div className="awwo-assistant-status" role="status">
-      <p className="awwo-assistant-status-headline"><Loader2 size={14} aria-hidden="true" /><span>{t(PENDING_HEADLINE[pending.phase])}</span></p>
+      <p className="awwo-assistant-status-headline"><Loader2 size={14} aria-hidden="true" /><span>{pending.phase === 'reading' && pending.reading
+        ? t('assistant.readingPage', { host: pending.reading.host, index: pending.reading.index, total: pending.reading.total })
+        : t(PENDING_HEADLINE[pending.phase])}</span></p>
       <p className="awwo-assistant-status-meta" aria-hidden="true">
         <span className="awwo-assistant-status-dot" />
         <span className="awwo-assistant-status-facts">{formatDuration(t, elapsedSeconds)}</span>
@@ -327,7 +391,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           {unified && message.role === 'assistant' && message.route ? <span className={`awwo-assistant-route is-${message.route}`}>
             {t(message.route === 'execute' ? 'assistant.routeExecute' : message.status ? 'assistant.routePlan' : 'assistant.routeReply')}</span> : null}
           {message.taskId && unified ? unified.renderTask(message.taskId)
-            : message.role === 'user' ? <MessageWithAttachments text={message.content} />
+            : message.role === 'user' ? <><MessageWithAttachments text={message.content} />{message.pages?.length ? <MessagePageList pages={message.pages} /> : null}</>
             : <p role={message.status === 'error' ? 'alert' : undefined}>{message.content}</p>}
           {message.status === 'applied' ? <span className="awwo-assistant-message-status" role="status">{t('assistant.applied')}</span>
             : message.status === 'stale' ? <span className="awwo-assistant-message-status is-stale" role="alert">{t('assistant.stale')}</span> : null}
@@ -371,7 +435,8 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           placeholder={t(unified ? (welcome ? 'assistant.unifiedWelcomePlaceholder' : 'assistant.unifiedPlaceholder')
             : welcome ? 'assistant.welcomePlaceholder' : 'assistant.panelPlaceholder')}
           value={attach.body} disabled={waiting} rows={welcome ? 3 : 2} maxLength={bodyLimit}
-          onChange={event => attach.setBody(event.target.value)} onPaste={attach.onPaste} {...composerKeys} />
+          onChange={event => { noteChange(event.target.value, event.nativeEvent); attach.setBody(event.target.value); }}
+          onPaste={event => { attach.onPaste(event); notePaste(event.currentTarget, event, attach.body); }} {...composerKeys} />
         {status}
         {/* One toolbar, as in a chat app: files and the model on the left; 用户须知, stop and send on the right. */}
         <div className="awwo-assistant-composer-actions">
@@ -382,7 +447,7 @@ export function CanvasAssistant({ mode, messages, draft, onDraftChange, busy, er
           </div>
           <div className="awwo-assistant-composer-submit">
             <ComposerNotes notes={notes} />
-            {busy || pending?.phase === 'routing' ? <button type="button" className="awwo-assistant-cancel" title={t('assistant.cancel')} onClick={onCancel}>
+            {busy || pending?.phase === 'routing' || pending?.phase === 'reading' ? <button type="button" className="awwo-assistant-cancel" title={t('assistant.cancel')} onClick={onCancel}>
               <Square size={11} aria-hidden="true" /><span>{t('assistant.cancel')}</span></button> : null}
             <button type="submit" className="awwo-assistant-send" disabled={!canSend || attach.busy} title={attach.busy ? t('attach.waiting') : sendLabel}>
               <span>{sendLabel}</span><ArrowUp size={16} aria-hidden="true" /></button>

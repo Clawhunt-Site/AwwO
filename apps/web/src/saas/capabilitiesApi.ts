@@ -7,7 +7,9 @@ export interface WorkspaceCapabilities {
   /** Finding skills on skills.sh and importing them into the library; absent from servers older than it. */
   skillRegistry?: { enabled: boolean; source: string };
   memory: { enabled: boolean; maxRunItems: number; maxRunBytes: number; maxPerScope: number };
-  webReader: { enabled: boolean; perDay: number; usedToday: number };
+  /** `fit`: the import cuts a page to its share of a task's quoted knowledge (knowledgeApi.ts KnowledgeWebImportInput),
+   *  which reading the pages a message names needs; absent from a server older than it, which reads none of them. */
+  webReader: { enabled: boolean; perDay: number; usedToday: number; fit?: boolean };
   render: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFps: number; maxWidth: number; maxHeight: number; maxFrames: number; maxHtmlBytes: number } };
   /** Edit nodes (edits.go), rendered on the same worker. Absent from a server older than them. */
   edit?: { enabled: boolean; perDay: number; usedToday: number; limits: { maxSeconds: number; maxFiles: number; maxTimelineBytes: number } };

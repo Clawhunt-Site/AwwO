@@ -53,6 +53,7 @@ import { assistantCostNote } from './assistantCost';
 import { liveDataNeed } from './liveDataNeed';
 import { assistantRouteRequest, TaskStartUnconfirmed, type AssistantExecutionHost, type AssistantPending, type AssistantRoute,
   type RouteAssistant } from './assistantRouting';
+import { messageLinks, typedPages, typeWords, type MessagePage, type MessagePagesOutcome, type ReadMessagePages, type TypedEdit, type TypedWords } from './messagePages';
 import { CanvasResults } from './CanvasResults';
 import { ModelPersonaControls, ModelPersonaShelf } from './ModelPersonaShelf';
 import { automaticGroups, paletteEfforts, readModelPalette, sandboxGroups, type ModelPaletteSelection } from './modelPalette';
@@ -74,7 +75,7 @@ import { followupDeliveryContract } from './followupDelivery';
 import { createAgentTemplate, createDevelopmentTemplate, type AgentTemplateId } from './agentTemplates';
 import { CanvasViewport } from './CanvasViewport';
 import { SessionTile, type SelectMode } from './SessionTile';
-import { watchReaderAway } from './TileComposer';
+import { watchReaderAway, type ComposerStatus } from './TileComposer';
 import { TilePorts, useWiring } from './TilePorts';
 import { WirePlane } from './WirePlane';
 import { Marquee, useMarquee } from './Marquee';
@@ -403,6 +404,9 @@ export interface CanvasSurfaceProps {
   assistantExecution?: AssistantExecutionHost;
   /** Asks the server how to handle one assistant message (POST …/assistant/route). */
   routeAssistant?: RouteAssistant;
+  /** Reads the web pages a message names before it is handled, the assistant's and a node's (messagePages.ts): the
+   *  hosted app, where the server reads the web. Absent, an address in a message is only text. */
+  readMessagePages?: ReadMessagePages;
   /** The hosted app's 成果 view: the canvas's result large, the steps that made it, and the host's run
    *  receipt. Absent (the desktop app) leaves the canvas without it. */
   results?: CanvasResultsOptions;
@@ -467,6 +471,9 @@ export interface InitialPlanRequest {
   claim: () => boolean;
   /** The request is settled: planned, restored to the box, or refused with a reason shown. */
   done: () => void;
+  /** It comes from a draft the old home box saved, which could cut an address: none of its addresses is the person's
+   *  until they paste it again. */
+  untrusted?: boolean;
 }
 
 /** LIVE companies a bind can target. Read straight from the control plane — the canvas no longer
@@ -522,7 +529,7 @@ export interface CanvasResultsOptions {
 // A message that only asks to go on with the turn before it (the router is told of such words too: assistant_route.go).
 const FOLLOW_UP = /^(继续|重试|再试一次|再来一次|接着做|继续执行|continue|retry|try again|go on)[\s。.!！]*$/i;
 
-export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpected = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
+export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpected = false, workspaceName, workspaceCaption, storageMode = 'local', runtimeReadJson, onCreateCompany, accountControl, headerTitle, headerActions, canvasTools, assistantExecution, routeAssistant, readMessagePages, results, taskDraft = null, evolution = null, onEvolutionSettled, autoRun = null, onAutoRunSettled, onOpenSettings, onWorkSettled, personalCredentialsRequired = false, executionUnavailableReason, onLocalDocumentSaveFailed, planRequest = requestCanvasPlan, initialPlan = null }: CanvasSurfaceProps = {}) {
   const { locale, t } = useCanvasI18n();
   // 普通用户模式: the conversations, each node's chat and model, and what the canvas made; nothing that configures by hand.
   const simple = useSimpleCanvas();
@@ -617,6 +624,30 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // The latest render's host, for handlers that resume after awaiting the server (a plan applied, a routed message).
   const executionRef = useRef(assistantExecution);
   executionRef.current = assistantExecution;
+  // The host's reader of the web pages a message names (messagePages.ts), read when a message is sent.
+  const readPagesRef = useRef(readMessagePages);
+  readPagesRef.current = readMessagePages;
+  // Which words of each box the person typed or pasted (messagePages.ts TypedWords): only an address they typed or
+  // pasted is read, never one the canvas wrote there (a task's draft, a node's fix lead, a starter prompt, a page's
+  // title, a draft restored after the page was opened again). Keyed 'assistant', or a node's id and conversation.
+  const typedWords = useRef(new globalThis.Map<string, TypedWords>());
+  const noteTyped = useCallback((box: string, previous: string, next: string, typed = true, edit?: TypedEdit) => {
+    if (!readOnlyRef.current) typedWords.current.set(box, typeWords(typedWords.current.get(box), previous, next, typed, edit));
+  }, []);
+  const noteNodeTyped = useCallback((node: SessionNode, threadId: string, previous: string, next: string, typed: boolean, edit?: TypedEdit) =>
+    noteTyped(`node:${node.id}:${threadId}`, previous, next, typed, edit), [noteTyped]);
+  // A message read is on its way: what its box held is the box's no longer, so nothing typed in it carries over to the
+  // words the canvas puts in the box next.
+  const forgetTyped = useCallback((box: string) => { typedWords.current.delete(box); }, []);
+  const typedIn = useCallback((box: string, text: string) => typedPages(typedWords.current.get(box), text), []);
+  /** Whether a message waits for the web pages it names: the host reads them and it names one. */
+  const namesPages = (text: string) => Boolean(readPagesRef.current) && messageLinks(text).length > 0;
+  /** The pages a message named that were not read, each with why, as one list for the box's notice. */
+  const unreadPages = useCallback((pages: ReadonlyArray<MessagePage>) => pages.filter(page => page.error).map(page => {
+    // The reason's own full stop would end the sentence inside the brackets.
+    const reason = page.error!.replace(/[。.]\s*$/u, '');
+    return locale === 'zh' ? `${page.host}（${reason}）` : `${page.host} (${reason})`;
+  }).join(locale === 'zh' ? '；' : '; '), [locale]);
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [paletteError, setPaletteError] = useState('');
   const [paletteRefresh, setPaletteRefresh] = useState(0);
@@ -2266,8 +2297,10 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // through. Undefined for every other run.
   // `operationId` is the one a run the host asks for is admitted under (an auto rerun's, autoRun); any other run has a
   // new one.
+  // `sentDraft`: the box's draft as it was when the message was sent, where the run starts later (after the pages a node's
+  // message names are read): only that is consumed, never what was typed meanwhile.
   const startRun = useCallback((requestedScope?: ReadonlyArray<string>, manualMessage?: string, onAccepted?: () => void, manualDisplayText?: string, collaboration?: GraphCollaborationPolicy,
-    asked?: WholeRunChoice | null, operationId?: string) => {
+    asked?: WholeRunChoice | null, operationId?: string, sentDraft?: string) => {
     if (readOnlyRef.current || outdatedObserver.current) return Promise.resolve();
     if (runUnavailableReason) { setHandoffNote(runUnavailableReason); return Promise.resolve(); }
     writePreviewsNow.current();
@@ -2324,7 +2357,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       : undefined;
     // The draft the send came from: a media node's prompt in the document, a chat node's message on this device.
     const submittedDraft = submittedNode && submittedThread
-      ? draftIsShared(submittedNode) ? submittedThread.draft : readComposerDraft(submittedNode.id, submittedThread.id)
+      ? sentDraft ?? (draftIsShared(submittedNode) ? submittedThread.draft : readComposerDraft(submittedNode.id, submittedThread.id))
       : undefined;
     return withCanvasRunOwnership(async () => {
     try {
@@ -3434,9 +3467,65 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
         : <p role="status">{pendingText}</p>}
     </section>;
   }, [cloudScope, runs, running, locale, laneOfNode, laneJournal]);
+  // A node's message names web pages: those whose addresses the person typed or pasted into its box are read first
+  // (messagePages.ts), the box saying which; one that is not read keeps the message in the box with why, and the same
+  // message sent again goes without it. One read at a time a node. An image, video or 3D node takes no knowledge (the
+  // server refuses it), so its prompt is never read for pages.
+  const [tileStatus, setTileStatus] = useState<Record<string, ComposerStatus>>({});
+  const tileReading = useRef(new globalThis.Set<string>());
+  // The node messages' page reads under way: stopped when this surface goes (a draft's recovery takes its place while
+  // the canvas stays open), so a read it left cites nothing and reads none of its message's later addresses.
+  const tileReads = useRef(new globalThis.Set<AbortController>());
+  useEffect(() => () => { for (const controller of tileReads.current) controller.abort(); tileReads.current.clear(); }, []);
+  const showTileStatus = useCallback((nodeId: string, status: ComposerStatus | null) => setTileStatus(previous => {
+    if (!status) { if (!(nodeId in previous)) return previous; const { [nodeId]: _gone, ...rest } = previous; return rest; }
+    return { ...previous, [nodeId]: status };
+  }), []);
   const tileOnSend = useCallback(
-    (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => { void startRun([node.id], message, onAccepted, displayText); },
-    [startRun],
+    (node: CanvasNode, message: string, onAccepted?: () => void, displayText?: string) => {
+      const read = readPagesRef.current;
+      const text = displayText ?? message;
+      if (!read || node.kind !== 'session' || draftIsShared(node) || !messageLinks(text).length) {
+        showTileStatus(node.id, null);
+        void startRun([node.id], message, onAccepted, displayText);
+        return;
+      }
+      if (tileReading.current.has(node.id)) return;
+      tileReading.current.add(node.id);
+      // The conversation the message was written in and the agent it was written to: the run starts after the read, and
+      // only if both are still the node's. The draft it came from, as it is now, is the one the run consumes (the box
+      // stays locked while the read lasts, so nothing else is typed into it meanwhile).
+      const threadId = activeThreadId(node);
+      const binding = JSON.stringify(node.binding ?? null);
+      const sentDraft = readComposerDraft(node.id, threadId);
+      const typed = typedIn(`node:${node.id}:${threadId}`, text);
+      showTileStatus(node.id, { text: t('assistant.reading'), tone: 'reading' });
+      void (async () => {
+        let outcome: MessagePagesOutcome | null = null;
+        const controller = new AbortController();
+        tileReads.current.add(controller);
+        try {
+          outcome = await read({ text, scope: `node:${node.id}`, typed }, controller.signal,
+            step => showTileStatus(node.id, { text: t('assistant.readingPage', { host: step.host, index: step.index, total: step.total }), tone: 'reading' }));
+        } catch { /* The canvas closed, or the read failed: nothing is sent, and the box says so. */ }
+        finally { tileReading.current.delete(node.id); tileReads.current.delete(controller); }
+        if (!mounted.current) return;
+        const now = docRef.current.nodes.find(item => item.id === node.id);
+        if (!now || now.kind !== 'session') { showTileStatus(node.id, null); return; }
+        if (!outcome) { showTileStatus(node.id, { text: t('assistant.pagesFailed'), tone: 'held' }); return; }
+        if (activeThreadId(now) !== threadId || JSON.stringify(now.binding ?? null) !== binding) {
+          showTileStatus(node.id, { text: t('assistant.pagesMoved'), tone: 'held' });
+          return;
+        }
+        if (outcome.hold) { showTileStatus(node.id, { text: t('assistant.pagesHeld', { pages: unreadPages(outcome.pages) }), tone: 'held' }); return; }
+        // Pages that went unread with the message (not the person's address, a one-time link) are said under the box.
+        const unread = unreadPages(outcome.pages);
+        showTileStatus(node.id, unread ? { text: t('assistant.pageNotRead', { reason: unread }), tone: 'note' } : null);
+        forgetTyped(`node:${node.id}:${threadId}`);
+        void startRun([node.id], message, onAccepted, displayText, undefined, undefined, undefined, sentDraft);
+      })();
+    },
+    [startRun, showTileStatus, t, unreadPages, typedIn, forgetTyped],
   );
   // A delivered page that fails when it runs goes back to its node once, with the error, as a message in the node's
   // own chat (pageRepair.ts); so does a figure that never moves, once of its own. Nothing starts while a run is active:
@@ -3853,6 +3942,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
 
   // The planning conversation is local UI history, separate from node execution Sessions.
   const [planning, setPlanning] = useState(() => readOnly ? { draft: '', messages: [] } as ReturnType<typeof loadPlanningConversation> : loadPlanningConversation());
+  // An empty box keeps no marks of words it held: a message the canvas took from it (sent, answered here, a repair, a
+  // run) never lends them to words it writes there later (messagePages.ts TypedWords).
+  useEffect(() => { if (!planning.draft) forgetTyped('assistant'); }, [planning.draft, forgetTyped]);
   // A message being handled before it joins the conversation (assistantRouting.ts): the server is routing it, it is
   // becoming a task, or the task it replaces is stopping. The ref answers a second click in the same tick.
   const [assistantPending, setAssistantPending] = useState<AssistantPending | null>(null);
@@ -4097,7 +4189,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     return componentModelEntry(host?.componentModel, live.models)?.model ?? DEFAULT_NEW_NODE_MODEL;
   };
   // `shown`: the reader's own words for the conversation, where the planner is given more (a hand-over's request).
-  const sendPlanningMessage = async (request?: string, resume = false, shown?: string) => {
+  const sendPlanningMessage = async (request?: string, resume = false, shown?: string, pages?: MessagePage[]) => {
     // Keep the draft untouched and refuse before allocating a request or calling either planner.
     const blocked = planBlocker(resume);
     if (blocked !== null) { if (blocked) setPlanningError(blocked); return; }
@@ -4123,7 +4215,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       ? { ...previous, draft: previous.draft.trim() === prompt ? '' : previous.draft }
       : { draft: request === undefined || previous.draft.trim() === (shown ?? prompt) ? '' : previous.draft,
         messages: [...previous.messages, { id: `${id}-user`, role: 'user' as const, content: shown ?? prompt, ...(route ? { route } : {}),
-          ...(shown !== undefined && shown !== prompt ? { request: prompt } : {}) }].slice(-60) });
+          ...(shown !== undefined && shown !== prompt ? { request: prompt } : {}), ...(pages?.length ? { pages } : {}) }].slice(-60) });
     try {
       const reportProgress = (progress: PlanProgress) => {
         // A superseded or cancelled request must not repaint the current one's progress.
@@ -4403,6 +4495,12 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   useEffect(() => {
     const request = initialPlan;
     if (!request || readOnly || initialPlanSettled.current) return;
+    // The person wrote it on the home: theirs whenever the box holds it as carried, before anything below settles the
+    // hand-over (a recovery, nodes on the canvas), and while it stays there (a stopped read, a page not read, a reload
+    // that put it back).
+    if (!request.untrusted && planning.draft === request.prompt && typedWords.current.get('assistant')?.text !== request.prompt) {
+      typedWords.current.set('assistant', { text: request.prompt, typed: [[0, request.prompt.length]] });
+    }
     if (canInitialize && (!recoveryLoaded || recoveryChecking)) return;
     const settle = () => { initialPlanSettled.current = true; request.done(); };
     if (planningRecovery?.pending) { settle(); return; }
@@ -4428,10 +4526,23 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     // A palette that could not be read will not be: the request goes without naming the model.
     if (canInitialize && !paletteError && !handOverWaited && planNewNodeChoice() === undefined) return;
     const timer = setTimeout(() => {
+      // The reader sent it from the box meanwhile (sendAssistantMessage settles it), or another message is being handled:
+      // never a second read or plan of it.
+      if (initialPlanSettled.current) return;
+      if (pendingRef.current || planningRequest.current) { settle(); return; }
       initialPlanSettled.current = true;
       if (!request.claim()) { request.done(); return; }
-      // An unmount mid-plan leaves the claim in place, so the next page says the plan was interrupted.
-      void sendPlanningMessage(request.prompt).finally(() => { if (mounted.current) request.done(); });
+      // An unmount mid-plan leaves the claim in place, so the next page says the plan was interrupted. The pages it
+      // names are read first; one that is not leaves the request in the box, with why. One that names none is planned
+      // at once, as before.
+      const planned = !namesPages(request.prompt) ? sendPlanningMessage(request.prompt) : (async () => {
+        const read = await assistantLatest.current!.readAssistantPages(`turn-${Date.now()}-${++planningSequence.current}`, request.prompt,
+          request.untrusted ? new Set() : undefined);
+        // A read takes time: the plan goes as the latest render sends it, and only onto a canvas still empty.
+        if (!read || read.hold || !mounted.current || docRef.current.nodes.length) return;
+        await assistantLatest.current!.sendPlanningMessage(request.prompt, false, undefined, read.pages);
+      })();
+      void planned.finally(() => { if (mounted.current) request.done(); });
     }, 0);
     return () => clearTimeout(timer);
   }, [initialPlan, readOnly, planning.draft, plannerStatusKnown, planningUnavailableReason, runUnavailableReason,
@@ -4446,7 +4557,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   const unifiedHost = assistantExecution && routeAssistant ? assistantExecution : undefined;
   // Handlers resume after awaiting the server; what they read then is the latest render's (set below).
   const assistantLatest = useRef<{ planBlocker: typeof planBlocker; sendPlanningMessage: typeof sendPlanningMessage;
-    canUndoPlan: boolean; undo: typeof undo } | null>(null);
+    canUndoPlan: boolean; undo: typeof undo; readAssistantPages: typeof readAssistantPages } | null>(null);
   // Hands the latest request over to the other way with a correction added, as the latest render can (set below):
   // false when it cannot, so the correction is handled as a message of its own.
   const redirectLatest = useRef<((to: AssistantRoute, correction: string) => boolean) | null>(null);
@@ -4533,13 +4644,35 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   };
   const failureText = (error: unknown) => error instanceof Error && error.message ? error.message : t('assistant.unavailable');
   // `request`: a hand-over's whole request, kept on the turn so a later correction hands it over again.
-  const userTurn = (id: string, prompt: string, route: AssistantRoute, request?: string) => ({ id: `${id}-user`, role: 'user' as const, content: prompt, route,
-    ...(request !== undefined && request !== prompt ? { request } : {}) });
+  const userTurn = (id: string, prompt: string, route: AssistantRoute, request?: string, pages?: MessagePage[]) => ({ id: `${id}-user`, role: 'user' as const, content: prompt, route,
+    ...(request !== undefined && request !== prompt ? { request } : {}), ...(pages?.length ? { pages } : {}) });
   // The identity a task is sent under, chosen here so its turn can carry it.
   const submissionId = () => `execution-${crypto.randomUUID()}`;
+  // The web pages a message names, read before it is handled (messagePages.ts): those whose addresses the person typed
+  // or pasted into the box (`typed`), or every one the home's request names (absent). Held (an address was not read):
+  // the box keeps the message and says which and why, and the same message sent again goes without that page. null:
+  // stopped, the read failed (the box keeps the message, and says so), or the page has gone.
+  const readAssistantPages = async (id: string, prompt: string, typed?: ReadonlySet<string>): Promise<{ pages?: MessagePage[]; hold: boolean } | null> => {
+    const read = readPagesRef.current;
+    if (!read || !namesPages(prompt)) return { hold: false };
+    const controller = new AbortController();
+    setPending({ id, prompt, phase: 'reading' }, controller);
+    let outcome: MessagePagesOutcome | null = null;
+    let failed = false;
+    try {
+      outcome = await read({ text: prompt, scope: 'assistant', ...(typed ? { typed } : {}) }, controller.signal,
+        reading => { if (pendingId() === id && !controller.signal.aborted) setPending({ id, prompt, phase: 'reading', reading }, controller); });
+    } catch (error) { failed = !(error instanceof DOMException && error.name === 'AbortError'); }
+    if (pendingId() !== id || controller.signal.aborted || !mounted.current) return null;
+    setPending(null);
+    if (!outcome) { if (failed) setPlanningError(t('assistant.pagesFailed')); return null; }
+    if (outcome.hold) { setPlanningError(t('assistant.pagesHeld', { pages: unreadPages(outcome.pages) })); return { hold: true }; }
+    forgetTyped('assistant');
+    return { pages: outcome.pages.length ? outcome.pages : undefined, hold: false };
+  };
   // A message routed to a task. Started, it joins the conversation with its task; refused, with the reason, and the
   // box keeps it; unconfirmed, the host offers to reconcile it and the box lets it go, so it is not sent twice.
-  const startAssistantTask = async (prompt: string, id: string) => {
+  const startAssistantTask = async (prompt: string, id: string, pages?: MessagePage[]) => {
     const host = executionRef.current;
     if (!host) return;
     const operationId = submissionId();
@@ -4548,7 +4681,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       const taskId = await host.start(prompt, operationId);
       if (!mounted.current) return;
       setPlanning(previous => ({ draft: previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
-        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
+        userTurn(id, prompt, 'execute', undefined, pages), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
       // A task that starts takes the conversation to the side panel (on an empty canvas, out of the welcome, whose box
       // had the focus), and a focus it left on the page to the panel's box, in the commit that draws the panel: React
@@ -4564,23 +4697,23 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       const reason = unconfirmed ? t('assistant.startUnconfirmed') : failureText(error);
       if (!unconfirmed) setPlanningError(reason);
       setPlanning(previous => ({ draft: unconfirmed && previous.draft.trim() === prompt ? '' : previous.draft, messages: [...previous.messages,
-        userTurn(id, prompt, 'execute'), { id: `${id}-task`, role: 'assistant' as const, content: reason,
+        userTurn(id, prompt, 'execute', undefined, pages), { id: `${id}-task`, role: 'assistant' as const, content: reason,
           status: unconfirmed ? 'unconfirmed' as const : 'error' as const, route: 'execute' as const, ...(unconfirmed ? { operationId } : {}) }].slice(-60) }));
     } finally { if (pendingId() === id) setPending(null); }
   };
   // A message routed to the canvas: refused with the reason (the box keeps it), or planned.
-  const planRouted = (prompt: string, id: string) => {
+  const planRouted = (prompt: string, id: string, pages?: MessagePage[]) => {
     // The planner takes at most 8000 bytes. A longer message goes to a task when one can start, as the reader would
     // expect of an assistant; otherwise the reply says so and the box keeps it.
     if (new TextEncoder().encode(prompt).length > 8000) {
-      if (executionRef.current?.ready) { void startAssistantTask(prompt, id); return; }
-      setPlanning(previous => ({ ...previous, messages: [...previous.messages, userTurn(id, prompt, 'plan'),
+      if (executionRef.current?.ready) { void startAssistantTask(prompt, id, pages); return; }
+      setPlanning(previous => ({ ...previous, messages: [...previous.messages, userTurn(id, prompt, 'plan', undefined, pages),
         { id: `${id}-assistant`, role: 'assistant' as const, content: t('assistant.tooLongToPlan'), status: 'error' as const, route: 'plan' as const }].slice(-60) }));
       return;
     }
     const blocked = assistantLatest.current!.planBlocker();
     if (blocked !== null) { setPlanningError(blocked || t('assistant.notNow')); return; }
-    void assistantLatest.current!.sendPlanningMessage(prompt);
+    void assistantLatest.current!.sendPlanningMessage(prompt, false, undefined, pages);
   };
   const sendAssistantMessage = async () => {
     // A question about what the canvas still needs is answered here, from the canvas, before it could cost a call; so
@@ -4595,6 +4728,13 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     if (!routes.length) { setPlanningError(planningUnavailableReason || t('assistant.unavailable')); return; }
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
     setPlanningError('');
+    // Sent from the box, the home's request is the reader's to send now: the hand-over leaves it to them.
+    if (initialPlan && !initialPlanSettled.current) { initialPlanSettled.current = true; initialPlan.done(); }
+    // The web pages it names are read first, so the plan, the task or the components it starts cite them. A message that
+    // names none goes on in this same tick, exactly as before.
+    const read: { pages?: MessagePage[]; hold: boolean } | null = namesPages(prompt) ? await readAssistantPages(id, prompt, typedIn('assistant', prompt)) : { hold: false };
+    if (!read || read.hold) return;
+    const pages = read.pages;
     let route: AssistantRoute = routes.includes('plan') ? 'plan' : routes[0];
     let redirect = false;
     if (routes.length > 1) {
@@ -4610,18 +4750,18 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     // A correction (别改画布，直接写吧) hands the request before it over to the other way, with the correction added:
     // the reader never picks a way by hand. Where that request cannot be handed over, the message is handled alone.
     if (redirect && redirectLatest.current?.(route, prompt)) return;
-    if (route === 'execute') await startAssistantTask(prompt, id);
-    else planRouted(prompt, id);
+    if (route === 'execute') await startAssistantTask(prompt, id, pages);
+    else planRouted(prompt, id, pages);
   };
   // A task's card sends a follow-up (the request again) straight to a new task, as its own turn.
   const sendTaskFollowUp = (text: string) => {
     if (readOnlyRef.current || pendingRef.current || planningRequest.current || !text.trim()) return;
     void startAssistantTask(text.trim(), `turn-${Date.now()}-${++planningSequence.current}`);
   };
-  /** Stops a message being routed; the box still holds it. False when none is. */
+  /** Stops a message being routed, or whose pages are being read; the box still holds it. False when none is. */
   const cancelRouting = () => {
     const current = pendingRef.current;
-    if (current?.pending.phase !== 'routing') return false;
+    if (current?.pending.phase !== 'routing' && current?.pending.phase !== 'reading') return false;
     current.controller?.abort();
     setPending(null);
     return true;
@@ -4630,7 +4770,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   const canUndoPlan = !readOnly && !planningBusy && !running && !bindingLocked && history.undo > 0
     && lastPlanRevision !== null && planRevision === lastPlanRevision
     && Boolean(lastCommit.current?.label.startsWith('ai:')) && canEditStructure();
-  assistantLatest.current = { planBlocker, sendPlanningMessage, canUndoPlan, undo };
+  assistantLatest.current = { planBlocker, sendPlanningMessage, canUndoPlan, undo, readAssistantPages };
   // After the assistant took its plan back while components were inside an icon: the cards are drawn again to show it.
   const showPlanUndone = () => {
     if (convergedViewRef.current?.hidden.size || convergedNowRef.current.canvas) showConverged(NOTHING_CONVERGED, t('converge.announce.shownForChange'));
@@ -4987,6 +5127,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     } } : {}),
     progress: planningProgress, expectedSeconds: plannerProvider === 'jev' ? undefined : lastPlanSeconds,
     onDraftChange: (draft: string) => { if (!readOnlyRef.current) setPlanning(previous => ({ ...previous, draft })); },
+    onTyped: (previous: string, next: string, typed: boolean, edit?: TypedEdit) => noteTyped('assistant', previous, next, typed, edit),
     onSend: () => { void sendAssistantMessage(); }, onCancel: () => { if (!cancelRouting()) void cancelPlanning(); },
     onUndo: () => {
       // undo() can still decline (a node began talking since this render); only an undo that happened is said.
@@ -5615,6 +5756,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
             run={runs[node.id] ?? null}
             gatewayBase={gatewayApiBase()}
             onSend={tileOnSend}
+            composerStatus={tileStatus[node.id]}
+            onComposerTyped={readOnly ? undefined : noteNodeTyped}
             conversationContext={node.kind === 'session' ? inputsFor(node) : undefined}
             assembleInputs={node.kind === 'assemble' ? inputsFor(node) : undefined}
             onIssueId={tileOnIssueId}

@@ -11,7 +11,7 @@ import { CanvasList } from './CanvasList';
 import { CaseGallery } from './CaseGallery';
 import { uploadFileToCanvas } from './canvasBridge';
 import { HomeAttachButton, HomeFileChips, keepFocus, PLAN_PROMPT_MAX_BYTES, requestBytes, useHomeFiles } from './homeAttachments';
-import { HOME_PROMPT_MAX_CHARACTERS, canvasNameFromPrompt, clearHomeDraft, readHomeDraft, saveHomeDraft } from './homePrompt';
+import { canvasNameFromPrompt, clearHomeDraft, homeDraftUntrusted, readHomeDraft, saveHomeDraft } from './homePrompt';
 import { savePlanHandoff } from './planHandoff';
 import { STARTER_CASES, type StarterCase } from './starterCases';
 import { ProductionCases } from './ProductionCases';
@@ -230,7 +230,7 @@ function PromptHome({ identity, tenant, onOpen, section, onSection }: SectionPro
       if (request !== null) {
         // Leaving now would lose the request: the canvas could only open with an empty prompt box.
         // Stay, keep the text, and let the operator open the canvas once they have it.
-        if (!savePlanHandoff({ user: identity.user.id, tenant: tenant.id, canvas: canvasId }, request)) {
+        if (!savePlanHandoff({ user: identity.user.id, tenant: tenant.id, canvas: canvasId }, request, Date.now(), homeDraftUntrusted(scope))) {
           sending.current = false;
           setBusy(false);
           setStranded({ id: canvasId, name });
@@ -319,7 +319,7 @@ function PromptHome({ identity, tenant, onOpen, section, onSection }: SectionPro
         <HomeFileChips state={files} disabled={busy} t={t} locale={locale} textField={input} />
         <textarea ref={input} aria-label={text('assistant.input')} aria-describedby={describedBy}
           placeholder={files.files.length ? t('写一句想用这些文件做什么…', 'Say what to do with these files…') : text('assistant.welcomePlaceholder')}
-          value={draft} rows={3} maxLength={HOME_PROMPT_MAX_CHARACTERS}
+          value={draft} rows={3}
           enterKeyHint="send" readOnly={busy} aria-busy={busy || undefined}
           onChange={event => update(event.target.value)} onPaste={files.onPaste} {...composerKeys} />
         <div className="saas-home-composer-actions">

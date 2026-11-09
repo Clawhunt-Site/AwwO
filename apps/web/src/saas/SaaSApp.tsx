@@ -14,6 +14,7 @@ import { CanvasRunReceipt } from './CanvasRunReceipt';
 import { MultiplayerHeader, useCanvasMultiplayer } from './useCanvasMultiplayer';
 import { readableConfirmed, rebaseFor, sameCanvasContent } from './canvasSync';
 import { readMultiplayer } from './capabilitiesApi';
+import { createMessagePageReader } from './messagePageReader';
 import { CANVAS_STORAGE_KEY, sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { CANVAS_RUN_JOURNAL_KEY, loadRunJournal, saveRunJournal } from '../canvas/runJournal';
 import { MAX_RUN_LANES, laneStorage, loadLaneJournals, withLaneOwnership } from '../canvas/runLanes';
@@ -466,6 +467,15 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
   const execution = useManagedExecution(tenant.id, canvasId, { userId: identity.user.id });
   // The server decides whether each assistant message arranges the canvas or becomes a task.
   const routeAssistant = useCallback<RouteAssistant>((request, signal) => routeAssistantMessage(tenant.id, canvasId, request, signal), [tenant.id, canvasId]);
+  // The pages a message names are read for the conversation (messagePageReader.ts), for a member who can edit: one
+  // reader for this open canvas, which asks at the first such message whether the server reads the web, so a message
+  // sent before that is known is read as well.
+  const localeNow = useRef(locale);
+  localeNow.current = locale;
+  const readMessagePages = useMemo(() => tenant.role === 'reader' ? undefined : createMessagePageReader(tenant.id, canvasId, () => localeNow.current),
+    [tenant.role, tenant.id, canvasId]);
+  // Held while this canvas is open: once it closes, a read still on its way cites nothing.
+  useEffect(() => readMessagePages?.attach(), [readMessagePages]);
   const resultsView = useMemo(() => canvasResultsOptions(tenant.id, canvasId), [tenant.id, canvasId]);
   const localDraftFailure = (error: unknown) => isCanvasStorageQuotaError(error)
     ? t('本机存储空间已满，自动保存已暂停。请先导出本地副本保留最新编辑。', 'Local browser storage is full. Autosave is paused. Export a local copy to preserve your latest edits.')
@@ -1059,7 +1069,7 @@ function CloudCanvas({ identity, tenant, canvasId, controls }: { identity: Ident
       autoRun={evolutionDriver.autoRun} onAutoRunSettled={evolutionDriver.autoRunSettled}
       canvasTools={uiMode === 'developer' ? <CanvasKnowledgeDock tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} extraTools={<><CanvasLibraryTools tenantId={tenant.id} canvasId={canvasId} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} onRevert={evolutionDriver.revert} /></>} />
         : <><CanvasWebReader tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} /><CanvasLessons tenantId={tenant.id} canvasId={canvasId} onTaskDraft={setKnowledgeTaskDraft} onEvolve={lessonEvolutions.enqueue} onRevert={evolutionDriver.revert} /></>}
-      assistantExecution={executionHost(execution)} routeAssistant={routeAssistant}
+      assistantExecution={executionHost(execution)} routeAssistant={routeAssistant} readMessagePages={readMessagePages}
       results={resultsView}
       workspaceName={tenant.name} workspaceCaption={t('云端工作区', 'Cloud workspace')} runtimeReadJson={runtimeReader} accountControl={controls} onCreateCompany={() => window.location.assign('/?createWorkspace=1')} onOpenSettings={() => setSettingsOpen(true)}
       onWorkSettled={event => {

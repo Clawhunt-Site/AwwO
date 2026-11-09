@@ -96,8 +96,10 @@ export async function readKnowledge(tenantId: string, signal: AbortSignal, query
 export async function createKnowledgeSource(tenantId: string, input: KnowledgeSourceInput, signal: AbortSignal) {
   return checked(await api<unknown>(`${base(tenantId)}/sources`, post(input, signal)), (x): x is KnowledgeDocument => document(x) && x.kind === 'source');
 }
-/** What the server's web reader needs: one public http(s) address and, optionally, a title to save the page under. */
-export interface KnowledgeWebImportInput { url: string; title?: string; operationId: string }
+/** What the server's web reader needs: one public http(s) address and, optionally, a title to save the page under.
+ *  `fit`, for a page a conversation names: the page is cut to its `share` of the room the cited `revisionIds` leave in
+ *  one task's quoted knowledge (64 KiB), `share` counting it and the message's pages still to read. */
+export interface KnowledgeWebImportInput { url: string; title?: string; operationId: string; fit?: { revisionIds: string[]; share: number } }
 /** The server reads one public page (robots.txt honoured, private addresses refused, one 20 s deadline) and saves its
  * readable text as a source with the fetch recorded in its provenance. Allowed longer than other knowledge requests. */
 export async function importKnowledgeFromWeb(tenantId: string, input: KnowledgeWebImportInput, signal: AbortSignal) {

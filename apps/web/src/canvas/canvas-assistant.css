@@ -82,6 +82,19 @@
 .awwo-assistant-message--assistant { padding: 0 1px; }
 .awwo-assistant-message-status { display: block; color: var(--awwo-accent, #286454); margin-top: 8px; font-size: 11px; }
 .awwo-assistant-message-status.is-stale { color: #856d31; }
+/* The web pages a user's message named (MessagePageList): one line each, its title opening the page. */
+.awwo-message-pages { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; min-width: 0; text-align: start; }
+.awwo-message-page { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; padding: 5px 8px; border: 1px solid var(--awwo-border, #e4e8e2);
+  border-radius: 8px; background: color-mix(in srgb, var(--awwo-surface, #fff) 70%, transparent); font-size: 12px; line-height: 1.4; }
+.awwo-message-page > svg { flex: 0 0 auto; color: var(--awwo-accent, #286454); }
+.awwo-message-page.is-unread > svg { color: var(--awwo-muted, #68736d); }
+.awwo-message-page-title { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-weight: 550; }
+a.awwo-message-page-title { text-decoration: none; }
+a.awwo-message-page-title:hover { color: var(--awwo-accent, #286454); text-decoration: underline; text-underline-offset: 2px; }
+a.awwo-message-page-title:focus-visible { outline: 2px solid var(--awwo-accent, #286454); outline-offset: 2px; border-radius: 3px; }
+.awwo-message-page-host { color: var(--awwo-muted, #68736d); font-size: 11px; }
+.awwo-message-page-note { flex: 1 0 100%; color: var(--awwo-muted, #68736d); font-size: 11px; overflow-wrap: anywhere; }
+.awwo-message-page.is-unread .awwo-message-page-note { color: #a33f35; }
 .awwo-assistant-empty { margin: 4px 0 0; color: var(--awwo-muted, #68736d); font-size: 13px; }
 .awwo-assistant-error, .awwo-assistant-message p[role='alert'] { color: #a33f35; }
 .awwo-assistant-error { margin: 0 0 10px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -105,6 +118,7 @@
 :root[data-theme='dark'] .awwo-canvas-assistant { --assistant-on-accent: #142a20; }
 :root[data-theme='dark'] .awwo-assistant-error, :root[data-theme='dark'] .awwo-assistant-message p[role='alert'] { color: #f1a6a1; }
 :root[data-theme='dark'] .awwo-assistant-message-status.is-stale { color: #dbba73; }
+:root[data-theme='dark'] .awwo-message-page.is-unread .awwo-message-page-note { color: #f1a6a1; }
 @keyframes awwo-assistant-spin { to { transform: rotate(360deg); } }
 @keyframes awwo-assistant-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes awwo-assistant-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }

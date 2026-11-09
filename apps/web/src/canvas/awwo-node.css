@@ -66,6 +66,9 @@
 .canvas-root .awwo-node .canvas-composer-notice,
 .canvas-root .awwo-node .canvas-composer-disclaimer,
 .canvas-root .awwo-node .canvas-composer-blocked { color: var(--awwo-muted); font-size: 11px; line-height: 1.45; }
+/* A message whose web page was not read stays in the box with why (messagePages.ts). */
+.canvas-root .awwo-node .canvas-composer-status.is-held { color: #a33f35; overflow-wrap: anywhere; }
+:root[data-theme='dark'] .canvas-root .awwo-node .canvas-composer-status.is-held { color: #f1a6a1; }
 .canvas-root .awwo-node .canvas-composer-row { position: relative; align-items: stretch; gap: 8px; }
 .canvas-root .awwo-node .canvas-composer-input { min-height: 56px; max-height: 120px; width: 100%; padding: 8px 12px; font-size: 13px; line-height: 1.55; color: var(--awwo-ink); background: var(--awwo-soft); border: 1px solid var(--awwo-line); border-radius: 10px; resize: vertical; }
 /* An image, video or 3D node's prompt is its whole task: the box shows it whole, up to a good part of the opened node. */

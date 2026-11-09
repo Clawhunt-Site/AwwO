@@ -295,6 +295,7 @@ function serviceCodes(): Record<string, [string, string]> {
     web_read_in_progress: ['这个网页还在读取中，请稍后再试。', 'This page is still being read. Try again in a moment.'],
     knowledge_request_timeout: ['知识库请求超时，请重新读取确认结果；没有自动重复提交。', 'The knowledge request timed out. Reload to check the result; nothing was sent again.'],
     knowledge_context_limit: ['选中的知识合计超过 64 KiB，一次任务带不下；请少选几份或选更短的资料。', 'The selected knowledge comes to more than 64 KiB, more than one task can carry. Select fewer or shorter items.'],
+    web_page_no_room: ['这个网页自身的地址和信息占满了这次任务还能引用的空间，正文放不下；可以先清除画布栏里的引用。', 'This page’s own addresses and details take all the room the task has left, with none for its text. Clear the references in the canvas bar first.'],
     invalid_knowledge: ['资料不符合要求（标题、内容长度或来源地址），请检查后重试。', 'The source does not meet the requirements (its title, content length or address). Check it and try again.'],
     web_read_quota: ['今天的网页读取次数已用完，请在 UTC 次日再试。', 'Today’s web reads are used up. Try again after the next UTC day.'],
     web_invalid_url: ['网址无效，请输入以 http:// 或 https:// 开头的完整网址。', 'The address is invalid. Enter a full address that starts with http:// or https://.'],

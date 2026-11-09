@@ -45,7 +45,8 @@ import { TAIL_LINES, lodFor, type TileLod } from './lod';
 import type { RunNodeStatus } from './runGraph';
 import { getSnapshot, subscribe, type NodeSession, type Turn } from './sessions';
 import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
-import { mediaComposerInfo, TileComposer, type TileComposerHandle } from './TileComposer';
+import { mediaComposerInfo, TileComposer, type ComposerStatus, type TileComposerHandle } from './TileComposer';
+import type { TypedEdit } from './messagePages';
 import type { UploadCounts } from './ComposerAttachments';
 import { TilePorts, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
@@ -355,6 +356,10 @@ export interface SessionTileProps {
   onHoldDeliverables?: (nodeId: string, held: boolean) => void;
   /** Override the send path (tests / a host that owns the transport). */
   onSend?: (node: SessionNode, text: string, onAccepted?: () => void, displayText?: string) => void;
+  /** Above the box: the web pages the last message names being read, or why the box kept it (the canvas's tileOnSend). */
+  composerStatus?: ComposerStatus;
+  /** Each edit the person makes in the box of the node's conversation `threadId` (TileComposer onTyped). */
+  onComposerTyped?: (node: SessionNode, threadId: string, previous: string, next: string, typed: boolean, edit?: TypedEdit) => void;
   /** Current graph-resolved inputs; absent uses this node's local contract values only. */
   conversationContext?: NodeConversationContext;
   /** An assemble node's inputs as its slots will read them now (assembleInputViews). */
@@ -443,6 +448,8 @@ export const SessionTile = memo(function SessionTile({
   onToggleDeliverables,
   onHoldDeliverables,
   onSend,
+  composerStatus,
+  onComposerTyped,
   conversationContext,
   freeConversation = false,
   renderTurnDetails,
@@ -1415,6 +1422,8 @@ export const SessionTile = memo(function SessionTile({
                   {expanded ? <TileComposer ref={composerHandle} deferClear draft={composerDraft()} onDraftChange={setComposerDraft} streaming={busy}
                     attachNodeId={nodeId} mediaNode={mediaComposerInfo(node, modelChoices)}
                     notice={freeConversation ? t(node.team ? 'conversation.teamNotice' : 'conversation.chatNotice') : undefined}
+                    status={composerStatus}
+                    onTyped={onComposerTyped && node.kind === 'session' && currentThread ? (previous, next, typed, edit) => onComposerTyped(node, currentThread.id, previous, next, typed, edit) : undefined}
                     sendUnavailableReason={sendUnavailableReason}
                     accessory={composerAccessory(node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
                       ? <NodeModelPicker choices={modelChoices} value={currentChoiceKey(node, modelChoices)} currentLabel={unlistedModelLabel(node, locale, modelNames?.models)}

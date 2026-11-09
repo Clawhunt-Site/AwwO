@@ -16,13 +16,14 @@
 // It is a composite box: files of any type go with the words (the "+" button, a drop or a paste), shown as
 // chips and carried as lines at the end of the message (ComposerAttachments.tsx).
 
-import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { AttachButton, AttachmentTray, useComposerAttachments } from './ComposerAttachments';
 import { ComposerNotes } from './ComposerNotes';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import type { NodeModelChoice } from './NodeModelPicker';
+import { byHand, pasteEdit, pasteInput, selectionBefore, selectionEdit, type SelectionBefore, type TypedEdit } from './messagePages';
 
 /**
  * What an image, video or 3D node's generator does with attached files: its kind, how many reference pictures the
@@ -67,6 +68,10 @@ export const COMPOSER_COPY = {
   unbound: '本节点尚未绑定真实 Agent，无法对话。',
 } as const;
 
+/** A line above the box for one message: the web pages it names being read (`reading`), why the box kept it (`held`,
+ *  messagePages.ts), or which of its pages went unread with it (`note`). It never stops a send. */
+export interface ComposerStatus { text: string; tone: 'reading' | 'held' | 'note' }
+
 export interface TileComposerProps {
   /** True while this tile's stream is live — sending again would supersede it. */
   streaming: boolean;
@@ -82,6 +87,11 @@ export interface TileComposerProps {
   /** The host acknowledges only after the message has a durable execution record. */
   deferClear?: boolean;
   notice?: string;
+  status?: ComposerStatus;
+  /** Each edit the person makes in the box, from the words it showed to the words they made: what they type or paste
+   *  is theirs (`typed`; not an undo or a redo), as against words put in for them (a starter prompt), whose addresses
+   *  are not read (messagePages.ts). */
+  onTyped?: (previous: string, next: string, typed: boolean, edit?: TypedEdit) => void;
   /** Shown under the input, like a chat app's model switch. */
   accessory?: ReactNode;
   /** The node files are attached on (provenance only). */
@@ -190,22 +200,52 @@ function useFocusBackOnUnlock(composer: RefObject<HTMLElement | null>, box: RefO
   }, [locked, composer]);
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, accessory, attachNodeId, mediaNode, ref }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, status, onTyped, accessory, attachNodeId, mediaNode, ref }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
   const [localInput, setLocalInput] = useState('');
   const input = draft ?? localInput;
   const setInput = (value: string) => { setLocalInput(value); onDraftChange?.(value); };
-  const disabled = blocked || streaming;
+  // While the pages a message names are read, the box waits for that message as it does for a reply.
+  const disabled = blocked || streaming || status?.tone === 'reading';
   const sendReason = !blocked ? sendUnavailableReason?.trim() || undefined : undefined;
   const attach = useComposerAttachments({ value: input, onChange: setInput, nodeId: attachNodeId, disabled });
   const waitReason = attach.busy ? t('attach.waiting') : undefined;
   const { setBody } = attach;
+  // A paste says where it went (messagePages.ts TypedEdit), as in the assistant's box.
+  const pasted = useRef<{ previous: string; edit: TypedEdit } | null>(null);
+  const notePaste = (box: HTMLTextAreaElement, event: { clipboardData: DataTransfer | null; defaultPrevented: boolean }, shown: string) => {
+    const edit = pasteEdit(box, event);
+    pasted.current = null;
+    if (!edit) return;
+    if (shown.slice(edit.start, edit.end) === edit.text) onTyped?.(shown, shown, true, edit);
+    else pasted.current = { previous: shown, edit };
+  };
+  const pastedHere = (shown: string, input: Event) => {
+    const paste = pasted.current;
+    pasted.current = null;
+    return paste && paste.previous === shown && pasteInput(input) ? paste.edit : undefined;
+  };
   useImperativeHandle(ref, () => ({ addPrompt: prompt => setBody(body => body ? `${body}\n\n${prompt}` : prompt) }), [setBody]);
   const composerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useFocusBackOnUnlock(composerRef, inputRef, disabled);
+  // Typing and deleting say where they were too, as in the assistant's box (messagePages.ts selectionEdit).
+  const began = useRef<SelectionBefore | null>(null);
+  useEffect(() => {
+    const box = inputRef.current;
+    if (!box) return undefined;
+    const note = (event: Event) => { began.current = selectionBefore(box, event); };
+    box.addEventListener('beforeinput', note);
+    return () => box.removeEventListener('beforeinput', note);
+  });
+  const noteChange = (next: string, change: Event) => {
+    const paste = pastedHere(attach.body, change);
+    const record = began.current;
+    began.current = null;
+    onTyped?.(attach.body, next, byHand(change), paste ?? selectionEdit(record, attach.body, next, change));
+  };
 
   const send = () => {
     const message = input.trim();
@@ -235,6 +275,8 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
       ) : sendReason ? (
         <div className="canvas-composer-notice" id={reasonId} role="status">{sendReason}</div>
       ) : null}
+      {!blocked && status ? <div className={`canvas-composer-notice canvas-composer-status is-${status.tone}`}
+        role={status.tone === 'held' ? 'alert' : 'status'}>{status.text}</div> : null}
       <div className="canvas-composer-box">
         <AttachmentTray state={attach} disabled={disabled} />
         {mediaNode && attach.attachments.length ? <p className="awwo-attachment-notice is-info">{mediaAttachmentNotice(t, mediaNode)}</p> : null}
@@ -250,9 +292,9 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
             aria-label={t('composer.placeholder')}
             aria-describedby={blocked ? undefined : disclaimerId}
             disabled={disabled}
-            onChange={(e) => attach.setBody(e.target.value)}
+            onChange={(e) => { noteChange(e.target.value, e.nativeEvent); attach.setBody(e.target.value); }}
             onKeyDown={onKeyDown}
-            onPaste={attach.onPaste}
+            onPaste={(e) => { attach.onPaste(e); notePaste(e.currentTarget, e, attach.body); }}
           />
           <button
             type="button"

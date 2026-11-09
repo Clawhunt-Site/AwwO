@@ -62,7 +62,7 @@ describe('the unsent home prompt', () => {
 describe('the planning handoff from the home to a new canvas', () => {
   it('starts a fresh pending request, and taking it does not change it', () => {
     expect(savePlanHandoff(scope, '  搭建销售周报流程  ', 1_000)).toBe(true);
-    expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual({ v: 1, prompt: '搭建销售周报流程', createdAt: 1_000, state: 'pending' });
+    expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual({ v: 2, prompt: '搭建销售周报流程', createdAt: 1_000, state: 'pending' });
     expect(takePlanHandoff(scope, 2_000)).toEqual({ prompt: '搭建销售周报流程', start: true, interrupted: false });
     expect(takePlanHandoff(scope, 2_000)).toEqual({ prompt: '搭建销售周报流程', start: true, interrupted: false });
     expect(savePlanHandoff(scope, '   ')).toBe(false);
@@ -91,9 +91,9 @@ describe('the planning handoff from the home to a new canvas', () => {
   });
 
   it('removes a malformed entry instead of acting on it', () => {
-    for (const raw of ['{broken', 'null', '[]', JSON.stringify({ v: 2, prompt: 'x', createdAt: 1, state: 'pending' }),
-      JSON.stringify({ v: 1, prompt: ' ', createdAt: 1, state: 'pending' }), JSON.stringify({ v: 1, prompt: 'x', createdAt: 'soon', state: 'pending' }),
-      JSON.stringify({ v: 1, prompt: 'x', createdAt: 1, state: 'running' })]) {
+    for (const raw of ['{broken', 'null', '[]', JSON.stringify({ v: 3, prompt: 'x', createdAt: 1, state: 'pending' }),
+      JSON.stringify({ v: 2, prompt: ' ', createdAt: 1, state: 'pending' }), JSON.stringify({ v: 2, prompt: 'x', createdAt: 'soon', state: 'pending' }),
+      JSON.stringify({ v: 2, prompt: 'x', createdAt: 1, state: 'running' })]) {
       sessionStorage.setItem(key, raw);
       expect(takePlanHandoff(scope, 2)).toBeNull();
       expect(sessionStorage.getItem(key)).toBeNull();
@@ -163,5 +163,45 @@ describe('the curated example catalogue', () => {
       { fromNode: '1.0', toNode: '2.0' }, { fromNode: '1.1', toNode: '2.0' },
     ]);
     expect(caseSketch([['data'], ['backend']], [['0.0', '1.0']]).edges).toEqual([{ fromNode: '0.0', toNode: '1.0' }]);
+  });
+});
+
+describe('a request the old home handed over, before hand-overs were versioned', () => {
+  const legacy = 'awwo.saas.plan-handoff.v1:user-a:tenant-a:canvas-a';
+  it('is put back in the box, never started or claimed, and none of its addresses is the person’s', () => {
+    sessionStorage.setItem(legacy, JSON.stringify({ v: 1, prompt: '读 https://example.org/', createdAt: 1_000, state: 'pending' }));
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: '读 https://example.org/', start: false, interrupted: false, untrusted: true });
+    expect(sessionStorage.getItem(legacy)).toBeNull();
+    expect(claimPlanHandoff(scope, 1_000)).toBe(false);
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: '读 https://example.org/', start: false, interrupted: false, untrusted: true });
+    clearPlanHandoff(scope);
+    expect(takePlanHandoff(scope, 1_000)).toBeNull();
+    // One sent that never came back stays so.
+    sessionStorage.setItem(legacy, JSON.stringify({ v: 1, prompt: 'x', createdAt: 1_000, state: 'dispatched' }));
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: 'x', start: false, interrupted: true, untrusted: true });
+    // A malformed one is removed, not taken.
+    clearPlanHandoff(scope);
+    sessionStorage.setItem(legacy, '{broken');
+    expect(takePlanHandoff(scope, 1_000)).toBeNull();
+    expect(sessionStorage.getItem(legacy)).toBeNull();
+  });
+
+  it('gives way to a request handed over now, and goes when the hand-over is cleared', () => {
+    sessionStorage.setItem(legacy, JSON.stringify({ v: 1, prompt: 'old', createdAt: 1_000, state: 'pending' }));
+    expect(savePlanHandoff(scope, '读 https://example.org/private', 1_000)).toBe(true);
+    expect(sessionStorage.getItem(legacy)).toBeNull();
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: '读 https://example.org/private', start: true, interrupted: false });
+    sessionStorage.setItem(legacy, JSON.stringify({ v: 1, prompt: 'x', createdAt: 1_000, state: 'dispatched' }));
+    clearPlanHandoff(scope);
+    expect(sessionStorage.getItem(legacy)).toBeNull();
+  });
+});
+
+describe('a request handed over from a draft the old home box saved', () => {
+  it('stays marked untrusted when it is taken, claimed and taken again', () => {
+    expect(savePlanHandoff(scope, '总结 https://example.org/', 1_000, true)).toBe(true);
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: '总结 https://example.org/', start: true, interrupted: false, untrusted: true });
+    expect(claimPlanHandoff(scope, 1_000)).toBe(true);
+    expect(takePlanHandoff(scope, 1_000)).toEqual({ prompt: '总结 https://example.org/', start: false, interrupted: true, untrusted: true });
   });
 });

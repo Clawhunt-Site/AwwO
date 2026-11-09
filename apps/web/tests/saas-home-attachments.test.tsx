@@ -11,6 +11,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { SaaSApiError, type CanvasRecord, type Identity, type Tenant } from '../src/saas/api';
 import { uploadFileToCanvas } from '../src/saas/canvasBridge';
 import { PLAN_HANDOFF_PREFIX, takePlanHandoff } from '../src/saas/planHandoff';
+import { readHomeDraft } from '../src/saas/homePrompt';
 import type { UploadedCanvasFile } from '../src/canvas/attachments';
 
 // The workspace home's request box takes files of any type, pictures, video, audio and 3D included, and hands them to
@@ -174,5 +175,23 @@ it('takes files dropped on the box or pasted into it, and a blank canvas takes n
   fireEvent.click(screen.getByRole('button', { name: '空白画布' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith('new-canvas'));
   expect(upload).not.toHaveBeenCalled();
+  expect(handoffs()).toEqual([]);
+});
+
+it('keeps what is typed or pasted whole, never cut to a length, and refuses a request too long when it is sent', async () => {
+  const { posts } = server();
+  view();
+  const area = box() as HTMLTextAreaElement;
+  // No limit cuts the box's words, so no address in them is cut to name another page (https://example.org/ from
+  // https://example.org/private): the canvas reads each address of the home's request as the person's own.
+  expect(area).not.toHaveAttribute('maxlength');
+  const long = `${'x'.repeat(7979)} https://example.org/private`;
+  fireEvent.change(area, { target: { value: long } });
+  expect(area).toHaveValue(long);
+  expect(readHomeDraft({ user: identity.user.id, tenant: tenant.id })).toBe(long);
+  // Too long for canvas planning: said when it is sent, and nothing is created or handed over.
+  fireEvent.keyDown(area, { key: 'Enter' });
+  expect(await screen.findByRole('alert')).toHaveTextContent('需求超过了画布规划能接收的长度');
+  expect(posts).toHaveLength(0);
   expect(handoffs()).toEqual([]);
 });

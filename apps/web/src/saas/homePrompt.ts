@@ -2,9 +2,6 @@
 export const CANVAS_NAME_MAX_CHARACTERS = 30;
 /** The server bounds names in bytes; a derived name stays well inside that. */
 const CANVAS_NAME_MAX_BYTES = 200;
-/** The prompt box and the planner share this bound. */
-export const HOME_PROMPT_MAX_CHARACTERS = 8000;
-
 // A clause ends at full-width sentence punctuation, or at ASCII punctuation followed by a space,
 // so a version number or an abbreviation inside a clause does not end it.
 const CLAUSE_END = /[。！？；：]|[.!?;:](?=\s|$)/u;
@@ -53,7 +50,14 @@ export function canvasNameFromPrompt(prompt: string, fallback: string): string {
 }
 
 export type HomeDraftScope = { user: string; tenant: string };
-const draftKey = ({ user, tenant }: HomeDraftScope) => `awwo.saas.home-draft.v1:${encodeURIComponent(user)}:${encodeURIComponent(tenant)}`;
+const draftKey = ({ user, tenant }: HomeDraftScope) => `awwo.saas.home-draft.v2:${encodeURIComponent(user)}:${encodeURIComponent(tenant)}`;
+// Drafts the old box saved (v1) could be cut mid-address (an input method's composition run past its limit). Read,
+// one is moved under v2 whole and the tab is marked (untrustedKey, kept for the tab's session): an undo can fill the box
+// with the old draft again, after it was emptied or even sent (a page the back/forward cache restores keeps the box's
+// history). The requests the home hands over in that tab read none of their addresses as the person's (planHandoff's
+// untrusted) until pasted again in the canvas.
+const legacyDraftKey = ({ user, tenant }: HomeDraftScope) => `awwo.saas.home-draft.v1:${encodeURIComponent(user)}:${encodeURIComponent(tenant)}`;
+const untrustedKey = ({ user, tenant }: HomeDraftScope) => `awwo.saas.home-draft-untrusted.v2:${encodeURIComponent(user)}:${encodeURIComponent(tenant)}`;
 
 /** The browser can refuse storage entirely (policy, private mode); the prompt box then simply
  * does not survive a reload. */
@@ -61,22 +65,41 @@ function sessionStore(): Storage | null {
   try { return window.sessionStorage; } catch { return null; }
 }
 
-/** The unsent home prompt of this tab, for this account and workspace. */
+/** The unsent home prompt of this tab, for this account and workspace, as it was typed: never cut to a length (the
+ * canvas reads each address in the home's request as the person's own, so a cut one would name another page; the
+ * request's limit is checked when it is sent). */
 export function readHomeDraft(scope: HomeDraftScope): string {
-  try { return (sessionStore()?.getItem(draftKey(scope)) ?? '').slice(0, HOME_PROMPT_MAX_CHARACTERS); }
-  catch { return ''; }
+  try {
+    const storage = sessionStore();
+    const value = storage?.getItem(draftKey(scope));
+    if (typeof value === 'string' || !storage) return value ?? '';
+    const legacy = storage.getItem(legacyDraftKey(scope)) ?? '';
+    if (!legacy) return '';
+    // Marked before it is moved: an old draft is never taken as the person's own, even where storage then fails.
+    storage.setItem(untrustedKey(scope), '1');
+    storage.setItem(draftKey(scope), legacy);
+    storage.removeItem(legacyDraftKey(scope));
+    return legacy;
+  } catch { return ''; }
+}
+
+/** Whether this tab restored a draft the old box saved (readHomeDraft): the requests the home hands over in it read
+ *  their addresses only once they are pasted again (planHandoff's untrusted). */
+export function homeDraftUntrusted(scope: HomeDraftScope): boolean {
+  try { return sessionStore()?.getItem(untrustedKey(scope)) === '1'; }
+  catch { return true; }
 }
 
 export function saveHomeDraft(scope: HomeDraftScope, value: string): void {
   try {
     const storage = sessionStore();
     if (!storage) return;
-    if (value) storage.setItem(draftKey(scope), value.slice(0, HOME_PROMPT_MAX_CHARACTERS));
-    else storage.removeItem(draftKey(scope));
+    if (value) storage.setItem(draftKey(scope), value);
+    else { storage.removeItem(draftKey(scope)); storage.removeItem(legacyDraftKey(scope)); }
   } catch { /* The prompt stays in the box; it only would not survive a reload. */ }
 }
 
 export function clearHomeDraft(scope: HomeDraftScope): void {
-  try { sessionStore()?.removeItem(draftKey(scope)); }
+  try { for (const key of [draftKey(scope), legacyDraftKey(scope)]) sessionStore()?.removeItem(key); }
   catch { /* Nothing was stored. */ }
 }

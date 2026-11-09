@@ -70,7 +70,8 @@ it('creates one canvas named after the request, hands the request to it and open
   expect(screen.getByText('Workspace A')).toBeVisible();
   // The page never grabs focus: a returning operator lands on the whole page, not the keyboard.
   expect(box()).not.toHaveFocus();
-  expect(box()).toHaveAttribute('maxlength', '8000');
+  // No length cuts the request's words (an address cut to fit would name another page); its limit is checked at send.
+  expect(box()).not.toHaveAttribute('maxlength');
   expect(box()).toHaveAttribute('enterkeyhint', 'send');
   expect(box()).toHaveAccessibleDescription('Enter 发送 · Shift+Enter 换行 请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。');
   fireEvent.change(box(), { target: { value: '  请帮我搭建销售周报流程：先统一口径\n再汇总  ' } });
@@ -325,4 +326,37 @@ it('tells everyone not to enter personal or sensitive information before the fir
   expect(screen.getByText('AI 内容仅供参考 · 勿输入敏感信息')).toBeVisible();
   expect(screen.getByText('AI 内容仅供参考 · 勿输入敏感信息').closest('small')).toHaveAttribute('title', '请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。');
   expect(screen.getByText('请勿输入身份证号、银行卡、密码等个人敏感信息；AI 生成的内容可能有误，请核实后再使用。')).toHaveClass('sr-only');
+});
+
+it('restores a draft the old box saved whole, and hands its request over with none of its addresses taken as the person’s', async () => {
+  const legacyKey = `awwo.saas.home-draft.v1:${encodeURIComponent(draftScope.user)}:${encodeURIComponent(draftScope.tenant)}`;
+  sessionStorage.setItem(legacyKey, '总结 https://example.org/');
+  server();
+  const onOpen = vi.fn();
+  view({ onOpen });
+  expect(box()).toHaveValue('总结 https://example.org/');
+  expect(sessionStorage.getItem(legacyKey)).toBeNull();
+  fireEvent.keyDown(box(), { key: 'Enter' });
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith('new-canvas'));
+  expect(takePlanHandoff({ ...draftScope, canvas: 'new-canvas' })).toEqual({ prompt: '总结 https://example.org/', start: true, interrupted: false, untrusted: true });
+});
+
+it('keeps the old draft’s mark for the tab, through an emptied box and a request sent, as an undo could bring the draft back', async () => {
+  sessionStorage.setItem(`awwo.saas.home-draft.v1:${encodeURIComponent(draftScope.user)}:${encodeURIComponent(draftScope.tenant)}`, '旧的 https://example.org/');
+  server();
+  const onOpen = vi.fn();
+  view({ onOpen });
+  fireEvent.change(box(), { target: { value: '' } });
+  fireEvent.change(box(), { target: { value: '总结 https://a.example/one' } });
+  fireEvent.keyDown(box(), { key: 'Enter' });
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith('new-canvas'));
+  expect(takePlanHandoff({ ...draftScope, canvas: 'new-canvas' })).toEqual({ prompt: '总结 https://a.example/one', start: true, interrupted: false, untrusted: true });
+  // Sent, the tab keeps the mark: a page the browser restores keeps the box's history, which an undo walks back.
+  cleanup();
+  const again = vi.fn();
+  view({ onOpen: again });
+  fireEvent.change(box(), { target: { value: '总结 https://a.example/two' } });
+  fireEvent.keyDown(box(), { key: 'Enter' });
+  await waitFor(() => expect(again).toHaveBeenCalledWith('new-canvas'));
+  expect(takePlanHandoff({ ...draftScope, canvas: 'new-canvas' })).toEqual({ prompt: '总结 https://a.example/two', start: true, interrupted: false, untrusted: true });
 });

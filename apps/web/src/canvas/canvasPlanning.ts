@@ -14,6 +14,7 @@ import { BLENDER_RUNTIME, computerRuntime } from './nodeRuntime';
 import { mediaKindOf, type MediaKind } from './mediaCatalog';
 import { activeNodeThread } from './nodeThreads';
 import { nodeTeamTemplates } from './nodeTeamTemplates';
+import { validMessagePages, type MessagePage } from './messagePages';
 import type { UiLocale } from '../locale';
 import { canvasText } from './i18n';
 import { readSseFrames } from '../sse';
@@ -35,6 +36,8 @@ export interface PlanningMessage {
   /** A hand-over's whole request (the earlier request, then the reader's correction), where `content` is the reader's
    *  own words: what a later correction hands over again. */
   request?: string;
+  /** A user turn's web pages, as they were read before it was handled (messagePages.ts). */
+  pages?: MessagePage[];
 }
 
 /** The turns the planner reads: an executed turn is the workspace's business, not the canvas's. */
@@ -222,7 +225,8 @@ export function loadPlanningConversation(): PlanningConversation {
           && (m.taskId === undefined || (typeof m.taskId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(m.taskId)))
           && (m.operationId === undefined || (typeof m.operationId === 'string' && /^execution-[0-9a-f-]{36}$/.test(m.operationId)))
           && (m.nodes === undefined || (Array.isArray(m.nodes) && m.nodes.length <= 200 && m.nodes.every(node => typeof node === 'string' && node.length <= 200)))
-          && (m.request === undefined || (typeof m.request === 'string' && m.request.length <= 40_000));
+          && (m.request === undefined || (typeof m.request === 'string' && m.request.length <= 40_000))
+          && (m.pages === undefined || validMessagePages(m.pages));
       }).slice(-60) : [],
     };
   } catch { return { draft: '', messages: [] }; }
