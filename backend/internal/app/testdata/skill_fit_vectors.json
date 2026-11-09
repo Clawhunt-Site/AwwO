@@ -31,9 +31,9 @@
       "ref": "builtin:motion-language",
       "name": "motion-language",
       "title": "Motion language: one vocabulary for everything that moves",
-      "version": 1,
-      "bytes": 4363,
-      "units": 4499
+      "version": 2,
+      "bytes": 4362,
+      "units": 4498
     }
   ]
 }
